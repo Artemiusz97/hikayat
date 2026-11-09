@@ -3,9 +3,10 @@ import { useTranslation } from 'react-i18next';
 import { 
   Compass, CheckCircle2, Circle, Search, Award, 
   MapPin, Coins, Sparkles, ChevronDown, ChevronRight, ShieldAlert,
-  FileSearch, RefreshCw, PlusCircle, Trash2, Zap
+  FileSearch, RefreshCw, PlusCircle, Trash2, Zap, ScrollText, Star
 } from 'lucide-react';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
+import ChronicleTapestryModal from '../Modals/ChronicleTapestryModal';
 
 const CATEGORY_META = {
   physical: { icon: '🔍', label: 'Physical', color: 'text-amber-300 bg-amber-950/50 border-amber-700/50' },
@@ -45,6 +46,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
   const [isStoryExpanded, setIsStoryExpanded] = useState(true);
   const [expandedSideQuests, setExpandedSideQuests] = useState({});
   const [expandedBounties, setExpandedBounties] = useState({});
+  const [tapestryModalOpen, setTapestryModalOpen] = useState(false);
 
   const toggleSideQuest = (id) => {
     setExpandedSideQuests(prev => ({ ...prev, [id]: !prev[id] }));
@@ -71,6 +73,10 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
   const completedQuests = archivedQuests;
 
   // Sub-objectives / stages for active story quest
+  const storyMainObjective = activeStoryQuest?.main_objective || activeStoryQuest?.fow_dossier?.main_objective || null;
+  const storyOptionalObjectives = (activeStoryQuest?.optional_objectives || activeStoryQuest?.fow_dossier?.optional_objectives || []).filter(o => o && o.is_discovered !== false);
+  const hasStructuredStory = Boolean((activeStoryQuest?.has_structured_objectives || activeStoryQuest?.fow_dossier?.has_structured_objectives) && storyMainObjective);
+  const completedStoryOptionals = storyOptionalObjectives.filter(o => o.completed || o.status === 'completed').length;
   const subObjectives = activeStoryQuest?.sub_objectives || activeStoryQuest?.stages || [];
   const completedSubs = subObjectives.filter(so => so.completed || so.done).length;
 
@@ -202,12 +208,284 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
     }
   };
 
+  const getOptionalRoleStyle = (role) => {
+    const norm = String(role || 'aid').toLowerCase();
+    if (norm === 'bypass') return 'bg-amber-950/70 text-amber-300 border-amber-700/60';
+    if (norm === 'alternative') return 'bg-purple-950/70 text-purple-200 border-purple-600/60';
+    if (norm === 'threatened') return 'bg-rose-950/70 text-rose-300 border-rose-600/60';
+    return 'bg-cyan-950/70 text-cyan-200 border-cyan-700/60';
+  };
+
+  const renderStructuredObjectives = (questObj) => {
+    const mainObj = questObj?.main_objective || questObj?.fow_dossier?.main_objective;
+    const hasStructured = Boolean((questObj?.has_structured_objectives || questObj?.fow_dossier?.has_structured_objectives) && mainObj);
+    if (!hasStructured) return null;
+
+    const mainStages = Array.isArray(mainObj.stages) ? mainObj.stages : [];
+    const totalMainStages = mainObj.total_stages || mainStages.length || 2;
+    const curMainStage = mainObj.current_stage || 1;
+    const isMainDone = Boolean(mainObj.completed);
+    const activeStage = mainStages.find(s => !s.completed && s.status !== 'completed' && s.status !== 'bypassed') || mainStages[mainStages.length - 1] || null;
+    const isPeak = Boolean(questObj?.is_peak_chapter || questObj?.fow_dossier?.is_peak_chapter);
+    const opts = (questObj?.optional_objectives || questObj?.fow_dossier?.optional_objectives || []).filter(o => o && o.is_discovered !== false);
+    const doneOpts = opts.filter(o => o.completed || o.status === 'completed').length;
+
+    return (
+      <div className="space-y-2.5 pt-1">
+        {/* ★ Main Objective Card */}
+        <div className={`p-2.5 rounded-lg border space-y-2 transition-all ${
+          isMainDone
+            ? 'bg-emerald-950/20 border-emerald-700/50'
+            : 'bg-black/50 border-fantasy-accent/50 shadow-sm'
+        }`}>
+          <div className="flex items-start gap-2 text-xs">
+            {isMainDone ? (
+              <CheckCircle2 size={14} className="text-emerald-400 shrink-0 mt-0.5" />
+            ) : (
+              <Star size={14} className="text-fantasy-accent shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1 min-w-0 space-y-1">
+              <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.2 rounded bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40">
+                    ★ {t('quests.main_objective', 'Main Objective')}
+                  </span>
+                  {isPeak && (
+                    <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded bg-rose-950/70 text-rose-300 border border-rose-600/50">
+                      ⚡ {t('quests.peak_chapter', 'Peak Set-Piece')}
+                    </span>
+                  )}
+                  {mainObj.aid_dc_reduction > 0 && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-700/50">
+                      🛡️ {t('quests.aid_secured', 'Aid Active')}
+                    </span>
+                  )}
+                  {mainObj.bypass_unlocked && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-700/50">
+                      ⏭️ {t('quests.bypass_active', 'Shortcut Active')}
+                    </span>
+                  )}
+                </div>
+                <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                  isMainDone
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                    : 'bg-amber-950/60 text-amber-300 border-amber-700/50 font-bold'
+                }`}>
+                  {isMainDone
+                    ? `✓ ${totalMainStages}/${totalMainStages}`
+                    : `${t('quests.stage_label_short', 'Stage')} ${curMainStage}/${totalMainStages}`}
+                </span>
+              </div>
+              <p className={`text-[11px] leading-snug ${isMainDone ? 'text-gray-400 line-through' : 'text-gray-100 font-semibold'}`}>
+                {cleanProseLocations(mainObj.title || mainObj.text || questObj?.objective)}
+              </p>
+            </div>
+          </div>
+
+          {/* Active Main Stage Callout */}
+          {!isMainDone && activeStage && (activeStage.stage_label || activeStage.target_location || activeStage.target_npc) && (
+            <div className="ml-5 bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
+              {activeStage.stage_label && (
+                <div className="text-[11px] text-amber-100 font-semibold leading-snug flex items-start gap-1.5">
+                  <span className="text-amber-400 shrink-0">{t('quests.current_step', '🎯 Current Step:')}</span>
+                  <span>{cleanProseLocations(activeStage.stage_label)}</span>
+                </div>
+              )}
+              {activeStage.target_location && activeStage.target_location !== 'Hidden Lair' && (
+                <div className="flex items-center justify-between gap-2 pt-0.5">
+                  <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
+                    <MapPin size={12} className="text-amber-400 shrink-0" />
+                    <span className="truncate" title={formatCleanLocation(activeStage.target_location)}>
+                      📍 <strong>{formatCleanLocation(activeStage.target_location)}</strong>
+                    </span>
+                  </div>
+                  {onOpenWorldMap && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenWorldMap(activeStage.target_location)}
+                      className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
+                    >
+                      {t('quests.locate_btn', 'Map')}
+                    </button>
+                  )}
+                </div>
+              )}
+              {activeStage.target_npc && (
+                <div className="text-[10px] text-cyan-300 flex items-center gap-1">
+                  <span>{t('quests.key_contact', '👤 Key Contact:')} <strong>{activeStage.target_npc}</strong></span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Main Stage Roadmap */}
+          {mainStages.length > 1 && !isMainDone && (
+            <div className="ml-5 pt-1 border-t border-fantasy-border/30 space-y-1">
+              {mainStages.map((st, sIdx) => {
+                const stStatus = String(st.status || 'locked').toLowerCase();
+                const stDone = Boolean(st.completed || stStatus === 'completed');
+                const stBypassed = Boolean(st.bypassed || stStatus === 'bypassed');
+                const stActive = stStatus === 'active' && !stDone && !stBypassed;
+                return (
+                  <div
+                    key={sIdx}
+                    className={`text-[10px] flex items-start gap-1.5 leading-tight ${
+                      stDone
+                        ? 'text-emerald-400/75 line-through'
+                        : stBypassed
+                          ? 'text-amber-300/70 italic line-through'
+                          : stActive
+                            ? 'text-amber-200 font-semibold'
+                            : 'text-gray-500'
+                    }`}
+                  >
+                    <span className="shrink-0 mt-0.5">
+                      {stDone ? '☑️' : stBypassed ? '⏭️' : stActive ? '📍' : '🔒'}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <span>
+                        {t('quests.stage_label_short', 'Stage')} {st.stage_index || sIdx + 1}: {cleanProseLocations(st.stage_label || st.text)}
+                      </span>
+                      {st.target_location && st.target_location !== 'Hidden Lair' && (
+                        <span className={`block text-[9px] font-mono ${stActive ? 'text-amber-300' : 'text-gray-500'}`}>
+                          ↳ 📍 {formatCleanLocation(st.target_location)}{st.target_npc ? ` • 👤 ${st.target_npc}` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Discovered Optional Objectives (1–3 Typed 1-Beat Routes) */}
+        {opts.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-bold text-gray-400 uppercase tracking-wider px-0.5">
+              <span>{t('quests.optional_objectives', 'Optional Tactical Routes')}</span>
+              <span className="font-mono text-cyan-300">{doneOpts}/{opts.length} {t('quests.optional_short', 'Optional')}</span>
+            </div>
+
+            {opts.map((opt, oIdx) => {
+              const st = String(opt.status || 'active').toLowerCase();
+              const isDone = Boolean(opt.completed || st === 'completed');
+              const isFailed = Boolean(opt.failed || st === 'failed');
+              const isBypassed = Boolean(opt.bypassed || st === 'bypassed');
+              const isLockedOut = Boolean(opt.locked_out || st === 'locked_out');
+              const isTerminal = isDone || isFailed || isBypassed || isLockedOut;
+              const roleKey = String(opt.role || 'aid').toLowerCase();
+
+              return (
+                <div
+                  key={opt.optional_id || opt.id || oIdx}
+                  className={`p-2 rounded-lg border space-y-1 text-[11px] transition-all ${
+                    isDone
+                      ? 'bg-emerald-950/15 border-emerald-800/40'
+                      : isFailed
+                        ? 'bg-rose-950/20 border-rose-800/40'
+                        : isLockedOut
+                          ? 'bg-neutral-950/60 border-neutral-800/60 opacity-75'
+                          : 'bg-black/40 border-fantasy-border/60'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                    <span className={`text-[9px] px-1.5 py-0.2 rounded border uppercase font-bold ${getOptionalRoleStyle(roleKey)}`}>
+                      {cleanProseLocations(opt.badge || t(`quests.optional_role_${roleKey}`, `Optional — ${roleKey}`))}
+                    </span>
+
+                    {isDone && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/50">
+                        ✓ {opt.bonus_claimed ? t('quests.bonus_claimed', 'Bonus Claimed') : t('quests.completed', 'Completed')}
+                      </span>
+                    )}
+                    {isFailed && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-rose-950/70 text-rose-300 border border-rose-700/50 uppercase">
+                        ✕ {t('quests.failed', 'Failed')}
+                      </span>
+                    )}
+                    {isBypassed && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-700/50 uppercase">
+                        ⏭️ {t('quests.bypassed', 'Bypassed')}
+                      </span>
+                    )}
+                    {isLockedOut && (
+                      <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-neutral-900 text-gray-400 border border-neutral-700 uppercase">
+                        🔒 {t('quests.locked_out', 'Locked Out')}
+                      </span>
+                    )}
+                  </div>
+
+                  <p className={`leading-snug ${
+                    isDone
+                      ? 'text-emerald-300/80 line-through'
+                      : isFailed
+                        ? 'text-rose-300/75 line-through'
+                        : isLockedOut
+                          ? 'text-gray-500 line-through'
+                          : 'text-gray-200 font-medium'
+                  }`}>
+                    {cleanProseLocations(opt.title || opt.text)}
+                  </p>
+
+                  {opt.stakes_hint && !isDone && (
+                    <p className={`text-[10px] leading-tight italic ${roleKey === 'threatened' ? 'text-rose-300/90' : 'text-gray-400'}`}>
+                      {cleanProseLocations(opt.stakes_hint)}
+                    </p>
+                  )}
+
+                  {!isTerminal && (opt.target_location || opt.target_npc) && (
+                    <div className="flex items-center justify-between gap-2 pt-0.5 text-[10px] text-amber-300 font-mono">
+                      <span className="truncate">
+                        {opt.target_location ? `📍 ${formatCleanLocation(opt.target_location)}` : ''}
+                        {opt.target_location && opt.target_npc ? ' • ' : ''}
+                        {opt.target_npc ? `👤 ${opt.target_npc}` : ''}
+                      </span>
+                      {opt.target_location && onOpenWorldMap && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenWorldMap(opt.target_location)}
+                          className="px-1.5 py-0.2 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[9px] font-sans font-bold shrink-0"
+                        >
+                          {t('quests.locate_btn', 'Map')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {!isTerminal && Array.isArray(opt.approaches) && opt.approaches.length > 0 && (
+                    <div className="flex flex-wrap gap-1 pt-0.5">
+                      {opt.approaches.map((ap, aIdx) => (
+                        <span
+                          key={aIdx}
+                          className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${
+                            ap.burned
+                              ? 'bg-red-950/40 text-red-400/70 border-red-800/40 line-through'
+                              : 'bg-white/5 text-gray-300 border-fantasy-border/50'
+                          }`}
+                        >
+                          {ap.stat || ap.approach_id}{ap.gold_cost ? ` (${ap.gold_cost}G)` : ''}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderFogOfWarDossier = (questObj, allowTurnIn = true) => {
     const fow = questObj?.fow_dossier;
     if (!fow || fow.dossier_stage !== 'compiled') return null;
     const maxAl = Math.max(2, fow.max_alert || 4);
     const curAl = Math.min(maxAl, fow.alert_level || 0);
     const leads = Array.isArray(fow.leads) ? fow.leads : [];
+    const hasStructured = Boolean((questObj?.has_structured_objectives || fow.has_structured_objectives) && (questObj?.main_objective || fow.main_objective));
+    const displayLeads = hasStructured ? leads.filter(ld => !ld.is_optional || (Array.isArray(ld.scouted_enemies) && ld.scouted_enemies.length > 0)) : leads;
     const twist = fow.twist || {};
     const tItem = fow.tangible_item || {};
 
@@ -227,12 +505,12 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           </div>
         </div>
 
-        {leads.length > 0 && (
+        {displayLeads.length > 0 && (
           <div className="space-y-1.5 bg-black/35 p-2 rounded border border-fantasy-border/40">
             <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
               {t('quests.known_leads', 'Known Leads')}
             </span>
-            {leads.map((ld, lIdx) => {
+            {displayLeads.map((ld, lIdx) => {
               const isDone = ld.status === 'completed';
               const isBypassed = ld.status === 'bypassed';
               return (
@@ -376,6 +654,14 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
 
   return (
     <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-3">
+      <ChronicleTapestryModal
+        isOpen={tapestryModalOpen}
+        onClose={() => setTapestryModalOpen(false)}
+        tapestry={campaignSpine?.chronicle_tapestry}
+        epilogueReady={Boolean(campaignSpine?.epilogue_ready)}
+        busyAction={busyAction}
+        onChooseEpilogue={handleEpilogueDecision}
+      />
       
       {/* Header & Subtabs */}
       <div className="space-y-2.5 border-b border-fantasy-border pb-2.5">
@@ -486,7 +772,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
       )}
 
       {loading && !activeStoryQuest && quests.length === 0 ? (
-        <p className="text-xs text-gray-500 italic text-center py-8">Consulting journal...</p>
+        <p className="text-xs text-gray-500 italic text-center py-8">{t('quests.loading_journal', 'Consulting journal...')}</p>
       ) : (
         <div className="space-y-4">
           
@@ -616,7 +902,25 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             🔥 Climax Ready!
                           </span>
                         )}
-                        {subObjectives.length > 0 && (
+                        {(activeStoryQuest.is_peak_chapter || activeStoryQuest?.fow_dossier?.is_peak_chapter) && (
+                          <span className="text-[10px] px-1.5 py-0.2 bg-rose-950/75 text-rose-300 font-bold uppercase rounded border border-rose-600/50">
+                            ⚡ {t('quests.peak_chapter', 'Peak Set-Piece')}
+                          </span>
+                        )}
+                        {hasStructuredStory ? (
+                          <>
+                            <span className="text-[10px] font-mono text-fantasy-accent bg-black/50 px-1.5 py-0.2 rounded border border-fantasy-border/40">
+                              ★ {storyMainObjective.completed
+                                ? `✓ ${storyMainObjective.total_stages || 2}/${storyMainObjective.total_stages || 2}`
+                                : `${t('quests.stage_label_short', 'Stage')} ${storyMainObjective.current_stage || 1}/${storyMainObjective.total_stages || 2}`}
+                            </span>
+                            {storyOptionalObjectives.length > 0 && (
+                              <span className="text-[10px] font-mono text-cyan-300 bg-black/50 px-1.5 py-0.2 rounded border border-cyan-800/40">
+                                {completedStoryOptionals}/{storyOptionalObjectives.length} {t('quests.optional_short', 'Opt.')}
+                              </span>
+                            )}
+                          </>
+                        ) : subObjectives.length > 0 && (
                           <span className="text-[10px] font-mono text-fantasy-accent bg-black/50 px-1.5 py-0.2 rounded border border-fantasy-border/40">
                             {completedSubs}/{subObjectives.length} Completed
                           </span>
@@ -639,7 +943,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       className="flex items-center justify-between text-[11px] text-gray-400 italic pt-1 border-t border-fantasy-border/20 cursor-pointer"
                     >
                       <span className="truncate">{cleanProseLocations(activeStoryQuest.objective || 'Tap to view objectives, locations, and rewards.')}</span>
-                      <span className="text-[10px] text-fantasy-accent not-italic font-semibold shrink-0 ml-2">Expand ▾</span>
+                      <span className="text-[10px] text-fantasy-accent not-italic font-semibold shrink-0 ml-2">{isStoryExpanded ? t('quests.collapse', 'Collapse ▴') : t('quests.expand', 'Expand ▾')}</span>
                     </div>
                   )}
 
@@ -656,7 +960,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         <div className="flex items-center justify-between gap-2 text-[11px] text-rose-200 bg-rose-950/50 px-2.5 py-2 rounded border border-rose-600/60">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <MapPin size={13} className="shrink-0 text-rose-400" />
-                            <span className="truncate">⚡ Final Showdown Location: <strong>{formatCleanLocation(activeStoryQuest.climax_location || activeStoryQuest.target_location)}</strong></span>
+                            <span className="truncate">{t('quests.final_showdown_location', '⚡ Final Showdown Location:')} <strong>{formatCleanLocation(activeStoryQuest.climax_location || activeStoryQuest.target_location)}</strong></span>
                           </div>
                           {onOpenWorldMap && (
                             <button
@@ -674,7 +978,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300 bg-amber-950/30 px-2.5 py-1.5 rounded border border-amber-700/40">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <MapPin size={12} className="shrink-0" />
-                            <span className="truncate">📍 Waypoint Lead: <strong>{formatCleanLocation(activeStoryQuest.target_location)}</strong></span>
+                            <span className="truncate">{t('quests.waypoint_lead', '📍 Waypoint Lead:')} <strong>{formatCleanLocation(activeStoryQuest.target_location)}</strong></span>
                           </div>
                           {onOpenWorldMap && (
                             <button
@@ -703,10 +1007,10 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         </div>
                       )}
 
-                      {subObjectives.length > 0 && (
+                      {hasStructuredStory ? renderStructuredObjectives(activeStoryQuest) : subObjectives.length > 0 && (
                         <div className="space-y-2 pt-1">
                           <div className="flex justify-between items-center text-[10px] font-bold text-gray-400 uppercase tracking-wider">
-                            <span>Objectives & Waypoint Locations</span>
+                            <span>{t('quests.objectives_and_waypoints', 'Objectives & Waypoint Locations')}</span>
                             <span className="font-mono text-fantasy-accent">{completedSubs} / {subObjectives.length} Completed</span>
                           </div>
                           <div className="space-y-2">
@@ -774,7 +1078,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                     <div className="ml-5 bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
                                       {stageLabel && (
                                         <div className="text-[11px] text-amber-100 font-semibold leading-snug flex items-start gap-1.5">
-                                          <span className="text-amber-400 shrink-0">🎯 Current Step:</span>
+                                          <span className="text-amber-400 shrink-0">{t('quests.current_step', '🎯 Current Step:')}</span>
                                           <span>{cleanProseLocations(stageLabel)}</span>
                                         </div>
                                       )}
@@ -789,7 +1093,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                               type="button"
                                               onClick={() => onOpenWorldMap(targetLoc)}
                                               className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
-                                              title="View on World Atlas"
+                                              title={t('quests.view_on_atlas', 'View on World Atlas')}
                                             >
                                               View on Map
                                             </button>
@@ -798,7 +1102,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                       )}
                                       {targetNpc && (
                                         <div className="text-[10px] text-cyan-300 flex items-center gap-1">
-                                          <span>👤 Key Contact: <strong>{targetNpc}</strong></span>
+                                          <span>{t('quests.key_contact', '👤 Key Contact:')} <strong>{targetNpc}</strong></span>
                                         </div>
                                       )}
                                     </div>
@@ -849,7 +1153,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
 
                       {(activeStoryQuest.reward_xp || activeStoryQuest.reward_gold || activeStoryQuest.reward_item) && (
                         <div className="flex items-center gap-3 pt-1 text-[11px] font-mono text-gray-400 border-t border-fantasy-border/30">
-                          <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">Rewards:</span>
+                          <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">{t('quests.rewards', 'Rewards:')}</span>
                           {activeStoryQuest.reward_gold && (
                             <span className="flex items-center gap-1 text-amber-300">
                               <Coins size={12} className="text-amber-400" />
@@ -926,7 +1230,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                 <p className="text-[11px] text-gray-400 leading-snug">{cleanProseLocations(q.objective || q.description)}</p>
                               )}
 
-                              {(q.target_location || q.stage_label || q.target_npc) && (
+                              {!Boolean((q.has_structured_objectives || q.fow_dossier?.has_structured_objectives) && (q.main_objective || q.fow_dossier?.main_objective)) && (q.target_location || q.stage_label || q.target_npc) && (
                                 <div className="bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
                                   {q.stage_label && (
                                     <div className="text-[11px] text-amber-100 font-semibold leading-snug">
@@ -965,7 +1269,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                 </div>
                               )}
 
-                              {qStages.length > 0 && (
+                              {(q.has_structured_objectives || q.fow_dossier?.has_structured_objectives) && (q.main_objective || q.fow_dossier?.main_objective) ? renderStructuredObjectives(q) : qStages.length > 0 && (
                                 <div className="space-y-1 bg-black/30 p-2 rounded border border-fantasy-border/30">
                                   {qStages.map((st, sIdx) => {
                                     const done = Boolean(st.completed || st.done || st.status === 'completed');
@@ -1009,7 +1313,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                     className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950/40 hover:bg-red-900/50 text-red-300 border border-red-800/50 text-[10px] font-bold transition-colors"
                                   >
                                     <Trash2 size={10} />
-                                    <span>Abandon</span>
+                                    <span>{t('quests.abandon', 'Abandon')}</span>
                                   </button>
                                 )}
                               </div>
@@ -1047,7 +1351,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             <CheckCircle2 size={12} className="text-emerald-400 shrink-0" />
                             <span className="text-gray-300 font-medium truncate">{cleanProseLocations(cq.title)}</span>
                           </div>
-                          <span className="text-[10px] text-emerald-400/80 font-mono shrink-0">Claimed</span>
+                          <span className="text-[10px] text-emerald-400/80 font-mono shrink-0">{t('quests.claimed', 'Claimed')}</span>
                         </div>
                       ))}
                     </div>
@@ -1065,7 +1369,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
               <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/60">
                 <div>
                   <h4 className="font-bold text-xs text-gray-200">{noticeBoardLabel}</h4>
-                  <p className="text-[10px] text-gray-400">Accept local side contracts for extra Gold & XP.</p>
+                  <p className="text-[10px] text-gray-400">{t('quests.side_contracts_desc', 'Accept local side contracts for extra Gold & XP.')}</p>
                 </div>
                 <button
                   disabled={Boolean(busyAction)}
@@ -1073,15 +1377,15 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   className="flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/30 text-fantasy-accent border border-fantasy-accent/40 text-[11px] font-bold transition-all shrink-0"
                 >
                   <RefreshCw size={12} className={busyAction === 'generate_board' ? 'animate-spin' : ''} />
-                  <span>{availableBounties.length === 0 ? 'Post Bounties' : 'Refresh Board'}</span>
+                  <span>{availableBounties.length === 0 ? t('quests.post_bounties', 'Post Bounties') : t('quests.refresh_board', 'Refresh Board')}</span>
                 </button>
               </div>
 
               {availableBounties.length === 0 ? (
                 <div className="text-center py-8 px-4 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg space-y-2">
                   <ShieldAlert size={24} className="mx-auto opacity-40 text-amber-400" />
-                  <p className="text-xs text-gray-400">No unclaimed postings on the board right now.</p>
-                  <p className="text-[11px]">Click "Post Bounties" above to generate fresh local contracts!</p>
+                  <p className="text-xs text-gray-400">{t('quests.no_bounties', 'No unclaimed postings on the board right now.')}</p>
+                  <p className="text-[11px]">{t('quests.post_bounties_tip', 'Click "Post Bounties" above to generate fresh local contracts!')}</p>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-1">
@@ -1146,14 +1450,14 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                   className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold transition-colors cursor-pointer"
                                 >
                                   <PlusCircle size={12} />
-                                  <span>Accept</span>
+                                  <span>{t('quests.accept', 'Accept')}</span>
                                 </button>
                                 <button
                                   type="button"
                                   disabled={Boolean(busyAction)}
                                   onClick={() => handleBountyContract(b.quest_id, 'accept', true)}
                                   className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-200 border border-amber-700/60 text-[10px] font-bold transition-colors cursor-pointer"
-                                  title="Attempt a CHA check to haggle an upfront Gold advance"
+                                  title={t('quests.haggle_advance_tooltip', 'Attempt a CHA check to haggle an upfront Gold advance')}
                                 >
                                   <Coins size={11} />
                                   <span>{t('quests.accept_advance', 'Accept + Advance (CHA)')}</span>
@@ -1181,9 +1485,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
                       <Zap size={13} className="text-amber-400" />
-                      <span>Deduction Synthesizer (+50 XP)</span>
+                      <span>{t('quests.deduction_synthesizer', 'Deduction Synthesizer (+50 XP)')}</span>
                     </span>
-                    <span className="text-[10px] font-mono text-gray-400">Pair 2 Leads</span>
+                    <span className="text-[10px] font-mono text-gray-400">{t('quests.pair_leads', 'Pair 2 Leads')}</span>
                   </div>
 
                   <div className="grid grid-cols-1 gap-1.5">
@@ -1192,7 +1496,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       onChange={e => setClueAId(e.target.value)}
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
-                      <option value="">Select Primary Evidence A...</option>
+                      <option value="">{t('quests.select_evidence_a', 'Select Primary Evidence A...')}</option>
                       {clues.filter(c => !c.is_consumed && c.category !== 'deduction').map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
@@ -1205,7 +1509,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       onChange={e => setClueBId(e.target.value)}
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
-                      <option value="">Select Corroborating Evidence B...</option>
+                      <option value="">{t('quests.select_evidence_b', 'Select Corroborating Evidence B...')}</option>
                       {clues.filter(c => !c.is_consumed && c.category !== 'deduction').map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
@@ -1232,7 +1536,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                     }`}
                   >
                     <Sparkles size={12} />
-                    <span>{busyAction === 'deduce' ? 'Cross-Referencing...' : (clueBId ? '🧩 Synthesize Breakthrough' : '🔮 Deduce with Single Clue')}</span>
+                    <span>{busyAction === 'deduce' ? t('quests.cross_referencing', 'Cross-Referencing...') : (clueBId ? t('quests.synthesize_breakthrough', '🧩 Synthesize Breakthrough') : t('quests.deduce_single_clue', '🔮 Deduce with Single Clue'))}</span>
                   </button>
                 </div>
               )}
@@ -1241,7 +1545,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
               {suspects.length > 0 && (
                 <div className="space-y-2 bg-black/35 p-2 rounded border border-fantasy-border/50">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Filter Suspect:</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{t('quests.filter_suspect', 'Filter Suspect:')}</span>
                     <select
                       value={selectedSuspect}
                       onChange={e => setSelectedSuspect(e.target.value)}
@@ -1280,8 +1584,8 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
               {filteredClues.length === 0 ? (
                 <div className="text-center py-8 px-4 text-gray-500 border border-dashed border-fantasy-border/50 rounded-lg space-y-1.5">
                   <Search size={24} className="mx-auto opacity-40 text-cyan-400" />
-                  <p className="text-xs text-gray-400">No investigation leads recorded yet.</p>
-                  <p className="text-[11px]">Inspect scenes, question witnesses, or scour NetWire rumors to gather evidence.</p>
+                  <p className="text-xs text-gray-400">{t('quests.no_leads', 'No investigation leads recorded yet.')}</p>
+                  <p className="text-[11px]">{t('quests.gather_evidence_desc', 'Inspect scenes, question witnesses, or scour NetWire rumors to gather evidence.')}</p>
                 </div>
               ) : (
                 <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-1">
@@ -1305,7 +1609,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${cat.color}`}>
-                              {cat.icon} {cat.label}
+                              {cat.icon} {t(`quests.clue_types.${catKey}`, cat.label)}
                             </span>
                             {isVerified && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 font-bold uppercase">
@@ -1346,7 +1650,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         {isObj && (c.linked_npc || c.source_location) && (
                           <div className="flex flex-wrap gap-2 pt-1 text-[10px] text-gray-400 border-t border-fantasy-border/30">
                             {c.linked_npc && (
-                              <span className="text-amber-300">👤 Suspect: <strong>{c.linked_npc}</strong></span>
+                              <span className="text-amber-300">{t('quests.suspect', '👤 Suspect:')} <strong>{c.linked_npc}</strong></span>
                             )}
                             {c.source_location && (
                               <span className="text-gray-400">📍 {formatCleanLocation(c.source_location)}</span>
@@ -1385,6 +1689,46 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
               </div>
 
               {/* Ch.10 Hard Game Over / Fallen World Banner */}
+              {/* Playable Fallen-World Chapter 11 Active Banner */}
+              {campaignSpine?.fallen_world && !campaignSpine?.epilogue_ready && !campaignSpine?.campaign_archived && (
+                <div className="bg-rose-950/55 border border-rose-600/60 rounded-lg p-3 space-y-1 text-xs text-rose-100">
+                  <strong className="uppercase tracking-wider text-rose-300 block">
+                    🌑 {t('quests.fallen_world_ch11_active', 'Fallen World — Chapter 11 Underground Resistance')}
+                  </strong>
+                  <p className="text-[11px] leading-snug text-rose-200/90">
+                    {t('quests.fallen_world_ch11_desc', 'Chapter 10 ended in defeat, plunging the realm into shadow. Protect your inner circle and forge the resistance in this playable epilogue!')}
+                  </p>
+                </div>
+              )}
+
+              {/* 4-Slide Chronicle Tapestry Access Card */}
+              {Array.isArray(campaignSpine?.chronicle_tapestry?.slides) && campaignSpine.chronicle_tapestry.slides.length > 0 && (
+                <div className="bg-gradient-to-br from-fantasy-dark via-black/70 to-amber-950/30 border border-fantasy-accent/60 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-fantasy-accent flex items-center gap-1.5">
+                      <ScrollText size={13} />
+                      <span>{t('quests.chronicle_tapestry', 'Chronicle Tapestry')}</span>
+                    </span>
+                    {campaignSpine.chronicle_tapestry.earned_title && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/60 text-amber-300 border border-amber-700/50">
+                        🏅 {cleanProseLocations(campaignSpine.chronicle_tapestry.earned_title)}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs font-semibold text-gray-100">
+                    {cleanProseLocations(campaignSpine.chronicle_tapestry.ending_title)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setTapestryModalOpen(true)}
+                    className="w-full py-1.5 px-3 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/35 text-fantasy-accent border border-fantasy-accent/50 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <ScrollText size={13} />
+                    <span>{t('quests.view_chronicle_tapestry', 'View 4-Slide Chronicle Tapestry')}</span>
+                  </button>
+                </div>
+              )}
+
               {campaignSpine?.campaign_game_over && (
                 <div className="bg-red-950/60 border border-red-600/60 rounded-lg p-3 space-y-1 text-xs text-red-200">
                   <strong className="uppercase tracking-wider text-red-300 block">💀 {t('quests.fallen_world', 'Fallen World — Chapter 10 Climax Defeat')}</strong>
@@ -1428,7 +1772,19 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   <div className="space-y-1.5">
                     {campaignSpine.world_scars.map((sc, sIdx) => (
                       <div key={sc.event_key || sIdx} className="bg-black/45 border border-rose-800/40 rounded p-2 text-[11px]">
-                        <div className="font-bold text-rose-200">{sc.title}</div>
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <span className="font-bold text-rose-200">{sc.title}</span>
+                          {sc.scar_tier === 'peak' && (
+                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-rose-950/80 text-rose-300 border border-rose-600/60">
+                              ⚡ {t('quests.peak_scar', 'Peak Scar')}
+                            </span>
+                          )}
+                          {sc.scar_tier === 'buildup' && (
+                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50">
+                              ⚔️ {t('quests.liberation_op', 'Liberation Op')}
+                            </span>
+                          )}
+                        </div>
                         {sc.location_name && (
                           <div className="text-[10px] text-amber-300 font-mono">📍 {formatCleanLocation(sc.location_name)}</div>
                         )}
@@ -1445,7 +1801,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   🏆 Campaign End Goals
                 </span>
                 {campaignEndGoals.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">Long-term victory milestones will crystallize as your adventure unfolds.</p>
+                  <p className="text-xs text-gray-500 italic">{t('quests.milestones_empty', 'Long-term victory milestones will crystallize as your adventure unfolds.')}</p>
                 ) : (
                   <div className="space-y-1.5">
                     {campaignEndGoals.map((goal, idx) => {
@@ -1474,7 +1830,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   📜 Chronicle Digest (Story So Far)
                 </span>
                 {chapterDigest.length === 0 ? (
-                  <p className="text-xs text-gray-500 italic">Completed chapters and major turning points will be summarized here.</p>
+                  <p className="text-xs text-gray-500 italic">{t('quests.chronicles_empty', 'Completed chapters and major turning points will be summarized here.')}</p>
                 ) : (
                   <div className="space-y-1.5 max-h-60 overflow-y-auto custom-scrollbar pr-1">
                     {chapterDigest.map((entry, idx) => (

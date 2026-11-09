@@ -156,6 +156,45 @@ def get_all_movement_prefixes() -> Tuple[str, ...]:
     return tuple(results)
 
 
+def get_realty_label(key: str, language: str = "en") -> str:
+    """Returns a localized Realty UI string with fallback to English."""
+    lang = (language or "en").lower().strip()
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "REALTY_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "REALTY_LABELS", {}).get(key, key)
+
+
+def get_folklore_sanctuary_label(key: str, language: str = "en") -> str:
+    """Returns a localized Folklore Sanctuary UI/badge string with fallback to English."""
+    lang = (language or "en").lower().strip()
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "FOLKLORE_SANCTUARY_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "FOLKLORE_SANCTUARY_LABELS", {}).get(key, key)
+
+
+def get_quest_ui_label(key: str, language: str = "en") -> str:
+    """Returns a localized Quest/Chronicle UI string with fallback to English."""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "QUEST_UI_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "QUEST_UI_LABELS", {}).get(key, key)
+
+def get_pact_ui_label(key: str, language: str = "en") -> str:
+    """Returns a localized Entity Contracts / Devil Pacts UI string with fallback to English."""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "PACT_UI_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "PACT_UI_LABELS", {}).get(key, key)
+
+
 __all__ = [
     "SUPPORTED_LOCALES",
     "LOCALES",
@@ -174,6 +213,10 @@ __all__ = [
     "get_all_dialogue_exit_phrases",
     "get_all_dialogue_init_prefixes",
     "get_all_movement_prefixes",
+    "get_realty_label",
+    "get_folklore_sanctuary_label",
+    "get_quest_ui_label",
+    "get_pact_ui_label",
     "en",
     "pl",
     "ms",

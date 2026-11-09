@@ -10,12 +10,13 @@ import re
 import sqlite3
 from config import DB_PATH
 import character_data as cd
-from .core import get_conn
+from .core import UnitOfWork, get_conn
 
 log = logging.getLogger(__name__)
 
-def get_learned_spells(user_id: int) -> list[str]:
-    char = db.get_character(user_id)
+def get_learned_spells(user_id: int, char: dict | None = None) -> list[str]:
+    if char is None:
+        char = db.get_character(user_id)
     if not char:
         return []
     raw = char.get("learned_spells", "[]")
@@ -138,7 +139,7 @@ def can_add_item(
         char = db.get_character(user_id)
     if not char:
         return True
-    cap = cd.inventory_capacity(char.get("str_", 1))
+    cap = db.get_character_inventory_capacity(user_id, char=char)
     existing = get_inventory(user_id, char=char)
     raw_cost = int(slot_cost) if slot_cost is not None else 1
     if raw_cost <= 0:
@@ -165,6 +166,8 @@ def add_item(
     char: dict | None = None,
     is_quest_locked: int = 0,
     linked_quest_id: str = "",
+    is_pact_locked: int = 0,
+    linked_contract_key: str = "",
 ) -> int | None:
     if char is None:
         char = db.get_character(user_id)
@@ -172,10 +175,28 @@ def add_item(
     if not force and char:
         if not can_add_item(user_id, slot_cost=slot_cost, name=name, item_type=item_type, effect=effect, char=char):
             return None
+    if not is_quest_locked:
+        try:
+            from mechanics.world.locations.folklore_veil import is_folklore_permission_token_name
+            if is_folklore_permission_token_name(name):
+                is_quest_locked = 1
+        except Exception:
+            pass
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO inventory (user_id, character_id, name, item_type, effect, slot_cost, is_quest_locked, linked_quest_id) VALUES (?,?,?,?,?,?,?,?)",
-            (user_id, char_id, name, item_type, effect, slot_cost, int(bool(is_quest_locked)), str(linked_quest_id or "")),
+            "INSERT INTO inventory (user_id, character_id, name, item_type, effect, slot_cost, is_quest_locked, linked_quest_id, is_pact_locked, linked_contract_key) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                user_id,
+                char_id,
+                name,
+                item_type,
+                effect,
+                slot_cost,
+                int(bool(is_quest_locked)),
+                str(linked_quest_id or ""),
+                int(bool(is_pact_locked)),
+                str(linked_contract_key or ""),
+            ),
         )
         return cur.lastrowid
 
@@ -199,98 +220,182 @@ def set_item_quest_lock(user_id: int, quest_id: str, locked: int = 0) -> int:
             )
         return cur.rowcount
 
-def remove_item_by_name(user_id: int, name: str) -> bool:
-    char = db.get_character(user_id)
-    if not char:
-        return False
-    char_id = char["id"]
+def _sync_post_equipment_mutation(
+    user_id: int,
+    changed_slot: str | None = None,
+    *,
+    raise_on_error: bool = True,
+) -> None:
+    """Runs physical-state garment/holding sync and equipped anomalous spell sync inside the caller's UnitOfWork."""
+    _sync_equipment_to_physical_state(user_id, changed_slot=changed_slot, raise_on_error=raise_on_error)
+    from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+    try:
+        try:
+            sync_equipped_anomalous_spells(user_id, raise_on_error=raise_on_error)
+        except TypeError:
+            sync_equipped_anomalous_spells(user_id)
+    except Exception as e:
+        if raise_on_error:
+            raise
+        log.warning("Failed syncing anomalous spells for user %s: %s", user_id, e, exc_info=True)
+
+
+def remove_item_by_name(user_id: int, name: str, force: bool = False) -> bool:
     target_clean = (name or "").strip().lower()
     if not target_clean:
         return False
 
-    was_equipped = False
-    removed = False
-    with get_conn() as conn:
-        # 1. Exact case-insensitive match
-        row = conn.execute(
-            "SELECT id, equipped, slot FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
-            (char_id, user_id, target_clean)
-        ).fetchone()
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
+            return False
+        char_id = char["id"]
 
-        # 2. Substring match
-        if not row:
-            rows = conn.execute(
-                "SELECT id, name, equipped, slot FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
-                (char_id, user_id)
-            ).fetchall()
-            for r in rows:
-                r_name = str(r["name"] or "").strip().lower()
-                if target_clean in r_name or r_name in target_clean:
-                    row = r
-                    break
+        was_equipped = False
+        removed_slot: str | None = None
+        removed = False
+        with get_conn() as conn:
+            # 1. Exact case-insensitive match
+            row = conn.execute(
+                "SELECT id, name, equipped, slot, is_quest_locked, is_pact_locked FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND LOWER(name)=? LIMIT 1",
+                (char_id, user_id, target_clean)
+            ).fetchone()
 
-            # 3. Token overlap match
+            # 2. Substring match
             if not row:
-                target_tokens = set(target_clean.split()) - {"a", "an", "the", "of", "in", "my", "your", "lost", "item"}
-                best_match = None
-                best_score = 0
+                rows = conn.execute(
+                    "SELECT id, name, equipped, slot, is_quest_locked, is_pact_locked FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
+                    (char_id, user_id)
+                ).fetchall()
                 for r in rows:
-                    r_tokens = set(str(r["name"] or "").strip().lower().split())
-                    overlap = len(target_tokens & r_tokens)
-                    if overlap > best_score:
-                        best_score = overlap
-                        best_match = r
-                if best_match and best_score >= 1:
-                    row = best_match
+                    r_name = str(r["name"] or "").strip().lower()
+                    if target_clean in r_name or r_name in target_clean:
+                        row = r
+                        break
 
-        if row:
+                # 3. Token overlap match
+                if not row:
+                    target_tokens = set(target_clean.split()) - {"a", "an", "the", "of", "in", "my", "your", "lost", "item"}
+                    best_match = None
+                    best_score = 0
+                    for r in rows:
+                        r_tokens = set(str(r["name"] or "").strip().lower().split())
+                        overlap = len(target_tokens & r_tokens)
+                        if overlap > best_score:
+                            best_score = overlap
+                            best_match = r
+                    if best_match and best_score >= 1:
+                        row = best_match
+
+            if row:
+                if bool(row["is_pact_locked"]):
+                    return False
+                if not force and bool(row["is_quest_locked"]):
+                    return False
+                was_equipped = bool(row["equipped"])
+                removed_slot = row["slot"]
+                cur = conn.execute("DELETE FROM inventory WHERE id=?", (row["id"],))
+                removed = cur.rowcount > 0
+
+        if removed and was_equipped:
+            _sync_post_equipment_mutation(user_id, changed_slot=removed_slot, raise_on_error=True)
+        return removed
+
+
+def remove_item(user_id: int, item_id: int, force: bool = False) -> bool:
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
+            return False
+        was_equipped = False
+        removed_slot: str | None = None
+        removed = False
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT id, equipped, slot, is_quest_locked, is_pact_locked FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                (item_id, char["id"], user_id),
+            ).fetchone()
+            if not row or bool(row["is_pact_locked"]) or (not force and bool(row["is_quest_locked"])):
+                return False
             was_equipped = bool(row["equipped"])
-            cur = conn.execute("DELETE FROM inventory WHERE id=?", (row["id"],))
+            removed_slot = row["slot"]
+            cur = conn.execute(
+                "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                (item_id, char["id"], user_id),
+            )
             removed = cur.rowcount > 0
 
-    if removed and was_equipped:
-        try:
-            _sync_equipment_to_physical_state(user_id)
-        except Exception as e:
-            log.warning("Failed syncing physical state after removing '%s' for user %s: %s", name, user_id, e, exc_info=True)
-        try:
-            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-            sync_equipped_anomalous_spells(user_id)
-        except Exception as e:
-            log.warning("Failed syncing anomalous spells after removing '%s' for user %s: %s", name, user_id, e, exc_info=True)
-    return removed
+        if removed and was_equipped:
+            _sync_post_equipment_mutation(user_id, changed_slot=removed_slot, raise_on_error=True)
+        return removed
 
-def remove_item(user_id: int, item_id: int) -> bool:
-    char = db.get_character(user_id)
-    if not char:
-        return False
-    was_equipped = False
-    removed = False
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT id, equipped FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-            (item_id, char["id"], user_id),
-        ).fetchone()
-        if not row:
+
+def atomic_merchant_purchase(
+    user_id: int,
+    name: str,
+    item_type: str,
+    effect: str,
+    slot_cost: int,
+    price: int,
+) -> int:
+    """Atomically verifies gold & capacity, deducts gold, and inserts the purchased item inside a single UnitOfWork."""
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
+            raise LookupError("Character not found")
+        eff_price = max(0, int(price or 0))
+        if eff_price > 0 and int(char.get("gold", 0) or 0) < eff_price:
+            raise ValueError(f"Not enough gold! Need {eff_price}g, have {char.get('gold', 0)}g.")
+        if not can_add_item(user_id, slot_cost, name, item_type, effect):
+            raise ValueError("Inventory is full!")
+        if eff_price > 0:
+            updated = db.apply_hp_mp_delta(user_id, gold_delta=-eff_price)
+            if updated is None:
+                raise RuntimeError(f"Failed to deduct purchase price for user {user_id}")
+        item_id = add_item(user_id, name, item_type=item_type, effect=effect, slot_cost=slot_cost)
+        if not item_id:
+            raise ValueError("Inventory is full!")
+        return int(item_id)
+
+
+def sell_inventory_item(user_id: int, item_id: int, price: int) -> bool:
+    """Atomically removes an eligible unequipped inventory item and credits `price` gold inside a single UnitOfWork."""
+    from mechanics.combat.items import is_digital_item, is_key_item
+
+    payout = max(0, int(price or 0))
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
             return False
-        was_equipped = bool(row["equipped"])
-        cur = conn.execute(
-            "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-            (item_id, char["id"], user_id),
-        )
-        removed = cur.rowcount > 0
-
-    if removed and was_equipped:
-        try:
-            _sync_equipment_to_physical_state(user_id)
-        except Exception as e:
-            log.warning("Failed syncing physical state after removing item %s for user %s: %s", item_id, user_id, e, exc_info=True)
-        try:
-            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-            sync_equipped_anomalous_spells(user_id)
-        except Exception as e:
-            log.warning("Failed syncing anomalous spells after removing item %s for user %s: %s", item_id, user_id, e, exc_info=True)
-    return removed
+        with get_conn() as conn:
+            row = conn.execute(
+                """SELECT id, name, item_type, effect, equipped, is_quest_locked, is_pact_locked
+                   FROM inventory
+                   WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))""",
+                (item_id, char["id"], user_id),
+            ).fetchone()
+            if not row:
+                return False
+            row_dict = dict(row)
+            if (
+                bool(row_dict.get("equipped"))
+                or bool(row_dict.get("is_quest_locked"))
+                or bool(row_dict.get("is_pact_locked"))
+                or is_key_item(row_dict)
+                or is_digital_item(row_dict)
+            ):
+                return False
+            cur = conn.execute(
+                "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                (item_id, char["id"], user_id),
+            )
+            if cur.rowcount <= 0:
+                return False
+        if payout != 0:
+            updated = db.apply_hp_mp_delta(user_id, gold_delta=payout)
+            if updated is None:
+                raise RuntimeError(f"Failed to credit resale payout for user {user_id}")
+        return True
 
 def get_inventory(user_id: int, char: dict | None = None) -> list[dict]:
     if char is None:
@@ -302,173 +407,229 @@ def get_inventory(user_id: int, char: dict | None = None) -> list[dict]:
                             (char["id"], user_id)).fetchall()
         return [dict(r) for r in rows]
 
+
+def get_inventories_for_characters(chars: list[dict]) -> dict[int, list[dict]]:
+    """Batch-loads inventory rows for multiple characters in a single SQLite query, keyed by character id."""
+    valid_chars = [c for c in (chars or []) if isinstance(c, dict) and c.get("id") is not None]
+    if not valid_chars:
+        return {}
+    char_ids = list(dict.fromkeys(int(c["id"]) for c in valid_chars))
+    uids = list(dict.fromkeys(int(c["user_id"]) for c in valid_chars if c.get("user_id") is not None))
+    by_char_id: dict[int, list[dict]] = {cid: [] for cid in char_ids}
+    uid_to_cid: dict[int, int] = {}
+    for c in valid_chars:
+        if c.get("user_id") is None:
+            continue
+        u_int = int(c["user_id"])
+        c_int = int(c["id"])
+        if u_int not in uid_to_cid or bool(c.get("is_active")):
+            uid_to_cid[u_int] = c_int
+    cids_json = json.dumps(char_ids)
+    with get_conn() as conn:
+        if uids:
+            uids_json = json.dumps(uids)
+            rows = conn.execute(
+                "SELECT * FROM inventory WHERE character_id IN (SELECT value FROM json_each(?)) "
+                "OR (character_id IS NULL AND user_id IN (SELECT value FROM json_each(?)))",
+                (cids_json, uids_json),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM inventory WHERE character_id IN (SELECT value FROM json_each(?))",
+                (cids_json,),
+            ).fetchall()
+    for r in rows:
+        cid = r["character_id"]
+        if cid is not None and int(cid) in by_char_id:
+            by_char_id[int(cid)].append(dict(r))
+        elif cid is None and r["user_id"] is not None:
+            mapped = uid_to_cid.get(int(r["user_id"]))
+            if mapped is not None:
+                by_char_id[mapped].append(dict(r))
+    return by_char_id
+
 def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
     if slot not in cd.EQUIPMENT_SLOTS:
         raise ValueError(f"'{slot}' is not a valid equipment slot.")
-    char = db.get_character(user_id)
-    if not char:
-        raise ValueError("No active character found.")
-    char_id = char["id"]
-
     from mechanics.combat.equipment import is_two_handed
 
-    with get_conn() as conn:
-        owned = conn.execute("SELECT * FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-                              (item_id, char_id, user_id)).fetchone()
-        if not owned:
-            raise ValueError("That item isn't in your inventory.")
-        item_dict = dict(owned)
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
+            raise ValueError("No active character found.")
+        char_id = char["id"]
 
-        # 0.0 Scenario Equip Compatibility Validation (Single Source of Truth)
-        from mechanics.combat.items.clothing import can_equip_item_in_scenario
-        active_sid = char.get("active_session_id")
-        current_scen = None
-        if active_sid:
-            s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (active_sid,)).fetchone()
-            if s_row:
-                current_scen = s_row[0] if isinstance(s_row, (list, tuple)) else s_row["scenario"]
-        if not current_scen:
-            current_scen = char.get("scenario") or "fantasy"
-        allowed_scen, scen_rejection = can_equip_item_in_scenario(item_dict, slot, current_scen)
-        if not allowed_scen:
-            raise ValueError(scen_rejection)
+        with get_conn() as conn:
+            owned = conn.execute("SELECT * FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                                  (item_id, char_id, user_id)).fetchone()
+            if not owned:
+                raise ValueError("That item isn't in your inventory.")
+            item_dict = dict(owned)
 
-        # 0. Slot-Type Compatibility Validation
-        from mechanics.combat.equipment import parse_equipment_metadata
-        item_meta = parse_equipment_metadata(item_dict) or {}
-        item_type = str(item_dict.get("item_type") or item_meta.get("item_type") or "").strip().title()
-        archetype = str(item_meta.get("archetype") or "").strip().lower()
+            # 0.0 Scenario Equip Compatibility Validation (Single Source of Truth)
+            from mechanics.combat.items.clothing import can_equip_item_in_scenario
+            active_sid = char.get("active_session_id")
+            current_scen = None
+            if active_sid:
+                s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (active_sid,)).fetchone()
+                if s_row:
+                    current_scen = s_row[0] if isinstance(s_row, (list, tuple)) else s_row["scenario"]
+            if not current_scen:
+                current_scen = char.get("scenario") or "fantasy"
+            allowed_scen, scen_rejection = can_equip_item_in_scenario(item_dict, slot, current_scen)
+            if not allowed_scen:
+                raise ValueError(scen_rejection)
 
-        from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
-        from mechanics.combat.items.headwear import HEADWEAR_ARCHETYPES
-        from mechanics.combat.items.gloves import GLOVE_ARCHETYPES
-        from mechanics.combat.items.shoes import SHOE_ARCHETYPES
-        from mechanics.combat.items.accessories import ACCESSORY_ARCHETYPES
+            # 0. Slot-Type Compatibility Validation
+            from mechanics.combat.equipment import parse_equipment_metadata
+            item_meta = parse_equipment_metadata(item_dict) or {}
+            item_type = str(item_dict.get("item_type") or item_meta.get("item_type") or "").strip().title()
+            archetype = str(item_meta.get("archetype") or "").strip().lower()
 
-        # Check combat body armor vs civilian clothing vs headwear vs weapon vs shield
-        is_civilian_clothing = (item_type == "Clothing") or (archetype in CLOTHING_TOPS or archetype in CLOTHING_BOTTOMS)
-        is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in HEADWEAR_ARCHETYPES)
-        is_shield = (item_type == "Shield") or (archetype in ("buckler", "heater_shield", "tower_shield", "riot_shield", "energy_shield"))
-        is_accessory = (item_type == "Accessory") or (archetype in ACCESSORY_ARCHETYPES or archetype in ("ring", "amulet", "belt", "necklace", "charm", "cloak", "bracelet", "earring", "talisman"))
-        is_gloves = (item_type in ("Gloves", "Handwear")) or (archetype in GLOVE_ARCHETYPES or "glove" in archetype or "gauntlet" in archetype or "mitt" in archetype)
-        is_shoes = (item_type in ("Shoes", "Footwear", "Boots")) or (archetype in SHOE_ARCHETYPES or "shoe" in archetype or "boot" in archetype or "greave" in archetype)
+            from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
+            from mechanics.combat.items.headwear import HEADWEAR_ARCHETYPES
+            from mechanics.combat.items.gloves import GLOVE_ARCHETYPES
+            from mechanics.combat.items.shoes import SHOE_ARCHETYPES
+            from mechanics.combat.items.accessories import ACCESSORY_ARCHETYPES
 
-        non_armor_types = ("Clothing", "Headwear", "Helmet", "Head", "Gloves", "Handwear", "Shoes", "Footwear", "Boots", "Accessory", "Shield", "Weapon")
-        non_armor_slots = ("Top", "Bottom", "Head", "Gloves", "Shoes", "Shield", "Weapon", "Accessory 1", "Accessory 2", "Accessory 3", "Accessory 4")
+            # Check combat body armor vs civilian clothing vs headwear vs weapon vs shield
+            is_civilian_clothing = (item_type == "Clothing") or (archetype in CLOTHING_TOPS or archetype in CLOTHING_BOTTOMS)
+            is_headwear = (item_type in ("Headwear", "Helmet", "Head")) or (archetype in HEADWEAR_ARCHETYPES)
+            is_shield = (item_type == "Shield") or (archetype in ("buckler", "heater_shield", "tower_shield", "riot_shield", "energy_shield"))
+            is_accessory = (item_type == "Accessory") or (archetype in ACCESSORY_ARCHETYPES or archetype in ("ring", "amulet", "belt", "necklace", "charm", "cloak", "bracelet", "earring", "talisman"))
+            is_gloves = (item_type in ("Gloves", "Handwear")) or (archetype in GLOVE_ARCHETYPES or "glove" in archetype or "gauntlet" in archetype or "mitt" in archetype)
+            is_shoes = (item_type in ("Shoes", "Footwear", "Boots")) or (archetype in SHOE_ARCHETYPES or "shoe" in archetype or "boot" in archetype or "greave" in archetype)
 
-        is_combat_armor = (
-            (item_type == "Armor")
-            or (slot == "Armor" and item_meta.get("base_dt", 0) > 2)
-            or (
-                item_type not in non_armor_types
-                and slot not in non_armor_slots
-                and not (is_headwear or is_gloves or is_shoes or is_accessory or is_shield or is_civilian_clothing)
-                and archetype in ("plate", "kevlar", "chainmail", "lamellar", "ceramic", "composite", "power_armor", "magic_robe", "cuirass", "leather")
+            non_armor_types = ("Clothing", "Headwear", "Helmet", "Head", "Gloves", "Handwear", "Shoes", "Footwear", "Boots", "Accessory", "Shield", "Weapon")
+            non_armor_slots = ("Top", "Bottom", "Head", "Gloves", "Shoes", "Shield", "Weapon", "Accessory 1", "Accessory 2", "Accessory 3", "Accessory 4")
+
+            is_combat_armor = (
+                (item_type == "Armor")
+                or (slot == "Armor" and item_meta.get("base_dt", 0) > 2)
+                or (
+                    item_type not in non_armor_types
+                    and slot not in non_armor_slots
+                    and not (is_headwear or is_gloves or is_shoes or is_accessory or is_shield or is_civilian_clothing)
+                    and archetype in ("plate", "kevlar", "chainmail", "lamellar", "ceramic", "composite", "power_armor", "magic_robe", "cuirass", "leather")
+                )
             )
-        )
-        # Only classify as weapon via archetype/multiplier heuristics when item_type doesn't
-        # already identify the item as something else (the heuristic archetype defaults to
-        # "sword" for unrecognised names, which would otherwise misclassify non-weapon gear).
-        _type_already_known = is_combat_armor or is_civilian_clothing or is_headwear or is_shield or is_accessory or is_gloves or is_shoes
-        is_weapon = (item_type == "Weapon") or (
-            not _type_already_known and (("multiplier" in item_meta) or (archetype in ("dagger", "shortsword", "wand", "pistol", "throwing", "sword", "axe", "mace", "spear", "revolver", "greatsword", "polearm", "warhammer", "staff", "bow", "crossbow", "rifle", "shotgun", "machinegun", "explosive", "katana")))
-        )
+            # Only classify as weapon via archetype/multiplier heuristics when item_type doesn't
+            # already identify the item as something else (the heuristic archetype defaults to
+            # "sword" for unrecognised names, which would otherwise misclassify non-weapon gear).
+            _type_already_known = is_combat_armor or is_civilian_clothing or is_headwear or is_shield or is_accessory or is_gloves or is_shoes
+            is_weapon = (item_type == "Weapon") or (
+                not _type_already_known and (("multiplier" in item_meta) or (archetype in ("dagger", "shortsword", "wand", "pistol", "throwing", "sword", "axe", "mace", "spear", "revolver", "greatsword", "polearm", "warhammer", "staff", "bow", "crossbow", "rifle", "shotgun", "machinegun", "explosive", "katana")))
+            )
 
-        if is_combat_armor and slot not in ("Armor",):
-            raise ValueError("Combat body armor can only be equipped in the dedicated 'Armor' slot.")
-        if is_civilian_clothing and slot not in ("Top", "Bottom"):
-            raise ValueError("Civilian clothing can only be equipped in 'Top' or 'Bottom' slots.")
-        if is_headwear and slot not in ("Head",):
-            raise ValueError("Headwear and helmets can only be equipped in the 'Head' slot.")
-        if is_shield and slot not in ("Shield",):
-            raise ValueError("Shields can only be equipped in the 'Shield' slot.")
-        if is_weapon and slot not in ("Weapon", "Shield"):
-            raise ValueError("Weapons can only be equipped in 'Weapon' (main-hand) or 'Shield' (off-hand) slots.")
-        if is_accessory and slot not in ("Accessory 1", "Accessory 2", "Accessory 3", "Accessory 4"):
-            raise ValueError("Accessories can only be equipped in 'Accessory 1-4' slots.")
-        if is_gloves and slot not in ("Gloves",):
-            raise ValueError("Gloves can only be equipped in the 'Gloves' slot.")
-        if is_shoes and slot not in ("Shoes",):
-            raise ValueError("Shoes can only be equipped in the 'Shoes' slot.")
+            if is_combat_armor and slot not in ("Armor",):
+                raise ValueError("Combat body armor can only be equipped in the dedicated 'Armor' slot.")
+            if is_civilian_clothing and slot not in ("Top", "Bottom"):
+                raise ValueError("Civilian clothing can only be equipped in 'Top' or 'Bottom' slots.")
+            if is_headwear and slot not in ("Head",):
+                raise ValueError("Headwear and helmets can only be equipped in the 'Head' slot.")
+            if is_shield and slot not in ("Shield",):
+                raise ValueError("Shields can only be equipped in the 'Shield' slot.")
+            if is_weapon and slot not in ("Weapon", "Shield"):
+                raise ValueError("Weapons can only be equipped in 'Weapon' (main-hand) or 'Shield' (off-hand) slots.")
+            if is_accessory and slot not in ("Accessory 1", "Accessory 2", "Accessory 3", "Accessory 4"):
+                raise ValueError("Accessories can only be equipped in 'Accessory 1-4' slots.")
+            if is_gloves and slot not in ("Gloves",):
+                raise ValueError("Gloves can only be equipped in the 'Gloves' slot.")
+            if is_shoes and slot not in ("Shoes",):
+                raise ValueError("Shoes can only be equipped in the 'Shoes' slot.")
 
-        # 0.5 Restraint Dual-Wield / Two-Handed Gate (Invariant 12)
-        if slot in ("Weapon", "Shield"):
-            try:
-                active_sid_check = db.get_active_session_id_for_user(user_id)
-                if active_sid_check:
-                    import mechanics.social.physical_state as ps
-                    p_state = ps.get_actor_physical_state(active_sid_check, char.get("name", "Hero"), conn=conn) or ps.get_actor_physical_state(active_sid_check, "player", conn=conn)
-                    if p_state:
-                        has_other_hand = bool(conn.execute(
-                            "SELECT 1 FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1",
-                            (char_id, user_id, "Shield" if slot == "Weapon" else "Weapon"),
-                        ).fetchone())
-                        if is_two_handed(item_dict) or (is_weapon and has_other_hand):
-                            allowed_eq, eq_reason = ps.can_actor_travel_or_dual_wield(p_state)
-                            if not allowed_eq:
-                                raise ValueError(eq_reason)
-            except ValueError:
-                raise
-            except Exception:
-                pass
+            # 0.5 Restraint Dual-Wield / Two-Handed Gate (Invariant 12)
+            if slot in ("Weapon", "Shield"):
+                try:
+                    active_sid_check = db.get_active_session_id_for_user(user_id)
+                    if active_sid_check:
+                        import mechanics.social.physical_state as ps
+                        p_state = ps.get_actor_physical_state(active_sid_check, char.get("name", "Hero"), conn=conn) or ps.get_actor_physical_state(active_sid_check, "player", conn=conn)
+                        if p_state:
+                            has_other_hand = bool(conn.execute(
+                                "SELECT 1 FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1",
+                                (char_id, user_id, "Shield" if slot == "Weapon" else "Weapon"),
+                            ).fetchone())
+                            if is_two_handed(item_dict) or (is_weapon and has_other_hand):
+                                allowed_eq, eq_reason = ps.can_actor_travel_or_dual_wield(p_state)
+                                if not allowed_eq:
+                                    raise ValueError(eq_reason)
+                except ValueError:
+                    raise
+                except Exception:
+                    pass
 
-        # 1. 2-Handed Weapon & Shield / Off-Hand mutual exclusion
-        if slot == "Weapon" and is_two_handed(item_dict):
-            # Unequip shield/off-hand if equipping a 2H weapon
-            shield_row = conn.execute(
-                "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot='Shield' AND equipped=1",
-                (char_id, user_id)).fetchone()
-            if shield_row:
-                conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (shield_row["id"],))
-        elif slot == "Shield":
-            if is_two_handed(item_dict):
-                raise ValueError("Two-handed weapons cannot be equipped in the off-hand slot.")
-            # Unequip 2H weapon if equipping a shield or off-hand weapon
-            weapon_row = conn.execute(
-                "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot='Weapon' AND equipped=1",
-                (char_id, user_id)).fetchone()
-            if weapon_row and is_two_handed(dict(weapon_row)):
-                conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (weapon_row["id"],))
+            # 1. 2-Handed Weapon & Shield / Off-Hand mutual exclusion
+            if slot == "Weapon" and is_two_handed(item_dict):
+                # Unequip shield/off-hand if equipping a 2H weapon
+                shield_row = conn.execute(
+                    "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot='Shield' AND equipped=1",
+                    (char_id, user_id)).fetchone()
+                if shield_row:
+                    if bool(shield_row["is_pact_locked"]):
+                        raise ValueError(
+                            f"Cannot displace pact-bound symbiotic gear '{shield_row['name']}' in your Shield slot while its contract is active."
+                        )
+                    conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (shield_row["id"],))
+            elif slot == "Shield":
+                if is_two_handed(item_dict):
+                    raise ValueError("Two-handed weapons cannot be equipped in the off-hand slot.")
+                # Unequip 2H weapon if equipping a shield or off-hand weapon
+                weapon_row = conn.execute(
+                    "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot='Weapon' AND equipped=1",
+                    (char_id, user_id)).fetchone()
+                if weapon_row and is_two_handed(dict(weapon_row)):
+                    if bool(weapon_row["is_pact_locked"]):
+                        raise ValueError(
+                            f"Cannot displace two-handed pact-bound weapon '{weapon_row['name']}' with an off-hand item while its contract is active."
+                        )
+                    conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (weapon_row["id"],))
 
-        # 2. Unequip whatever was previously in this slot
-        previous_row = conn.execute(
-            "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1 AND id!=?",
-            (char_id, user_id, slot, item_id)).fetchone()
-        previous = dict(previous_row) if previous_row else None
-        if previous:
-            conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (previous["id"],))
+            # 2. Unequip whatever was previously in this slot
+            previous_row = conn.execute(
+                "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1 AND id!=?",
+                (char_id, user_id, slot, item_id)).fetchone()
+            previous = dict(previous_row) if previous_row else None
+            if previous:
+                if bool(previous.get("is_pact_locked")):
+                    raise ValueError(
+                        f"Cannot overwrite pact-bound symbiotic gear '{previous['name']}' in '{slot}' while its contract is active."
+                    )
+                conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (previous["id"],))
 
-        conn.execute("UPDATE inventory SET equipped=1, slot=?, character_id=? WHERE id=?", (slot, char_id, item_id))
-    _sync_equipment_to_physical_state(user_id, changed_slot=slot)
-    try:
-        from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-        sync_equipped_anomalous_spells(user_id)
-    except Exception as e:
-        log.warning(f"Error syncing anomalous spells on equip for user {user_id}: {e}")
-    return previous
+            conn.execute("UPDATE inventory SET equipped=1, slot=?, character_id=? WHERE id=?", (slot, char_id, item_id))
+        _sync_post_equipment_mutation(user_id, changed_slot=slot, raise_on_error=True)
+        return previous
+
 
 def unequip_slot(user_id: int, slot: str) -> dict | None:
     if slot not in cd.EQUIPMENT_SLOTS:
         raise ValueError(f"'{slot}' is not a valid equipment slot.")
-    char = db.get_character(user_id)
-    if not char:
-        return None
-    char_id = char["id"]
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1",
-                            (char_id, user_id, slot)).fetchone()
-        if not row:
+    with UnitOfWork():
+        char = db.get_character(user_id)
+        if not char:
             return None
-        conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (row["id"],))
-    _sync_equipment_to_physical_state(user_id, changed_slot=slot)
-    try:
-        from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-        sync_equipped_anomalous_spells(user_id)
-    except Exception as e:
-        log.warning(f"Error syncing anomalous spells on unequip for user {user_id}: {e}")
-    return dict(row)
+        char_id = char["id"]
+        with get_conn() as conn:
+            row = conn.execute("SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND slot=? AND equipped=1",
+                                (char_id, user_id, slot)).fetchone()
+            if not row:
+                return None
+            if bool(row["is_pact_locked"]):
+                raise ValueError(
+                    f"Pact-bound symbiotic gear '{row['name']}' cannot be unequipped while its contract is active."
+                )
+            conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (row["id"],))
+        _sync_post_equipment_mutation(user_id, changed_slot=slot, raise_on_error=True)
+        return dict(row)
 
-def _sync_equipment_to_physical_state(user_id: int, changed_slot: str | None = None) -> None:
+
+def _sync_equipment_to_physical_state(
+    user_id: int,
+    changed_slot: str | None = None,
+    *,
+    raise_on_error: bool = False,
+) -> None:
     """Invariant 5: Synchronizes equipped weapon holding and garment layers to active session physical state without clobbering unrelated garment states or posture/restraints."""
     try:
         active_sid = db.get_active_session_id_for_user(user_id)
@@ -538,6 +699,8 @@ def _sync_equipment_to_physical_state(user_id: int, changed_slot: str | None = N
             garments=garments if garments else None,
         )
     except Exception as e:
+        if raise_on_error:
+            raise
         log.warning(f"Error syncing equipment to physical state for user {user_id}: {e}")
 
 def get_equipment(user_id: int) -> dict:

@@ -382,17 +382,38 @@ class ScenarioSelectView(discord.ui.View):
         super().__init__(timeout=180)
         self.name = name
 
+        import scenario_variants
         scenarios = load_scenarios()
-        options = [
-            discord.SelectOption(label=entry["name"], value=key, description=entry["description"][:100])
-            for key, entry in scenarios.items()
-        ]
+        # Only family roots here; variants are offered in a follow-up picker.
+        options = []
+        for key in scenario_variants.get_family_root_keys()[:25]:
+            entry = scenarios[key]
+            count = len(scenario_variants.get_family_variants(key))
+            label = entry["name"] + (f" ({count} variants)" if count > 1 else "")
+            options.append(discord.SelectOption(label=label[:100], value=key,
+                                                description=entry["description"][:100]))
         select = discord.ui.Select(placeholder="Choose a scenario...", options=options)
         select.callback = self._on_select
         self.add_item(select)
 
     async def _on_select(self, interaction: discord.Interaction):
+        from cogs.scenario_picker import (
+            ScenarioVariantSelectView, channel_allows_nsfw, hidden_nsfw_note, needs_variant_step,
+        )
         scenario_key = interaction.data["values"][0]
+        allow_nsfw = channel_allows_nsfw(interaction.channel)
+        if needs_variant_step(scenario_key, allow_nsfw):
+            family_name = load_scenarios().get(scenario_key, {}).get("name", scenario_key)
+            view = ScenarioVariantSelectView(interaction.user.id, scenario_key, self._go_to_gender,
+                                             allow_nsfw=allow_nsfw)
+            await interaction.response.edit_message(
+                content=(f"Scenario: **{family_name}**. Choose a variant:"
+                         f"{hidden_nsfw_note(scenario_key, allow_nsfw)}"),
+                view=view)
+            return
+        await self._go_to_gender(interaction, scenario_key)
+
+    async def _go_to_gender(self, interaction: discord.Interaction, scenario_key: str):
         scen_name = load_scenarios().get(scenario_key, {}).get("name", scenario_key)
         view = GenderSelectView(self.name, scenario=scenario_key)
         await interaction.response.edit_message(

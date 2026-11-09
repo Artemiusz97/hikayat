@@ -159,6 +159,17 @@ def get_contact_request_cooldown(session_id: int, npc_name: str) -> int:
         clean_name = str(npc_name).strip().lower()
         clean_slug = clean_name.replace(" ", "_")
         entry = cds.get(clean_name) or cds.get(clean_slug)
+        if not entry and clean_name:
+            for k_cd, v_cd in cds.items():
+                k_low = str(k_cd or "").strip().lower()
+                if not k_low:
+                    continue
+                if (
+                    (" " not in clean_name and "_" not in clean_name and (k_low.startswith(f"{clean_name} ") or k_low.startswith(f"{clean_name}_")))
+                    or (" " not in k_low and "_" not in k_low and (clean_name.startswith(f"{k_low} ") or clean_slug.startswith(f"{k_low}_")))
+                ):
+                    entry = v_cd
+                    break
         if not entry:
             return 0
 
@@ -1069,6 +1080,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 cur_track = str(track).strip().lower()
             else:
                 cur_track = existing_track
+            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and cur_track == "romantic":
+                cur_track = "platonic"
 
             existing_gender = existing_dict.get("gender")
             if existing_gender and str(existing_gender).strip().lower() not in ("", "unknown"):
@@ -1279,6 +1292,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for dfk in ("intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed"):
                 if cur_prof.get(dfk):
                     ret_app[dfk] = cur_prof[dfk]
+            cur_info = _enrich_contact_basic_info(conn, session_id, final_name, cur_info, scenario=scen, narrative_text=narrative_text)
             if cur_prof.get("had_first_time_with_player"):
                 ret_app["had_first_time_with_player"] = cur_prof["had_first_time_with_player"]
 
@@ -1350,6 +1364,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 seed_str=f"{name}_{info.get('description', '')}"
             )
             cur_track = track if (track and str(track).strip()) else "platonic"
+            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and str(cur_track).strip().lower() == "romantic":
+                cur_track = "platonic"
             cur_gender = canonical_gender or info.get("gender") or gender or ""
             if cur_gender:
                 info["gender"] = cur_gender
@@ -1428,6 +1444,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and app_dict.get(k):
                     prof_dict[k] = app_dict[k]
                 app_dict.pop(k, None)
+            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
 
             if "tracks" not in prof_dict or not isinstance(prof_dict["tracks"], dict):
                 prof_dict["tracks"] = {}
@@ -1468,6 +1485,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
                       "past_intimate_history", "past_intimate_entries"):
                 app_dict.pop(k, None)
+            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
 
             cursor = conn.execute(
                 """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,
@@ -1733,6 +1751,32 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
             narrative_text=scene_narrative
         )
 
+def _apply_contact_household_residence(session_id: int, d: dict, hh: dict, scen_key: str) -> None:
+    rel = d.get("relations") if isinstance(d.get("relations"), dict) else {}
+    if rel.get("cohabiting_family") is False and rel.get("residence_location"):
+        return
+    try:
+        from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+        if is_anomalous_realty_scenario(scen_key):
+            from mechanics.world.locations.residences import (
+                is_adult_special_agent_contact,
+                resolve_agent_residence_blueprint,
+            )
+            if is_adult_special_agent_contact(d):
+                bp = resolve_agent_residence_blueprint(int(session_id or 0), d, scen_key=scen_key)
+                if bp.get("residence_display"):
+                    rel["residence_location"] = bp["residence_display"]
+                    rel["residence_node_id"] = bp.get("bedroom_node_id", "")
+                    rel["cohabiting_family"] = False
+                    d["relations"] = rel
+                    return
+    except Exception:
+        pass
+    if hh.get("residence_location"):
+        rel["residence_location"] = hh["residence_location"]
+        d["relations"] = rel
+
+
 def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool = True, ensure_scene: bool = True) -> list[dict]:
     import mechanics.social.persona as persona
     import namegen
@@ -1814,7 +1858,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 conn, session_id, c_name, raw_info,
                 scenario=scen_key, narrative_text=scene_narrative
             )
-            if enriched_info != raw_info and d.get("id"):
+            if False and enriched_info != raw_info and d.get("id"):
                 try:
                     conn.execute(
                         "UPDATE contacts SET basic_info_json=? WHERE id=?",
@@ -2037,8 +2081,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                         scenario=scen_key,
                         member_role=d.get("household_role"),
                     )
-                    if hh.get("residence_location"):
-                        d["relations"]["residence_location"] = hh["residence_location"]
+                    _apply_contact_household_residence(session_id, d, hh, scen_key)
                     d["household_id"] = hh["id"]
             elif not d.get("relations") or not d["relations"].get("family"):
                 _active_resolving_contacts.add(session_id)
@@ -2172,6 +2215,16 @@ def update_contact_track(session_id: int, npc_id: str, new_track: str, character
     clean_name = str(npc_id or "").strip().lower()
     character_id = int(character_id or 0)
     norm_track = "romantic" if str(new_track).strip().lower() == "romantic" else "platonic"
+    if norm_track == "romantic" and session_id:
+        with get_conn() as _fox_conn:
+            _fox_chk = _fox_conn.execute(
+                """SELECT race FROM contacts
+                   WHERE session_id=? AND (? = 0 OR character_id=? OR character_id=0)
+                   AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
+                (session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id),
+            ).fetchall()
+            if any(str(r["race"] or "").strip().lower() == "kitsune:myobu_fox" for r in _fox_chk):
+                return False
     now = time.time()
     with get_conn() as conn:
         target_rows = conn.execute(
@@ -2741,8 +2794,7 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
                 scenario=scen_key,
                 member_role=d.get("household_role"),
             )
-            if hh.get("residence_location"):
-                d["relations"]["residence_location"] = hh["residence_location"]
+            _apply_contact_household_residence(session_id, d, hh, scen_key)
             d["household_id"] = hh["id"]
     elif not d.get("relations") or not d["relations"].get("family"):
         import mechanics.social.genealogy as genealogy
@@ -2772,12 +2824,15 @@ def _parse_faction_row(d: dict) -> dict:
             d[col.replace("_json", "")] = json.loads(d.get(col) or default)
         except Exception:
             d[col.replace("_json", "")] = []
+    d.setdefault("hq_node_id", "")
+    d.setdefault("hq_display_name", d.get("hq_location_id", ""))
     return d
 
 def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str = "",
                    perks: list = None, category: str = "", hq_location_id: str = "",
                    hierarchy_template: str = "", leadership_roster: list = None,
-                   rival_faction_ids: list = None, allied_faction_ids: list = None) -> dict:
+                   rival_faction_ids: list = None, allied_faction_ids: list = None,
+                   hq_node_id: str = "") -> dict:
     name = (name or "").strip()
     if not name:
         return {}
@@ -2802,13 +2857,14 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
                                         notes=?,
                                         category=COALESCE(NULLIF(?, ''), category),
                                         hq_location_id=COALESCE(NULLIF(?, ''), hq_location_id),
+                                        hq_node_id=COALESCE(NULLIF(?, ''), hq_node_id),
                                         hierarchy_template=COALESCE(NULLIF(?, ''), hierarchy_template),
                                         leadership_roster_json=COALESCE(NULLIF(?, '[]'), leadership_roster_json),
                                         rival_faction_ids_json=COALESCE(NULLIF(?, '[]'), rival_faction_ids_json),
                                         allied_faction_ids_json=COALESCE(NULLIF(?, '[]'), allied_faction_ids_json),
                                         updated_at=? WHERE id=?""",
                 (new_score, perks_json, final_notes,
-                 category or "", hq_location_id or "", hierarchy_template or "",
+                 category or "", hq_location_id or "", hq_node_id or "", hierarchy_template or "",
                  roster_json or "[]", rivals_json or "[]", allies_json or "[]",
                  now, existing["id"]))
             row = dict(existing)
@@ -2823,12 +2879,12 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
             tmpl = hierarchy_template or category or cat
             cursor = conn.execute(
                 """INSERT INTO factions (session_id, faction_id, name, reputation_score, perks_json, notes,
-                                         category, hq_location_id, hierarchy_template,
+                                         category, hq_location_id, hq_node_id, hierarchy_template,
                                          leadership_roster_json, rival_faction_ids_json, allied_faction_ids_json,
                                          created_at, updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, faction_id, name, initial_score, perks_json, notes or "",
-                 cat, hq_location_id or "", tmpl,
+                 cat, hq_location_id or "", hq_node_id or "", tmpl,
                  roster_json or "[]", rivals_json or "[]", allies_json or "[]", now, now))
             row = {
                 "id": cursor.lastrowid, "session_id": session_id, "faction_id": faction_id,
@@ -2844,7 +2900,10 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
 def get_factions(session_id: int) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM factions WHERE session_id=? ORDER BY updated_at DESC",
+            """SELECT f.*, COALESCE(NULLIF(w.name, ''), f.hq_location_id) AS hq_display_name
+               FROM factions f
+               LEFT JOIN world_nodes w ON w.session_id = f.session_id AND w.node_id = f.hq_node_id
+               WHERE f.session_id=? ORDER BY f.updated_at DESC""",
             (session_id,)).fetchall()
     return [db._parse_faction_row(dict(r)) for r in rows]
 
@@ -2852,7 +2911,10 @@ def get_faction(session_id: int, faction_id_or_name: str) -> dict | None:
     fid = (faction_id_or_name or "").strip().lower().replace(" ", "_")
     with get_conn() as conn:
         r = conn.execute(
-            "SELECT * FROM factions WHERE session_id=? AND faction_id=?",
+            """SELECT f.*, COALESCE(NULLIF(w.name, ''), f.hq_location_id) AS hq_display_name
+               FROM factions f
+               LEFT JOIN world_nodes w ON w.session_id = f.session_id AND w.node_id = f.hq_node_id
+               WHERE f.session_id=? AND f.faction_id=?""",
             (session_id, fid)).fetchone()
     if not r:
         return None
@@ -3834,6 +3896,236 @@ def delete_contact(session_id: int, contact_id_or_npc_id: int | str) -> bool:
         return cur.rowcount > 0
 
 
+def _ensure_actor_physical_turn_snapshots_table(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS actor_physical_turn_snapshots (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id          INTEGER NOT NULL,
+            turn_number         INTEGER NOT NULL,
+            states_json         TEXT NOT NULL DEFAULT '[]',
+            garments_json       TEXT NOT NULL DEFAULT '[]',
+            room_meta_json      TEXT NOT NULL DEFAULT '{}',
+            updated_at          REAL NOT NULL,
+            UNIQUE(session_id, turn_number)
+        )"""
+    )
+    cols = {
+        (r["name"] if isinstance(r, sqlite3.Row) else r[1])
+        for r in conn.execute("PRAGMA table_info(actor_physical_turn_snapshots)").fetchall()
+    }
+    if "room_meta_json" not in cols:
+        conn.execute("ALTER TABLE actor_physical_turn_snapshots ADD COLUMN room_meta_json TEXT NOT NULL DEFAULT '{}'")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_phys_turn_snap_sess_turn ON actor_physical_turn_snapshots(session_id, turn_number)"
+    )
+
+
+def snapshot_session_physical_state_for_turn(
+    session_id: int,
+    turn_number: int,
+    conn: sqlite3.Connection | None = None,
+) -> None:
+    """Captures an exact per-turn snapshot of actor_physical_states, actor_garments, and room_meta_json for deterministic rollback."""
+    if not session_id:
+        return
+    sid = int(session_id)
+    t_num = int(turn_number)
+
+    def _run(c: sqlite3.Connection) -> None:
+        s_rows = c.execute(
+            "SELECT * FROM actor_physical_states WHERE session_id = ? ORDER BY id ASC",
+            (sid,),
+        ).fetchall()
+        states = [{k: v for k, v in dict(r).items() if k not in ("id", "session_id")} for r in s_rows]
+
+        g_rows = c.execute(
+            "SELECT * FROM actor_garments WHERE session_id = ? ORDER BY id ASC",
+            (sid,),
+        ).fetchall()
+        garments = [{k: v for k, v in dict(r).items() if k not in ("id", "session_id")} for r in g_rows]
+
+        room_meta: dict = {}
+        try:
+            p_row = c.execute("SELECT physical_state_json FROM sessions WHERE id = ?", (sid,)).fetchone()
+            if p_row and p_row["physical_state_json"]:
+                parsed = json.loads(p_row["physical_state_json"])
+                if isinstance(parsed, dict):
+                    room_meta = {k: v for k, v in parsed.items() if k != "actors"}
+        except Exception:
+            room_meta = {}
+
+        now = time.time()
+        sql = """INSERT INTO actor_physical_turn_snapshots
+                 (session_id, turn_number, states_json, garments_json, room_meta_json, updated_at)
+                 VALUES (?, ?, ?, ?, ?, ?)
+                 ON CONFLICT(session_id, turn_number) DO UPDATE SET
+                     states_json = excluded.states_json,
+                     garments_json = excluded.garments_json,
+                     room_meta_json = excluded.room_meta_json,
+                     updated_at = excluded.updated_at"""
+        params = (
+            sid,
+            t_num,
+            json.dumps(states, default=str),
+            json.dumps(garments, default=str),
+            json.dumps(room_meta, default=str),
+            now,
+        )
+        try:
+            c.execute(sql, params)
+        except sqlite3.OperationalError as exc:
+            err_low = str(exc).lower()
+            if "no such table: actor_physical_turn_snapshots" in err_low or "no such column: room_meta_json" in err_low:
+                _ensure_actor_physical_turn_snapshots_table(c)
+                c.execute(sql, params)
+            else:
+                raise
+
+    if conn is not None:
+        _run(conn)
+    else:
+        with get_conn() as c:
+            _run(c)
+
+
+def rollback_actor_physical_state_after_turn(
+    session_id: int,
+    turn_number: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict:
+    """Restores actor_physical_states, actor_garments, and sessions.physical_state_json to the latest snapshot <= turn_number and prunes future snapshots."""
+    if not session_id:
+        return {"physical_actors_restored": 0, "garments_restored": 0}
+    sid = int(session_id)
+    t_num = int(turn_number)
+
+    def _run(c: sqlite3.Connection) -> dict:
+        def _select_and_prune():
+            sr = c.execute(
+                """SELECT turn_number, states_json, garments_json, room_meta_json
+                   FROM actor_physical_turn_snapshots
+                   WHERE session_id = ? AND turn_number <= ?
+                   ORDER BY turn_number DESC
+                   LIMIT 1""",
+                (sid, t_num),
+            ).fetchone()
+            dc = c.execute(
+                "DELETE FROM actor_physical_turn_snapshots WHERE session_id = ? AND turn_number > ?",
+                (sid, t_num),
+            )
+            return sr, int(dc.rowcount or 0)
+
+        try:
+            snap_row, pruned_future = _select_and_prune()
+        except sqlite3.OperationalError as exc:
+            err_low = str(exc).lower()
+            if "no such table: actor_physical_turn_snapshots" in err_low:
+                return {"physical_actors_restored": 0, "garments_restored": 0}
+            if "no such column: room_meta_json" in err_low:
+                _ensure_actor_physical_turn_snapshots_table(c)
+                snap_row, pruned_future = _select_and_prune()
+            else:
+                raise
+
+        if snap_row is None:
+            if pruned_future > 0:
+                c.execute("DELETE FROM actor_physical_states WHERE session_id = ?", (sid,))
+                c.execute("DELETE FROM actor_garments WHERE session_id = ?", (sid,))
+                c.execute("UPDATE sessions SET physical_state_json = '{}' WHERE id = ?", (sid,))
+            else:
+                try:
+                    p_row = c.execute("SELECT physical_state_json FROM sessions WHERE id = ?", (sid,)).fetchone()
+                    if p_row and p_row["physical_state_json"]:
+                        parsed = json.loads(p_row["physical_state_json"])
+                        if isinstance(parsed, dict) and "actors" in parsed:
+                            cleaned = {k: v for k, v in parsed.items() if k != "actors"}
+                            c.execute(
+                                "UPDATE sessions SET physical_state_json = ? WHERE id = ?",
+                                (json.dumps(cleaned, default=str), sid),
+                            )
+                except Exception:
+                    pass
+            return {"physical_actors_restored": 0, "garments_restored": 0}
+
+        try:
+            states = json.loads(snap_row["states_json"] or "[]")
+        except Exception:
+            states = []
+        try:
+            garments = json.loads(snap_row["garments_json"] or "[]")
+        except Exception:
+            garments = []
+        try:
+            raw_room_meta = snap_row["room_meta_json"] if "room_meta_json" in snap_row.keys() else "{}"
+            room_meta = json.loads(raw_room_meta or "{}")
+            if not isinstance(room_meta, dict):
+                room_meta = {}
+            else:
+                room_meta = {k: v for k, v in room_meta.items() if k != "actors"}
+        except Exception:
+            room_meta = {}
+
+        state_cols = {
+            r["name"] if isinstance(r, sqlite3.Row) else r[1]
+            for r in c.execute("PRAGMA table_info(actor_physical_states)").fetchall()
+        }
+        garment_cols = {
+            r["name"] if isinstance(r, sqlite3.Row) else r[1]
+            for r in c.execute("PRAGMA table_info(actor_garments)").fetchall()
+        }
+
+        c.execute("DELETE FROM actor_physical_states WHERE session_id = ?", (sid,))
+        c.execute("DELETE FROM actor_garments WHERE session_id = ?", (sid,))
+        c.execute(
+            "UPDATE sessions SET physical_state_json = ? WHERE id = ?",
+            (json.dumps(room_meta, default=str), sid),
+        )
+
+        restored_states = 0
+        for st in (states if isinstance(states, list) else []):
+            if not isinstance(st, dict):
+                continue
+            row_dict = {
+                k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+                for k, v in st.items()
+                if k in state_cols and k not in ("id", "session_id")
+            }
+            if not row_dict:
+                continue
+            row_dict["session_id"] = sid
+            cols_sql = ",".join(row_dict.keys())
+            qmarks = ",".join("?" * len(row_dict))
+            c.execute(f"INSERT INTO actor_physical_states ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
+            restored_states += 1
+
+        restored_garments = 0
+        for gm in (garments if isinstance(garments, list) else []):
+            if not isinstance(gm, dict):
+                continue
+            row_dict = {
+                k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+                for k, v in gm.items()
+                if k in garment_cols and k not in ("id", "session_id")
+            }
+            if not row_dict:
+                continue
+            row_dict["session_id"] = sid
+            cols_sql = ",".join(row_dict.keys())
+            qmarks = ",".join("?" * len(row_dict))
+            c.execute(f"INSERT INTO actor_garments ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
+            restored_garments += 1
+
+        return {
+            "physical_actors_restored": restored_states,
+            "garments_restored": restored_garments,
+        }
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
+
+
 def get_school_directory_batch(session_id: int) -> dict[str, dict]:
     """Fetch all school_directory entries for a session keyed by lowercase name in 1 query."""
     if not session_id:
@@ -3852,3 +4144,25 @@ def get_school_directory_batch(session_id: int) -> dict[str, dict]:
 
 
 
+
+from .social_pacing import (
+    backfill_exempt_and_legacy_contact_discoveries,
+    canon_social_npc_id,
+    clear_clear_the_air_gate,
+    get_character_social_daily,
+    get_character_social_daily_batch,
+    get_contact_dossier_discoveries,
+    get_contact_dossier_discoveries_batch,
+    get_npc_social_composure,
+    get_npc_social_composure_batch,
+    get_player_fow_exemption_sets,
+    get_social_topic_states,
+    get_social_topic_states_batch,
+    record_contact_dossier_discoveries,
+    rollback_social_pacing_state_after_turn,
+    set_clear_the_air_gate,
+    snapshot_session_social_state_for_turn,
+    upsert_character_social_daily,
+    upsert_npc_social_composure,
+    upsert_social_topic_state,
+)

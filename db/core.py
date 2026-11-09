@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS inventory (
     slot_cost   INTEGER DEFAULT 1,
     slot        TEXT DEFAULT NULL,
     is_quest_locked INTEGER DEFAULT 0,
-    linked_quest_id TEXT DEFAULT ''
+    linked_quest_id TEXT DEFAULT '',
+    is_pact_locked INTEGER DEFAULT 0,
+    linked_contract_key TEXT DEFAULT ''
 );
 -- 'slot' holds one of the 6 canonical equipment slots (see
 -- character_data.EQUIPMENT_SLOTS: Weapon/Shield/Top/Bottom/Gloves/Shoes) that
@@ -259,6 +261,7 @@ CREATE TABLE IF NOT EXISTS quests (
     resolution_approach TEXT DEFAULT '',
     engine              TEXT DEFAULT '',
     dossier_stage       TEXT DEFAULT 'legacy',
+    anomaly_blueprint_json TEXT DEFAULT '{}',
     created_at          REAL,
     updated_at          REAL,
     UNIQUE(session_id, quest_id)
@@ -377,6 +380,7 @@ CREATE TABLE IF NOT EXISTS factions (
     notes               TEXT DEFAULT '',
     category            TEXT DEFAULT 'guild',   -- guild | club | delinquents | corpo | syndicate | order
     hq_location_id      TEXT DEFAULT '',        -- matches session_locations.location_id
+    hq_node_id          TEXT DEFAULT '',        -- foreign key to world_nodes.node_id
     hierarchy_template  TEXT DEFAULT 'guild',   -- key into FACTION_HIERARCHIES in mechanics/factions.py
     leadership_roster_json  TEXT DEFAULT '[]',      -- [{rank, title, name, is_player}]
     rival_faction_ids_json  TEXT DEFAULT '[]',      -- list of faction_id strings
@@ -466,6 +470,7 @@ CREATE TABLE IF NOT EXISTS quest_waypoints (
     updated_at          REAL,
     UNIQUE(session_id, quest_id, stage_index, sub_obj_id)
 );
+CREATE INDEX IF NOT EXISTS idx_quest_waypoints_sub_obj ON quest_waypoints(session_id, quest_id, sub_obj_id);
 
 CREATE TABLE IF NOT EXISTS phone_messages (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -741,6 +746,9 @@ CREATE TABLE IF NOT EXISTS campaign_spines (
     lieutenants_roster_json TEXT NOT NULL DEFAULT '[]',
     chapters_blueprint_json TEXT NOT NULL DEFAULT '{}',
     nemeses_json            TEXT NOT NULL DEFAULT '[]',
+    hidden_bible_json       TEXT NOT NULL DEFAULT '{}',
+    ending_axes_json        TEXT NOT NULL DEFAULT '{}',
+    chronicle_tapestry_json TEXT NOT NULL DEFAULT '{}',
     climax_status           TEXT NOT NULL DEFAULT 'pending',
     epilogue_status         TEXT NOT NULL DEFAULT 'pending',
     state_events_json       TEXT NOT NULL DEFAULT '[]',
@@ -792,9 +800,234 @@ CREATE TABLE IF NOT EXISTS user_folklore_codex (
     times_contained     INTEGER NOT NULL DEFAULT 0,
     first_discovered_at REAL,
     updated_at          REAL,
+    first_session_id    INTEGER DEFAULT NULL,
+    first_turn          INTEGER DEFAULT NULL,
     PRIMARY KEY (user_id, codex_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_folklore_codex_uid ON user_folklore_codex(user_id);
+
+CREATE TABLE IF NOT EXISTS session_anomaly_records (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    record_type         TEXT NOT NULL, -- 'field_log' | 'vault_requisition' | 'vault_log' | 'contained_log'
+    entity_key          TEXT NOT NULL DEFAULT '',
+    codex_id            TEXT NOT NULL DEFAULT '',
+    stage               TEXT NOT NULL DEFAULT 'sighted',
+    first_turn          INTEGER NOT NULL DEFAULT 0,
+    turn_updated        INTEGER NOT NULL DEFAULT 0,
+    payload_json        TEXT NOT NULL DEFAULT '{}',
+    created_at          REAL NOT NULL,
+    updated_at          REAL NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_session_anom_field_log
+    ON session_anomaly_records(session_id, record_type, entity_key)
+    WHERE record_type = 'field_log' AND entity_key != '';
+CREATE INDEX IF NOT EXISTS idx_session_anom_sess_type ON session_anomaly_records(session_id, record_type);
+CREATE INDEX IF NOT EXISTS idx_session_anom_sess_turn ON session_anomaly_records(session_id, first_turn, turn_updated);
+
+CREATE TABLE IF NOT EXISTS actor_physical_turn_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    turn_number         INTEGER NOT NULL,
+    states_json         TEXT NOT NULL DEFAULT '[]',
+    garments_json       TEXT NOT NULL DEFAULT '[]',
+    room_meta_json      TEXT NOT NULL DEFAULT '{}',
+    updated_at          REAL NOT NULL,
+    UNIQUE(session_id, turn_number)
+);
+CREATE INDEX IF NOT EXISTS idx_phys_turn_snap_sess_turn ON actor_physical_turn_snapshots(session_id, turn_number);
+
+CREATE TABLE IF NOT EXISTS player_properties (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    property_id         TEXT NOT NULL,
+    facility_node_id    TEXT NOT NULL,
+    zone_id             TEXT NOT NULL,
+    tier                INTEGER NOT NULL DEFAULT 0,
+    price_paid          INTEGER NOT NULL DEFAULT 0,
+    is_primary          INTEGER NOT NULL DEFAULT 0,
+    is_starter          INTEGER NOT NULL DEFAULT 0,
+    spare_keys_json     TEXT NOT NULL DEFAULT '{}',
+    purchased_turn      INTEGER NOT NULL DEFAULT 0,
+    purchased_day       INTEGER NOT NULL DEFAULT 1,
+    created_at          REAL NOT NULL,
+    updated_at          REAL NOT NULL,
+    UNIQUE(session_id, property_id)
+);
+CREATE INDEX IF NOT EXISTS idx_player_properties_sess ON player_properties(session_id);
+CREATE INDEX IF NOT EXISTS idx_player_properties_node ON player_properties(session_id, facility_node_id);
+CREATE INDEX IF NOT EXISTS idx_player_properties_primary ON player_properties(session_id, is_primary);
+
+CREATE TABLE IF NOT EXISTS npc_social_composure (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    npc_id                  TEXT NOT NULL,
+    current_composure       INTEGER NOT NULL DEFAULT 100,
+    max_composure           INTEGER NOT NULL DEFAULT 100,
+    composure_state         TEXT NOT NULL DEFAULT 'composed',
+    mood                    TEXT NOT NULL DEFAULT 'Engaged',
+    mood_dc_mod             INTEGER NOT NULL DEFAULT 0,
+    last_schedule_block     TEXT NOT NULL DEFAULT '',
+    last_interaction_day    INTEGER NOT NULL DEFAULT 1,
+    last_interaction_minute INTEGER NOT NULL DEFAULT 0,
+    lockout_until_day       INTEGER NOT NULL DEFAULT 0,
+    lockout_until_minute    INTEGER NOT NULL DEFAULT 0,
+    clear_the_air_required  INTEGER NOT NULL DEFAULT 0,
+    clear_the_air_reason    TEXT NOT NULL DEFAULT '',
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, npc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_npc_social_composure_sess ON npc_social_composure(session_id, npc_id);
+
+CREATE TABLE IF NOT EXISTS character_social_daily (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    character_id            INTEGER NOT NULL DEFAULT 0,
+    npc_id                  TEXT NOT NULL,
+    current_day             INTEGER NOT NULL DEFAULT 1,
+    daily_affinity_earned   INTEGER NOT NULL DEFAULT 0,
+    is_on_date              INTEGER NOT NULL DEFAULT 0,
+    gift_given_today        INTEGER NOT NULL DEFAULT 0,
+    confession_given_today  INTEGER NOT NULL DEFAULT 0,
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, character_id, npc_id, current_day)
+);
+CREATE INDEX IF NOT EXISTS idx_char_social_daily_lookup ON character_social_daily(session_id, character_id, current_day);
+
+CREATE TABLE IF NOT EXISTS social_topic_states (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    character_id            INTEGER NOT NULL DEFAULT 0,
+    npc_id                  TEXT NOT NULL,
+    topic_id                TEXT NOT NULL,
+    category                TEXT NOT NULL DEFAULT '',
+    depth_tier              INTEGER NOT NULL DEFAULT 1,
+    last_outcome            TEXT NOT NULL DEFAULT '',
+    last_discussed_day      INTEGER NOT NULL DEFAULT 0,
+    cooldown_until_day      INTEGER NOT NULL DEFAULT 0,
+    cooldown_until_minute   INTEGER NOT NULL DEFAULT 0,
+    last_venue_leaf         TEXT NOT NULL DEFAULT '',
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, character_id, npc_id, topic_id)
+);
+CREATE INDEX IF NOT EXISTS idx_social_topic_states_lookup ON social_topic_states(session_id, character_id, npc_id);
+
+CREATE TABLE IF NOT EXISTS contact_dossier_discoveries (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    character_id            INTEGER NOT NULL DEFAULT 0,
+    npc_id                  TEXT NOT NULL,
+    fact_category           TEXT NOT NULL,
+    fact_key                TEXT NOT NULL,
+    fact_value              TEXT NOT NULL DEFAULT '',
+    discovered_turn         INTEGER NOT NULL DEFAULT 0,
+    discovery_source        TEXT NOT NULL DEFAULT 'dialogue',
+    created_at              REAL NOT NULL,
+    UNIQUE(session_id, character_id, npc_id, fact_category, fact_key)
+);
+CREATE INDEX IF NOT EXISTS idx_contact_discoveries_lookup ON contact_dossier_discoveries(session_id, character_id, npc_id);
+CREATE INDEX IF NOT EXISTS idx_contact_discoveries_turn ON contact_dossier_discoveries(session_id, discovered_turn);
+
+CREATE TABLE IF NOT EXISTS social_turn_snapshots (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    turn_number             INTEGER NOT NULL,
+    composure_json          TEXT NOT NULL DEFAULT '[]',
+    daily_json              TEXT NOT NULL DEFAULT '[]',
+    topic_states_json       TEXT NOT NULL DEFAULT '[]',
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, turn_number)
+);
+CREATE INDEX IF NOT EXISTS idx_social_turn_snap_sess_turn ON social_turn_snapshots(session_id, turn_number);
+
+CREATE TABLE IF NOT EXISTS session_entity_contracts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    character_id        INTEGER DEFAULT NULL,
+    contract_key        TEXT NOT NULL,
+    patron_id           TEXT NOT NULL,
+    source_pool         TEXT NOT NULL DEFAULT 'bespoke',
+    codex_id            TEXT NOT NULL DEFAULT '',
+    entity_name         TEXT NOT NULL,
+    element             TEXT NOT NULL DEFAULT 'aether',
+    synergy_stat        TEXT NOT NULL DEFAULT 'INT',
+    holder_type         TEXT NOT NULL DEFAULT 'player',
+    holder_id           TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'active',
+    tier                INTEGER NOT NULL DEFAULT 1,
+    resonance_xp        INTEGER NOT NULL DEFAULT 0,
+    appraisal_state     TEXT NOT NULL DEFAULT 'neutral',
+    breach_stage        INTEGER NOT NULL DEFAULT 0,
+    unpaid_blood_debt   INTEGER NOT NULL DEFAULT 0,
+    bound_gear_item_id  INTEGER DEFAULT NULL,
+    bound_gear_slot     TEXT NOT NULL DEFAULT '',
+    taboo_id            TEXT NOT NULL DEFAULT '',
+    tithe_schedule_json TEXT NOT NULL DEFAULT '{}',
+    stat_locks_json     TEXT NOT NULL DEFAULT '{}',
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    turn_signed         INTEGER NOT NULL DEFAULT 1,
+    turn_updated        INTEGER NOT NULL DEFAULT 1,
+    created_at          REAL NOT NULL,
+    updated_at          REAL NOT NULL,
+    UNIQUE(session_id, contract_key)
+);
+CREATE INDEX IF NOT EXISTS idx_entity_contracts_sess_holder ON session_entity_contracts(session_id, holder_type, holder_id, status);
+CREATE INDEX IF NOT EXISTS idx_entity_contracts_sess_patron ON session_entity_contracts(session_id, patron_id, tier, status);
+CREATE INDEX IF NOT EXISTS idx_entity_contracts_char ON session_entity_contracts(character_id, status);
+
+CREATE TABLE IF NOT EXISTS session_contract_grudges (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    character_id        INTEGER DEFAULT NULL,
+    grudge_key          TEXT NOT NULL,
+    patron_id           TEXT NOT NULL,
+    entity_name         TEXT NOT NULL,
+    holder_id           TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'active',
+    soul_scar_active    INTEGER NOT NULL DEFAULT 1,
+    nemesis_spawned     INTEGER NOT NULL DEFAULT 0,
+    metadata_json       TEXT NOT NULL DEFAULT '{}',
+    severance_turn      INTEGER NOT NULL DEFAULT 1,
+    resolved_turn       INTEGER DEFAULT NULL,
+    created_at          REAL NOT NULL,
+    updated_at          REAL NOT NULL,
+    UNIQUE(session_id, grudge_key)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_grudges_sess_holder ON session_contract_grudges(session_id, holder_id, status);
+
+CREATE TABLE IF NOT EXISTS session_contract_turn_snapshots (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id          INTEGER NOT NULL,
+    turn_number         INTEGER NOT NULL,
+    contracts_json      TEXT NOT NULL DEFAULT '[]',
+    grudges_json        TEXT NOT NULL DEFAULT '[]',
+    created_at          REAL NOT NULL,
+    UNIQUE(session_id, turn_number)
+);
+CREATE INDEX IF NOT EXISTS idx_contract_snaps_sess_turn ON session_contract_turn_snapshots(session_id, turn_number);
+
+CREATE TABLE IF NOT EXISTS user_patron_compendium (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id                 INTEGER NOT NULL,
+    patron_id               TEXT NOT NULL,
+    source_pool             TEXT NOT NULL DEFAULT 'bespoke',
+    codex_id                TEXT NOT NULL DEFAULT '',
+    entity_name             TEXT NOT NULL DEFAULT '',
+    max_tier_reached        INTEGER NOT NULL DEFAULT 1,
+    times_signed            INTEGER NOT NULL DEFAULT 1,
+    times_invoked           INTEGER NOT NULL DEFAULT 0,
+    times_severed           INTEGER NOT NULL DEFAULT 0,
+    is_currently_contracted INTEGER NOT NULL DEFAULT 1,
+    metadata_json           TEXT NOT NULL DEFAULT '{}',
+    first_discovered_at     REAL NOT NULL,
+    updated_at              REAL NOT NULL,
+    UNIQUE(user_id, patron_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_patron_comp_uid ON user_patron_compendium(user_id);
+CREATE INDEX IF NOT EXISTS idx_user_patron_comp_codex ON user_patron_compendium(user_id, codex_id);
 """
 
 
@@ -1706,7 +1939,145 @@ WHERE implicated_contact_id IS NOT NULL
             "CREATE INDEX IF NOT EXISTS idx_user_folklore_codex_uid ON user_folklore_codex(user_id)",
         ],
     ),
+    (
+        44,
+        "add_factions_hq_node_id_v44",
+        [
+            "ALTER TABLE factions ADD COLUMN hq_node_id TEXT DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS idx_factions_session_hq_node ON factions(session_id, hq_node_id)",
+            "UPDATE session_locations SET sub_name = 'School Library & Study Stacks' WHERE sub_name = 'Quiet School Library & Study Stacks'",
+            "UPDATE world_nodes SET name = 'School Library & Study Stacks' WHERE name = 'Quiet School Library & Study Stacks'",
+        ],
+    ),
+    (
+        45,
+        "add_session_anomaly_records_and_quest_blueprint_v45",
+        [
+            """CREATE TABLE IF NOT EXISTS session_anomaly_records (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                record_type         TEXT NOT NULL,
+                entity_key          TEXT NOT NULL DEFAULT '',
+                codex_id            TEXT NOT NULL DEFAULT '',
+                stage               TEXT NOT NULL DEFAULT 'sighted',
+                first_turn          INTEGER NOT NULL DEFAULT 0,
+                turn_updated        INTEGER NOT NULL DEFAULT 0,
+                payload_json        TEXT NOT NULL DEFAULT '{}',
+                created_at          REAL NOT NULL,
+                updated_at          REAL NOT NULL
+            )""",
+            """CREATE UNIQUE INDEX IF NOT EXISTS uq_session_anom_field_log
+                ON session_anomaly_records(session_id, record_type, entity_key)
+                WHERE record_type = 'field_log' AND entity_key != ''""",
+            "CREATE INDEX IF NOT EXISTS idx_session_anom_sess_type ON session_anomaly_records(session_id, record_type)",
+            "CREATE INDEX IF NOT EXISTS idx_session_anom_sess_turn ON session_anomaly_records(session_id, first_turn, turn_updated)",
+            "ALTER TABLE quests ADD COLUMN anomaly_blueprint_json TEXT DEFAULT '{}'",
+            "ALTER TABLE user_folklore_codex ADD COLUMN first_session_id INTEGER DEFAULT NULL",
+            "ALTER TABLE user_folklore_codex ADD COLUMN first_turn INTEGER DEFAULT NULL",
+        ],
+    ),
 ]
+
+
+SCHEMA_MIGRATIONS.append(
+    (
+        46,
+        "add_actor_physical_turn_snapshots_v46",
+        [
+            """CREATE TABLE IF NOT EXISTS actor_physical_turn_snapshots (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                turn_number         INTEGER NOT NULL,
+                states_json         TEXT NOT NULL DEFAULT '[]',
+                garments_json       TEXT NOT NULL DEFAULT '[]',
+                updated_at          REAL NOT NULL,
+                UNIQUE(session_id, turn_number)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_phys_turn_snap_sess_turn ON actor_physical_turn_snapshots(session_id, turn_number)",
+        ],
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        47,
+        "add_actor_physical_turn_snapshots_room_meta_v47",
+        [
+            "ALTER TABLE actor_physical_turn_snapshots ADD COLUMN room_meta_json TEXT NOT NULL DEFAULT '{}'",
+        ],
+    )
+)
+
+
+SCHEMA_MIGRATIONS.append(
+    (
+        48,
+        "add_player_properties_v48",
+        [
+            """CREATE TABLE IF NOT EXISTS player_properties (
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id          INTEGER NOT NULL,
+                property_id         TEXT NOT NULL,
+                facility_node_id    TEXT NOT NULL,
+                zone_id             TEXT NOT NULL,
+                tier                INTEGER NOT NULL DEFAULT 0,
+                price_paid          INTEGER NOT NULL DEFAULT 0,
+                is_primary          INTEGER NOT NULL DEFAULT 0,
+                is_starter          INTEGER NOT NULL DEFAULT 0,
+                spare_keys_json     TEXT NOT NULL DEFAULT '{}',
+                purchased_turn      INTEGER NOT NULL DEFAULT 0,
+                purchased_day       INTEGER NOT NULL DEFAULT 1,
+                created_at          REAL NOT NULL,
+                updated_at          REAL NOT NULL,
+                UNIQUE(session_id, property_id)
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_player_properties_sess ON player_properties(session_id)",
+            "CREATE INDEX IF NOT EXISTS idx_player_properties_node ON player_properties(session_id, facility_node_id)",
+            "CREATE INDEX IF NOT EXISTS idx_player_properties_primary ON player_properties(session_id, is_primary)",
+        ],
+    )
+)
+
+
+SCHEMA_MIGRATIONS.append(
+    (
+        49,
+        "zone_split_eastern_sanctuary_and_hidden_villages_v49",
+        [],
+    )
+)
+
+from .social_pacing import SOCIAL_V50_DDL_STATEMENTS as _SOCIAL_V50_DDL
+
+SCHEMA_MIGRATIONS.append(
+    (
+        50,
+        "dynamic_social_overhaul_v50",
+        list(_SOCIAL_V50_DDL),
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        51,
+        "main_quest_bounty_overhaul_v51",
+        [
+            "ALTER TABLE campaign_spines ADD COLUMN hidden_bible_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE campaign_spines ADD COLUMN ending_axes_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE campaign_spines ADD COLUMN chronicle_tapestry_json TEXT NOT NULL DEFAULT '{}'",
+        ],
+    )
+)
+
+from .contracts import ENTITY_CONTRACTS_V52_DDL as _ENTITY_CONTRACTS_V52_DDL
+
+SCHEMA_MIGRATIONS.append(
+    (
+        52,
+        "entity_contracts_and_patron_compendium_v52",
+        list(_ENTITY_CONTRACTS_V52_DDL),
+    )
+)
 
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
@@ -1792,12 +2163,121 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         except Exception as e:
             print(f"[migration 39] Warning: campaign spine legacy backfill encountered: {e}")
 
+    if 45 in newly_applied:
+        try:
+            _backfill_session_anomaly_records_v45(conn)
+        except Exception as e:
+            print(f"[migration 45] Warning: session anomaly records backfill encountered: {e}")
+    if 49 in newly_applied:
+        try:
+            _migrate_zone_split_and_hidden_villages_v49(conn)
+        except Exception as e:
+            print(f"[migration 49] Warning: zone split & hidden folklore villages backfill encountered: {e}")
+    if 50 in newly_applied:
+        try:
+            _migrate_dynamic_social_overhaul_v50(conn)
+        except Exception as e:
+            print(f"[migration 50] Warning: dynamic social overhaul backfill encountered: {e}")
+    if 51 in newly_applied:
+        try:
+            _migrate_main_quest_bounty_overhaul_v51(conn)
+        except Exception as e:
+            print(f"[migration 51] Warning: main quest & bounty overhaul backfill encountered: {e}")
+
     try:
         _strip_legacy_session_fk_constraints(conn)
     except Exception as e:
         print(f"[schema] Warning: session FK cleanup encountered: {e}")
 
     return newly_applied
+
+
+def _migrate_zone_split_and_hidden_villages_v49(conn: sqlite3.Connection) -> int:
+    """Idempotently splits `zone_eastern_sanctuary` from `zone_woods_reserve` and seeds hidden folklore villages on existing saves."""
+    from mechanics.world.locations.folklore_veil import backfill_zone_split_and_hidden_villages_v49
+    return backfill_zone_split_and_hidden_villages_v49(conn)
+
+
+def _migrate_dynamic_social_overhaul_v50(conn: sqlite3.Connection) -> int:
+    """Idempotently backfills contact_dossier_discoveries for kin, companions, romantic partners, and pre-v50 saves."""
+    from .social_pacing import backfill_exempt_and_legacy_contact_discoveries
+    return backfill_exempt_and_legacy_contact_discoveries(conn, is_legacy_migration=True)
+
+
+def _migrate_main_quest_bounty_overhaul_v51(conn: sqlite3.Connection) -> int:
+    """Ensures v51 campaign_spines columns exist and strips legacy Story Quest deadlines while leaving mid-chapter quests intact."""
+    cols = {
+        (r["name"] if isinstance(r, sqlite3.Row) else r[1])
+        for r in conn.execute("PRAGMA table_info(campaign_spines)").fetchall()
+    }
+    added = 0
+    for col_name in ("hidden_bible_json", "ending_axes_json", "chronicle_tapestry_json"):
+        if col_name not in cols:
+            conn.execute(f"ALTER TABLE campaign_spines ADD COLUMN {col_name} TEXT NOT NULL DEFAULT '{{}}'")
+            added += 1
+    conn.execute(
+        """UPDATE quests
+           SET deadline_day = NULL, deadline_minute = NULL
+           WHERE (is_story_quest = 1 OR LOWER(quest_type) IN ('story quest', 'main quest') OR quest_id LIKE 'SQ-%')
+             AND (deadline_day IS NOT NULL OR deadline_minute IS NOT NULL)"""
+    )
+    conn.execute(
+        """UPDATE quests
+           SET is_story_quest = 1
+           WHERE (is_story_quest = 0 OR is_story_quest IS NULL)
+             AND (LOWER(quest_type) IN ('story quest', 'main quest') OR quest_id LIKE 'SQ-%')"""
+    )
+    return added
+
+
+def _backfill_session_anomaly_records_v45(conn: sqlite3.Connection) -> None:
+    """Idempotently backfills `session_anomaly_records` from legacy `sessions.extra_json` and `quests.anomaly_blueprint_json` from `quest_notes`."""
+    from .dossiers import SESSION_ANOMALY_KEY_TO_RECORD_TYPE, sync_session_anomaly_records_from_extra
+
+    now = time.time()
+    s_rows = conn.execute("SELECT id, extra_json FROM sessions WHERE extra_json IS NOT NULL AND extra_json != ''").fetchall()
+    for r in s_rows:
+        sid = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+        raw_extra = (r["extra_json"] if isinstance(r, sqlite3.Row) else r[1]) or "{}"
+        try:
+            extra = json.loads(raw_extra) if isinstance(raw_extra, str) else dict(raw_extra or {})
+        except Exception:
+            continue
+        if not isinstance(extra, dict):
+            continue
+        anom_patch = {k: extra[k] for k in SESSION_ANOMALY_KEY_TO_RECORD_TYPE if k in extra}
+        if anom_patch:
+            sync_session_anomaly_records_from_extra(sid, anom_patch, conn=conn)
+            for k in SESSION_ANOMALY_KEY_TO_RECORD_TYPE:
+                extra.pop(k, None)
+            conn.execute(
+                "UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(extra, default=str), now, sid),
+            )
+
+    try:
+        from mechanics.world.anomaly_engine import parse_blueprint_from_notes
+    except Exception:
+        parse_blueprint_from_notes = None
+
+    if parse_blueprint_from_notes is not None:
+        q_rows = conn.execute(
+            """SELECT id, quest_notes, anomaly_blueprint_json
+               FROM quests
+               WHERE quest_notes LIKE '%anomaly_bp:%' OR quest_notes LIKE '%anomaly_blueprint:%'"""
+        ).fetchall()
+        for qr in q_rows:
+            qid_pk = qr["id"] if isinstance(qr, sqlite3.Row) else qr[0]
+            q_notes = (qr["quest_notes"] if isinstance(qr, sqlite3.Row) else qr[1]) or ""
+            existing_bp_json = (qr["anomaly_blueprint_json"] if isinstance(qr, sqlite3.Row) else qr[2]) or ""
+            if existing_bp_json.strip() not in ("", "{}"):
+                continue
+            bp = parse_blueprint_from_notes(q_notes)
+            if isinstance(bp, dict) and bp:
+                conn.execute(
+                    "UPDATE quests SET anomaly_blueprint_json = ? WHERE id = ?",
+                    (json.dumps(bp, separators=(",", ":"), ensure_ascii=True), qid_pk),
+                )
 
 
 def _backfill_campaign_spines_from_legacy_sessions(conn: sqlite3.Connection) -> None:
@@ -2570,6 +3050,8 @@ def _migrate_contacts_intimacy_profiles(conn: sqlite3.Connection) -> int:
 
 def init_db(force: bool = False):
     with get_conn() as conn:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.executescript(CREATE_SESSION_LOCKS_TABLE)
         if not force:
             try:
                 has_migrations = conn.execute(
@@ -2583,9 +3065,41 @@ def init_db(force: bool = False):
                     return
             except Exception:
                 pass
-        conn.execute("PRAGMA journal_mode = WAL")
+            try:
+                conn.executescript(SCHEMA)
+                run_schema_migrations(conn)
+            except sqlite3.OperationalError as e:
+                if "no such column" not in str(e).lower():
+                    raise
+                buf: list[str] = []
+                post_stmts: list[str] = []
+                in_trigger = False
+                for line in SCHEMA.splitlines():
+                    stripped = line.strip()
+                    if not stripped or stripped.startswith("--"):
+                        continue
+                    buf.append(line)
+                    up = stripped.upper()
+                    if up.startswith("CREATE TRIGGER"):
+                        in_trigger = True
+                    stmt_done = (in_trigger and up == "END;") or (not in_trigger and stripped.endswith(";"))
+                    if stmt_done:
+                        in_trigger = False
+                        stmt_sql = "\n".join(buf).strip()
+                        buf = []
+                        if stmt_sql.upper().startswith(("CREATE TABLE", "CREATE VIRTUAL TABLE")):
+                            conn.execute(stmt_sql)
+                        else:
+                            post_stmts.append(stmt_sql)
+                run_schema_migrations(conn)
+                for p_sql in post_stmts:
+                    try:
+                        conn.execute(p_sql)
+                    except sqlite3.OperationalError as idx_err:
+                        if "no such column" not in str(idx_err).lower():
+                            raise
+            return
         conn.executescript(SCHEMA)
-        conn.executescript(CREATE_SESSION_LOCKS_TABLE)
         run_schema_migrations(conn)
 
 
@@ -2800,8 +3314,12 @@ SESSION_CHILD_TABLES = (
     "quests", "quest_waypoints", "session_clues", "phone_messages", "phone_daily_interactions",
     "phone_gossip_feed", "commitments_ledger", "session_digests",
     "session_chronicles", "npc_memories", "session_members", "households", "intimate_events",
-    "social_persons", "social_ties", "actor_physical_states", "actor_garments", "world_events",
-    "campaign_spines", "quest_dossiers"
+    "social_persons", "social_ties", "actor_physical_states", "actor_garments",
+    "actor_physical_turn_snapshots", "world_events",
+    "campaign_spines", "quest_dossiers", "session_anomaly_records", "player_properties",
+    "npc_social_composure", "character_social_daily", "social_topic_states",
+    "contact_dossier_discoveries", "social_turn_snapshots",
+    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots"
 )
 
 STAT_COLUMN = {"STR": "str_", "PER": "per_", "END": "end_", "CHA": "cha",
@@ -2935,12 +3453,17 @@ def safe_cleanup_test_records(min_user_id: int = 800_000, max_user_id: int = 999
             "DELETE FROM user_folklore_codex WHERE user_id BETWEEN ? AND ?",
             (min_user_id, max_user_id)
         ).rowcount
+        c7 = conn.execute(
+            "DELETE FROM user_patron_compendium WHERE user_id BETWEEN ? AND ?",
+            (min_user_id, max_user_id)
+        ).rowcount
         deleted_counts["inventory"] = c1
         deleted_counts["user_settings"] = c2
         deleted_counts["characters"] = c3
         deleted_counts["adventure_saves"] = c4
         deleted_counts["session_members"] = c5
         deleted_counts["user_folklore_codex"] = c6
+        deleted_counts["user_patron_compendium"] = c7
     return deleted_counts
 
 

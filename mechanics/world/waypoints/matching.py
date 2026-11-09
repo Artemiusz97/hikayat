@@ -91,7 +91,14 @@ def is_hostile_or_lair_waypoint(wp: dict) -> bool:
     return False
 
 
-def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Optional[int] = None) -> dict:
+def get_waypoint_npc_schedule_info(
+    session_id: int,
+    wp: dict,
+    current_minute: Optional[int] = None,
+    session: Optional[dict] = None,
+    session_time: Optional[tuple] = None,
+    contacts_by_name: Optional[dict] = None,
+) -> dict:
     """
     Resolves live NPC schedule routing and Nighttime Off-Duty Guard for a waypoint.
     Returns:
@@ -124,9 +131,13 @@ def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Op
 
     target_npc = str(wp.get("target_npc") or "").strip()
     try:
-        curr_day, db_curr_min, _ = db.get_session_time(session_id)
+        if session_time is not None:
+            curr_day, db_curr_min, _ = session_time
+        else:
+            curr_day, db_curr_min, _ = db.get_session_time(session_id)
         curr_min = current_minute if current_minute is not None else db_curr_min
-        session = db.get_session(session_id) or {}
+        if session is None:
+            session = db.get_session(session_id) or {}
         scen_key = str(session.get("scenario") or "fantasy")
         from mechanics.world.world_schedule import get_scenario_wake_minute
         from mechanics.world.npc_schedule import get_npc_scheduled_location, get_detailed_npc_time_phase
@@ -134,7 +145,10 @@ def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Op
         safe_min = int(curr_min or 0) % 1440
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
 
-        contact = db.get_contact(session_id, target_npc)
+        if contacts_by_name is not None:
+            contact = contacts_by_name.get(target_npc.lower()) or db.get_contact(session_id, target_npc)
+        else:
+            contact = db.get_contact(session_id, target_npc)
         if not contact and scenario_data.is_anomalous_incursions_scenario(scen_key):
             try:
                 from mechanics.social.agent_roster import find_special_agent_by_name
@@ -197,14 +211,26 @@ def get_waypoint_npc_schedule_info(session_id: int, wp: dict, current_minute: Op
     return default_res
 
 
-def resolve_effective_waypoint_location(session_id: int, wp: dict) -> str:
+def resolve_effective_waypoint_location(
+    session_id: int,
+    wp: dict,
+    session: Optional[dict] = None,
+    session_time: Optional[tuple] = None,
+    contacts_cache: Optional[dict] = None,
+) -> str:
     """Returns the effective live target location for a waypoint, resolving NPC schedule if tagged."""
-    info = get_waypoint_npc_schedule_info(session_id, wp)
+    info = get_waypoint_npc_schedule_info(
+        session_id,
+        wp,
+        session=session,
+        session_time=session_time,
+        contacts_by_name=contacts_cache,
+    )
     eff = info["effective_location"]
     if eff and "{" in eff and session_id:
         try:
             from mechanics.world.locations.hierarchy import resolve_session_location_tokens
-            sess = db.get_session(session_id)
+            sess = session or db.get_session(session_id)
             scen_key = sess.get("scenario", "fantasy") if sess else "fantasy"
             eff = resolve_session_location_tokens(session_id, eff, scen_key)
         except Exception:
@@ -718,7 +744,7 @@ def get_story_quest_climax_location(session_id: int, allow_premature: bool = Fal
 
     sub_objs = story_quest.get("sub_objectives", []) or []
     if not allow_premature:
-        if not sub_objs or not all(isinstance(so, dict) and so.get("completed") for so in sub_objs):
+        if not sub_objs or not db.is_quest_main_objectives_complete(sub_objs):
             return None, None
 
     # All sub-objectives are done! Resolve the Climax Encounter location
@@ -734,12 +760,12 @@ def get_story_quest_climax_location(session_id: int, allow_premature: bool = Fal
             return story_quest, row["target_location"]
 
         # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) qualifies
-        if allow_premature and not (sub_objs and all(isinstance(so, dict) and so.get("completed") for so in sub_objs)):
+        if allow_premature and not (sub_objs and db.is_quest_main_objectives_complete(sub_objs)):
             return None, None
 
         # 2. Check the target location of the highest sub_obj_id waypoint
         row_sub = conn.execute(
-            "SELECT target_location FROM quest_waypoints WHERE session_id=? AND quest_id=? AND target_location IS NOT NULL AND target_location != '' ORDER BY sub_obj_id DESC, stage_index DESC LIMIT 1",
+            "SELECT target_location FROM quest_waypoints WHERE session_id=? AND quest_id=? AND target_location IS NOT NULL AND target_location != '' ORDER BY CASE WHEN sub_obj_id = 0 THEN 0 ELSE 1 END ASC, sub_obj_id DESC, stage_index DESC LIMIT 1",
             (session_id, qid)
         ).fetchone()
         if row_sub and row_sub["target_location"]:

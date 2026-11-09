@@ -16,7 +16,7 @@ ITEM_ICON_KEYWORDS = {
     "grimoire": ("法术书", "秘典", "魔导书", "古卷", "经卷"),
     "bow": ("长弓", "短弓", "弓", "弩", "十字弩"),
     "gun": ("火枪", "手枪", "步枪", "猎枪"),
-    "dagger": ("匕首", "短刀", "短剑", "飞刀"),
+    "dagger": ("匕首", "短刀", "短剑", "飞刀", "马来短剑", "短怀剑"),
     "axe": ("战斧", "斧", "板斧", "手斧"),
     "hammer": ("战锤", "铁锤", "大锤", "重锤"),
     "spear": ("长枪", "长矛", "战戟", "三叉戟", "标枪"),
@@ -33,7 +33,7 @@ ITEM_ICON_KEYWORDS = {
     "gloves": ("手套", "护手", "铁手套", "臂铠"),
     "pants": ("裤子", "长裤", "护腿", "裙"),
     "armor": (
-        "板甲", "盔甲", "锁子甲", "战甲", "长袍", "法袍", "外衣", "胸甲", "皮甲", "大衣", "制服", "衬衫"
+        "板甲", "盔甲", "锁子甲", "战甲", "长袍", "法袍", "外衣", "胸甲", "皮甲", "大衣", "制服", "衬衫", "和服", "羽织", "卡巴雅", "宋吉锦"
     ),
     "shield": ("盾牌", "圆盾", "大盾", "重盾", "盾"),
 
@@ -58,7 +58,7 @@ ITEM_ICON_KEYWORDS = {
     "health": ("治疗", "生命", "绷带", "金创药", "伤药"),
     "mana": ("法力", "魔力", "法力药水"),
     "potion": ("药水", "药剂", "秘药", "灵药", "疯柑", "净盐", "线香", "黄瓜", "油豆腐", "符箓", "寒铁护符"),
-    "quest": ("钥匙", "地图", "密信", "卷轴", "信件", "古籍", "信函"),
+    "quest": ("钥匙", "地图", "密信", "卷轴", "信件", "古籍", "信函", "狐火铜铃", "竹笛", "传世圣物", "铃铛", "suzu", "serunai", "pusaka"),
 }
 
 TWO_HANDED_ARCHETYPES = (
@@ -126,3 +126,87 @@ DIALOGUE_INIT_PREFIXES = (
 MOVEMENT_PREFIXES = (
     "前往", "去往", "走进", "进入", "动身前往", "返回"
 )
+
+
+REALTY_LABELS = {
+    "app_name": "房产与地契",
+    "app_sub": "安全屋与备用钥匙",
+    "tab_owned": "我的居所",
+    "tab_market": "房产挂牌",
+    "badge_starter": "初始宿舍",
+    "badge_owned": "私人房产",
+    "badge_for_sale": "待售",
+    "primary_home": "主要居所",
+    "set_primary": "设为主宅",
+    "buy_deed": "购买地契",
+    "deed_owned": "已拥有",
+    "give_spare_key": "赠送钥匙",
+    "revoke_key": "收回钥匙",
+    "spare_keys_label": "备用钥匙持有人",
+    "starter_spare_key_note": "阵营分配宿舍会随转职迁移。购买永久房契后可向亲密联系人赠送备用钥匙。",
+    "no_deeds_owned": "尚未拥有任何永久房产地契。",
+    "no_eligible_contacts": "好感度达到 70+ 或建立恋人关系后可赠送备用钥匙。",
+    "purchased_ok": "成功购入房产地契！",
+    "purchase_failed": "购房失败。",
+    "primary_updated": "主要居所已更新。",
+    "key_granted": "已赠送备用钥匙！",
+    "key_revoked": "已收回备用钥匙。",
+}
+
+
+FOLKLORE_SANCTUARY_LABELS = {
+    "kitsune_spirit_merchant": "稻荷灵药铺",
+    "bunian_pusaka_merchant": "传世圣物匠师馆",
+    "ranger_station_outfitter": "林区护林补给商",
+    "spirit_relay_badge": "灵脉传讯",
+    "veil_unattuned_badge": "凡俗门径",
+    "veil_attuned_badge": "灵障已共鸣",
+    "twilight_veil_badge": "逢魔时刻·灵障渐薄",
+    "leyline_passage_badge": "灵脉秘径",
+    "sanctuary_pact_warning": "已违背灵境互不侵犯盟约——请于外门奉上 100 金币赎罪供奉。",
+}
+
+
+QUEST_UI_LABELS = {
+    "main_objective": "核心主目标",
+    "optional_routes": "可选战术路线",
+    "peak_chapter": "高潮大场面",
+    "chronicle_tapestry": "纪年史挂毯",
+    "fallen_world_ch11": "沦陷世界 — 第11章抵抗军尾声",
+    "peak_scar": "高潮创痕",
+    "liberation_op": "光复行动",
+    "optional_aid": "战术援助",
+    "optional_bypass": "潜入绕行",
+    "optional_alternative": "替代路线",
+    "optional_threatened": "危机营救 / 撤离",
+    "bonus_claimed": "奖励已领取",
+    "failed_route": "路线失败",
+    "locked_out": "已封锁",
+    "fallen_world_epilogue": "沦陷世界 — 抵抗军尾声",
+    "base_reward_note": "基础达成奖励",
+}
+
+PACT_UI_LABELS = {
+    "title": "异界契约与恶魔盟约",
+    "subtitle": "零魔耗契约 • 鲜血与供奉账册",
+    "tab_active": "当前盟约",
+    "tab_discover": "寻访与相性审定",
+    "tab_compendium": "契约主图鉴",
+    "slots_label": "契约槽位",
+    "remote_ready": "可进行远程通灵仪式",
+    "remote_blocked": "需脱离战斗并身处圣所或安全居所",
+    "appraisal_favored": "眷顾（0.65倍代价 • 直开二/三阶）",
+    "appraisal_neutral": "中立（1.0倍标准条款）",
+    "appraisal_disdained": "厌弃（1.50倍代价 • 封锁三阶）",
+    "sign_btn": "缔结盟约",
+    "upgrade_btn": "深化位阶",
+    "feed_btn": "通灵供奉 / 偿清血债",
+    "sever_scrub_btn": "医疗 / 神社净除",
+    "sever_exorcism_btn": "迎战显化体（驱魔断契）",
+    "pact_bound_badge": "[契约绑定]",
+    "lethal_overdraw": "致命透支（欠下血债）",
+    "breach_stage_1": "神明震怒 — 24小时血债追索",
+    "breach_stage_2": "暴烈断契 — 灵魂创痕",
+    "contracted_badge": "已缔约",
+    "currently_bound": "契约中",
+}

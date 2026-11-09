@@ -13,7 +13,12 @@ import scenario_data
 import skill_check
 from mechanics.narrative.blueprints import get_max_campaign_chapters
 from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility
-from mechanics.narrative.campaign_spine import compile_or_get_campaign_spine
+from mechanics.narrative.campaign_spine import (
+    compile_chronicle_tapestry,
+    compile_or_get_campaign_spine,
+    select_chapter_storylet,
+    update_campaign_ending_axes,
+)
 from mechanics.narrative.dossier_compiler import (
     compile_quest_dossier,
     infer_quest_family_tier,
@@ -33,7 +38,7 @@ from models.llm_schemas import DossierEnrichment
 logger = logging.getLogger(__name__)
 
 _INTERNAL_TAG_RE = re.compile(r"\[(?:ITEM_JSON|GEAR_JSON|SPELLBOOK_JSON)\][^\n]*", re.IGNORECASE)
-_STAT_LEAK_RE = re.compile(r"\b(?:DC\s*\d+|\d+\s*(?:HP|MP)|(?:\+|\-)\d+%\s*chance)\b", re.IGNORECASE)
+_STAT_LEAK_RE = re.compile(r"(?:\bDC\s*\d+|\b\d+\s*(?:HP|MP)|(?<!\w)[+-]?\d+%\s*chance\b)", re.IGNORECASE)
 
 
 def sanitize_dossier_prose(text: str) -> str:
@@ -68,8 +73,13 @@ def compile_campaign_spine_at_turn_zero(
     active_sq = db.get_active_story_quest(session_id)
     if active_sq and active_sq.get("quest_id"):
         sq_id = str(active_sq["quest_id"])
+        is_legacy_midchapter = bool(
+            not active_sq.get("has_structured_objectives")
+            and str(active_sq.get("dossier_stage") or "legacy") == "legacy"
+            and len(active_sq.get("sub_objectives") or []) > 0
+        )
         existing_dos = db.get_quest_dossier(session_id, sq_id)
-        if not existing_dos or existing_dos.get("status_stage") != "compiled":
+        if not is_legacy_midchapter and (not existing_dos or existing_dos.get("status_stage") != "compiled"):
             ch1_bp = (spine.get("chapters_blueprint") or {}).get("1") or {}
             compile_quest_dossier(
                 session_id=session_id,
@@ -143,15 +153,20 @@ def sync_waypoints_from_dossier(
     force_replace: bool = False,
 ) -> List[Dict[str, Any]]:
     """
-    Synchronizes `quest_waypoints` for a Stage-2 compiled side contract while preserving
-    custom waypoints on legacy or Story sub-objective quests.
+    Synchronizes `quest_waypoints` and `quests.sub_objectives_json` for a compiled `QuestDossier`
+    (`1 Main Objective` on `sub_obj_id = 0` + `1–3` Typed Optionals on `sub_obj_id = 1..3`),
+    while preserving legacy un-structured waypoints when no `main_stages` exist.
     """
+    climax = dict((dossier or {}).get("climax_spec") or {})
+    leads = list((dossier or {}).get("leads_graph") or [])
+    if climax.get("main_stages") or any(isinstance(ld, dict) and ld.get("is_optional") for ld in leads):
+        db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=dossier)
+        return db.get_quest_waypoints(session_id, quest_id, sub_obj_id=None) or []
+
     existing_wps = db.get_quest_waypoints(session_id, quest_id, sub_obj_id=None) or []
     if existing_wps and not force_replace and len(existing_wps) >= 2:
         return existing_wps
 
-    leads = list(dossier.get("leads_graph") or [])
-    climax = dict(dossier.get("climax_spec") or {})
     climax_loc = str(climax.get("location") or "Central District")
     waypoints: List[Dict[str, Any]] = []
 
@@ -206,9 +221,10 @@ async def enrich_dossier_with_utility_llm(
     """
     Bounded (`timeout=4.0`, `retries=0`, `use_utility=True`) flavor enrichment pass.
     Routes NSFW / hybrid quests to `NSFW_LLM_UTILITY_MODEL` via `is_nsfw=uses_nsfw_routing`.
+    Polishes Main + Optional flavor notes and `stakes_hint` prose while never mutating deterministic topology.
     Falls back instantaneously to the deterministic 5-locale `QuestDossier` on timeout/offline.
     """
-    dos = dossier or db.get_quest_dossier(session_id, quest_id)
+    dos = dossier or await adb(db.get_quest_dossier, session_id, quest_id)
     if not dos:
         return {}
 
@@ -217,18 +233,21 @@ async def enrich_dossier_with_utility_llm(
     uses_nsfw = bool((dos.get("contract_economy") or {}).get("uses_nsfw_routing"))
     stub = dict(dos.get("pitch_stub") or {})
     leads = [dict(l) for l in (dos.get("leads_graph") or [])]
+    climax = dict(dos.get("climax_spec") or {})
     twist = dict(dos.get("twist_spec") or {})
 
+    opt_roles = [str(l.get("role") or "aid") for l in leads]
     sys_prompt = (
         "You enrich tabletop RPG quest dossiers with vivid, context-aware flavor prose. "
-        "NEVER include raw HP/MP/DC numbers or internal JSON tags ([ITEM_JSON], [GEAR_JSON]). "
+        "NEVER include raw HP/MP/DC numbers or internal JSON tags ([ITEM_JSON], [GEAR_JSON], [SPELLBOOK_JSON]). "
         f"Respond strictly in JSON matching the schema in language '{lang}'."
     )
     usr_prompt = (
         f"Engine: {dos.get('engine')}\n"
         f"Title: {stub.get('title')}\n"
         f"Pitch: {stub.get('public_pitch')}\n"
-        f"Lead Count: {len(leads)}\n"
+        f"Main Stages: {len(climax.get('main_stages') or [])}\n"
+        f"Optional Roles ({len(leads)}): {', '.join(opt_roles)}\n"
         f"Has Twist: {twist.get('has_twist')} ({twist.get('twist_type')})"
     )
     try:
@@ -244,15 +263,31 @@ async def enrich_dossier_with_utility_llm(
             response_model=DossierEnrichment,
         )
         if enriched:
-            p_txt = sanitize_dossier_prose(enriched.get("public_pitch") or "")
+            p_txt = sanitize_dossier_prose(enriched.get("public_pitch") or enriched.get("objective_flavor") or "")
             if p_txt:
                 stub["public_pitch"] = p_txt
-            l_descs = list(enriched.get("lead_descriptions") or [])
+            m_labels = list(enriched.get("main_stage_labels") or [])
+            main_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
+            for idx, m_lbl in enumerate(m_labels):
+                if idx < len(main_stages) and m_lbl:
+                    clean_m = sanitize_dossier_prose(str(m_lbl))
+                    if clean_m:
+                        main_stages[idx]["stage_label"] = clean_m[:180]
+                        main_stages[idx]["label"] = clean_m[:180]
+            if main_stages:
+                climax["main_stages"] = main_stages
+            l_descs = list(enriched.get("lead_descriptions") or enriched.get("lead_titles") or [])
             for idx, desc in enumerate(l_descs):
                 if idx < len(leads) and desc:
                     clean_d = sanitize_dossier_prose(str(desc))
                     if clean_d:
                         leads[idx]["flavor_note"] = clean_d
+            s_hints = list(enriched.get("stakes_hints") or [])
+            for idx, sh in enumerate(s_hints):
+                if idx < len(leads) and sh:
+                    clean_sh = sanitize_dossier_prose(str(sh))
+                    if clean_sh:
+                        leads[idx]["stakes_hint"] = clean_sh[:160]
             t_txt = sanitize_dossier_prose(enriched.get("twist_summary") or "")
             if twist.get("has_twist") and t_txt:
                 twist["summary"] = t_txt
@@ -262,8 +297,11 @@ async def enrich_dossier_with_utility_llm(
                 quest_id,
                 pitch_stub=stub,
                 leads_graph=leads,
+                climax_spec=climax,
                 twist_spec=twist,
             )
+            if saved and (climax.get("main_stages") or any(l.get("is_optional") for l in leads)):
+                await adb(db.sync_quest_projection_from_dossier, session_id, quest_id, saved)
             return saved or dos
     except Exception as exc:
         logger.debug("Utility LLM dossier enrichment skipped/fell back for %s: %s", quest_id, exc)
@@ -402,9 +440,10 @@ async def accept_bounty_contract_async(
     enrich_llm: bool = False,
 ) -> Dict[str, Any]:
     """Async lock-safe Stage-2 bounty compiler for REST/WebSocket/Discord adapters."""
-    from mechanics.system.concurrency import distributed_session_lock
+    from mechanics.system.concurrency import distributed_adventure_lock
 
-    async with distributed_session_lock(session_id):
+    eff_uid = user_id if (user_id and user_id > 0) else None
+    async with distributed_adventure_lock(eff_uid, session_id):
         res = await adb(
             accept_bounty_contract,
             session_id,
@@ -538,12 +577,13 @@ def forfeit_side_bounty(
     }
 
 
-def build_universal_epilogue_choices(scen_key: str) -> List[Dict[str, Any]]:
-    endless_label = (
-        "♾️ Continue in Endless Containment Mode"
-        if scenario_data.is_anomalous_incursions_scenario(scen_key)
-        else "♾️ Continue in Endless Sandbox Mode"
-    )
+def build_universal_epilogue_choices(scen_key: str, ending_id: str = "") -> List[Dict[str, Any]]:
+    if ending_id == "fallen_world":
+        endless_label = "♾️ Continue in Fallen-World Resistance Mode"
+    elif scenario_data.is_anomalous_incursions_scenario(scen_key):
+        endless_label = "♾️ Continue in Endless Containment Mode"
+    else:
+        endless_label = "♾️ Continue in Endless Sandbox Mode"
     return [
         {
             "label": "🏁 Conclude Campaign (Archive Chronicle)",
@@ -562,6 +602,120 @@ def build_universal_epilogue_choices(scen_key: str) -> List[Dict[str, Any]]:
     ]
 
 
+def evaluate_skipped_threatened_optionals(
+    session_id: int,
+    quest_id: str,
+    dossier: Optional[Dict[str, Any]] = None,
+    turn_number: Optional[int] = None,
+    lang: str = "en",
+) -> List[Dict[str, Any]]:
+    """
+    Evaluates skipped Optionals upon quest/chapter resolution:
+    - Standard `aid` / `bypass` / `alternative` Optionals carry ZERO world/ally fallout when skipped.
+    - Selectively flagged `role == 'threatened'` Optionals spawn targeted fallout (`WorldScar` + collateral toll).
+    - Enforces **Fair Inner-Circle Jeopardy**: party/romances/family NEVER suffer off-screen permadeath;
+      permanent loss triggers ONLY when an explicit on-screen rescue beat (`on_screen_triage_presented` or `failed`)
+      was abandoned or failed on-screen.
+    """
+    dos = dossier or (db.get_quest_dossier(session_id, quest_id) if session_id and quest_id else None)
+    if not dos:
+        return []
+
+    sess = db.get_session(session_id) or {}
+    eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
+    prev_leads = [dict(l) for l in (dos.get("leads_graph") or [])]
+    leads = [dict(l) for l in prev_leads]
+    is_story = str(dos.get("family_tier") or "") == "story"
+    ch_num = int((dos.get("climax_spec") or {}).get("chapter") or dos.get("chapter") or db.get_session_chapter(session_id) or 1)
+    fallout_events: List[Dict[str, Any]] = []
+    mutated = False
+
+    for idx, ld in enumerate(leads):
+        role = str(ld.get("role") or "").strip().lower()
+        st = str(ld.get("status") or "active").strip().lower()
+        if role != "threatened":
+            continue
+        if st in ("completed", "skipped_fallout"):
+            continue
+
+        mutated = True
+        was_failed_on_screen = st == "failed" or bool(ld.get("on_screen_triage_presented"))
+        ld["status"] = "failed" if st == "failed" else "skipped_fallout"
+        leads[idx] = ld
+
+        venue = str(ld.get("target_location") or (dos.get("climax_spec") or {}).get("location") or sess.get("current_location") or "District")
+        ally_name = str(ld.get("target_npc") or ld.get("implicated_ally_npc") or "").strip()
+        is_inner_circle = bool(
+            ld.get("fair_jeopardy_on_screen_only")
+            or ld.get("is_inner_circle_rescue")
+            or ld.get("implicated_ally_npc")
+        )
+
+        scar_tier = "peak" if (is_story and ch_num in (3, 6, 8, 9, 10)) else ("buildup" if is_story else "bounty")
+        scar_spec = render_world_scar_spec(
+            engine=str(dos.get("engine") or "CRISIS_DEFENSE"),
+            venue_name=venue,
+            lang=lang,
+        )
+        scar_spec["scar_tier"] = scar_tier
+        scar_spec["chapter_number"] = ch_num
+        scar_ev = spawn_quest_world_scar(
+            session_id=session_id,
+            source_quest_id=f"{quest_id}_OPT{idx + 1}",
+            scar_spec=scar_spec,
+            location_name=venue,
+            turn_number=eff_turn,
+            scar_tier=scar_tier,
+        )
+
+        inner_circle_lost = False
+        if ally_name:
+            if is_inner_circle:
+                if was_failed_on_screen:
+                    inner_circle_lost = True
+                    update_campaign_ending_axes(
+                        session_id,
+                        collateral_delta=1,
+                        inner_circle_loss=ally_name,
+                        turn_number=eff_turn,
+                    )
+                else:
+                    # Fair Jeopardy Invariant: ZERO off-screen permadeath for inner-circle allies!
+                    try:
+                        db.update_relationship_score(session_id, ally_name, delta_score=-10)
+                    except Exception:
+                        pass
+                    if is_story:
+                        update_campaign_ending_axes(session_id, collateral_delta=1, turn_number=eff_turn)
+            else:
+                try:
+                    db.update_relationship_score(session_id, ally_name, delta_score=-15)
+                except Exception:
+                    pass
+                if is_story:
+                    update_campaign_ending_axes(session_id, collateral_delta=1, turn_number=eff_turn)
+        elif is_story:
+            update_campaign_ending_axes(session_id, collateral_delta=1, turn_number=eff_turn)
+
+        fallout_events.append(
+            {
+                "optional_id": ld.get("optional_id") or ld.get("lead_id"),
+                "target_npc": ally_name,
+                "target_location": venue,
+                "inner_circle_lost": inner_circle_lost,
+                "world_scar": scar_ev,
+            }
+        )
+
+    if mutated:
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "leads_graph", prev_leads, leads)
+        saved = db.upsert_quest_dossier(session_id, quest_id, leads_graph=leads)
+        if saved:
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved)
+
+    return fallout_events
+
+
 def resolve_chapter_transition(
     session_id: int,
     quest: Dict[str, Any],
@@ -571,13 +725,17 @@ def resolve_chapter_transition(
     outcome: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Universal 11-Chapter Campaign Spine Progression & Finale State Machine (Decision 6):
-    - Ch.1-9 (`Completed` OR fail-forward `Failed`): stacks `WorldScar` on failure, advances to `cur_ch + 1`,
-      and synchronously compiles Chapter `next_ch` Story Quest + `QuestDossier` (zero `asyncio.create_task` races!).
-    - Ch.10 Climax:
-      * Final Bossfight wipe (0 HP) or flee (`EVADE_TACTICAL_FLEE`) -> **Hard Game Over** + Fallen-World archive.
-      * Victory or non-boss fail-forward -> advances to **Chapter 11 (Universal Playable Epilogue)** across ALL scenarios.
-    - Ch.11 Completion: unlocks `[Archive Chronicle]` vs `[Endless Sandbox Mode]`.
+    Universal 11-Chapter Triple-Peak Campaign Spine Progression & Finale State Machine:
+    - Ch. 1–9 (`Completed` OR fail-forward `Failed`): evaluates skipped `threatened` Optionals
+      (zero penalty on standard `aid`/`bypass`/`alternative` Optionals), stacks Two-Tier `WorldScar`
+      on failure, advances to `cur_ch + 1`, and deterministically compiles the next Storylet + `QuestDossier`
+      with `deadline_day = None`.
+    - Ch. 10 Grand Climax:
+      * Combat OR non-combat defeat (`status == 'Failed'`) -> **Playable Fallen-World `Ch. 11`**
+        (`climax_status = 'fallen_world'`, `epilogue_status = 'ch11_fallen_active'`), NEVER abrupt Hard Game Over!
+      * Victory -> advances to **Ending-Specific Playable Epilogue `Ch. 11`** (`climax_status = 'victory'`).
+    - Ch. 11 Completion: compiles 4-Slide **Chronicle Tapestry** (`World`, `Factions`, `Bonds`, `Earned Title`)
+      and unlocks `[Archive Chronicle]` vs. **Stateful Endless Mode** (including Fallen-World Resistance).
     """
     sess = db.get_session(session_id) or {"id": session_id}
     scen_key = str(sess.get("scenario") or "fantasy")
@@ -597,6 +755,17 @@ def resolve_chapter_transition(
     if quest_ch > 0 and cur_ch > quest_ch:
         return {"chapter": cur_ch, "already_transitioned": True}
 
+    # Evaluate selectively threatened Optionals (standard Optionals have zero skip penalty)
+    threatened_fallout: List[Dict[str, Any]] = []
+    if qid and dossier and cur_ch <= 10:
+        threatened_fallout = evaluate_skipped_threatened_optionals(
+            session_id=session_id,
+            quest_id=qid,
+            dossier=dossier,
+            turn_number=eff_turn,
+            lang=lang,
+        )
+
     # Update deterministic campaign goals floor
     goals = db.get_session_campaign_goals(session_id)
     if goals and status == "Completed":
@@ -608,105 +777,122 @@ def resolve_chapter_transition(
                 g["status"] = "Completed"
         db.update_session_campaign_goals(session_id, goals)
 
-    # 1. Chapter 10 Final Bossfight Wipe/Flee -> Hard Game Over
     climax_spec = (dossier or {}).get("climax_spec") or {}
-    is_ch10_boss = bool(
-        cur_ch == 10
-        and not scenario_data.is_non_combat_scenario(scen_key)
-        and (
-            climax_spec.get("is_final_chapter_boss")
-            or climax_spec.get("boss_sheet") is not None
-            or reason in ("boss_wipe", "boss_fled", "EVADE_TACTICAL_FLEE", "party_wipe")
-        )
-    )
-    if cur_ch == 10 and status == "Failed" and is_ch10_boss:
-        spine_events = list(spine.get("state_events") or [])
-        spine_events.append({"turn": eff_turn, "kind": "climax_status", "prev": spine.get("climax_status", "pending"), "next": "hard_game_over"})
-        spine_events.append({"turn": eff_turn, "kind": "epilogue_status", "prev": spine.get("epilogue_status", "pending"), "next": "fallen_world_archived"})
-        db.upsert_campaign_spine(
-            session_id,
-            scen_key,
-            climax_status="hard_game_over",
-            epilogue_status="fallen_world_archived",
-            state_events=spine_events,
-        )
-        mm_name = (spine.get("mastermind_profile") or {}).get("name", "the Mastermind")
-        fallen_dir = (
-            f"[MANDATORY CAMPAIGN FINALE — HARD GAME OVER & FALLEN WORLD]: The party fell or fled before {mm_name} "
-            f"in Chapter 10! Narrate the tragic Fallen-World aftermath as {mm_name}'s design overtakes the realm and archive the chronicle."
-        )
-        db.update_session(
-            session_id,
-            extra={
-                "campaign_game_over": True,
-                "fallen_world": True,
-                "chronicle_archived": True,
-                "epilogue_ready": False,
-            },
-        )
-        if isinstance(outcome, dict):
-            outcome["campaign_game_over"] = True
-            outcome["fallen_world"] = True
-        return {
-            "chapter": 10,
-            "hard_game_over": True,
-            "fallen_world": True,
-            "directive": fallen_dir,
-        }
 
-    # 2. Chapter 11 Completion -> Post-Epilogue Choice (Archive vs. Endless Sandbox)
+    # 1. Chapter 11 Completion -> 4-Slide Chronicle Tapestry + Post-Epilogue Choice (Archive vs. Endless Mode)
     if cur_ch >= 11 and not sess.get("endless_mode_unlocked"):
-        epilogue_choices = build_universal_epilogue_choices(scen_key)
-        spine_events = list(spine.get("state_events") or [])
-        spine_events.append({"turn": eff_turn, "kind": "epilogue_status", "prev": spine.get("epilogue_status", "pending"), "next": "awaiting_choice"})
+        if qid:
+            with db.get_conn() as conn:
+                conn.execute(
+                    "UPDATE quests SET status = ?, updated_at = ? WHERE session_id = ? AND quest_id = ? AND status = 'Active'",
+                    ("Failed" if status == "Failed" else "Completed", time.time(), session_id, qid),
+                )
+        tapestry = compile_chronicle_tapestry(session_id=session_id, lang=lang, turn_number=eff_turn)
+        ending_id = str(tapestry.get("ending_id") or "")
+        epilogue_choices = build_universal_epilogue_choices(scen_key, ending_id=ending_id)
+        fresh_spine = db.get_campaign_spine(session_id) or spine
+        spine_events = list(fresh_spine.get("state_events") or [])
+        spine_events.append(
+            {
+                "turn": eff_turn,
+                "kind": "epilogue_status",
+                "prev": fresh_spine.get("epilogue_status", "pending"),
+                "next": "awaiting_choice",
+            }
+        )
         db.upsert_campaign_spine(
             session_id,
             scen_key,
             epilogue_status="awaiting_choice",
+            chronicle_tapestry=tapestry,
             state_events=spine_events,
         )
-        db.update_session(session_id, extra={"epilogue_ready": True, "epilogue_choices": epilogue_choices})
+        db.update_session(
+            session_id,
+            extra={
+                "epilogue_ready": True,
+                "epilogue_choices": epilogue_choices,
+                "chronicle_tapestry": tapestry,
+                "_last_transition_quest_id": qid,
+                "_last_transition_turn": eff_turn,
+            },
+        )
         if isinstance(outcome, dict):
             outcome["epilogue_ready"] = True
             outcome["epilogue_choices"] = epilogue_choices
+            outcome["chronicle_tapestry"] = tapestry
         return {
             "chapter": cur_ch,
             "epilogue_ready": True,
             "epilogue_choices": epilogue_choices,
+            "chronicle_tapestry": tapestry,
             "directive": (
-                "[MANDATORY CAMPAIGN EPILOGUE RESOLUTION]: Playable Epilogue Chapter 11 completed! "
-                "Present the choice between [Archive Chronicle] and [Endless Sandbox Mode]."
+                f"[MANDATORY CAMPAIGN EPILOGUE RESOLUTION — {tapestry.get('ending_title', 'Chronicle Complete')}]: "
+                "Playable Epilogue Chapter 11 completed! Present the 4-Slide Chronicle Tapestry and the choice "
+                "between [Archive Chronicle] and [Endless Mode]."
             ),
         }
 
-    # 3. Chapters 1-10 Advance (Completed OR Fail-Forward)
+    # 2. Chapters 1-10 Advance (Completed OR Fail-Forward, including Playable Fallen-World Ch. 11 on Ch. 10 Defeat!)
     world_scar_ev: Optional[Dict[str, Any]] = None
+    is_ch10_fallen = bool(cur_ch == 10 and status == "Failed")
     if status == "Failed":
         eng = str((dossier or {}).get("engine") or quest.get("engine") or "CRISIS_DEFENSE")
         venue = str(climax_spec.get("location") or sess.get("current_location") or "Central District")
-        scar_spec = (
+        scar_tier = "peak" if cur_ch in (3, 6, 8, 9, 10) else "buildup"
+        scar_spec = dict(
             (((dossier or {}).get("outcomes_matrix") or {}).get("failure") or {}).get("world_scar")
             or render_world_scar_spec(engine=eng, venue_name=venue, lang=lang)
         )
+        scar_spec["scar_tier"] = scar_tier
+        scar_spec["chapter_number"] = cur_ch
+        if cur_ch in (8, 9, 10):
+            scar_spec["lockdown"] = True
         world_scar_ev = spawn_quest_world_scar(
             session_id=session_id,
             source_quest_id=qid or f"CH{cur_ch}",
             scar_spec=scar_spec,
             location_name=venue,
             turn_number=eff_turn,
+            scar_tier=scar_tier,
+        )
+        update_campaign_ending_axes(
+            session_id=session_id,
+            collateral_delta=2 if cur_ch in (3, 6, 8, 9, 10) else 1,
+            ch10_defeated=is_ch10_fallen or None,
+            turn_number=eff_turn,
         )
 
     if cur_ch == 10:
-        spine_events = list(spine.get("state_events") or [])
-        spine_events.append({"turn": eff_turn, "kind": "climax_status", "prev": spine.get("climax_status", "pending"), "next": "victory"})
-        spine_events.append({"turn": eff_turn, "kind": "epilogue_status", "prev": spine.get("epilogue_status", "pending"), "next": "ch11_active"})
-        db.upsert_campaign_spine(
+        fresh_spine = db.get_campaign_spine(session_id) or spine
+        spine_events = list(fresh_spine.get("state_events") or [])
+        new_climax_st = "fallen_world" if is_ch10_fallen else "victory"
+        new_epilogue_st = "ch11_fallen_active" if is_ch10_fallen else "ch11_active"
+        spine_events.append(
+            {"turn": eff_turn, "kind": "climax_status", "prev": fresh_spine.get("climax_status", "pending"), "next": new_climax_st}
+        )
+        spine_events.append(
+            {"turn": eff_turn, "kind": "epilogue_status", "prev": fresh_spine.get("epilogue_status", "pending"), "next": new_epilogue_st}
+        )
+        spine = db.upsert_campaign_spine(
             session_id,
             scen_key,
-            climax_status="victory",
-            epilogue_status="ch11_active",
+            climax_status=new_climax_st,
+            epilogue_status=new_epilogue_st,
             state_events=spine_events,
-        )
+        ) or fresh_spine
+        if is_ch10_fallen:
+            db.update_session(
+                session_id,
+                extra={
+                    "campaign_game_over": False,
+                    "fallen_world": True,
+                    "epilogue_ready": False,
+                },
+            )
+            if isinstance(outcome, dict):
+                outcome["campaign_game_over"] = False
+                outcome["fallen_world"] = True
 
     # Ensure the resolved story quest row is no longer 'Active' before inserting the next chapter's quest
     if qid:
@@ -723,6 +909,14 @@ def resolve_chapter_transition(
                 )
         db.append_dossier_state_event(session_id, qid, eff_turn, "quest_status", "Active", final_q_status)
 
+    if cur_ch >= 11 and sess.get("endless_mode_unlocked"):
+        db.set_session_chapter(session_id, 11)
+        return {
+            "chapter": 11,
+            "endless_mode": True,
+            "message": "Campaign chronicle concluded! Endless Mode active.",
+        }
+
     next_ch = cur_ch + 1
     db.set_session_chapter(session_id, next_ch)
     db.update_session(
@@ -730,45 +924,39 @@ def resolve_chapter_transition(
         extra={"_last_transition_quest_id": qid, "_last_transition_turn": eff_turn},
     )
 
-    from game_engine.quests import create_contextual_story_quest_data
+    spine_for_next = db.get_campaign_spine(session_id) or spine
+    storylet = select_chapter_storylet(session_id, next_ch, spine=spine_for_next, lang=lang)
+    ch_bp = (spine_for_next.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
 
     next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-    ch_bp = (spine.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
-    fallback_data = create_contextual_story_quest_data(session_id, sess, chapter_num=next_ch)
-    next_subs = fallback_data.get("sub_objectives") or []
-    next_wps = fallback_data.get("sub_waypoints") or {}
-
-    next_title = str(ch_bp.get("title_template") or fallback_data.get("title") or f"Chapter #{next_ch}")
-    next_engine = str(ch_bp.get("engine") or fallback_data.get("archetype") or "MYSTERY_CASE")
+    next_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{next_ch}"))
+    next_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
     next_obj = sanitize_dossier_prose(
-        str(fallback_data.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
+        str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
     )
 
     next_quest = db.upsert_quest(
         session_id=session_id,
         quest_id=next_sq_id,
-        quest_type=str(fallback_data.get("archetype") or "Story Quest"),
+        quest_type="Story Quest",
         title=next_title,
         objective=next_obj,
-        progress=f"0/{len(next_subs)} Cleared" if next_subs else f"Quest #{next_ch}",
+        progress="0/1 Main Objective",
         current_clues="",
         status="Active",
         reward_xp=250 + (next_ch * 30),
         reward_gold=60 + (next_ch * 10),
         is_story_quest=1,
-        clues_required=len(next_subs),
-        sub_objectives=next_subs,
+        clues_required=1,
+        sub_objectives=[],
+        deadline_day=None,
+        deadline_minute=None,
         engine=next_engine,
         dossier_stage="compiled",
     )
-    for so in next_subs:
-        so_id = so.get("id")
-        wps = next_wps.get(so_id) or []
-        if wps:
-            db.save_quest_waypoints(session_id=session_id, quest_id=next_sq_id, waypoints=wps, sub_obj_id=so_id)
 
-    feat_lt = str(ch_bp.get("featured_lieutenant") or "")
-    mm_name = str((spine.get("mastermind_profile") or {}).get("name") or "")
+    feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
+    mm_name = str((spine_for_next.get("mastermind_profile") or {}).get("name") or "")
     target_for_ch = mm_name if next_ch == 10 else feat_lt
 
     next_dossier = compile_quest_dossier(
@@ -785,16 +973,28 @@ def resolve_chapter_transition(
         scen_key=scen_key,
         lang=lang,
     )
+    refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
 
-    return {
+    res_payload: Dict[str, Any] = {
         "chapter": next_ch,
         "previous_chapter": cur_ch,
         "next_quest_id": next_sq_id,
-        "next_quest": next_quest,
+        "next_quest": refreshed_next_quest,
         "next_dossier": next_dossier,
         "fail_forward": bool(status == "Failed"),
+        "hard_game_over": False,
+        "fallen_world": is_ch10_fallen,
+        "threatened_fallout": threatened_fallout,
         "world_scar": world_scar_ev,
     }
+    if is_ch10_fallen:
+        mm_display = mm_name or "the Mastermind"
+        res_payload["directive"] = (
+            f"[MANDATORY PLAYABLE FALLEN-WORLD EPILOGUE (CHAPTER 11)]: {mm_display} prevailed in Chapter 10! "
+            "Instead of an abrupt Game Over, advance into Chapter 11 in a Fallen World where the party survives "
+            "to salvage their inner circle and seed an underground resistance."
+        )
+    return res_payload
 
 
 def resolve_epilogue_choice(

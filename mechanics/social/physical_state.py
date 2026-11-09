@@ -537,11 +537,12 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 party_names.add(pn.lower())
                 matched_comp = _match_actor_key(pn, actors)
                 if matched_comp not in actors:
-                    u_top, u_bot = _infer_initial_undergarments_state(p_npc, session.get("scenario", "fantasy"), session_id=session.get("id"))
+                    _is_myobu_comp = str(p_npc.get("race") or "").strip().lower() == "kitsune:myobu_fox"
+                    u_top, u_bot = ("none", "none") if _is_myobu_comp else _infer_initial_undergarments_state(p_npc, session.get("scenario", "fantasy"), session_id=session.get("id"))
                     actors[pn] = {
-                        "posture": "Standing alert with party",
-                        "holding": p_npc.get("weapon") or "Equipped weapon",
-                        "clothing": {
+                        "posture": "Poised on four spirit-fox paws" if _is_myobu_comp else "Standing alert with party",
+                        "holding": "Foxfire wisps" if _is_myobu_comp else (p_npc.get("weapon") or "Equipped weapon"),
+                        "clothing": {slot: STATE_NONE for slot in ALL_GARMENT_SLOTS} if _is_myobu_comp else {
                             "outerwear": "none",
                             "top": "Clothed",
                             "bottom": "Clothed",
@@ -1968,6 +1969,17 @@ def resolve_canonical_wardrobe(
         except Exception:
             app = {}
 
+    _raw_race_chk = str(char_or_npc.get("race") or (char_or_npc.get("basic_info") or {}).get("race") or app.get("kitsune_form") or "").strip().lower()
+    if _raw_race_chk == "kitsune:myobu_fox":
+        return {
+            slot: {
+                "slot": slot,
+                "state": STATE_NONE,
+                "item_name": "",
+                "layer_depth": int(SLOT_LAYER_DEPTHS.get(slot, 2)),
+            }
+            for slot in ALL_GARMENT_SLOTS
+        }
     attire_desc = str(app.get("attire") or "")
     u_top, u_bot = _infer_initial_undergarments_state(char_or_npc, scen_key, session_id)
 

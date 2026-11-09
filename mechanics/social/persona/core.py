@@ -642,6 +642,8 @@ DIVERSE_HAIR_LENGTHS_MALE = [
 def is_half_beast_race(race_str: str) -> bool:
     """Checks if a race string designates a half-beast / hybrid / beastkin demi-human."""
     r = str(race_str or "").lower().replace("-", "_")
+    if r == "kitsune:humanoid":
+        return True
     return any(k in r for k in ("half_beast", "halfbeast", "hybrid", "demi_human", "beastkin", "half_breed"))
 
 def is_beast_race(race_str: str) -> bool:
@@ -775,6 +777,10 @@ GLOBAL_SKIN_TONE_POOL = [
 ]
 
 HUMANOID_RACE_SKIN_TONES = {
+    "orang_bunian": [
+        ("luminous ivory-fair porcelain", 30), ("radiant pearl-alabaster", 25),
+        ("moonlit fair cream", 20), ("warm fair peach-ivory", 15), ("translucent rosy-fair", 10)
+    ],
     "dark_elf": [
         ("ashen charcoal", 30), ("obsidian dusk", 25), ("slate gray", 20),
         ("dusky violet-gray", 15), ("pale moon-silver", 10)
@@ -997,6 +1003,10 @@ CULTURE_NATURAL_HAIR_POOLS = {
 }
 
 HUMANOID_RACE_NATURAL_HAIR_POOLS = {
+    "orang_bunian": [
+        ("flowing glossy raven-black", 45), ("lustrous midnight-ebony", 30),
+        ("rich dark chestnut silk", 25)
+    ],
     # Dark Elves / Drow: Famously moon-silver and stark white, with slate and midnight darks
     "dark_elf": [
         ("pale moon-silver", 35), ("stark white", 30), ("ash-gray", 15),

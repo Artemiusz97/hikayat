@@ -13,14 +13,19 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
             equip_items.append(f"{slot}: {item['name']}{n_tag}")
     equipped_text = "; ".join(equip_items) or "nothing"
     carried = [i["name"] for i in inventory if isinstance(i, dict) and not i.get("equipped")]
-    class_line = char.get("char_class") or char.get("class", "Adventurer")
+    from mechanics.system.input_sanitizer import sanitize_character_name, wrap_custom_lore
+    class_line = sanitize_character_name(char.get("char_class") or char.get("class", "Adventurer"), max_len=60, fallback="Adventurer")
     if char.get("class_description"):
-        class_line += f" -- {char['class_description']}"
+        fenced_cls_desc = wrap_custom_lore(char["class_description"], max_len=800)
+        if fenced_cls_desc:
+            class_line += f" -- {fenced_cls_desc}"
     from mechanics.social.races import format_race_display
     raw_race = char.get("race") or "human"
     race_display = format_race_display(raw_race)
     if char.get("race_description"):
-        race_display += f" ({char['race_description']})"
+        fenced_race_desc = wrap_custom_lore(char["race_description"], max_len=600)
+        if fenced_race_desc:
+            race_display += f" ({fenced_race_desc})"
     race_line = f" | Race: {race_display}"
     
     # Pronoun & Gender Canon
@@ -106,8 +111,9 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
         build_desc += f" | Physique: {pl_physique}"
     build_line = f"Physical Build: {build_desc}. (Incorporate the protagonist's physical scale, height, and build into scene narration and physical interactions.)"
 
+    safe_char_name = sanitize_character_name(char.get('name', 'Hero'), max_len=60, fallback='Hero')
     lines = [
-        f"Name: {char.get('name', 'Hero')}{race_line} | Class: {class_line} | Level: {char.get('level', 1)}{gender_line}",
+        f"Name: {safe_char_name}{race_line} | Class: {class_line} | Level: {char.get('level', 1)}{gender_line}",
         pronoun_rule,
         biology_rule,
         build_line,
@@ -119,6 +125,17 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
         arch_lbl = str(char["combat_archetype"]).replace("_", " ").title()
         med_lbl = str(char["ability_medium"]).replace("_", " ").title()
         lines.append(f"[Awakened Resonance: {attr_lbl} | {arch_lbl} | {med_lbl}]")
+    if char.get("active_pacts"):
+        try:
+            from mechanics.pacts import build_actor_pact_tell_phrase
+            pact_tell_line = build_actor_pact_tell_phrase(
+                char["active_pacts"],
+                scenario_or_key=str(char.get("scenario") or "anomalous_incursions"),
+            )
+            if pact_tell_line:
+                lines.append(pact_tell_line)
+        except Exception:
+            pass
     lines.extend([
         f"STR {str_val} | PER {char.get('per_', 5)} | END {char.get('end_', 5)} | CHA {char.get('cha', 5)} | "
         f"INT {char.get('int_', 5)} | AGI {char.get('agi', 5)} | LUK {char.get('luk', 5)}",
@@ -183,6 +200,81 @@ def _describe_tracked_entity(entity) -> str:
 
     return f"{name} ({', '.join(bits)})" if bits else name
 
+def _sanitize_history_header_token(raw: str, max_len: int = 160, fallback: str = "") -> str:
+    """Sanitizes untrusted action labels and actor/title strings inside bracketed history prompt headers."""
+    import re as _re
+    from mechanics.system.input_sanitizer import sanitize_prompt_lore
+    cleaned = sanitize_prompt_lore(raw or "", max_len=max_len * 2)
+    cleaned = _re.sub(r"[\[\]<>\r\n\t]+", " ", cleaned)
+    cleaned = _re.sub(r"\s+", " ", cleaned).strip()
+    if max_len > 0 and len(cleaned) > max_len:
+        cleaned = cleaned[:max_len].rstrip()
+    return cleaned if cleaned else fallback
+
+
+def _format_history_prompt_entry(item, is_latest: bool = True) -> str:
+    if not item:
+        return ""
+    import json as _json
+    import re as _re
+    from mechanics.system.input_sanitizer import sanitize_character_name
+    if isinstance(item, dict):
+        witnesses = item.get("witnessed_by") or []
+        # Defend against DB returning witnessed_by as a JSON string instead of a list
+        if isinstance(witnesses, str):
+            try:
+                witnesses = _json.loads(witnesses)
+            except Exception:
+                witnesses = [witnesses] if witnesses.strip() else []
+        if not isinstance(witnesses, list):
+            witnesses = []
+        clean_witnesses = [
+            sanitize_character_name(str(w), max_len=60, fallback="")
+            for w in witnesses
+            if str(w or "").strip()
+        ]
+        clean_witnesses = [w for w in clean_witnesses if w]
+        wit_str = f" [Witnessed by: {', '.join(clean_witnesses)}]" if clean_witnesses else ""
+
+        from game_engine.pronoun_resolver import strip_pronoun_tags
+        if item.get("type") == "scene":
+            title = _sanitize_history_header_token(str(item.get("scene_title") or "Opening"), max_len=80, fallback="Opening")
+            nar = strip_pronoun_tags(item.get("next_narrative") or item.get("narrative") or "")
+            if not is_latest and len(nar) > 160:
+                clean_nar = _re.sub(r'"[^"]*"|“[^”]*”', '', nar).strip()
+                sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_nar) if s.strip()]
+                nar = sentences[0] if sentences else (nar[:157] + "...")
+            return f"[{title}] {nar}{wit_str}".strip()
+
+        char_n = sanitize_character_name(str(item.get("character_name") or "Hero"), max_len=60, fallback="Hero")
+        lbl = _sanitize_history_header_token(str(item.get("label") or "Action"), max_len=160, fallback="Action")
+        tier_s = _sanitize_history_header_token(str(item.get("tier_label") or item.get("tier") or ""), max_len=40, fallback="")
+        out_nar = strip_pronoun_tags(item.get("outcome_narrative") or item.get("narrative") or "")
+        nxt_nar = strip_pronoun_tags(item.get("next_narrative") or "")
+
+        if is_latest:
+            combined = f"{out_nar} {nxt_nar}".strip() if nxt_nar and nxt_nar != out_nar else out_nar
+        else:
+            # Asymmetric Recency: Compact older turns by stripping quoted dialogue and keeping core resolutions
+            parts = []
+            if out_nar:
+                clean_out = _re.sub(r'"[^"]*"|“[^”]*”', '', out_nar).strip()
+                sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_out) if s.strip()]
+                parts.append(sentences[0] if sentences else (out_nar[:120] + "..."))
+            if nxt_nar and nxt_nar != out_nar:
+                clean_nxt = _re.sub(r'"[^"]*"|“[^”]*”', '', nxt_nar).strip()
+                nxt_sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_nxt) if s.strip()]
+                if nxt_sentences:
+                    parts.append(nxt_sentences[0])
+            combined = " ".join(parts).strip()
+            if not combined:
+                combined = f"{out_nar} {nxt_nar}".strip() if nxt_nar and nxt_nar != out_nar else out_nar
+                if len(combined) > 160:
+                    combined = combined[:157] + "..."
+        return f"[{char_n} -> {lbl} ({tier_s})]: {combined}{wit_str}".strip()
+    return _sanitize_history_header_token(str(item), max_len=200, fallback="")
+
+
 def _history_text(
     history: list,
     session_id: int | None = None,
@@ -233,59 +325,7 @@ def _history_text(
 
     # ---------- Tier 1: Raw recent turns ----------
     def _format_hist_item(item, is_latest: bool = True) -> str:
-        if not item:
-            return ""
-        import json as _json
-        import re as _re
-        if isinstance(item, dict):
-            witnesses = item.get("witnessed_by") or []
-            # Defend against DB returning witnessed_by as a JSON string instead of a list
-            if isinstance(witnesses, str):
-                try:
-                    witnesses = _json.loads(witnesses)
-                except Exception:
-                    witnesses = [witnesses] if witnesses.strip() else []
-            if not isinstance(witnesses, list):
-                witnesses = []
-            wit_str = f" [Witnessed by: {', '.join(str(w) for w in witnesses)}]" if witnesses else ""
-
-            from game_engine.pronoun_resolver import strip_pronoun_tags
-            if item.get("type") == "scene":
-                title = item.get("scene_title") or "Opening"
-                nar = strip_pronoun_tags(item.get("next_narrative") or item.get("narrative") or "")
-                if not is_latest and len(nar) > 160:
-                    clean_nar = _re.sub(r'"[^"]*"|“[^”]*”', '', nar).strip()
-                    sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_nar) if s.strip()]
-                    nar = sentences[0] if sentences else (nar[:157] + "...")
-                return f"[{title}] {nar}{wit_str}".strip()
-                
-            char_n = item.get("character_name") or "Hero"
-            lbl = item.get("label") or "Action"
-            tier_s = item.get("tier_label") or item.get("tier") or ""
-            out_nar = strip_pronoun_tags(item.get("outcome_narrative") or item.get("narrative") or "")
-            nxt_nar = strip_pronoun_tags(item.get("next_narrative") or "")
-
-            if is_latest:
-                combined = f"{out_nar} {nxt_nar}".strip() if nxt_nar and nxt_nar != out_nar else out_nar
-            else:
-                # Asymmetric Recency: Compact older turns by stripping quoted dialogue and keeping core resolutions
-                parts = []
-                if out_nar:
-                    clean_out = _re.sub(r'"[^"]*"|“[^”]*”', '', out_nar).strip()
-                    sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_out) if s.strip()]
-                    parts.append(sentences[0] if sentences else (out_nar[:120] + "..."))
-                if nxt_nar and nxt_nar != out_nar:
-                    clean_nxt = _re.sub(r'"[^"]*"|“[^”]*”', '', nxt_nar).strip()
-                    nxt_sentences = [s.strip() for s in _re.split(r'(?<=[.!?])\s+', clean_nxt) if s.strip()]
-                    if nxt_sentences:
-                        parts.append(nxt_sentences[0])
-                combined = " ".join(parts).strip()
-                if not combined:
-                    combined = f"{out_nar} {nxt_nar}".strip() if nxt_nar and nxt_nar != out_nar else out_nar
-                    if len(combined) > 160:
-                        combined = combined[:157] + "..."
-            return f"[{char_n} -> {lbl} ({tier_s})]: {combined}{wit_str}".strip()
-        return str(item)
+        return _format_history_prompt_entry(item, is_latest=is_latest)
 
     if budget:
         # Dynamic Token Budgeting - Sliding Window
@@ -578,6 +618,7 @@ def _scene_context_text(session_id: int, current_location: str,
                     "appearance": c.get("appearance", {}),
                     "mannerisms": (c.get("basic_info") or {}).get("mannerisms", ""),
                     "traits": c.get("unlocked_traits", []),
+                    "basic_info": c.get("basic_info") or {},
                     "description": (c.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
                 })
 
@@ -596,6 +637,7 @@ def _scene_context_text(session_id: int, current_location: str,
                         "appearance": e.get("appearance") or c_data.get("appearance", {}),
                         "mannerisms": e.get("mannerisms") or (c_data.get("basic_info") or {}).get("mannerisms", ""),
                         "traits": e.get("traits") or c_data.get("unlocked_traits", []),
+                        "basic_info": e.get("basic_info") or c_data.get("basic_info") or {},
                         "description": e.get("description") or (c_data.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
                     })
 
@@ -666,8 +708,49 @@ def _scene_context_text(session_id: int, current_location: str,
 
             if act_desc:
                 details.append("Activity: " + act_desc)
+            c_data_present = contacts_by_name.get(p_name_low, {})
+            p_bi = (c_data_present.get("basic_info") if isinstance(c_data_present, dict) else None) or p.get("basic_info") or {}
+            if not isinstance(p_bi, dict):
+                p_bi = {}
+            race_raw = p.get('race') or (c_data_present.get("race") if isinstance(c_data_present, dict) else "") or ""
+            race_low_present = str(race_raw).strip().lower()
+            if race_low_present == "kitsune:myobu_fox":
+                details.append(
+                    "Form: Quadruped multi-tailed Myōbu Spirit Fox wreathed in foxfire; speaks clearly in an ethereal spirit-voice, wears no human garments, and remains non-romantic until shifted into humanoid guise"
+                )
+            if p_bi.get("secret_crush_on_pc") and str((c_data_present or {}).get("track") or "platonic").strip().lower() == "platonic":
+                details.append(
+                    "Demeanor Cue: Harbors a quiet, courtly secret attraction toward the player at first sight—shows warm stolen glances, gentle poise, and shy fascination without acting like an already-confessed lover"
+                )
+            if p_bi.get("is_daytime_wanderer"):
+                curr_mod_min = int(session.get("current_minute", 480) if isinstance(session, dict) else 480) % 1440
+                loc_str_now = str(current_location or "")
+                curr_nid_now = str(session.get("current_node_id") or "") if isinstance(session, dict) else ""
+                from mechanics.world.locations.folklore_veil import VEILED_INNER_ROOM_IDS
+                in_inner_enclave = bool(
+                    curr_nid_now in (set(VEILED_INNER_ROOM_IDS["kitsune"]) | set(VEILED_INNER_ROOM_IDS["bunian"]))
+                    or any(
+                        tok in loc_str_now
+                        for tok in (
+                            "Hidden Kitsune Enclave",
+                            "Hidden Bunian",
+                            "Sato-no-Inari",
+                            "Kampung Kayangan",
+                            "Starlit Fox-Fire Lantern Plaza",
+                            "Celestial Nine-Tail Sovereign Pavilion",
+                            "Myōbu Spirit-Fire Curio",
+                            "Root-Woven Leyline Fox-Fire Shrine",
+                            "Laman Seri Cempaka",
+                            "Istana Seri Kayangan",
+                            "Pusaka Artisan Hall",
+                            "Moonlit Cempaka",
+                        )
+                    )
+                )
+                if 540 <= curr_mod_min < 1020 and not in_inner_enclave:
+                    glamour_tell = str(p_bi.get("glamour_tell") or "a subtle otherworldly tell beneath polite traveller attire").strip()
+                    details.append(f"Glamour Disguise: Wearing polite human traveller glamour in public save for a subtle tell ({glamour_tell})")
             extra = (" (" + "; ".join(details) + ")") if details else ""
-            race_raw = p.get('race') or ""
             race_tag = f"Race: {format_race_display(race_raw)} | " if race_raw else ""
             # Binary Stance (Hostile vs Non-Hostile) and Combat Reaction Matrix
             is_non_combat = scenario_data.has_tag(scen_key, "non_combat") or scenario_data.has_tag(scen_key, "high_school_drama") or scenario_data.has_tag(scen_key, "slice_of_life")

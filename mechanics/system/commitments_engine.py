@@ -599,6 +599,9 @@ def flake_commitment(
     if npc_id and npc_id != "group":
         try:
             contact_row = _adjust_contact_affinity_delta(session_id, npc_id, penalty)
+            if str(flaked_entity or "player").strip().lower() in ("player", "protagonist") and hasattr(db, "set_clear_the_air_gate"):
+                _gate_npc = (contact_row.get("npc_id") if contact_row else None) or npc_id
+                db.set_clear_the_air_gate(session_id, _gate_npc, reason="flaked_commitment", turn_updated=int(current_turn or 0))
         except Exception as e:
             log.warning("Affinity penalty deduction failed: %s", e)
 
@@ -697,6 +700,8 @@ def abandon_rendezvous(
     if npc_id and npc_id != "group":
         try:
             _adjust_contact_affinity_delta(session_id, npc_id, penalty)
+            if hasattr(db, "set_clear_the_air_gate"):
+                db.set_clear_the_air_gate(session_id, npc_id, reason="abandoned_rendezvous")
         except Exception:
             pass
         try:

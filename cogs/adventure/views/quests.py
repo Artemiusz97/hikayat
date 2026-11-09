@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .base import SessionRestrictedView
 from .constants import *
 import asyncio
 import json
@@ -39,8 +40,10 @@ from mechanics.social.persona import normalize_appearance
 from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
+from mechanics.system.concurrency import distributed_session_lock
+from localization import get_quest_ui_label
 import unicodedata
-from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
+from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _choice_button_label, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_chronicle_tapestry_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
 
 class ActiveBountySelect(discord.ui.Select):
     def __init__(self, session_id: int, bounties: list[dict], selected_quest_id: str | None = None):
@@ -135,9 +138,9 @@ class CaseboardSuspectSelect(discord.ui.Select):
         view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", selected_suspect=selected_suspect)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class ClueDeductionView(discord.ui.View):
+class ClueDeductionView(SessionRestrictedView):
     def __init__(self, session_id: int, all_clues: list[dict]):
-        super().__init__(timeout=180)
+        super().__init__(session_id=session_id, timeout=180)
         self.session_id = session_id
         # Filter available: only unconsumed leads and not already a breakthrough deduction
         self.all_clues = [c for c in all_clues if not c.get("is_consumed") and c.get("category") != "deduction"]
@@ -218,22 +221,23 @@ class ClueDeductionView(discord.ui.View):
             pair_key = f"{min(int(self.clue_a_id), int(self.clue_b_id))}:{max(int(self.clue_a_id), int(self.clue_b_id))}"
             eff_clue_b_id = self.clue_b_id
 
-        session = await adb(db.get_session, self.session_id)
-        cur_turn = len((session or {}).get("history") or [])
-        attempts_map = dict((session or {}).get("deduction_attempts_turn") or {})
-        if attempts_map.get(pair_key) == cur_turn:
-            await interaction.response.send_message("⏳ You already attempted to connect this lead or pair this turn. Advance the story or try another lead!", ephemeral=True)
-            return
+        async with distributed_session_lock(self.session_id):
+            session = await adb(db.get_session, self.session_id)
+            cur_turn = len((session or {}).get("history") or [])
+            attempts_map = dict((session or {}).get("deduction_attempts_turn") or {})
+            if attempts_map.get(pair_key) == cur_turn:
+                await interaction.response.send_message("⏳ You already attempted to connect this lead or pair this turn. Advance the story or try another lead!", ephemeral=True)
+                return
 
-        ded_res = await adb(
-            game_engine.resolve_caseboard_deduction,
-            self.session_id,
-            self.clue_a_id,
-            eff_clue_b_id,
-            interaction.user.id,
-        )
-        attempts_map[pair_key] = cur_turn
-        await adb(db.update_session, self.session_id, extra={"deduction_attempts_turn": attempts_map})
+            ded_res = await adb(
+                game_engine.resolve_caseboard_deduction,
+                self.session_id,
+                self.clue_a_id,
+                eff_clue_b_id,
+                interaction.user.id,
+            )
+            attempts_map[pair_key] = cur_turn
+            await adb(db.update_session, self.session_id, extra={"deduction_attempts_turn": attempts_map})
 
         if not ded_res.get("is_valid"):
             prefix = "🚩 **Red Herring Rejected:**" if ded_res.get("is_red_herring") else "🔍 **No Logical Link:**"
@@ -273,10 +277,12 @@ def _hydrate_quest_log_data(
 ) -> dict:
     norm_tab = "Main Quest" if current_tab in ("Active", "Notes") else current_tab
     session = db.get_session(session_id) or {}
+    spine = db.get_campaign_spine(session_id) or {}
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     cur_loc = session.get("current_location", "") if session else ""
     data = {
         "session": session,
+        "spine": spine,
         "scen_key": scen_key,
         "cur_loc": cur_loc,
         "active_bounties": [],
@@ -332,7 +338,135 @@ async def create_quest_log_view_and_embed(
     return view, embed
 
 
-class QuestLogView(discord.ui.View):
+class ChronicleTapestryView(SessionRestrictedView):
+    def __init__(
+        self,
+        session_id: int,
+        slide_idx: int = 0,
+        slides: list[dict] | None = None,
+        epilogue_ready: bool = False,
+        fallen_world: bool = False,
+        return_tab: str = "Goals",
+    ):
+        super().__init__(session_id=session_id, timeout=300)
+        self.session_id = session_id
+        self.slides = list(slides or [])
+        self.total_slides = max(1, len(self.slides))
+        self.slide_idx = max(0, min(int(slide_idx or 0), self.total_slides - 1))
+        self.epilogue_ready = bool(epilogue_ready)
+        self.fallen_world = bool(fallen_world)
+        self.return_tab = return_tab or "Goals"
+
+        slide_icons = {"world": "🌍", "factions": "🛡️", "bonds": "🤝", "title": "👑"}
+        for idx, sl in enumerate(self.slides[:4]):
+            sl_id = str((sl or {}).get("slide_id") or (sl or {}).get("id") or "")
+            sl_head = str((sl or {}).get("heading") or f"Slide {idx + 1}")[:22]
+            btn = discord.ui.Button(
+                label=f"{idx + 1}. {sl_head}",
+                emoji=slide_icons.get(sl_id, "📜"),
+                style=discord.ButtonStyle.primary if idx == self.slide_idx else discord.ButtonStyle.secondary,
+                row=0,
+            )
+            btn.callback = self._make_jump_callback(idx)
+            self.add_item(btn)
+
+        prev_btn = discord.ui.Button(
+            label="Previous",
+            emoji="◀️",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.slide_idx <= 0),
+            row=1,
+        )
+        next_btn = discord.ui.Button(
+            label="Next",
+            emoji="▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.slide_idx >= self.total_slides - 1),
+            row=1,
+        )
+        back_btn = discord.ui.Button(
+            label="Back to Quest Log",
+            emoji="🔙",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        prev_btn.callback = self._prev_slide
+        next_btn.callback = self._next_slide
+        back_btn.callback = self._back_to_quest_log
+        self.add_item(prev_btn)
+        self.add_item(next_btn)
+        self.add_item(back_btn)
+
+        if self.epilogue_ready:
+            arch_btn = discord.ui.Button(
+                label="Archive Campaign",
+                emoji="🏛️",
+                style=discord.ButtonStyle.primary,
+                row=2,
+            )
+            endless_btn = discord.ui.Button(
+                label="Lead Resistance (Endless)" if self.fallen_world else "Continue in Endless World",
+                emoji="🔥" if self.fallen_world else "♾️",
+                style=discord.ButtonStyle.danger if self.fallen_world else discord.ButtonStyle.success,
+                row=2,
+            )
+            arch_btn.callback = self._make_epilogue_callback("archive")
+            endless_btn.callback = self._make_epilogue_callback("endless")
+            self.add_item(arch_btn)
+            self.add_item(endless_btn)
+
+    async def _render_slide(self, interaction: discord.Interaction, target_idx: int):
+        sess = await adb(db.get_session, self.session_id) or {}
+        spine = await adb(db.get_campaign_spine, self.session_id) or {}
+        tapestry = (spine.get("chronicle_tapestry") or sess.get("chronicle_tapestry") or {})
+        slides = list(tapestry.get("slides") or self.slides)
+        embed = await adb(_build_chronicle_tapestry_embed, self.session_id, target_idx)
+        new_view = ChronicleTapestryView(
+            self.session_id,
+            slide_idx=target_idx,
+            slides=slides,
+            epilogue_ready=bool(sess.get("epilogue_ready")),
+            fallen_world=bool(sess.get("fallen_world") or tapestry.get("is_fallen_world")),
+            return_tab=self.return_tab,
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    def _make_jump_callback(self, idx: int):
+        async def callback(interaction: discord.Interaction):
+            await self._render_slide(interaction, idx)
+        return callback
+
+    async def _prev_slide(self, interaction: discord.Interaction):
+        await self._render_slide(interaction, max(0, self.slide_idx - 1))
+
+    async def _next_slide(self, interaction: discord.Interaction):
+        await self._render_slide(interaction, min(self.total_slides - 1, self.slide_idx + 1))
+
+    async def _back_to_quest_log(self, interaction: discord.Interaction):
+        view, embed = await create_quest_log_view_and_embed(self.session_id, tab=self.return_tab)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    def _make_epilogue_callback(self, choice_id: str):
+        async def callback(interaction: discord.Interaction):
+            async with distributed_session_lock(self.session_id):
+                res = await adb(
+                    game_engine.resolve_epilogue_choice,
+                    self.session_id,
+                    choice_id,
+                    [interaction.user.id],
+                )
+            view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Goals")
+            await interaction.response.edit_message(embed=embed, view=view)
+            msg = (
+                "🏛️ **Campaign Chronicle Archived!** Your legend is sealed in the Hall of Chronicles."
+                if res.get("mode") == "archived"
+                else "♾️ **Endless Post-Campaign World Unlocked!** New post-game contracts and liberation operations await."
+            )
+            await interaction.followup.send(msg, ephemeral=True)
+        return callback
+
+
+class QuestLogView(SessionRestrictedView):
     def __init__(
         self,
         session_id: int,
@@ -341,7 +475,7 @@ class QuestLogView(discord.ui.View):
         selected_suspect: str | None = None,
         hydrated: dict | None = None,
     ):
-        super().__init__(timeout=300)
+        super().__init__(session_id=session_id, timeout=300)
         self.session_id = session_id
         self.current_tab = "Main Quest" if current_tab in ("Active", "Notes") else current_tab
         self.selected_quest_id = selected_quest_id
@@ -350,10 +484,12 @@ class QuestLogView(discord.ui.View):
 
         if hydrated is not None:
             session = hydrated.get("session") or {}
+            spine = hydrated.get("spine") or {}
             scen_key = hydrated.get("scen_key") or (session.get("scenario", "fantasy") if session else "fantasy")
             cur_loc = hydrated.get("cur_loc") if "cur_loc" in hydrated else (session.get("current_location", "") if session else "")
         else:
-            session = db.get_session(session_id)
+            session = db.get_session(session_id) or {}
+            spine = db.get_campaign_spine(session_id) or {}
             scen_key = session.get("scenario", "fantasy") if session else "fantasy"
             cur_loc = session.get("current_location", "") if session else ""
         labels = _get_quest_scenario_labels(scen_key)
@@ -404,6 +540,31 @@ class QuestLogView(discord.ui.View):
         world_pulse_btn = discord.ui.Button(label="World Pulse", emoji="🌐", style=discord.ButtonStyle.secondary, row=4)
         world_pulse_btn.callback = self._open_world_pulse
         self.add_item(world_pulse_btn)
+
+        tapestry_obj = (spine.get("chronicle_tapestry") or (session or {}).get("chronicle_tapestry") or {}) if isinstance(spine, dict) else {}
+        has_tapestry = bool((isinstance(tapestry_obj, dict) and tapestry_obj.get("slides")) or (session or {}).get("epilogue_ready"))
+        if has_tapestry:
+            tap_btn = discord.ui.Button(
+                label="Chronicle Tapestry",
+                emoji="📜",
+                style=discord.ButtonStyle.primary if (session or {}).get("epilogue_ready") else discord.ButtonStyle.secondary,
+                row=4,
+            )
+            tap_btn.callback = self._open_chronicle_tapestry
+            self.add_item(tap_btn)
+
+        if self.current_tab == "Goals" and (session or {}).get("epilogue_ready"):
+            arch_btn = discord.ui.Button(label="Archive Campaign", emoji="🏛️", style=discord.ButtonStyle.primary, row=1)
+            endless_btn = discord.ui.Button(
+                label="Lead Resistance (Endless)" if (session or {}).get("fallen_world") else "Continue in Endless World",
+                emoji="🔥" if (session or {}).get("fallen_world") else "♾️",
+                style=discord.ButtonStyle.danger if (session or {}).get("fallen_world") else discord.ButtonStyle.success,
+                row=1,
+            )
+            arch_btn.callback = self._make_epilogue_decision_callback("archive")
+            endless_btn.callback = self._make_epilogue_decision_callback("endless")
+            self.add_item(arch_btn)
+            self.add_item(endless_btn)
 
         # Conditionally render Notice Board button ONLY if location has a board and tab supports it
         from mechanics.world.locations import location_has_bounty_board
@@ -481,7 +642,9 @@ class QuestLogView(discord.ui.View):
                 if client_nm and str(client_nm).strip():
                     suspect_set.add(str(client_nm).strip())
                 for ld in (dos.get("leads_graph") or []):
-                    if ld.get("status") in ("unlocked", "active", "completed") or ld.get("roster_cleared") or ld.get("is_discovered"):
+                    if bool(ld.get("is_discovered", True)) and (
+                        ld.get("status") in ("unlocked", "active", "completed") or ld.get("roster_cleared")
+                    ):
                         tgt_npc = ld.get("target_npc")
                         if tgt_npc and str(tgt_npc).strip():
                             suspect_set.add(str(tgt_npc).strip())
@@ -535,6 +698,41 @@ class QuestLogView(discord.ui.View):
                 back_hist_btn = discord.ui.Button(label="All History", emoji="⬅️", style=discord.ButtonStyle.secondary, row=2)
                 back_hist_btn.callback = self._back_to_history_overview
                 self.add_item(back_hist_btn)
+
+    async def _open_chronicle_tapestry(self, interaction: discord.Interaction):
+        sess = await adb(db.get_session, self.session_id) or {}
+        spine = await adb(db.get_campaign_spine, self.session_id) or {}
+        tapestry = (spine.get("chronicle_tapestry") or sess.get("chronicle_tapestry") or {})
+        slides = list(tapestry.get("slides") or [])
+        embed = await adb(_build_chronicle_tapestry_embed, self.session_id, 0)
+        view = ChronicleTapestryView(
+            self.session_id,
+            slide_idx=0,
+            slides=slides,
+            epilogue_ready=bool(sess.get("epilogue_ready")),
+            fallen_world=bool(sess.get("fallen_world") or tapestry.get("is_fallen_world")),
+            return_tab=self.current_tab,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    def _make_epilogue_decision_callback(self, choice_id: str):
+        async def callback(interaction: discord.Interaction):
+            async with distributed_session_lock(self.session_id):
+                res = await adb(
+                    game_engine.resolve_epilogue_choice,
+                    self.session_id,
+                    choice_id,
+                    [interaction.user.id],
+                )
+            view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Goals")
+            await interaction.response.edit_message(embed=embed, view=view)
+            msg = (
+                "🏛️ **Campaign Chronicle Archived!** Your legend is sealed in the Hall of Chronicles."
+                if res.get("mode") == "archived"
+                else "♾️ **Endless Post-Campaign World Unlocked!** New post-game contracts and liberation operations await."
+            )
+            await interaction.followup.send(msg, ephemeral=True)
+        return callback
 
     async def _open_world_pulse(self, interaction: discord.Interaction):
         from .world_pulse import WorldPulseView, build_world_pulse_embed
@@ -603,17 +801,26 @@ class QuestLogView(discord.ui.View):
                     target_qid = qid
                     break
                 cb = d.get("cast_bindings") or {}
+                climax_spec = d.get("climax_spec") or {}
+                twist_spec = d.get("twist_spec") or {}
+                climax_unlocked = bool(climax_spec.get("gate_type") == "open" or climax_spec.get("is_unlocked"))
+                twist_visible = bool(twist_spec.get("has_twist") and twist_spec.get("is_discovered"))
+                visible_roles = ("target", "accomplice", "client", "informant") if (climax_unlocked or twist_visible) else ("client",)
                 cast_names = [
                     str(((cb.get(r) or {}).get("name") if isinstance(cb.get(r), dict) else "")).strip().lower()
-                    for r in ("target", "accomplice", "client", "informant")
+                    for r in visible_roles
                 ]
-                climax_culprit = str((d.get("climax_spec") or {}).get("true_culprit") or "").strip().lower()
+                climax_culprit = str(climax_spec.get("true_culprit") or "").strip().lower() if climax_unlocked else ""
                 lead_npcs = [
                     str(ld.get("target_npc") or "").strip().lower()
                     for ld in (d.get("leads_graph") or [])
-                    if isinstance(ld, dict)
+                    if isinstance(ld, dict) and bool(ld.get("is_discovered", True))
                 ]
-                if suspect_low in cast_names or suspect_low == climax_culprit or suspect_low in lead_npcs:
+                if (
+                    (suspect_low and suspect_low in cast_names)
+                    or (climax_culprit and suspect_low == climax_culprit)
+                    or (suspect_low and suspect_low in lead_npcs)
+                ):
                     target_qid = qid
                     break
             target_qid = target_qid or fallback_qid
@@ -621,18 +828,19 @@ class QuestLogView(discord.ui.View):
                 await interaction.response.send_message("No active compiled investigation dossier found.", ephemeral=True)
                 return
 
-            res = await adb(
-                game_engine.resolve_suspect_accusation,
-                self.session_id,
-                target_qid,
-                suspect,
-                mode,
-                interaction.user.id,
-            )
-            view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", selected_suspect=suspect)
-            await interaction.response.edit_message(embed=embed, view=view)
-            icon = "✅" if res.get("correct") else ("🛑" if mode == "formal" else "⚠️")
-            await interaction.followup.send(f"{icon} {res.get('message') or 'Accusation resolved.'}", ephemeral=True)
+            async with distributed_session_lock(self.session_id):
+                res = await adb(
+                    game_engine.resolve_suspect_accusation,
+                    self.session_id,
+                    target_qid,
+                    suspect,
+                    mode,
+                    interaction.user.id,
+                )
+                view, embed = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", selected_suspect=suspect)
+                await interaction.response.edit_message(embed=embed, view=view)
+                icon = "✅" if res.get("correct") else ("🛑" if mode == "formal" else "⚠️")
+                await interaction.followup.send(f"{icon} {res.get('message') or 'Accusation resolved.'}", ephemeral=True)
         return callback
 
     async def _abandon_selected_bounty(self, interaction: discord.Interaction):
@@ -650,13 +858,14 @@ class QuestLogView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        forfeit_res = await adb(
-            game_engine.forfeit_side_bounty,
-            self.session_id,
-            self.selected_quest_id,
-            [interaction.user.id],
-            interaction.user.id,
-        )
+        async with distributed_session_lock(self.session_id):
+            forfeit_res = await adb(
+                game_engine.forfeit_side_bounty,
+                self.session_id,
+                self.selected_quest_id,
+                [interaction.user.id],
+                interaction.user.id,
+            )
         if not forfeit_res.get("success"):
             await interaction.response.send_message(
                 f"🔒 {forfeit_res.get('reason') or 'Cannot abandon this contract.'}",
@@ -694,10 +903,11 @@ class QuestLogView(discord.ui.View):
             )
             return
         await interaction.response.defer()
-        bounties = await game_engine.generate_bounty_board(session)
-        embed = _build_bounty_board_embed(session, bounties)
-        view = BountyBoardView(session, bounties)
-        await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
+        async with distributed_session_lock(self.session_id):
+            bounties = await game_engine.generate_bounty_board(session)
+            embed = _build_bounty_board_embed(session, bounties)
+            view = BountyBoardView(session, bounties)
+            await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
 
 class ContractDispositionSelect(discord.ui.Select):
@@ -753,16 +963,17 @@ class ContractDispositionSelect(discord.ui.Select):
 
     async def callback(self, interaction: discord.Interaction):
         disp = self.values[0]
-        sess = await adb(db.get_session, self.session_id) or {}
-        res = await adb(
-            game_engine.resolve_quest_turn_in_or_betrayal,
-            self.session_id,
-            self.quest_id,
-            interaction.user.id,
-            disp,
-            None,
-            str(sess.get("current_location") or ""),
-        )
+        async with distributed_session_lock(self.session_id):
+            sess = await adb(db.get_session, self.session_id) or {}
+            res = await adb(
+                game_engine.resolve_quest_turn_in_or_betrayal,
+                self.session_id,
+                self.quest_id,
+                interaction.user.id,
+                disp,
+                None,
+                str(sess.get("current_location") or ""),
+            )
         if not res.get("success"):
             await interaction.response.send_message(f"⚠️ {res.get('reason') or 'Cannot resolve turn-in yet.'}", ephemeral=True)
             return
@@ -841,9 +1052,14 @@ class BountySelect(discord.ui.Select):
         )
 
 
-class BountyBoardView(discord.ui.View):
+class BountyBoardView(SessionRestrictedView):
     def __init__(self, session: dict, bounties: list[dict], haggle_advance: bool = False):
-        super().__init__(timeout=300)
+        turn_order_ids = (session or {}).get("turn_order") or None
+        super().__init__(
+            session_id=int((session or {}).get("id") or 0),
+            timeout=300,
+            allowed_user_ids=turn_order_ids if turn_order_ids else None,
+        )
         self.session = session
         self.session_id = session["id"]
         self.haggle_advance = haggle_advance
@@ -866,13 +1082,6 @@ class BountyBoardView(discord.ui.View):
         self.add_item(refresh_btn)
         self.add_item(haggle_btn)
         self.add_item(quest_btn)
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        turn_order = (self.session or {}).get("turn_order") or []
-        if turn_order and interaction.user.id not in turn_order:
-            await interaction.response.send_message("You're not in this session.", ephemeral=True)
-            return False
-        return True
 
     async def _toggle_haggle_advance(self, interaction: discord.Interaction):
         self.haggle_advance = not self.haggle_advance

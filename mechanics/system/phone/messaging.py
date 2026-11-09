@@ -11,8 +11,10 @@ import db
 import scenario_data
 from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
+from game_engine.prompt_layout import build_side_channel_language_directive
 from skill_check import resolve_check, success_chance, CheckResult
 from mechanics.social.relationships import clamp_score, is_contact_eligible
+from mechanics.system.input_sanitizer import fence_player_message, sanitize_prompt_lore
 
 from .embeds import *
 
@@ -148,6 +150,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # Handle Over-Limit Attempts: In-character refusal with escalating badgering penalty
     if is_over_limit:
         return await handle_dm_over_limit(
+            session=session,
+            speaker_gender=str(contact.get("gender") or basic.get("gender") or ""),
             session_id=session_id,
             npc_id=npc_id,
             contact_name=contact_name,
@@ -234,7 +238,12 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     # Fetch recent message history
     history_rows = db.get_phone_messages(session_id, npc_id, limit=6)
-    history_text = "\n".join(f"{'Player' if r['sender'] == 'player' else contact_name}: {r['message']}" for r in history_rows)
+    history_text = "\n".join(
+        f"Player: {fence_player_message(r['message'], max_len=500)}"
+        if r["sender"] == "player"
+        else f"{contact_name}: {sanitize_prompt_lore(r['message'], max_len=500)}"
+        for r in history_rows
+    )
 
     # In-Game Time & World Schedule Context
     curr_day_val, curr_min_val, _ = db.get_session_time(session_id)
@@ -596,12 +605,24 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         + in_person_hint
         + family_and_grade_hint
         + meetup_location_hint
+        + (
+            (build_side_channel_language_directive(
+                session,
+                text_fields=("reply_text",),
+                preserve_fields=("rendezvous_location", "[Attached Photo:/Video: ...] bracket prefix"),
+                style="sms",
+                speaker_gender=str(contact.get("gender") or basic.get("gender") or ""),
+                recipient_gender=str(player_char.get("gender") or session.get("lead_character_gender") or ""),
+            ) + "\n")
+            if str(session.get("narration_language") or session.get("language") or "en").lower().strip().split("-")[0] != "en"
+            else ""
+        )
         + f"Respond with ONLY a single valid JSON object matching the schema:\n{dm_schema}"
     )
 
     user_prompt = (
         f"Conversation History:\n{history_text}\n"
-        f"Player ({player_char.get('name', 'Hero')}): {user_message}\n"
+        f"Player ({player_char.get('name', 'Hero')}): {fence_player_message(user_message, max_len=500)}\n"
         f"Intent: {intent}\n"
         f"Generate {contact_name}'s text reply JSON:"
     )
@@ -749,20 +770,21 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     )
 
     # Save messages to SQLite
-    db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
-    db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
+    await db.adb(db.save_phone_message, session_id, npc_id, sender="player", message=user_message, intent=intent)
+    await db.adb(db.save_phone_message, session_id, npc_id, sender="npc", message=reply_text, intent=intent)
 
     # Persist meetup appointment so the NPC appears at the rendezvous location
     if resolved_rendezvous and intent == "meetup":
         # Only save if there is no active appointment for this contact or the location has changed
         if not existing_appointment or existing_appointment.get("rendezvous_location") != resolved_rendezvous:
-            db.save_phone_appointment(session_id, npc_id, contact_name, resolved_rendezvous, is_confidential=is_romantic)
+            await db.adb(db.save_phone_appointment, session_id, npc_id, contact_name, resolved_rendezvous, is_confidential=is_romantic)
             # Update contact known location so spatial queries and world tracker recognize where they are situated
             existing_basic = dict(contact.get("basic_info") or {})
             existing_basic["location"] = resolved_rendezvous
             meet_term = "a romantic date" if is_romantic else "a meetup"
             meet_mem = f"Agreed via DM to meet for {meet_term} at {resolved_rendezvous}"
-            db.upsert_contact(
+            await db.adb(
+                db.upsert_contact,
                 session_id=session_id,
                 character_id=player_char.get("id", 0),
                 npc_id=npc_id,
@@ -776,7 +798,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # Record memorable flirtation milestone
     if intent == "flirt" and check_result.succeeded and affinity_delta >= 2:
         flirt_mem = f"Shared playful, affectionate flirtation via DM with {contact_name}"
-        db.upsert_contact(
+        await db.adb(
+            db.upsert_contact,
             session_id=session_id,
             character_id=player_char.get("id", 0),
             npc_id=npc_id,
@@ -804,11 +827,50 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         except Exception as _dm_led_err:
             log.warning(f"[phone] Failed to record DM flirt milestone: {_dm_led_err}")
 
+    # Shared +18/+30 Daily Digestion Cap & Tier 1 Dossier Unlock (no room Composure drain)
+    dm_digestion_capped = False
+    dm_discovered_facts = []
+    if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
+        from mechanics.social import consequences as _soc_conseq
+        from mechanics.social import pacing as _soc_pacing
+
+        turn_dm_idx = max(1, len((session or {}).get("history") or []))
+        char_id_val = int(player_char.get("id", 0) or 0)
+        if affinity_delta > 0:
+            digestion_res = await db.adb(
+                _soc_pacing.apply_shared_daily_digestion,
+                session_id,
+                char_id_val,
+                contact_name,
+                raw_delta=affinity_delta,
+                current_day=current_day,
+                is_on_date=bool(is_romantic and existing_appointment),
+                is_confession=False,
+                is_gift=False,
+                turn_updated=turn_dm_idx,
+            )
+            affinity_delta = int(digestion_res.get("applied_delta", affinity_delta))
+            dm_digestion_capped = bool(digestion_res.get("capped"))
+        if check_result.succeeded and str(intent_category or intent or "").lower() in ("chat", "friendly", "personal", "flirt"):
+            dm_cat = "flirt_chemistry" if str(intent_category or intent or "").lower() == "flirt" else "get_to_know"
+            dm_discovered_facts = await db.adb(
+                _soc_conseq.select_and_record_dialogue_discoveries,
+                session_id,
+                char_id_val,
+                contact_name,
+                category=dm_cat,
+                topic_id=f"dm_{intent or 'chat'}",
+                outcome_tier="success",
+                contact_obj=contact,
+                scenario=scen_key,
+                turn_number=turn_dm_idx,
+            )
+
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
     if affinity_delta != 0:
         if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
             new_score = clamp_score(score + affinity_delta)
-            db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
+            await db.adb(db.update_contact_score, session_id, npc_id, new_score, character_id=player_char.get("id", 0))
         else:
             log.info(f"[phone] Skipping affinity update for ineligible contact '{contact_name}' (role: {role}).")
 
@@ -817,7 +879,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     digital_item_id = None
     media_type_created = None
     if check_result.succeeded:
-        digital_item_id, media_type_created = persist_dm_media_item_and_milestone(
+        digital_item_id, media_type_created = await db.adb(
+            persist_dm_media_item_and_milestone,
             session=session,
             session_id=session_id,
             npc_id=npc_id,
@@ -846,7 +909,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             else:
                 meta["relocations_used"] = 0
 
-        db.record_phone_daily_interaction(
+        await db.adb(
+            db.record_phone_daily_interaction,
             session_id=session_id,
             npc_id=npc_id,
             current_day=current_day,
@@ -856,7 +920,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             is_over_limit=False
         )
 
-    updated_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
+    updated_limits = await db.adb(db.get_phone_daily_limits, session_id, npc_id, current_day)
 
     return {
         "reply_text": reply_text,
@@ -868,6 +932,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         "digital_item_id": digital_item_id,
         "media_type_created": media_type_created,
         "daily_limits": updated_limits,
+        "daily_digestion_capped": dm_digestion_capped,
+        "discovered_facts": dm_discovered_facts,
         "check_result": {
             "stat": stat_name,
             "chance": check_result.chance,

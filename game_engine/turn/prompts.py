@@ -73,11 +73,16 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
         sub_objs = story_quest.get("sub_objectives", []) or []
         sub_obj_lines = []
         for so in sub_objs:
+            if not isinstance(so, dict):
+                continue
+            is_opt = bool(so.get("is_optional"))
+            if is_opt and not bool(so.get("is_discovered", True)):
+                continue
             so_id = so.get("id")
-            box = "[x]" if so.get("completed") else "[ ]"
-            arch_str = f" [{so['archetype']}]" if so.get("archetype") else ""
+            so_stat = str(so.get("status") or ("completed" if so.get("completed") else "active")).lower()
+            box = "[x]" if so.get("completed") else ("[FAILED]" if so_stat == "failed" else ("[BYPASSED]" if so_stat == "bypassed" else ("[LOCKED]" if so_stat == "locked_out" else "[ ]")))
             wp_ctx = ""
-            if not so.get("completed") and so_id is not None and session.get("id"):
+            if not so.get("completed") and so_stat == "active" and so_id is not None and session.get("id"):
                 sq_qid = str(story_quest.get("quest_id") or "")
                 so_id_int = int(so_id)
                 active_wp = (
@@ -87,13 +92,21 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
                 )
                 if active_wp:
                     wps = so.get("waypoints") or db.get_quest_waypoints(session["id"], story_quest.get("quest_id", ""), so_id) or []
-                    tot_st = len(wps) if wps else 3
+                    tot_st = len(wps) if wps else (1 if is_opt else 2)
                     st_idx = active_wp.get("stage_index", 1)
                     st_lbl = active_wp.get("stage_label", "")
                     st_loc = active_wp.get("target_location", "")
                     loc_part = f" @ {st_loc}" if st_loc else ""
                     wp_ctx = f" -> [ACTIVE STAGE {st_idx}/{tot_st}: {st_lbl}{loc_part}]"
-            sub_obj_lines.append(f"  {box} Sub-Quest #{so.get('id', '?')}{arch_str}: {so.get('text', '')}{wp_ctx}")
+            if is_opt:
+                badge_lbl = so.get("badge") or f"Optional — {str(so.get('role') or 'aid').title()}"
+                hint_part = f" ({so['stakes_hint']})" if so.get("stakes_hint") else ""
+                sub_obj_lines.append(f"  {box} [{badge_lbl}] {so.get('text', '')}{hint_part}{wp_ctx}")
+            elif so_id == 0 or so.get("is_main"):
+                sub_obj_lines.append(f"  {box} ★ Main Objective: {so.get('text', '')}{wp_ctx}")
+            else:
+                arch_str = f" [{so['archetype']}]" if so.get("archetype") else ""
+                sub_obj_lines.append(f"  {box} Sub-Quest #{so.get('id', '?')}{arch_str}: {so.get('text', '')}{wp_ctx}")
         sub_objs_context = "\n".join(sub_obj_lines) if sub_obj_lines else "  (No sub-quests listed)"
 
 
@@ -102,7 +115,7 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
 
 
 
-        all_sub_objs_done = sub_objs and all(so.get("completed") for so in sub_objs)
+        all_sub_objs_done = bool(sub_objs and db.is_quest_main_objectives_complete(sub_objs))
 
 
 
@@ -373,7 +386,7 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
         check_obj = a.get("check")
         chance_note = f" (success chance was {check_obj.chance}%)" if check_obj and hasattr(check_obj, "chance") else ""
         c_name = a["char"]["name"] if isinstance(a.get("char"), dict) and a["char"].get("name") else "You"
-        scen_for_act = str(session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy")
+        scen_for_act = str((session.get("scenario") if isinstance(session, dict) else None) or "fantasy")
         is_recruit_act = (
             str(a.get("intent") or "").lower() == "party_recruit"
             or any(
@@ -401,8 +414,11 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
                 )
             except Exception:
                 pass
+        from mechanics.system.input_sanitizer import fence_player_action, sanitize_character_name
+        safe_c_name = sanitize_character_name(c_name, max_len=60, fallback="Hero")
+        fenced_lbl = fence_player_action(action_lbl, max_len=400)
         action_lines.append(
-            f"- {c_name} chose to: \"{action_lbl}\"{mp_note} -> "
+            f"- {safe_c_name} chose to: {fenced_lbl}{mp_note} -> "
             f"Outcome (already determined, do not contradict): {tier_directive}{chance_note}"
         )
     stealth_directives = []

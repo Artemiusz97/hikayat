@@ -633,10 +633,28 @@ def calculate_social_affinity_delta(
 
     # Rule 1: Check Failure Hard Ceiling
     # A failed check CANNOT yield positive affinity gain. Capped at <= 0.
+    breakdown["cha_fail_cushion"] = 0
     if not is_free_action and not succeeded:
         final_delta = min(0, final_delta)
+        is_covert_ab = bool(action.get("is_covert_ability"))
+        cha_cushioned = False
+        if is_covert_ab:
+            backfire_floor = -6 if tier in ("crit_fail", "critical_failure") else -4
+            final_delta = min(final_delta, backfire_floor)
+            reasons.append(f"Covert ability manipulation detected ({backfire_floor})")
+        elif (
+            stat == "CHA"
+            and tier not in ("crit_fail", "critical_failure")
+            and interaction_tone not in ("hostile", "cruel")
+            and not action.get("is_cruel")
+            and final_delta < 0
+        ):
+            final_delta = min(0, final_delta + 1)
+            cha_cushioned = True
+            breakdown["cha_fail_cushion"] = 1
+            reasons.append("CHA social poise cushions non-critical failure (+1)")
         # Ensure that a failed check results in an affinity loss (at least -1) unless heavily cushioned
-        if final_delta == 0 and not is_free_action:
+        if final_delta == 0 and not is_free_action and not cha_cushioned:
             final_delta = -1
 
     # Rule 2: Check Success Floor
@@ -650,6 +668,18 @@ def calculate_social_affinity_delta(
             final_delta = min(0, final_delta)
         else:
             final_delta = max(1, final_delta)
+            cat_low = str(action.get("category") or action.get("social_category") or "").strip().lower()
+            if (
+                cat_low == "friction_rivalry"
+                and not action.get("is_cruel")
+                and interaction_tone != "cruel"
+                and any(
+                    tok in " ".join(clean_traits).lower()
+                    for tok in ("proud", "rebellious", "delinquent", "stoic", "competitive", "tsundere", "defiant", "blunt", "stubborn", "bold")
+                )
+            ):
+                final_delta = max(2, final_delta + 1)
+                reasons.append("Grudging respect from proud/defiant temperament (+1)")
 
     # Rule 3: Single-turn clamp [-10, 18]
     final_delta = max(-10, min(18, final_delta))

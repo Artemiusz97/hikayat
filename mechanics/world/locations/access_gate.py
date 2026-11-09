@@ -89,6 +89,117 @@ def format_minute_to_hhmm(minute: int | None) -> str:
     return f"{m // 60:02d}:{m % 60:02d}"
 
 
+_SANCTUARY_PREFERRED_KEYWORDS = (
+    "inn", "tavern", "guild", "cafe", "coffee", "diner", "teahouse",
+    "commons", "agency_hq", "lobby", "sanctuary", "shelter", "bazaar",
+    "market", "promenade", "plaza", "hub",
+)
+_SANCTUARY_EXCLUDED_KEYWORDS = (
+    "homeroom", "classroom", "rooftop", "infirmary", "faculty",
+    "principal", "council", "locker", "pool", "dungeon", "prison",
+    "morgue", "quarantine", "vault", "sewer", "crypt",
+)
+
+
+def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
+    """
+    Designates and persists 1 core Hub Sanctuary facility per session (`safe_sanctuary_exempt = True`)
+    that can NEVER be locked down by WorldScars or Chapter 8–9 martial law.
+    """
+    if not session_id:
+        return ""
+    try:
+        nodes = db.get_session_world_nodes(session_id) or []
+    except Exception:
+        nodes = []
+    if not nodes:
+        return "loc_hub_sanctuary"
+
+    facilities = [n for n in nodes if str(n.get("node_type") or "").upper() == "FACILITY"]
+    if not facilities:
+        facilities = list(nodes)
+
+    for fac in facilities:
+        nid = str(fac.get("node_id") or "")
+        if not nid:
+            continue
+        try:
+            st = db.get_world_node_state(session_id, nid) or {}
+            if st.get("safe_sanctuary_exempt"):
+                return nid
+        except Exception:
+            pass
+
+    chosen_nid = ""
+    for fac in facilities:
+        nid = str(fac.get("node_id") or "")
+        tier = str(fac.get("access_tier") or "open").lower()
+        blob = f"{nid} {fac.get('name') or ''}".lower()
+        if tier != "open":
+            continue
+        if any(ex in blob for ex in _SANCTUARY_EXCLUDED_KEYWORDS):
+            continue
+        if any(pk in blob for pk in _SANCTUARY_PREFERRED_KEYWORDS):
+            chosen_nid = nid
+            break
+
+    if not chosen_nid:
+        for fac in facilities:
+            nid = str(fac.get("node_id") or "")
+            tier = str(fac.get("access_tier") or "open").lower()
+            blob = f"{nid} {fac.get('name') or ''}".lower()
+            if tier == "open" and not any(ex in blob for ex in _SANCTUARY_EXCLUDED_KEYWORDS):
+                chosen_nid = nid
+                break
+
+    if not chosen_nid:
+        for nd in nodes:
+            nid = str(nd.get("node_id") or "")
+            tier = str(nd.get("access_tier") or "open").lower()
+            blob = f"{nid} {nd.get('name') or ''}".lower()
+            if (
+                nid
+                and tier == "open"
+                and not any(ex in blob for ex in _SANCTUARY_EXCLUDED_KEYWORDS)
+                and any(pk in blob for pk in _SANCTUARY_PREFERRED_KEYWORDS)
+            ):
+                chosen_nid = nid
+                break
+
+    if chosen_nid:
+        try:
+            db.update_world_node_state(session_id, chosen_nid, {"safe_sanctuary_exempt": True})
+        except Exception:
+            pass
+    return chosen_nid
+
+
+def is_safe_sanctuary_node(session_id: int, node_id: str) -> bool:
+    """Returns True if `node_id` (or its parent facility) is the session's Safe Hub Sanctuary."""
+    if not session_id or not node_id:
+        return False
+    sanctuary_id = get_designated_hub_sanctuary_node_id(session_id)
+    target = str(node_id).strip()
+    if sanctuary_id and target.lower() == sanctuary_id.lower():
+        return True
+    try:
+        node = db.get_world_node(session_id, target)
+        if node:
+            st = db.get_world_node_state(session_id, target) or {}
+            if st.get("safe_sanctuary_exempt"):
+                return True
+            parent_id = str(node.get("parent_id") or "")
+            if parent_id:
+                if sanctuary_id and parent_id.lower() == sanctuary_id.lower():
+                    return True
+                pst = db.get_world_node_state(session_id, parent_id) or {}
+                if pst.get("safe_sanctuary_exempt"):
+                    return True
+    except Exception:
+        pass
+    return False
+
+
 def get_node_effective_access_info(
     session_id: int,
     node_id: str,
@@ -222,13 +333,40 @@ def get_node_effective_access_info(
         except Exception:
             pass
 
-    # Procedural World Event Facility Lockdown / Quarantine evaluation
-    if session_id and not is_unlocked:
+    # Procedural World Event Facility Lockdown / Quarantine evaluation (Safe Hub Sanctuary is NEVER locked)
+    sanctuary_exempt = is_safe_sanctuary_node(session_id, node_id) if session_id else False
+    if session_id and sanctuary_exempt:
+        try:
+            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            has_crisis_lock = any(
+                ev.get("status") == "active"
+                and (
+                    (ev.get("modifiers") or {}).get("is_locked")
+                    or (ev.get("modifiers") or {}).get("lockdown_nodes")
+                    or (ev.get("modifiers") or {}).get("martial_law_lockdown")
+                    or (ev.get("metadata") or {}).get("scar_tier") == "peak"
+                )
+                for ev in (ev_list or [])
+                if isinstance(ev, dict)
+            )
+            if has_crisis_lock:
+                tier = "open"
+                is_unlocked = True
+                curfew_active = False
+                curfew_label = ""
+                schedule_locked = False
+                is_trespassing = False
+                sched_reason_code = "safe_hub_sanctuary"
+                sched_reason_label = "Safe Hub Sanctuary (Exempt from Crisis Lockdown)"
+        except Exception:
+            pass
+    elif session_id and not is_unlocked:
         try:
             from mechanics.world.world_events.modifiers import is_node_locked_by_event
+            sanctuary_nid = get_designated_hub_sanctuary_node_id(session_id)
             ev_list = db.get_world_events(session_id, entity_type="macro_event")
-            ev_lock = is_node_locked_by_event(ev_list, node_id) or (
-                is_node_locked_by_event(ev_list, str(fac_node.get("node_id") or "")) if fac_node else None
+            ev_lock = is_node_locked_by_event(ev_list, node_id, safe_sanctuary_node_id=sanctuary_nid) or (
+                is_node_locked_by_event(ev_list, str(fac_node.get("node_id") or ""), safe_sanctuary_node_id=sanctuary_nid) if fac_node else None
             )
             if ev_lock and ev_lock.get("is_locked"):
                 tier = "restricted"
@@ -239,7 +377,40 @@ def get_node_effective_access_info(
             pass
 
     # Status Badge
-    if is_unlocked and (tier in ("restricted", "private") or schedule_locked):
+    owned_badge = ""
+    for_sale_badge = ""
+    if session_id:
+        try:
+            from .residences import get_player_owned_or_starter_property_for_node, is_unpurchased_realty_node
+            owned_prop = get_player_owned_or_starter_property_for_node(session_id, node_id)
+            if owned_prop is not None:
+                tier = "open"
+                is_unlocked = True
+                curfew_active = False
+                curfew_label = ""
+                schedule_locked = False
+                is_trespassing = False
+                sched_reason_code = ""
+                sched_reason_label = ""
+                owned_badge = "Owned Residence" if not owned_prop.get("is_starter") else "Starter Quarters"
+            else:
+                unbought_realty = is_unpurchased_realty_node(session_id, node_id)
+                if unbought_realty is not None and not is_unlocked:
+                    tier = "private"
+                    curfew_active = False
+                    curfew_label = ""
+                    schedule_locked = False
+                    is_trespassing = False
+                    sched_reason_code = "property_for_sale"
+                    sched_reason_label = f"For Sale — {unbought_realty['price']}g"
+                    for_sale_badge = f"For Sale — {unbought_realty['price']}g"
+        except Exception:
+            pass
+    if owned_badge:
+        status_badge = owned_badge
+    elif for_sale_badge:
+        status_badge = for_sale_badge
+    elif is_unlocked and (tier in ("restricted", "private") or schedule_locked):
         status_badge = "Unlocked"
     elif sched_reason_code == "after_hours_anomaly_breach":
         status_badge = "Anomalous Breach (Unlocked)"
@@ -271,6 +442,7 @@ def get_node_effective_access_info(
         "is_trespassing": is_trespassing,
         "schedule_reason_code": sched_reason_code,
         "schedule_reason_label": sched_reason_label,
+        "safe_sanctuary_exempt": bool(sanctuary_exempt),
     }
 
 
@@ -303,6 +475,7 @@ def record_node_unlock(
         "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
         "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
         "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+        "fac_agency_residence", "fac_temple_residence", "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
     )
     if parent_id and node.get("node_type") == "ROOM" and not parent_id.startswith("bld_school_") and parent_id not in multi_wing_parents:
         db.update_world_node_state(session_id, parent_id, updates)
@@ -434,6 +607,7 @@ def evaluate_anomalous_hq_access(
     elif "loc_private_hq_1" in combined or "sub_priv1_" in combined:
         if n_id == "loc_private_hq_1" or any(k in combined for k in (
             "sub_priv1_entrance", "sub_priv1_dispatch", "entrance", "lobby", "atrium",
+            "atrium concierge", "global contracts", "contracts & telemetry",
             "contract board", "contract & telemetry", "contract & tactical dispatch",
         )):
             is_open_lobby_or_shop = True
@@ -444,6 +618,7 @@ def evaluate_anomalous_hq_access(
     elif "loc_private_hq_2" in combined or "sub_priv2_" in combined:
         if n_id == "loc_private_hq_2" or any(k in combined for k in (
             "sub_priv2_entrance", "sub_priv2_dispatch", "entrance", "foyer", "reception",
+            "brick-front vestibule", "security reception", "partner case room",
             "lobby", "corkboard", "dispatch bullpen", "contract board", "contract & tactical dispatch",
         )):
             is_open_lobby_or_shop = True
@@ -501,8 +676,8 @@ def evaluate_anomalous_hq_access(
 
     label_map = {
         "public_agency": "Restricted Bureau Inner Sector (Public Agency Clearance Required)",
-        "private_agency_1": "Restricted Corporate R&D Floor & Vault (Conglomerate Operative Clearance Required)",
-        "private_agency_2": "Padlocked Back-Office Cage & Cellar (Local Agency Staff Key Required)",
+        "private_agency_1": "Restricted High-Security Tower Floor & Vault (Conglomerate Clearance Required)",
+        "private_agency_2": "Restricted Partner Suite & Vaulted Armory (Agency Partner Credentials Required)",
         "monastic_order": "Restricted Monastic Inner Sanctum (Order Initiate Clearance Required)",
         "cult_faction": "Ward-Sealed Occult Sanctum (Hostile Cult Restricted Area)",
         "clandestine_faction": "Biometric Clandestine Vault (Unauthorized Entry Prohibited)",
@@ -520,7 +695,8 @@ def evaluate_node_access_gate(
     session: dict,
     actions: list = None,
     party: list = None,
-    companions: list = None
+    companions: list = None,
+    persist_db: bool = True,
 ) -> dict[str, Any]:
     """
     Evaluates whether player travel to target_node_id is halted by a lock, curfew,
@@ -778,7 +954,9 @@ def evaluate_node_access_gate(
             )
 
     # 1. Player's own home is always accessible to the player (once off-campus)
-    if low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in display_name.lower():
+    from .residences import get_player_owned_or_starter_property_for_node, is_unpurchased_realty_node
+    from .realty_catalog import is_anomalous_realty_scenario, resolve_realty_entry
+    if (get_player_owned_or_starter_property_for_node(session_id, target_node_id, session=session if isinstance(session, dict) else None) is not None) or (not is_anomalous_realty_scenario(scen_key) and (low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in display_name.lower())):
         return {"gated": False}
 
     # 1b. Love Hotel Automated Suite Rental (`$40` Mirrored Suite / `$80` Rooftop Jacuzzi Suite + Partner Waiver)
@@ -909,6 +1087,26 @@ def evaluate_node_access_gate(
         except Exception:
             pass
 
+    # 1d. Hidden Folklore Villages Veil Gate & Sanctuary Treaty (must run BEFORE Step 2 open check & Step 3 \bkey\b regex)
+    from .folklore_veil import evaluate_folklore_veil_gate
+    veil_gate_res = evaluate_folklore_veil_gate(
+        session_id=session_id,
+        target_node_id=target_node_id,
+        node=node,
+        fac_node=fac_node,
+        session=session if isinstance(session, dict) else None,
+        actions=actions,
+        party=party,
+        active_companions=active_companions,
+        current_minute=safe_min,
+        persist_db=persist_db,
+    )
+    if veil_gate_res is not None:
+        if not veil_gate_res.get("gated") and late_arrival_directive and not veil_gate_res.get("prompt_directive"):
+            veil_gate_res["late_arrival_warning"] = True
+            veil_gate_res["prompt_directive"] = late_arrival_directive
+        return veil_gate_res
+
     # 2. Check access info & existing unlocks
     access_info = get_node_effective_access_info(
         session_id, target_node_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key
@@ -949,7 +1147,8 @@ def evaluate_node_access_gate(
         }
 
     # 3. Check Inventory for Key / Pass / Badge (strict word-boundary match so "Keychain"/"Whiskey" never unlock vaults)
-    if re.search(
+    unbought_realty = is_unpurchased_realty_node(session_id, target_node_id, session=session if isinstance(session, dict) else None) if session_id else None
+    if (unbought_realty is None) and re.search(
         r"\b(master key|skeleton key|staff pass|council badge|keycard|passcard|access card|clearance badge|door key|gate key|vault key|sanctum key|room key|office key|key)\b",
         inv_str,
     ):
@@ -957,7 +1156,7 @@ def evaluate_node_access_gate(
         return {"gated": False, "unlocked_by": "key"}
 
     # 4. Check Accompanying Companion Authority
-    for comp in active_companions:
+    for comp in ([] if unbought_realty else active_companions):
         if isinstance(comp, dict) and has_npc_authority_for_node(comp, node, fac_node):
             record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="companion_authority")
             return {"gated": False, "unlocked_by": "companion_authority", "authorized_npc": comp.get("name")}
@@ -983,7 +1182,7 @@ def evaluate_node_access_gate(
             }
 
     # 6. Check Private Residence Intercom Gate (Edge Case 5)
-    if tier == "private" and ("house" in low_id or "residence" in low_id):
+    if (unbought_realty is None) and tier == "private" and ("house" in low_id or "residence" in low_id):
         contacts = db.get_contacts(session_id) or []
         disp_low = display_name.lower()
         resident_contact = None
@@ -1114,7 +1313,10 @@ def evaluate_node_access_gate(
     sched_reason_code = access_info.get("schedule_reason_code") or ""
     sched_reason_label = access_info.get("schedule_reason_label") or ""
 
-    if sched_reason_code in ("commercial_closed", "weekend_closed"):
+    if unbought_realty is not None:
+        reason_code = "property_for_sale"
+        reason_label = f"For Sale — {unbought_realty['price']}g"
+    elif sched_reason_code in ("commercial_closed", "weekend_closed"):
         reason_code = sched_reason_code
         reason_label = sched_reason_label
     elif curfew_active or is_trespassing:
@@ -1140,6 +1342,53 @@ def evaluate_node_access_gate(
     )
 
     barrier_choices = []
+    if unbought_realty is not None:
+        barrier_choices.append(Phase2Choice(
+            f"[For Sale — {unbought_realty['price']}g] Purchase {unbought_realty['name']} Deed",
+            stat="FREE",
+            requirement=0,
+            intent="property_purchase",
+            property_id=unbought_realty["property_id"],
+            price=int(unbought_realty["price"]),
+            target_node_id=unbought_realty["bedroom_node_id"],
+            target_location=f"{unbought_realty['zone_name']} ➔ {unbought_realty['name']} ➔ {unbought_realty['bedroom_name']}",
+        ))
+        if not is_lock_jammed:
+            barrier_choices.append(Phase2Choice(
+                f"[AGI] Sneak in or pick the lock to inspect {display_name}",
+                stat="AGI",
+                requirement=12,
+                target_node_id=target_node_id,
+                target_location=display_name,
+                intent="movement",
+                is_stealth=True,
+                stance="stealth",
+            ))
+        barrier_choices.append(Phase2Choice(
+            f"Turn back from {display_name}",
+            stat="NONE",
+            requirement=0,
+            target_node_id=retreat_nid,
+            target_location=retreat_loc,
+            intent="movement",
+        ))
+        return {
+            "gated": True,
+            "node_id": target_node_id,
+            "facility_node_id": fac_node.get("node_id") if fac_node else target_node_id,
+            "node_name": display_name,
+            "reason_code": "property_for_sale",
+            "reason_label": f"For Sale — {unbought_realty['price']}g",
+            "is_trespassing": False,
+            "focal_point": f"Outside {unbought_realty['name']} (For Sale — {unbought_realty['price']}g)",
+            "prompt_directive": (
+                f"[SYSTEM: PROPERTY FOR SALE — DOORSTEP THRESHOLD]\n"
+                f"The player has arrived at the exterior doorstep of {unbought_realty['name']}, an unowned residential property currently listed For Sale (never quote raw gold integers in narrative prose).\n"
+                f"- Place characters at the exterior entrance/doorstep of {unbought_realty['name']}.\n"
+                f"- Depict the locked residential keypad/door and realty placard ({unbought_realty['description']}). Characters halt here unless purchasing the deed or bypassing the lock."
+            ),
+            "barrier_choices": barrier_choices,
+        }
     if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
         if not is_lock_jammed:
             barrier_choices.append(Phase2Choice(
@@ -1443,7 +1692,22 @@ def get_privacy_nudge_choice(
     # Affinity-scaled DC curve (Stranger: DC 12 -> Acquaintance: 10-11 -> Friend: 8-9 -> Romantic/Dating: 5-7)
     score_discount = max(0, min(6, score // 25))
     track_bonus = 2 if track == 'romantic' else (1 if score >= 60 else 0)
-    req_dc = max(5, min(14, 12 - score_discount - track_bonus))
+    home_dc_mod = 0
+    try:
+        from .residences import get_player_owned_or_starter_property_for_node
+        from .realty_catalog import resolve_realty_entry
+        owned_here = get_player_owned_or_starter_property_for_node(session_id, str(parent_id or curr_node['node_id']), session=sess_dict)
+        if owned_here and owned_here.get("catalog_entry"):
+            home_dc_mod = int(owned_here["catalog_entry"].get("cha_invite_dc_mod") or 0)
+        else:
+            prim_prop = db.get_primary_property(session_id)
+            if prim_prop and not prim_prop.get("is_starter"):
+                p_cat = resolve_realty_entry(str(prim_prop.get("property_id") or ""), session_or_id=sess_dict)
+                if p_cat:
+                    home_dc_mod = int(p_cat.get("cha_invite_dc_mod") or 0)
+    except Exception:
+        home_dc_mod = 0
+    req_dc = max(3, min(14, 12 - score_discount - track_bonus + home_dc_mod))
 
     scen_key = str(sess_dict.get('scenario') or 'high_school_drama')
     from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
@@ -1523,3 +1787,53 @@ def get_privacy_nudge_choice(
         pass
 
     return None
+
+
+CIVIC_POLICE_ROLE_TOKENS = frozenset({
+    "police", "patrol", "officer", "detective", "sergeant", "sheriff", "koban", "constable"
+})
+ACADEMIC_FACULTY_TOKENS = frozenset({
+    "teacher", "faculty", "staff", "nurse", "librarian", "principal", "counselor",
+    "custodian", "janitor", "professor", "instructor"
+})
+
+
+def can_npc_stage_at_facility(
+    npc_or_role: dict | str,
+    location: str,
+    session: dict | None = None,
+    current_minute: int = 480,
+    scen_key: str = ""
+) -> bool:
+    """Verifies whether an NPC or role is permitted to be staged at a facility at a given time.
+
+    During weekday academic hours (07:30 to 16:30), interior academic rooms (classrooms, libraries,
+    homerooms, infirmaries) are restricted to students and school staff, preventing municipal police
+    or off-campus civic officials from spawning inside study spaces without an active emergency.
+    """
+    if not location or not npc_or_role:
+        return True
+    loc_low = str(location).lower()
+    is_academic_loc = any(k in loc_low for k in ("school", "academy", "classroom", "homeroom", "stacks", "library", "infirmary", "staff room"))
+    safe_min = int(current_minute or 480) % 1440
+    is_school_hours = 450 <= safe_min < 990  # 07:30 to 16:30
+
+    if is_academic_loc and is_school_hours:
+        role = (npc_or_role.get("role") or (npc_or_role.get("basic_info") or {}).get("role") or "") if isinstance(npc_or_role, dict) else str(npc_or_role)
+        role_low = role.lower()
+        standing = str((npc_or_role.get("grade") or (npc_or_role.get("basic_info") or {}).get("grade") or "") if isinstance(npc_or_role, dict) else "").lower()
+
+        # Campus security and school resource officers permitted
+        if any(re.search(rf"\b{re.escape(t)}\b", role_low) for t in ("school", "campus", "resource")):
+            return True
+
+        # Civic town police officers excluded from interior school facilities during class hours
+        if any(re.search(rf"\b{re.escape(t)}\b", role_low) for t in CIVIC_POLICE_ROLE_TOKENS):
+            return False
+
+        # Validate student or faculty standing
+        if standing in ("faculty", "staff", "freshman", "sophomore", "junior", "senior"):
+            return True
+        if any(re.search(rf"\b{re.escape(t)}\b", role_low) for t in ACADEMIC_FACULTY_TOKENS) or "student" in role_low or "classmate" in role_low:
+            return True
+    return True

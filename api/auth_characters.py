@@ -1,11 +1,13 @@
-import inspect
 import random
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from mechanics.system.concurrency import distributed_adventure_lock, distributed_user_lock
+from .security import extract_actor_token, is_strict_auth_context, issue_actor_token, verify_actor_token, verify_user_access
 
 import db
 from db import adb
 import scenario_data
+import scenario_variants
 import character_data as cd
 from .deps import (
     logger,
@@ -19,8 +21,8 @@ from .deps import (
     CharacterAppearanceUpdateRequest,
 )
 
-if not hasattr(db, "delete_character_by_id") and hasattr(db, "delete_character"):
-    db.delete_character_by_id = db.delete_character
+
+
 
 
 async def _default_generate_class_starter_equipment(
@@ -79,10 +81,6 @@ async def _default_generate_class_starter_equipment(
         return {}
 
 
-if not hasattr(cd, "generate_class_starter_equipment"):
-    cd.generate_class_starter_equipment = _default_generate_class_starter_equipment
-
-
 async def _invoke_starter_equipment_generator(
     chosen_class: str,
     scen_key: str,
@@ -93,29 +91,17 @@ async def _invoke_starter_equipment_generator(
     starting_faction: str = "public_agency",
     force_dynamic: bool = False,
 ) -> dict:
-    gen_fn = getattr(cd, "generate_class_starter_equipment", _default_generate_class_starter_equipment)
     try:
-        try:
-            res = gen_fn(
-                chosen_class,
-                scen_key,
-                stats=stats,
-                class_description=class_description,
-                gender=gender,
-                race=race,
-                starting_faction=starting_faction,
-                force_dynamic=force_dynamic,
-            )
-        except TypeError:
-            res = gen_fn(
-                chosen_class,
-                scen_key,
-                stats=stats,
-                class_description=class_description,
-                gender=gender,
-            )
-        if inspect.isawaitable(res):
-            res = await res
+        res = await _default_generate_class_starter_equipment(
+            chosen_class,
+            scen_key,
+            stats=stats,
+            class_description=class_description,
+            gender=gender,
+            race=race,
+            starting_faction=starting_faction,
+            force_dynamic=force_dynamic,
+        )
         if isinstance(res, dict):
             return res
     except Exception as e:
@@ -219,6 +205,148 @@ def _normalize_loadout_dict(loadout: dict) -> dict:
     return normalized
 
 
+def rebuild_verified_client_starter_loadout(
+    raw_loadout: Optional[dict],
+    scenario: str,
+    char_class: str = "Adventurer",
+    gender: str = "Male",
+    race: str = "Human",
+    starting_faction: str = "public_agency",
+) -> dict:
+    """Rebuilds untrusted HTTP client starter_loadout entries using authoritative server Tier-3 generators.
+
+    Preserves sanitized cosmetic item names and descriptions from EmbarkationModal previews while
+    discarding any client-supplied [ITEM_JSON]/[GEAR_JSON] stat overrides and clamping slot_cost to 1..3.
+    """
+    if not isinstance(raw_loadout, dict) or not raw_loadout:
+        return {}
+
+    from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
+    from mechanics.combat.items.envelope import serialize_item
+    from mechanics.combat.equipment import parse_equipment_metadata
+    from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
+    from mechanics.combat.items.armors import generate_random_equipment as gen_armor
+    from mechanics.combat.items.clothing import generate_random_clothing
+    from mechanics.combat.items.headwear import generate_random_equipment as gen_headwear
+    from mechanics.combat.items.gloves import generate_random_equipment as gen_gloves
+    from mechanics.combat.items.shoes import generate_random_equipment as gen_shoes
+    from mechanics.combat.items.shields import generate_random_equipment as gen_shield
+    from mechanics.combat.items.accessories import generate_random_equipment as gen_acc
+
+    baseline = {}
+    try:
+        baseline = cd.generate_starter_equipment_loadout(
+            scenario=scenario,
+            char_class=char_class,
+            gender=gender,
+            race=race,
+            tier=3,
+            starting_faction=starting_faction,
+        ) or {}
+    except Exception:
+        baseline = {}
+
+    slot_gens = {
+        "Weapon": lambda nm: gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=nm),
+        "Head": lambda _nm: gen_headwear(scenario=scenario, slot="Head", tier=3, archetype=None),
+        "Armor": lambda _nm: gen_armor(scenario=scenario, slot="Armor", tier=3, archetype=None),
+        "Top": lambda _nm: generate_random_clothing(scenario=scenario, slot="Top", tier=3),
+        "Bottom": lambda _nm: generate_random_clothing(scenario=scenario, slot="Bottom", tier=3),
+        "Gloves": lambda _nm: gen_gloves(scenario=scenario, slot="Gloves", tier=3, archetype=None),
+        "Shoes": lambda _nm: gen_shoes(scenario=scenario, slot="Shoes", tier=3, archetype=None),
+        "Shield": lambda _nm: gen_shield(scenario=scenario, slot="Shield", tier=3, archetype=None),
+        "Accessory 1": lambda _nm: gen_acc(scenario=scenario, slot="Accessory 1", tier=3),
+        "Accessory 2": lambda _nm: gen_acc(scenario=scenario, slot="Accessory 2", tier=3),
+    }
+
+    verified: dict = {}
+    for slot, item_data in raw_loadout.items():
+        if not item_data or slot not in cd.EQUIPMENT_SLOTS:
+            continue
+        canonical_type = _resolve_slot_item_type(slot)
+        raw_name = ""
+        raw_desc = ""
+        raw_cost = 1
+        if isinstance(item_data, dict):
+            raw_name = str(item_data.get("name") or "")
+            raw_desc = str(item_data.get("description") or "")
+            if not raw_desc:
+                raw_eff = str(item_data.get("effect") or "")
+                if raw_eff and not raw_eff.lstrip().startswith("["):
+                    raw_desc = raw_eff
+            try:
+                raw_cost = int(item_data.get("slot_cost", 1) or 1)
+            except (TypeError, ValueError):
+                raw_cost = 1
+        elif isinstance(item_data, (list, tuple)) and len(item_data) >= 1:
+            raw_name = str(item_data[0] or "")
+            if len(item_data) >= 2 and item_data[1] and not str(item_data[1]).lstrip().startswith("["):
+                raw_desc = str(item_data[1])
+            if len(item_data) >= 3:
+                try:
+                    raw_cost = int(item_data[2])
+                except (TypeError, ValueError):
+                    raw_cost = 1
+        elif isinstance(item_data, str):
+            raw_name = item_data
+
+        clean_name = sanitize_character_name(raw_name, max_len=80, fallback="")
+        if not clean_name:
+            continue
+        clean_desc = sanitize_prompt_lore(raw_desc, max_len=300)
+        safe_cost = max(1, min(3, raw_cost))
+
+        base_entry = baseline.get(slot)
+        base_item = dict(base_entry) if isinstance(base_entry, dict) else None
+        # If client chose a different weapon name than baseline, generate fresh Tier-3 weapon profile for that name
+        if slot == "Weapon" or not base_item or not isinstance(base_item.get("metadata"), dict):
+            gen_fn = slot_gens.get(slot)
+            if gen_fn:
+                try:
+                    cand = gen_fn(clean_name)
+                    if isinstance(cand, dict):
+                        base_item = cand
+                except Exception:
+                    pass
+
+        if isinstance(base_item, dict):
+            meta = dict(base_item.get("metadata") or {})
+            if not meta:
+                meta = parse_equipment_metadata({"name": clean_name, "item_type": canonical_type, "slot": slot})
+            meta["name"] = clean_name
+            meta["tier"] = 3
+            meta["slot"] = slot
+            meta["item_type"] = canonical_type
+            if clean_desc:
+                meta["description"] = clean_desc
+            verified[slot] = {
+                "name": clean_name,
+                "description": clean_desc or str(meta.get("description") or "Starter gear"),
+                "effect": serialize_item(meta),
+                "slot_cost": safe_cost,
+                "item_type": canonical_type,
+                "metadata": meta,
+            }
+        else:
+            meta = parse_equipment_metadata({"name": clean_name, "item_type": canonical_type, "slot": slot})
+            meta["name"] = clean_name
+            meta["tier"] = 3
+            meta["slot"] = slot
+            meta["item_type"] = canonical_type
+            if clean_desc:
+                meta["description"] = clean_desc
+            verified[slot] = {
+                "name": clean_name,
+                "description": clean_desc or "Starter gear",
+                "effect": serialize_item(meta),
+                "slot_cost": safe_cost,
+                "item_type": canonical_type,
+                "metadata": meta,
+            }
+
+    return verified
+
+
 async def _equip_starter_loadout_dict(user_id: int, loadout: dict, skip_weapon: bool = False):
     if not isinstance(loadout, dict):
         return
@@ -299,12 +427,13 @@ async def auth_guest(req: GuestAuthRequest):
         "user_id_str": str(guest_id),
         "username": name,
         "display_name": name,
+        "auth_token": issue_actor_token(int(guest_id)),
         "is_guest": True
     }
 
 
 @router.post("/api/auth/discord")
-async def auth_discord(req: DiscordAuthRequest):
+async def auth_discord(req: DiscordAuthRequest, request: Request = None):
     """Authenticates or resolves a Discord User ID / Username to load existing Discord characters."""
     val = (req.user_id_or_name or req.discord_id or "").strip()
     if not val:
@@ -327,6 +456,13 @@ async def auth_discord(req: DiscordAuthRequest):
             resolved_id = abs(hash(val)) % (10**18)
 
     user_id = resolved_id
+    if is_strict_auth_context(request):
+        existing_tok = extract_actor_token(request)
+        if not verify_actor_token(existing_tok, int(user_id)):
+            raise HTTPException(
+                status_code=403,
+                detail="Unverified Discord ID sign-in is disabled on shared/public servers. Please continue as Guest.",
+            )
     char = await adb(db.get_character, user_id)
     discord_user = await adb(db.get_discord_user, user_id)
 
@@ -340,24 +476,42 @@ async def auth_discord(req: DiscordAuthRequest):
         "display_name": display_name,
         "has_character": char is not None,
         "character_name": char["name"] if char else None,
+        "auth_token": issue_actor_token(int(user_id)),
         "is_guest": False
     }
 
 
+async def _resolve_request_ui_lang(lang: Optional[str] = None, user_id: Optional[int] = None) -> str:
+    if lang and str(lang).strip():
+        return scenario_data.normalize_locale_code(lang)
+    if user_id:
+        try:
+            st = await adb(db.get_settings, int(user_id))
+            if isinstance(st, dict) and st.get("ui_language"):
+                return scenario_data.normalize_locale_code(st["ui_language"])
+        except Exception:
+            pass
+    return "en"
+
+
 @router.get("/api/scenarios")
-async def get_scenarios():
-    """Returns available scenario templates."""
+async def get_scenarios(lang: Optional[str] = None, user_id: Optional[int] = None):
+    """Returns available scenario templates, localized when `lang` or `user_id` specifies a non-English UI locale."""
     try:
-        scenarios = scenario_data.load_scenarios()
+        eff_lang = await _resolve_request_ui_lang(lang, user_id)
+        scenarios = scenario_data.get_localized_scenarios(eff_lang) if eff_lang != "en" else scenario_data.load_scenarios()
         scenario_list = [
             {
                 "key": k,
                 "name": v.get("display_name") or v.get("name", k),
                 "display_name": v.get("display_name") or v.get("name", k),
-                "dropdown_label": scenario_data.get_scenario_dropdown_label(v),
+                "dropdown_label": scenario_data.get_scenario_dropdown_label(v, lang=eff_lang),
                 "emoji": v.get("emoji", "🗺️"),
                 "tags": v.get("tags", []),
                 "description": v.get("description", ""),
+                "family_root": scenario_variants.get_scenario_family_root(k),
+                "variant_label": scenario_variants.get_variant_label(k, eff_lang),
+                "variant_tags": scenario_variants.get_variant_tags(k),
             }
             for k, v in (scenarios.items() if isinstance(scenarios, dict) else [])
             if not k.startswith("custom_combinator_")
@@ -372,10 +526,11 @@ async def get_scenarios():
 
 
 @router.get("/api/genres")
-async def get_genres():
+async def get_genres(lang: Optional[str] = None, user_id: Optional[int] = None):
     """Returns available genres dictionary with separated core genres and modifiers."""
     try:
-        genres = scenario_data.load_genres()
+        eff_lang = await _resolve_request_ui_lang(lang, user_id)
+        genres = scenario_data.get_localized_genres(eff_lang) if eff_lang != "en" else scenario_data.load_genres()
         core_genres = [{"key": k, **v} for k, v in genres.items() if v.get("category") == "genre"]
         modifiers = [{"key": k, **v} for k, v in genres.items() if v.get("category") == "modifier"]
         genre_list = [{"key": k, **v} for k, v in genres.items()]
@@ -386,7 +541,13 @@ async def get_genres():
 
 
 @router.get("/api/class-templates")
-async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str] = None, starting_faction: Optional[str] = None):
+async def get_class_templates(
+    scenario: Optional[str] = None,
+    tags: Optional[str] = None,
+    starting_faction: Optional[str] = None,
+    lang: Optional[str] = None,
+    user_id: Optional[int] = None,
+):
     """Returns preset class options and starting weapons, supporting custom multi-tag scenarios and all-genre browsing."""
     raw_templates = cd.load_class_templates()
     all_classes = {}
@@ -511,9 +672,29 @@ async def get_class_templates(scenario: Optional[str] = None, tags: Optional[str
         anom_meds = list(ABILITY_MEDIUMS)
         med_synergy = {k: list(v) for k, v in MEDIUM_STAT_SYNERGY.items()}
 
+    eff_lang = await _resolve_request_ui_lang(lang, user_id)
+    if eff_lang != "en":
+        classes = {
+            c_n: cd.localize_class_template(c_n, c_i, eff_lang) if isinstance(c_i, dict) else c_i
+            for c_n, c_i in classes.items()
+        }
+        all_classes = {
+            c_n: cd.localize_class_template(c_n, c_i, eff_lang) if isinstance(c_i, dict) else c_i
+            for c_n, c_i in all_classes.items()
+        }
+        faction_classes = {
+            f_k: {
+                c_n: cd.localize_class_template(c_n, c_i, eff_lang) if isinstance(c_i, dict) else c_i
+                for c_n, c_i in f_cls.items()
+            }
+            for f_k, f_cls in faction_classes.items()
+        }
+    starting_weapons_localized = cd.get_localized_starting_weapons_map(all_starting_weapons, eff_lang)
+
     return {
         "classes": classes,
         "starting_weapons": starting_weapons,
+        "starting_weapons_localized": starting_weapons_localized,
         "faction_classes": faction_classes,
         "faction_starting_weapons": faction_starting_weapons,
         "is_non_combat": is_non_combat,
@@ -654,7 +835,8 @@ def _format_character_dict(char: dict | None) -> dict | None:
 
 
 @router.get("/api/characters/{user_id}")
-async def get_user_characters(user_id: int):
+async def get_user_characters(user_id: int, request: Request = None):
+    await verify_user_access(request, user_id)
     """Fetches all characters for a given user (up to 6 maximum)."""
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
     chars = await adb(db.get_user_characters, canonical_id)
@@ -662,7 +844,8 @@ async def get_user_characters(user_id: int):
 
 
 @router.post("/api/character/switch")
-async def switch_character(req: CharacterSwitchRequest):
+async def switch_character(req: CharacterSwitchRequest, request: Request = None):
+    await verify_user_access(request, req.user_id)
     """Switches active character for a user by character_id."""
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.switch_character, canonical_id, req.character_id)
@@ -672,10 +855,29 @@ async def switch_character(req: CharacterSwitchRequest):
 
 
 @router.delete("/api/character/{user_id}/{character_id}")
-async def delete_character_endpoint(user_id: int, character_id: int):
+async def delete_character_endpoint(user_id: int, character_id: int, request: Request = None):
+    await verify_user_access(request, user_id)
     """Deletes a specific character by character_id and returns updated character roster."""
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
-    deleted = await adb(db.delete_character_by_id, canonical_id, character_id)
+
+    def _collect_char_session_ids() -> list[int]:
+        with db.get_conn() as conn:
+            c_row = conn.execute(
+                "SELECT active_session_id FROM characters WHERE id=? AND user_id=?",
+                (int(character_id), int(canonical_id)),
+            ).fetchone()
+            s_rows = conn.execute(
+                "SELECT id FROM sessions WHERE character_id=?",
+                (int(character_id),),
+            ).fetchall()
+            sids = {int(r["id"]) for r in s_rows if r and r["id"]}
+            if c_row and c_row["active_session_id"]:
+                sids.add(int(c_row["active_session_id"]))
+            return sorted(sids)
+
+    lock_sids = await adb(_collect_char_session_ids)
+    async with distributed_adventure_lock(canonical_id, lock_sids):
+        deleted = await adb(db.delete_character_by_id, canonical_id, character_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Character not found")
     chars = await adb(db.get_user_characters, canonical_id)
@@ -688,7 +890,8 @@ async def delete_character_endpoint(user_id: int, character_id: int):
 
 
 @router.get("/api/character/{user_id}")
-async def get_character(user_id: int):
+async def get_character(user_id: int, request: Request = None):
+    await verify_user_access(request, user_id)
     """Fetches full character sheet, stats, HP/MP, level, and unspent stat points."""
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
     char = await adb(db.get_character, canonical_id)
@@ -696,6 +899,7 @@ async def get_character(user_id: int):
         raise HTTPException(status_code=404, detail="Character not found")
 
     char_dict = _format_character_dict(char)
+    active_sid = None
     try:
         active_sid = await adb(db.get_active_session_id_for_user, canonical_id)
         if active_sid:
@@ -709,9 +913,9 @@ async def get_character(user_id: int):
     except Exception:
         pass
     char_dict.setdefault("clothing_status", "Fully Clothed 👕")
-    capacity = cd.inventory_capacity(char_dict["str_"])
+    capacity = await adb(db.get_character_inventory_capacity, canonical_id, char_dict, active_sid)
     items = await adb(db.get_inventory, canonical_id)
-    used_slots = sum(i.get("slot_cost", 1) for i in items if not i.get("equipped"))
+    used_slots = db.compute_inventory_used_slots(items)
 
     equipment = await adb(db.get_equipment, canonical_id)
     equipped_list = [item for item in equipment.values() if item] if equipment else None
@@ -739,7 +943,8 @@ async def get_character(user_id: int):
 
 
 @router.post("/api/character/create")
-async def create_character(req: CharacterCreateRequest):
+async def create_character(req: CharacterCreateRequest, request: Request = None):
+    await verify_user_access(request, req.user_id)
     """Creates a new character in SQLite database."""
     total_stats = req.str_val + req.per + req.end + req.cha + req.int_val + req.agi + req.luk
     if total_stats > 12:
@@ -762,148 +967,171 @@ async def create_character(req: CharacterCreateRequest):
     leftover_points = max(0, 12 - total_stats)
     try:
         user_id = await adb(db.resolve_canonical_user_id, req.user_id)
-        appearance_payload = dict(req.appearance or {})
-        is_req_m = any(kw in str(req.gender or "Male").lower() for kw in ("male", "man", "boy")) and "female" not in str(req.gender or "Male").lower()
-        if is_req_m:
-            if req.penis_size:
-                appearance_payload["penis_size"] = req.penis_size
-            appearance_payload.pop("breast_size", None)
-        else:
-            if req.breast_size:
-                appearance_payload["breast_size"] = req.breast_size
-            appearance_payload.pop("penis_size", None)
-        if req.asset_texture:
-            appearance_payload["asset_texture"] = req.asset_texture
-        if getattr(req, "origin_mode", None):
-            appearance_payload["origin_mode"] = str(req.origin_mode).strip().lower()
-        if getattr(req, "student_grade", None):
-            appearance_payload["student_grade"] = str(req.student_grade).strip()
+        async with distributed_user_lock(user_id):
+            appearance_payload = dict(req.appearance or {})
+            is_req_m = any(kw in str(req.gender or "Male").lower() for kw in ("male", "man", "boy")) and "female" not in str(req.gender or "Male").lower()
+            if is_req_m:
+                if req.penis_size:
+                    appearance_payload["penis_size"] = req.penis_size
+                appearance_payload.pop("breast_size", None)
+            else:
+                if req.breast_size:
+                    appearance_payload["breast_size"] = req.breast_size
+                appearance_payload.pop("penis_size", None)
+            if req.asset_texture:
+                appearance_payload["asset_texture"] = req.asset_texture
+            if getattr(req, "origin_mode", None):
+                appearance_payload["origin_mode"] = str(req.origin_mode).strip().lower()
+            if getattr(req, "student_grade", None):
+                appearance_payload["student_grade"] = str(req.student_grade).strip()
 
-        await adb(
-            db.create_character,
-            user_id=user_id,
-            name=req.name,
-            char_class=chosen_class,
-            class_description=req.class_description or "",
-            stats=stats,
-            pending_stat_points=leftover_points,
-            gender=req.gender or "Male",
-            scenario=scen_key,
-            race=req.race or "Human",
-            race_description=req.race_description or "",
-            appearance=appearance_payload if appearance_payload else None,
-            attribute=req.attribute,
-            combat_archetype=req.combat_archetype,
-            ability_medium=req.ability_medium,
-        )
+            from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
+            clean_gender = sanitize_character_name(req.gender or "Male", max_len=50, fallback="Male")
+            clean_race = sanitize_character_name(req.race or "Human", max_len=60, fallback="Human")
+            clean_race_desc = sanitize_prompt_lore(req.race_description or "", max_len=600)
+            clean_class_desc = sanitize_prompt_lore(req.class_description or "", max_len=1500)
+            chosen_class = sanitize_character_name(chosen_class, max_len=60, fallback="Warrior")
 
-        req_starting_fac = str(getattr(req, "starting_faction", "") or "public_agency").strip()
-        if scenario_data.is_anomalous_high_school_scenario(scen_key) and (
-            getattr(req, "origin_mode", "") == "student" or req_starting_fac in ("student_freelancer", "student")
-        ):
-            req_starting_fac = "student_freelancer"
-        if isinstance(req.starter_loadout, dict) and len(req.starter_loadout) > 0:
-            starter_loadout = req.starter_loadout
-        else:
-            starter_loadout = await _invoke_starter_equipment_generator(
-                chosen_class,
-                scen_key,
+            await adb(
+                db.create_character,
+                user_id=user_id,
+                name=sanitize_character_name(req.name, max_len=60, fallback="Adventurer"),
+                char_class=chosen_class,
+                class_description=clean_class_desc,
                 stats=stats,
-                class_description=req.class_description or "",
-                gender=req.gender or "Male",
-                race=req.race or "Human",
-                starting_faction=req_starting_fac,
-                force_dynamic=False,
+                pending_stat_points=leftover_points,
+                gender=clean_gender,
+                scenario=scen_key,
+                race=clean_race,
+                race_description=clean_race_desc,
+                appearance=appearance_payload if appearance_payload else None,
+                attribute=req.attribute,
+                combat_archetype=req.combat_archetype,
+                ability_medium=req.ability_medium,
             )
-        is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
-        is_anomalous_create = scenario_data.is_anomalous_incursions_scenario(scen_key)
-        skip_w = bool(req.starting_weapon) or is_non_combat
-        await _equip_starter_loadout_dict(
-            user_id,
-            starter_loadout,
-            skip_weapon=skip_w,
-        )
 
-        if not is_non_combat and (req.starting_weapon or not starter_loadout.get("Weapon")):
-            if is_anomalous_create:
-                from mechanics.combat.items.anomalous_gear import get_anomalous_faction_weapons
-                fac_w = get_anomalous_faction_weapons(req_starting_fac)
-                default_anom_w = fac_w[0] if fac_w else "Bureau Issue Service Pistol"
-                starting_weapon = req.starting_weapon or default_anom_w
-            else:
-                starting_weapon = req.starting_weapon or "Rusty Sword"
-            if is_anomalous_create:
-                from mechanics.combat.items.weapons import generate_random_equipment as _gen_anom_w
-                w_obj = await adb(_gen_anom_w, scenario=scen_key, slot="Weapon", tier=3, name=starting_weapon)
-                w_name_final = w_obj.get("name", starting_weapon) if isinstance(w_obj, dict) else starting_weapon
-                weapon_effect = (w_obj.get("effect") if isinstance(w_obj, dict) else None) or _build_starting_weapon_effect(
-                    starting_weapon, req.starting_weapon_description or "", scen_key
-                )
-            else:
-                w_name_final = starting_weapon
-                weapon_effect = _build_starting_weapon_effect(
-                    starting_weapon,
-                    req.starting_weapon_description or "",
+            req_starting_fac = str(getattr(req, "starting_faction", "") or "public_agency").strip()
+            if scenario_data.is_anomalous_high_school_scenario(scen_key) and (
+                getattr(req, "origin_mode", "") == "student" or req_starting_fac in ("student_freelancer", "student")
+            ):
+                req_starting_fac = "student_freelancer"
+            if isinstance(req.starter_loadout, dict) and len(req.starter_loadout) > 0:
+                starter_loadout = await adb(
+                    rebuild_verified_client_starter_loadout,
+                    req.starter_loadout,
                     scen_key,
+                    chosen_class,
+                    clean_gender,
+                    clean_race,
+                    req_starting_fac,
                 )
-            weapon_id = await adb(
-                db.add_item,
+            else:
+                starter_loadout = await _invoke_starter_equipment_generator(
+                    chosen_class,
+                    scen_key,
+                    stats=stats,
+                    class_description=clean_class_desc,
+                    gender=clean_gender,
+                    race=clean_race,
+                    starting_faction=req_starting_fac,
+                    force_dynamic=False,
+                )
+            is_non_combat = scenario_data.is_non_combat_scenario(scen_key)
+            is_anomalous_create = scenario_data.is_anomalous_incursions_scenario(scen_key)
+            skip_w = bool(req.starting_weapon) or is_non_combat
+            await _equip_starter_loadout_dict(
                 user_id,
-                w_name_final,
-                item_type="Weapon",
-                effect=weapon_effect,
-                slot_cost=1,
-                force=True,
+                starter_loadout,
+                skip_weapon=skip_w,
             )
-            await adb(db.equip_item, user_id, weapon_id, "Weapon")
 
-        if is_anomalous_create:
-            # Ensure starting consumables & 5 Innate Special Abilities are present immediately on character creation
-            try:
-                s_items = await adb(cd.get_starting_items, scen_key, chosen_class, req_starting_fac)
-                for s_it in (s_items or []):
-                    if isinstance(s_it, (list, tuple)) and len(s_it) >= 4:
-                        await adb(db.add_item, user_id, s_it[0], item_type=s_it[1], effect=s_it[2], slot_cost=int(s_it[3] or 1), force=True)
-            except Exception:
-                pass
-            try:
-                from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
-                from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
-                from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-                ch_cur = await adb(db.get_character, user_id)
-                prog = db.get_skill_progress(ch_cur) if ch_cur else {}
-                if not prog.get("innate_spells"):
-                    c_attr = (ch_cur or {}).get("attribute") or getattr(req, "attribute", None)
-                    c_arch = (ch_cur or {}).get("combat_archetype") or getattr(req, "combat_archetype", None)
-                    c_med = (ch_cur or {}).get("ability_medium") or getattr(req, "ability_medium", None)
-                    if c_attr and c_arch and c_med:
-                        innate_ids = list(build_awakened_kit_ids(c_attr, c_arch, c_med))
-                    else:
-                        innate_ids = await adb(
-                        get_anomalous_starting_innate_abilities,
-                        chosen_class,
-                        scen_key,
-                        req.class_description or "",
+            if not is_non_combat and (req.starting_weapon or not starter_loadout.get("Weapon")):
+                clean_start_w = sanitize_character_name(req.starting_weapon or "", max_len=80, fallback="")
+                clean_start_w_desc = sanitize_prompt_lore(req.starting_weapon_description or "", max_len=300)
+                if is_anomalous_create:
+                    from mechanics.combat.items.anomalous_gear import get_anomalous_faction_weapons
+                    fac_w = get_anomalous_faction_weapons(req_starting_fac)
+                    default_anom_w = fac_w[0] if fac_w else "Bureau Issue Service Pistol"
+                    starting_weapon = clean_start_w or default_anom_w
+                else:
+                    starting_weapon = clean_start_w or "Rusty Sword"
+                if is_anomalous_create:
+                    from mechanics.combat.items.weapons import generate_random_equipment as _gen_anom_w
+                    w_obj = await adb(_gen_anom_w, scenario=scen_key, slot="Weapon", tier=3, name=starting_weapon)
+                    w_name_final = w_obj.get("name", starting_weapon) if isinstance(w_obj, dict) else starting_weapon
+                    weapon_effect = (w_obj.get("effect") if isinstance(w_obj, dict) else None) or _build_starting_weapon_effect(
+                        starting_weapon, clean_start_w_desc, scen_key
                     )
-                    if innate_ids and isinstance(innate_ids, list):
-                        prog["innate_spells"] = list(innate_ids)
-                        await adb(db.set_skill_progress, user_id, prog)
-                        cur_learned = await adb(db.get_learned_spells, user_id) or []
-                        merged = list(dict.fromkeys(list(innate_ids) + list(cur_learned)))
-                        await adb(db.set_learned_spells, user_id, merged)
-                await adb(sync_equipped_anomalous_spells, user_id)
-            except Exception as e:
-                logger.warning(f"Failed setting anomalous innate spells for user {user_id}: {e}")
+                else:
+                    w_name_final = starting_weapon
+                    weapon_effect = _build_starting_weapon_effect(
+                        starting_weapon,
+                        clean_start_w_desc,
+                        scen_key,
+                    )
+                weapon_id = await adb(
+                    db.add_item,
+                    user_id,
+                    w_name_final,
+                    item_type="Weapon",
+                    effect=weapon_effect,
+                    slot_cost=1,
+                    force=True,
+                )
+                await adb(db.equip_item, user_id, weapon_id, "Weapon")
 
-        created = await adb(db.get_character, user_id)
+            if is_anomalous_create:
+                # Ensure starting consumables & 5 Innate Special Abilities are present immediately on character creation
+                try:
+                    s_items = await adb(cd.get_starting_items, scen_key, chosen_class, req_starting_fac)
+                    for s_it in (s_items or []):
+                        if isinstance(s_it, (list, tuple)) and len(s_it) >= 4:
+                            await adb(db.add_item, user_id, s_it[0], item_type=s_it[1], effect=s_it[2], slot_cost=int(s_it[3] or 1), force=True)
+                except Exception:
+                    pass
+                try:
+                    from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
+                    from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+                    from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+                    ch_cur = await adb(db.get_character, user_id)
+                    prog = db.get_skill_progress(ch_cur) if ch_cur else {}
+                    if not prog.get("innate_spells"):
+                        c_attr = (ch_cur or {}).get("attribute") or getattr(req, "attribute", None)
+                        c_arch = (ch_cur or {}).get("combat_archetype") or getattr(req, "combat_archetype", None)
+                        c_med = (ch_cur or {}).get("ability_medium") or getattr(req, "ability_medium", None)
+                        if c_attr and c_arch and c_med:
+                            innate_ids = list(build_awakened_kit_ids(c_attr, c_arch, c_med))
+                        else:
+                            innate_ids = await adb(
+                                get_anomalous_starting_innate_abilities,
+                                chosen_class,
+                                scen_key,
+                                req.class_description or "",
+                            )
+                        if innate_ids and isinstance(innate_ids, list):
+                            prog["innate_spells"] = list(innate_ids)
+                            await adb(db.set_skill_progress, user_id, prog)
+                            cur_learned = await adb(db.get_learned_spells, user_id) or []
+                            merged = list(dict.fromkeys(list(innate_ids) + list(cur_learned)))
+                            await adb(db.set_learned_spells, user_id, merged)
+                    await adb(sync_equipped_anomalous_spells, user_id)
+                except Exception as e:
+                    logger.warning(f"Failed setting anomalous innate spells for user {user_id}: {e}")
+
+            created = await adb(db.get_character, user_id)
         return {"success": True, "character": _format_character_dict(created), "resolved_scenario": scen_key}
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Error creating character: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/api/character/regenerate-gear")
-async def regenerate_character_gear(req: RegenerateGearRequest):
+async def regenerate_character_gear(req: RegenerateGearRequest, request: Request = None):
+    await verify_user_access(request, req.user_id)
     """Regenerates and equips a fresh class-tailored starter outfit for the active character."""
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.get_character, canonical_id)
@@ -971,7 +1199,8 @@ async def regenerate_character_gear(req: RegenerateGearRequest):
 
 
 @router.post("/api/character/allocate")
-async def spend_stat_point(req: SpendStatPointRequest):
+async def spend_stat_point(req: SpendStatPointRequest, request: Request = None):
+    await verify_user_access(request, req.user_id)
     """Allocates 1 pending stat point into a stat."""
     stat = req.stat.upper()
     if stat not in cd.STATS:
@@ -989,15 +1218,24 @@ async def spend_stat_point(req: SpendStatPointRequest):
 
 
 @router.post("/api/character/appearance")
-async def update_character_appearance(req: CharacterAppearanceUpdateRequest):
+async def update_character_appearance(req: CharacterAppearanceUpdateRequest, request: Request = None):
+    await verify_user_access(request, req.user_id)
     """Updates appearance attributes (breast_size, penis_size, asset_texture, etc.) for the character."""
     canonical_id = await adb(db.resolve_canonical_user_id, req.user_id)
     char = await adb(db.get_character, canonical_id)
-    if not char:
-        raise HTTPException(status_code=404, detail="Character not found")
+    if req.character_id is not None:
+        target_char = await adb(db.get_character_by_id, int(req.character_id))
+        if not target_char:
+            raise HTTPException(status_code=404, detail="Character not found")
+        if int(target_char.get("user_id") or 0) != int(canonical_id):
+            raise HTTPException(status_code=403, detail="Forbidden: character belongs to another user")
+    else:
+        if not char:
+            raise HTTPException(status_code=404, detail="Character not found")
+        target_char = char
 
     appearance_update = dict(req.appearance or {})
-    char_gen = char.get("gender", "male")
+    char_gen = target_char.get("gender", "male")
     is_char_m = any(kw in str(char_gen).lower() for kw in ("male", "man", "boy")) and "female" not in str(char_gen).lower()
     if is_char_m:
         if req.penis_size is not None:
@@ -1010,7 +1248,7 @@ async def update_character_appearance(req: CharacterAppearanceUpdateRequest):
     if req.asset_texture is not None:
         appearance_update["asset_texture"] = req.asset_texture
 
-    target_char_id = req.character_id or char["id"]
+    target_char_id = int(target_char["id"])
     updated = await adb(db.update_character_appearance, target_char_id, appearance_update)
     if not updated:
         raise HTTPException(status_code=404, detail="Character not found or update failed")

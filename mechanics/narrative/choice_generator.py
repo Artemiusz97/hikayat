@@ -623,6 +623,84 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             "label_detail": spell.get("description", ""),
         })
 
+    # 2b. ENTITY CONTRACTS & DEVIL PACTS (0-MP Invocations)
+    active_pacts = []
+    if is_anom_combat and user_id:
+        try:
+            from mechanics.pacts import (
+                build_pact_spell_def,
+                compute_pact_cast_costs,
+                get_patron_by_id,
+            )
+            sess_id_cg = int(session.get("id") or 0) if isinstance(session, dict) else 0
+            active_pacts = list(char.get("active_pacts") or [])
+            if not active_pacts and sess_id_cg:
+                active_pacts = db.get_player_active_pacts(sess_id_cg, int(user_id))
+            contained_cg = list((session.get("contained_anomalies_log") if isinstance(session, dict) else None) or [])
+            lang_cg = str((session.get("narration_language") or session.get("language") or "en") if isinstance(session, dict) else "en")
+            for p_row in active_pacts:
+                if not isinstance(p_row, dict):
+                    continue
+                patron_cg = get_patron_by_id(
+                    str(p_row.get("patron_id") or ""),
+                    scenario_or_key=scenario or "anomalous_incursions",
+                    lang=lang_cg,
+                    contained_records=contained_cg,
+                )
+                if not patron_cg:
+                    continue
+                p_tier = int(p_row.get("tier") or 1)
+                sp_pact = build_pact_spell_def(patron_cg, p_tier)
+                cost_info = compute_pact_cast_costs(char, p_row, patron_cg, current_day=int((session or {}).get("current_day") or 1) if isinstance(session, dict) else 1)
+                p_disc = sp_pact.get("discipline", "attack")
+                p_ttype = sp_pact.get("target_type", "single")
+                if p_ttype in ("support", "summon") or sp_pact.get("unavoidable"):
+                    p_hit = 100
+                elif p_ttype == "chain":
+                    p_hit = min(100, m_hit_pct + 10)
+                elif p_ttype == "aoe":
+                    p_hit = max(15, m_hit_pct - 5)
+                else:
+                    p_hit = m_hit_pct
+                p_stat = str(sp_pact.get("stat") or ("END" if p_disc == "support" else "INT")).upper()
+                toll_parts = ["0 MP"]
+                if cost_info["hp_cost"] > 0:
+                    toll_parts.append(f"-{cost_info['hp_cost']} HP")
+                if cost_info["credit_cost"] > 0:
+                    toll_parts.append(f"-{cost_info['credit_cost']} Cr")
+                if cost_info["charges_remaining"] >= 0:
+                    toll_parts.append(f"{cost_info['charges_remaining']}/{cost_info['charges_max']} Charges")
+                overdraw_badge = " • ⚠️ LETHAL OVERDRAW" if cost_info["is_lethal_overdraw"] else ""
+                p_lbl = f"{sp_pact.get('emoji', '🩸')} {sp_pact['name']} ({p_hit}% • {' • '.join(toll_parts)}{overdraw_badge})"
+                magic.append({
+                    "label": p_lbl,
+                    "stat": p_stat,
+                    "requirement": 0,
+                    "hit_chance": p_hit,
+                    "mp_cost": 0,
+                    "pip_cost": 0,
+                    "is_ultimate": False,
+                    "is_pact_skill": True,
+                    "patron_id": patron_cg["patron_id"],
+                    "patron_name": patron_cg["canonical_name"],
+                    "contract_key": p_row.get("contract_key", ""),
+                    "pact_tier": p_tier,
+                    "pact_hp_cost": cost_info["hp_cost"],
+                    "pact_credit_cost": cost_info["credit_cost"],
+                    "pact_charges_remaining": cost_info["charges_remaining"],
+                    "is_lethal_overdraw": cost_info["is_lethal_overdraw"],
+                    "can_afford": cost_info["can_invoke"],
+                    "blocked_reason": cost_info["blocked_reason"],
+                    "spell_id": sp_pact["id"],
+                    "choice_type": "MAGIC_SPELL",
+                    "action_category": "magic",
+                    "is_chain": p_ttype == "chain",
+                    "discipline": p_disc,
+                    "label_detail": sp_pact.get("description", ""),
+                })
+        except Exception:
+            pass
+
 
     # 3. TACTICS & ENVIRONMENT CATEGORY
     tactics = []
@@ -696,6 +774,18 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
             "action_category": "tactics",
             "label_detail": "Slip into shadows: sheds enemy aggro onto companions and primes Flanking Backstab (+50% dmg)"
         })
+
+    _kin_match = None
+    if is_anom_combat and active_pacts:
+        try:
+            from mechanics.pacts import evaluate_kin_authority
+            _kin_match = evaluate_kin_authority(active_pacts, monster, scenario_or_key=scenario or "anomalous_incursions")
+            if _kin_match and _kin_match.get("matched"):
+                monster["dossier_revealed"] = True
+                if isinstance(monster.get("anomaly_blueprint"), dict):
+                    monster["anomaly_blueprint"]["dossier_revealed"] = True
+        except Exception:
+            _kin_match = None
 
     # Non-Hostile Agitated Entity Containment Tactics (Persuade/Calm at any HP + Subdue at <= 35% HP)
     if monster.get("requires_non_lethal_subdue") or monster.get("is_anomalous_manifestation"):
@@ -815,6 +905,50 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
                 "incursion_id": monster.get("incursion_id", ""),
                 "quest_id": monster.get("linked_quest_id", ""),
                 "label_detail": f"Safely capture and seal the weakened entity ({subdue_reason}) alive",
+            })
+
+    if is_anom_combat:
+        if _kin_match and _kin_match.get("matched") and not monster.get("is_pact_exorcism_boss") and not monster.get("sparring"):
+            _kin_dc = 3
+            _kin_pct = min(98, _dc_to_pct(_kin_dc) + 40)
+            tactics.insert(0, {
+                "label": f"👑 Invoke Patron Authority: Pacify {monster_name} ({_kin_pct}% • CHA)",
+                "stat": "CHA",
+                "requirement": _kin_dc,
+                "hit_chance": _kin_pct,
+                "mp_cost": 0,
+                "choice_type": "DIPLOMACY_TAUNT",
+                "action_category": "tactics",
+                "intent": "anomalous_incursion_action",
+                "incursion_action": "invoke_patron_authority",
+                "incursion_id": monster.get("incursion_id", ""),
+                "quest_id": monster.get("linked_quest_id", ""),
+                "label_detail": f"Command {monster_name} to stand down via {_kin_match.get('patron_name', 'Patron')} Kin Authority (+40% Pacify & Dossier Unsealed)",
+            })
+        _surr_hp = int(monster.get("hp", 0) or 0)
+        _surr_max = max(1, int(monster.get("max_hp", 100) or 100))
+        _surr_bp = monster.get("anomaly_blueprint") if isinstance(monster.get("anomaly_blueprint"), dict) else {}
+        _surr_sap = str(monster.get("sapience") or _surr_bp.get("sapience") or "").strip().lower()
+        if (
+            0 < _surr_hp <= max(1, int(_surr_max * 0.15))
+            and (_surr_sap == "sapient" or bool(monster.get("codex_id") or _surr_bp.get("codex_id")))
+            and not monster.get("is_pact_exorcism_boss")
+            and not monster.get("sparring")
+            and not monster.get("is_human_npc")
+        ):
+            tactics.insert(0, {
+                "label": f"🩸 Accept Entity Covenant: Bind {monster_name} (Forfeit Bounty)",
+                "stat": "FREE",
+                "requirement": 0,
+                "hit_chance": 100,
+                "mp_cost": 0,
+                "choice_type": "DIPLOMACY_TAUNT",
+                "action_category": "tactics",
+                "intent": "anomalous_incursion_action",
+                "incursion_action": "accept_boss_pact_surrender",
+                "incursion_id": monster.get("incursion_id", ""),
+                "quest_id": monster.get("linked_quest_id", ""),
+                "label_detail": f"Spare the critically weakened {monster_name} (<= 15% HP) to forge a Tier I Entity Contract immediately, forfeiting its kill bounty cash",
             })
 
     # 4. FLEE CATEGORY

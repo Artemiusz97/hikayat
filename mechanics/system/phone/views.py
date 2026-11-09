@@ -23,16 +23,31 @@ from .embeds import (
 )
 from .messaging import *
 
-class PhoneMainView(discord.ui.View):
+class PhoneOwnerRestrictedView(discord.ui.View):
+    """Base phone view enforcing strict device ownership (fail-closed) without Layer-4 imports."""
+    user_id: int | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if not self.user_id or int(interaction.user.id) != int(self.user_id):
+            if interaction.response.is_done() is not True:
+                await interaction.response.send_message(
+                    "This smartphone belongs to another player.",
+                    ephemeral=True,
+                )
+            return False
+        return True
+
+
+class PhoneMainView(PhoneOwnerRestrictedView):
     """The Home Screen of the Smartphone / Cyberdeck Hub."""
-    def __init__(self, cog, session_id: int, user_id: int):
+    def __init__(self, cog, session_id: int, user_id: int, *, session: dict | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.session_id = session_id
         self.user_id = user_id
 
-        session = db.get_session(session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+        session_obj = session if isinstance(session, dict) else db.get_session(session_id)
+        scen_key = session_obj.get("scenario", "fantasy") if session_obj else "fantasy"
         branding = get_phone_branding(scen_key)
 
         contacts_app = branding.get("contacts_app_name", "Contacts")
@@ -44,8 +59,22 @@ class PhoneMainView(discord.ui.View):
         feed_btn = discord.ui.Button(label=branding["feed_app_name"], emoji=branding["feed_emoji"], style=discord.ButtonStyle.secondary, row=0)
         gallery_btn = discord.ui.Button(label=gallery_app, emoji=gallery_emoji, style=discord.ButtonStyle.secondary, row=0)
 
+        from mechanics.world.locations import is_anomalous_realty_scenario
+
         bounty_btn = discord.ui.Button(label=branding["bounty_app_name"], emoji="📋", style=discord.ButtonStyle.secondary, row=1)
         shop_btn = discord.ui.Button(label=branding["shop_app_name"], emoji="🛍️", style=discord.ButtonStyle.secondary, row=1)
+        encyclopedia_btn = discord.ui.Button(label="Encyclopedia", emoji="📖", style=discord.ButtonStyle.secondary, row=1)
+        realty_btn = None
+        if is_anomalous_realty_scenario(scen_key):
+            from localization import get_realty_label
+            _u_lang = _resolve_phone_ui_lang(user_id, session_obj)
+            realty_btn = discord.ui.Button(
+                label=get_realty_label("app_name", _u_lang)[:80],
+                emoji="🏠",
+                style=discord.ButtonStyle.success,
+                row=1,
+            )
+            realty_btn.callback = self._open_realty
         close_btn = discord.ui.Button(label="Lock Screen", emoji="🔒", style=discord.ButtonStyle.secondary, row=1)
 
         contacts_btn.callback = self._open_contacts
@@ -54,6 +83,7 @@ class PhoneMainView(discord.ui.View):
         gallery_btn.callback = self._open_gallery
         bounty_btn.callback = self._open_bounties
         shop_btn.callback = self._open_shop
+        encyclopedia_btn.callback = self._open_encyclopedia
         close_btn.callback = self._close_phone
 
         self.add_item(contacts_btn)
@@ -62,17 +92,68 @@ class PhoneMainView(discord.ui.View):
         self.add_item(gallery_btn)
         self.add_item(bounty_btn)
         self.add_item(shop_btn)
+        self.add_item(encyclopedia_btn)
+        if realty_btn is not None:
+            self.add_item(realty_btn)
         self.add_item(close_btn)
 
+    async def _open_realty(self, interaction: discord.Interaction):
+        from mechanics.world.locations.residences import build_realty_payload
+
+        def _prep_realty():
+            pl = build_realty_payload(self.session_id, self.user_id)
+            lang = _resolve_phone_ui_lang(self.user_id)
+            return pl, lang
+
+        payload, lang = await db.adb(_prep_realty)
+        embed = _build_realty_embed(payload, lang=lang)
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, lang=lang)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _open_encyclopedia(self, interaction: discord.Interaction):
+        from cogs.contacts import build_folklore_encyclopedia_embed, FolkloreEncyclopediaView
+        from mechanics.world.folklore_codex import build_encyclopedia_payload
+
+        settings = await db.adb(db.get_settings, self.user_id)
+        ui_lang = (settings or {}).get("ui_language") if isinstance(settings, dict) else None
+        payload = await db.adb(
+            build_encyclopedia_payload,
+            session_id=self.session_id,
+            user_id=self.user_id,
+            lang=ui_lang,
+        )
+        embed, _, _ = build_folklore_encyclopedia_embed(payload, mode="archive", tradition_key="all", page=0)
+        view = FolkloreEncyclopediaView(
+            payload=payload,
+            user_id=self.user_id,
+            session_id=self.session_id,
+            cog=self.cog,
+            from_phone=True,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
     async def _open_gallery(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=None, filter_type=None, page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=None, filter_type=None, page=0)
+        def _prep_gallery():
+            emb = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=None, filter_type=None, page=0)
+            inv = db.get_inventory(self.user_id) if self.user_id else []
+            return emb, inv
+
+        embed, inv_items = await db.adb(_prep_gallery)
+        view = PhoneMediaGalleryView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            filter_contact=None,
+            filter_type=None,
+            page=0,
+            inv_items=inv_items,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_contacts(self, interaction: discord.Interaction):
-        char = db.get_character(self.user_id)
-        contacts = db.get_contacts(self.session_id, character_id=char.get("id", 0)) if char else []
-        session = db.get_session(self.session_id)
+        char = await db.adb(db.get_character, self.user_id)
+        contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0))) if char else []
+        session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
 
@@ -90,9 +171,9 @@ class PhoneMainView(discord.ui.View):
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_dms(self, interaction: discord.Interaction):
-        char = db.get_character(self.user_id)
-        contacts = db.get_contacts(self.session_id, character_id=char.get("id", 0)) if char else []
-        session = db.get_session(self.session_id)
+        char = await db.adb(db.get_character, self.user_id)
+        contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0))) if char else []
+        session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
 
@@ -113,21 +194,28 @@ class PhoneMainView(discord.ui.View):
 
     async def _open_feed(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        session = db.get_session(self.session_id)
+        session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
 
         posts = await generate_gossip_feed_posts(session)
-        state_summary = get_social_state_summary(self.session_id, session)
+        state_summary = await db.adb(get_social_state_summary, self.session_id, session)
         embed = _build_gossip_feed_embed(session, posts, branding, charges=state_summary["charges"])
-        view = SocialFeedView(self.cog, self.session_id, self.user_id, posts)
+        view = SocialFeedView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            posts,
+            session=session,
+            state_summary=state_summary,
+        )
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
     async def _open_bounties(self, interaction: discord.Interaction):
         from game_engine import generate_bounty_board
         from cogs.adventure import _build_bounty_board_embed, BountyBoardView
         await interaction.response.defer()
-        session = db.get_session(self.session_id)
+        session = await db.adb(db.get_session, self.session_id)
         bounties = await generate_bounty_board(session)
         embed = _build_bounty_board_embed(session, bounties)
         view = BountyBoardView(session, bounties)
@@ -144,7 +232,7 @@ class PhoneMainView(discord.ui.View):
     async def _close_phone(self, interaction: discord.Interaction):
         await interaction.response.send_message("📱 Phone screen locked.", ephemeral=True)
 
-class DMContactSelectView(discord.ui.View):
+class DMContactSelectView(PhoneOwnerRestrictedView):
     """Dropdown menu to select which NPC to message."""
     def __init__(self, cog, session_id: int, user_id: int, contacts: list[dict]):
         super().__init__(timeout=300)
@@ -182,18 +270,28 @@ class DMContactSelectView(discord.ui.View):
             await interaction.response.send_message("Contact not found.", ephemeral=True)
             return
 
-        embed = _build_dm_chat_embed(self.session_id, contact)
-        view = DMChatView(self.cog, self.session_id, self.user_id, contact, list(self.contacts_dict.values()))
+        def _prep_dm_chat():
+            emb = _build_dm_chat_embed(self.session_id, contact)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_dm_chat)
+        view = DMChatView(self.cog, self.session_id, self.user_id, contact, list(self.contacts_dict.values()), session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back_to_home(self, interaction: discord.Interaction):
-        embed = build_phone_home_embed(self.session_id, self.user_id)
-        view = PhoneMainView(self.cog, self.session_id, self.user_id)
+        def _prep_home():
+            emb = build_phone_home_embed(self.session_id, self.user_id)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_home)
+        view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class DMChatView(discord.ui.View):
+class DMChatView(PhoneOwnerRestrictedView):
     """Active chat view with a specific contact."""
-    def __init__(self, cog, session_id: int, user_id: int, contact: dict, all_contacts: list[dict]):
+    def __init__(self, cog, session_id: int, user_id: int, contact: dict, all_contacts: list[dict], *, session: dict | None = None):
         super().__init__(timeout=300)
         self.cog = cog
         self.session_id = session_id
@@ -201,8 +299,8 @@ class DMChatView(discord.ui.View):
         self.contact = contact
         self.all_contacts = all_contacts
 
-        session = db.get_session(session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+        session_obj = session if isinstance(session, dict) else db.get_session(session_id)
+        scen_key = session_obj.get("scenario", "fantasy") if session_obj else "fantasy"
         is_nsfw = scenario_data.is_nsfw_scenario(scen_key)
         is_romantic = str(contact.get("track", "platonic")).lower() == "romantic"
 
@@ -253,22 +351,24 @@ class DMChatView(discord.ui.View):
         await self._send_dm_action(interaction, None, intent="meetup")
 
     async def _quick_photo(self, interaction: discord.Interaction):
-        char = db.get_character(self.user_id)
-        session = db.get_session(self.session_id)
+        def _load_photo_ctx():
+            return db.get_character(self.user_id), db.get_session(self.session_id)
+
+        char, session = await db.adb(_load_photo_ctx)
         loc = session.get("current_location", "around here") if session else "around here"
         caption = generate_player_photo_caption(char, intent="photo", location=loc)
         msg = f"Sending you a quick snapshot from {loc}! 📸\n[Attached Photo: {caption}]\nWhat are you up to right now?"
         await self._send_dm_action(interaction, msg, intent="photo")
 
     async def _quick_nsfw_photo(self, interaction: discord.Interaction):
-        char = db.get_character(self.user_id)
+        char = await db.adb(db.get_character, self.user_id)
         caption = generate_player_photo_caption(char, intent="nsfw_photo")
         msg = f"Sending an intimate selfie just for your eyes... 🔞\n[Attached Intimate Photo: {caption}]\nHope you like what you see 😉"
         await self._send_dm_action(interaction, msg, intent="nsfw_photo")
 
     async def _quick_intel_rumor(self, interaction: discord.Interaction):
         npc_id = self.contact.get("npc_id") or self.contact["name"].lower().replace(" ", "_")
-        history_rows = db.get_phone_messages(self.session_id, npc_id, limit=2)
+        history_rows = await db.adb(db.get_phone_messages, self.session_id, npc_id, 2)
         if history_rows:
             msg = "By the way, what's the latest word around here? Heard anything interesting or any rumors lately? 🔍"
         else:
@@ -281,8 +381,11 @@ class DMChatView(discord.ui.View):
 
     async def _send_dm_action(self, interaction: discord.Interaction, message_text: str = None, intent: str = "chat"):
         await interaction.response.defer()
-        char = db.get_character(self.user_id)
-        session = db.get_session(self.session_id)
+
+        def _load_dm_ctx():
+            return db.get_character(self.user_id), db.get_session(self.session_id)
+
+        char, session = await db.adb(_load_dm_ctx)
 
         if not message_text:
             message_text = await generate_player_chat_message(session, self.contact, char, intent=intent)
@@ -291,14 +394,18 @@ class DMChatView(discord.ui.View):
 
         # Refresh contact data with new score
         npc_id = self.contact.get("npc_id") or self.contact["name"].lower().replace(" ", "_")
-        updated_contact = db.get_contact(self.session_id, npc_id, character_id=char.get("id", 0)) or self.contact
-        self.contact = updated_contact
 
-        embed = _build_dm_chat_embed(self.session_id, updated_contact, last_reply=reply_data)
+        def _refresh_dm_embed():
+            upd = db.get_contact(self.session_id, npc_id, character_id=char.get("id", 0) if char else 0) or self.contact
+            emb = _build_dm_chat_embed(self.session_id, upd, last_reply=reply_data)
+            return upd, emb
+
+        updated_contact, embed = await db.adb(_refresh_dm_embed)
+        self.contact = updated_contact
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=self)
 
     async def _back_to_contacts(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
+        session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
         embed = discord.Embed(
@@ -332,18 +439,27 @@ class DMCustomMessageModal(discord.ui.Modal):
         user_text = str(self.msg_input.value).strip()
         await self.chat_view._send_dm_action(interaction, user_text, intent="custom")
 
-class SocialFeedView(discord.ui.View):
+class SocialFeedView(PhoneOwnerRestrictedView):
     """View displaying social timeline posts with single rumor scouring and character discovery buttons."""
-    def __init__(self, cog, session_id: int, user_id: int, posts: list[dict]):
+    def __init__(
+        self,
+        cog,
+        session_id: int,
+        user_id: int,
+        posts: list[dict],
+        *,
+        session: dict | None = None,
+        state_summary: dict | None = None,
+    ):
         super().__init__(timeout=300)
         self.cog = cog
         self.session_id = session_id
         self.user_id = user_id
         self.posts = posts
 
-        session = db.get_session(session_id)
-        state_summary = get_social_state_summary(session_id, session)
-        charges = state_summary["charges"]
+        session_obj = session if isinstance(session, dict) else db.get_session(session_id)
+        summary_obj = state_summary if isinstance(state_summary, dict) else get_social_state_summary(session_id, session_obj)
+        charges = summary_obj["charges"]
 
         # Row 0: Investigation & Social Discovery
         rumor_btn = discord.ui.Button(
@@ -388,7 +504,7 @@ class SocialFeedView(discord.ui.View):
 
     async def _dig_rumors(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        session = db.get_session(self.session_id)
+        session = await db.adb(db.get_session, self.session_id)
         res = await scour_feed_for_rumor(session, self.user_id)
 
         if res.get("error") == "exhausted":
@@ -431,16 +547,20 @@ class SocialFeedView(discord.ui.View):
 
     async def _find_friends(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        session = db.get_session(self.session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
 
-        profile = discover_suggested_peer(self.session_id, self.user_id)
+        def _prep_find():
+            sess = db.get_session(self.session_id)
+            scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
+            br = get_phone_branding(scen_k)
+            prof = discover_suggested_peer(self.session_id, self.user_id)
+            emb = _build_social_profile_embed(self.session_id, prof, br) if prof else None
+            return prof, emb
+
+        profile, embed = await db.adb(_prep_find)
         if not profile:
             await interaction.followup.send("⚠️ No student profiles available right now.", ephemeral=True)
             return
 
-        embed = _build_social_profile_embed(self.session_id, profile, branding)
         view = SocialProfileView(self.cog, self.session_id, self.user_id, profile, self.posts)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
@@ -459,19 +579,31 @@ class SocialFeedView(discord.ui.View):
 
     async def _refresh_feed(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        session = db.get_session(self.session_id)
+        session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
 
         new_posts = await generate_gossip_feed_posts(session, force_refresh=True)
-        state_summary = get_social_state_summary(self.session_id, session)
+        state_summary = await db.adb(get_social_state_summary, self.session_id, session)
         embed = _build_gossip_feed_embed(session, new_posts, branding, charges=state_summary["charges"])
-        view = SocialFeedView(self.cog, self.session_id, self.user_id, new_posts)
+        view = SocialFeedView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            new_posts,
+            session=session,
+            state_summary=state_summary,
+        )
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
     async def _back_to_home(self, interaction: discord.Interaction):
-        embed = build_phone_home_embed(self.session_id, self.user_id)
-        view = PhoneMainView(self.cog, self.session_id, self.user_id)
+        def _prep_home():
+            emb = build_phone_home_embed(self.session_id, self.user_id)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_home)
+        view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
 class SocialSearchModal(discord.ui.Modal):
@@ -495,10 +627,16 @@ class SocialSearchModal(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
         query = str(self.query_input.value).strip()
-        profile = lookup_social_profile(self.session_id, self.user_id, query)
-        session = db.get_session(self.session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+
+        def _prep_search():
+            prof = lookup_social_profile(self.session_id, self.user_id, query)
+            sess = db.get_session(self.session_id)
+            scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
+            br = get_phone_branding(scen_k)
+            emb = _build_social_profile_embed(self.session_id, prof, br) if prof else None
+            return prof, emb
+
+        profile, embed = await db.adb(_prep_search)
 
         if not profile:
             await interaction.followup.send(
@@ -507,11 +645,10 @@ class SocialSearchModal(discord.ui.Modal):
             )
             return
 
-        embed = _build_social_profile_embed(self.session_id, profile, branding)
         view = SocialProfileView(self.cog, self.session_id, self.user_id, profile, self.feed_view.posts)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
-class SocialProfileView(discord.ui.View):
+class SocialProfileView(PhoneOwnerRestrictedView):
     """View displaying a faux social media profile with Send Friend Request option."""
     def __init__(self, cog, session_id: int, user_id: int, profile: dict, posts: list[dict]):
         super().__init__(timeout=300)
@@ -556,8 +693,18 @@ class SocialProfileView(discord.ui.View):
         self.add_item(back_btn)
 
     async def _send_request(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
-        res = resolve_social_friend_request(session, self.user_id, self.profile)
+        def _resolve_req():
+            sess = db.get_session(self.session_id)
+            r = resolve_social_friend_request(sess, self.user_id, self.profile)
+            if r.get("on_cooldown"):
+                return sess, r, None, None
+            scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
+            br = get_phone_branding(scen_k)
+            upd_prof = lookup_social_profile(self.session_id, self.user_id, self.profile["name"]) or self.profile
+            emb = _build_social_profile_embed(self.session_id, upd_prof, br)
+            return sess, r, upd_prof, emb
+
+        session, res, updated_profile, embed = await db.adb(_resolve_req)
 
         check = res.get("check") or {}
         tier = check.get("tier") if isinstance(check, dict) else getattr(check, "tier", "fail")
@@ -571,9 +718,6 @@ class SocialProfileView(discord.ui.View):
             "crit_fail": "💀"
         }.get(tier, "🎲")
 
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
-
         if res.get("on_cooldown"):
             await interaction.response.send_message(res["message"], ephemeral=True)
             return
@@ -585,8 +729,6 @@ class SocialProfileView(discord.ui.View):
             f"{res['message']}"
         )
 
-        updated_profile = lookup_social_profile(self.session_id, self.user_id, self.profile["name"]) or self.profile
-        embed = _build_social_profile_embed(self.session_id, updated_profile, branding)
         view = SocialProfileView(self.cog, self.session_id, self.user_id, updated_profile, self.posts)
 
         try:
@@ -603,30 +745,58 @@ class SocialProfileView(discord.ui.View):
                     pass
 
     async def _open_dm_with_contact(self, interaction: discord.Interaction):
-        char = db.get_character(self.user_id)
-        contacts = db.get_contacts(self.session_id, character_id=char.get("id", 0)) if char else []
-        contact = db.get_contact(self.session_id, self.profile["npc_id"], character_id=char.get("id", 0)) if char else None
+        def _prep_dm():
+            ch = db.get_character(self.user_id)
+            cts = db.get_contacts(self.session_id, character_id=ch.get("id", 0)) if ch else []
+            ct = db.get_contact(self.session_id, self.profile["npc_id"], character_id=ch.get("id", 0)) if ch else None
+            if not ct:
+                return None, [], None, None
+            emb = _build_dm_chat_embed(self.session_id, ct)
+            sess = db.get_session(self.session_id)
+            return ct, cts, emb, sess
+
+        contact, contacts, embed, session = await db.adb(_prep_dm)
 
         if not contact:
             await interaction.response.send_message("Contact not found.", ephemeral=True)
             return
 
-        embed = _build_dm_chat_embed(self.session_id, contact)
-        view = DMChatView(self.cog, self.session_id, self.user_id, contact, contacts)
+        view = DMChatView(self.cog, self.session_id, self.user_id, contact, contacts, session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back_to_feed(self, interaction: discord.Interaction):
-        session = db.get_session(self.session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
-        state_summary = get_social_state_summary(self.session_id, session)
-        embed = _build_gossip_feed_embed(session, self.posts, branding, charges=state_summary["charges"])
-        view = SocialFeedView(self.cog, self.session_id, self.user_id, self.posts)
+        def _prep_feed():
+            sess = db.get_session(self.session_id)
+            scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
+            br = get_phone_branding(scen_k)
+            st = get_social_state_summary(self.session_id, sess)
+            emb = _build_gossip_feed_embed(sess, self.posts, br, charges=st["charges"])
+            return sess, st, emb
+
+        session, state_summary, embed = await db.adb(_prep_feed)
+        view = SocialFeedView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            self.posts,
+            session=session,
+            state_summary=state_summary,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
-class PhoneMediaGalleryView(discord.ui.View):
+class PhoneMediaGalleryView(PhoneOwnerRestrictedView):
     """Interactive media album browser with contact filtering, category tags, and pagination."""
-    def __init__(self, cog, session_id: int, user_id: int, filter_contact: str = None, filter_type: str = None, page: int = 0):
+    def __init__(
+        self,
+        cog,
+        session_id: int,
+        user_id: int,
+        filter_contact: str = None,
+        filter_type: str = None,
+        page: int = 0,
+        *,
+        inv_items: list[dict] | None = None,
+    ):
         super().__init__(timeout=300)
         self.cog = cog
         self.session_id = session_id
@@ -635,9 +805,9 @@ class PhoneMediaGalleryView(discord.ui.View):
         self.filter_type = filter_type
         self.page = page
 
-        inv_items = db.get_inventory(user_id) if user_id else []
+        resolved_inv = inv_items if isinstance(inv_items, list) else (db.get_inventory(user_id) if user_id else [])
         from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
-        all_digital = [it for it in inv_items if is_digital_item(it)]
+        all_digital = [it for it in resolved_inv if is_digital_item(it)]
 
         # Unique contacts list
         contacts_seen = []
@@ -743,11 +913,29 @@ class PhoneMediaGalleryView(discord.ui.View):
         self.add_item(next_btn)
         self.add_item(home_btn)
 
+    async def _render_gallery(self, interaction: discord.Interaction, filter_contact: str | None, filter_type: str | None, page: int):
+        def _prep():
+            emb = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=filter_contact, filter_type=filter_type, page=page)
+            inv = db.get_inventory(self.user_id) if self.user_id else []
+            return emb, inv
+
+        embed, inv_items = await db.adb(_prep)
+        view = PhoneMediaGalleryView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            filter_contact=filter_contact,
+            filter_type=filter_type,
+            page=page,
+            inv_items=inv_items,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
     async def _on_select_item(self, interaction: discord.Interaction):
         item_id = interaction.data["values"][0]
         item = self.items_dict.get(item_id)
         if not item:
-            inv = db.get_inventory(self.user_id) if self.user_id else []
+            inv = (await db.adb(db.get_inventory, self.user_id)) if self.user_id else []
             item = next((it for it in inv if str(it.get("id")) == str(item_id)), None)
         if not item:
             await interaction.response.send_message("Media item not found.", ephemeral=True)
@@ -759,48 +947,37 @@ class PhoneMediaGalleryView(discord.ui.View):
     async def _on_select_contact_filter(self, interaction: discord.Interaction):
         chosen = interaction.data["values"][0]
         new_fc = None if chosen == "ALL" else chosen
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=new_fc, filter_type=self.filter_type, page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=new_fc, filter_type=self.filter_type, page=0)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, new_fc, self.filter_type, 0)
 
     async def _filter_all(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=None, page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=None, page=0)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, None, 0)
 
     async def _filter_photos(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="photos", page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="photos", page=0)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, "photos", 0)
 
     async def _filter_intimate(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="intimate", page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="intimate", page=0)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, "intimate", 0)
 
     async def _filter_videos(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="videos", page=0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type="videos", page=0)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, "videos", 0)
 
     async def _prev_page(self, interaction: discord.Interaction):
-        p = max(0, self.page - 1)
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=self.filter_type, page=p)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=self.filter_type, page=p)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, self.filter_type, max(0, self.page - 1))
 
     async def _next_page(self, interaction: discord.Interaction):
-        p = self.page + 1
-        embed = build_media_gallery_embed(self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=self.filter_type, page=p)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, filter_contact=self.filter_contact, filter_type=self.filter_type, page=p)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await self._render_gallery(interaction, self.filter_contact, self.filter_type, self.page + 1)
 
     async def _back_home(self, interaction: discord.Interaction):
-        embed = build_phone_home_embed(self.session_id, self.user_id)
-        view = PhoneMainView(self.cog, self.session_id, self.user_id)
+        def _prep_home():
+            emb = build_phone_home_embed(self.session_id, self.user_id)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_home)
+        view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
-class PhoneMediaDetailView(discord.ui.View):
+class PhoneMediaDetailView(PhoneOwnerRestrictedView):
     """View to inspect and manage an individual media item."""
     def __init__(self, cog, session_id: int, user_id: int, item: dict, filter_contact: str = None, filter_type: str = None, page: int = 0):
         super().__init__(timeout=300)
@@ -825,23 +1002,484 @@ class PhoneMediaDetailView(discord.ui.View):
         self.add_item(home_btn)
 
     async def _back_to_gallery(self, interaction: discord.Interaction):
-        embed = build_media_gallery_embed(self.session_id, self.user_id, self.filter_contact, self.filter_type, self.page)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, self.filter_contact, self.filter_type, self.page)
+        def _prep():
+            emb = build_media_gallery_embed(self.session_id, self.user_id, self.filter_contact, self.filter_type, self.page)
+            inv = db.get_inventory(self.user_id) if self.user_id else []
+            return emb, inv
+
+        embed, inv_items = await db.adb(_prep)
+        view = PhoneMediaGalleryView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            self.filter_contact,
+            self.filter_type,
+            self.page,
+            inv_items=inv_items,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _delete_item(self, interaction: discord.Interaction):
         item_id = self.item.get("id")
-        if item_id:
-            db.remove_item(self.user_id, int(item_id))
-        embed = build_media_gallery_embed(self.session_id, self.user_id, self.filter_contact, self.filter_type, 0)
-        view = PhoneMediaGalleryView(self.cog, self.session_id, self.user_id, self.filter_contact, self.filter_type, 0)
+
+        def _do_delete():
+            if item_id:
+                db.remove_item(self.user_id, int(item_id))
+            emb = build_media_gallery_embed(self.session_id, self.user_id, self.filter_contact, self.filter_type, 0)
+            inv = db.get_inventory(self.user_id) if self.user_id else []
+            return emb, inv
+
+        embed, inv_items = await db.adb(_do_delete)
+        view = PhoneMediaGalleryView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            self.filter_contact,
+            self.filter_type,
+            0,
+            inv_items=inv_items,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _back_home(self, interaction: discord.Interaction):
-        embed = build_phone_home_embed(self.session_id, self.user_id)
-        view = PhoneMainView(self.cog, self.session_id, self.user_id)
+        def _prep_home():
+            emb = build_phone_home_embed(self.session_id, self.user_id)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_home)
+        view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
 
 
 GossipFeedView = SocialFeedView
+
+
+def _resolve_phone_ui_lang(user_id: int | None, session: dict | None = None) -> str:
+    """Resolves the player's UI language code ('en', 'pl', 'ms', 'zh', 'de') for Discord Smartphone embeds."""
+    try:
+        if user_id:
+            st = db.get_settings(int(user_id)) or {}
+            if st.get("ui_language"):
+                return str(st["ui_language"]).strip().lower()
+            if st.get("language"):
+                return str(st["language"]).strip().lower()
+    except Exception:
+        pass
+    if isinstance(session, dict) and session.get("language"):
+        return str(session["language"]).strip().lower()
+    return "en"
+
+
+def _build_realty_embed(
+    payload: dict,
+    selected_prop_id: str | None = None,
+    notice: str = "",
+    lang: str = "en",
+) -> discord.Embed:
+    """Builds the localized Smartphone Realty & Safehouse Registry embed for Discord."""
+    from localization import get_realty_label
+
+    rl = lambda k: get_realty_label(k, lang)
+    gold = int(payload.get("gold") or 0)
+    bonus = int(payload.get("property_slot_bonus") or 0)
+    max_slots = int(payload.get("max_inventory_slots") or 30)
+    starter = payload.get("starter_quarters")
+    owned = payload.get("owned_properties") or []
+    catalog = payload.get("catalog") or []
+
+    desc_lines = [
+        f"🪙 **{gold}g** | 🎒 **`+{bonus}`** (`{max_slots}`)"
+    ]
+    if notice:
+        desc_lines.append(f"\n✨ *{notice}*")
+
+    embed = discord.Embed(
+        title=f"🏠 {rl('app_name')} — {rl('app_sub')}",
+        description="\n".join(desc_lines),
+        color=discord.Color.teal(),
+    )
+
+    res_lines = []
+    if starter:
+        prim_tag = f" `★ {rl('primary_home')}`" if starter.get("is_primary") else ""
+        res_lines.append(
+            f"• 🏢 **{starter['name']}** (`{rl('badge_starter')}`){prim_tag}\n"
+            f"  ↳ 📍 {starter.get('zone_name', '')} — *{starter.get('room_name', 'Private Unit')}*"
+        )
+    for op in owned:
+        prim_tag = f" `★ {rl('primary_home')}`" if op.get("is_primary") else ""
+        keys = [h["name"] for h in (op.get("spare_key_holders") or [])]
+        key_str = f" | 🔑 {', '.join(keys)}" if keys else ""
+        res_lines.append(
+            f"• 🏠 **{op['name']}** (`T{op['tier']}`){prim_tag}{key_str}\n"
+            f"  ↳ 📍 {op.get('zone_name', '')} — `+{op.get('base_slots', 0)}`"
+        )
+    if res_lines:
+        embed.add_field(name=f"🔑 {rl('tab_owned')}", value="\n".join(res_lines)[:1024], inline=False)
+
+    sel_item = None
+    if selected_prop_id:
+        if starter and starter.get("property_id") == selected_prop_id:
+            sel_item = {**starter, "is_owned": True, "is_starter": True}
+        else:
+            sel_item = next((c for c in catalog if c["property_id"] == selected_prop_id), None)
+
+    if sel_item:
+        perks = []
+        if sel_item.get("base_slots"):
+            perks.append(f"+{sel_item['base_slots']} Slots")
+        if float(sel_item.get("rest_multiplier") or 1.0) > 1.0:
+            perks.append(f"{sel_item['rest_multiplier']}x Rest")
+        if int(sel_item.get("cha_invite_dc_mod") or 0) < 0:
+            perks.append(f"{sel_item['cha_invite_dc_mod']} Invite DC")
+        if int(sel_item.get("hangout_affinity_bonus") or 0) > 0:
+            perks.append(f"+{sel_item['hangout_affinity_bonus']} Affinity")
+        perk_line = " • ".join(perks) if perks else rl("starter_spare_key_note")
+        status_txt = (
+            rl("badge_starter")
+            if sel_item.get("is_starter")
+            else (rl("deed_owned") if sel_item.get("is_owned") else f"{rl('badge_for_sale')} — {sel_item.get('price', 0)}g")
+        )
+        embed.add_field(
+            name=f"📋 {sel_item['name']} ({status_txt})",
+            value=(
+                f"📍 {sel_item.get('zone_name', '')}\n"
+                f"✨ `{perk_line}`\n"
+                f"*{sel_item.get('description', '')}*"
+            )[:1024],
+            inline=False,
+        )
+    else:
+        mkt_lines = []
+        for c in catalog[:9]:
+            tag = f"✅ {rl('deed_owned')}" if c.get("is_owned") else f"🏷️ {c['price']}g"
+            mkt_lines.append(f"• **T{c['tier']} {c['name']}** ({c.get('zone_name', '')}) — `{tag}`")
+        if mkt_lines:
+            embed.add_field(name=f"🏷️ {rl('tab_market')}", value="\n".join(mkt_lines)[:1024], inline=False)
+
+    return embed
+
+
+class PhoneRealtyView(PhoneOwnerRestrictedView):
+    """Interactive Discord Smartphone Realty & Safehouse management view."""
+    def __init__(
+        self,
+        cog,
+        session_id: int,
+        user_id: int,
+        payload: dict,
+        selected_prop_id: str | None = None,
+        lang: str = "en",
+    ):
+        from localization import get_realty_label
+
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.session_id = session_id
+        self.user_id = user_id
+        self.payload = payload
+        self.lang = lang or "en"
+        rl = lambda k: get_realty_label(k, self.lang)
+        starter = payload.get("starter_quarters")
+        catalog = payload.get("catalog") or []
+
+        if not selected_prop_id:
+            prim_owned = next((c["property_id"] for c in catalog if c.get("is_primary")), None)
+            selected_prop_id = prim_owned or (starter.get("property_id") if starter else (catalog[0]["property_id"] if catalog else None))
+        self.selected_prop_id = selected_prop_id
+
+        options: list[discord.SelectOption] = []
+        if starter:
+            s_pid = starter["property_id"]
+            options.append(
+                discord.SelectOption(
+                    label=f"{starter['name']}"[:100],
+                    value=s_pid,
+                    description=f"{rl('badge_starter')} • {starter.get('zone_name', '')}"[:100],
+                    emoji="🏢",
+                    default=(s_pid == self.selected_prop_id),
+                )
+            )
+        for c in catalog[:24]:
+            cid = c["property_id"]
+            status_lbl = f"★ {rl('primary_home')}" if c.get("is_primary") else (rl("deed_owned") if c.get("is_owned") else f"{c['price']}g")
+            options.append(
+                discord.SelectOption(
+                    label=f"[T{c['tier']}] {c['name']}"[:100],
+                    value=cid,
+                    description=f"{status_lbl} • {c.get('zone_name', '')} (+{c.get('base_slots', 0)})"[:100],
+                    emoji="🏠" if c.get("is_owned") else "🏷️",
+                    default=(cid == self.selected_prop_id),
+                )
+            )
+
+        if options:
+            sel = discord.ui.Select(
+                placeholder=f"🏠 {rl('tab_owned')} / {rl('tab_market')}..."[:100],
+                min_values=1,
+                max_values=1,
+                options=options,
+                row=0,
+            )
+            sel.callback = self._on_select_property
+            self.add_item(sel)
+
+        is_starter_sel = bool(starter and starter.get("property_id") == self.selected_prop_id)
+        cat_sel = next((c for c in catalog if c["property_id"] == self.selected_prop_id), None)
+        is_owned_deed = bool(cat_sel and cat_sel.get("is_owned"))
+        is_primary_sel = bool(
+            (is_starter_sel and starter.get("is_primary"))
+            or (cat_sel and cat_sel.get("is_primary"))
+        )
+
+        buy_price = int(cat_sel.get("price") or 0) if cat_sel else 0
+        buy_btn = discord.ui.Button(
+            label=(f"{rl('buy_deed')} ({buy_price}g)" if (cat_sel and not is_owned_deed) else rl("deed_owned"))[:80],
+            emoji="🪙",
+            style=discord.ButtonStyle.success,
+            disabled=bool(is_starter_sel or not cat_sel or is_owned_deed or not cat_sel.get("can_afford")),
+            row=1,
+        )
+        prim_btn = discord.ui.Button(
+            label=(rl("primary_home") if is_primary_sel else rl("set_primary"))[:80],
+            emoji="⭐",
+            style=discord.ButtonStyle.primary,
+            disabled=bool(is_primary_sel or (not is_starter_sel and not is_owned_deed)),
+            row=1,
+        )
+        key_btn = discord.ui.Button(
+            label=rl("spare_keys_label")[:80],
+            emoji="🔑",
+            style=discord.ButtonStyle.secondary,
+            disabled=not is_owned_deed,
+            row=1,
+        )
+        home_btn = discord.ui.Button(
+            label="Phone Home",
+            emoji="📱",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+
+        buy_btn.callback = self._buy_deed
+        prim_btn.callback = self._set_primary
+        key_btn.callback = self._open_spare_keys
+        home_btn.callback = self._back_home
+
+        self.add_item(buy_btn)
+        self.add_item(prim_btn)
+        self.add_item(key_btn)
+        self.add_item(home_btn)
+
+    async def _on_select_property(self, interaction: discord.Interaction):
+        chosen = interaction.data["values"][0]
+        from mechanics.world.locations.residences import build_realty_payload
+        payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        embed = _build_realty_embed(payload, selected_prop_id=chosen, lang=self.lang)
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, selected_prop_id=chosen, lang=self.lang)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _buy_deed(self, interaction: discord.Interaction):
+        from localization import get_realty_label
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_adventure_lock
+        from mechanics.world.locations.residences import build_realty_payload
+
+        if not self.selected_prop_id:
+            return
+        await interaction.response.defer()
+        try:
+            async with distributed_adventure_lock(self.user_id, self.session_id, raise_http_error=False):
+                sess = await db.adb(db.get_session, self.session_id)
+                if not sess or str(sess.get("status") or "active").strip().lower() != "active":
+                    await interaction.followup.send("❌ This adventure session is no longer active.", ephemeral=True)
+                    return
+                res = await db.adb(db.atomic_purchase_property, self.session_id, self.user_id, self.selected_prop_id)
+                payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        except LockAcquisitionError as lock_err:
+            await interaction.followup.send(f"⏳ {lock_err}", ephemeral=True)
+            return
+
+        if not res.get("ok"):
+            await interaction.followup.send(
+                f"❌ {get_realty_label('purchase_failed', self.lang)} (`{res.get('reason', 'error')}`)",
+                ephemeral=True,
+            )
+            return
+        prop_nm = (res.get("catalog_entry") or {}).get("name") or self.selected_prop_id
+        notice = f"{get_realty_label('purchased_ok', self.lang)} ({prop_nm})"
+        embed = _build_realty_embed(payload, selected_prop_id=self.selected_prop_id, notice=notice, lang=self.lang)
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, selected_prop_id=self.selected_prop_id, lang=self.lang)
+        await interaction.edit_original_response(embed=embed, view=view)
+
+    async def _set_primary(self, interaction: discord.Interaction):
+        from localization import get_realty_label
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+        from mechanics.world.locations.residences import build_realty_payload
+
+        if not self.selected_prop_id:
+            return
+        await interaction.response.defer()
+        try:
+            async with distributed_session_lock(self.session_id, raise_http_error=False):
+                sess = await db.adb(db.get_session, self.session_id)
+                if not sess or str(sess.get("status") or "active").strip().lower() != "active":
+                    await interaction.followup.send("❌ This adventure session is no longer active.", ephemeral=True)
+                    return
+                res = await db.adb(db.set_primary_property, self.session_id, self.selected_prop_id)
+                payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        except LockAcquisitionError as lock_err:
+            await interaction.followup.send(f"⏳ {lock_err}", ephemeral=True)
+            return
+
+        if not res.get("ok"):
+            await interaction.followup.send("❌ Could not update Primary Home.", ephemeral=True)
+            return
+        embed = _build_realty_embed(
+            payload,
+            selected_prop_id=self.selected_prop_id,
+            notice=get_realty_label("primary_updated", self.lang),
+            lang=self.lang,
+        )
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, selected_prop_id=self.selected_prop_id, lang=self.lang)
+        await interaction.edit_original_response(embed=embed, view=view)
+
+    async def _open_spare_keys(self, interaction: discord.Interaction):
+        from localization import get_realty_label
+        from mechanics.world.locations.residences import build_realty_payload
+        payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        owned_entry = next(
+            (o for o in (payload.get("owned_properties") or []) if o["property_id"] == self.selected_prop_id),
+            None,
+        )
+        if not owned_entry:
+            await interaction.response.send_message(f"🔑 {get_realty_label('starter_spare_key_note', self.lang)}", ephemeral=True)
+            return
+        eligible = payload.get("eligible_spare_key_contacts") or []
+        holders = owned_entry.get("spare_key_holders") or []
+        if not eligible and not holders:
+            await interaction.response.send_message(
+                f"🔑 {get_realty_label('no_eligible_contacts', self.lang)}",
+                ephemeral=True,
+            )
+            return
+        view = PhoneSpareKeySelectView(self.cog, self.session_id, self.user_id, payload, owned_entry, lang=self.lang)
+        embed = _build_realty_embed(
+            payload,
+            selected_prop_id=self.selected_prop_id,
+            notice=get_realty_label("spare_keys_label", self.lang),
+            lang=self.lang,
+        )
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def _back_home(self, interaction: discord.Interaction):
+        def _prep_home():
+            emb = build_phone_home_embed(self.session_id, self.user_id)
+            sess = db.get_session(self.session_id)
+            return emb, sess
+
+        embed, session = await db.adb(_prep_home)
+        view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class PhoneSpareKeySelectView(PhoneOwnerRestrictedView):
+    """Sub-view to grant or revoke Spare Keys on an owned property deed."""
+    def __init__(self, cog, session_id: int, user_id: int, payload: dict, owned_entry: dict, lang: str = "en"):
+        from localization import get_realty_label
+
+        super().__init__(timeout=300)
+        self.cog = cog
+        self.session_id = session_id
+        self.user_id = user_id
+        self.payload = payload
+        self.lang = lang or "en"
+        self.property_id = owned_entry["property_id"]
+        rl = lambda k: get_realty_label(k, self.lang)
+
+        holders = {str(h["npc_id"]).lower(): h for h in (owned_entry.get("spare_key_holders") or [])}
+        options: list[discord.SelectOption] = []
+        seen: set[str] = set()
+
+        for h_low, h in holders.items():
+            seen.add(h_low)
+            options.append(
+                discord.SelectOption(
+                    label=f"{rl('revoke_key')}: {h['name']}"[:100],
+                    value=f"revoke:{h['npc_id']}"[:100],
+                    description=rl("revoke_key")[:100],
+                    emoji="🚫",
+                )
+            )
+        for c in (payload.get("eligible_spare_key_contacts") or [])[:20]:
+            cid_low = str(c["npc_id"]).lower()
+            if cid_low in seen:
+                continue
+            seen.add(cid_low)
+            rel_lbl = "♥" if c.get("is_romantic") else f"+{c.get('relationship_score', 0)}"
+            options.append(
+                discord.SelectOption(
+                    label=f"{rl('give_spare_key')}: {c['name']}"[:100],
+                    value=f"grant:{c['npc_id']}"[:100],
+                    description=rel_lbl[:100],
+                    emoji="🔑",
+                )
+            )
+
+        if options:
+            sel = discord.ui.Select(
+                placeholder=f"🔑 {rl('spare_keys_label')}..."[:100],
+                min_values=1,
+                max_values=1,
+                options=options[:25],
+                row=0,
+            )
+            sel.callback = self._on_toggle_key
+            self.add_item(sel)
+
+        back_btn = discord.ui.Button(label=rl("app_name")[:80], emoji="🔙", style=discord.ButtonStyle.secondary, row=1)
+        back_btn.callback = self._back_to_realty
+        self.add_item(back_btn)
+
+    async def _on_toggle_key(self, interaction: discord.Interaction):
+        from localization import get_realty_label
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+        from mechanics.world.locations.residences import build_realty_payload
+
+        raw_val = interaction.data["values"][0]
+        mode, npc_id = raw_val.split(":", 1)
+        await interaction.response.defer()
+        try:
+            async with distributed_session_lock(self.session_id, raise_http_error=False):
+                sess = await db.adb(db.get_session, self.session_id)
+                if not sess or str(sess.get("status") or "active").strip().lower() != "active":
+                    await interaction.followup.send("❌ This adventure session is no longer active.", ephemeral=True)
+                    return
+                if mode == "revoke":
+                    res = await db.adb(db.revoke_property_spare_key, self.session_id, self.property_id, npc_id)
+                    msg = get_realty_label("key_revoked", self.lang)
+                else:
+                    res = await db.adb(db.grant_property_spare_key, self.session_id, self.property_id, npc_id)
+                    msg = f"{get_realty_label('key_granted', self.lang)} ({res.get('npc_name') or npc_id})"
+                payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        except LockAcquisitionError as lock_err:
+            await interaction.followup.send(f"⏳ {lock_err}", ephemeral=True)
+            return
+
+        if not res.get("ok"):
+            await interaction.followup.send(f"❌ `{res.get('reason', 'error')}`", ephemeral=True)
+            return
+        embed = _build_realty_embed(payload, selected_prop_id=self.property_id, notice=msg, lang=self.lang)
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, selected_prop_id=self.property_id, lang=self.lang)
+        await interaction.edit_original_response(embed=embed, view=view)
+
+    async def _back_to_realty(self, interaction: discord.Interaction):
+        from mechanics.world.locations.residences import build_realty_payload
+        payload = await db.adb(build_realty_payload, self.session_id, self.user_id)
+        embed = _build_realty_embed(payload, selected_prop_id=self.property_id, lang=self.lang)
+        view = PhoneRealtyView(self.cog, self.session_id, self.user_id, payload, selected_prop_id=self.property_id, lang=self.lang)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+RealtyView = PhoneRealtyView

@@ -133,12 +133,14 @@ def generate_quest_action_choices(
     if story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc):
         sq_title = story_quest.get("title", "Story Quest")
         sub_objs = story_quest.get("sub_objectives", []) or []
-        is_premature = bool(sub_objs and not all(isinstance(so, dict) and so.get("completed") for so in sub_objs))
+        is_premature = bool(sub_objs and not db.is_quest_main_objectives_complete(sub_objs))
         stat = "CHA" if "high_school" in scen_key or "modern" in scen_key else ("INT" if "sci" in scen_key else "STR")
         req = 6
         if char and isinstance(char.get("stats"), dict):
             c_stat = int(char["stats"].get(stat, 5))
             req = max(4, min(10, c_stat))
+        _sq_cs = ((story_quest.get("dossier") or {}).get("climax_spec") or {})
+        req = max(2, min(14, req - int(_sq_cs.get("aid_dc_reduction") or 0) + int(_sq_cs.get("alert_dc_bonus") or 0)))
         if is_premature:
             req += 4  # Phase 5 A11: +4 DC penalty for premature confrontation
 
@@ -213,6 +215,15 @@ def generate_quest_action_choices(
         prefix = "Story Quest" if is_story else "Bounty"
         icon = "⭐" if is_story else "🎯"
         bp_id = wp.get("blueprint_id") or ""
+        _wp_dos = db.get_quest_dossier(session_id, qid) if (session_id and qid) else None
+        _wp_cs = (_wp_dos or {}).get("climax_spec") or {}
+        _wp_opt_lead = next(
+            (ld for ld in ((_wp_dos or {}).get("leads_graph") or []) if isinstance(ld, dict) and ld.get("is_optional") and int(ld.get("sub_obj_id") or -1) == int(sub_obj_id if sub_obj_id is not None else -2)),
+            None,
+        )
+        if _wp_opt_lead:
+            _opt_badge = str(_wp_opt_lead.get("badge") or f"Optional — {str(_wp_opt_lead.get('role') or 'aid').title()}")
+            prefix = f"{prefix} | {_opt_badge}"
         res_approach = str(wp.get("resolution_approach") or "")
         reward_gold = int(wp.get("reward_gold") or 30)
 
@@ -317,12 +328,19 @@ def generate_quest_action_choices(
             stat = "INT" if "high_school" in scen_key or "modern" in scen_key else "AGI"
 
         req = 3
+        _main_dc_adj = (
+            -int(_wp_cs.get("aid_dc_reduction") or 0) + int(_wp_cs.get("alert_dc_bonus") or 0)
+            if (_wp_cs and not _wp_opt_lead)
+            else 0
+        )
         if char and isinstance(char.get("stats"), dict):
             c_stat = int(char["stats"].get(stat, 5))
             req = max(2, min(8, c_stat - 1))
         if out_of_window_dc_penalty > 0:
             req = min(12, req + out_of_window_dc_penalty)
 
+        if _main_dc_adj != 0:
+            req = max(2, min(14, req + _main_dc_adj))
         clean_stage = stage_label[0].upper() + stage_label[1:] if len(stage_label) > 1 else stage_label
         if clean_stage.endswith("."):
             clean_stage = clean_stage[:-1]

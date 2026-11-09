@@ -1,25 +1,17 @@
 from __future__ import annotations
 
-"""
-Deterministic 3-Band Conversation Choice Engine & Urgent Schedule Departure State Machine.
+"""Deterministic 4-Band Conversation Choice Engine & Departure Facade.
 
-Responsibilities:
-1. Resolves active partner relationship profiles (Stranger / Acquaintance / Friend+ / Romantic,
-   Private Meetup, Companion, Home/Office status, and active Quest/Bounty hooks).
-2. Enforces the 3-Band Conversation Choice Architecture (up to 7-8 options):
-   - Band 1 (2-4 slots): Skill-check quest/bounty/rumor/intel inquiries (quest/bounty prioritized).
-   - Band 2 (1-3 slots): Affinity-scaled social/background options (mostly FREE; [CHA] for bold moves).
-   - Band 3 (Final pinned slot): Standardized FREE "Leave conversation..." (never truncated).
-3. Manages the 2-Stage Urgent Schedule Departure State Machine:
-   - Stage 1 Warning ("I need to go soon"): Adds [CHA] Convince to stay + +3 DC / CHA DC 9 hurry checks.
-   - Stage 2 Ultimatum: Overrides to strictly 2 choices ([CHA] Convince to stay | Leave / Let head out);
-     any Custom Action auto-fails and causes immediate departure.
-   - 5-Turn Stay Extension: Capped once per time-block; auto-departs on the 5th bonus turn.
-   - Private Meetup Exemption: Suppresses hurry stages; on player Leave Conversation at non-home venues,
-     NPC mentions needing to head out too, says goodbye, and physically relocates to scheduled location.
+Enforces the 4-Band Conversation Choice Architecture (<= 8 options total):
+  1. Band 1 — Quest / Investigation (0-2 slots): ONLY when an active quest, bounty,
+     discovered world rumor ([Break the News] / clue press), or claimed minor event applies.
+  2. Band 2 — Dynamic Social Suite (4-6 slots, elastically flexing down when utilities stack):
+     7-SPECIAL, fixed DC 3-12 Sims-style topics, milestones (Ask on Date / Confess), and ambient gossip.
+  3. Band 3 — Pre-Exit Structural Utilities (pinned immediately above Exit):
+     Recruit to Party, Move to Quieter Spot / Walk Together, Ask for Contact Info, Convince to Stay.
+  4. Band 4 — Pinned Exit (1 final slot): Standardized FREE 'Leave conversation...'.
 """
 
-import json
 import logging
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -27,6 +19,28 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import db
 import namegen
 import scenario_data
+from mechanics.social import deck, pacing
+from mechanics.social.band_fallbacks import (
+    _PRONOUNS_BY_GENDER,
+    _build_contextual_role_and_leisure_phrases,
+    _is_similar_to_recent,
+    generate_band1_quest_and_rumor_fallbacks as _gen_b1_impl,
+    generate_band2_social_choices as _gen_b2_impl,
+    resolve_partner_pronouns,
+    sanitize_contextual_dialogue_label,
+    synthesize_choice_from_seed,
+)
+from mechanics.social.departure import (
+    _CONVINCE_STAY_RE,
+    _apply_stage1_hurry_gate,
+    _canon_npc_key,
+    _locations_match,
+    get_npc_departure_states,
+    is_convince_stay_action,
+    relocate_departed_npcs_impl,
+    run_departure_turn_evaluation,
+    save_npc_departure_states,
+)
 from mechanics.social.relationships import (
     clamp_score,
     get_disclosure_check_requirement,
@@ -35,48 +49,16 @@ from mechanics.social.relationships import (
 
 log = logging.getLogger(__name__)
 
-# ── Regex Guardrails for Affinity & Action Filtering ─────────────────────────
-
-_CONVINCE_STAY_RE = re.compile(
-    r"\b(?:convince|persuade|beg|urge|coax|plead\s+with|ask)\b.*?\b(?:to\s+)?stay\b"
-    r"(?:.*?\b(?:longer|here|little|bit|while|minutes|more)\b)?",
-    re.IGNORECASE,
-)
+SPECIAL_STATS_SET = frozenset({"STR", "PER", "END", "CHA", "INT", "AGI", "LUK"})
 
 _WALK_WITH_RE = re.compile(
     r"^\s*(?:walk\s+with|stroll\s+with|accompany|go\s+with|head\s+(?:out\s+|over\s+)?with|tag\s+along\s+with|escort)\s+(.+)$",
     re.IGNORECASE,
 )
 
-_COMPLIMENT_RE = re.compile(
-    r"\b(?:compliment|flatter|praise\s+(?:her|his|their)|admire\s+(?:her|his|their)|"
-    r"tell\s+(?:her|him|them)\s+(?:she|he|they)\s+look|comment\s+on\s+how\s+(?:cute|pretty|handsome|gorgeous|attractive|stunning))\b",
-    re.IGNORECASE,
-)
-
-_WITTY_OR_BANTER_RE = re.compile(
-    r"\b(?:witty\s+(?:observation|remark|comment|quip|banter|line)|"
-    r"wry\s+(?:observation|remark|comment|quip|joke)|"
-    r"lighthearted\s+(?:observation|tease|banter|joke)|"
-    r"playfully\s+(?:tease|rib|poke\s+fun|banter|comment|joke)|"
-    r"crack\s+a\s+(?:playful\s+|lighthearted\s+|quick\s+|dry\s+)?joke|"
-    r"(?:tell|make|share)\s+a\s+(?:playful\s+|lighthearted\s+|dry\s+|wry\s+)?(?:joke|quip)|"
-    r"\btease\s+(?:her|him|them|[A-Z][a-z]+)\b|"
-    r"\bbanter\s+(?:with|casually)\b|"
-    r"\bflirt\s+with\b|\bwink\s+at\b)\b",
-    re.IGNORECASE,
-)
-
-_HEAVY_TEASE_OR_FLIRT_RE = re.compile(
-    r"\b(?:playfully\s+tease|tease\s+(?:her|him|them|[A-Z][a-z]+)|flirt\s+with|wink\s+at|"
-    r"seductive|whisper\s+flirtatiously|brush\s+(?:her|his|their)\s+(?:hand|cheek|hair|lips)|"
-    r"hold\s+(?:her|his|their)\s+hand|pull\s+(?:her|him|them)\s+close)\b",
-    re.IGNORECASE,
-)
-
 _ROMANTIC_ADVANCE_RE = re.compile(
     r"\b(?:flirt\s+with|wink\s+at|seductive|whisper\s+flirtatiously|"
-    r"brush\s+(?:her|his|their)\s+(?:hand|cheek|hair|lips)|"
+    r"brush\s+(?:her|his|their)\s+(?:her|his|their|hand|cheek|hair|lips)|"
     r"hold\s+(?:her|his|their)\s+hand|pull\s+(?:her|him|them)\s+close)\b",
     re.IGNORECASE,
 )
@@ -96,189 +78,6 @@ _BOLD_SOCIAL_CHECK_RE = re.compile(
     re.IGNORECASE,
 )
 
-_QUEST_OR_INTEL_KEYWORDS = (
-    "quest", "bounty", "contract", "case", "clue", "lead", "evidence", "rumor", "rumour",
-    "anomaly", "anomalous", "incursion", "breach", "resonance", "containment", "suspect",
-    "witness", "incident", "report", "reading", "readings", "patrol", "sector", "intel",
-    "investigat", "analyze", "deduce", "examine", "inspect", "interrogate", "question",
-    "probe", "query", "gauge", "read her", "read his", "read their", "body language",
-    "guild", "dossier", "briefing", "disappearance", "artifact", "signal", "ledger",
-)
-
-_SOCIAL_BACKGROUND_KEYWORDS = (
-    "background", "how long", "hometown", "family", "hobby", "hobbies", "interest",
-    "outside of work", "off duty", "off-duty", "free time", "favorite", "favourite",
-    "what got", "what inspired", "inspired", "join the", "joined the", "career",
-    "studies", "major", "club", "day is going", "holding up", "compliment", "joke",
-    "banter", "tease", "weather", "walk with", "stroll with", "chat casually",
-    "get to know", "personal life", "childhood", "dream",
-)
-
-
-_PRONOUNS_BY_GENDER: Dict[str, Dict[str, str]] = {
-    "female": {
-        "subj": "she",
-        "obj": "her",
-        "poss": "her",
-        "refl": "herself",
-        "is_are": "is",
-        "has_have": "has",
-        "loves_love": "loves",
-        "enjoys_enjoy": "enjoys",
-        "likes_like": "likes",
-        "wants_want": "wants",
-        "shares_share": "shares",
-        "handles_handle": "handles",
-        "knows_know": "knows",
-    },
-    "male": {
-        "subj": "he",
-        "obj": "him",
-        "poss": "his",
-        "refl": "himself",
-        "is_are": "is",
-        "has_have": "has",
-        "loves_love": "loves",
-        "enjoys_enjoy": "enjoys",
-        "likes_like": "likes",
-        "wants_want": "wants",
-        "shares_share": "shares",
-        "handles_handle": "handles",
-        "knows_know": "knows",
-    },
-    "they": {
-        "subj": "they",
-        "obj": "them",
-        "poss": "their",
-        "refl": "themselves",
-        "is_are": "are",
-        "has_have": "have",
-        "loves_love": "love",
-        "enjoys_enjoy": "enjoy",
-        "likes_like": "like",
-        "wants_want": "want",
-        "shares_share": "share",
-        "handles_handle": "handle",
-        "knows_know": "know",
-    },
-}
-
-
-def resolve_partner_pronouns(
-    profile: Optional[Dict[str, Any]] = None,
-    partner_name: str = "",
-) -> Dict[str, str]:
-    """
-    Deterministically resolves gender and pronoun conjugations for a conversational partner.
-    Returns an immutable dict with 'subj', 'obj', 'poss', 'refl', and pre-conjugated verbs.
-    """
-    if isinstance(profile, dict) and isinstance(profile.get("pronouns"), dict):
-        return profile["pronouns"]
-
-    gender = ""
-    if isinstance(profile, dict):
-        raw_g = profile.get("gender") or profile.get("sex")
-        if raw_g:
-            norm_g = str(raw_g).strip().lower()
-            if norm_g in ("they", "them", "nonbinary", "non-binary", "neutral", "unspecified"):
-                return _PRONOUNS_BY_GENDER["they"]
-            if norm_g in ("female", "woman", "girl"):
-                return _PRONOUNS_BY_GENDER["female"]
-            if norm_g in ("male", "man", "boy"):
-                return _PRONOUNS_BY_GENDER["male"]
-            gender = norm_g
-
-    if not gender or gender not in ("female", "male"):
-        from mechanics.social.persona.core import infer_contact_gender
-        ref = profile if isinstance(profile, dict) else {}
-        name = partner_name or str(ref.get("name") or "")
-        contact_ref = ref.get("contact") or ref.get("scene_npc") or ref.get("lore_entity") or ref
-        if not isinstance(contact_ref, dict):
-            contact_ref = {"name": name}
-        elif "name" not in contact_ref and name:
-            contact_ref = dict(contact_ref)
-            contact_ref["name"] = name
-        inferred = infer_contact_gender(contact_ref)
-        if inferred in ("female", "male"):
-            gender = inferred
-
-    if gender not in _PRONOUNS_BY_GENDER:
-        gender = "they"
-
-    return _PRONOUNS_BY_GENDER[gender]
-
-
-def _canon_npc_key(name: str) -> str:
-    return re.sub(r"\s+", " ", str(name or "").strip().lower())
-
-
-def _locations_match(loc_a: str, loc_b: str, session_id: Optional[int] = None, node_a: str = "", node_b: str = "") -> bool:
-    if node_a and node_b and str(node_a).strip() == str(node_b).strip():
-        return True
-    if session_id and node_a and node_b:
-        try:
-            if db.is_descendant_of(session_id, node_a, node_b) or db.is_descendant_of(session_id, node_b, node_a):
-                return True
-        except Exception:
-            pass
-    a = str(loc_a or "").strip().lower()
-    b = str(loc_b or "").strip().lower()
-    if not a or not b:
-        return False
-    if a == b or a in b or b in a:
-        return True
-    a_parts = [p.strip() for p in a.split("➔") if p.strip()]
-    b_parts = [p.strip() for p in b.split("➔") if p.strip()]
-    if a_parts and b_parts:
-        # Same primary building/venue (Tier 2) or same leaf sub-room (Tier 3) counts as same venue
-        a_leaf, b_leaf = a_parts[-1], b_parts[-1]
-        if a_leaf == b_leaf or (len(a_leaf) >= 5 and (a_leaf in b_leaf or b_leaf in a_leaf)):
-            return True
-        if len(a_parts) >= 2 and len(b_parts) >= 2 and a_parts[1] == b_parts[1]:
-            return True
-    return False
-
-
-def get_npc_departure_states(session: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
-    """Returns normalized per-NPC urgent departure state map from session."""
-    if not isinstance(session, dict):
-        return {}
-    raw = session.get("npc_departure_states")
-    if not isinstance(raw, dict):
-        extra = session.get("extra")
-        if isinstance(extra, dict) and isinstance(extra.get("npc_departure_states"), dict):
-            raw = extra["npc_departure_states"]
-    if not isinstance(raw, dict):
-        return {}
-    out: Dict[str, Dict[str, Any]] = {}
-    for k, v in raw.items():
-        if isinstance(v, dict):
-            out[_canon_npc_key(k)] = dict(v)
-    return out
-
-
-def save_npc_departure_states(
-    session: Optional[Dict[str, Any]],
-    states: Dict[str, Dict[str, Any]],
-    persist_db: bool = True,
-) -> None:
-    """Synchronizes npc_departure_states onto session and persists to SQLite extra_json."""
-    clean_states = {_canon_npc_key(k): dict(v) for k, v in (states or {}).items() if k and isinstance(v, dict)}
-    if isinstance(session, dict):
-        session["npc_departure_states"] = clean_states
-        if isinstance(session.get("extra"), dict):
-            session["extra"]["npc_departure_states"] = clean_states
-        sess_id = session.get("id")
-        if persist_db and sess_id:
-            try:
-                # Pass empty dict (not None) when empty so update_session overwrites rather than deletes or skips
-                db.update_session(int(sess_id), extra={"npc_departure_states": clean_states})
-            except Exception as e:
-                log.warning("Failed persisting npc_departure_states: %s", e)
-
-
-# ── Per-NPC Daily Conversation Ledger & Pacing Budget ─────────────────────────
-
 
 def get_npc_conversation_ledgers(session: Optional[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
     """Returns per-day, per-NPC conversation ledger map from session."""
@@ -291,11 +90,7 @@ def get_npc_conversation_ledgers(session: Optional[Dict[str, Any]]) -> Dict[str,
             raw = extra["npc_conversation_ledgers"]
     if not isinstance(raw, dict):
         return {}
-    out: Dict[str, Dict[str, Any]] = {}
-    for k, v in raw.items():
-        if k and isinstance(v, dict):
-            out[str(k)] = dict(v)
-    return out
+    return {str(k): dict(v) for k, v in raw.items() if k and isinstance(v, dict)}
 
 
 def save_npc_conversation_ledgers(
@@ -335,8 +130,9 @@ def compute_base_conversation_budget(profile: Dict[str, Any]) -> int:
     return 2
 
 
-def _extract_topic_signature(label: str) -> str:
-    """Maps a social/background choice label to a semantic topic signature so rephrased duplicates don't repeat."""
+def _extract_topic_signature(label: str, choice: Optional[Dict[str, Any]] = None) -> str:
+    if isinstance(choice, dict) and choice.get("topic_id"):
+        return str(choice["topic_id"]).strip()
     lbl_low = str(label or "").strip().lower()
     if not lbl_low:
         return ""
@@ -344,24 +140,14 @@ def _extract_topic_signature(label: str) -> str:
         return "contact_exchange"
     if any(k in lbl_low for k in ("work as ", "role in ", "role as ", "duty as ", "current assignment", "career path")):
         return "work_role"
-    if any(k in lbl_low for k in ("how long", "stationed", "classes or club", "busiest")):
-        return "stationed_duration"
     if any(k in lbl_low for k in ("off duty", "off-duty", "free time", "outside of work", "hobby", "hobbies", "enjoy doing")):
         return "hobbies_offduty"
-    if any(k in lbl_low for k in ("favorite spot", "favourite spot", "grab a bite", "coffee", "unwind around", "favorite food")):
+    if any(k in lbl_low for k in ("favorite spot", "favourite spot", "grab a bite", "unwind around", "favorite food")):
         return "favorite_spot_food"
-    if any(k in lbl_low for k in ("proudest", "personal story", "what inspired", "what got", "growing up", "hometown", "childhood", "fondest memory")):
+    if any(k in lbl_low for k in ("proudest", "personal story", "what inspired", "what got", "hometown", "childhood")):
         return "personal_story"
-    if any(k in lbl_low for k in ("really been holding up", "day is going", "on their mind", "how they are holding up")):
+    if any(k in lbl_low for k in ("holding up", "day is going", "on their mind")):
         return "day_checkin"
-    if any(k in lbl_low for k in ("atmosphere around", "vibe here", "crowd today", "pace around here", "enjoy the moment together")):
-        return "venue_atmosphere"
-    if _ROMANTIC_ADVANCE_RE.search(label):
-        return "flirt_romance"
-    if _COMPLIMENT_RE.search(label):
-        return "compliment"
-    if any(k in lbl_low for k in ("joke", "quip", "playful banter", "wry observation", "lighthearted observation", "playfully tease")):
-        return "joke_banter"
     if any(k in lbl_low for k in ("walk with ", "stroll with ", "accompany ")):
         return "walk_together"
     if "clear the air" in lbl_low:
@@ -373,13 +159,12 @@ def get_partner_conversation_budget_state(
     session: Optional[Dict[str, Any]],
     profile: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Pure reader returning remaining daily non-quest conversation budget and asked topics for an NPC."""
     sess = session if isinstance(session, dict) else {}
     curr_day = int(sess.get("current_day") or 1)
     curr_min = int(sess.get("current_minute") if sess.get("current_minute") is not None else 480)
     from mechanics.world.schedules import get_time_block_key
-    curr_blk = get_time_block_key(curr_min)
 
+    curr_blk = get_time_block_key(curr_min)
     partner_name = str(profile.get("name") or "").strip()
     l_key = f"{curr_day}:{_canon_npc_key(partner_name)}"
     ledgers = get_npc_conversation_ledgers(sess)
@@ -395,11 +180,9 @@ def get_partner_conversation_budget_state(
     meetup_key = f"{curr_day}:meetup:{meetup_loc}"
 
     if is_meetup and entry.get("active_meetup_key") != meetup_key:
-        # Entering a scheduled Private Meetup / Date grants a fresh full budget
         turns_used = 0
         bonus_turns = 0
     elif last_blk and last_blk != curr_blk and curr_blk not in rechecked:
-        # Catching up again in a later time block grants +2 check-in turns
         bonus_turns += 2
 
     remaining = max(0, base_budget + bonus_turns - turns_used)
@@ -421,7 +204,6 @@ def is_non_quest_social_turn_action(
     action_dict: Dict[str, Any],
     was_already_partner: bool = True,
 ) -> bool:
-    """Determines whether an action consumes 1 turn of the NPC's non-quest social conversation budget."""
     if not isinstance(action_dict, dict):
         return False
     lbl = str(action_dict.get("label") or action_dict.get("text") or action_dict.get("action") or "").strip()
@@ -441,6 +223,7 @@ def is_non_quest_social_turn_action(
     ):
         return False
     from mechanics.narrative.intent import is_conversational_exit
+
     if is_conversational_exit(lbl):
         return False
     if (
@@ -451,11 +234,11 @@ def is_non_quest_social_turn_action(
         or action_dict.get("is_story_quest")
         or action_dict.get("_active_quest_inquiry")
         or action_dict.get("_is_world_rumor_inquiry")
+        or action_dict.get("_is_break_the_news")
         or str(action_dict.get("linked_quest_id") or "").upper().startswith("MNR-")
         or str(action_dict.get("quest_id") or "").upper().startswith("MNR-")
     ):
         return False
-    # Pure conversation-opening greeting ("Speak with Putri Wijaya") on Turn 0 does NOT burn a question slot
     if not was_already_partner and _OPENING_GREETING_RE.match(lbl) and " about " not in lbl_low:
         return False
     return True
@@ -470,7 +253,6 @@ def record_partner_conversation_turn(
     was_already_partner: bool = True,
     persist_db: bool = True,
 ) -> Dict[str, Any]:
-    """Records asked labels/topics and increments turns_used for non-quest social dialogue turns."""
     if not isinstance(session, dict) or not partner_name:
         return {}
     try:
@@ -483,8 +265,8 @@ def record_partner_conversation_turn(
     curr_day = int(session.get("current_day") or 1)
     curr_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
     from mechanics.world.schedules import get_time_block_key
-    curr_blk = get_time_block_key(curr_min)
 
+    curr_blk = get_time_block_key(curr_min)
     l_key = f"{curr_day}:{_canon_npc_key(partner_name)}"
     ledgers = get_npc_conversation_ledgers(session)
     entry = dict(ledgers.get(l_key) or {
@@ -514,7 +296,6 @@ def record_partner_conversation_turn(
 
     asked_labels = [str(x).strip().lower() for x in (entry.get("asked_labels") or []) if str(x).strip()]
     asked_sigs = [str(x).strip() for x in (entry.get("asked_topic_signatures") or []) if str(x).strip()]
-
     pre_base = compute_base_conversation_budget(profile)
     pre_rem = pre_base + int(entry.get("bonus_turns") or 0) - int(entry.get("turns_used") or 0)
 
@@ -526,11 +307,10 @@ def record_partner_conversation_turn(
         lbl_low = lbl.lower()
         if not lbl_low:
             continue
-        # Record non-opening-greeting labels so the exact option does not repeat back-to-back
         if not _OPENING_GREETING_RE.match(lbl) or " about " in lbl_low:
             if lbl_low not in asked_labels:
                 asked_labels.append(lbl_low)
-            sig = str(a.get("_topic_sig") or _extract_topic_signature(lbl) or "").strip()
+            sig = str(a.get("_topic_sig") or _extract_topic_signature(lbl, a) or "").strip()
             if sig and sig != "contact_exchange" and sig not in asked_sigs:
                 asked_sigs.append(sig)
         if is_non_quest_social_turn_action(a, was_already_partner=was_already_partner):
@@ -550,7 +330,11 @@ def record_partner_conversation_turn(
     return get_partner_conversation_budget_state(session, profile)
 
 
-def _find_contact_and_lore(session_id: Optional[int], partner_name: str, char_id: int = 0) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+def _find_contact_and_lore(
+    session_id: Optional[int],
+    partner_name: str,
+    char_id: int = 0,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
     contact: Optional[Dict[str, Any]] = None
     lore_ent: Dict[str, Any] = {}
     if not session_id or not partner_name:
@@ -639,7 +423,6 @@ def resolve_partner_conversation_profile(
     p_first = namegen.extract_first_and_last_name(partner_name)[0].strip().lower() if partner_name else ""
     p_last = namegen.extract_first_and_last_name(partner_name)[1].strip().lower() if partner_name else ""
 
-    # 1. Check Party & Temporary Companion Status
     is_party_member = False
     is_temp_companion = False
     for pm in (sess.get("party_npcs") or []):
@@ -669,7 +452,6 @@ def resolve_partner_conversation_profile(
             pass
     is_companion = bool(is_party_member or is_temp_companion)
 
-    # 2. Check Active Private Meetup / Rendezvous Status
     is_private_meetup = False
     meetup_location = ""
     has_other_commitment_loc = ""
@@ -707,15 +489,9 @@ def resolve_partner_conversation_profile(
         except Exception:
             pass
 
-    # 3. Check if Current Scene is the NPC's Own Home / Bedroom / Personal Office
     is_npc_home_or_office = False
     loc_low = curr_loc.lower()
-    home_loc = str(
-        b_info.get("residence")
-        or b_info.get("home_location")
-        or b_info.get("residence_location")
-        or ""
-    ).strip()
+    home_loc = str(b_info.get("residence") or b_info.get("home_location") or b_info.get("residence_location") or "").strip()
     if home_loc and _locations_match(curr_loc, home_loc, session_id=session_id):
         is_npc_home_or_office = True
     if not is_npc_home_or_office:
@@ -730,9 +506,7 @@ def resolve_partner_conversation_profile(
         try:
             from mechanics.world.npc_schedule import get_npc_schedule
             npc_ref = contact or npc_scene_obj or {"name": partner_name, "role": role}
-            sched_map = get_npc_schedule(
-                npc_ref, scen_key=scen_key, session_id=session_id, current_day=curr_day, current_minute=curr_min
-            )
+            sched_map = get_npc_schedule(npc_ref, scen_key=scen_key, session_id=session_id, current_day=curr_day, current_minute=curr_min)
             night_home = str((sched_map or {}).get("night") or "").strip()
             if night_home and any(
                 w in loc_low for w in ("bedroom", "apartment", "residence", "dorm", "house", "quarters", "suite")
@@ -741,13 +515,11 @@ def resolve_partner_conversation_profile(
         except Exception:
             pass
 
-    # 4. Active Quest / Bounty Stationing Check
     is_quest_stationed_here = False
     relevant_quests: List[Dict[str, Any]] = []
     if session_id:
         try:
-            active_wps = db.get_all_session_active_waypoints(session_id) or []
-            for wp in active_wps:
+            for wp in (db.get_all_session_active_waypoints(session_id) or []):
                 wp_npc = str(wp.get("target_npc") or "").strip().lower()
                 wp_loc = str(wp.get("target_location") or wp.get("location") or "").strip()
                 if wp_npc and (wp_npc == p_low or (p_first and len(p_first) >= 3 and p_first in wp_npc)):
@@ -759,37 +531,20 @@ def resolve_partner_conversation_profile(
         except Exception:
             pass
 
-    can_walk_together = bool(
-        is_private_meetup
-        or is_companion
-        or score >= 100
-        or track == "romantic"
-    )
-
-    if score >= 100 or track == "romantic":
-        convince_stay_dc = 6
-    elif score >= 50:
-        convince_stay_dc = 9
-    else:
-        convince_stay_dc = 12
+    can_walk_together = bool(is_private_meetup or is_companion or score >= 100 or track == "romantic")
+    convince_stay_dc = 6 if (score >= 100 or track == "romantic") else (9 if score >= 50 else 12)
 
     traits_list: List[str] = []
     for t_cand in ((contact or {}).get("traits") or b_info.get("traits") or lore_ent.get("traits") or []):
         t_str = str(t_cand or "").strip()
-        if t_str and len(t_str) <= 36 and t_str not in traits_list:
+        if t_str and len(t_str) <= 36 and "???" not in t_str and t_str not in traits_list:
             traits_list.append(t_str)
 
     prefs_obj = ((contact or {}).get("preferences") or {}) if isinstance((contact or {}).get("preferences"), dict) else {}
     likes_list: List[str] = []
-    for raw_lk in (
-        prefs_obj.get("likes")
-        or prefs_obj.get("hobbies")
-        or b_info.get("hobbies")
-        or b_info.get("likes")
-        or []
-    ):
+    for raw_lk in (prefs_obj.get("likes") or prefs_obj.get("hobbies") or b_info.get("hobbies") or b_info.get("likes") or []):
         lk_str = str(raw_lk or "").strip()
-        if lk_str and len(lk_str) <= 44 and lk_str not in likes_list:
+        if lk_str and len(lk_str) <= 44 and "???" not in lk_str and lk_str not in likes_list:
             likes_list.append(lk_str)
 
     pron = resolve_partner_pronouns(
@@ -846,7 +601,6 @@ def _collect_valid_walk_destinations(
     session: Optional[Dict[str, Any]],
     profile: Dict[str, Any],
 ) -> Set[str]:
-    """Collects contextual walk-with destinations: meetup spot, active quest waypoints, and current-zone sub-locations."""
     valid: Set[str] = set()
     if not isinstance(session, dict):
         return valid
@@ -858,28 +612,22 @@ def _collect_valid_walk_destinations(
         for part in str(profile["meetup_location"]).split("➔"):
             if part.strip():
                 valid.add(part.strip().lower())
-
     for wp in (profile.get("relevant_quests") or []):
-        wloc = str(wp.get("target_location") or wp.get("location") or "")
-        for part in wloc.split("➔"):
+        for part in str(wp.get("target_location") or wp.get("location") or "").split("➔"):
             if part.strip():
                 valid.add(part.strip().lower())
-
     if sess_id:
         try:
             for q in (db.get_session_quests(int(sess_id), status="Active") or []):
-                qloc = str(q.get("location") or "")
-                for part in qloc.split("➔"):
+                for part in str(q.get("location") or "").split("➔"):
                     if part.strip():
                         valid.add(part.strip().lower())
         except Exception:
             pass
-
         if curr_zone:
             try:
                 for loc_row in (db.get_session_locations(int(sess_id)) or []):
-                    zn = str(loc_row.get("zone_name") or "").strip().lower()
-                    if zn == curr_zone:
+                    if str(loc_row.get("zone_name") or "").strip().lower() == curr_zone:
                         for k in ("primary_name", "sub_name"):
                             v = str(loc_row.get(k) or "").strip().lower()
                             if v:
@@ -898,7 +646,6 @@ def _collect_valid_walk_destinations(
             except Exception:
                 pass
 
-    # Generic nearby within-venue descriptors (e.g. "a quieter corner", "the hallway", "nearby bench")
     for generic_spot in (
         "quieter corner", "quiet corner", "quieter spot", "hallway", "corridor",
         "courtyard", "balcony", "terrace", "nearby bench", "lounge", "foyer",
@@ -907,89 +654,70 @@ def _collect_valid_walk_destinations(
     return valid
 
 
-def is_convince_stay_action(action_or_label: Any) -> bool:
-    if isinstance(action_or_label, dict):
-        if action_or_label.get("_convince_stay") or action_or_label.get("departure_action") == "convince_stay":
-            return True
-        lbl = str(action_or_label.get("label") or action_or_label.get("text") or action_or_label.get("action") or "")
-    else:
-        lbl = str(action_or_label or "")
-    return bool(_CONVINCE_STAY_RE.search(lbl))
-
-
 def is_choice_allowed_for_partner_profile(
     choice: Dict[str, Any] | str,
     profile: Dict[str, Any],
     session: Optional[Dict[str, Any]] = None,
     allow_convince_stay: bool = False,
 ) -> bool:
-    """Deterministically filters out premature flattery/banter, invalid walk-alongs, and unprompted stay checks."""
+    """Validates structural gates (Convince Stay, Walk-Along destinations, Merchant/Faculty flirt block)."""
     c_dict = choice if isinstance(choice, dict) else {"label": str(choice or "")}
     lbl = str(c_dict.get("label") or c_dict.get("text") or "").strip()
     if not lbl:
         return False
     lbl_low = lbl.lower()
 
-    # 1. Pinned exit or quest-stamped actions are always allowed (unless convince_stay check below)
     if c_dict.get("_pinned_dialogue_exit") or c_dict.get("intent") == "dialogue_exit" or c_dict.get("ends_dialogue"):
         return True
 
-    # 2. "Convince [NPC] to stay" is strictly forbidden unless explicitly stamped in Stage 1 / Stage 2
     if is_convince_stay_action(c_dict):
         return bool(allow_convince_stay and c_dict.get("_convince_stay"))
 
-    # 3. "Propose moving to a quieter spot" privacy nudge: block for Strangers/Negative outside meetups
     if "quieter" in lbl_low and ("propose moving" in lbl_low or "suggest moving" in lbl_low or "speak in private" in lbl_low):
-        if profile["score"] < 50 and not profile["is_private_meetup"] and profile["track"] != "romantic":
+        if int(profile.get("score", 0)) < 50 and not profile.get("is_private_meetup") and profile.get("track") != "romantic":
             return False
 
-    # 4. "Walk with [NPC]..." / accompany check
     m_walk = _WALK_WITH_RE.match(lbl)
-    if m_walk or any(p in lbl_low for p in ("walk with ", "stroll with ", "accompany ", "tag along with ")):
+    if c_dict.get("intent") != "party_recruit" and (m_walk or any(p in lbl_low for p in ("walk with ", "stroll with ", "accompany ", "tag along with "))):
+        if c_dict.get("_priority_slot"):
+            return True
         if not profile.get("can_walk_together"):
             return False
-        # Validate destination if " to " / " toward " is present
         dest_match = re.search(r"\b(?:to|toward|towards|into)\s+(.+)$", lbl, re.IGNORECASE)
         if dest_match:
-            dest_raw = dest_match.group(1).strip(" .,!?)(").lower()
-            dest_raw = re.sub(r"^(?:the|a|an)\s+", "", dest_raw).strip()
+            dest_raw = re.sub(r"^(?:the|a|an)\s+", "", dest_match.group(1).strip(" .,!?)(").lower()).strip()
             valid_dests = _collect_valid_walk_destinations(session, profile)
             if dest_raw and valid_dests:
                 if not any(vd in dest_raw or dest_raw in vd for vd in valid_dests if len(vd) >= 4):
                     return False
 
-    # 5. 4-Tier Affinity Social Filter (+1 tier loosening during scheduled Private Meetups / Dates)
-    score = int(profile.get("score", 0))
-    track = str(profile.get("track") or "platonic").lower()
-    is_meetup = bool(profile.get("is_private_meetup"))
-    eff_score = score + (50 if (is_meetup and score >= 0) else 0)
-
-    if track != "romantic":
-        if eff_score < 50:
-            # Negative (< 0) and Stranger (0-49 outside meetup): strictly NO compliments, witty observations, jokes, banter, or teasing
-            if _COMPLIMENT_RE.search(lbl) or _WITTY_OR_BANTER_RE.search(lbl):
-                return False
-        elif eff_score < 100:
-            # Acquaintance (50-99, or Stranger on Meetup): polite compliments & light jokes allowed,
-            # but block heavy teasing, flirting, or physical affection unless romantic confession milestone
-            if c_dict.get("intent") != "romantic_confession" and _HEAVY_TEASE_OR_FLIRT_RE.search(lbl):
-                return False
-        elif eff_score < 150:
-            # Friend (100-149, or Acquaintance on Meetup): playful teasing & banter allowed,
-            # overt romantic/seductive flirtation unlocks at Close (150+) / Romantic / Friend+ Meetup
-            if c_dict.get("intent") != "romantic_confession" and _ROMANTIC_ADVANCE_RE.search(lbl):
-                return False
+    # Block flirt_chemistry / romantic advances on Faculty, Merchants, Clerks, and non-contact roles
+    scen_key = str((session or {}).get("scenario") or "fantasy")
+    if str(c_dict.get("intent") or "").lower() == "party_recruit":
+        scen_low = scen_key.lower()
+        if int(profile.get("score", 0)) < 0 or "slice_of_life" in scen_low or ("high_school" in scen_low and "anomalous" not in scen_low):
+            return False
+    allows_flirt = deck._npc_allows_flirt(
+        str(profile.get("name") or ""),
+        profile.get("scene_npc"),
+        profile.get("contact"),
+        scen_key,
+    )
+    if not allows_flirt:
+        if (
+            str(c_dict.get("category") or "").lower() == "flirt_chemistry"
+            or str(c_dict.get("intent") or "").lower() in ("romantic_confession", "phone_contact_exchange")
+            or _ROMANTIC_ADVANCE_RE.search(lbl)
+        ):
+            return False
 
     return True
 
 
 def build_pinned_leave_choice(partners: List[str]) -> Dict[str, Any]:
-    """Builds the standardized, pinned Band 3 Leave Conversation choice."""
+    """Builds the standardized, pinned Band 4 Leave Conversation choice."""
     clean_partners = [str(p).strip() for p in (partners or []) if str(p).strip()]
-    if len(clean_partners) == 1:
-        label = f"Leave conversation with {clean_partners[0]}"
-    else:
-        label = "Leave conversation"
+    label = f"Leave conversation with {clean_partners[0]}" if len(clean_partners) == 1 else "Leave conversation"
     return {
         "label": label,
         "stat": "NONE",
@@ -1003,67 +731,6 @@ def build_pinned_leave_choice(partners: List[str]) -> Dict[str, Any]:
     }
 
 
-def _recent_action_labels_lower(
-    session: Optional[Dict[str, Any]],
-    limit: int = 25,
-    actions: Optional[List[Any]] = None,
-    partner_name: str = "",
-) -> List[str]:
-    labels: List[str] = []
-    seen: Set[str] = set()
-
-    def _add(val: Any) -> None:
-        s = str(val or "").strip().lower()
-        if s and s not in seen:
-            seen.add(s)
-            labels.append(s)
-
-    for a in (actions or []):
-        if isinstance(a, dict):
-            _add(a.get("label") or a.get("text") or a.get("action"))
-
-    if isinstance(session, dict):
-        if partner_name:
-            curr_day = int(session.get("current_day") or 1)
-            l_key = f"{curr_day}:{_canon_npc_key(partner_name)}"
-            ledgers = get_npc_conversation_ledgers(session)
-            entry = ledgers.get(l_key) or {}
-            for asked in (entry.get("asked_labels") or []):
-                _add(asked)
-
-        hist = session.get("history") or []
-        for h in reversed(hist):
-            if isinstance(h, dict):
-                _add(h.get("label") or h.get("action_label") or h.get("action"))
-                for sub_a in (h.get("actions") or []):
-                    if isinstance(sub_a, dict):
-                        _add(sub_a.get("label") or sub_a.get("text") or sub_a.get("action"))
-            elif isinstance(h, str):
-                # Support formatted string history "[SUCCESS] Hero: Action label -> ..."
-                m_str = re.search(r":\s*([^->]+?)(?:\s*->|$)", h)
-                if m_str:
-                    _add(m_str.group(1))
-            if len(labels) >= limit:
-                break
-    return labels[:limit]
-
-
-def _is_similar_to_recent(label: str, recent_labels: List[str]) -> bool:
-    l_low = str(label or "").strip().lower()
-    if not l_low or not recent_labels:
-        return False
-    if l_low in recent_labels:
-        return True
-    toks = {w for w in re.findall(r"\b[a-z]{4,}\b", l_low) if w not in {"with", "about", "what", "have", "from", "that", "this", "their", "your", "ask", "inquire"}}
-    if len(toks) < 2:
-        return False
-    for rl in recent_labels:
-        r_toks = set(re.findall(r"\b[a-z]{4,}\b", rl))
-        if toks and len(toks & r_toks) >= max(2, len(toks) - 1):
-            return True
-    return False
-
-
 def generate_band1_quest_and_rumor_fallbacks(
     profile: Dict[str, Any],
     session: Optional[Dict[str, Any]],
@@ -1072,723 +739,30 @@ def generate_band1_quest_and_rumor_fallbacks(
     active_quests: Optional[List[Any]] = None,
     **kwargs: Any,
 ) -> List[Dict[str, Any]]:
-    """Generates deterministic Band 1 skill-check choices prioritizing active quests/bounties, then local rumors/intel."""
-    sess = session if isinstance(session, dict) else {}
-    sess_id = sess.get("id")
-    scen_key = str(sess.get("scenario") or "fantasy").lower()
-    partner = str(profile.get("name") or "them").strip()
-    pron = profile.get("_cached_pronouns")
-    if not isinstance(pron, dict):
-        pron = resolve_partner_pronouns(profile=profile, partner_name=partner)
-        profile["_cached_pronouns"] = pron
-    role = str(profile.get("role") or "").strip()
-    recent = _recent_action_labels_lower(sess, actions=actions, partner_name=partner)
-
-    candidates: List[Dict[str, Any]] = []
-
-    # Priority 1: Active quests / bounties from DB
-    if sess_id:
-        try:
-            if active_quests is None:
-                active_quests = db.get_session_quests(int(sess_id), status="Active") or []
-            for q in active_quests[:3]:
-                q_title = str(q.get("title") or "").strip()
-                q_id = str(q.get("id") or q.get("quest_id") or "")
-                is_bounty = "bounty" in str(q.get("quest_type") or "").lower() or q_id.lower().startswith("bnt-")
-                if q_title:
-                    lbl = (
-                        f"Question {partner} for field leads on '{q_title}'"
-                        if is_bounty
-                        else f"Ask {partner} what {pron['subj']} {pron['knows_know']} regarding '{q_title}'"
-                    )
-                    candidates.append({
-                        "label": lbl[:180],
-                        "stat": "CHA",
-                        "requirement": 6,
-                        "mp_cost": 0,
-                        "intent": "investigate_clue",
-                        "target_npc": partner,
-                        "quest_id": q_id,
-                        "_active_quest_inquiry": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    })
-                    lbl_int = f"Cross-check details about '{q_title}' with {partner}"
-                    candidates.append({
-                        "label": lbl_int[:180],
-                        "stat": "INT",
-                        "requirement": 6,
-                        "mp_cost": 0,
-                        "intent": "investigate_clue",
-                        "target_npc": partner,
-                        "quest_id": q_id,
-                        "_active_quest_inquiry": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    })
-        except Exception:
-            pass
-
-    _snap_b1_local = (sess.get("_world_events_snapshot") or db.get_world_events_snapshot(int(sess["id"]))) if sess.get("id") else None
-
-    # Priority 1.5: Discovered World Rumors (Aware NPC Clue Pressing vs Unaware NPC 1/Day [Break the News])
-    if sess.get("id") and isinstance(_snap_b1_local, dict):
-        try:
-            from mechanics.world.world_events.modifiers import compute_rumor_defensive_dc
-            from mechanics.world.world_events.social_hooks import (
-                can_break_news_today,
-                is_npc_aware_of_event,
-            )
-            _sid_we = int(sess["id"])
-            _snap_we = _snap_b1_local
-            _npc_slug = str(partner or "").strip().lower().replace(" ", "_")
-            _curr_d = int(sess.get("current_day") or 1)
-            _def_dc = compute_rumor_defensive_dc(_snap_we, npc_name=partner)
-            for _rm in (_snap_we.get("discovered_rumors") or [])[:2]:
-                if _rm.get("status") != "active":
-                    continue
-                _rm_title = str(_rm.get("title") or "the rumor").strip()
-                _ev_k = str(_rm.get("event_key") or "")
-                _rm_qid = str(_rm.get("linked_quest_id") or "")
-                if is_npc_aware_of_event(_sid_we, _ev_k, _npc_slug):
-                    _cand_rm = {
-                        "label": f"Press {partner} for leads on '{_rm_title}'"[:180],
-                        "stat": "CHA",
-                        "requirement": 6 + _def_dc,
-                        "mp_cost": 0,
-                        "intent": "investigate_clue",
-                        "target_npc": partner,
-                        "event_key": _ev_k,
-                        "_is_world_rumor_inquiry": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    }
-                    if _rm_qid:
-                        _cand_rm["quest_id"] = _rm_qid
-                        _cand_rm["linked_quest_id"] = _rm_qid
-                        _cand_rm["is_quest_action"] = True
-                    candidates.append(_cand_rm)
-                elif can_break_news_today(_sid_we, _curr_d, _npc_slug, pity_state=_snap_we.get("pity_state")):
-                    candidates.append({
-                        "label": f"[Break the News] Share what you heard about '{_rm_title}' with {partner}"[:180],
-                        "stat": "CHA",
-                        "requirement": 5,
-                        "mp_cost": 0,
-                        "intent": "break_the_news",
-                        "target_npc": partner,
-                        "event_key": _ev_k,
-                        "_is_break_the_news": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    })
-        except Exception:
-            pass
-
-    # Priority 1.6: Claimed Minor Event Inquiries (Budget-Exempt Band 1 Investigation)
-    if sess.get("id") and isinstance(_snap_b1_local, dict):
-        try:
-            from mechanics.world.world_events import extract_minor_events, is_npc_aware_of_minor_event
-            _sid_mnr = int(sess["id"])
-            _snap_mnr = _snap_b1_local
-            _npc_slug_mnr = str(partner or "").strip().lower().replace(" ", "_")
-            _curr_loc_mnr = str(sess.get("current_location") or "")
-            _all_evs = extract_minor_events(_snap_mnr, statuses=("active",))
-            for _mev in _all_evs:
-                _l_qid = str(_mev.get("linked_quest_id") or "")
-                if _mev.get("status") == "active" and _l_qid.upper().startswith("MNR-"):
-                    if is_npc_aware_of_minor_event(
-                        _sid_mnr, _mev, _npc_slug_mnr, npc_profile=profile, current_location=_curr_loc_mnr
-                    ):
-                        _m_title = str(_mev.get("title") or "the local incident").strip()
-                        candidates.append({
-                            "label": f"Ask {partner} what {pron['subj']} noticed about '{_m_title}'"[:180],
-                            "stat": "PER",
-                            "requirement": 5,
-                            "mp_cost": 0,
-                            "intent": "investigate_clue",
-                            "target_npc": partner,
-                            "event_key": str(_mev.get("event_key") or ""),
-                            "quest_id": _l_qid,
-                            "linked_quest_id": _l_qid,
-                            "is_quest_action": True,
-                            "_is_world_rumor_inquiry": True,
-                            "is_fallback": False,
-                            "_deterministic_supplement": True,
-                            "_band": 1,
-                        })
-                        break
-        except Exception:
-            pass
-
-    # Priority 2: Scenario-grounded rumor & situational intel skill checks
-    if scenario_data.is_anomalous_high_school_scenario(scen_key):
-        rumor_specs = [
-            ("INT", f"Query {partner} about strange campus occurrences or anomalous readings nearby", 6),
-            ("CHA", f"Ask {partner} if {pron['subj']} {pron['has_have']} heard any notable school or city rumors lately", 6),
-            ("PER", f"Read {partner}'s demeanor and situational awareness for anything {pron['subj']} {pron['is_are']} holding back", 5),
-            ("CHA", f"Ask {partner} about active containment bounties or what clubs have been making noise this week", 6),
-        ]
-    elif scenario_data.is_anomalous_incursions_scenario(scen_key):
-        rumor_specs = [
-            ("INT", f"Query {partner} about recent anomalous readings or breach reports nearby", 6),
-            ("CHA", f"Ask {partner} about unlogged agency rumors or active containment bounties", 6),
-            ("PER", f"Read {partner}'s demeanor and tactical readiness for anything {pron['subj']} {pron['is_are']} holding back", 5),
-            ("INT", f"Compare notes with {partner} on sector patrol patterns and recent dispatch alerts", 6),
-        ]
-    elif any(k in scen_key for k in ("high_school", "academy", "school")):
-        rumor_specs = [
-            ("CHA", f"Ask {partner} if {pron['subj']} {pron['has_have']} heard any notable campus rumors lately", 6),
-            ("INT", f"Inquire with {partner} about upcoming school events or student council news", 5),
-            ("PER", f"Observe {partner}'s expression closely to gauge what is on {pron['poss']} mind", 5),
-            ("CHA", f"Ask {partner} what clubs or homerooms have been making noise this week", 5),
-        ]
-    elif "cyber" in scen_key:
-        rumor_specs = [
-            ("CHA", f"Ask {partner} about current street rumors, fixer jobs, or local heat", 6),
-            ("INT", f"Probe {partner} for district intel and recent network anomalies", 6),
-            ("PER", f"Read {partner}'s body language and subtle tells during the exchange", 5),
-            ("CHA", f"Check with {partner} on who has been moving heavy chrome through this block", 6),
-        ]
-    else:
-        from mechanics.social.relationships import format_public_character_role
-        pub_role = format_public_character_role(role, scen_key=scen_key)
-        is_student_r = any(
-            k in role.lower()
-            for k in ("student", "classmate", "freshman", "sophomore", "junior", "senior", "clown", "slacker", "delinquent", "bookworm", "president", "captain", "member")
-        )
-        role_hint = f" as {pub_role}" if (pub_role and not is_student_r and len(pub_role) < 28) else ""
-        rumor_specs = [
-            ("CHA", f"Ask {partner} about recent local rumors, bounties, or trouble in the area", 6),
-            ("INT", f"Question {partner} for practical intel {pron['subj']} {pron['has_have']} noticed{role_hint}", 6),
-            ("PER", f"Study {partner}'s expression and posture to gauge what {pron['subj']} {pron['knows_know']}", 5),
-            ("CHA", f"Ask {partner} whether any unusual travelers or incidents turned up today", 5),
-        ]
-
-    for st, lbl, dc in rumor_specs:
-        candidates.append({
-            "label": lbl,
-            "stat": st,
-            "requirement": dc,
-            "mp_cost": 0,
-            "intent": "investigate_clue",
-            "target_npc": partner,
-            "_is_generic_rumor": True,
-            "is_fallback": False,
-            "_deterministic_supplement": True,
-            "_band": 1,
-        })
-
-    return [c for c in candidates if not _is_similar_to_recent(c["label"], recent)]
-
-
-def _build_contextual_role_and_leisure_phrases(
-    profile: Dict[str, Any],
-    session: Optional[Dict[str, Any]],
-    venue_leaf: str,
-) -> Dict[str, str]:
-    """
-    Computes context-aware role/activity, leisure, and duration phrases for Band 2 social choices
-    so students/peers never receive immersion-breaking 'Ask about their work/job as Class Clown'
-    or 'when they are off duty' options (Issue 9).
-    """
-    from mechanics.social.relationships import format_public_character_role
-
-    sess = session if isinstance(session, dict) else {}
-    scen_key = str(sess.get("scenario") or "fantasy").lower()
-    partner = str(profile.get("name") or "them").strip()
-    pron = profile.get("_cached_pronouns")
-    if not isinstance(pron, dict):
-        pron = resolve_partner_pronouns(profile=profile, partner_name=partner)
-        profile["_cached_pronouns"] = pron
-    raw_role = str(profile.get("role") or "").strip()
-    faction = str(profile.get("faction") or "").strip()
-    contact = profile.get("contact") if isinstance(profile.get("contact"), dict) else {}
-    b_info = (contact.get("basic_info") or {}) if isinstance(contact.get("basic_info"), dict) else {}
-    scene_npc = profile.get("scene_npc") if isinstance(profile.get("scene_npc"), dict) else {}
-
-    grade = str(b_info.get("grade") or contact.get("grade") or scene_npc.get("grade") or "").strip()
-    club = str(b_info.get("club") or contact.get("club") or scene_npc.get("club") or faction or "").strip()
-    activity = str(scene_npc.get("activity") or b_info.get("initial_activity") or "").strip()
-
-    role_low = raw_role.lower()
-    grade_low = grade.lower()
-    club_low = club.lower()
-    has_real_club = club_low not in ("", "none", "unaffiliated", "general", "faculty", "town", "staff", "administration")
-
-    is_faculty_or_adult = bool(
-        grade_low in ("faculty", "citizen", "staff")
-        or b_info.get("is_faculty")
-        or b_info.get("social_role_type") in ("faculty_staff", "adult_service")
-        or any(
-            w in role_low
-            for w in (
-                "teacher", "professor", "principal", "vice-principal", "dean", "counselor",
-                "nurse", "librarian", "coach", "chef", "custodian", "groundskeeper", "janitor",
-                "officer", "detective", "doctor", "barista", "clerk", "owner", "merchant",
-                "shopkeeper", "guard", "captain", "agent", "commander", "director", "broker",
-            )
-        )
-        and "student" not in role_low
-        and "varsity" not in role_low
-        and "club" not in role_low
-        and "team" not in role_low
-        and "class " not in role_low
+    return _gen_b1_impl(
+        profile=profile,
+        session=session,
+        char=char,
+        actions=actions,
+        active_quests=active_quests,
+        ledgers_getter=get_npc_conversation_ledgers,
+        **kwargs,
     )
-
-    is_student_or_peer = (not is_faculty_or_adult) and bool(
-        grade_low in ("freshman", "sophomore", "junior", "senior", "student", "youth peer")
-        or b_info.get("social_role_type") == "student_peer"
-        or any(k in scen_key for k in ("high_school", "academy", "school"))
-        or any(
-            w in role_low
-            for w in (
-                "student", "classmate", "freshman", "sophomore", "junior", "senior",
-                "clown", "slacker", "delinquent", "bookworm", "informant", "gamer",
-                "tinkerer", "trendsetter", "sketch artist", "musician", "volunteer",
-                "tutor", "skateboarder", "representative", "council", "varsity",
-                "sprinter", "runner", "swimmer", "prodigy", "rookie", "columnist",
-            )
-        )
-    )
-
-    public_role = format_public_character_role(raw_role, grade=grade, club=club, scen_key=scen_key)
-    v_clean = venue_leaf if venue_leaf not in ("", "here", "this spot") else ""
-
-    if is_student_or_peer:
-        if has_real_club:
-            role_phrase = f"{pron['poss']} activities with the {club}"
-            handle_phrase = f"everything with the {club} and classes"
-            inspire_phrase = f"what first got {pron['obj']} into the {club}"
-        elif activity and len(activity) <= 48:
-            role_phrase = f"what {pron['subj']} {pron['is_are']} up to right now ({activity.lower()})"
-            handle_phrase = "keeping up with classes and campus life"
-            inspire_phrase = f"what {pron['subj']} {pron['enjoys_enjoy']} most about life at the academy"
-        elif v_clean:
-            role_phrase = f"what brings {pron['obj']} to the {v_clean} today"
-            handle_phrase = "keeping up with classes and campus life"
-            inspire_phrase = f"what {pron['subj']} {pron['enjoys_enjoy']} most about life at the academy"
-        else:
-            role_phrase = f"how {pron['poss']} classes and semester are going"
-            handle_phrase = "keeping up with classes and campus life"
-            inspire_phrase = f"what {pron['subj']} {pron['wants_want']} to pursue after graduation"
-
-        return {
-            "is_student_or_peer": "1",
-            "public_role": public_role,
-            "role_phrase": role_phrase,
-            "handle_phrase": handle_phrase,
-            "inspire_phrase": inspire_phrase,
-            "unwind_outside_phrase": "after class and on weekends",
-            "off_duty_phrase": "after school and on weekends",
-            "outside_work_phrase": "outside of class",
-            "duration_question": f"Ask {partner} which classes, clubs, or campus hangouts {pron['subj']} {pron['likes_like']} best",
-        }
-
-    # Adult / Faculty / Fantasy / Sci-Fi / Anomaly Operative
-    clean_r = public_role or raw_role
-    if clean_r:
-        if any(k in scen_key for k in ("high_school", "academy", "school")) and is_faculty_or_adult:
-            role_phrase = f"{pron['poss']} role on campus as {clean_r}"
-            handle_phrase = f"{pron['poss']} responsibilities as {clean_r}"
-            inspire_phrase = f"what inspired {pron['obj']} to become a {clean_r}"
-            unwind_outside = "outside of school hours"
-            off_duty = "outside of school hours"
-            outside_work = "outside of campus life"
-            duration_q = f"Ask {partner} how long {pron['subj']} {pron['has_have']} been with the academy"
-        else:
-            role_phrase = f"{pron['poss']} work as {clean_r}"
-            handle_phrase = f"{pron['poss']} responsibilities as {clean_r}"
-            inspire_phrase = f"what originally inspired {pron['obj']} to pursue being a {clean_r}"
-            unwind_outside = f"outside of {pron['poss']} duties as {clean_r}"
-            off_duty = f"in {pron['poss']} free time off duty"
-            outside_work = "outside of work"
-            duration_q = f"Ask {partner} how long {pron['subj']} {pron['has_have']} been around {v_clean or 'here'}"
-    elif faction:
-        role_phrase = f"{pron['poss']} involvement with {faction}"
-        handle_phrase = f"{pron['poss']} role in {faction}"
-        inspire_phrase = f"how {pron['subj']} first got involved with {faction}"
-        unwind_outside = f"in {pron['poss']} free time"
-        off_duty = f"in {pron['poss']} free time"
-        outside_work = f"from {pron['poss']} personal life"
-        duration_q = f"Ask {partner} how long {pron['subj']} {pron['has_have']} been around {v_clean or 'here'}"
-    else:
-        role_phrase = f"what brings {pron['obj']} to {v_clean}" if v_clean else f"{pron['poss']} background and daily routine"
-        handle_phrase = f"{pron['poss']} daily routine"
-        inspire_phrase = f"{pron['poss']} background and what drives {pron['obj']}"
-        unwind_outside = f"in {pron['poss']} free time"
-        off_duty = f"in {pron['poss']} free time"
-        outside_work = f"from {pron['poss']} personal life"
-        duration_q = f"Ask {partner} how long {pron['subj']} {pron['has_have']} been around {v_clean or 'here'}"
-
-    return {
-        "is_student_or_peer": "",
-        "public_role": clean_r,
-        "role_phrase": role_phrase,
-        "handle_phrase": handle_phrase,
-        "inspire_phrase": inspire_phrase,
-        "unwind_outside_phrase": unwind_outside,
-        "off_duty_phrase": off_duty,
-        "outside_work_phrase": outside_work,
-        "duration_question": duration_q,
-    }
-
-
-def sanitize_contextual_dialogue_label(
-    label: str,
-    profile: Optional[Dict[str, Any]],
-    session: Optional[Dict[str, Any]] = None,
-) -> str:
-    """
-    Rewrites immersion-breaking LLM/fallback dialogue labels that treat student archetypes
-    or meta-tropes as literal paid jobs ('work as Class Clown & Slacker', 'job as Rebellious Delinquent',
-    'off duty' for high school students), and normalizes generic pronouns ('they/their/them') to match
-    the partner's gender.
-    """
-    raw = str(label or "").strip()
-    if not raw or not isinstance(profile, dict):
-        return raw
-    sess = session if isinstance(session, dict) else {}
-    curr_loc = str(sess.get("current_location") or "").strip()
-    venue_leaf = curr_loc.split("➔")[-1].strip() if curr_loc else "here"
-    ctx_phrases = _build_contextual_role_and_leisure_phrases(profile, sess, venue_leaf)
-    is_student = bool(ctx_phrases.get("is_student_or_peer"))
-    partner = str(profile.get("name") or "").strip()
-    pron = profile.get("_cached_pronouns")
-    if not isinstance(pron, dict):
-        pron = resolve_partner_pronouns(profile=profile, partner_name=partner)
-        profile["_cached_pronouns"] = pron
-    subj = pron["subj"]
-    poss = pron["poss"]
-    low = raw.lower()
-
-    if is_student or any(
-        t in low
-        for t in (
-            "class clown", "slacker", "rebellious delinquent", "introverted bookworm",
-            "gossip informant", "cafeteria gamer", "tech tinkerer", "trendsetter",
-        )
-    ):
-        if re.search(r"\b(?:their|her|his\s+)?(?:work|job|career|profession|duties)\s+as\b", low):
-            raw = re.sub(
-                r"\b(?:their|her|his\s+)?(?:work|job|career|profession|duties)\s+as\s+[^,.?!]+",
-                ctx_phrases["role_phrase"],
-                raw,
-                flags=re.IGNORECASE,
-            )
-        if "when they are off duty" in low or "when off duty" in low:
-            raw = re.sub(
-                r"\bwhen\s+(?:they\s+are\s+)?off\s+duty\b",
-                ctx_phrases["off_duty_phrase"],
-                raw,
-                flags=re.IGNORECASE,
-            )
-        if "outside of work" in low or "outside work" in low:
-            raw = re.sub(
-                r"\boutside\s+(?:of\s+)?work\b",
-                ctx_phrases["outside_work_phrase"],
-                raw,
-                flags=re.IGNORECASE,
-            )
-
-    # Contextual pronoun alignment for gendered NPCs (female / male)
-    if subj in ("she", "he"):
-        raw = re.sub(r"\bask\s+how\s+their\s+day\b", f"ask how {poss} day", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bpolitely\s+how\s+their\s+day\b", f"politely how {poss} day", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bwhat\s+they\s+love\s+doing\b", f"what {subj} {pron['loves_love']} doing", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bwhat\s+they\s+usually\s+enjoy\s+doing\b", f"what {subj} usually {pron['enjoys_enjoy']} doing", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bcompliment\s+on\s+their\s+style\b", f"compliment on {poss} style", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bhow\s+capably\s+they\s+handle\b", f"how capably {subj} {pron['handles_handle']}", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bhow\s+they\s+first\s+got\s+into\b", f"how {subj} first got into", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bhow\s+they\s+have\s+really\s+been\s+holding\s+up\b", f"how {subj} {pron['has_have']} really been holding up", raw, flags=re.IGNORECASE)
-        raw = re.sub(r'\babout\s+their\s+([a-z0-9_-]+)\s+streak\b', rf'about {poss} \g<1> streak', raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\babout\s+their\s+fondness\s+for\b", f"about {poss} fondness for", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\babout\s+their\s+favorite\s+spot\b", f"about {poss} favorite spot", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bwhat\s+they\s+know\s+regarding\b", f"what {subj} {pron['knows_know']} regarding", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bif\s+they\s+have\s+heard\b", f"if {subj} {pron['has_have']} heard", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bwhat\s+is\s+on\s+their\s+mind\b", f"what is on {poss} mind", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bwhat\s+they\s+know\b", f"what {subj} {pron['knows_know']}", raw, flags=re.IGNORECASE)
-        raw = re.sub(r"\bsecret\s+they\s+rarely\s+share\b", f"secret {subj} rarely {pron['shares_share']}", raw, flags=re.IGNORECASE)
-
-    return raw
 
 
 def generate_band2_social_choices(
     profile: Dict[str, Any],
     session: Optional[Dict[str, Any]],
     actions: Optional[List[Any]] = None,
+    party: Optional[List[Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Generates dynamic, non-repeating 4-tier + Meetup/Date social choices for Band 2."""
-    sess = session if isinstance(session, dict) else {}
-    scen_key = str(sess.get("scenario") or "fantasy").lower()
-    partner = str(profile.get("name") or "them").strip()
-    pron = profile.get("_cached_pronouns")
-    if not isinstance(pron, dict):
-        pron = resolve_partner_pronouns(profile=profile, partner_name=partner)
-        profile["_cached_pronouns"] = pron
-    role = str(profile.get("role") or "").strip()
-    faction = str(profile.get("faction") or "").strip()
-    score = int(profile.get("score", 0))
-    track = str(profile.get("track") or "platonic").lower()
-    is_meetup = bool(profile.get("is_private_meetup"))
-    can_walk = bool(profile.get("can_walk_together"))
-    likes = [str(x).strip() for x in (profile.get("likes") or []) if str(x).strip()]
-    traits = [str(x).strip() for x in (profile.get("traits") or []) if str(x).strip()]
-
-    curr_loc = str(sess.get("current_location") or "").strip()
-    venue_leaf = curr_loc.split("➔")[-1].strip() if curr_loc else "here"
-    if len(venue_leaf) > 36 or not venue_leaf:
-        venue_leaf = "this spot"
-
-    budget_state = get_partner_conversation_budget_state(sess, profile)
-    asked_sigs = set(budget_state.get("asked_topic_signatures") or [])
-    recent = _recent_action_labels_lower(sess, actions=actions, partner_name=partner)
-
-    ctx_phrases = _build_contextual_role_and_leisure_phrases(profile, sess, venue_leaf)
-    role_phrase = ctx_phrases["role_phrase"]
-    handle_phrase = ctx_phrases["handle_phrase"]
-    inspire_phrase = ctx_phrases["inspire_phrase"]
-    unwind_outside_phrase = ctx_phrases["unwind_outside_phrase"]
-    off_duty_phrase = ctx_phrases["off_duty_phrase"]
-    outside_work_phrase = ctx_phrases["outside_work_phrase"]
-    duration_question = ctx_phrases["duration_question"]
-    eff_score = score + (50 if (is_meetup and score >= 0) else 0)
-    options: List[Dict[str, Any]] = []
-
-    def _social_check(
-        lbl: str,
-        stat: str = "CHA",
-        req: int = 5,
-        intent: str = "dialogue_init",
-        sig: str = "",
-    ) -> Dict[str, Any]:
-        st_clean = stat if stat in ("CHA", "INT", "PER") else "CHA"
-        topic_sig = sig or _extract_topic_signature(lbl)
-        return {
-            "label": lbl[:180],
-            "stat": st_clean,
-            "requirement": max(5, int(req)),
-            "mp_cost": 0,
-            "intent": intent,
-            "target_npc": partner,
-            "_topic_sig": topic_sig,
-            "is_fallback": False,
-            "_deterministic_supplement": True,
-            "_band": 2,
-            "_server_stamped": True,
-        }
-
-    if score < 0 and not is_meetup:
-        options.append(_social_check(f"Keep your tone measured and ask {partner} directly about {role_phrase}", stat="CHA", req=7, sig="work_role"))
-        options.append(_social_check(f"Ask {partner} plainly what it would take to clear the air between you", stat="CHA", req=8, sig="clear_air"))
-        options.append(_social_check(f"Listen calmly and read {partner}'s reservations without pressing", stat="PER", req=7, sig="day_checkin"))
-    else:
-        _snap_b2_local = (sess.get("_world_events_snapshot") or db.get_world_events_snapshot(int(sess["id"]))) if sess.get("id") else None
-
-        # Active World Event Casual Banter (Aware NPCs)
-        if sess.get("id") and isinstance(_snap_b2_local, dict):
-            try:
-                from mechanics.world.world_events import is_npc_aware_of_event
-                _sid_b2 = int(sess["id"])
-                _snap_b2 = _snap_b2_local
-                _npc_slug_b2 = str(partner or "").strip().lower().replace(" ", "_")
-                for _ev in (_snap_b2.get("active_macro_events") or [])[:2]:
-                    if _ev.get("status") not in ("active", "resolved_aftermath"):
-                        continue
-                    _ev_k2 = str(_ev.get("event_key") or "")
-                    if is_npc_aware_of_event(_sid_b2, _ev_k2, _npc_slug_b2):
-                        options.append(_social_check(
-                            f"Chat casually with {partner} about {_ev.get('title', 'recent events')}",
-                            stat="CHA",
-                            req=5,
-                            sig=f"world_event_{_ev_k2}",
-                        ))
-                        break
-            except Exception:
-                pass
-
-        # Unclaimed Minor / Mundane Event Casual Banter (Aware NPCs, consumes 1 chat turn)
-        if sess.get("id") and isinstance(_snap_b2_local, dict):
-            try:
-                from mechanics.world.world_events import extract_minor_events, is_npc_aware_of_minor_event
-                _sid_mnr2 = int(sess["id"])
-                _snap_mnr2 = _snap_b2_local
-                _npc_slug_mnr2 = str(partner or "").strip().lower().replace(" ", "_")
-                _minors_b2 = extract_minor_events(_snap_mnr2)
-                for _mev2 in _minors_b2:
-                    if _mev2.get("status") not in ("active", "resolved_aftermath"):
-                        continue
-                    if _mev2.get("linked_quest_id"):
-                        continue
-                    if is_npc_aware_of_minor_event(
-                        _sid_mnr2, _mev2, _npc_slug_mnr2, npc_profile=profile, current_location=curr_loc
-                    ):
-                        _mev_k2 = str(_mev2.get("event_key") or "")
-                        options.append(_social_check(
-                            f"Chat casually with {partner} about {_mev2.get('title', 'recent incidents')}",
-                            stat="CHA",
-                            req=5,
-                            sig=f"minor_event_{_mev_k2}",
-                        ))
-                        break
-            except Exception:
-                pass
-
-        # Scheduled Private Meetup / Date prioritized personal & venue options
-        if is_meetup:
-            options.append(_social_check(f"Take in the vibe at {venue_leaf} with {partner} and ask how {pron['poss']} day has been", stat="CHA", req=5, sig="venue_atmosphere"))
-            if likes:
-                options.append(_social_check(f"Ask {partner} more about {pron['poss']} fondness for {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
-            else:
-                options.append(_social_check(f"Ask {partner} what {pron['subj']} {pron['loves_love']} doing most to unwind {unwind_outside_phrase}", stat="CHA", req=5, sig="hobbies_offduty"))
-            options.append(_social_check(f"Share a lighthearted joke with {partner} over your meetup", stat="CHA", req=5, sig="joke_banter"))
-            options.append(_social_check(f"Offer {partner} a warm, sincere compliment on {pron['poss']} style today", stat="CHA", req=5, sig="compliment"))
-            if eff_score >= 100 or track == "romantic":
-                options.append(_social_check(f"Playfully tease {partner} and trade warm, easygoing banter", stat="CHA", req=6, sig="personal_story"))
-            if eff_score >= 150 or track == "romantic":
-                options.append(_social_check(f"Flirt charmingly with {partner} and lean into the chemistry between you", stat="CHA", req=6, sig="flirt_romance"))
-
-        # Tier 1: Stranger (0-49) — Polite icebreakers, role/work, venue small talk, day check-in
-        if eff_score < 50 and track != "romantic":
-            options.append(_social_check(f"Ask {partner} about {role_phrase}", stat="INT", req=5, sig="work_role"))
-            options.append(_social_check(duration_question, stat="CHA", req=5, sig="stationed_duration"))
-            options.append(_social_check(f"Make polite small talk with {partner} about the pace around {venue_leaf} today", stat="CHA", req=5, sig="venue_atmosphere"))
-            options.append(_social_check(f"Gauge {partner}'s mood and ask politely how {pron['poss']} day is going", stat="PER", req=5, sig="day_checkin"))
-            options.append(_social_check(f"Ask {partner} what local spot nearby {pron['subj']} would recommend for a break", stat="INT", req=5, sig="favorite_spot_food"))
-
-        # Tier 2: Acquaintance (50-99) — Off-duty hobbies, known likes, light situational jokes, polite compliments
-        elif eff_score < 100 and track != "romantic":
-            if likes:
-                options.append(_social_check(f"Ask {partner} how {pron['subj']} first got into {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
-            else:
-                options.append(_social_check(f"Ask {partner} what {pron['subj']} usually {pron['enjoys_enjoy']} doing {off_duty_phrase}", stat="CHA", req=5, sig="hobbies_offduty"))
-            options.append(_social_check(f"Offer {partner} a polite compliment on how capably {pron['subj']} {pron['handles_handle']} {handle_phrase}", stat="CHA", req=6, sig="compliment"))
-            options.append(_social_check(f"Crack a lighthearted joke with {partner} about the day's routine", stat="CHA", req=5, sig="joke_banter"))
-            options.append(_social_check(f"Ask {partner} about {pron['poss']} favorite spot in town to grab food or unwind", stat="INT", req=5, sig="favorite_spot_food"))
-            options.append(_social_check(f"Ask {partner} about {inspire_phrase}", stat="PER", req=5, sig="personal_story"))
-
-        # Tier 3 & 4: Friend (100-149) & Close / Romantic (150+ or Romantic Track)
-        else:
-            options.append(_social_check(f"Share some playful banter and crack a lighthearted joke with {partner}", stat="CHA", req=5, sig="joke_banter"))
-            if eff_score >= 150 or track == "romantic":
-                options.append(_social_check(f"Flirt with {partner} and offer a warm, personal compliment", stat="CHA", req=6, sig="flirt_romance"))
-                options.append(_social_check(f"Ask {partner} softly about a personal dream or secret {pron['subj']} rarely {pron['shares_share']}", stat="PER", req=6, sig="personal_story"))
-            else:
-                options.append(_social_check(f"Compliment {partner} warmly and ask how {pron['subj']} {pron['has_have']} really been holding up", stat="CHA", req=5, sig="compliment"))
-                options.append(_social_check(f"Ask {partner} to share a favorite personal story or memory from {outside_work_phrase}", stat="INT", req=5, sig="personal_story"))
-            if likes:
-                options.append(_social_check(f"Trade lively opinions with {partner} about {likes[0]}", stat="INT", req=5, sig="hobbies_offduty"))
-            elif traits:
-                options.append(_social_check(f"Playfully tease {partner} about {pron['poss']} {traits[0].lower()} streak", stat="CHA", req=5, sig="hobbies_offduty"))
-            if can_walk:
-                valid_spots = [
-                    s for s in _collect_valid_walk_destinations(sess, profile)
-                    if s not in {"quieter corner", "quiet corner", "quieter spot", "hallway", "corridor", "nearby bench", "foyer"}
-                    and s not in str(sess.get("current_location") or "").lower()
-                ]
-                walk_dest = valid_spots[0].title() if valid_spots else "a nearby spot in the area"
-                walk_opt = _social_check(f"Walk with {partner} toward {walk_dest}", stat="CHA", req=5, intent="movement", sig="walk_together")
-                walk_opt["target_npc"] = partner
-                if valid_spots:
-                    walk_opt["target_location"] = walk_dest
-                options.append(walk_opt)
-
-    filtered: List[Dict[str, Any]] = []
-    seen_sigs_local: Set[str] = set()
-    for o in options:
-        sig = str(o.get("_topic_sig") or "")
-        if sig and (sig in asked_sigs or sig in seen_sigs_local):
-            continue
-        if _is_similar_to_recent(o["label"], recent):
-            continue
-        if sig:
-            seen_sigs_local.add(sig)
-        filtered.append(o)
-    return filtered
-
-
-def _classify_choice_band(c: Dict[str, Any]) -> int:
-    """Classifies a non-exit dialogue choice into Band 1 (Quest/Bounty/Intel Check) or Band 2 (Social/Background)."""
-    if c.get("_pinned_dialogue_exit") or c.get("intent") == "dialogue_exit" or c.get("ends_dialogue"):
-        return 3
-    if c.get("_band") in (1, 2):
-        return int(c["_band"])
-    if c.get("is_quest_action") or c.get("quest_id") or c.get("clue_pair_ids"):
-        return 1
-    if c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in str(c.get("label") or "").lower():
-        return 2
-    intent = str(c.get("intent") or "").lower()
-    if intent in ("phone_contact_exchange", "romantic_confession", "social_invite", "affection_touch", "gift_offer"):
-        return 2
-    lbl_low = str(c.get("label") or "").lower()
-    if any(skw in lbl_low for skw in _SOCIAL_BACKGROUND_KEYWORDS):
-        return 2
-    if intent == "investigate_clue" or any(qkw in lbl_low for qkw in _QUEST_OR_INTEL_KEYWORDS):
-        return 1
-    stat = str(c.get("stat") or "NONE").upper()
-    if stat in ("INT", "PER"):
-        return 1
-    # CHA / NONE conversational lines without quest/intel markers belong to Band 2 social
-    if any(w in lbl_low for w in ("ask ", "chat ", "talk ", "share ", "tell ", "comment ", "compliment", "joke", "banter")):
-        return 2
-    return 1
-
-
-def _normalize_band2_stat_and_dc(
-    c: Dict[str, Any],
-    profile: Dict[str, Any],
-    char: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Ensures every Band 2 dialogue choice (questions, queries, jokes, teases, flirts, compliments) requires a skill check."""
-    out = dict(c)
-    out.pop("_free_social", None)
-    lbl = str(out.get("label") or "")
-    if out.get("_privacy_nudge") or str(out.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in lbl.lower():
-        if str(out.get("stat") or "NONE").upper() in ("NONE", "FREE", ""):
-            out["stat"] = "CHA"
-        if int(out.get("requirement") or 0) <= 0:
-            out["requirement"] = 8
-        return out
-    intent = str(out.get("intent") or "").lower()
-    is_bold = bool(
-        intent in ("phone_contact_exchange", "romantic_confession", "gift_offer")
-        or _BOLD_SOCIAL_CHECK_RE.search(lbl)
-        or (int(out.get("requirement") or 0) >= 10)
+    return _gen_b2_impl(
+        profile=profile,
+        session=session,
+        actions=actions,
+        party=party,
+        ledgers_getter=get_npc_conversation_ledgers,
     )
-    if is_bold:
-        if str(out.get("stat") or "NONE").upper() in ("NONE", "FREE", ""):
-            out["stat"] = "CHA"
-        if int(out.get("requirement") or 0) <= 0:
-            out["requirement"] = get_disclosure_check_requirement(7, int(profile.get("score", 0)), 2)
-    else:
-        st_u = str(out.get("stat") or "NONE").upper()
-        req_u = int(out.get("requirement") or 0)
-        if st_u in ("NONE", "FREE", "") or req_u <= 0:
-            from game_engine.choices_cleaner import infer_choice_stat_and_dc
-            new_st, new_dc = infer_choice_stat_and_dc(lbl, default_stat="CHA", default_dc=5, char=char)
-            out["stat"] = new_st if new_st not in ("NONE", "FREE") else "CHA"
-            out["requirement"] = max(5, int(new_dc))
-        else:
-            out["requirement"] = max(5, req_u)
-    return out
-
-
-def _apply_stage1_hurry_gate(c: Dict[str, Any]) -> Dict[str, Any]:
-    """Applies the Stage 1 urgent-departure hurry difficulty gate (+3 DC, or FREE -> CHA DC 9)."""
-    out = dict(c)
-    stat = str(out.get("stat") or "NONE").upper()
-    req = int(out.get("requirement") or 0)
-    if stat in ("NONE", "FREE", "") or req <= 0:
-        out["stat"] = "CHA"
-        out["requirement"] = 9
-        out.pop("_free_social", None)
-    elif stat != "ITEM":
-        out["requirement"] = min(15, max(9, req + 3))
-    out["_hurry_gated"] = True
-    return out
 
 
 def _is_verified_quest_choice(c: Dict[str, Any]) -> bool:
@@ -1799,7 +773,270 @@ def _is_verified_quest_choice(c: Dict[str, Any]) -> bool:
         or c.get("quest_id")
         or c.get("clue_pair_ids")
         or c.get("_active_quest_inquiry")
+        or c.get("_is_world_rumor_inquiry")
+        or c.get("_is_break_the_news")
     )
+
+
+def _is_pre_exit_utility_choice(c: Dict[str, Any]) -> bool:
+    if c.get("_convince_stay") or c.get("departure_action") == "convince_stay":
+        return True
+    intent = str(c.get("intent") or "").lower()
+    if intent in ("phone_contact_exchange", "party_recruit"):
+        return True
+    lbl_low = str(c.get("label") or "").lower()
+    if c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in lbl_low:
+        return True
+    if _WALK_WITH_RE.match(str(c.get("label") or "")) or "walk with " in lbl_low:
+        return True
+    if intent == "movement" and "quieter" in lbl_low:
+        return True
+    return False
+
+
+def _utility_sort_rank(c: Dict[str, Any]) -> int:
+    """Orders Band 3 Pre-Exit Utilities: Recruit (0) -> Quiet Spot/Walk (1) -> Contact Info (2) -> Convince Stay (3)."""
+    intent = str(c.get("intent") or "").lower()
+    if intent == "party_recruit":
+        return 0
+    if c.get("_convince_stay") or c.get("departure_action") == "convince_stay":
+        return 3
+    if intent == "phone_contact_exchange":
+        return 2
+    return 1
+
+
+def _classify_choice_band(c: Dict[str, Any]) -> int:
+    """Classifies a dialogue choice into Band 1 (Quest/Rumor), Band 2 (Social), Band 3 (Utility), or Band 4 (Exit)."""
+    if c.get("_pinned_dialogue_exit") or c.get("intent") == "dialogue_exit" or c.get("ends_dialogue"):
+        return 4
+    if _is_pre_exit_utility_choice(c):
+        return 3
+    if _is_verified_quest_choice(c):
+        return 1
+    if c.get("topic_id") or c.get("category") or c.get("_band") == 2:
+        return 2
+    if c.get("_band") == 1:
+        return 1
+    return 2
+
+
+def _normalize_band2_stat_and_dc(
+    c: Dict[str, Any],
+    profile: Dict[str, Any],
+    char: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Ensures every Band 2 / Band 3 social or utility button has a valid 7-SPECIAL stat and fixed DC 3-12."""
+    out = dict(c)
+    out.pop("_free_social", None)
+    lbl = str(out.get("label") or "")
+    st_u = str(out.get("stat") or "NONE").upper()
+    req_u = int(out.get("requirement") or 0)
+
+    if out.get("_server_stamped") and str(out.get("intent") or "").lower() == "party_recruit" and st_u == "NONE":
+        out["stat"] = "NONE"
+        out["requirement"] = 0
+        return out
+
+    if (_WALK_WITH_RE.match(lbl) or "walk with " in lbl.lower()) and st_u == "NONE" and (profile.get("can_walk_together") or out.get("_priority_slot")):
+        out["stat"] = "NONE"
+        out["requirement"] = 0
+        out.setdefault("intent", "movement")
+        return out
+
+    if out.get("_privacy_nudge") or str(out.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in lbl.lower():
+        if st_u not in SPECIAL_STATS_SET:
+            out["stat"] = "CHA"
+        out["requirement"] = max(3, min(12, req_u if req_u > 0 else 8))
+        return out
+
+    intent = str(out.get("intent") or "").lower()
+    is_bold_stranger = (
+        int(profile.get("score", 0)) < 50
+        and profile.get("track") != "romantic"
+        and (
+            _infer_social_category_from_choice(out) == "flirt_chemistry"
+            or _ROMANTIC_ADVANCE_RE.search(lbl)
+        )
+    )
+    if st_u not in SPECIAL_STATS_SET and st_u != "ITEM":
+        from game_engine.choices_cleaner import infer_choice_stat_and_dc
+        new_st, new_dc = infer_choice_stat_and_dc(lbl, default_stat="CHA", default_dc=5, char=char)
+        out["stat"] = new_st if new_st in SPECIAL_STATS_SET else "CHA"
+        req_u = req_u if req_u > 0 else int(new_dc)
+
+    if req_u <= 0:
+        if intent in ("phone_contact_exchange", "romantic_confession") or _BOLD_SOCIAL_CHECK_RE.search(lbl):
+            req_u = get_disclosure_check_requirement(7, int(profile.get("score", 0)), 2)
+        else:
+            req_u = 5
+
+    if is_bold_stranger and not out.get("_seed_reconciled"):
+        req_u = max(9, req_u)
+
+    if out.get("stat") != "ITEM":
+        out["requirement"] = max(3, min(12, req_u))
+    return out
+
+
+def _infer_social_category_from_choice(c: Dict[str, Any]) -> str:
+    raw_cat = str(c.get("category") or "").strip().lower()
+    if raw_cat in (
+        "get_to_know", "friendly_situational", "humor_banter",
+        "flirt_chemistry", "friction_rivalry", "callbacks_history", "clear_the_air",
+    ):
+        return raw_cat
+    lbl = str(c.get("label") or "").lower()
+    if any(w in lbl for w in ("apologize", "make amends", "clear the air", "own up", "explain why")):
+        return "clear_the_air"
+    if any(w in lbl for w in ("flirt", "tease", "wink", "compliment", "gaze", "brush", "charm", "chemistry", "blush")):
+        return "flirt_chemistry"
+    if any(w in lbl for w in ("challenge", "call out", "confront", "push back", "rival", "insult", "bluff", "stand firm")):
+        return "friction_rivalry"
+    if any(w in lbl for w in ("joke", "laugh", "banter", "quip", "wit", "crack a", "dry humor")):
+        return "humor_banter"
+    if any(w in lbl for w in ("remember", "promise", "last time", "shared", "earlier", "mutual")):
+        return "callbacks_history"
+    if any(w in lbl for w in ("rumor", "heard", "lately", "weather", "atmosphere", "drink", "snack", "lend a hand")):
+        return "friendly_situational"
+    return "get_to_know"
+
+
+def _stamp_choice_from_seed(
+    choice: Dict[str, Any],
+    seed: Dict[str, Any],
+    default_partner: str,
+) -> Dict[str, Any]:
+    out = dict(choice)
+    out["topic_id"] = str(seed.get("topic_id") or out.get("topic_id") or "")
+    out["category"] = str(seed.get("category") or out.get("category") or "")
+    st = str(seed.get("stat") or out.get("stat") or "CHA").upper()
+    out["stat"] = st if st in SPECIAL_STATS_SET else "CHA"
+    out["requirement"] = max(3, min(12, int(seed.get("dc") or out.get("requirement") or 6)))
+    out["mp_cost"] = max(0, int(seed.get("mp_cost") or 0))
+    out["target_npc"] = str(seed.get("target_npc") or out.get("target_npc") or default_partner)
+    out["is_covert_ability"] = bool(seed.get("is_covert_ability"))
+    out["is_direct_reply"] = bool(seed.get("is_direct_reply"))
+    if seed.get("is_cruel"):
+        out["is_cruel"] = True
+    if seed.get("event_key"):
+        out["event_key"] = str(seed["event_key"])
+    out["_seed_reconciled"] = True
+    out["_band"] = 2
+    return out
+
+
+def _reconcile_band2_with_dealt_seeds(
+    band2_raw: List[Dict[str, Any]],
+    dealt_seeds: List[Dict[str, Any]],
+    lead_profile: Dict[str, Any],
+    sess: Dict[str, Any],
+    clean_partners: List[str],
+    party: Optional[List[Any]],
+    current_npcs: Optional[List[Any]],
+    desired_min_b2: int,
+    desired_max_b2: int,
+    seen_lbls: Set[str],
+    clear_the_air_required: bool = False,
+    lead_char: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """3-pass seed reconciliation: Pass 1 exact topic_id -> Pass 2 category slot -> Pass 3 deterministic fallback."""
+    lead_partner = clean_partners[0]
+    seeds = [dict(s) for s in (dealt_seeds or []) if isinstance(s, dict) and s.get("topic_id")]
+    if not seeds:
+        return band2_raw
+
+    claimed_seed_idx: Set[int] = set()
+    milestones: List[Dict[str, Any]] = []
+    pass1_matched: List[Dict[str, Any]] = []
+    unmatched_after_p1: List[Dict[str, Any]] = []
+
+    for c in band2_raw:
+        c_int = str(c.get("intent") or "").lower()
+        c_sub = str(c.get("sub_intent") or "").lower()
+        if c_int == "romantic_confession" or c_sub in ("confession", "date") or c.get("_privacy_nudge"):
+            if not clear_the_air_required:
+                milestones.append(_normalize_band2_stat_and_dc(c, lead_profile, char=lead_char))
+            continue
+
+        c_tid = str(c.get("topic_id") or "").strip()
+        matched_i: Optional[int] = None
+        if c_tid:
+            for idx, s in enumerate(seeds):
+                if idx not in claimed_seed_idx and str(s.get("topic_id") or "").strip() == c_tid:
+                    matched_i = idx
+                    break
+        if matched_i is not None:
+            claimed_seed_idx.add(matched_i)
+            pass1_matched.append(_stamp_choice_from_seed(c, seeds[matched_i], lead_partner))
+        else:
+            unmatched_after_p1.append(c)
+
+    # Pass 2: Category / Semantic Slot Match
+    pass2_matched: List[Dict[str, Any]] = []
+    leftover_llm: List[Dict[str, Any]] = []
+    for c in unmatched_after_p1:
+        inferred_cat = _infer_social_category_from_choice(c)
+        matched_i = None
+        for idx, s in enumerate(seeds):
+            if idx not in claimed_seed_idx and str(s.get("category") or "").strip().lower() == inferred_cat:
+                matched_i = idx
+                break
+        if matched_i is not None:
+            claimed_seed_idx.add(matched_i)
+            pass2_matched.append(_stamp_choice_from_seed(c, seeds[matched_i], lead_partner))
+        elif not clear_the_air_required:
+            leftover_llm.append(_normalize_band2_stat_and_dc(c, lead_profile, char=lead_char))
+
+    reconciled: List[Dict[str, Any]] = list(milestones) + pass1_matched + pass2_matched
+
+    # Pass 3: Ensure top non-CHA wildcard stat from dealt seeds is present, then fill up to desired_min_b2
+    wildcard_non_cha_seeds = [
+        (idx, s) for idx, s in enumerate(seeds)
+        if idx not in claimed_seed_idx and str(s.get("stat") or "CHA").upper() != "CHA"
+    ]
+    present_stats = {str(ch.get("stat") or "").upper() for ch in reconciled}
+    if wildcard_non_cha_seeds:
+        w_idx, w_seed = wildcard_non_cha_seeds[0]
+        w_stat = str(w_seed.get("stat") or "").upper()
+        if w_stat and w_stat not in present_stats and len(reconciled) < desired_max_b2:
+            prof_for_w = (
+                lead_profile
+                if str(w_seed.get("target_npc") or lead_partner).strip().lower() == lead_partner.lower()
+                else resolve_partner_conversation_profile(sess, str(w_seed.get("target_npc")), party=party, current_npcs=current_npcs)
+            )
+            syn_w = synthesize_choice_from_seed(w_seed, prof_for_w, session=sess)
+            wk = syn_w["label"].strip().lower()
+            if wk not in seen_lbls and is_choice_allowed_for_partner_profile(syn_w, prof_for_w, session=sess):
+                claimed_seed_idx.add(w_idx)
+                seen_lbls.add(wk)
+                reconciled.append(_normalize_band2_stat_and_dc(syn_w, prof_for_w, char=lead_char))
+                present_stats.add(w_stat)
+
+    for lf in leftover_llm:
+        if len(reconciled) >= desired_max_b2:
+            break
+        reconciled.append(lf)
+
+    for idx, s in enumerate(seeds):
+        if len(reconciled) >= desired_min_b2:
+            break
+        if idx in claimed_seed_idx:
+            continue
+        t_p = str(s.get("target_npc") or lead_partner).strip() or lead_partner
+        prof_s = (
+            lead_profile
+            if t_p.lower() == lead_partner.lower()
+            else resolve_partner_conversation_profile(sess, t_p, party=party, current_npcs=current_npcs)
+        )
+        syn = synthesize_choice_from_seed(s, prof_s, session=sess)
+        sk = syn["label"].strip().lower()
+        if sk not in seen_lbls and is_choice_allowed_for_partner_profile(syn, prof_s, session=sess):
+            claimed_seed_idx.add(idx)
+            seen_lbls.add(sk)
+            reconciled.append(_normalize_band2_stat_and_dc(syn, prof_s, char=lead_char))
+
+    return reconciled[:desired_max_b2]
 
 
 def enforce_conversation_choice_bands(
@@ -1811,38 +1048,32 @@ def enforce_conversation_choice_bands(
     priority_buttons: Optional[List[Dict[str, Any]]] = None,
     actions: Optional[List[Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """
-    Organizes active conversation choices into:
-      - Stage 2 Ultimatum Override (strictly 2 choices: Convince to Stay | Leave / Let Head Out), OR
-      - Progressive Budget Taper (when remaining_budget == 0: ONLY Active Quest/Bounty choices + Pinned Leave), OR
-      - [Optional Stage 1 Convince] + Band 1 (Skill-Check Quest/Bounty/Rumor)
-        + Band 2 (Affinity-Scaled Dynamic Social/Background) + Band 3 (Pinned Leave Conversation).
-    """
+    """Enforces [Band 1: Quest (0-2)] -> [Band 2: Social (4-6)] -> [Band 3: Pre-Exit Utilities] -> [Band 4: Leave] (<= 8)."""
     clean_partners = [str(p).strip() for p in (partners or []) if str(p).strip()]
     if not clean_partners:
         return list(cleaned_choices or [])
 
     sess = session if isinstance(session, dict) else {}
+    sess_id = sess.get("id")
     lead_partner = clean_partners[0]
     lead_char = None
     if party and isinstance(party, list) and party[0]:
         lead_char = party[0][0] if isinstance(party[0], (tuple, list)) else party[0]
 
-    dep_states = get_npc_departure_states(sess)
     if scenario_data.is_anomalous_incursions_scenario(str(sess.get("scenario") or "")):
         from mechanics.world.anomalous_events import (
-            is_anomalous_scene_entity,
             build_sapient_anomaly_dialogue_choices,
+            is_anomalous_scene_entity,
         )
         if is_anomalous_scene_entity(lead_partner, session=sess, current_npcs=current_npcs):
             return build_sapient_anomaly_dialogue_choices(
                 lead_partner,
-                session_id=int(sess["id"]) if sess.get("id") else None,
+                session_id=int(sess_id) if sess_id else None,
                 session=sess,
                 char=lead_char if isinstance(lead_char, dict) else None,
             )
 
-    # Check if ANY active partner is in Stage 2 Ultimatum or Stage 1 Warning
+    dep_states = get_npc_departure_states(sess)
     urg_partner = ""
     urg_state: Dict[str, Any] = {}
     for p_nm in clean_partners:
@@ -1860,10 +1091,14 @@ def enforce_conversation_choice_bands(
     )
     lead_profile = resolve_partner_conversation_profile(sess, lead_partner, party=party, current_npcs=current_npcs)
     budget_state = get_partner_conversation_budget_state(sess, lead_profile)
-    remaining_budget = int(budget_state.get("remaining_budget", 3))
+    remaining_budget = int(budget_state.get("remaining_budget", 5))
     asked_sigs = set(budget_state.get("asked_topic_signatures") or [])
-    recent_labels = _recent_action_labels_lower(sess, actions=actions, partner_name=lead_partner)
+    from mechanics.social.band_fallbacks import _recent_action_labels_lower
+    recent_labels = _recent_action_labels_lower(
+        sess, actions=actions, partner_name=lead_partner, ledgers_getter=get_npc_conversation_ledgers
+    )
 
+    curr_day = int(sess.get("current_day") or 1)
     curr_min = int(sess.get("current_minute") if sess.get("current_minute") is not None else 480)
     from mechanics.world.schedules import get_time_block_key
     curr_blk = get_time_block_key(curr_min)
@@ -1907,44 +1142,58 @@ def enforce_conversation_choice_bands(
         return ultimatum_choices
 
     in_stage_1 = bool(urg_partner and urg_state.get("stage") == "stage_1_warning" and urg_profile)
+    pinned_exit = build_pinned_leave_choice(clean_partners)
 
-    # Combine priority buttons + cleaned choices while filtering against partner profile & anti-repeat ledger
+    # Check Composure Cold-Shoulder / Focus-on-Road lockouts
+    comp_row = None
+    if sess_id:
+        try:
+            comp_row = pacing.sync_and_get_composure(
+                int(sess_id),
+                lead_partner,
+                current_day=curr_day,
+                current_minute=curr_min,
+                scenario=str(sess.get("scenario") or "fantasy"),
+            )
+        except Exception:
+            comp_row = None
+
+    comp_locked = bool(
+        comp_row
+        and int(comp_row.get("current_composure") if comp_row.get("current_composure") is not None else 100) <= 0
+        and pacing.is_composure_locked_out(comp_row, curr_day, curr_min)
+    )
+    comp_state = str((comp_row or {}).get("composure_state") or "")
+
     combined_raw: List[Dict[str, Any]] = []
     seen_lbls: Set[str] = set()
     for src in list(priority_buttons or []) + list(cleaned_choices or []):
         if not isinstance(src, dict):
             continue
         lbl = sanitize_contextual_dialogue_label(str(src.get("label") or "").strip(), lead_profile, session=sess)
-        src = dict(src)
-        src["label"] = lbl
+        src = dict(src, label=lbl)
         lbl_k = lbl.lower()
         if not lbl_k or lbl_k in seen_lbls:
             continue
-        # Ignore old verbose exit choices; we always attach standardized Band 3 at the end
         if src.get("_pinned_dialogue_exit") or src.get("intent") == "dialogue_exit" or src.get("ends_dialogue"):
             continue
         from mechanics.narrative.intent import is_conversational_exit
         if is_conversational_exit(lbl):
             continue
-        if not is_choice_allowed_for_partner_profile(
-            src,
-            lead_profile,
-            session=sess,
-            allow_convince_stay=in_stage_1,
-        ):
+        if not is_choice_allowed_for_partner_profile(src, lead_profile, session=sess, allow_convince_stay=in_stage_1):
             continue
 
         is_quest_c = _is_verified_quest_choice(src)
-        is_contact_ex = str(src.get("intent") or "").lower() == "phone_contact_exchange"
-        if not is_quest_c and not is_contact_ex and not src.get("_convince_stay"):
+        is_util_c = _is_pre_exit_utility_choice(src)
+        if not is_quest_c and not is_util_c:
             if _is_similar_to_recent(lbl, recent_labels):
                 continue
-            sig_c = str(src.get("_topic_sig") or _extract_topic_signature(lbl) or "")
+            sig_c = str(src.get("_topic_sig") or _extract_topic_signature(lbl, src) or "")
             if sig_c and sig_c in asked_sigs:
                 continue
 
         seen_lbls.add(lbl_k)
-        combined_raw.append(dict(src))
+        combined_raw.append(src)
 
     try:
         from game_engine.choices_cleaner import deduplicate_redundant_choices
@@ -1954,6 +1203,7 @@ def enforce_conversation_choice_bands(
 
     band1: List[Dict[str, Any]] = []
     band2: List[Dict[str, Any]] = []
+    band3_utils: List[Dict[str, Any]] = []
 
     for c in combined_raw:
         if c.get("_convince_stay"):
@@ -1961,151 +1211,129 @@ def enforce_conversation_choice_bands(
         b_idx = _classify_choice_band(c)
         if b_idx == 1:
             band1.append(c)
+        elif b_idx == 3:
+            band3_utils.append(_normalize_band2_stat_and_dc(c, lead_profile, char=lead_char))
         elif b_idx == 2:
-            band2.append(c)
+            band2.append(_normalize_band2_stat_and_dc(c, lead_profile, char=lead_char))
 
-    # Sort Band 1 so verified quest/bounty choices come first
-    band1.sort(
-        key=lambda x: (
-            0 if _is_verified_quest_choice(x) else 1,
-            0 if x.get("clue_pair_ids") else 1,
-        )
-    )
+    # Backfill verified Band 1 quest / discovered rumor / claimed MNR hooks (0-2 slots ONLY when genuinely applicable!)
+    if len(band1) < 2:
+        for fb1 in generate_band1_quest_and_rumor_fallbacks(lead_profile, sess, char=lead_char, actions=actions):
+            if not _is_verified_quest_choice(fb1):
+                continue
+            fb_k = fb1["label"].strip().lower()
+            if fb_k not in seen_lbls:
+                seen_lbls.add(fb_k)
+                band1.append(fb1)
+            if len(band1) >= 2:
+                break
 
-    # Ensure every Band 1 choice is a genuine skill check
+    band1.sort(key=lambda x: (0 if x.get("clue_pair_ids") else 1, 0 if x.get("quest_id") else 1))
     from game_engine.choices_cleaner import infer_choice_stat_and_dc
     for b1 in band1:
         st_u = str(b1.get("stat") or "NONE").upper()
         req_u = int(b1.get("requirement") or 0)
-        if st_u in ("NONE", "FREE", "") or req_u <= 0:
+        if st_u not in SPECIAL_STATS_SET or req_u <= 0:
             new_st, new_dc = infer_choice_stat_and_dc(b1.get("label", ""), default_stat="INT", default_dc=6, char=lead_char)
-            b1["stat"] = new_st if new_st not in ("NONE", "FREE") else "INT"
-            b1["requirement"] = max(5, new_dc)
+            b1["stat"] = new_st if new_st in SPECIAL_STATS_SET else "INT"
+            b1["requirement"] = max(4, min(12, new_dc))
+    band1 = band1[:2]
 
-    stage1_prefix: List[Dict[str, Any]] = []
-    if in_stage_1 and urg_profile:
-        if urg_state.get("extended_block") != curr_blk:
-            stage1_prefix.append({
-                "label": f"Convince {urg_partner} to stay a little longer",
-                "stat": "CHA",
-                "requirement": int(urg_profile["convince_stay_dc"]),
-                "mp_cost": 0,
-                "intent": "social_invite",
-                "target_npc": urg_partner,
-                "_convince_stay": True,
-                "departure_action": "convince_stay",
-                "_priority_slot": True,
-                "_server_stamped": True,
-            })
+    # Attach Stage 1 Convince to Stay to Band 3 Pre-Exit Utilities (pinned right before Leave Conversation!)
+    if in_stage_1 and urg_profile and urg_state.get("extended_block") != curr_blk:
+        band3_utils.append({
+            "label": f"Convince {urg_partner} to stay a little longer",
+            "stat": "CHA",
+            "requirement": int(urg_profile["convince_stay_dc"]),
+            "mp_cost": 0,
+            "intent": "social_invite",
+            "target_npc": urg_partner,
+            "_convince_stay": True,
+            "departure_action": "convince_stay",
+            "_priority_slot": True,
+            "_server_stamped": True,
+        })
+    band3_utils.sort(key=_utility_sort_rank)
+    band3_utils = band3_utils[:3]
 
-    pinned_exit = build_pinned_leave_choice(clean_partners)
+    # ── COLD SHOULDER / FOCUS ON ROAD / BUDGET EXHAUSTION GATES ─────────────
+    if comp_locked and comp_state == "cold_shoulder":
+        cold_b1 = []
+        for b1 in band1:
+            cb = dict(b1)
+            cb["requirement"] = min(12, int(cb.get("requirement") or 6) + 3)
+            cold_b1.append(cb)
+        return cold_b1 + [pinned_exit]
 
-    # ── CONVERSATION BUDGET EXHAUSTION: Keep ONLY Active Quest/Bounty Hooks + Leave Conversation ──
+    if comp_locked and comp_state in ("focus_on_road", "walked_away"):
+        return band1 + [pinned_exit]
+
     if remaining_budget <= 0:
-        quest_only_b1 = [c for c in band1 if _is_verified_quest_choice(c)]
-        if not quest_only_b1:
-            for fb1 in generate_band1_quest_and_rumor_fallbacks(lead_profile, sess, char=lead_char, actions=actions):
-                if _is_verified_quest_choice(fb1):
-                    fb_k = fb1["label"].strip().lower()
-                    if fb_k not in seen_lbls:
-                        seen_lbls.add(fb_k)
-                        quest_only_b1.append(fb1)
-                if len(quest_only_b1) >= 2:
-                    break
-        quest_only_b1 = quest_only_b1[:4]
-        if in_stage_1 and urg_profile:
-            quest_only_b1 = [_apply_stage1_hurry_gate(c) for c in quest_only_b1]
-        return stage1_prefix + quest_only_b1 + [pinned_exit]
+        convince_only = [u for u in band3_utils if u.get("_convince_stay")]
+        out_b1 = [_apply_stage1_hurry_gate(c) for c in band1] if (in_stage_1 and urg_profile) else band1
+        return out_b1 + convince_only + [pinned_exit]
 
-    is_meetup_social_focus = bool(lead_profile.get("is_private_meetup") and not lead_profile.get("is_quest_stationed_here"))
+    # ── ELASTIC BAND 2 DYNAMIC SOCIAL SUITE (4-6 slots, <= 8 total) ─────────
+    avail_for_b2 = max(1, 8 - 1 - len(band1) - len(band3_utils))
+    desired_min_b2 = min(avail_for_b2, 4)
+    desired_max_b2 = min(avail_for_b2, 6)
 
-    if is_meetup_social_focus:
-        # On scheduled Private Meetups / Dates without a stationed quest hook, suppress generic agency/street rumor fillers
-        band1 = [c for c in band1 if _is_verified_quest_choice(c)][:2]
-    else:
-        # Backfill Band 1 if fewer than 2 quest/bounty/rumor skill-check options exist
-        if len(band1) < 2:
-            for fb1 in generate_band1_quest_and_rumor_fallbacks(lead_profile, sess, char=lead_char, actions=actions):
-                fb_k = fb1["label"].strip().lower()
-                if fb_k not in seen_lbls:
-                    seen_lbls.add(fb_k)
-                    band1.append(fb1)
-                if len(band1) >= 2:
-                    break
-        band1 = band1[:4]
+    clear_the_air_req = bool(int((comp_row or {}).get("clear_the_air_required") or 0) == 1)
+    dealt_seeds = sess.get("_dealt_social_seeds")
+    if clear_the_air_req and not (isinstance(dealt_seeds, list) and dealt_seeds):
+        dealt_seeds = deck.deal_social_deck_seeds(
+            session=sess,
+            partners=clean_partners,
+            party=party,
+            current_npcs=current_npcs,
+            desired_count=max(4, desired_max_b2),
+        )
 
-    # Normalize Band 2 & pin phone_contact_exchange ahead of generic social fillers so it is never popped
-    band2 = [_normalize_band2_stat_and_dc(c, lead_profile, char=lead_char) for c in band2]
-    def _band2_sort_key(ch: Dict[str, Any]) -> int:
-        if str(ch.get("intent") or "").lower() == "phone_contact_exchange":
-            return 0
-        if ch.get("_privacy_nudge") or str(ch.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in str(ch.get("label") or "").lower():
-            return 2
-        return 1
-    band2.sort(key=_band2_sort_key)
+    if isinstance(dealt_seeds, list) and dealt_seeds:
+        band2 = _reconcile_band2_with_dealt_seeds(
+            band2_raw=band2,
+            dealt_seeds=dealt_seeds,
+            lead_profile=lead_profile,
+            sess=sess,
+            clean_partners=clean_partners,
+            party=party,
+            current_npcs=current_npcs,
+            desired_min_b2=desired_min_b2,
+            desired_max_b2=desired_max_b2,
+            seen_lbls=seen_lbls,
+            clear_the_air_required=clear_the_air_req,
+            lead_char=lead_char,
+        )
 
-    has_contact_btn = any(str(c.get("intent") or "").lower() == "phone_contact_exchange" for c in band2)
-    if is_meetup_social_focus:
-        min_band2 = min(4, max(2, remaining_budget))
-        max_band2 = 5
-    else:
-        min_band2 = 3 if has_contact_btn else (2 if len(band1) <= 3 else 1)
-        max_band2 = 4 if has_contact_btn else 3
-
-    if len(band2) < min_band2:
-        for fb2 in generate_band2_social_choices(lead_profile, sess, actions=actions):
+    if len(band2) < desired_min_b2:
+        for fb2 in generate_band2_social_choices(lead_profile, sess, actions=actions, party=party):
             fb_k = fb2["label"].strip().lower()
             if fb_k not in seen_lbls and is_choice_allowed_for_partner_profile(fb2, lead_profile, session=sess):
                 seen_lbls.add(fb_k)
-                band2.append(fb2)
-            if len(band2) >= min_band2:
+                band2.append(_normalize_band2_stat_and_dc(fb2, lead_profile, char=lead_char))
+            if len(band2) >= desired_max_b2:
                 break
-    band2 = band2[:max_band2]
 
-    # Progressive Taper when remaining_budget is low (1 or 2 turns left)
-    quest_b1 = [c for c in band1 if _is_verified_quest_choice(c)]
-    non_quest_b1 = [c for c in band1 if not _is_verified_quest_choice(c)]
     if remaining_budget == 1:
-        # Down to final wrap-up exchange: cap non-quest options to at most 2
-        allowed_nq = 2
-        priv_in_b2 = [c for c in band2 if c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge"]
-        other_b2 = [c for c in band2 if not (c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge")]
-        kept_b2 = other_b2[:max(0, allowed_nq - len(priv_in_b2))] + priv_in_b2
-        rem_slots = max(0, allowed_nq - len(kept_b2))
-        band2 = kept_b2
-        band1 = quest_b1 + non_quest_b1[:rem_slots]
+        band2 = band2[:min(2, desired_max_b2)]
     elif remaining_budget == 2:
-        # Winding down: cap non-quest options to at most 3
-        allowed_nq = 3
-        priv_in_b2 = [c for c in band2 if c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge"]
-        other_b2 = [c for c in band2 if not (c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge")]
-        kept_b2 = other_b2[:max(1, min(2, len(other_b2)) - len(priv_in_b2))] + priv_in_b2
-        rem_slots = max(0, allowed_nq - len(kept_b2))
-        kept_nq_b1 = non_quest_b1[:rem_slots]
-        extra_b2_slots = max(0, allowed_nq - len(kept_b2) - len(kept_nq_b1))
-        band2 = (kept_b2 + other_b2[len(kept_b2) : len(kept_b2) + extra_b2_slots])
-        band1 = quest_b1 + kept_nq_b1
+        band2 = band2[:min(3, desired_max_b2)]
+    else:
+        band2 = band2[:desired_max_b2]
 
     if in_stage_1 and urg_profile:
         band1 = [_apply_stage1_hurry_gate(c) for c in band1]
         band2 = [_apply_stage1_hurry_gate(c) for c in band2]
+        band3_utils = [
+            u if u.get("_convince_stay") else _apply_stage1_hurry_gate(u)
+            for u in band3_utils
+        ]
 
-    # Cap total choices at <= 8 while preserving pinned phone_contact_exchange and Band 3 Leave Conversation
-    max_body = 6 if stage1_prefix else 7
-    while len(band1) + len(band2) > max_body and len(band2) > (2 if has_contact_btn else 1):
-        # Pop generic social fillers before popping privacy nudge or contact exchange
-        pop_idx = next(
-            (i for i in reversed(range(len(band2))) if not band2[i].get("_privacy_nudge") and str(band2[i].get("sub_intent") or "").lower() != "privacy_nudge" and str(band2[i].get("intent") or "").lower() != "phone_contact_exchange"),
-            len(band2) - 1
-        )
-        band2.pop(pop_idx)
-    while len(band1) + len(band2) > max_body and len(band1) > len(quest_b1) and len(band1) > 1:
-        band1.pop()
-    while len(band1) + len(band2) > max_body and len(band2) > 1:
+    # Final hard <= 8 ceiling: trim social slots first so Band 1 quests, Band 3 pre-exit utilities, and Band 4 exit never drop
+    while len(band1) + len(band2) + len(band3_utils) + 1 > 8 and len(band2) > 1:
         band2.pop()
 
-    pinned_exit = build_pinned_leave_choice(clean_partners)
-    return stage1_prefix + band1 + band2 + [pinned_exit]
+    return band1 + band2 + band3_utils + [pinned_exit]
 
 
 def pin_dialogue_exit_last(
@@ -2113,11 +1341,7 @@ def pin_dialogue_exit_last(
     partners: Optional[List[str]],
     max_total: int = 8,
 ) -> List[Dict[str, Any]]:
-    """
-    Guarantees that in active non-intimate dialogue:
-      1. Stage 2 ultimatum 2-choice locks are never overwritten by ambient injectors.
-      2. Standardized 'Leave conversation...' is ALWAYS present as the final choice and never sliced off.
-    """
+    """Keeps Stage 2 locks intact, pins Pre-Exit Utilities right above Leave Conversation, and caps at max_total."""
     clean_partners = [str(p).strip() for p in (partners or []) if str(p).strip()]
     if not clean_partners:
         return list(choices or [])
@@ -2126,6 +1350,7 @@ def pin_dialogue_exit_last(
         return [c for c in (choices or []) if isinstance(c, dict) and c.get("_stage_2_ultimatum_locked")]
 
     body: List[Dict[str, Any]] = []
+    utilities: List[Dict[str, Any]] = []
     exit_choice: Optional[Dict[str, Any]] = None
     from mechanics.narrative.intent import is_conversational_exit
 
@@ -2142,13 +1367,17 @@ def pin_dialogue_exit_last(
             if exit_choice is None:
                 exit_choice = c if c.get("_pinned_dialogue_exit") else build_pinned_leave_choice(clean_partners)
             continue
-        body.append(c)
+        if _is_pre_exit_utility_choice(c):
+            utilities.append(c)
+        else:
+            body.append(c)
 
     if exit_choice is None:
         exit_choice = build_pinned_leave_choice(clean_partners)
 
-    body_cap = max(1, max_total - 1)
-    return body[:body_cap] + [exit_choice]
+    utilities.sort(key=_utility_sort_rank)
+    avail_body = max(0, max_total - 1 - len(utilities))
+    return body[:avail_body] + utilities[: max(0, max_total - 1)] + [exit_choice]
 
 
 def evaluate_conversation_departure_turn(
@@ -2159,319 +1388,15 @@ def evaluate_conversation_departure_turn(
     party: Optional[List[Any]] = None,
     stage_info: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Evaluates Urgent Schedule Departure transitions & Private Meetup exit rules pre-LLM.
-    Returns:
-      {
-        "directive_note": str,
-        "departing_for_schedule": List[Dict[str, str]],  # [{"name", "target_location", "target_node_id", "reason"}]
-        "active_partners": List[str],
-      }
-    """
-    from skill_check import is_check_success
-    from mechanics.world.schedules import (
-        detect_schedule_boundary_crossed,
-        get_npc_scheduled_location,
-        get_npc_scheduled_node_id,
-        get_time_block_key,
-        is_schedule_transition_imminent,
+    return run_departure_turn_evaluation(
+        session=session,
+        actions=actions,
+        new_partners=new_partners,
+        has_exited_convo=has_exited_convo,
+        profile_resolver=resolve_partner_conversation_profile,
+        party=party,
+        stage_info=stage_info,
     )
-    from mechanics.world.mobility import get_session_dialogue_partners
-    from game_engine.npcs.dialogue_tracking import compute_scene_beat_linger_turns
-
-    sess_id = session.get("id")
-    scen_key = str(session.get("scenario") or "fantasy")
-    scene_loc = str(
-        (stage_info or {}).get("effective_location")
-        or session.get("current_location")
-        or ""
-    )
-    scene_nid = str(
-        (stage_info or {}).get("effective_node_id")
-        or session.get("current_node_id")
-        or ""
-    )
-    curr_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
-    curr_day = int(session.get("current_day") or 1)
-    prev_min = session.get("_prev_turn_minute")
-    prev_day = session.get("_prev_turn_day")
-    curr_blk = get_time_block_key(curr_min)
-    history = session.get("history") or []
-
-    prev_partners = list(get_session_dialogue_partners(session))
-    states = get_npc_departure_states(session)
-    directives: List[str] = []
-    departing_records: List[Dict[str, str]] = []
-    updated_partners = [str(p).strip() for p in (new_partners or []) if str(p).strip()]
-
-    norm_actions = [a for a in (actions or []) if isinstance(a, dict)]
-    lead_act = norm_actions[0] if norm_actions else {}
-    act_succeeded = is_check_success(lead_act.get("check"), default_if_none=bool(lead_act.get("success", True)))
-    is_custom_act = bool(
-        lead_act.get("type") == "custom"
-        or lead_act.get("_stage2_custom_auto_fail")
-    )
-    is_convince_act = is_convince_stay_action(lead_act)
-    is_let_depart_act = bool(
-        lead_act.get("departure_action") == "let_npc_depart"
-        or (lead_act.get("dismisses_npc") and "head out" in str(lead_act.get("label") or "").lower())
-    )
-
-    def _resolve_npc_dest(npc_nm: str, prof: Dict[str, Any]) -> Tuple[str, str]:
-        if prof.get("has_other_commitment_loc"):
-            return str(prof["has_other_commitment_loc"]), ""
-        npc_ref = prof.get("contact") or prof.get("scene_npc") or {"name": npc_nm, "role": prof.get("role", "")}
-        is_imm, _, next_b, mins_r = is_schedule_transition_imminent(
-            curr_min, window_minutes=15, current_day=curr_day, scen_key=scen_key
-        )
-        t_blk = next_b if (is_imm and next_b) else curr_blk
-        t_min = (curr_min + mins_r) if (is_imm and mins_r) else curr_min
-        s_loc = get_npc_scheduled_location(
-            npc_ref, current_minute=t_min, current_day=curr_day, scen_key=scen_key, time_slot=t_blk, session_id=sess_id
-        )
-        s_nid = get_npc_scheduled_node_id(
-            npc_ref, current_minute=t_min, current_day=curr_day, scen_key=scen_key, time_slot=t_blk
-        ) or ""
-        return str(s_loc or ""), str(s_nid or "")
-
-    def _queue_departure(npc_nm: str, dest_loc: str, dest_nid: str, reason: str) -> None:
-        if any(r["name"].lower() == npc_nm.lower() for r in departing_records):
-            return
-        departing_records.append({
-            "name": npc_nm,
-            "target_location": dest_loc,
-            "target_node_id": dest_nid,
-            "reason": reason,
-        })
-        nonlocal updated_partners
-        updated_partners = [p for p in updated_partners if p.lower() != npc_nm.lower()]
-
-    # ── 1. Handle Explicit Conversational Exit (including Private Meetup Exit & Active Departure States) ──
-    if has_exited_convo:
-        for p_nm in prev_partners:
-            p_key = _canon_npc_key(p_nm)
-            st = states.pop(p_key, None)
-            prof = resolve_partner_conversation_profile(session, p_nm, party=party)
-            if prof["is_private_meetup"]:
-                # Mark active meetup appointment completed on clean exit
-                if sess_id:
-                    try:
-                        db.update_phone_appointment_status(int(sess_id), p_nm, "completed")
-                        db.update_phone_appointment_status(int(sess_id), p_nm.lower().replace(" ", "_"), "completed")
-                    except Exception:
-                        pass
-                if prof["is_npc_home_or_office"]:
-                    directives.append(
-                        f"\n[PRIVATE MEETUP GOODBYE (AT {p_nm.upper()}'S SPACE)]: The player is wrapping up the meetup. "
-                        f"Have {p_nm} give the player a warm, proper goodbye while remaining in their own space (do NOT reopen dialogue).\n"
-                    )
-                else:
-                    dest_loc, dest_nid = _resolve_npc_dest(p_nm, prof)
-                    if not dest_loc or _locations_match(scene_loc, dest_loc, session_id=sess_id, node_a=scene_nid, node_b=dest_nid):
-                        dest_loc = "their next obligation"
-                    dest_clean = dest_loc.split("➔")[-1].strip()
-                    _queue_departure(p_nm, dest_loc, dest_nid, "private_meetup_exit")
-                    directives.append(
-                        f"\n[PRIVATE MEETUP CONCLUSION & DEPARTURE]: The player has ended the conversation to wrap up the meetup. "
-                        f"In `outcome_narrative`, have {p_nm} explicitly mention that they need to get going too (toward {dest_clean}), "
-                        f"give the player a proper goodbye, and physically leave the scene! Do NOT keep {p_nm} in `npcs_present`.\n"
-                    )
-            elif st and st.get("stage") in ("stage_1_warning", "stage_2_ultimatum", "extended_stay"):
-                dest_loc = str(st.get("target_location") or "")
-                dest_nid = str(st.get("target_node_id") or "")
-                dest_clean = dest_loc.split("➔")[-1].strip() if dest_loc else "their scheduled obligation"
-                _queue_departure(p_nm, dest_loc, dest_nid, "schedule_departure_on_exit")
-                directives.append(
-                    f"\n[SCHEDULE DEPARTURE]: As the conversation ends, {p_nm} bids farewell and physically leaves the scene for {dest_clean}.\n"
-                )
-        save_npc_departure_states(session, states, persist_db=True)
-        return {
-            "directive_note": "".join(directives),
-            "departing_for_schedule": departing_records,
-            "active_partners": [],
-        }
-
-    # ── 2. Advance Existing Departure State Machine for Active Partners ──────
-    bound_crossed = False
-    if prev_min is not None and prev_min != curr_min:
-        try:
-            b_info = detect_schedule_boundary_crossed(prev_day or curr_day, int(prev_min), curr_day, curr_min, scen_key=scen_key)
-            bound_crossed = bool(b_info.get("crossed"))
-        except Exception:
-            bound_crossed = False
-    is_imm_now, _, next_blk_now, mins_rem_now = is_schedule_transition_imminent(
-        curr_min, window_minutes=15, current_day=curr_day, scen_key=scen_key
-    )
-
-    for p_nm in list(updated_partners):
-        p_key = _canon_npc_key(p_nm)
-        prof = resolve_partner_conversation_profile(session, p_nm, party=party)
-
-        # Private meetups & permanent party companions never trigger Stage 1 / Stage 2 hurry
-        if prof["is_private_meetup"] or prof["is_party_member"]:
-            states.pop(p_key, None)
-            continue
-
-        st = states.get(p_key)
-        act_targets_this_npc = (
-            len(updated_partners) == 1
-            or str(lead_act.get("target_npc") or "").strip().lower() == p_nm.lower()
-            or p_nm.lower() in str(lead_act.get("label") or "").lower()
-        )
-
-        if st:
-            stage_val = str(st.get("stage") or "none")
-            dest_loc = str(st.get("target_location") or "")
-            dest_nid = str(st.get("target_node_id") or "")
-            dest_clean = dest_loc.split("➔")[-1].strip() if dest_loc else "their next obligation"
-
-            if is_let_depart_act and act_targets_this_npc:
-                states.pop(p_key, None)
-                _queue_departure(p_nm, dest_loc, dest_nid, "let_npc_depart")
-                directives.append(
-                    f"\n[SCHEDULE DEPARTURE]: The player lets {p_nm} head out. {p_nm} excuses themself with a brief farewell and leaves the scene for {dest_clean}.\n"
-                )
-                continue
-
-            if stage_val == "stage_1_warning" and act_targets_this_npc:
-                if is_convince_act:
-                    if act_succeeded and st.get("extended_block") != curr_blk:
-                        st["stage"] = "extended_stay"
-                        st["turns_remaining"] = 5
-                        st["extended_block"] = curr_blk
-                        states[p_key] = st
-                        directives.append(
-                            f"\n[STAY EXTENSION GRANTED (5 TURNS)]: The player convinced {p_nm} to stay! "
-                            f"{p_nm} agrees to spare a few more minutes before heading to {dest_clean}.\n"
-                        )
-                    else:
-                        states.pop(p_key, None)
-                        _queue_departure(p_nm, dest_loc, dest_nid, "convince_stay_failed")
-                        directives.append(
-                            f"\n[SCHEDULE DEPARTURE — CONVINCE FAILED]: The player failed to convince {p_nm} to stay. "
-                            f"{p_nm} apologetically excuses themself right now and physically leaves the scene for {dest_clean}!\n"
-                        )
-                else:
-                    if act_succeeded:
-                        st["stage"] = "stage_2_ultimatum"
-                        states[p_key] = st
-                        directives.append(
-                            f"\n[URGENT SCHEDULE DEPARTURE — STAGE 2 ULTIMATUM]: {p_nm} answers the player's question/action normally, "
-                            f"then checks the time and states firmly that they MUST leave for {dest_clean} right now.\n"
-                        )
-                    else:
-                        states.pop(p_key, None)
-                        _queue_departure(p_nm, dest_loc, dest_nid, "stage1_hurry_check_failed")
-                        directives.append(
-                            f"\n[SCHEDULE DEPARTURE — HURRIED EXIT]: Because {p_nm} is late for {dest_clean} and the player's check failed, "
-                            f"{p_nm} cuts the exchange short, ignores the request, excuses themself immediately, and physically leaves the scene!\n"
-                        )
-                continue
-
-            if stage_val == "stage_2_ultimatum" and act_targets_this_npc:
-                if is_custom_act:
-                    states.pop(p_key, None)
-                    _queue_departure(p_nm, dest_loc, dest_nid, "stage2_custom_action_failed")
-                    directives.append(
-                        f"\n[SCHEDULE DEPARTURE — OUT OF TIME]: {p_nm} has no time left to entertain anything else—they excuse themself immediately and physically leave the scene for {dest_clean}!\n"
-                    )
-                elif is_convince_act:
-                    if act_succeeded and st.get("extended_block") != curr_blk:
-                        st["stage"] = "extended_stay"
-                        st["turns_remaining"] = 5
-                        st["extended_block"] = curr_blk
-                        states[p_key] = st
-                        directives.append(
-                            f"\n[STAY EXTENSION GRANTED (5 TURNS)]: At the last moment, the player convinced {p_nm} to stay a bit longer before heading to {dest_clean}!\n"
-                        )
-                    else:
-                        states.pop(p_key, None)
-                        _queue_departure(p_nm, dest_loc, dest_nid, "stage2_convince_failed")
-                        directives.append(
-                            f"\n[SCHEDULE DEPARTURE — CONVINCE FAILED]: The player failed to convince {p_nm} to stay. "
-                            f"{p_nm} excuses themself immediately and physically leaves the scene for {dest_clean}!\n"
-                        )
-                else:
-                    states.pop(p_key, None)
-                    _queue_departure(p_nm, dest_loc, dest_nid, "stage2_departed")
-                    directives.append(
-                        f"\n[SCHEDULE DEPARTURE]: {p_nm} bids farewell and physically leaves the scene for {dest_clean}.\n"
-                    )
-                continue
-
-            if stage_val == "extended_stay":
-                rem = int(st.get("turns_remaining", 5)) - 1
-                if rem <= 0:
-                    # 5th bonus turn reached -> respond warmly, then depart (one-time cap per block)
-                    st["stage"] = "completed_block"
-                    st["turns_remaining"] = 0
-                    states[p_key] = st
-                    _queue_departure(p_nm, dest_loc, dest_nid, "extended_stay_expired")
-                    directives.append(
-                        f"\n[STAY EXTENSION COMPLETE — FINAL TURN DEPARTURE]: {p_nm}'s 5 bonus turns are up. "
-                        f"Have {p_nm} respond warmly to the player's action, give a polite heads-up and goodbye that they truly cannot delay any longer, "
-                        f"and physically depart the scene for {dest_clean}!\n"
-                    )
-                else:
-                    st["turns_remaining"] = rem
-                    states[p_key] = st
-                continue
-
-            if stage_val == "completed_block":
-                if st.get("extended_block") != curr_blk:
-                    states.pop(p_key, None)
-                else:
-                    continue
-
-        # ── 3. Check Fresh Trigger Into Stage 1 Warning ──────────────────────
-        dest_loc, dest_nid = _resolve_npc_dest(p_nm, prof)
-        if not dest_loc or _locations_match(scene_loc, dest_loc, session_id=sess_id, node_a=scene_nid, node_b=dest_nid):
-            continue
-
-        if prof["is_quest_stationed_here"]:
-            continue
-
-        non_scene_turns = sum(1 for h in history if isinstance(h, dict) and h.get("type") != "scene")
-        linger_turns = compute_scene_beat_linger_turns(history, session=session, active_partners=[p_nm])
-        has_real_clock_shift = bool(
-            (bound_crossed and non_scene_turns >= 1)
-            or (is_imm_now and linger_turns >= 1 and non_scene_turns >= 1)
-        )
-        has_commitment_elsewhere = bool(prof.get("has_other_commitment_loc") and (linger_turns >= 1 or non_scene_turns >= 1))
-        has_prolonged_linger = bool(linger_turns >= 4)
-
-        if has_real_clock_shift or has_commitment_elsewhere or has_prolonged_linger:
-            dest_clean = dest_loc.split("➔")[-1].strip()
-            t_blk = next_blk_now if (is_imm_now and next_blk_now) else curr_blk
-            states[p_key] = {
-                "stage": "stage_1_warning",
-                "target_location": dest_loc,
-                "target_node_id": dest_nid,
-                "triggered_block": t_blk,
-                "turns_remaining": 0,
-                "extended_block": "",
-            }
-            if is_imm_now and mins_rem_now:
-                timing_str = f"in about {mins_rem_now} minutes"
-            else:
-                timing_str = "now"
-            directives.append(
-                f"\n[URGENT SCHEDULE DEPARTURE — STAGE 1 WARNING]: {p_nm} is supposed to be at {dest_clean} {timing_str}. "
-                f"In their spoken reply this turn, {p_nm} MUST explicitly mention that they need to get going to {dest_clean} soon!\n"
-            )
-
-    # Prune stale non-completed states for NPCs no longer in conversation
-    active_keys = {_canon_npc_key(p) for p in updated_partners}
-    for k in list(states.keys()):
-        if k not in active_keys and states[k].get("stage") != "completed_block":
-            states.pop(k, None)
-
-    save_npc_departure_states(session, states, persist_db=True)
-    return {
-        "directive_note": "".join(directives),
-        "departing_for_schedule": departing_records,
-        "active_partners": updated_partners,
-    }
 
 
 def relocate_departed_schedule_npcs(
@@ -2480,133 +1405,13 @@ def relocate_departed_schedule_npcs(
     departing_records: List[Dict[str, str]],
     stage_info: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Physically removes departed NPCs from the current scene, records cast disengagement cooldowns,
-    clears temporary walk-along state, and persists their new destination location to SQLite so they
-    actually appear at that destination when the player visits it.
-    """
-    if not departing_records:
-        return
-    sess_id = session.get("id")
-    curr_day = int(session.get("current_day") or 1)
-    curr_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
-    from mechanics.world.schedules import get_time_block_key
-    curr_blk = get_time_block_key(curr_min)
-    history = session.get("history") or []
-    turn_idx = len(history)
-
-    dep_names_low = {str(r.get("name") or "").strip().lower() for r in departing_records if r.get("name")}
-    if not dep_names_low:
-        return
-
-    # 1. Remove from result["npcs_present"] & session["current_npcs"]
-    if isinstance(result, dict):
-        if isinstance(result.get("npcs_present"), list):
-            result["npcs_present"] = [
-                n for n in result["npcs_present"]
-                if str(n.get("name") if isinstance(n, dict) else n).strip().lower() not in dep_names_low
-            ]
-        dep_list = list(result.get("npc_departures") or [])
-        dep_chars = list(result.get("departed_characters") or [])
-        for r in departing_records:
-            nm = str(r.get("name") or "").strip()
-            if nm and nm not in dep_list:
-                dep_list.append(nm)
-            if nm and nm not in dep_chars:
-                dep_chars.append(nm)
-        result["npc_departures"] = dep_list
-        result["departed_characters"] = dep_chars
-
-        rem_dps = [
-            p for p in (result.get("dialogue_partners") or [])
-            if str(p).strip().lower() not in dep_names_low
-        ]
-        result["dialogue_partners"] = rem_dps
-        result["dialogue_partner"] = rem_dps[0] if rem_dps else None
-
-    if isinstance(session.get("current_npcs"), list):
-        session["current_npcs"] = [
-            n for n in session["current_npcs"]
-            if str(n.get("name") if isinstance(n, dict) else n).strip().lower() not in dep_names_low
-        ]
-
-    if isinstance(stage_info, dict):
-        sd = list(stage_info.get("schedule_departed_npcs") or [])
-        for r in departing_records:
-            nm = str(r.get("name") or "").strip()
-            if nm and nm not in sd:
-                sd.append(nm)
-        stage_info["schedule_departed_npcs"] = sd
-
-    # 2. Record disengagement in cast_state so LLM cannot re-engage them
-    try:
-        from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
-        cs = get_cast_state(session)
-        dis_map = cs.setdefault("disengaged_at_turn", {})
-        for dn in dep_names_low:
-            dis_map[dn] = turn_idx
-        save_cast_state(session, cs, persist_db=bool(sess_id))
-        if isinstance(result, dict):
-            result["_staged_cast_state"] = cs
-    except Exception:
-        pass
-
-    # 3. Persist destination location to contacts, lorebook, and session relocated overrides
-    relocated_overrides = dict(session.get("npc_relocated_overrides") or {})
-    for r in departing_records:
-        nm = str(r.get("name") or "").strip()
-        dest_loc = str(r.get("target_location") or "").strip()
-        dest_nid = str(r.get("target_node_id") or "").strip()
-        if not nm:
-            continue
-        if sess_id:
-            try:
-                db.remove_temporary_companion(int(sess_id), nm)
-            except Exception:
-                pass
-        if not dest_loc or dest_loc == "their next obligation":
-            continue
-
-        relocated_overrides[_canon_npc_key(nm)] = {
-            "name": nm,
-            "location": dest_loc,
-            "node_id": dest_nid,
-            "day": curr_day,
-            "minute": curr_min,
-            "block": curr_blk,
-        }
-        if sess_id:
-            try:
-                c_existing, lore_ent = _find_contact_and_lore(int(sess_id), nm)
-                if c_existing:
-                    b_inf = dict(c_existing.get("basic_info") or {})
-                    b_inf["location"] = dest_loc
-                    db.upsert_contact(
-                        session_id=int(sess_id),
-                        character_id=int(c_existing.get("character_id") or 0),
-                        npc_id=str(c_existing.get("npc_id") or nm),
-                        name=nm,
-                        basic_info=b_inf,
-                        delta_score=0,
-                    )
-                if lore_ent:
-                    db.upsert_lorebook_entity(
-                        int(sess_id),
-                        "person",
-                        nm,
-                        str(lore_ent.get("description") or ""),
-                        str(lore_ent.get("disposition") or "neutral"),
-                        faction=str(lore_ent.get("faction") or ""),
-                    )
-            except Exception as e:
-                log.warning("Failed updating relocated NPC destination for '%s': %s", nm, e)
-
-    session["npc_relocated_overrides"] = relocated_overrides
-    if sess_id:
-        try:
-            db.update_session(int(sess_id), extra={"npc_relocated_overrides": relocated_overrides})
-        except Exception:
-            pass
+    relocate_departed_npcs_impl(
+        session=session,
+        result=result,
+        departing_records=departing_records,
+        find_contact_and_lore_fn=_find_contact_and_lore,
+        stage_info=stage_info,
+    )
 
 
 def build_conversation_prompt_directive(
@@ -2614,7 +1419,7 @@ def build_conversation_prompt_directive(
     partners: List[str],
     party: Optional[List[Any]] = None,
 ) -> str:
-    """Builds the LLM prompt block instructing 3-Band choice generation & affinity-tier social rules."""
+    """Builds the Z3 LLM prompt block instructing 4-Band choice generation & contextual seed authoring."""
     clean_partners = [str(p).strip() for p in (partners or []) if str(p).strip()]
     if not clean_partners:
         return ""
@@ -2627,36 +1432,36 @@ def build_conversation_prompt_directive(
                 f"- Active Anomalous Entity Partner: {clean_partners[0]}\n"
                 f"- Voice {clean_partners[0]} strictly as an eerie, otherworldly sapient anomalous manifestation answering about its origins, taboo/nature, or bargain terms—NEVER as a mundane human peer making small talk.\n"
             )
-    partner = clean_partners[0]
-    score = prof["score"]
-    tier_name = prof["tier_name"]
-    is_meetup = prof["is_private_meetup"]
-    track = prof["track"]
 
-    if is_meetup or score >= 100 or track == "romantic":
-        social_rule = (
-            f"{partner} is at '{tier_name}' ({score}, track={track}, meetup={is_meetup}): "
-            f"generate 1-3 warm skill-check (`stat='CHA'`, `'INT'`, or `'PER'`, `requirement=5-7`) social options (personal compliments, playful banter, jokes, teasing, flirting, deeper backstory questions, or walking together to a contextual spot in the area)."
-        )
-    elif score >= 50:
-        social_rule = (
-            f"{partner} is an '{tier_name}' ({score}): "
-            f"generate 1-2 polite skill-check (`stat='CHA'`, `'INT'`, or `'PER'`, `requirement=5-7`) social options (hobbies/background questions, light polite compliments, or mild situational observations). "
-            f"DO NOT generate 'Walk with {partner}', heavy teasing, or flirting."
-        )
-    else:
-        social_rule = (
-            f"{partner} is '{tier_name}' ({score}): "
-            f"generate 1-2 polite, neutral skill-check (`stat='INT'`, `'PER'`, or `'CHA'`, `requirement=5-7`) contextual questions ONLY (e.g., their current activity, club, classes, duties, or immediate situation). "
-            f"NEVER treat student/personality tropes (e.g. 'Class Clown', 'Delinquent', 'Bookworm') as a literal job or say 'work/job as...'. "
-            f"STRICTLY FORBIDDEN for Strangers: DO NOT generate compliments, flattery, 'offer a witty observation', jokes, banter, teasing, or 'Walk with {partner}'!"
-        )
+    partner = clean_partners[0]
+    tier_name = prof["tier_name"]
+    score = prof["score"]
+    seeds = (session or {}).get("_dealt_social_seeds") if isinstance(session, dict) else None
+    seed_lines = ""
+    if isinstance(seeds, list) and seeds:
+        formatted = []
+        for s in seeds:
+            if not isinstance(s, dict):
+                continue
+            reply_tag = " [DIRECT REPLY TO QUESTION]" if s.get("is_direct_reply") else ""
+            formatted.append(
+                f"    * topic_id='{s.get('topic_id')}' | category='{s.get('category')}' | stat='{s.get('stat')}' | target='{s.get('target_npc')}'{reply_tag}: {s.get('prompt_cue')}"
+            )
+        if formatted:
+            seed_lines = (
+                "  - [PRE-TURN SOCIAL SEEDS — AUTHOR BESPOKE CONTEXTUAL LABELS]:\n"
+                "    Write natural, scene-grounded dialogue choice `label` strings for each seed below (never formulaic templates; never mention raw DC numbers), "
+                "and copy its exact `topic_id` and `category` onto the emitted `Choice` object:\n"
+                + "\n".join(formatted)
+                + "\n"
+            )
 
     return (
-        "\n[CONVERSATION CHOICE ARCHITECTURE — PYTHON-ENFORCED]:\n"
-        f"- Active Dialogue Partner(s): {', '.join(clean_partners)}\n"
-        "- Structure `choices` into these exact bands:\n"
-        "  1. FIRST 2-4 OPTIONS (Skill Checks: `INT`, `PER`, `CHA`, DC 5-8): Action/dialogue options that PRIORITIZE active quests/bounties or query the character for quest/bounty intel and local rumors.\n"
-        f"  2. NEXT 1-3 OPTIONS (Affinity-Scaled Social/Background Skill Checks: `CHA`, `INT`, `PER`, DC 5-8): {social_rule}\n"
-        "  3. DO NOT generate 'Convince ... to stay' unless instructed by an [URGENT SCHEDULE DEPARTURE] directive. Only the final 'Leave conversation...' option has `stat='NONE'`, `requirement=0`.\n"
+        "\n[CONVERSATION CHOICE ARCHITECTURE — 4-BAND PYTHON-ENFORCED]:\n"
+        f"- Active Dialogue Partner(s): {', '.join(clean_partners)} ({partner}: '{tier_name}', score={score})\n"
+        "- Structure `choices` cleanly (total <= 8):\n"
+        "  1. QUEST / INVESTIGATION (0-2 slots ONLY if an active quest, bounty, or discovered rumor genuinely applies).\n"
+        "  2. DYNAMIC SOCIAL SUITE (4-6 slots across `STR, PER, END, CHA, INT, AGI, LUK`): Contextual Sims-style get-to-know, situational props, banter, early/warm flirt gambles, rivalry pushback, callbacks, or casual local event gossip. Never treat student/personality tropes ('Class Clown', 'Delinquent') as paid jobs.\n"
+        f"{seed_lines}"
+        "  3. PRE-EXIT UTILITIES & LEAVE: Do NOT generate 'Convince ... to stay' unless instructed by [URGENT SCHEDULE DEPARTURE]. Python pins structural utilities and 'Leave conversation...' last.\n"
     )

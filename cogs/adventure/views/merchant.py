@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List, Dict, Any, Optional
 import discord
 
 import db
+from .base import SessionRestrictedView
 from mechanics.combat.merchant import (
     MERCHANT_ARCHETYPES,
     compute_effective_shop_item_price,
@@ -17,7 +18,13 @@ if TYPE_CHECKING:
     from cogs.adventure.cog import AdventureCog
 
 
-def build_merchant_embed(session_id: int, extra_note: str | None = None) -> discord.Embed:
+def build_merchant_embed(
+    session_id: int,
+    extra_note: str | None = None,
+    *,
+    note: str | None = None,
+) -> discord.Embed:
+    eff_note = extra_note if extra_note is not None else note
     session = db.get_session(session_id)
     merchant = session["merchant"]
     is_phone = merchant.get("is_phone_shop", False)
@@ -60,8 +67,8 @@ def build_merchant_embed(session_id: int, extra_note: str | None = None) -> disc
         embed.add_field(name="Haggle Discount", value=f"{merchant['discount_pct']}%", inline=True)
     embed.add_field(name="Haggle Attempts Left", value=f"{3 - merchant.get('haggle_attempts', 0)}/3", inline=True)
     embed.add_field(name="🕒 Daily Restock", value=f"Start of **Day {next_day}**", inline=True)
-    if extra_note:
-        embed.add_field(name="Update", value=extra_note, inline=False)
+    if eff_note:
+        embed.add_field(name="Update", value=eff_note, inline=False)
     embed.set_footer(text=footer_text)
     return embed
 
@@ -90,17 +97,17 @@ class BazaarStoreSelectDropdown(discord.ui.Select):
         )
 
 
-class BazaarStoreSelectView(discord.ui.View):
-    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict]):
-        super().__init__(timeout=180)
+class BazaarStoreSelectView(SessionRestrictedView):
+    def __init__(self, cog: "AdventureCog", session_id: int, available_stores: list[dict], user_id: Optional[int] = None):
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
         self.add_item(BazaarStoreSelectDropdown(cog, session_id, available_stores))
 
 
 async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interaction: discord.Interaction):
-    session = db.get_session(session_id)
-    if interaction.user.id not in session["turn_order"]:
+    session = await adb(db.get_session, session_id)
+    if not session or interaction.user.id not in (session.get("turn_order") or []):
         await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
         return
 
@@ -110,7 +117,7 @@ async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interact
     available_stores = get_available_merchant_types_for_location(current_loc, scen_key=scen_key)
 
     if len(available_stores) > 1:
-        view = BazaarStoreSelectView(cog, session_id, available_stores)
+        view = BazaarStoreSelectView(cog, session_id, available_stores, user_id=interaction.user.id)
         await interaction.response.send_message(
             f"🏛️ **Marketplace Directory — {current_loc}**\nSelect a specialist shop or stall to browse their wares:",
             view=view,
@@ -137,10 +144,14 @@ async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interact
     await interaction.response.edit_message(content=prompt, embed=None, view=vote_view)
 
 
-class MerchantVoteView(discord.ui.View):
+class MerchantVoteView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, member_ids: list, prompt: str,
                  on_unanimous, on_not_unanimous):
-        super().__init__(timeout=120)
+        super().__init__(
+            session_id=session_id,
+            timeout=120,
+            allowed_user_ids=member_ids if member_ids else None,
+        )
         self.cog = cog
         self.session_id = session_id
         self.member_ids = member_ids
@@ -187,7 +198,7 @@ class MerchantVoteView(discord.ui.View):
             child.disabled = True
 
 
-class BuySelectView(discord.ui.View):
+class BuySelectView(SessionRestrictedView):
     def __init__(
         self,
         cog: "AdventureCog",
@@ -195,10 +206,12 @@ class BuySelectView(discord.ui.View):
         stock: list,
         discount_pct: int,
         shop_ctx: dict | None = None,
+        user_id: int | None = None,
     ):
-        super().__init__(timeout=180)
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
+        self.user_id = user_id
         options = []
         seen_values = set()
         for idx, item in enumerate(stock[:25]):
@@ -226,11 +239,12 @@ class BuySelectView(discord.ui.View):
         await self.cog.buy_item(interaction, self.session_id, interaction.user.id, item_name)
 
 
-class SellSelectView(discord.ui.View):
-    def __init__(self, cog: "AdventureCog", session_id: int, priced_items: list):
-        super().__init__(timeout=180)
+class SellSelectView(SessionRestrictedView):
+    def __init__(self, cog: "AdventureCog", session_id: int, priced_items: list, user_id: int | None = None):
+        super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.cog = cog
         self.session_id = session_id
+        self.user_id = user_id
         self.priced_by_id = {str(i["id"]): i for i in priced_items}
         options = [
             discord.SelectOption(label=f"{i['name']} — {i['price']}g"[:100], value=str(i["id"]))
@@ -250,9 +264,9 @@ class SellSelectView(discord.ui.View):
                                   int(item_id), entry["name"], entry["price"])
 
 
-class RumorView(discord.ui.View):
+class RumorView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, rumors: list):
-        super().__init__(timeout=300)
+        super().__init__(session_id=session_id, timeout=300)
         self.cog = cog
         self.session_id = session_id
         for idx, rumor in enumerate(rumors[:3]):
@@ -275,9 +289,13 @@ class RumorView(discord.ui.View):
         await self.cog.return_to_merchant_view(interaction, self.session_id)
 
 
-class MerchantView(discord.ui.View):
+class MerchantView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, member_ids: list, is_phone_shop: bool = None):
-        super().__init__(timeout=1800)
+        super().__init__(
+            session_id=session_id,
+            timeout=1800,
+            allowed_user_ids=member_ids if member_ids else None,
+        )
         self.cog = cog
         self.session_id = session_id
         self.member_ids = member_ids
@@ -316,8 +334,9 @@ class MerchantView(discord.ui.View):
         if len(self.member_ids) <= 1:
             await on_execute(interaction)
             return
-        char = db.get_character(interaction.user.id)
-        prompt = f"**{char['name']}** wants to {action_label}. Does everyone agree?"
+        char = await adb(db.get_character, interaction.user.id)
+        char_name = char["name"] if char else "A party member"
+        prompt = f"**{char_name}** wants to {action_label}. Does everyone agree?"
 
         async def on_not_unanimous(vote_interaction: discord.Interaction):
             await self.cog._merchant_consensus_failed(vote_interaction, self.session_id, action_label)

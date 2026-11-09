@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { apiCall } from '../api/client';
-import { isValidSessionId } from '../utils/session';
+import { isValidSessionId, isAnomalousScenarioKey } from '../utils/session';
 
 export const useCodex = (sessionId, user, session = null) => {
   const [contacts, setContacts] = useState([]);
@@ -25,7 +26,9 @@ export const useCodex = (sessionId, user, session = null) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const isAnomalousScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+  const { i18n } = useTranslation();
+  const activeUiLang = (i18n.resolvedLanguage || i18n.language || 'en').slice(0, 2);
+  const isAnomalousScenario = isAnomalousScenarioKey(session?.scenario);
 
   const fetchCodexData = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !user) {
@@ -43,7 +46,7 @@ export const useCodex = (sessionId, user, session = null) => {
         apiCall(`/api/quests/${sessionId}?user_id=${user.user_id}`),
       ];
       if (isAnomalousScenario) {
-        requests.push(apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}`));
+        requests.push(apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}&lang=${encodeURIComponent(activeUiLang)}`));
       }
 
       const [contactsRes, factionsRes, lorebookRes, questsRes, encyclopediaRes] = await Promise.allSettled(requests);
@@ -94,7 +97,7 @@ export const useCodex = (sessionId, user, session = null) => {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, user, isAnomalousScenario]);
+  }, [sessionId, user, isAnomalousScenario, activeUiLang]);
 
   useEffect(() => {
     fetchCodexData();
@@ -170,12 +173,12 @@ export const useCodex = (sessionId, user, session = null) => {
   const refreshEncyclopediaIfActive = useCallback(async () => {
     if (!isAnomalousScenario || !isValidSessionId(sessionId) || !user?.user_id) return;
     try {
-      const encData = await apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}`);
+      const encData = await apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}&lang=${encodeURIComponent(activeUiLang)}`);
       if (encData) setEncyclopedia(encData);
     } catch {
       // Non-fatal background refresh
     }
-  }, [isAnomalousScenario, sessionId, user?.user_id]);
+  }, [isAnomalousScenario, sessionId, user?.user_id, activeUiLang]);
 
   const deduceClues = async (clueAId, clueBId = null) => {
     if (!isValidSessionId(sessionId) || !clueAId) return null;

@@ -29,7 +29,7 @@ def build_inventory_embed(user_id: int, feedback_notice: str = "") -> discord.Em
         return discord.Embed(title="No Character", description="You don't have an active character yet.", color=discord.Color.red())
 
     inv = db.get_inventory(user_id)
-    cap = inventory_capacity(char["str_"])
+    cap = db.get_character_inventory_capacity(user_id, char=char)
     used_slots = db.used_slots(user_id)
 
     embed = discord.Embed(

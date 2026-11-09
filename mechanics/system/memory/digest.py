@@ -79,9 +79,10 @@ def is_arc_boundary_event(session: dict, actions: list, outcome: dict) -> bool:
 
     for a in (actions or []):
         label_lower = str(a.get("label", "")).lower()
-        if any(kw in label_lower for kw in _TRAVEL_KEYWORDS):
+        from localization import ALL_MOVEMENT_PREFIXES, ALL_DIALOGUE_EXIT_PHRASES
+        if any(kw in label_lower for kw in _TRAVEL_KEYWORDS) or any(kw in label_lower for kw in ALL_MOVEMENT_PREFIXES):
             return True
-        if is_conversational_exit(label_lower) or any(kw in label_lower for kw in _DIALOGUE_EXIT_KEYWORDS):
+        if is_conversational_exit(label_lower) or any(kw in label_lower for kw in _DIALOGUE_EXIT_KEYWORDS) or any(kw in label_lower for kw in ALL_DIALOGUE_EXIT_PHRASES):
             if get_session_dialogue_partners(session):
                 return True
 
@@ -313,7 +314,9 @@ async def generate_arc_digest(
     if use_deterministic:
         result = build_deterministic_arc_digest(raw_turns)
     else:
+        import db as _db_dig
         import llm_client  # lazy import to avoid circular deps at module load time
+        from game_engine.prompt_layout import build_side_channel_language_directive
 
         turns_text = "\n".join(f"- {t}" for t in raw_turns)
         user_msg = (
@@ -322,7 +325,16 @@ async def generate_arc_digest(
         )
         try:
             result = await llm_client.call_llm_json(
-                system_prompt=_DIGEST_SYSTEM,
+                system_prompt=(
+                    f"{_DIGEST_SYSTEM}\n\n{_dig_dir}"
+                    if (_dig_dir := build_side_channel_language_directive(
+                        _db_dig.get_session(session_id) or {},
+                        text_fields=("key_events", "commitments[].description", "mechanical_summary", "active_hooks"),
+                        preserve_fields=("commitments[].commitment_type", "commitments[].source_entity", "commitments[].target_entity", "entities", "location_tag", "quest_ids"),
+                        style="narrative",
+                    ))
+                    else _DIGEST_SYSTEM
+                ),
                 user_prompt=user_msg,
                 temperature=0.2,
                 max_tokens=600,

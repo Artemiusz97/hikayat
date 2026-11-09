@@ -110,6 +110,9 @@ def is_two_handed(item: Any) -> bool:
     else:
         return False
 
+    if any(k in name_str for k in ("breaching maul", "breaching sledgehammer")):
+        return False
+
     from localization import TWO_HANDED_ARCHETYPES, TWO_HANDED_KEYWORDS
 
     if any(k in arch for k in TWO_HANDED_ARCHETYPES):

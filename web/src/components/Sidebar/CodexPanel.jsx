@@ -5,10 +5,12 @@ import {
   Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserMinus,
   Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll, Calendar, Clock, Smartphone
 } from 'lucide-react';
+import { apiCall } from '../../api/client';
 import { StatusEffectBadge } from './CharacterSheet';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 import WorldPulseLoreSubTab from './WorldPulseLoreSubTab';
 import EncyclopediaSubTab from './EncyclopediaSubTab';
+import { isAnomalousScenarioKey } from '../../utils/session';
 
 const formatPersonEntity = (item) => {
   if (!item) return '';
@@ -75,8 +77,9 @@ export const getStandingBadgeClass = (standing) => {
   return 'bg-purple-950/40 text-purple-300 border-purple-800/40';
 };
 
-const renderBulletPoints = (lines) => {
+const renderBulletPoints = (lines, t = null) => {
   if (!lines || !lines.length) return null;
+  const unknownLabel = typeof t === 'function' ? t('common.unknown', 'Unknown') : 'Unknown';
   return (
     <div className="space-y-1">
       {lines.map((line, idx) => {
@@ -90,7 +93,7 @@ const renderBulletPoints = (lines) => {
             <div key={idx} className="leading-relaxed text-gray-300 text-xs">
               • <strong className="text-gray-100">{label}</strong>:{' '}
               {isUnknown ? (
-                <span className="text-gray-500 italic">Unknown</span>
+                <span className="text-gray-500 italic">{unknownLabel}</span>
               ) : (
                 <span>{val}</span>
               )}
@@ -354,8 +357,8 @@ const CodexPanel = ({
   processingTurn = false,
 }) => {
   const { t } = useTranslation();
-  const { contacts, factions, agentDossier, lorebook, worldPulse, commitments = [], encyclopedia, loading, factionHqAction, refreshCodex, cancelCommitment, trackRumor } = codexHook;
-  const isAnomalousScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+  const { contacts = [], factions = [], agentDossier, lorebook = {}, worldPulse, commitments = [], encyclopedia, loading, factionHqAction, refreshCodex, cancelCommitment, trackRumor } = codexHook || {};
+  const isAnomalousScenario = isAnomalousScenarioKey(session?.scenario);
   const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore' | 'agenda' | 'encyclopedia'
 
   useEffect(() => {
@@ -424,9 +427,8 @@ const CodexPanel = ({
     setCompanionBusy(npcName);
     setCompanionFeedback(null);
     try {
-      const res = await fetch('/api/party/companion', {
+      const data = await apiCall('/api/party/companion', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user_id: user.user_id,
           session_id: session.id,
@@ -434,17 +436,12 @@ const CodexPanel = ({
           action: isInParty ? 'dismiss' : 'recruit',
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setCompanionFeedback({ type: 'error', text: data.detail || 'Could not update party.' });
-      } else {
-        setCompanionFeedback({ type: 'ok', text: data.message || 'Party updated.' });
-        if (onSessionUpdated && Array.isArray(data.party_npcs)) {
-          onSessionUpdated({ ...session, party_npcs: data.party_npcs });
-        }
+      setCompanionFeedback({ type: 'ok', text: data.message || 'Party updated.' });
+      if (onSessionUpdated && Array.isArray(data.party_npcs)) {
+        onSessionUpdated({ ...session, party_npcs: data.party_npcs });
       }
     } catch (err) {
-      setCompanionFeedback({ type: 'error', text: err.message });
+      setCompanionFeedback({ type: 'error', text: err.message || 'Could not update party.' });
     } finally {
       setCompanionBusy(null);
     }
@@ -809,7 +806,7 @@ const CodexPanel = ({
 
       {/* Content View */}
       {loading && contacts.length === 0 ? (
-        <p className="text-xs text-gray-500 italic text-center py-8">Consulting codex archives...</p>
+        <p className="text-xs text-gray-500 italic text-center py-8">{t('codex.loading_archives', 'Consulting codex archives...')}</p>
       ) : (
         <div className="space-y-3 flex-1 flex flex-col">
           
@@ -819,7 +816,7 @@ const CodexPanel = ({
               <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
                 <Users size={24} className="mx-auto mb-1.5 opacity-40" />
                 <p className="text-xs">{t('codex.no_characters', 'No characters discovered in the world yet.')}</p>
-                <p className="text-[10px] text-gray-500 mt-1">Explore locations and meet characters in the story to reveal them here.</p>
+                <p className="text-[10px] text-gray-500 mt-1">{t('codex.empty_archives', 'Explore locations and meet characters in the story to reveal them here.')}</p>
               </div>
             ) : (
               filteredContacts.map(rawNpc => {
@@ -1072,11 +1069,11 @@ const CodexPanel = ({
                         if (!hasAnyApp) return null;
                         return (
                           <div className="text-[10.5px] text-gray-400 bg-black/30 p-1.5 rounded border border-fantasy-border/30 flex flex-wrap gap-x-2 gap-y-0.5">
-                            {(stature || physique) && <span>📐 <strong>Build:</strong> {[stature, physique].filter(Boolean).map(formatTitle).join(' • ')}</span>}
-                            {eyeColor && <span>👁️ <strong>Eyes:</strong> {formatTitle(eyeColor)}</span>}
-                            {hairColor && <span>💇 <strong>Hair:</strong> {formatTitle(hairColor)}</span>}
-                            {coatColor && <span>✨ <strong>Skin/Coat:</strong> {formatTitle(coatColor)}</span>}
-                            {outfitStyle && <span>👔 <strong>Outfit:</strong> {formatTitle(outfitStyle)}</span>}
+                            {(stature || physique) && <span>📐 <strong>{t('codex.build', 'Build:')}</strong> {[stature, physique].filter(Boolean).map(formatTitle).join(' • ')}</span>}
+                            {eyeColor && <span>👁️ <strong>{t('codex.eyes', 'Eyes:')}</strong> {formatTitle(eyeColor)}</span>}
+                            {hairColor && <span>💇 <strong>{t('codex.hair', 'Hair:')}</strong> {formatTitle(hairColor)}</span>}
+                            {coatColor && <span>✨ <strong>{t('codex.skin_coat', 'Skin/Coat:')}</strong> {formatTitle(coatColor)}</span>}
+                            {outfitStyle && <span>👔 <strong>{t('codex.outfit', 'Outfit:')}</strong> {formatTitle(outfitStyle)}</span>}
                             {isNsfwScenario && (isMale ? ((infoLevel >= 3 || isDebugRevealed) && appearance.penis_size && appearance.penis_size.toLowerCase() !== 'unknown') : appearance.breast_size) && (
                               <span className="text-pink-400/90 font-medium">
                                 🔞 {isMale ? `Size: ${appearance.penis_size}` : `Bust: ${appearance.breast_size}`}
@@ -1334,7 +1331,7 @@ const CodexPanel = ({
                                 <div className="space-y-2.5">
                                   {(npc.archetype_trope || basic.archetype_trope) && (
                                     <div className="text-[11px] text-purple-300">
-                                      <strong className="text-purple-200">Archetype / Trope:</strong> {npc.archetype_trope || basic.archetype_trope}
+                                      <strong className="text-purple-200">{t('codex.archetype_trope', 'Archetype / Trope:')}</strong> {npc.archetype_trope || basic.archetype_trope}
                                     </div>
                                   )}
                                   {(basic.description || appearance.summary || npc.description) && (
@@ -1409,9 +1406,9 @@ const CodexPanel = ({
                                         <span className="font-bold text-amber-400 uppercase tracking-wider block">
                                           📍 Schedule & Haunts
                                         </span>
-                                        {basic.primary_facility && <div>• <strong>Primary Facility:</strong> {basic.primary_facility}</div>}
-                                        {basic.secondary_facility && <div>• <strong>Secondary Hangout:</strong> {basic.secondary_facility}</div>}
-                                        {(basic.location || npc.location) && <div>• <strong>Current / Last Seen:</strong> {formatCleanLocation(basic.location || npc.location)}</div>}
+                                        {basic.primary_facility && <div>• <strong>{t('codex.primary_facility', 'Primary Facility:')}</strong> {basic.primary_facility}</div>}
+                                        {basic.secondary_facility && <div>• <strong>{t('codex.secondary_hangout', 'Secondary Hangout:')}</strong> {basic.secondary_facility}</div>}
+                                        {(basic.location || npc.location) && <div>• <strong>{t('codex.current_last_seen', 'Current / Last Seen:')}</strong> {formatCleanLocation(basic.location || npc.location)}</div>}
                                       </div>
                                     )}
                                     <div className="space-y-1.5">
@@ -1419,7 +1416,7 @@ const CodexPanel = ({
                                         📜 Shared Interactions ({recentMemories.length})
                                       </span>
                                       {recentMemories.length === 0 ? (
-                                        <p className="text-gray-500 italic text-[11px]">No shared interactions recorded yet.</p>
+                                        <p className="text-gray-500 italic text-[11px]">{t('codex.no_shared_interactions', 'No shared interactions recorded yet.')}</p>
                                       ) : (
                                         recentMemories.map((mem, idx) => {
                                           const text = typeof mem === 'string' ? mem : (mem.memory_fact || mem.summary || JSON.stringify(mem));
@@ -1464,7 +1461,7 @@ const CodexPanel = ({
                                           ))}
                                         </div>
                                       ) : (
-                                        <p className="text-gray-500 italic">No family records recorded.</p>
+                                        <p className="text-gray-500 italic">{t('codex.no_family_records', 'No family records recorded.')}</p>
                                       )}
                                     </div>
                                     <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
@@ -1472,14 +1469,14 @@ const CodexPanel = ({
                                         💖 Romantic Standing
                                       </span>
                                       <div>
-                                        • <strong>Current Status:</strong>{' '}
+                                        • <strong>{t('codex.current_status', 'Current Status:')}</strong>{' '}
                                         {romData.current_partner
                                           ? renderLinkedPerson(romData.current_partner, 'text-pink-300 font-semibold')
                                           : (romData.status || 'Single')}
                                       </div>
                                       {romData.ex_partners && romData.ex_partners.length > 0 && (
                                         <div>
-                                          • <strong>Past Ex-Partner(s):</strong>{' '}
+                                          • <strong>{t('codex.past_ex_partners', 'Past Ex-Partner(s):')}</strong>{' '}
                                           {romData.ex_partners.map((p, idx) => (
                                             <React.Fragment key={idx}>
                                               {idx > 0 ? ', ' : ''}
@@ -1490,19 +1487,19 @@ const CodexPanel = ({
                                       )}
                                     </div>
                                     <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
-                                      <span className="font-bold text-cyan-400 uppercase tracking-wider block">🤝 Friends</span>
+                                      <span className="font-bold text-cyan-400 uppercase tracking-wider block">{t('codex.friends_header', '🤝 Friends')}</span>
                                       {friendsList.length > 0 ? (
                                         friendsList.map((f, i) => <div key={i} className="text-cyan-300">• {renderLinkedPerson(f)}</div>)
                                       ) : (
-                                        <p className="text-gray-500 italic">No close friends recorded.</p>
+                                        <p className="text-gray-500 italic">{t('codex.no_friends', 'No close friends recorded.')}</p>
                                       )}
                                     </div>
                                     <div className="pt-2 border-t border-fantasy-border/30 space-y-1">
-                                      <span className="font-bold text-amber-400 uppercase tracking-wider block">⚔️ Rivals</span>
+                                      <span className="font-bold text-amber-400 uppercase tracking-wider block">{t('codex.rivals_header', '⚔️ Rivals')}</span>
                                       {rivalsList.length > 0 ? (
                                         rivalsList.map((r, i) => <div key={i} className="text-amber-300">• {renderLinkedPerson(r)}</div>)
                                       ) : (
-                                        <p className="text-gray-500 italic">No known rivals recorded.</p>
+                                        <p className="text-gray-500 italic">{t('codex.no_rivals', 'No known rivals recorded.')}</p>
                                       )}
                                     </div>
                                   </div>
@@ -1522,55 +1519,55 @@ const CodexPanel = ({
                                         🔞 Anatomy & Experience
                                       </span>
                                       {hasSections && intSec.anatomy ? (
-                                        renderBulletPoints(intSec.anatomy)
+                                        renderBulletPoints(intSec.anatomy, t)
                                       ) : (
                                         <div className="space-y-1 text-gray-300">
                                           <div>• <strong>{isMale ? 'Penis Size' : 'Breast Size'}:</strong> {sizeDisplay}</div>
-                                          <div>• <strong>Intercourse:</strong> {appearance.experience || (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin')}</div>
-                                          <div>• <strong>Oral:</strong> {appearance.oral_experience || 'Inexperienced'}</div>
-                                          <div>• <strong>Manual:</strong> {appearance.manual_experience || 'Inexperienced'}</div>
-                                          <div>• <strong>Anal:</strong> {appearance.anal_experience || 'Inexperienced'}</div>
+                                          <div>• <strong>{t('codex.act_intercourse', 'Intercourse:')}</strong> {appearance.experience || (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin')}</div>
+                                          <div>• <strong>{t('codex.act_oral', 'Oral:')}</strong> {appearance.oral_experience || 'Inexperienced'}</div>
+                                          <div>• <strong>{t('codex.act_manual', 'Manual:')}</strong> {appearance.manual_experience || 'Inexperienced'}</div>
+                                          <div>• <strong>{t('codex.act_anal', 'Anal:')}</strong> {appearance.anal_experience || 'Inexperienced'}</div>
                                         </div>
                                       )}
                                     </div>
                                     {hasSections && intSec.dynamic && (
                                       <div className="pt-2 border-t border-fantasy-border/30">
-                                        <span className="font-bold text-purple-400 uppercase tracking-wider block mb-1">🎭 Demeanor & Dynamic</span>
-                                        {renderBulletPoints(intSec.dynamic)}
+                                        <span className="font-bold text-purple-400 uppercase tracking-wider block mb-1">{t('codex.section_demeanor_dynamic', '🎭 Demeanor & Dynamic')}</span>
+                                        {renderBulletPoints(intSec.dynamic, t)}
                                       </div>
                                     )}
                                     {hasSections && intSec.undergarments && (
                                       <div className="pt-2 border-t border-fantasy-border/30">
-                                        <span className="font-bold text-indigo-400 uppercase tracking-wider block mb-1">🩲 Undergarments</span>
-                                        {renderBulletPoints(intSec.undergarments)}
+                                        <span className="font-bold text-indigo-400 uppercase tracking-wider block mb-1">{t('codex.section_undergarments', '🩲 Undergarments')}</span>
+                                        {renderBulletPoints(intSec.undergarments, t)}
                                       </div>
                                     )}
                                     {hasSections && (intSec.sensitive_spots || intSec.sensitivities) && (
                                       <div className="pt-2 border-t border-fantasy-border/30">
-                                        <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">🌸 Sensitive Spots & Desires</span>
-                                        {renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities)}
+                                        <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">{t('codex.section_sensitive_spots', '🌸 Sensitive Spots & Desires')}</span>
+                                        {renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities, t)}
                                       </div>
                                     )}
                                     {hasSections && intSec.desires_and_turn_offs && (
                                       <div className="pt-2 border-t border-fantasy-border/30">
-                                        <span className="font-bold text-amber-400 uppercase tracking-wider block mb-1">🔥 Desires & Turn-Offs</span>
-                                        {renderBulletPoints(intSec.desires_and_turn_offs)}
+                                        <span className="font-bold text-amber-400 uppercase tracking-wider block mb-1">{t('codex.section_desires_turnoffs', '🔥 Desires & Turn-Offs')}</span>
+                                        {renderBulletPoints(intSec.desires_and_turn_offs, t)}
                                       </div>
                                     )}
                                     {hasSections && intSec.act_preferences && (
                                       <div className="pt-2 border-t border-fantasy-border/30">
-                                        <span className="font-bold text-rose-400 uppercase tracking-wider block mb-1">❤️ Act Preferences</span>
-                                        {renderBulletPoints(intSec.act_preferences)}
+                                        <span className="font-bold text-rose-400 uppercase tracking-wider block mb-1">{t('codex.section_act_preferences', '❤️ Act Preferences')}</span>
+                                        {renderBulletPoints(intSec.act_preferences, t)}
                                       </div>
                                     )}
                                     <div className="pt-2 border-t border-fantasy-border/30">
-                                      <span className="font-bold text-gray-300 uppercase tracking-wider block mb-1">Past Intimate History</span>
+                                      <span className="font-bold text-gray-300 uppercase tracking-wider block mb-1">{t('codex.section_past_intimate_history', 'Past Intimate History')}</span>
                                       {npc.past_intimate_entries && npc.past_intimate_entries.length > 0 ? (
                                         npc.past_intimate_entries.map((h, i) => <p key={i} className="text-gray-300 italic">• {h}</p>)
                                       ) : npc.past_intimate_history ? (
                                         <p className="text-gray-300 italic">• {npc.past_intimate_history}</p>
                                       ) : (
-                                        <p className="text-gray-400 italic">• Virgin (No prior intimate history before meeting you)</p>
+                                        <p className="text-gray-400 italic">{t('codex.virgin_history', '• Virgin (No prior intimate history before meeting you)')}</p>
                                       )}
                                     </div>
                                   </div>
@@ -1678,10 +1675,10 @@ const CodexPanel = ({
                             </span>
                           )}
                         </h4>
-                        {faction.hq_location_id && (
+                        {(faction.hq_display_name || faction.hq_location_id) && (
                           <span className="text-[10px] text-gray-500 flex items-center gap-1 mt-0.5">
                             <MapPin size={10} />
-                            <span>HQ: {formatCleanLocation(faction.hq_location_id)}</span>
+                            <span>HQ: {faction.hq_display_name || formatCleanLocation(faction.hq_location_id)}</span>
                           </span>
                         )}
                       </div>
@@ -1750,7 +1747,7 @@ const CodexPanel = ({
                                 <Crown size={11} className="text-amber-400" />
                                 <span>{t('codex.leadership_hierarchy', 'Leadership Hierarchy')}</span>
                               </span>
-                              <span className="font-mono text-gray-500">Ranks 1–4</span>
+                              <span className="font-mono text-gray-500">{t('codex.ranks_range', 'Ranks 1–4')}</span>
                             </div>
                             <div className="space-y-1 bg-black/40 p-2 rounded border border-fantasy-border/40">
                               {[...roster].sort((a, b) => (b.rank || 0) - (a.rank || 0)).map((slot) => {
@@ -1865,7 +1862,7 @@ const CodexPanel = ({
                               onClick={() => handleFactionOp(faction.faction_id, 'bounty')}
                               className="col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-700/60 text-indigo-300 transition-all"
                             >
-                              <span>📋 Faction Bounties</span>
+                              <span>{t('codex.faction_bounties', '📋 Faction Bounties')}</span>
                             </button>
                           </div>
 

@@ -346,45 +346,7 @@ def _get_effective_first_name(name: str) -> str:
     return tokens[0]
 
 
-def _is_dialogue_partner(name: str, dialogue_partners: list | str = None) -> bool:
-    if not name or not dialogue_partners:
-        return False
-    if isinstance(dialogue_partners, str):
-        try:
-            parsed = json.loads(dialogue_partners)
-            partners_list = parsed if isinstance(parsed, list) else [dialogue_partners]
-        except Exception:
-            partners_list = [dialogue_partners]
-    elif isinstance(dialogue_partners, list):
-        partners_list = []
-        for p in dialogue_partners:
-            if isinstance(p, list):
-                partners_list.extend(str(x) for x in p if x)
-            elif p:
-                partners_list.append(str(p))
-    else:
-        partners_list = [str(dialogue_partners)]
-
-    n_raw = name.strip().lower()
-    n_clean = _norm_name(name)
-    title_words = {
-        'the', 'elder', 'lord', 'lady', 'sir', 'madam', 'captain', 'dr', 'mr', 'ms', 'mrs',
-        'scholar', 'guardian', 'druid', 'student', 'council', 'president', 'vice', 'secretary',
-        'representative', 'officer', 'member', 'guildmaster', 'archivist', 'warden'
-    }
-    n_tokens = [t for t in n_clean.split() if len(t) > 2 and t not in title_words]
-    if not n_tokens and len(n_clean) > 2:
-        n_tokens = [n_clean]
-
-    for p in partners_list:
-        p_raw = str(p).strip().lower()
-        p_clean = _norm_name(p)
-        if p_raw in n_raw or n_raw in p_raw or p_clean in n_clean or n_clean in p_clean:
-            return True
-        for t in n_tokens:
-            if t in p_clean or t in p_raw:
-                return True
-    return False
+from mechanics.world.mobility import is_dialogue_partner as _is_dialogue_partner
 
 
 EXEMPT_OFFERING_WORDS = frozenset({
@@ -574,14 +536,16 @@ def infer_choice_stat_and_dc(label: str, default_stat: str = "CHA", default_dc: 
     else:
         stat = default_stat or "CHA"
 
-    dc = default_dc or 6
-    if default_dc >= 10:
-        dc = default_dc
-    elif char and isinstance(char.get("stats"), dict):
-        c_val = int(char["stats"].get(stat, 6))
-        dc = max(5, min(8, c_val))
+    if default_dc is not None and int(default_dc) != 6:
+        raw_d = int(default_dc)
+        dc = max(10, min(15, raw_d)) if raw_d >= 10 else max(3, min(12, raw_d))
     else:
-        dc = max(5, min(8, dc))
+        if any(w in lbl for w in ("how their day", "how her day", "how his day", "casual", "weather", "unwind", "breather", "lend a hand", "small talk", "atmosphere", "quietly enjoy")):
+            dc = 4
+        elif any(w in lbl for w in ("flirt", "bold", "challenge", "call out", "confront", "push back", "bluff", "gamble", "provocative", "rival", "insult")):
+            dc = 8
+        else:
+            dc = 6
 
     return stat, dc
 
@@ -705,7 +669,6 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     is_non_combat = (
         is_non_combat_scenario(scenario)
         or has_tag(scenario, "non_combat")
-        or has_tag(scenario, "high_school")
         or not is_mechanic_enabled(scenario, "tactical_combat")
     )
 
@@ -803,6 +766,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             has_bounty_prefix = "🎯" in label_str or "[bounty]" in label_lower
             _preserve_anom_brackets = bool(
                 c.get("is_anomaly_inquiry")
+                or c.get("intent") == "property_purchase"
                 or c.get("incursion_action")
                 or c.get("trap_choice_kind")
                 or (c.get("_server_stamped") and c.get("sapience"))
@@ -923,7 +887,13 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "incursion_action", "incursion_id", "breach_id", "offering_item_name",
                 "trap_choice_kind", "is_anomaly_inquiry", "_npc_speak_choice",
                 "_pinned_dialogue_exit", "sapience", "dossier_revealed",
-                "taboo_exploited_stat",
+                "taboo_exploited_stat", "property_id", "price",
+                "topic_id", "category", "is_covert_ability", "is_direct_reply",
+                "is_cruel", "_seed_reconciled", "_band", "_privacy_nudge",
+                "is_privacy_nudge", "_convince_stay", "departure_action",
+                "event_key", "_active_quest_inquiry", "_is_world_rumor_inquiry",
+                "_is_break_the_news", "linked_quest_id", "_topic_sig",
+                "_deterministic_supplement",
             ):
                 if _extra_k in c and c[_extra_k] is not None:
                     entry_dict[_extra_k] = c[_extra_k]
@@ -1558,19 +1528,45 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
         elif not is_active_intimate and not is_non_combat and is_mechanic_enabled(scenario, "tactical_combat") and session_id:
             import scenario_data as _sd_cc2
             from mechanics.social.relationships import get_scenario_recruitment_phrasing
-            is_anom_cc = _sd_cc2.is_anomalous_incursions_scenario(scenario)
+            is_anom_cc = bool(
+                _sd_cc2.is_anomalous_incursions_scenario(scenario)
+                or _sd_cc2.is_anomalous_high_school_scenario(scenario)
+                or "urban_anomalies" in str(scenario).lower()
+            )
+            sess = db.get_session(session_id)
+            lore_people = db.get_lorebook(session_id).get("person", []) if session_id else []
             for p_name in partners_list:
                 if not p_name:
                     continue
-                is_civ_partner = False
+                ineligible_anom_partner = False
                 if is_anom_cc:
                     try:
                         from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_CIVILIAN
-                        if classify_anomalous_npc_tag(p_name, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
-                            is_civ_partner = True
+                        from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
+                        lore_ent_strip = next((p for p in lore_people if p.get("name", "").lower() == p_name.lower()), {})
+                        if classify_anomalous_npc_tag(lore_ent_strip or p_name, session_id=session_id, scen_key=scenario) == TAG_CIVILIAN:
+                            ineligible_anom_partner = True
+                        else:
+                            lead_uid_st = (char.get("user_id") if isinstance(char, dict) else 0) or (sess.get("host_user_id") if isinstance(sess, dict) else 0)
+                            c_rec_st = db.get_contact(session_id, p_name)
+                            aff_st = int((c_rec_st or {}).get("relationship_score", 0) or 0)
+                            lvl_st = int((char.get("level", 1) if isinstance(char, dict) else 1) or 1)
+                            cand_st = dict(lore_ent_strip or {})
+                            if isinstance(c_rec_st, dict):
+                                cand_st.update(c_rec_st)
+                            cand_st["name"] = p_name
+                            eval_st = evaluate_anomalous_companion_recruitment(
+                                sess or {"id": session_id, "scenario": scenario},
+                                lead_uid_st,
+                                cand_st,
+                                aff_st,
+                                lvl_st,
+                            )
+                            if not eval_st.get("allowed"):
+                                ineligible_anom_partner = True
                     except Exception:
                         pass
-                if is_civ_partner or db.get_recruitment_cooldown(session_id, p_name) > 0:
+                if ineligible_anom_partner or db.get_recruitment_cooldown(session_id, p_name) > 0:
                     dialogue_filtered = [
                         c for c in dialogue_filtered
                         if not (
@@ -1584,12 +1580,10 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     ]
 
             party_npcs = db.get_session_party_npcs(session_id)
-            sess = db.get_session(session_id)
             human_count = len(sess.get("turn_order", [])) if sess else 1
             if human_count + len(party_npcs) < 4:
                 enemy_list = game_engine.get_active_enemies(sess) if hasattr(game_engine, 'get_active_enemies') else []
                 enemy_names = {game_engine._get_npc_name(e).lower() for e in enemy_list if e}
-                lore_people = db.get_lorebook(session_id).get("person", []) if session_id else []
 
                 has_recruit = any(
                     c.get("intent") == "party_recruit"
@@ -1623,7 +1617,10 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                                 if not eval_cc.get("allowed"):
                                     continue
                                 cost_cc = int(eval_cc.get("cost", 0) or 0)
-                                if cost_cc > 0:
+                                if eval_cc.get("anomalous_npc_tag") == "folklore_villager":
+                                    rec_label = f"Invite {p_name} to join your party beyond the sanctuary veil"
+                                    rec_stat, rec_req = "NONE", 0
+                                elif cost_cc > 0:
                                     rec_label = f"Hire Special Agent {p_name} onto your field team ({cost_cc}G)"
                                     rec_stat, rec_req = "NONE", 0
                                 else:
@@ -1638,6 +1635,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                                         "mp_cost": 0,
                                         "intent": "party_recruit",
                                         "target_npc": p_name,
+                                        "_server_stamped": True,
                                         "is_fallback": False,
                                     }
                                     if len(dialogue_filtered) > 1 and dialogue_filtered[-1].get("stat") == "NONE":
@@ -1648,6 +1646,11 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                                 continue
                             except Exception:
                                 continue
+                        if "slice_of_life" in str(scenario).lower() or ("high_school" in str(scenario).lower() and "anomalous" not in str(scenario).lower()):
+                            continue
+                        c_rec_std = db.get_contact(session_id, p_name)
+                        if isinstance(c_rec_std, dict) and int(c_rec_std.get("relationship_score", 0) or 0) < 0:
+                            continue
                         cd = db.get_recruitment_cooldown(session_id, p_name)
                         if cd == 0:
                             rec_phrasing = get_scenario_recruitment_phrasing(scenario, p_name)
@@ -2296,7 +2299,11 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             import scenario_data as _sd_cc3
             if _sd_cc3.is_anomalous_incursions_scenario(scenario):
                 from game_engine.matching import matches_keyword_boundary
-                from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag, TAG_SPECIAL_AGENT
+                from mechanics.social.anomalous_npc_tags import (
+                    TAG_FOLKLORE_VILLAGER,
+                    TAG_SPECIAL_AGENT,
+                    classify_anomalous_npc_tag,
+                )
                 filtered_anom_rec = []
                 for c in cleaned:
                     c_lbl_low = str(c.get("label", "") if isinstance(c, dict) else "").lower()
@@ -2313,7 +2320,10 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                                     break
                             if not t_n and len(partners_list) == 1:
                                 t_n = partners_list[0]
-                        if t_n and classify_anomalous_npc_tag(t_n, session_id=session_id, scen_key=scenario) != TAG_SPECIAL_AGENT:
+                        if t_n and classify_anomalous_npc_tag(t_n, session_id=session_id, scen_key=scenario) not in (
+                            TAG_SPECIAL_AGENT,
+                            TAG_FOLKLORE_VILLAGER,
+                        ):
                             continue
                     filtered_anom_rec.append(c)
                 cleaned = filtered_anom_rec

@@ -806,6 +806,32 @@ def _hydrate_npc_from_db(npc: Dict[str, Any], session_id: Optional[int]) -> Dict
     return hydrated
 
 
+def _apply_spare_key_schedule_overrides(
+    schedule_nodes: Dict[str, str],
+    session_id: Optional[int],
+    npc_obj: Dict[str, Any],
+    current_day: int,
+    scen_key_low: str,
+) -> Dict[str, str]:
+    if not session_id:
+        return schedule_nodes
+    try:
+        from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+        if is_anomalous_realty_scenario(scen_key_low):
+            from mechanics.world.locations.residences import resolve_spare_key_evening_visit_node
+            sk_eve = resolve_spare_key_evening_visit_node(int(session_id), npc_obj, current_day, "evening")
+            if sk_eve:
+                schedule_nodes["evening"] = sk_eve
+                if "extracurricular" in schedule_nodes:
+                    schedule_nodes["extracurricular"] = sk_eve
+            sk_aft = resolve_spare_key_evening_visit_node(int(session_id), npc_obj, current_day, "afternoon")
+            if sk_aft:
+                schedule_nodes["afternoon"] = sk_aft
+    except Exception:
+        pass
+    return schedule_nodes
+
+
 def get_npc_schedule_node_ids(
     npc: Dict[str, Any],
     scen_key: str = "fantasy",
@@ -857,6 +883,32 @@ def get_npc_schedule_node_ids(
 
     schedule_nodes: Dict[str, str] = {}
 
+    from mechanics.social.roster_tags import npc_is_folklore_villager
+    if npc_is_folklore_villager(npc):
+        from mechanics.social.folklore_roster import get_folklore_villager_spec
+        from mechanics.social.races import is_myobu_fox_race
+        spec = get_folklore_villager_spec(int(session_id or 0), npc.get("npc_id") or name) if session_id else None
+        raw_sched = dict((spec or {}).get("schedule") or basic.get("schedule") or {})
+        home_nid = str(
+            (spec or {}).get("home_node")
+            or basic.get("home_node")
+            or ("sub_kitsune_inner_plaza" if "kitsune" in str(npc.get("race") or "").lower() else "sub_bunian_inner_plaza")
+        )
+        villager_nodes = {
+            "morning": str(raw_sched.get("morning") or home_nid),
+            "lunch": str(raw_sched.get("afternoon") or raw_sched.get("morning") or home_nid),
+            "afternoon": str(raw_sched.get("afternoon") or home_nid),
+            "evening": str(raw_sched.get("evening") or home_nid),
+            "night": str(raw_sched.get("night") or home_nid),
+            "commute": str(raw_sched.get("morning") or home_nid),
+            "class_afternoon": str(raw_sched.get("afternoon") or home_nid),
+            "extracurricular": str(raw_sched.get("evening") or home_nid),
+        }
+        cur_race = str((spec or {}).get("race") or npc.get("race") or "")
+        if is_myobu_fox_race(cur_race):
+            return villager_nodes
+        return _apply_spare_key_schedule_overrides(villager_nodes, session_id, npc, current_day, scen_key_low)
+
     if is_school:
         hydrated_npc = _hydrate_npc_from_db(npc, session_id)
         grade_val = str(hydrated_npc.get("grade") or "").strip()
@@ -867,9 +919,10 @@ def get_npc_schedule_node_ids(
 
         if _is_town_citizen_or_youth_peer(hydrated_npc):
             from mechanics.social.town_roster import get_town_citizen_schedule_nodes
-            return get_town_citizen_schedule_nodes(
+            tc_nodes = get_town_citizen_schedule_nodes(
                 hydrated_npc, current_day=current_day, seed_val=seed_val, current_minute=current_minute
             )
+            return _apply_spare_key_schedule_overrides(tc_nodes, session_id, hydrated_npc, current_day, scen_key_low)
 
         clique_low = clique_val.lower()
         gender_low = str(npc.get("gender") or basic.get("gender") or "").strip().lower()
@@ -890,6 +943,23 @@ def get_npc_schedule_node_ids(
         fac_aft_node, _ = _resolve_school_faculty_class_station(role, primary_fac, current_day=current_day, phase="class_afternoon")
         student_cls_node, _ = _resolve_student_classroom_node_and_path(hydrated_npc, primary_fac=primary_fac)
         house_nid = f"loc_{name_slug}_house"
+        if is_anom_hs and (is_stu_agent or (is_spec_agent and is_teen_npc)):
+            _agent_fac_nid = str(
+                hydrated_npc.get("residence_facility_id")
+                or npc.get("residence_facility_id")
+                or basic.get("residence_facility_id")
+                or ""
+            ).strip()
+            if not _agent_fac_nid:
+                try:
+                    from mechanics.world.locations.residences import resolve_agent_residence_blueprint
+                    _agent_fac_nid = str(
+                        resolve_agent_residence_blueprint(int(session_id or 1), hydrated_npc, scen_key=scen_key_low).get("facility_node_id") or ""
+                    )
+                except Exception:
+                    _agent_fac_nid = ""
+            if _agent_fac_nid:
+                house_nid = _agent_fac_nid
 
         is_athlete = (not is_faculty) and any(
             c in f"{role} {club} {clique_low}"
@@ -1091,11 +1161,20 @@ def get_npc_schedule_node_ids(
         s_nid = prof["secondary_node_id"]
         night_watch = is_npc_nocturnal_or_night_shift(npc, scen_key=scen_key_low, current_day=current_day)
         is_tp_hangout = s_nid.startswith("loc_tp_")
+        agent_home_nid = str(npc.get("residence_facility_id") or basic.get("residence_facility_id") or "").strip()
+        if not agent_home_nid and (is_spec_agent or fac_id in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction")):
+            try:
+                from mechanics.world.locations.residences import resolve_agent_residence_blueprint
+                agent_home_nid = str(resolve_agent_residence_blueprint(int(session_id or 1), npc, scen_key=scen_key_low).get("facility_node_id") or "")
+            except Exception:
+                agent_home_nid = ""
+        if not agent_home_nid:
+            agent_home_nid = f"loc_{name_slug}_apartment"
 
         if fac_id in ("cult_faction", "clandestine_faction"):
             # Nocturnal Covert Operatives: civilian cover by day, active sanctum / rift / black-market ops by night!
             day_cover = "sub_roastery_mezzanine" if is_tp_hangout else s_nid
-            schedule_nodes["morning"] = day_cover if ((seed_val + current_day) % 2 == 0) else p_nid
+            schedule_nodes["morning"] = agent_home_nid if ((seed_val + current_day) % 3 == 0) else (day_cover if ((seed_val + current_day) % 2 == 0) else p_nid)
             schedule_nodes["lunch"] = day_cover
             schedule_nodes["afternoon"] = day_cover
             schedule_nodes["evening"] = p_nid
@@ -1109,14 +1188,14 @@ def get_npc_schedule_node_ids(
                 schedule_nodes["lunch"] = s_nid if is_student_acolyte else "loc_et_zen_tea_garden"
                 schedule_nodes["afternoon"] = p_nid
                 schedule_nodes["evening"] = s_nid if is_subway_monk else (p_nid if is_student_acolyte else s_nid)
-                schedule_nodes["night"] = s_nid if is_subway_monk else (p_nid if night_watch else "loc_et_onsen_bathhouse")
+                schedule_nodes["night"] = s_nid if is_subway_monk else (p_nid if night_watch else "fac_temple_residence")
             else:
                 on_temple_duty = ((seed_val + current_day) % 2 == 0) or tier >= 4
                 schedule_nodes["morning"] = p_nid if on_temple_duty else s_nid
                 schedule_nodes["lunch"] = "loc_et_zen_tea_garden" if on_temple_duty else s_nid
                 schedule_nodes["afternoon"] = p_nid if on_temple_duty else s_nid
                 schedule_nodes["evening"] = s_nid
-                schedule_nodes["night"] = s_nid if is_subway_monk else (p_nid if night_watch else "loc_et_onsen_bathhouse")
+                schedule_nodes["night"] = s_nid if is_subway_monk else (p_nid if night_watch else "fac_temple_residence")
         elif fac_id in ("public_agency", "private_agency_1", "private_agency_2"):
             canteen_nid = (
                 "loc_hq_canteen_cafe" if fac_id == "public_agency"
@@ -1139,14 +1218,14 @@ def get_npc_schedule_node_ids(
                 elif s_nid in ("sub_ramen_counter_hall", "sub_cabinet_aisles", "sub_subkonbini_nook", "sub_billiards_lounge", "sub_jazz_lounge") and ((seed_val + current_day) % 2 == 1):
                     schedule_nodes["night"] = s_nid
                 else:
-                    schedule_nodes["night"] = quarters_nid if tier <= 2 else f"loc_{name_slug}_apartment"
+                    schedule_nodes["night"] = "fac_agency_residence" if fac_id == "public_agency" else agent_home_nid
             else:
                 weekend_duty = ((seed_val + current_day) % 2 == 0)
                 schedule_nodes["morning"] = p_nid if weekend_duty else s_nid
                 schedule_nodes["lunch"] = s_nid
                 schedule_nodes["afternoon"] = p_nid if weekend_duty else s_nid
                 schedule_nodes["evening"] = eve_hangout
-                schedule_nodes["night"] = p_nid if night_watch else (quarters_nid if tier <= 2 else f"loc_{name_slug}_apartment")
+                schedule_nodes["night"] = p_nid if night_watch else ("fac_agency_residence" if fac_id == "public_agency" else agent_home_nid)
         else:
             # General Urban / Civilian / Freelance Contacts in Anomalous Incursions
             schedule_nodes["morning"] = p_nid
@@ -1251,6 +1330,9 @@ def get_npc_schedule_node_ids(
         schedule_nodes["evening"] = "loc_sailor_tavern"
         schedule_nodes["night"] = f"loc_{name_slug}_quarters"
 
+    if session_id:
+        eff_npc = _hydrate_npc_from_db(npc, session_id)
+        _apply_spare_key_schedule_overrides(schedule_nodes, session_id, eff_npc, current_day, scen_key_low)
     return schedule_nodes
 
 
@@ -1323,18 +1405,31 @@ def get_npc_scheduled_node_id(
     base_sched_nid = node_sched.get(block_key, node_sched.get(get_time_block_key(current_minute), node_sched.get("morning", "loc_homeroom")))
 
     in_mandatory_class = is_high_school_setting(scen_key) and (not is_weekend(current_day)) and block_key in ("morning", "class_afternoon")
-    if session_id and 360 <= int(current_minute or 480) < 1320 and block_key != "night" and not in_mandatory_class:
+    if session_id:
         try:
-            from mechanics.world.world_events.modifiers import resolve_npc_stationing_with_events
+            from mechanics.world.world_events.modifiers import is_node_locked_by_event, resolve_npc_stationing_with_events
+            from mechanics.world.locations.access_gate import get_designated_hub_sanctuary_node_id
             ev_list = active_events if active_events is not None else db.get_world_events(session_id, entity_type="macro_event")
             if ev_list:
-                return resolve_npc_stationing_with_events(
-                    ev_list,
-                    npc,
-                    scheduled_node_id=base_sched_nid,
-                    date_node_id=date_nid,
-                    story_node_id=story_nid,
-                )
+                sanctuary_nid = get_designated_hub_sanctuary_node_id(session_id)
+                if is_node_locked_by_event(ev_list, base_sched_nid, safe_sanctuary_node_id=sanctuary_nid):
+                    return resolve_npc_stationing_with_events(
+                        ev_list,
+                        npc,
+                        scheduled_node_id=base_sched_nid,
+                        date_node_id=date_nid,
+                        story_node_id=story_nid,
+                        safe_sanctuary_node_id=sanctuary_nid,
+                    )
+                if 360 <= int(current_minute or 480) < 1320 and block_key != "night" and not in_mandatory_class:
+                    return resolve_npc_stationing_with_events(
+                        ev_list,
+                        npc,
+                        scheduled_node_id=base_sched_nid,
+                        date_node_id=date_nid,
+                        story_node_id=story_nid,
+                        safe_sanctuary_node_id=sanctuary_nid,
+                    )
         except Exception:
             pass
 
@@ -1363,7 +1458,7 @@ def get_npc_schedule(
     role = str(hydrated_npc.get("role") or basic.get("role") or hydrated_npc.get("occupation") or "").lower()
     club = str(hydrated_npc.get("club") or basic.get("club") or "").lower()
     primary_fac = str(hydrated_npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
-    home_loc = str(hydrated_npc.get("home_location") or basic.get("home_location") or "").strip()
+    home_loc = str(hydrated_npc.get("residence_location") or basic.get("residence_location") or hydrated_npc.get("home_location") or basic.get("home_location") or "").strip()
     traits = hydrated_npc.get("unlocked_traits") or hydrated_npc.get("traits") or basic.get("traits") or []
     trait_names = [str(t.get("name") if isinstance(t, dict) else t).lower() for t in traits if t]
 
@@ -1479,10 +1574,10 @@ def get_npc_schedule(
             is_student_acolyte = (prof["secondary_node_id"] == "loc_school_rooftop")
             is_subway_monk = (prof["secondary_node_id"] == "sub_uc_brass_rotunda")
             schedule["morning"] = s_path if (is_student_acolyte and not weekend) else p_path
-            schedule["lunch"] = s_path if (is_student_acolyte and not weekend) else "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Zen Rock Garden & Bamboo Tea House"
+            schedule["lunch"] = s_path if (is_student_acolyte and not weekend) else "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Zen Rock Garden & Bamboo Tea House"
             schedule["afternoon"] = p_path if (not weekend or ((seed_val + current_day) % 2 == 0)) else s_path
             schedule["evening"] = p_path if (is_student_acolyte and not weekend) else s_path
-            schedule["night"] = s_path if is_subway_monk else (p_path if night_watch else (home_loc or "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Sacred Mountain Hot Springs & Onsen Bathhouse"))
+            schedule["night"] = s_path if is_subway_monk else (p_path if night_watch else (home_loc or "Sacred Mountain Sanctuary & Onsen Quarter ➔ Outer Cloister Initiate Quarters"))
         else:
             on_weekend_duty = ((seed_val + current_day) % 2 == 0)
             field_patrol = (prof["agent_tier"] <= 2 and ((seed_val + current_day) % 2 == 0))
@@ -1490,7 +1585,7 @@ def get_npc_schedule(
             schedule["lunch"] = p_path if (not weekend and seed_val % 2 == 0) else s_path
             schedule["afternoon"] = (s_path if field_patrol else p_path) if not weekend else (p_path if on_weekend_duty else s_path)
             schedule["evening"] = s_path
-            schedule["night"] = p_path if night_watch else (home_loc or "Suburban Residential District ➔ Private Apartment")
+            schedule["night"] = p_path if night_watch else (home_loc or ("City Center ➔ Public Agency Residential Hall" if fac_id == "public_agency" else "Downtown ➔ Private Apartment"))
 
         schedule.setdefault("commute", schedule.get("morning", p_path))
         schedule.setdefault("class_afternoon", schedule.get("afternoon", p_path))
@@ -1524,28 +1619,101 @@ def get_npc_schedule(
         schedule["evening"] = "Local Tavern ➔ Corner Booth"
         schedule["night"] = home_loc or "Tavern Inn ➔ Guest Quarters"
 
-    # If session_id is provided, overlay resolved world_nodes paths
+    # If session_id is provided, overlay resolved world_nodes paths and Circadian Crisis Shifts
     if session_id:
         import db as local_db
-        session_nodes = local_db.get_session_world_nodes(session_id)
-        if session_nodes:
-            node_map = {n["node_id"]: n for n in session_nodes}
+        session_nodes = local_db.get_session_world_nodes(session_id) or []
+        node_map = {n["node_id"]: n for n in session_nodes} if session_nodes else {}
+
+        def _fmt_node_path(nid_key: str) -> str:
+            if nid_key not in node_map:
+                return ""
+            n_obj = node_map[nid_key]
+            if n_obj.get("parent_id") and n_obj["parent_id"] in node_map:
+                parent_obj = node_map[n_obj["parent_id"]]
+                if parent_obj.get("parent_id") and parent_obj["parent_id"] in node_map:
+                    grand_obj = node_map[parent_obj["parent_id"]]
+                    return f"{grand_obj['name']} ➔ {parent_obj['name']} ➔ {n_obj['name']}"
+                return f"{parent_obj['name']} ➔ {n_obj['name']}"
+            return str(n_obj.get("name") or "")
+
+        if node_map:
             resolved_schedule: Dict[str, str] = {}
             for block, nid in node_sched.items():
-                if nid in node_map:
-                    n_obj = node_map[nid]
-                    if n_obj.get("parent_id") and n_obj["parent_id"] in node_map:
-                        parent_obj = node_map[n_obj["parent_id"]]
-                        if parent_obj.get("parent_id") and parent_obj["parent_id"] in node_map:
-                            grand_obj = node_map[parent_obj["parent_id"]]
-                            resolved_schedule[block] = f"{grand_obj['name']} ➔ {parent_obj['name']} ➔ {n_obj['name']}"
-                            continue
-                        else:
-                            resolved_schedule[block] = f"{parent_obj['name']} ➔ {n_obj['name']}"
-                            continue
-                    resolved_schedule[block] = n_obj["name"]
+                fmt_p = _fmt_node_path(nid)
+                if fmt_p:
+                    resolved_schedule[block] = fmt_p
             if resolved_schedule:
                 schedule.update(resolved_schedule)
+
+        # Circadian Crisis Shifts: evacuate/reroute non-enforcer NPCs out of locked-down or Peak-scarred facilities
+        try:
+            ev_list = local_db.get_world_events(session_id, entity_type="macro_event") or []
+            crisis_events = [
+                ev
+                for ev in ev_list
+                if isinstance(ev, dict)
+                and ev.get("status") == "active"
+                and (
+                    (ev.get("modifiers") or {}).get("is_locked")
+                    or (ev.get("modifiers") or {}).get("lockdown_nodes")
+                    or (ev.get("modifiers") or {}).get("martial_law_lockdown")
+                    or (ev.get("metadata") or {}).get("scar_tier") == "peak"
+                )
+            ]
+            if crisis_events and not any(w in role for w in ("inquisitor", "enforcer", "warden", "sentinel", "occupier")):
+                from mechanics.world.locations.access_gate import get_designated_hub_sanctuary_node_id
+                from mechanics.world.world_events.modifiers import is_node_locked_by_event
+
+                sanctuary_nid = get_designated_hub_sanctuary_node_id(int(session_id))
+                sanc_target_nid = sanctuary_nid
+                if sanctuary_nid and node_map:
+                    open_rooms = [
+                        n["node_id"]
+                        for n in session_nodes
+                        if str(n.get("parent_id") or "") == sanctuary_nid
+                        and str(n.get("access_tier") or "open").lower() == "open"
+                    ]
+                    if open_rooms:
+                        sanc_target_nid = open_rooms[0]
+                sanctuary_path = _fmt_node_path(sanc_target_nid) if sanc_target_nid else ""
+                if sanctuary_path:
+                    cur_ch = int(local_db.get_session_chapter(int(session_id)) or 1)
+                    martial_curfew = cur_ch in (8, 9) and any(
+                        bool((ev.get("modifiers") or {}).get("martial_law_lockdown")) for ev in crisis_events
+                    )
+                    for block, loc_str in list(schedule.items()):
+                        loc_low = str(loc_str or "").strip().lower()
+                        loc_nid = node_sched.get(block) or (
+                            local_db.resolve_node_id_from_location(int(session_id), loc_str) if loc_str else ""
+                        ) or ""
+                        fac_nid = (
+                            str(node_map[loc_nid].get("parent_id") or "")
+                            if (loc_nid in node_map and str(node_map[loc_nid].get("node_type") or "").upper() == "ROOM")
+                            else loc_nid
+                        )
+                        if sanctuary_nid and (loc_nid == sanctuary_nid or fac_nid == sanctuary_nid):
+                            continue
+                        locked_hit = bool(
+                            (loc_nid and is_node_locked_by_event(crisis_events, loc_nid, safe_sanctuary_node_id=sanctuary_nid))
+                            or (fac_nid and is_node_locked_by_event(crisis_events, fac_nid, safe_sanctuary_node_id=sanctuary_nid))
+                        )
+                        scar_hit = any(
+                            (ev.get("metadata") or {}).get("scar_tier") == "peak"
+                            and any(
+                                len(seg.strip()) >= 4 and seg.strip().lower() in loc_low
+                                for seg in str(ev.get("location_name") or "").split("➔")[-1:]
+                            )
+                            for ev in crisis_events
+                        )
+                        curfew_hit = bool(martial_curfew and block in ("evening", "night"))
+                        if locked_hit or scar_hit or curfew_hit:
+                            if block == "night" and home_loc and home_loc.strip().lower() != loc_low:
+                                schedule[block] = home_loc
+                            else:
+                                schedule[block] = sanctuary_path
+        except Exception:
+            pass
 
     return schedule
 
@@ -1634,13 +1802,34 @@ def is_npc_eligible_for_private_room(
         except Exception:
             pass
 
-    # 4. Station authority check
+    # 4. Spare-key home access & station authority check
     if node_id and session_id:
         try:
             import db
             from mechanics.world.locations.access_gate import has_npc_authority_for_node
-            if has_npc_authority_for_node(session_id, node_id, npc_name):
-                return True
+            from mechanics.world.locations.residences import (
+                get_player_owned_or_starter_property_for_node,
+                is_npc_active_spare_key_holder,
+            )
+
+            prop = get_player_owned_or_starter_property_for_node(int(session_id), node_id, session=session)
+            if prop and not prop.get("is_starter"):
+                if is_npc_active_spare_key_holder(int(session_id), npc_name, prop.get("spare_keys") or {}):
+                    return True
+
+            node_obj = db.get_world_node(int(session_id), node_id)
+            if node_obj:
+                parent_obj = db.get_world_node(int(session_id), node_obj["parent_id"]) if node_obj.get("parent_id") else None
+                npc_obj = _hydrate_npc_from_db({"name": npc_name}, int(session_id))
+                if node_id in ("sub_kitsune_sovereign_pavilion", "sub_bunian_royal_istana"):
+                    n_bi = npc_obj.get("basic_info") if isinstance(npc_obj.get("basic_info"), dict) else {}
+                    if n_bi.get("is_sovereign") or n_bi.get("is_royal_heir"):
+                        if (node_id == "sub_kitsune_sovereign_pavilion" and n_bi.get("folklore_village") == "kitsune") or (
+                            node_id == "sub_bunian_royal_istana" and n_bi.get("folklore_village") == "bunian"
+                        ):
+                            return True
+                if has_npc_authority_for_node(npc_obj, node_obj, parent_obj):
+                    return True
         except Exception:
             pass
 

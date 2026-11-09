@@ -9,6 +9,7 @@ from mechanics.combat.merchant import (
     build_merchant_embed as _merchant_embed,
     discounted_price as _discounted_price,
     sell_bonus_price as _sell_bonus_price,
+    compute_item_resale_payout,
     MerchantView,
     BuySelectView,
     SellSelectView,
@@ -72,7 +73,7 @@ class MerchantMixin:
         })
         await adb(db.save_merchant_state, session_id, merchant)
 
-        embeds = [_merchant_embed(session_id, extra_note=detour_note)]
+        embeds = [await adb(_merchant_embed, session_id, detour_note)]
         view = MerchantView(self, session_id, session["turn_order"], is_phone_shop=is_phone_shop)
         await interaction.edit_original_response(content=None, embeds=embeds, view=view)
 
@@ -106,13 +107,27 @@ class MerchantMixin:
                 waiting_on = [uid for uid in session["turn_order"] if str(uid) not in session["pending_picks"]]
                 embeds = sync_scene_embed(session, party, session["scene_title"], session["narrative"],
                                           session["choices"], waiting_on)
-                view = SyncChoiceView(self, session_id, session["turn_order"], session["choices"], party, merchant)
+                view = await SyncChoiceView.create(
+                    self, session_id, session["turn_order"], session["choices"], party, merchant, session=session,
+                )
             else:
                 turn_uid = db.current_turn_user_id(session)
-                actor_char = await adb(db.get_character, turn_uid)
+                party_by_uid = {
+                    (c.get("user_id") or c.get("id")): (c, inv)
+                    for c, inv in party
+                    if c
+                }
+                if turn_uid in party_by_uid:
+                    actor_char, actor_inv = party_by_uid[turn_uid]
+                else:
+                    actor_char = await adb(db.get_character, turn_uid)
+                    actor_inv = None
                 embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
                                      session["choices"])
-                view = ChoiceView(self, session_id, turn_uid, session["choices"], actor_char, merchant)
+                view = await ChoiceView.create(
+                    self, session_id, turn_uid, session["choices"], actor_char, merchant,
+                    session=session, actor_inv=actor_inv,
+                )
 
             content = (f"The party can't agree on stopping, and **{initiator['name']}**'s attempt to "
                        f"convince them otherwise falls flat. ({check.chance}% chance — {check.tier_label}) "
@@ -127,7 +142,7 @@ class MerchantMixin:
         fallback for these, unlike shop entry) -- redisplay the shop
         unchanged with a short note."""
         session = await adb(db.get_session, session_id)
-        embeds = [_merchant_embed(session_id, extra_note=f"The party couldn't agree to {action_label} this time.")]
+        embeds = [await adb(_merchant_embed, session_id, f"The party couldn't agree to {action_label} this time.")]
         view = MerchantView(self, session_id, session["turn_order"])
         if not interaction.response.is_done():
             await interaction.response.edit_message(embeds=embeds, view=view)
@@ -174,7 +189,7 @@ class MerchantMixin:
             )
             return
         discount = merchant.get("discount_pct", 0)
-        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx)
+        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx, user_id=interaction.user.id)
         lines = []
         for i in stock:
             price = compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)
@@ -203,200 +218,252 @@ class MerchantMixin:
             mark_vault_requisition_claimed,
             stamp_discounted_purchase_metadata,
         )
-        from mechanics.system.concurrency import distributed_session_lock
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
 
-        async with distributed_session_lock(session_id):
-            session = await adb(db.get_session, session_id)
-            if not session:
-                await interaction.response.send_message("Session not found.", ephemeral=True)
-                return
-            merchant = session["merchant"]
-            is_phone_shop = bool(merchant.get("is_phone_shop", False))
-            shop_ctx = await adb(
-                get_anomalous_shop_faction_context,
-                session,
-                session.get("current_location", ""),
-                is_phone_shop,
-                user_id,
-            )
-            if not shop_ctx.get("allowed", True):
+        try:
+            async with distributed_session_lock(session_id, raise_http_error=False):
+                session = await adb(db.get_session, session_id)
+                if not session:
+                    await interaction.response.send_message("Session not found.", ephemeral=True)
+                    return
+                sess_members = set(int(u) for u in ((await adb(db.get_session_members, session_id)) or []) if u is not None)
+                sess_members.update(int(u) for u in (session.get("turn_order") or []) if u is not None)
+                if session.get("host_user_id") is not None:
+                    sess_members.add(int(session["host_user_id"]))
+                if int(user_id) not in sess_members:
+                    await interaction.response.send_message("You're not in this session.", ephemeral=True)
+                    return
+                merchant = session["merchant"]
+                is_phone_shop = bool(merchant.get("is_phone_shop", False))
+                shop_ctx = await adb(
+                    get_anomalous_shop_faction_context,
+                    session,
+                    session.get("current_location", ""),
+                    is_phone_shop,
+                    user_id,
+                )
+                if not shop_ctx.get("allowed", True):
+                    await interaction.response.send_message(
+                        shop_ctx.get("access_denied_reason") or "Access denied to this faction store.",
+                        ephemeral=True,
+                    )
+                    return
+                if shop_ctx.get("shrine_daily_exhausted"):
+                    await interaction.response.send_message(
+                        "Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.",
+                        ephemeral=True,
+                    )
+                    return
+
+                stock = merchant.get("stock", [])
+                entry = next((i for i in stock if i["name"] == item_name and i.get("quantity", 0) > 0), None)
+                if not entry and " #" in item_name:
+                    base_name = item_name.rsplit(" #", 1)[0]
+                    entry = next((i for i in stock if i["name"] == base_name and i.get("quantity", 0) > 0), None)
+                if not entry:
+                    await interaction.response.send_message("That item is no longer available.", ephemeral=True)
+                    return
+
+                discount_pct = merchant.get("discount_pct", 0)
+                price = compute_effective_shop_item_price(entry, shop_ctx=shop_ctx, discount_pct=discount_pct)
+
+                char = await adb(db.get_character, user_id)
+                if not char or (char.get("gold", 0) or 0) < price:
+                    await interaction.response.send_message(
+                        f"You don't have enough gold ({price}g needed).",
+                        ephemeral=True,
+                    )
+                    return
+
+                effect_val = str(entry.get("effect") or entry.get("description", ""))
+                if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
+                    for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
+                        if effect_val.startswith(prefix):
+                            try:
+                                meta_obj = _json.loads(effect_val[len(prefix):])
+                                if shop_ctx.get("is_monastic_free_shop"):
+                                    meta_obj["shrine_sacred_grant"] = True
+                                if shop_ctx.get("is_public_discounted_shop"):
+                                    meta_obj["purchase_price_paid"] = price
+                                    meta_obj["public_requisition_item"] = True
+                                effect_val = f"{prefix}{_json.dumps(meta_obj)}"
+                            except Exception:
+                                pass
+                            break
+                    else:
+                        if shop_ctx.get("is_monastic_free_shop"):
+                            effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'shrine_sacred_grant': True})}"
+                        elif shop_ctx.get("is_public_discounted_shop"):
+                            effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'purchase_price_paid': price, 'public_requisition_item': True})}"
+                elif shop_ctx.get("is_event_discounted_shop"):
+                    effect_val = stamp_discounted_purchase_metadata(effect_val, price)
+
+                slot_cost_val = int(entry.get("slot_cost", 1) or 1)
+                can_fit = await adb(
+                    db.can_add_item,
+                    user_id,
+                    slot_cost_val,
+                    entry["name"],
+                    entry.get("item_type", "Item"),
+                    effect_val,
+                )
+                if not can_fit:
+                    cap = await adb(db.get_character_inventory_capacity, user_id, char)
+                    used = await adb(db.used_slots, user_id)
+                    await interaction.response.send_message(
+                        f"🎒 Your inventory is full ({used}/{cap} slots). Sell or drop items before buying!",
+                        ephemeral=True,
+                    )
+                    return
+
+                try:
+                    await adb(
+                        db.atomic_merchant_purchase,
+                        user_id,
+                        entry["name"],
+                        entry.get("item_type", "Item"),
+                        effect_val,
+                        slot_cost_val,
+                        price,
+                    )
+                except (ValueError, LookupError) as exc:
+                    await interaction.response.send_message(str(exc), ephemeral=True)
+                    return
+
+                if shop_ctx.get("is_monastic_free_shop"):
+                    from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
+                    a_state = await adb(get_anomalous_faction_state, session_id, user_id)
+                    new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
+                    a_state["shrine_free_claims_today"] = new_claims
+                    a_state["shrine_free_claimed_today"] = new_claims
+                    await adb(save_anomalous_faction_state, session_id, a_state, user_id)
+
+                entry["quantity"] -= 1
+
+                active_key = merchant.get("active_store_key")
+                if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
+                    merchant["catalogues"][active_key]["stock"] = stock
+
+                if entry.get("is_vault_requisition"):
+                    claimed_reqs = mark_vault_requisition_claimed(session, entry.get("name", ""))
+                    if claimed_reqs is not None:
+                        await adb(db.update_session, session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
+
+                await adb(db.save_merchant_state, session_id, merchant)
+                await adb(game_engine.evaluate_quest_state_predicates, session_id, user_id)
+        except LockAcquisitionError:
+            if not interaction.response.is_done():
                 await interaction.response.send_message(
-                    shop_ctx.get("access_denied_reason") or "Access denied to this faction store.",
+                    "⏳ Another shop or turn action is resolving for this session. Please retry in a moment.",
                     ephemeral=True,
                 )
-                return
-            if shop_ctx.get("shrine_daily_exhausted"):
-                await interaction.response.send_message(
-                    "Daily Sacred Shrine provisions (3/3) have been claimed today. Stock refreshes tomorrow morning.",
+            else:
+                await interaction.followup.send(
+                    "⏳ Another shop or turn action is resolving for this session. Please retry in a moment.",
                     ephemeral=True,
                 )
-                return
-
-            stock = merchant.get("stock", [])
-            entry = next((i for i in stock if i["name"] == item_name and i.get("quantity", 0) > 0), None)
-            if not entry and " #" in item_name:
-                base_name = item_name.rsplit(" #", 1)[0]
-                entry = next((i for i in stock if i["name"] == base_name and i.get("quantity", 0) > 0), None)
-            if not entry:
-                await interaction.response.send_message("That item is no longer available.", ephemeral=True)
-                return
-
-            discount_pct = merchant.get("discount_pct", 0)
-            price = compute_effective_shop_item_price(entry, shop_ctx=shop_ctx, discount_pct=discount_pct)
-
-            char = await adb(db.get_character, user_id)
-            if not char or (char.get("gold", 0) or 0) < price:
-                await interaction.response.send_message(
-                    f"You don't have enough gold ({price}g needed).",
-                    ephemeral=True,
-                )
-                return
-
-            effect_val = str(entry.get("effect") or entry.get("description", ""))
-            if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
-                for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
-                    if effect_val.startswith(prefix):
-                        try:
-                            meta_obj = _json.loads(effect_val[len(prefix):])
-                            if shop_ctx.get("is_monastic_free_shop"):
-                                meta_obj["shrine_sacred_grant"] = True
-                            if shop_ctx.get("is_public_discounted_shop"):
-                                meta_obj["purchase_price_paid"] = price
-                                meta_obj["public_requisition_item"] = True
-                            effect_val = f"{prefix}{_json.dumps(meta_obj)}"
-                        except Exception:
-                            pass
-                        break
-                else:
-                    if shop_ctx.get("is_monastic_free_shop"):
-                        effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'shrine_sacred_grant': True})}"
-                    elif shop_ctx.get("is_public_discounted_shop"):
-                        effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'purchase_price_paid': price, 'public_requisition_item': True})}"
-            elif shop_ctx.get("is_event_discounted_shop"):
-                effect_val = stamp_discounted_purchase_metadata(effect_val, price)
-
-            slot_cost_val = int(entry.get("slot_cost", 1) or 1)
-            can_fit = await adb(
-                db.can_add_item,
-                user_id,
-                slot_cost_val,
-                entry["name"],
-                entry.get("item_type", "Item"),
-                effect_val,
-            )
-            if not can_fit:
-                cap = inventory_capacity(char.get("str_", 1))
-                used = await adb(db.used_slots, user_id)
-                await interaction.response.send_message(
-                    f"🎒 Your inventory is full ({used}/{cap} slots). Sell or drop items before buying!",
-                    ephemeral=True,
-                )
-                return
-
-            if shop_ctx.get("is_monastic_free_shop"):
-                from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
-                a_state = await adb(get_anomalous_faction_state, session_id, user_id)
-                new_claims = int(a_state.get("shrine_free_claims_today", a_state.get("shrine_free_claimed_today", 0)) or 0) + 1
-                a_state["shrine_free_claims_today"] = new_claims
-                a_state["shrine_free_claimed_today"] = new_claims
-                await adb(save_anomalous_faction_state, session_id, a_state, user_id)
-
-            await adb(db.apply_hp_mp_delta, user_id, 0, 0, -price)
-            await adb(db.add_item, user_id, entry["name"], entry.get("item_type", "Item"), effect_val, slot_cost_val)
-            entry["quantity"] -= 1
-
-            active_key = merchant.get("active_store_key")
-            if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
-                merchant["catalogues"][active_key]["stock"] = stock
-
-            if entry.get("is_vault_requisition"):
-                claimed_reqs = mark_vault_requisition_claimed(session, entry.get("name", ""))
-                if claimed_reqs is not None:
-                    await adb(db.update_session, session_id, extra={"anomalous_vault_requisitions": claimed_reqs})
-
-            await adb(db.save_merchant_state, session_id, merchant)
-            await adb(game_engine.evaluate_quest_state_predicates, session_id, user_id)
+            return
 
         await interaction.response.edit_message(
             content=f"🛒 You bought **{entry['name']}** for **{price}g**!", view=None)
 
     async def open_sell_menu(self, interaction: discord.Interaction, session_id: int):
-        """Task 2's Sell -- needs an LLM call to price the player's live
-        inventory, so this defers first (ephemeral) then follows up."""
+        """Evaluates sellable inventory items using unified deterministic resale pricing."""
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
         user_id = interaction.user.id
-        inventory = db.get_inventory(user_id)
-        from mechanics.combat.items import is_key_item
-        carried = [i for i in inventory if not i.get("equipped") and not is_key_item(i)]
-        if not carried:
-            await interaction.followup.send("You have no unequipped items to sell (equipped gear and key items cannot be sold).", ephemeral=True)
+        inventory, session, char = await asyncio.gather(
+            adb(db.get_inventory, user_id),
+            adb(db.get_session, session_id),
+            adb(db.get_character, user_id),
+        )
+        priced_items = []
+        for item in (inventory or []):
+            payout, reject_reason = compute_item_resale_payout(dict(item), session, char)
+            if reject_reason:
+                continue
+            priced_items.append({"id": item["id"], "name": item["name"], "price": payout})
+        if not priced_items:
+            await interaction.followup.send(
+                "You have no unequipped items to sell (equipped gear, key items, and digital items cannot be sold).",
+                ephemeral=True,
+            )
             return
-        prices = await game_engine.evaluate_items_for_sale(carried)
-        session = db.get_session(session_id)
-        discount = session["merchant"].get("discount_pct", 0)
-        priced_items = [
-            {"id": item["id"], "name": item["name"],
-             "price": _sell_bonus_price(prices.get(item["name"], 3), discount)}
-            for item in carried
-        ]
-        view = SellSelectView(self, session_id, priced_items)
+        view = SellSelectView(self, session_id, priced_items, user_id=user_id)
         lines = "\n".join(f"**{i['name']}** — {i['price']}g" for i in priced_items)
         await interaction.followup.send(content=f"**The merchant offers:**\n{lines}", view=view, ephemeral=True)
 
     async def sell_item(self, interaction: discord.Interaction, session_id: int, user_id: int,
                          item_id: int, item_name: str, price: int):
-        """Independent & non-blocking (Task 3.2): only THIS player's gold
-        and inventory change."""
-        inv = db.get_inventory(user_id)
-        match = next((i for i in inv if i["id"] == item_id), None)
+        """Independent & non-blocking: verifies resale eligibility and price server-side inside UnitOfWork."""
+        inv, session, char = await asyncio.gather(
+            adb(db.get_inventory, user_id),
+            adb(db.get_session, session_id),
+            adb(db.get_character, user_id),
+        )
+        match = next((dict(i) for i in (inv or []) if i.get("id") == item_id), None)
         if not match:
             await interaction.response.send_message("You no longer have that item.", ephemeral=True)
             return
-        if match.get("equipped"):
-            await interaction.response.send_message("❌ You cannot sell an item while it is equipped. Unequip it first!", ephemeral=True)
+        verified_price, reject_reason = compute_item_resale_payout(match, session, char)
+        if reject_reason:
+            await interaction.response.send_message(f"❌ {reject_reason}.", ephemeral=True)
             return
-        from mechanics.combat.items import is_key_item
-        if is_key_item(match):
-            await interaction.response.send_message("❌ Key narrative items cannot be sold.", ephemeral=True)
+        sold = await adb(db.sell_inventory_item, user_id, match["id"], verified_price)
+        if not sold:
+            await interaction.response.send_message("You no longer have that item.", ephemeral=True)
             return
-        db.remove_item(user_id, match["id"])
-        db.apply_hp_mp_delta(user_id, 0, 0, price)
         await interaction.response.edit_message(
-            content=f"💰 You sold **{item_name}** for **{price}g**!", view=None)
+            content=f"💰 You sold **{match.get('name', item_name)}** for **{verified_price}g**!", view=None)
 
     async def resolve_haggle(self, interaction: discord.Interaction, session_id: int, user_id: int):
         """Task 2's Haggle: up to 3 attempts per encounter (shared across
         the whole party, not per-player), difficulty scaling with each
         attempt. Success applies a cumulative discount to Buy (lower
         price) and Sell (higher payout) for the rest of the encounter."""
-        session = db.get_session(session_id)
-        merchant = session["merchant"]
-        attempts = merchant.get("haggle_attempts", 0)
-        char = db.get_character(user_id)
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
 
-        if attempts >= 3:
-            note = "The merchant has grown tired of haggling — no more attempts this visit."
-        else:
-            requirement = 4 + attempts * 2  # scales up each attempt: 4, 6, 8
-            check_mode = db.get_settings(user_id).get("debug_check_mode", "off")
-            check = resolve_check(char["cha"], requirement, char["luk"], check_mode=check_mode)
-            merchant["haggle_attempts"] = attempts + 1
-            if check.succeeded:
-                merchant["discount_pct"] = min(30, merchant.get("discount_pct", 0) + 10)
-                note = (f"**{char['name']}** haggles skillfully! ({check.chance}% chance — {check.tier_label}) "
-                        f"The party now gets a **{merchant['discount_pct']}%** discount buying, and better "
-                        f"prices selling.")
+        try:
+            async with distributed_session_lock(session_id, raise_http_error=False):
+                session = await adb(db.get_session, session_id)
+                merchant = session["merchant"]
+                attempts = merchant.get("haggle_attempts", 0)
+                char = await adb(db.get_character, user_id)
+
+                if attempts >= 3:
+                    note = "The merchant has grown tired of haggling — no more attempts this visit."
+                else:
+                    requirement = 4 + attempts * 2  # scales up each attempt: 4, 6, 8
+                    check_mode = (await adb(db.get_settings, user_id)).get("debug_check_mode", "off")
+                    check = resolve_check(char["cha"], requirement, char["luk"], check_mode=check_mode)
+                    merchant["haggle_attempts"] = attempts + 1
+                    if check.succeeded:
+                        merchant["discount_pct"] = min(30, merchant.get("discount_pct", 0) + 10)
+                        note = (f"**{char['name']}** haggles skillfully! ({check.chance}% chance — {check.tier_label}) "
+                                f"The party now gets a **{merchant['discount_pct']}%** discount buying, and better "
+                                f"prices selling.")
+                    else:
+                        note = (f"**{char['name']}**'s haggling falls flat. ({check.chance}% chance — "
+                                f"{check.tier_label}) Prices are unchanged.")
+                    active_key = merchant.get("active_store_key")
+                    if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
+                        merchant["catalogues"][active_key]["haggle_attempts"] = merchant["haggle_attempts"]
+                        merchant["catalogues"][active_key]["discount_pct"] = merchant["discount_pct"]
+                    await adb(db.save_merchant_state, session_id, merchant)
+        except LockAcquisitionError:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "⏳ Another haggle or turn action is currently resolving. Please retry in a moment.",
+                    ephemeral=True,
+                )
             else:
-                note = (f"**{char['name']}**'s haggling falls flat. ({check.chance}% chance — "
-                        f"{check.tier_label}) Prices are unchanged.")
-            active_key = merchant.get("active_store_key")
-            if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
-                merchant["catalogues"][active_key]["haggle_attempts"] = merchant["haggle_attempts"]
-                merchant["catalogues"][active_key]["discount_pct"] = merchant["discount_pct"]
-            db.save_merchant_state(session_id, merchant)
+                await interaction.followup.send(
+                    "⏳ Another haggle or turn action is currently resolving. Please retry in a moment.",
+                    ephemeral=True,
+                )
+            return
 
-        embeds = [_merchant_embed(session_id, extra_note=note)]
+        embeds = [await adb(_merchant_embed, session_id, note)]
         view = MerchantView(self, session_id, session["turn_order"])
         if not interaction.response.is_done():
             await interaction.response.edit_message(embeds=embeds, view=view)
@@ -404,7 +471,7 @@ class MerchantMixin:
             await interaction.edit_original_response(embeds=embeds, view=view)
 
     async def _show_rumor_menu(self, interaction: discord.Interaction, session_id: int):
-        session = db.get_session(session_id)
+        session = await adb(db.get_session, session_id)
         rumors = session["merchant"].get("rumors", [])
         embeds = [discord.Embed(title="👂 Ask Around", description="Pick a topic to ask the merchant about:",
                                color=discord.Color.dark_gold())]
@@ -419,50 +486,80 @@ class MerchantMixin:
         marks it revealed EITHER WAY so it can't be re-attempted/farmed
         (Task 2's Ask spec). On success, logs the rumor text into the
         session history so future narration can stay consistent with it."""
-        session = db.get_session(session_id)
-        merchant = session["merchant"]
-        rumors = merchant.get("rumors", [])
-        if idx >= len(rumors) or rumors[idx].get("revealed"):
-            await self._show_rumor_menu(interaction, session_id)  # stale click -- just re-render
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+
+        try:
+            async with distributed_session_lock(session_id, raise_http_error=False):
+                session = await adb(db.get_session, session_id)
+                merchant = session["merchant"]
+                rumors = merchant.get("rumors", [])
+                if idx >= len(rumors) or rumors[idx].get("revealed"):
+                    stale_click = True
+                else:
+                    stale_click = False
+                    char, _settings = await asyncio.gather(
+                        adb(db.get_character, user_id),
+                        adb(db.get_settings, user_id),
+                    )
+                    check_mode = _settings.get("debug_check_mode", "off")
+                    check = resolve_check(char["cha"], 5, char["luk"], check_mode=check_mode)
+                    rumors[idx]["revealed"] = True
+                    await adb(db.save_merchant_state, session_id, merchant)
+
+                    if check.succeeded:
+                        rumor_entry = rumors[idx] if isinstance(rumors[idx], dict) else {"text": str(rumors[idx])}
+                        rumor_text = rumor_entry.get("text", "")
+                        new_history = game_engine.push_history(session["history"],
+                                                                f"[Rumor] {char['name']} learned: {rumor_text}")
+                        await adb(
+                            db.save_session_scene,
+                            session_id,
+                            session["scene_title"],
+                            session["narrative"],
+                            session["choices"],
+                            new_history,
+                        )
+
+                        linked_qid = str(rumor_entry.get("linked_quest_id") or "").strip()
+                        linked_nid = str(rumor_entry.get("linked_node_id") or "").strip()
+                        if linked_nid:
+                            from mechanics.combat.merchant import reveal_hidden_node_from_rumor
+                            await adb(reveal_hidden_node_from_rumor, session_id, linked_nid)
+                        if linked_qid or linked_nid:
+                            cur_ch = (await adb(db.get_session_chapter, session_id)) or 1
+                            await adb(
+                                db.add_session_clue,
+                                session_id=session_id,
+                                title=rumor_text[:60],
+                                lead_text=rumor_text,
+                                category="testimonial",
+                                source_location=session.get("current_location", "Merchant Shop"),
+                                linked_npc=str(rumor_entry.get("linked_npc") or merchant.get("name", "Merchant")),
+                                quest_id=linked_qid,
+                                chapter=cur_ch,
+                            )
+                            result_text = f"*\"{rumor_text}\"*\n\n*(📜 Logged to your Clue Caseboard!)*"
+                        else:
+                            result_text = f"*\"{rumor_text}\"*"
+                    else:
+                        result_text = (f"**{char['name']}** can't get a clear answer — the merchant's story doesn't "
+                                        f"quite add up. ({check.chance}% chance — {check.tier_label})")
+        except LockAcquisitionError:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "⏳ Another investigation or turn action is currently resolving. Please retry in a moment.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "⏳ Another investigation or turn action is currently resolving. Please retry in a moment.",
+                    ephemeral=True,
+                )
             return
 
-        char = db.get_character(user_id)
-        check_mode = db.get_settings(user_id).get("debug_check_mode", "off")
-        check = resolve_check(char["cha"], 5, char["luk"], check_mode=check_mode)
-        rumors[idx]["revealed"] = True
-        db.save_merchant_state(session_id, merchant)
-
-        if check.succeeded:
-            rumor_entry = rumors[idx] if isinstance(rumors[idx], dict) else {"text": str(rumors[idx])}
-            rumor_text = rumor_entry.get("text", "")
-            new_history = game_engine.push_history(session["history"],
-                                                    f"[Rumor] {char['name']} learned: {rumor_text}")
-            db.save_session_scene(session_id, session["scene_title"], session["narrative"],
-                                   session["choices"], new_history)
-
-            linked_qid = str(rumor_entry.get("linked_quest_id") or "").strip()
-            linked_nid = str(rumor_entry.get("linked_node_id") or "").strip()
-            if linked_nid:
-                from mechanics.combat.merchant import reveal_hidden_node_from_rumor
-                reveal_hidden_node_from_rumor(session_id, linked_nid)
-            if linked_qid or linked_nid:
-                cur_ch = db.get_session_chapter(session_id) or 1
-                db.add_session_clue(
-                    session_id=session_id,
-                    title=rumor_text[:60],
-                    lead_text=rumor_text,
-                    category="testimonial",
-                    source_location=session.get("current_location", "Merchant Shop"),
-                    linked_npc=str(rumor_entry.get("linked_npc") or merchant.get("name", "Merchant")),
-                    quest_id=linked_qid,
-                    chapter=cur_ch,
-                )
-                result_text = f"*\"{rumor_text}\"*\n\n*(📜 Logged to your Clue Caseboard!)*"
-            else:
-                result_text = f"*\"{rumor_text}\"*"
-        else:
-            result_text = (f"**{char['name']}** can't get a clear answer — the merchant's story doesn't "
-                            f"quite add up. ({check.chance}% chance — {check.tier_label})")
+        if stale_click:
+            await self._show_rumor_menu(interaction, session_id)
+            return
 
         embeds = [discord.Embed(title="👂 Ask Around", description=result_text, color=discord.Color.dark_gold())]
         view = RumorView(self, session_id, rumors)
@@ -472,8 +569,8 @@ class MerchantMixin:
             await interaction.edit_original_response(embeds=embeds, view=view)
 
     async def return_to_merchant_view(self, interaction: discord.Interaction, session_id: int):
-        session = db.get_session(session_id)
-        embeds = [_merchant_embed(session_id)]
+        session = await adb(db.get_session, session_id)
+        embeds = [await adb(_merchant_embed, session_id)]
         view = MerchantView(self, session_id, session["turn_order"])
         if not interaction.response.is_done():
             await interaction.response.edit_message(embeds=embeds, view=view)
@@ -486,24 +583,41 @@ class MerchantMixin:
         turn-neutral side trips (no LLM call, no turn advancement), so we
         just re-render the SAME scene/choices from session state rather
         than generating anything new."""
-        session = db.get_session(session_id)
+        session = await adb(db.get_session, session_id)
         merchant = session["merchant"]
         merchant["active"] = False
         merchant["available"] = False  # this encounter is resolved; a future scene rolls fresh
-        db.save_merchant_state(session_id, merchant)
+        await adb(db.save_merchant_state, session_id, merchant)
 
-        party = [(db.get_character(uid), db.get_inventory(uid)) for uid in session["turn_order"]]
+        turn_uids = list(session["turn_order"])
+        chars = await asyncio.gather(*(adb(db.get_character, uid) for uid in turn_uids))
+        invs = await asyncio.gather(*(adb(db.get_inventory, uid) for uid in turn_uids))
+        party = list(zip(chars, invs))
         if session["mode"] == "sync":
             waiting_on = [uid for uid in session["turn_order"] if str(uid) not in session["pending_picks"]]
             embeds = sync_scene_embed(session, party, session["scene_title"], session["narrative"],
                                       session["choices"], waiting_on)
-            view = SyncChoiceView(self, session_id, session["turn_order"], session["choices"], party, merchant)
+            view = await SyncChoiceView.create(
+                self, session_id, session["turn_order"], session["choices"], party, merchant, session=session,
+            )
         else:
             turn_uid = db.current_turn_user_id(session)
-            actor_char = db.get_character(turn_uid)
+            party_by_uid = {
+                (c.get("user_id") or c.get("id")): (c, inv)
+                for c, inv in party
+                if c
+            }
+            if turn_uid in party_by_uid:
+                actor_char, actor_inv = party_by_uid[turn_uid]
+            else:
+                actor_char = await adb(db.get_character, turn_uid)
+                actor_inv = None
             embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
                                  session["choices"])
-            view = ChoiceView(self, session_id, turn_uid, session["choices"], actor_char, merchant)
+            view = await ChoiceView.create(
+                self, session_id, turn_uid, session["choices"], actor_char, merchant,
+                session=session, actor_inv=actor_inv,
+            )
 
         content = "You step away from the merchant's stall."
         if not interaction.response.is_done():

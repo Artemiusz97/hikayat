@@ -1,6 +1,9 @@
+from __future__ import annotations
+
 import discord
 import asyncio
 import db
+from db import adb
 import game_engine
 from services.turn_service import TurnService
 from .embeds import *
@@ -70,11 +73,9 @@ class GameLoopMixin:
                         await interaction.followup.send(f"⚠️ The LLM failed to interpret this action: {e}")
                         return
 
+                    eff_mode = "turn" if len(session.get("turn_order") or []) > 1 else "solo"
                     try:
-                        # Wrap sync/async mismatch: TurnService.resolve_action is async, but db calls inside it are sync.
-                        # Hikayat uses threaded DB calls or async wrappers for db.
-                        # Actually, TurnService uses db directly which are synchronous sqlite calls, that's fine for now as server.py also does it.
-                        turn_response = await TurnService.resolve_action(session_id, user_id, action, mode="solo")
+                        turn_response = await TurnService.resolve_action(session_id, user_id, action, mode=eff_mode)
                     except Exception as e:
                         logger.error("Failed to resolve turn for session %s: %s", session_id, e, exc_info=True)
                         snapshot = await adb(db.get_turn_snapshot, session_id)
@@ -92,37 +93,23 @@ class GameLoopMixin:
                     xp_gained = turn_response.xp_gained
                     new_char = turn_response.new_char
 
-                    scen_curr = turn_response.session.get("scenario", "fantasy")
-                    loc_curr = outcome.get("location") or turn_response.session.get("current_location", "")
-
-                    raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                        outcome, session=turn_response.session
-                    )
-                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
-                        new_choices = list(raw_next_choices)
+                    if getattr(turn_response, "scene_persisted", None) is True:
+                        new_choices = list(turn_response.cleaned_choices or [])
+                        outcome["scene_title"] = turn_response.scene_title or outcome.get("scene_title", "")
+                        outcome["next_narrative"] = turn_response.next_narrative or outcome.get("next_narrative", "")
+                        merchant = dict((turn_response.session or {}).get("merchant") or {})
                     else:
-                        new_choices = self._clean_choices(
-                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=new_char,
-                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
-                            departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                        from services.turn_service import TurnService as _CanonicalTurnService
+                        scene_title, next_narrative, new_choices = await _CanonicalTurnService._finalize_and_save_scene(
+                            session_id=session_id,
+                            session_obj=turn_response.session,
+                            outcome=outcome,
+                            lead_char=dict(new_char) if new_char else None,
+                            history=list((turn_response.session or {}).get("history", [])),
+                            mode=eff_mode,
+                            is_retry=False,
                         )
-                    outcome["next_narrative"] = next_narrative
-                    outcome["scene_title"] = scene_title
-
-                    # Build new_history from TurnService's already-persisted history
-                    new_history = list(turn_response.session.get("history", []))
-
-                    if len(session["turn_order"]) > 1:
-                        await adb(db.advance_turn, session_id)
-
-                    await adb(db.save_session_scene, session_id, scene_title,
-                                           next_narrative, new_choices, new_history,
-                                           location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
-                                           current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg,
-                                           current_node_id=outcome.get("current_node_id"),
-                                           focal_point=outcome.get("focal_point"))
-                    merchant = _apply_merchant_encounter_result(session_id, outcome.get("merchant_encounter"))
+                        merchant = await adb(_apply_merchant_encounter_result, session_id, outcome.get("merchant_encounter"))
 
                     result_display = session.get("result_display", "detailed")
                     is_free_action = (
@@ -182,7 +169,9 @@ class GameLoopMixin:
 
                     next_embeds = scene_embed(fresh_session, next_actor_char, outcome.get("scene_title"),
                                               outcome.get("next_narrative"), new_choices, image_url)
-                    next_view = ChoiceView(self, session_id, next_turn_uid, new_choices, next_actor_char, merchant)
+                    next_view = await ChoiceView.create(
+                        self, session_id, next_turn_uid, new_choices, next_actor_char, merchant, session=fresh_session,
+                    )
                     _, discord_file = prepare_discord_image(image_url)
                     send_kwargs = {"embeds": next_embeds, "view": next_view}
                     if discord_file:
@@ -222,6 +211,30 @@ class GameLoopMixin:
 
                     # If Turn 0 (opening scene, no action history yet), regenerate opening scene
                     if not history:
+                        import scenario_data as _sd_retry
+                        _retry_scen = str(session.get("scenario") or "fantasy")
+                        _prev_fac_state = session.get("anomalous_faction_state") if isinstance(session.get("anomalous_faction_state"), dict) else {}
+                        _prev_origin = str(session.get("origin_mode") or "")
+                        _prev_grade = str(session.get("student_grade") or "Sophomore")
+                        _prev_faction = str(
+                            session.get("anomalous_starting_faction")
+                            or _prev_fac_state.get("faction_archetype_key")
+                            or ("student_freelancer" if _prev_origin == "student" else "public_agency")
+                        )
+                        await adb(db.reset_session_for_opening_retry, session_id, uid)
+                        if _sd_retry.is_anomalous_incursions_scenario(_retry_scen):
+                            from mechanics.world.anomalous_events import bootstrap_anomalous_session
+                            await adb(
+                                bootstrap_anomalous_session,
+                                session_id,
+                                _retry_scen,
+                                uid,
+                                _prev_faction,
+                                char.get("name", "") if isinstance(char, dict) else "",
+                                _prev_origin,
+                                _prev_grade,
+                            )
+                        session = await adb(db.get_session, session_id) or session
                         await self.launch_opening_scene(interaction, session, use_followup=True)
                         return
 
@@ -240,34 +253,21 @@ class GameLoopMixin:
 
                     outcome = turn_response.outcome
                     action = turn_response.action
-                    new_history = list(turn_response.session.get("history", []))
-
-                    scen_curr = session.get("scenario", "fantasy")
-                    loc_curr = outcome.get("location") or session.get("current_location", "")
-
-                
-                    raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                        outcome, session=session
-                    )
-                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
-                        new_choices = list(raw_next_choices)
+                    if getattr(turn_response, "scene_persisted", None) is True:
+                        new_choices = list(turn_response.cleaned_choices or [])
+                        outcome["scene_title"] = turn_response.scene_title or outcome.get("scene_title", "")
+                        outcome["next_narrative"] = turn_response.next_narrative or outcome.get("next_narrative", "")
                     else:
-                        new_choices = self._clean_choices(
-                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=char,
-                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id,
-                            departed_npcs=outcome.get("departed_characters") or outcome.get("departed_npcs"),
+                        from services.turn_service import TurnService as _CanonicalTurnService
+                        _, _, new_choices = await _CanonicalTurnService._finalize_and_save_scene(
+                            session_id=session_id,
+                            session_obj=session,
+                            outcome=outcome,
+                            lead_char=dict(char) if char else None,
+                            history=list((turn_response.session or {}).get("history", [])),
+                            mode=session.get("mode"),
+                            is_retry=True,
                         )
-                    outcome["next_narrative"] = next_narrative
-                    outcome["scene_title"] = scene_title
-                
-                    await adb(db.clear_pending_picks, session_id)
-                    await adb(db.save_session_scene, session_id, scene_title,
-                                           next_narrative, new_choices, new_history,
-                                           location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
-                                           current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg,
-                                           current_node_id=outcome.get("current_node_id"),
-                                           focal_point=outcome.get("focal_point"))
                     merchant = session.get("merchant", {}) # Don't re-apply merchant state
                     items_gained_by_user = {}
                     loot_text = ""
@@ -329,14 +329,27 @@ class GameLoopMixin:
 
                     # Reconstruct view and sync embeds
                     if fresh_session["mode"] == "sync":
-                        next_embeds = sync_scene_embed(fresh_session, party, outcome.get("scene_title"),
+                        sync_members = list(fresh_session.get("turn_order") or [uid])
+                        full_party = []
+                        for m_uid in sync_members:
+                            m_char = await adb(db.get_character, m_uid)
+                            if m_char:
+                                m_inv = await adb(db.get_inventory, m_uid)
+                                full_party.append((m_char, m_inv))
+                        if not full_party and char:
+                            full_party = [(char, inv)]
+                        next_embeds = sync_scene_embed(fresh_session, full_party, outcome.get("scene_title"),
                                                        outcome.get("next_narrative"), new_choices, waiting_on=[],
                                                        image_url=image_url)
-                        next_view = SyncChoiceView(self, session_id, [uid], new_choices, party, merchant)
+                        next_view = await SyncChoiceView.create(
+                            self, session_id, sync_members, new_choices, full_party, merchant, session=fresh_session,
+                        )
                     else:
                         next_embeds = scene_embed(fresh_session, char, outcome.get("scene_title"),
                                                   outcome.get("next_narrative"), new_choices, image_url)
-                        next_view = ChoiceView(self, session_id, uid, new_choices, char, merchant)
+                        next_view = await ChoiceView.create(
+                            self, session_id, uid, new_choices, char, merchant, session=fresh_session, actor_inv=inv,
+                        )
                     
                     _, discord_file = prepare_discord_image(image_url)
                     send_kwargs = {"embeds": next_embeds, "view": next_view}
@@ -495,33 +508,24 @@ class GameLoopMixin:
                         if levels_gained:
                             all_levels.append((uid, levels_gained))
 
-                    scen_curr = turn_response.session.get("scenario", "fantasy")
-                    loc_curr = outcome.get("location") or turn_response.session.get("current_location", "")
-                    first_char = party[0][0] if party and party[0] else None
-                    new_history = list(turn_response.session.get("history", []))
-
-                    raw_next_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                        outcome, session=turn_response.session
-                    )
-                    if isinstance(outcome, dict) and outcome.get("_hybrid_choices_built") and raw_next_choices:
-                        new_choices = list(raw_next_choices)
+                    if getattr(turn_response, "scene_persisted", None) is True:
+                        new_choices = list(turn_response.cleaned_choices or [])
+                        outcome["scene_title"] = turn_response.scene_title or outcome.get("scene_title", "")
+                        outcome["next_narrative"] = turn_response.next_narrative or outcome.get("next_narrative", "")
+                        merchant = dict((turn_response.session or {}).get("merchant") or {})
                     else:
-                        new_choices = self._clean_choices(
-                            raw_next_choices, scenario=scen_curr, location=loc_curr, char=first_char,
-                            dialogue_partner=partner_arg, current_npcs=npcs_arg, session_id=session_id
+                        first_char = party[0][0] if party and party[0] else None
+                        from services.turn_service import TurnService as _CanonicalTurnService
+                        _, _, new_choices = await _CanonicalTurnService._finalize_and_save_scene(
+                            session_id=session_id,
+                            session_obj=turn_response.session,
+                            outcome=outcome,
+                            lead_char=dict(first_char) if first_char else None,
+                            history=list((turn_response.session or {}).get("history", [])),
+                            mode="sync",
+                            is_retry=False,
                         )
-                    outcome["next_narrative"] = next_narrative
-                    outcome["scene_title"] = scene_title
-
-                    await adb(db.clear_pending_picks, session_id)
-                    await adb(db.save_session_scene, session_id, scene_title,
-                                           next_narrative, new_choices, new_history,
-                                           location=outcome.get("location"), nearby_enemies=outcome.get("nearby_enemies"),
-                                           current_npcs=outcome.get("npcs_present", []),
-                                           dialogue_partner=partner_arg,
-                                           current_node_id=outcome.get("current_node_id"),
-                                           focal_point=outcome.get("focal_point"))
-                    merchant = _apply_merchant_encounter_result(session_id, outcome.get("merchant_encounter"))
+                        merchant = await adb(_apply_merchant_encounter_result, session_id, outcome.get("merchant_encounter"))
 
                     loot_text = _format_items_gained_multi(items_gained_by_user, party)
 
@@ -581,7 +585,9 @@ class GameLoopMixin:
                     next_embeds = sync_scene_embed(fresh_session, fresh_party, outcome.get("scene_title"),
                                                    outcome.get("next_narrative"), new_choices, waiting_on=[],
                                                    image_url=image_url)
-                    next_view = SyncChoiceView(self, session_id, member_ids, new_choices, fresh_party, merchant)
+                    next_view = await SyncChoiceView.create(
+                        self, session_id, member_ids, new_choices, fresh_party, merchant, session=fresh_session,
+                    )
                     _, discord_file = prepare_discord_image(image_url)
                     send_kwargs = {"embeds": next_embeds, "view": next_view}
                     if discord_file:

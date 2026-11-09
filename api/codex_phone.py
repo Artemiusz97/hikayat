@@ -1,6 +1,6 @@
 from __future__ import annotations
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel
 import json
 import time
@@ -12,7 +12,30 @@ import mechanics.social.persona
 import mechanics.social.relationships
 import mechanics.social.genealogy
 import mechanics.narrative.bounty
-from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
+from mechanics.system.concurrency import (
+    distributed_adventure_lock,
+    distributed_session_lock,
+    distributed_user_lock,
+)
+from .security import (
+    extract_actor_token,
+    extract_verified_token_uid,
+    is_strict_auth_context,
+    verify_session_participant,
+    verify_user_access,
+)
+
+
+async def _verify_missing_session_codex_auth(request: Request | None, user_id: int | str | None) -> None:
+    if request is None and not is_strict_auth_context(None):
+        return
+    tok = extract_actor_token(request)
+    if tok is not None or is_strict_auth_context(request):
+        valid_uid = int(user_id) if isinstance(user_id, int) or (isinstance(user_id, str) and user_id.isdigit()) else None
+        if valid_uid is not None:
+            await verify_user_access(request, valid_uid)
+        elif not tok or extract_verified_token_uid(tok) is None:
+            raise HTTPException(status_code=401, detail="user_id and actor token are required.")
 from mechanics.system.phone import (
     scenario_has_smartphone,
     get_phone_branding,
@@ -173,9 +196,10 @@ def _enrich_commitments_for_ui(session_id: int, raw_commitments: list[dict] | No
 
 
 @router.post("/api/party/companion")
-async def manage_party_companion(req: CompanionPartyRequest):
+async def manage_party_companion(req: CompanionPartyRequest, request: Request = None):
     """Recruits a high-affinity NPC into the active party (max 2 companions) or dismisses them."""
-    async with distributed_session_lock(req.session_id), distributed_user_lock(req.user_id):
+    await verify_session_participant(request, req.session_id, req.user_id)
+    async with distributed_adventure_lock(req.user_id, req.session_id):
         return await _execute_manage_party_companion(req)
 
 
@@ -402,13 +426,19 @@ def _infer_school_grade_badge(role: str, current_grade: str, scen_key: str) -> s
 
 
 @router.get("/api/lorebook/{session_id}")
-async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
+async def get_lorebook(session_id: int, user_id: int | None = Query(None), request: Request = None):
     """Fetches lorebook entities grouped by category, restricting person entities to discovered characters."""
     import re
     from mechanics.social.persona import infer_contact_gender
     from mechanics.social.persona.intimacy.appearance import normalize_appearance
 
-    session = await adb(db.get_session, session_id) or {}
+    user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
+    raw_sess = await adb(db.get_session, session_id)
+    if raw_sess:
+        await verify_session_participant(request, session_id, user_id, session=raw_sess)
+    else:
+        await _verify_missing_session_codex_auth(request, user_id)
+    session = raw_sess or {}
     scen_key = str(session.get("scenario") or "fantasy")
     curr_npcs = session.get("current_npcs") or []
     party_npcs = await adb(db.get_session_party_npcs, session_id) or []
@@ -453,6 +483,9 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
         is_unlocked_contact,
     )
     met_in_story_names = collect_met_npc_names(session, party_npcs=party_npcs, player_char_name=player_char_name)
+    codex_char_id = int((char_row or {}).get("id") or 0)
+    codex_ui_lang = str((settings or {}).get("ui_language") or "en")
+    codex_fow_ctx = await adb(_preload_fog_of_war_context, session_id, codex_char_id, party_names, codex_ui_lang)
 
     discovered_people_names = set()
     all_entities = []
@@ -590,7 +623,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                     it_basic.setdefault("mannerisms", it_dict.get("mannerisms") or "")
                     it_dict["basic_info"] = it_basic
 
-                    enriched_person = _enrich_contact_record(it_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+                    enriched_person = _enrich_contact_record(it_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=codex_fow_ctx)
                     it_dict.update(enriched_person)
                     it_dict["is_contact"] = bool(c is not None and is_unlocked_contact(c, party_names, met_in_story_names=met_in_story_names))
                     it_dict["is_discovered"] = True
@@ -656,7 +689,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
             p_dict["is_contact"] = bool(is_unlocked_contact(c, party_names, met_in_story_names=met_in_story_names))
             p_dict["is_discovered"] = True
 
-            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=codex_fow_ctx)
             p_dict.update(enriched_p)
             grouped.setdefault("person", []).append(p_dict)
             all_entities.append(p_dict)
@@ -713,7 +746,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
                 "is_contact": False,
                 "is_discovered": True,
             }
-            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st)
+            enriched_p = _enrich_contact_record(p_dict, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=codex_fow_ctx)
             p_dict.update(enriched_p)
             p_dict["is_discovered"] = True
             grouped.setdefault("person", []).append(p_dict)
@@ -733,10 +766,74 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None)):
     }
 
 
-def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_reveal_all: bool, phys_st: dict | None = None, party_names: set[str] | None = None) -> dict:
+def _preload_fog_of_war_context(
+    session_id: int,
+    character_id: int,
+    party_names: set[str] | None = None,
+    lang: str = "en",
+) -> dict:
+    """Batch-loads dossier discoveries and kin/romance/party exemptions in O(1) queries to prevent N+1 loops."""
+    import mechanics.social.relationship_graph as rg
+
+    cid = int(character_id or 0)
+    sid = int(session_id or 0)
+    disc_by_npc = db.get_contact_dossier_discoveries_batch(sid, cid) if sid else {}
+    ex_sets = db.get_player_fow_exemption_sets(sid) if sid else {}
+    party_npc_keys = set(ex_sets.get("party_npc_keys") or set()) | {
+        db.canon_social_npc_id(n) for n in (party_names or set()) if str(n).strip()
+    }
+    kin_npc_keys = set(ex_sets.get("kin_npc_keys") or set())
+    romantic_npc_keys = set(ex_sets.get("romantic_npc_keys") or set())
+    return {
+        "character_id": cid,
+        "lang": str(lang or "en"),
+        "disc_by_npc": disc_by_npc,
+        "party_npc_keys": party_npc_keys,
+        "kin_npc_keys": kin_npc_keys,
+        "romantic_npc_keys": romantic_npc_keys,
+    }
+
+
+def _enrich_contact_record(
+    c_raw: dict,
+    session_id: int,
+    scen_key: str,
+    debug_reveal_all: bool,
+    phys_st: dict | None = None,
+    party_names: set[str] | None = None,
+    fow_context: dict | None = None,
+) -> dict:
     from mechanics.social.relationships import enrich_contact_dossier
     from mechanics.social.roster_tags import resolve_character_badges
-    res = enrich_contact_dossier(c_raw, session_id, scen_key, debug_reveal_all=debug_reveal_all, phys_st=phys_st)
+    c_in = dict(c_raw or {})
+    preloaded_disc = None
+    fow_lang = "en"
+    party_keys = None
+    kin_keys = None
+    rom_keys = None
+    if isinstance(fow_context, dict):
+        if fow_context.get("character_id") and not c_in.get("character_id"):
+            c_in["character_id"] = int(fow_context["character_id"])
+        fow_lang = str(fow_context.get("lang") or "en")
+        canon_nid = db.canon_social_npc_id(c_in.get("npc_id") or c_in.get("name") or "")
+        disc_map = fow_context.get("disc_by_npc")
+        if isinstance(disc_map, dict):
+            preloaded_disc = disc_map.get(canon_nid, [])
+        party_keys = fow_context.get("party_npc_keys")
+        kin_keys = fow_context.get("kin_npc_keys")
+        rom_keys = fow_context.get("romantic_npc_keys")
+    res = enrich_contact_dossier(
+        c_in,
+        session_id,
+        scen_key,
+        debug_reveal_all=debug_reveal_all,
+        phys_st=phys_st,
+        preloaded_discoveries=preloaded_disc,
+        lang=fow_lang,
+        party_npc_keys=party_keys,
+        kin_npc_keys=kin_keys,
+        romantic_npc_keys=rom_keys,
+    )
     if not res.get("grade"):
         b_inf = res.get("basic_info") or {}
         raw_g = b_inf.get("grade") if isinstance(b_inf, dict) else ""
@@ -771,9 +868,15 @@ def _enrich_contact_record(c_raw: dict, session_id: int, scen_key: str, debug_re
 
 
 @router.get("/api/contacts/{session_id}")
-async def get_contacts(session_id: int, user_id: int | None = Query(None)):
+async def get_contacts(session_id: int, user_id: int | None = Query(None), request: Request = None):
     """Fetches NPC contacts and relationship standings."""
-    session = await adb(db.get_session, session_id) or {}
+    user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
+    raw_sess = await adb(db.get_session, session_id)
+    if raw_sess:
+        await verify_session_participant(request, session_id, user_id, session=raw_sess)
+    else:
+        await _verify_missing_session_codex_auth(request, user_id)
+    session = raw_sess or {}
     scen_key = session.get("scenario", "fantasy")
     phys_st = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else None
     valid_uid = user_id if isinstance(user_id, int) else (int(user_id) if isinstance(user_id, str) and user_id.isdigit() else None)
@@ -797,7 +900,12 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None)):
     # Pre-filter unlocked contacts before expensive enrichment loop
     unlocked_raw = [c for c in (contacts or []) if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
     enriched_contacts = await adb(
-        lambda: [_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names) for c in unlocked_raw]
+        lambda: (
+            lambda _fow=_preload_fog_of_war_context(session_id, char_id, party_names, str((settings or {}).get("ui_language") or "en")): [
+                _enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=_fow)
+                for c in unlocked_raw
+            ]
+        )()
     )
     return {
         "contacts": enriched_contacts,
@@ -846,6 +954,7 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
     enriched = []
     for f in raw_factions:
         f_dict = dict(f)
+        f_dict.setdefault("hq_display_name", f_dict.get("hq_location_id", ""))
         rep = int(f_dict.get("reputation_score") or 0)
         template = f_dict.get("hierarchy_template") or f_dict.get("category") or "default"
         roster = f_dict.get("leadership_roster") or []
@@ -881,16 +990,24 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
 
 
 @router.get("/api/factions/{session_id}")
-async def get_factions(session_id: int, user_id: int | None = None):
+async def get_factions(session_id: int, user_id: int | None = None, request: Request = None):
     """Fetches faction standings, Rank 1-4 leadership rosters, hierarchy templates, and player membership."""
+    user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
+    raw_sess = await adb(db.get_session, session_id)
+    if raw_sess:
+        await verify_session_participant(request, session_id, user_id, session=raw_sess)
+    else:
+        await _verify_missing_session_codex_auth(request, user_id)
     return await adb(_enrich_factions_list, session_id, user_id)
 
 
 @router.post("/api/factions/{session_id}/hq-action")
-async def faction_hq_action(session_id: int, req: FactionHQActionRequest):
+async def faction_hq_action(session_id: int, req: FactionHQActionRequest, request: Request = None):
     """Executes a Faction HQ operation: join, leave, rest, quartermaster, bounty, or promote."""
-    async with distributed_session_lock(session_id), distributed_user_lock(req.user_id):
-        return await _execute_faction_hq_action(session_id, req)
+    await verify_session_participant(request, session_id, req.user_id)
+    async with distributed_user_lock(req.user_id):
+        async with distributed_session_lock(session_id):
+            return await _execute_faction_hq_action(session_id, req)
 
 
 async def _execute_faction_hq_action(session_id: int, req: FactionHQActionRequest):
@@ -1076,13 +1193,13 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         })
         await adb(db.save_merchant_state, session_id, merchant)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return {
+        return _serializable_action({
             "success": True,
             "action": "quartermaster",
             "merchant": merchant,
             "message": f"{faction.get('name', 'Faction')} Quartermaster requisition catalogue unlocked!",
             **payload,
-        }
+        })
 
     if action == "bounty":
         from mechanics.social.factions import is_school_club_faction
@@ -1108,13 +1225,13 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 )
         bounties = await game_engine.generate_faction_bounty_board(session, faction)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return {
+        return _serializable_action({
             "success": True,
             "action": "bounty",
-            "bounties": [dict(b) for b in (bounties or []) if b],
+            "bounties": [dict(b) for b in (payload.get("available_bounties") or []) if b],
             "message": f"Generated {len(bounties or [])} faction contracts for {faction.get('name', 'Faction')}!",
             **payload,
-        }
+        })
 
     if action in ("promote", "challenge_leader"):
         from mechanics.social.factions import is_school_club_faction
@@ -1149,7 +1266,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             await adb(db.update_faction_leadership_roster, session_id, faction["faction_id"], new_roster)
             await adb(db.set_character_faction_membership, char_id, faction["faction_id"], target_rank, new_title)
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
-            return {
+            return _serializable_action({
                 "success": True,
                 "action": "promote",
                 "auto_promoted": True,
@@ -1157,7 +1274,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 "target_title": new_title,
                 "message": f"Promoted to Rank {target_rank}: {new_title}!",
                 **payload,
-            }
+            })
 
         pending_promotion = {
             "faction_id": faction["faction_id"],
@@ -1274,7 +1391,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
         learned_after = await adb(db.get_learned_spells, req.user_id)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return {
+        return _serializable_action({
             "success": True,
             "action": "calibrate",
             "attribute": new_attr,
@@ -1288,7 +1405,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 f"{new_med.replace('_', ' ').title()} (-500G, -1 {core_item['name']})."
             ),
             **payload,
-        }
+        })
 
     raise HTTPException(status_code=400, detail=f"Unsupported faction HQ action: {req.action}")
 
@@ -1345,23 +1462,74 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                                     wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
                                 if wp.get("target_location"):
                                     wp["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, wp["target_location"], scen_key))
-        q["fow_dossier"] = game_engine.build_fog_of_war_quest_payload(
+        _saved_notes = q.get("quest_notes")
+        _saved_anom_bp = q.get("anomaly_blueprint")
+        _saved_anom_bp_json = q.get("anomaly_blueprint_json")
+        _saved_dos = q.get("dossier")
+        _redacted = game_engine.redact_quest_for_fog_of_war(session_id, q, reveal_all=reveal_all)
+        q.clear()
+        q.update(_redacted)
+        q["fow_dossier"] = q.get("fow") or game_engine.build_fog_of_war_quest_payload(
             session_id,
             q,
-            dossier=q.get("dossier"),
+            dossier=_saved_dos,
             reveal_all=reveal_all,
         )
-        if not reveal_all:
-            q.pop("dossier", None)
-        q_notes_raw = str(q.get("quest_notes") or "")
-        if "anomaly_bp:" in q_notes_raw or "anomaly_blueprint:" in q_notes_raw:
+        if reveal_all:
+            if _saved_dos is not None:
+                q["dossier"] = _saved_dos
+            if _saved_notes is not None:
+                q["quest_notes"] = _saved_notes
+            if _saved_anom_bp is not None:
+                q["anomaly_blueprint"] = _saved_anom_bp
+            if _saved_anom_bp_json is not None:
+                q["anomaly_blueprint_json"] = _saved_anom_bp_json
+        else:
+            q["quest_notes"] = ""
+            q.pop("anomaly_blueprint_json", None)
+        if isinstance(q.get("main_objective"), dict):
+            mo = q["main_objective"]
+            if mo.get("title"):
+                mo["title"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, mo["title"], scen_key))
+                mo["text"] = mo["title"]
+            for ms in (mo.get("stages") or []):
+                if isinstance(ms, dict):
+                    if ms.get("stage_label"):
+                        ms["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["stage_label"], scen_key))
+                        ms["text"] = ms["stage_label"]
+                    if ms.get("target_location"):
+                        ms["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, ms["target_location"], scen_key))
+        for opt_o in (q.get("optional_objectives") or []):
+            if isinstance(opt_o, dict):
+                if opt_o.get("title"):
+                    opt_o["title"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, opt_o["title"], scen_key))
+                    opt_o["text"] = opt_o["title"]
+                if opt_o.get("stakes_hint"):
+                    opt_o["stakes_hint"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, opt_o["stakes_hint"], scen_key))
+                if opt_o.get("target_location"):
+                    opt_o["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, opt_o["target_location"], scen_key))
+        q_notes_raw = str(_saved_notes or q.get("quest_notes") or "")
+        has_anom_bp = (
+            "anomaly_bp:" in q_notes_raw
+            or "anomaly_blueprint:" in q_notes_raw
+            or bool(isinstance(_saved_anom_bp or q.get("anomaly_blueprint"), dict) and (_saved_anom_bp or q.get("anomaly_blueprint")))
+            or str(_saved_anom_bp_json or q.get("anomaly_blueprint_json") or "").strip() not in ("", "{}")
+        )
+        if has_anom_bp:
             try:
                 from mechanics.world.anomaly_engine import (
                     parse_blueprint_from_notes,
                     format_anomaly_dossier_summary,
                 )
                 from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised
-                bp_q = parse_blueprint_from_notes(q_notes_raw)
+                parse_probe = dict(q)
+                if _saved_notes is not None:
+                    parse_probe["quest_notes"] = _saved_notes
+                if _saved_anom_bp is not None:
+                    parse_probe["anomaly_blueprint"] = _saved_anom_bp
+                if _saved_anom_bp_json is not None:
+                    parse_probe["anomaly_blueprint_json"] = _saved_anom_bp_json
+                bp_q = parse_blueprint_from_notes(parse_probe)
                 if bp_q:
                     is_rev = bool(reveal_all or "dossier_revealed:1" in q_notes_raw or bp_q.get("dossier_revealed"))
                     q["anomaly_dossier_revealed"] = is_rev
@@ -1392,8 +1560,11 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         _clean_quest_dict(active_sq)
     if active_sq and active_sq.get("climax_ready"):
         try:
+            sq_dos = db.get_quest_dossier(session_id, active_sq.get("quest_id", ""))
+            climax_spec_sq = (sq_dos or {}).get("climax_spec") or {}
+            is_climax_unlocked = bool(reveal_all or (str(climax_spec_sq.get("gate_type") or climax_spec_sq.get("gate_mode") or "").lower() == "open") or climax_spec_sq.get("is_unlocked"))
             _, climax_loc = get_story_quest_climax_location(session_id)
-            if climax_loc:
+            if climax_loc and is_climax_unlocked:
                 clean_climax = dedupe_location_stutter(climax_loc.replace(" -> ", " ➔ "))
                 active_sq["climax_location"] = clean_climax
                 active_sq["target_location"] = clean_climax
@@ -1428,6 +1599,8 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
             "location_name": e.get("location_name"),
             "description": e.get("description"),
             "remediation_quest_id": (e.get("metadata") or {}).get("remediation_quest_id") if isinstance(e.get("metadata"), dict) else None,
+            "scar_tier": ((e.get("metadata") or {}).get("scar_tier") or "bounty") if isinstance(e.get("metadata"), dict) else "bounty",
+            "remediation_type": (e.get("metadata") or {}).get("remediation_type") if isinstance(e.get("metadata"), dict) else None,
         }
         for e in (db.get_world_events(session_id, statuses=("active",)) or [])
         if (
@@ -1450,14 +1623,24 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         "epilogue_choices": list(session.get("epilogue_choices") or []),
         "endless_mode_unlocked": bool(session.get("endless_mode_unlocked")),
         "campaign_archived": bool(session.get("campaign_archived") or session.get("chronicle_archived")),
+        "is_peak_chapter": int(current_chapter) in (3, 6, 8, 9, 10),
+        "chronicle_tapestry": (spine or {}).get("chronicle_tapestry") or session.get("chronicle_tapestry") or {},
+        "ending_archetype": ((spine or {}).get("chronicle_tapestry") or session.get("chronicle_tapestry") or {}).get("ending_archetype") or ((spine or {}).get("chronicle_tapestry") or session.get("chronicle_tapestry") or {}).get("ending_id") or "",
     }
 
-    # Machine tokens in quest_notes (base64 anomaly blueprint, dossier/faction flags) are server-only:
+    # Machine tokens in quest_notes / anomaly_blueprint_json are server-only:
     # redact them after eligibility parsing so disguised folklore identities never reach clients.
     if not reveal_all:
         for q_red in list(quests) + ([active_sq] if isinstance(active_sq, dict) else []):
-            if isinstance(q_red, dict) and "anomaly_bp:" in str(q_red.get("quest_notes") or ""):
-                q_red["quest_notes"] = ""
+            if isinstance(q_red, dict):
+                has_raw_anom = (
+                    "anomaly_bp:" in str(q_red.get("quest_notes") or "")
+                    or "anomaly_blueprint:" in str(q_red.get("quest_notes") or "")
+                    or str(q_red.get("anomaly_blueprint_json") or "").strip() not in ("", "{}")
+                )
+                if has_raw_anom:
+                    q_red["quest_notes"] = ""
+                q_red.pop("anomaly_blueprint_json", None)
 
     return {
         "quests": quests,
@@ -1477,17 +1660,22 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
 
 
 @router.get("/api/quests/{session_id}")
-async def get_quests(session_id: int, user_id: Optional[int] = Query(None)):
+async def get_quests(session_id: int, user_id: Optional[int] = Query(None), request: Request = None):
     """Fetches active, available, and completed quests, active story quest, Fog-of-War dossiers, and Caseboard clues."""
-    return await adb(_build_quests_payload, session_id, user_id)
+    user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
+    raw_sess = await adb(db.get_session, session_id)
+    if raw_sess:
+        await verify_session_participant(request, session_id, user_id, session=raw_sess)
+    else:
+        await _verify_missing_session_codex_auth(request, user_id)
+    res = await adb(_build_quests_payload, session_id, user_id)
+    return _serializable_action(res)
 
 
 @router.post("/api/quests/{session_id}/bounties/generate")
-async def generate_session_bounties(session_id: int, req: BountyGenerateRequest):
+async def generate_session_bounties(session_id: int, req: BountyGenerateRequest, request: Request = None):
     """Generates or refreshes the Bounty Board contracts for the session."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
 
     async with distributed_session_lock(session_id):
         if req.faction_id:
@@ -1501,21 +1689,20 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest)
             bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
 
     payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return {
+    return _serializable_action({
         "success": True,
-        "bounties": [dict(b) for b in (bounties or []) if b],
+        "bounties": [dict(b) for b in (payload.get("available_bounties") or []) if b],
         **payload,
-    }
+    })
 
 
 @router.post("/api/quests/{session_id}/bounties/action")
-async def bounty_contract_action(session_id: int, req: BountyActionRequest):
+async def bounty_contract_action(session_id: int, req: BountyActionRequest, request: Request = None):
     """Accepts an available bounty (compiling Stage-2 QuestDossier + optional CHA advance) or abandons/forfeits an active bounty."""
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
     quest = await adb(db.get_quest_by_id, session_id, req.quest_id)
     if not quest:
         raise HTTPException(status_code=404, detail="Bounty contract not found")
-
-    session = await adb(db.get_session, session_id) or {}
     scen_key = str(session.get("scenario") or "fantasy")
     action = (req.action or "accept").strip().lower()
 
@@ -1594,8 +1781,9 @@ async def bounty_contract_action(session_id: int, req: BountyActionRequest):
 
 
 @router.post("/api/quests/{session_id}/clues/deduce")
-async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest):
+async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, request: Request = None):
     """Deterministically cross-references two evidence clues via QuestDossier clue_graph / Logic Caseboard (zero RNG!)."""
+    await verify_session_participant(request, session_id, req.user_id)
     is_single = req.clue_b_id is None or int(req.clue_a_id) == int(req.clue_b_id)
 
     async with distributed_session_lock(session_id):
@@ -1648,8 +1836,9 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest):
 
 
 @router.post("/api/quests/{session_id}/caseboard/accuse")
-async def accuse_caseboard_suspect(session_id: int, req: SuspectAccusationRequest):
+async def accuse_caseboard_suspect(session_id: int, req: SuspectAccusationRequest, request: Request = None):
     """Resolves a Private Confrontation vs. Formal Public Accusation against a Caseboard suspect."""
+    await verify_session_participant(request, session_id, req.user_id)
     async with distributed_session_lock(session_id):
         session = await adb(db.get_session, session_id)
         if not session:
@@ -1674,8 +1863,9 @@ async def accuse_caseboard_suspect(session_id: int, req: SuspectAccusationReques
 
 
 @router.post("/api/quests/{session_id}/turn-in")
-async def resolve_contract_turn_in(session_id: int, req: QuestTurnInRequest):
+async def resolve_contract_turn_in(session_id: int, req: QuestTurnInRequest, request: Request = None):
     """Resolves Contract Turn-In, Side-Switching, `2x` Twist Blackmail, or Tangible MacGuffin Keep/Destroy/Fence."""
+    await verify_session_participant(request, session_id, req.user_id)
     async with distributed_session_lock(session_id):
         session = await adb(db.get_session, session_id)
         if not session:
@@ -1701,8 +1891,9 @@ async def resolve_contract_turn_in(session_id: int, req: QuestTurnInRequest):
 
 
 @router.post("/api/quests/{session_id}/epilogue")
-async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceRequest):
+async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceRequest, request: Request = None):
     """Resolves Chapter 11 Universal Epilogue choice: 'archive' vs 'endless'."""
+    await verify_session_participant(request, session_id, req.user_id)
     async with distributed_session_lock(session_id):
         session = await adb(db.get_session, session_id)
         if not session:
@@ -1719,11 +1910,9 @@ async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceR
 
 
 @router.get("/api/phone/{session_id}")
-async def get_phone_state(session_id: int, user_id: int = Query(...)):
+async def get_phone_state(session_id: int, user_id: int = Query(...), request: Request = None):
     """Fetches smartphone OS state: scenario branding, appointments, gossip feed, contacts, social state, and digital media gallery."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, user_id)
 
     scen_key = session.get("scenario", "fantasy")
     inv = await adb(db.get_inventory, user_id)
@@ -1768,6 +1957,26 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
         if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            if not uc_copy.get("debug_revealed"):
+                if "_phone_fow_ctx" not in locals():
+                    _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
+                    _ph_set = await adb(db.get_settings, _ph_uid) if _ph_uid else {}
+                    _ph_dbg = bool((_ph_set or {}).get("debug_reveal_all_info", 0))
+                    _ph_cid = int(locals().get("char_id") or ((await adb(db.get_character, _ph_uid)) or {}).get("id", 0) if _ph_uid else 0)
+                    _phone_fow_ctx = None if _ph_dbg else await adb(_preload_fog_of_war_context, session_id, _ph_cid, party_names, str((_ph_set or {}).get("ui_language") or "en"))
+                if isinstance(_phone_fow_ctx, dict):
+                    from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact as _apply_ph_fow
+                    _cn_ph = db.canon_social_npc_id(uc_copy.get("npc_id") or uc_copy.get("name") or "")
+                    uc_copy = _apply_ph_fow(
+                        uc_copy,
+                        session_id=session_id,
+                        character_id=_phone_fow_ctx.get("character_id", 0),
+                        preloaded_discoveries=(_phone_fow_ctx.get("disc_by_npc") or {}).get(_cn_ph, []),
+                        lang=_phone_fow_ctx.get("lang", "en"),
+                        party_npc_keys=_phone_fow_ctx.get("party_npc_keys"),
+                        kin_npc_keys=_phone_fow_ctx.get("kin_npc_keys"),
+                        romantic_npc_keys=_phone_fow_ctx.get("romantic_npc_keys"),
+                    )
             unlocked_contacts.append(uc_copy)
 
     synthetic_channels = []
@@ -1842,11 +2051,9 @@ async def get_phone_state(session_id: int, user_id: int = Query(...)):
 
 
 @router.post("/api/phone/{session_id}/feed/refresh")
-async def refresh_phone_feed(session_id: int, req: PhoneFeedActionRequest):
+async def refresh_phone_feed(session_id: int, req: PhoneFeedActionRequest, request: Request = None):
     """Generates fresh in-universe social media timeline posts."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
 
     posts = await generate_gossip_feed_posts(dict(session), force_refresh=bool(req.force_refresh))
     gossip = await adb(db.get_gossip_feed, session_id, limit=15)
@@ -1860,11 +2067,9 @@ async def refresh_phone_feed(session_id: int, req: PhoneFeedActionRequest):
 
 
 @router.post("/api/phone/{session_id}/feed/scour")
-async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest):
+async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest, request: Request = None):
     """Consumes 1 rumor charge (max 3) to roll a PER/INT check for a verified story clue."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
 
     async with distributed_session_lock(session_id):
         res = await scour_feed_for_rumor(dict(session), req.user_id)
@@ -1893,11 +2098,9 @@ async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest):
 
 
 @router.post("/api/phone/{session_id}/peerpulse/discover")
-async def discover_peerpulse_profile(session_id: int, req: PeerPulseDiscoverRequest):
+async def discover_peerpulse_profile(session_id: int, req: PeerPulseDiscoverRequest, request: Request = None):
     """Looks up a specific peer profile by name/handle or discovers a suggested uncontacted peer."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
 
     query = (req.query_name or "").strip()
     if query:
@@ -1927,11 +2130,9 @@ async def discover_peerpulse_profile(session_id: int, req: PeerPulseDiscoverRequ
 
 
 @router.post("/api/phone/{session_id}/peerpulse/friend-request")
-async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendRequest):
+async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendRequest, request: Request = None):
     """Resolves a PeerPulse friend request using CHA + mutual friend / shared club / sibling bonuses."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id)
 
     res = await adb(resolve_social_friend_request, dict(session), req.user_id, dict(req.profile))
     char_row = await adb(db.get_character, req.user_id)
@@ -1946,6 +2147,26 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
         if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            if not uc_copy.get("debug_revealed"):
+                if "_phone_fow_ctx" not in locals():
+                    _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
+                    _ph_set = await adb(db.get_settings, _ph_uid) if _ph_uid else {}
+                    _ph_dbg = bool((_ph_set or {}).get("debug_reveal_all_info", 0))
+                    _ph_cid = int(locals().get("char_id") or ((await adb(db.get_character, _ph_uid)) or {}).get("id", 0) if _ph_uid else 0)
+                    _phone_fow_ctx = None if _ph_dbg else await adb(_preload_fog_of_war_context, session_id, _ph_cid, party_names, str((_ph_set or {}).get("ui_language") or "en"))
+                if isinstance(_phone_fow_ctx, dict):
+                    from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact as _apply_ph_fow
+                    _cn_ph = db.canon_social_npc_id(uc_copy.get("npc_id") or uc_copy.get("name") or "")
+                    uc_copy = _apply_ph_fow(
+                        uc_copy,
+                        session_id=session_id,
+                        character_id=_phone_fow_ctx.get("character_id", 0),
+                        preloaded_discoveries=(_phone_fow_ctx.get("disc_by_npc") or {}).get(_cn_ph, []),
+                        lang=_phone_fow_ctx.get("lang", "en"),
+                        party_npc_keys=_phone_fow_ctx.get("party_npc_keys"),
+                        kin_npc_keys=_phone_fow_ctx.get("kin_npc_keys"),
+                        romantic_npc_keys=_phone_fow_ctx.get("romantic_npc_keys"),
+                    )
             unlocked_contacts.append(uc_copy)
     return {
         "success": True,
@@ -1956,11 +2177,9 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
 
 
 @router.get("/api/phone/{session_id}/peerpulse/suggestions")
-async def get_peerpulse_suggestions(session_id: int, user_id: int = Query(...)):
+async def get_peerpulse_suggestions(session_id: int, user_id: int = Query(...), request: Request = None):
     """Fetches suggested student peers for PeerPulse Graph."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, user_id)
     suggestions = await adb(get_suggested_peers, session_id, user_id)
     import scenario_data as _sd_sugg
     scen_sugg = session.get("scenario", "")
@@ -1981,8 +2200,9 @@ async def get_peerpulse_suggestions(session_id: int, user_id: int = Query(...)):
 
 
 @router.get("/api/phone/{session_id}/messages/{npc_id}")
-async def get_npc_messages(session_id: int, npc_id: str):
+async def get_npc_messages(session_id: int, npc_id: str, user_id: Optional[int] = Query(None), request: Request = None):
     """Fetches direct message chat history with a specific NPC contact."""
+    await verify_session_participant(request, session_id, user_id)
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
     messages = await adb(db.get_phone_messages, session_id, clean_npc_id, limit=20)
     current_day, _, _ = await adb(db.get_session_time, session_id)
@@ -1994,8 +2214,10 @@ async def get_npc_messages(session_id: int, npc_id: str):
 
 
 @router.post("/api/phone/{session_id}/messages/{npc_id}")
-async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageRequest):
+async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageRequest, request: Request = None):
     """Sends a text message to an NPC contact and generates an immediate contextual reply."""
+    _, eff_uid = await verify_session_participant(request, session_id, req.user_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, eff_uid)
     text = (req.message or "").strip()
     if (not text or text == "__auto__") and not req.intent:
         raise HTTPException(status_code=400, detail="Message cannot be empty")
@@ -2007,85 +2229,86 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             detail="Automated dispatch channels are read-only broadcast feeds and do not accept replies."
         )
 
-    session_row = await adb(db.get_session, session_id)
-    if not session_row:
-        raise HTTPException(status_code=404, detail="Session not found")
-    session = dict(session_row)
+    async with distributed_adventure_lock(canonical_id, session_id):
+        session_row = await adb(db.get_session, session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session = dict(session_row)
 
-    char_row = await adb(db.get_character, req.user_id)
-    if not char_row:
-        raise HTTPException(status_code=404, detail="Character not found")
-    player_char = dict(char_row)
+        char_row = await adb(db.get_character, canonical_id, session_id=session_id)
+        if not char_row:
+            raise HTTPException(status_code=404, detail="Character not found")
+        player_char = dict(char_row)
 
-    contact = await adb(db.get_contact, session_id, npc_id, character_id=player_char.get("id", 0))
-    if not contact:
-        # Try matching against all contacts in session
-        all_contacts = await adb(db.get_contacts, session_id, req.user_id)
-        for c in all_contacts:
-            if c.get("npc_id") == npc_id or c.get("name", "").lower().replace(" ", "_") == npc_id.lower():
-                contact = dict(c)
-                break
-    if not contact:
-        contact = {
-            "npc_id": npc_id,
-            "name": npc_id.replace("_", " ").title(),
-            "relationship_score": 0,
-            "track": "platonic",
-            "basic_info": {}
+        contact = await adb(db.get_contact, session_id, npc_id, character_id=player_char.get("id", 0))
+        if not contact:
+            # Try matching against all contacts in session
+            all_contacts = await adb(db.get_contacts, session_id, canonical_id)
+            for c in all_contacts:
+                if c.get("npc_id") == npc_id or c.get("name", "").lower().replace(" ", "_") == npc_id.lower():
+                    contact = dict(c)
+                    break
+        if not contact:
+            contact = {
+                "npc_id": npc_id,
+                "name": npc_id.replace("_", " ").title(),
+                "relationship_score": 0,
+                "track": "platonic",
+                "basic_info": {}
+            }
+
+        from mechanics.social.relationships import is_contact_blocked, is_contact_eligible
+        scen_key = str(session.get("scenario") or "")
+        if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
+            raise HTTPException(
+                status_code=403,
+                detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
+            )
+        if isinstance(contact, dict) and (
+            contact.get("is_dispatch_channel")
+            or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Automated dispatch channels are read-only broadcast feeds and do not accept replies."
+            )
+        if is_contact_blocked(contact):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{contact.get('name', 'This contact')} has blocked your number due to hostility. Reconcile with them in person first."
+            )
+
+        if isinstance(contact, dict) and (
+            contact.get("deceased")
+            or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("deceased"))
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
+            )
+
+        if not text or text == "__auto__":
+            text = await generate_player_chat_message(session, dict(contact), player_char, req.intent)
+            if not text:
+                raise HTTPException(status_code=400, detail="Message cannot be empty")
+
+        intent = req.intent or detect_custom_message_intent(text)
+        reply_data = await generate_contact_dm_reply(
+            session=session,
+            contact=dict(contact),
+            player_char=player_char,
+            user_message=text,
+            intent=intent
+        )
+
+        messages = await adb(db.get_phone_messages, session_id, contact.get("npc_id", npc_id), limit=20)
+        return {
+            "success": True,
+            "generated_message": text,
+            "reply": reply_data,
+            "messages": [dict(m) for m in messages],
+            "daily_limits": reply_data.get("daily_limits"),
         }
-
-    from mechanics.social.relationships import is_contact_blocked, is_contact_eligible
-    scen_key = str(session.get("scenario") or "")
-    if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
-        raise HTTPException(
-            status_code=403,
-            detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
-        )
-    if isinstance(contact, dict) and (
-        contact.get("is_dispatch_channel")
-        or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="Automated dispatch channels are read-only broadcast feeds and do not accept replies."
-        )
-    if is_contact_blocked(contact):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{contact.get('name', 'This contact')} has blocked your number due to hostility. Reconcile with them in person first."
-        )
-
-    if isinstance(contact, dict) and (
-        contact.get("deceased")
-        or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("deceased"))
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
-        )
-
-    if not text or text == "__auto__":
-        text = await generate_player_chat_message(session, dict(contact), player_char, req.intent)
-        if not text:
-            raise HTTPException(status_code=400, detail="Message cannot be empty")
-
-    intent = req.intent or detect_custom_message_intent(text)
-    reply_data = await generate_contact_dm_reply(
-        session=session,
-        contact=dict(contact),
-        player_char=player_char,
-        user_message=text,
-        intent=intent
-    )
-
-    messages = await adb(db.get_phone_messages, session_id, contact.get("npc_id", npc_id), limit=20)
-    return {
-        "success": True,
-        "generated_message": text,
-        "reply": reply_data,
-        "messages": [dict(m) for m in messages],
-        "daily_limits": reply_data.get("daily_limits"),
-    }
 
 
 @router.post("/api/commitments/{session_id}/{commitment_id}/cancel")
@@ -2093,13 +2316,12 @@ async def cancel_session_commitment(
     session_id: int,
     commitment_id: int,
     req: CancelCommitmentRequest | None = Body(default=None),
+    request: Request = None,
 ):
     """Cancels an active rendezvous or commitment in commitments_ledger without flake penalty."""
     from mechanics.system import commitments_engine
 
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    session, _ = await verify_session_participant(request, session_id, req.user_id if req else None)
 
     reason = (req.reason if req and req.reason else "player_cancelled").strip()
     cancelled = await adb(
@@ -2126,18 +2348,7 @@ async def cancel_session_commitment(
     }
 
 
-@router.get("/api/codex/encyclopedia")
-async def get_codex_encyclopedia(
-    session_id: Optional[int] = Query(default=None),
-    user_id: Optional[int] = Query(default=None),
-):
-    """Returns the account-wide Canonical Folklore Codex [X/50] and session Field Log & Containment Vault."""
-    from mechanics.world.folklore_codex import build_encyclopedia_payload
-
-    eff_uid = int(user_id) if user_id is not None else None
-    eff_sid = int(session_id) if session_id is not None else None
-    payload = await adb(build_encyclopedia_payload, session_id=eff_sid, user_id=eff_uid)
-    return payload
+from .encyclopedia import get_codex_encyclopedia  # noqa: F401
 
 
 

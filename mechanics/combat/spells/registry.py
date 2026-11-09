@@ -1,6 +1,10 @@
 from __future__ import annotations
 import contextvars
+import copy
+import logging
 from typing import Dict, Any, List, Optional, Tuple
+
+log = logging.getLogger(__name__)
 
 _ACTIVE_EMPOWERED_SPELLS_CTX: contextvars.ContextVar[frozenset[str]] = contextvars.ContextVar(
     "_ACTIVE_EMPOWERED_SPELLS_CTX", default=frozenset()
@@ -834,8 +838,8 @@ def register_spell(spell_def: Dict[str, Any]) -> None:
             try:
                 import db
                 db.save_procedural_spell(spell_def)
-            except Exception:
-                pass
+            except Exception as e:
+                log.error("Failed to persist procedural spell %s to SQLite: %s", spell_def.get("id"), e, exc_info=True)
 
 def get_spell(spell_id: str) -> Optional[Dict[str, Any]]:
     if not spell_id:
@@ -846,17 +850,45 @@ def get_spell(spell_id: str) -> Optional[Dict[str, Any]]:
             ensure_awakened_kits_registered()
         except Exception:
             pass
+    if spell_id not in SPELL_REGISTRY and str(spell_id).startswith("pact_"):
+        try:
+            from mechanics.pacts.catalog import ensure_pact_spells_registered
+            ensure_pact_spells_registered()
+        except Exception:
+            pass
     sp = SPELL_REGISTRY.get(spell_id)
     if sp is None:
-        # Lazy fallback: attempt to re-hydrate from database
+        # Lazy fallback 1: attempt to re-hydrate from procedural_spells table
         try:
             import db
             proc_spell = db.get_procedural_spell(spell_id)
             if proc_spell:
                 register_spell(proc_spell)
-                sp = proc_spell
-        except Exception:
-            pass
+                sp = SPELL_REGISTRY.get(spell_id) or proc_spell
+        except Exception as e:
+            log.warning("Failed reading procedural spell %s from SQLite: %s", spell_id, e)
+    if sp is None and str(spell_id).startswith("proc_"):
+        # Lazy fallback 2: hydrate from equipped/carried [GEAR_JSON] granted_spell metadata
+        try:
+            from db.core import get_conn
+            from mechanics.combat.equipment import parse_equipment_metadata
+
+            with get_conn() as conn:
+                inv_rows = conn.execute(
+                    "SELECT name, item_type, effect, slot FROM inventory WHERE effect LIKE ?",
+                    (f"%{spell_id}%",),
+                ).fetchall()
+            for r in inv_rows:
+                meta = parse_equipment_metadata(dict(r)) or {}
+                g_sp = meta.get("granted_spell")
+                if isinstance(g_sp, dict) and str(g_sp.get("id") or "") == str(spell_id):
+                    sp_copy = copy.deepcopy(g_sp)
+                    sp_copy["duplicate_empowered"] = False
+                    register_spell(sp_copy)
+                    sp = SPELL_REGISTRY.get(spell_id)
+                    break
+        except Exception as e:
+            log.warning("Failed lazy [GEAR_JSON] hydration for procedural spell %s: %s", spell_id, e)
     if sp is None:
         return None
     emp = _ACTIVE_EMPOWERED_SPELLS_CTX.get()

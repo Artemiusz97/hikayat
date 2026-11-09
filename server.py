@@ -106,8 +106,11 @@ from api import (
     inventory_merchant_router,
     adventure_router,
     codex_phone_router,
+    encyclopedia_router,
     settings_ws_router,
     world_events_router,
+    realty_router,
+    contracts_router,
 )
 
 import argparse
@@ -195,8 +198,11 @@ app.include_router(auth_characters_router)
 app.include_router(inventory_merchant_router)
 app.include_router(adventure_router)
 app.include_router(codex_phone_router)
+app.include_router(encyclopedia_router)
 app.include_router(settings_ws_router)
 app.include_router(world_events_router)
+app.include_router(realty_router)
+app.include_router(contracts_router)
 
 
 @app.get("/api/server/public-url")

@@ -10,19 +10,24 @@ def create_contextual_story_quest_data(
     starting_hook_context: dict = None,
     previous_completed_title: str = None
 ) -> dict:
-    """Deterministic, scenario-tailored Story Quest generator.
-    Guarantees a rich Story Quest with exactly 3 distinct sub-quests and 3-stage
-    progressive waypoints even if the LLM is completely unreachable or times out."""
-    scen_key = session.get("scenario", "fantasy")
-    loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
+    """Deterministic, scenario-tailored Story Quest compiler (`<20ms` offline-safe).
+    Delegates Story Quest creation to the Triple-Peak Storylet Deck (`Ch. 3, 6, 8, 9, 10` peaks)
+    and outputs `1 Main Objective` (`id=0`, `2` stages on Buildup / `3` stages on Peak) +
+    `1–3` Typed `1`-Beat Optionals (`id=1..3`: `aid`, `bypass`, `alternative`, `threatened`)
+    with `deadline_day = None` across all 21 scenarios and 5 locales (`en, pl, ms, zh, de`)."""
+    sess_dict = session if isinstance(session, dict) else {}
+    scen_key = str(sess_dict.get("scenario") or "fantasy")
+    raw_lang = str(sess_dict.get("narration_language") or sess_dict.get("language") or "en")
+    ch_clamped = max(1, min(11, int(chapter_num or 1)))
+
+    loc = (sess_dict.get("current_location") or "").strip()
     if not loc and starting_hook_context:
-        loc = starting_hook_context.get("suggested_location") or ""
-    if not loc and isinstance(session, dict) and session.get("current_node_id"):
+        loc = (starting_hook_context.get("suggested_location") or "").strip()
+    if not loc and sess_dict.get("current_node_id"):
         try:
-            import db
-            node = db.get_world_node(session_id, session["current_node_id"])
+            node = db.get_world_node(session_id, sess_dict["current_node_id"])
             if node:
-                ancestors = db.get_node_ancestors(session_id, session["current_node_id"])
+                ancestors = db.get_node_ancestors(session_id, sess_dict["current_node_id"])
                 chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
                 loc = " ➔ ".join(chain)
         except Exception:
@@ -37,7 +42,22 @@ def create_contextual_story_quest_data(
         format_clean_location_prose,
         clean_narrative_location_arrows,
     )
-    from mechanics.world.waypoints import ensure_multi_stage_waypoints
+    from mechanics.narrative.quest_engines import (
+        normalize_quest_locale,
+        render_optional_objective_template,
+    )
+    from mechanics.narrative.campaign_spine import (
+        PEAK_CHAPTERS,
+        _build_universal_chapters_blueprint,
+        _default_ending_axes,
+        _roll_hidden_campaign_bible,
+        compile_or_get_campaign_spine,
+        select_chapter_storylet,
+    )
+    from mechanics.narrative.blueprints import get_blueprint_for_archetype
+    import scenario_data
+
+    eff_lang = normalize_quest_locale(raw_lang)
 
     if loc and "{" in loc:
         loc = resolve_session_location_tokens(session_id, loc, scen_key)
@@ -48,7 +68,7 @@ def create_contextual_story_quest_data(
         z_res = resolve_session_location_tokens(session_id, z, scen_key)
         for p in prims[:2]:
             p_res = resolve_session_location_tokens(session_id, p, scen_key)
-            avail_locs_list.append(f"{z_res} -> {p_res}")
+            avail_locs_list.append(f"{z_res} ➔ {p_res}")
 
     if not loc:
         if avail_locs_list:
@@ -57,308 +77,227 @@ def create_contextual_story_quest_data(
             try:
                 from mechanics.world.locations.seeding import get_default_tiered_location
                 dz, dp, _ = get_default_tiered_location(scen_key, session_id=session_id)
-                loc = f"{dz} -> {dp}"
+                loc = f"{dz} ➔ {dp}"
             except Exception:
-                loc = "Ashford Academy" if is_school_scenario(scen_key) else "the Realm"
+                loc = "Ashford Academy" if is_school_scenario(scen_key) else "Central District"
 
     loc1 = avail_locs_list[0] if len(avail_locs_list) > 0 else loc
     loc2 = avail_locs_list[1] if len(avail_locs_list) > 1 else loc1
     loc3 = avail_locs_list[2] if len(avail_locs_list) > 2 else (avail_locs_list[0] if avail_locs_list else loc)
+    loc1_short = format_clean_location_prose(loc1, include_zone=False) or "the sector"
+    loc2_short = format_clean_location_prose(loc2, include_zone=False) or loc1_short
+    loc3_prose = format_clean_location_prose(loc3, include_zone=True, preposition="in") or loc1_short
 
-    loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
-    loc_short = format_clean_location_prose(loc, include_zone=False)
-    loc1_prose = format_clean_location_prose(loc1, include_zone=True, preposition="in")
-    loc2_prose = format_clean_location_prose(loc2, include_zone=True, preposition="in")
-    loc3_prose = format_clean_location_prose(loc3, include_zone=True, preposition="in")
-    loc1_short = format_clean_location_prose(loc1, include_zone=False)
-    loc2_short = format_clean_location_prose(loc2, include_zone=False)
-    loc3_short = format_clean_location_prose(loc3, include_zone=False)
+    persisted_sess = None
+    if session_id:
+        try:
+            persisted_sess = db.get_session(session_id)
+        except Exception:
+            persisted_sess = None
 
-    import scenario_data
-    if scenario_data.is_anomalous_incursions_scenario(scen_key):
-        from mechanics.narrative.blueprints import generate_anomalous_campaign_blueprint
-        bp = generate_anomalous_campaign_blueprint(session_id, session)
-        ch_clamped = max(1, min(11, int(chapter_num or 1)))
-        ch_spec = bp["chapters"].get(ch_clamped, bp["chapters"][1])
-        anomaly = bp["world_ending_anomaly"]
-        ent_name = anomaly.get("name", "The Non-Euclidean Convergence")
-        ent_title = anomaly.get("title", "Sovereign of the Folded Horizon")
-        omen = anomaly.get("foreshadow_sign", "geometric distortions and bleeding static")
-        harbinger = anomaly.get("harbinger_name", "The Convergence Harbinger")
-
-        title = ch_spec["title_template"]
-        archetype = ch_spec["archetype"]
-        sub_archs = ch_spec["sub_archetypes"]
-
-        if ch_clamped == 1:
-            objective = (
-                f"Respond to an emerging containment breach at {loc1_prose} and stabilize the affected threshold. "
-                f"Investigate anomalous telemetry readings across {loc2_short} and {loc3_prose}, culminating in an ominous resonance spike ({omen}) "
-                f"that foreshadows the distant awakening of {ent_name}."
-            )
-        elif 2 <= ch_clamped <= 6:
-            objective = (
-                f"{ch_spec['pacing_directive']} Follow the trail of altered relics, spatial distortions, and clandestine interference "
-                f"across {loc1_short}, {loc2_short}, and {loc3_prose} before the Cult and Syndicate complete their preparations for {ent_name}."
-            )
-        elif 7 <= ch_clamped <= 9:
-            objective = (
-                f"{ch_spec['pacing_directive']} Reinforce municipal quarantine cordons at {loc1_short}, intercept hostile manifestations at {loc2_short}, "
-                f"and confront {harbinger}'s vanguard forces near {loc3_prose}."
-            )
-        elif ch_clamped == 10:
-            objective = (
-                f"Reality fractures across the metropolitan sky as {ent_name} ({ent_title}) manifests at the convergence epicenter! "
-                f"Map the non-Euclidean breach at {loc1_short}, sever the final ritual anchors at {loc2_short}, and defeat {ent_name} at {loc3_prose} to save the world!"
-            )
-        else:
-            objective = (
-                f"With {ent_name} defeated and the cataclysm averted, seal the last lingering reality echoes at {loc1_short}, "
-                f"suppress residual cognitohazard fallout at {loc2_short}, and attend your post-crisis commendation & debriefing at {loc3_prose}."
-            )
-
-        sub_objs = [
-            {
-                "id": 1,
-                "archetype": sub_archs[0],
-                "text": f"[{sub_archs[0]}] Execute primary field protocol and secure resonance telemetry at {loc1_prose}.",
-                "completed": False,
-            },
-            {
-                "id": 2,
-                "archetype": sub_archs[1],
-                "text": f"[{sub_archs[1]}] Stabilize secondary breach vectors and neutralize interference at {loc2_prose}.",
-                "completed": False,
-            },
-            {
-                "id": 3,
-                "archetype": sub_archs[2],
-                "text": (
-                    f"[Boss Confrontation] Breach the convergence core and defeat {ent_name} at {loc3_prose}!"
-                    if ch_clamped == 10
-                    else (
-                        f"[Foreshadowing Spike] Contain the breach leader at {loc3_prose} and record the ominous signature ({omen})."
-                        if ch_clamped == 1
-                        else f"[{sub_archs[2]}] Complete final chapter containment objective at {loc3_prose}."
-                    )
-                ),
-                "completed": False,
-            },
-        ]
-    elif is_school_scenario(scen_key):
-        from mechanics.social.school_roster import ensure_school_directory_exists
-        raw_roster = ensure_school_directory_exists(session) or []
-        roster_list = raw_roster if isinstance(raw_roster, list) else (raw_roster.get("students", []) if isinstance(raw_roster, dict) else [])
-        from mechanics.world.locations.seeds import get_session_school_name
-        school_name = get_session_school_name(session_id, scen_key) or "the Academy"
-
-        # Deterministic seed hashing for diverse themes & dynamic leads
-        seed = int(session_id or 1) + int(chapter_num or 1) * 31
-        hook_text = (starting_hook_context.get("hook_text") if starting_hook_context else "") or ""
-        hook_arch = (starting_hook_context.get("archetype") if starting_hook_context else "") or ""
-
-        # Safe dynamic student contacts
-        npc1 = roster_list[seed % len(roster_list)]["name"] if roster_list else "the Class Representative"
-        npc2 = roster_list[(seed + 1) % len(roster_list)]["name"] if len(roster_list) > 1 else "the Disciplinary Monitor"
-
-        school_archetype_matrix = [
-            {
-                "theme": "Curfew Breach & Campus Vandalism",
-                "archetype": "Campus Investigation",
-                "title_fmt": "Chapter #{ch}: The Midnight Disturbance at {school}",
-                "obj_fmt": "Unexplained occurrences and curfew violations have thrown {school} into turmoil after hours. Investigate the disturbance at {loc1}, verify student testimonies at {loc2}, and uncover who is orchestrating the clandestine gatherings at {loc3}.",
-                "sub_specs": [
-                    ("Campus Investigation", "Examine physical evidence and witness clues at {loc1}."),
-                    ("Campus Infiltration", "Bypass campus monitors to inspect the restricted records at {loc2}."),
-                    ("Student Diplomacy", "Confront {npc1} regarding the rumors and secure key testimony at {loc3}."),
-                ],
-            },
-            {
-                "theme": "Academic Espionage & Exam Paper Tampering",
-                "archetype": "Academic Espionage",
-                "title_fmt": "Chapter #{ch}: The Compromised Archives at {school}",
-                "obj_fmt": "Confidential evaluation dossiers and restricted examination records have vanished from {school}. Intercept the leaked communications at {loc1}, breach the faculty archives at {loc2}, and extract the truth from {npc1} at {loc3}.",
-                "sub_specs": [
-                    ("Academic Espionage", "Intercept leaked study communications and notes near {loc1}."),
-                    ("Campus Infiltration", "Slip into the locked administrative annex at {loc2} without raising alarms."),
-                    ("Student Diplomacy", "Negotiate with {npc1} to reclaim the compromised files at {loc3}."),
-                ],
-            },
-            {
-                "theme": "Student Council Power Struggle",
-                "archetype": "Council Intrigue",
-                "title_fmt": "Chapter #{ch}: Factional Strife at {school}",
-                "obj_fmt": "Rival campus factions are clashing for dominance over student governance at {school}. Survey the tension at {loc1}, gather clandestine council intel at {loc2}, and broker an agreement with {npc1} at {loc3}.",
-                "sub_specs": [
-                    ("Campus Surveillance", "Monitor faction representatives and scout the staging area at {loc1}."),
-                    ("Campus Infiltration", "Acquire internal council deliberations from {loc2}."),
-                    ("Student Diplomacy", "Meet with {npc1} to formalize a cooperation pact at {loc3}."),
-                ],
-            },
-            {
-                "theme": "Occult Society Rumors & Urban Legend",
-                "archetype": "Occult Mystery",
-                "title_fmt": "Chapter #{ch}: Whispers in the Stacks at {school}",
-                "obj_fmt": "Strange rumors and eerie ward failures have manifested across {school}. Trace the strange occurrences at {loc1}, explore the quiet corridors at {loc2}, and question {npc1} at {loc3} to dispel the rumors.",
-                "sub_specs": [
-                    ("Occult Forensics", "Analyze the strange signs and gather anomalous clues at {loc1}."),
-                    ("Campus Infiltration", "Infiltrate the sealed archive corridors under {loc2}."),
-                    ("Student Diplomacy", "Confront {npc1} and resolve the supernatural scare at {loc3}."),
-                ],
-            },
-        ]
-
-        theme_idx = seed % len(school_archetype_matrix)
-        if "occult" in hook_text.lower() or "ritual" in hook_arch.lower():
-            theme_idx = 3
-        elif "exam" in hook_text.lower() or "grade" in hook_text.lower() or "sabotage" in hook_text.lower():
-            theme_idx = 1
-        elif "council" in hook_text.lower() or "rival" in hook_text.lower() or "club" in hook_text.lower():
-            theme_idx = 2
-
-        spec = school_archetype_matrix[theme_idx]
-        title = spec["title_fmt"].format(ch=chapter_num, school=school_name)
-        archetype = spec["archetype"]
-        objective = spec["obj_fmt"].format(
-            school=school_name, loc1=loc1_prose, loc2=loc2_prose, loc3=loc3_prose, npc1=npc1, npc2=npc2
-        )
-
-        sub_objs = []
-        for idx, (sub_arch, text_tmpl) in enumerate(spec["sub_specs"], 1):
-            sub_objs.append({
-                "id": idx,
-                "archetype": sub_arch,
-                "text": text_tmpl.format(loc1=loc1_prose, loc2=loc2_prose, loc3=loc3_prose, npc1=npc1, npc2=npc2),
-                "completed": False
-            })
-    elif starting_hook_context and chapter_num == 1:
-        arch_title = starting_hook_context.get("archetype_title") or starting_hook_context.get("archetype", "hub_launchpad").replace("_", " ").title()
-        title = f"Chapter #1: The {arch_title} Resolution"
-        archetype = "Inciting Incident"
-        objective = (
-            f"The repercussions of the {arch_title.lower()} incident have begun to unfold across {loc_prose}. "
-            f"Investigate the physical trail left in the wake of the disturbance, secure the surrounding regional thresholds, "
-            f"and confront the rising threat before it spreads further."
-        )
-        sub_objs = [
-            {
-                "id": 1,
-                "archetype": "Investigation",
-                "text": f"Investigate the primary site of the {arch_title.lower()} incident and collect key leads.",
-                "completed": False
-            },
-            {
-                "id": 2,
-                "archetype": "Infiltration",
-                "text": f"Scout the perimeter and bypass security barriers around {loc2_prose}.",
-                "completed": False
-            },
-            {
-                "id": 3,
-                "archetype": "Diplomacy",
-                "text": f"Confront the regional instigator or coordinate countermeasures with allies at {loc3_prose}.",
-                "completed": False
-            }
-        ]
-    elif "cyber" in scen_key.lower():
-        title = f"Chapter #{chapter_num}: Encrypted Subnets"
-        archetype = "Corporate Espionage"
-        objective = (
-            f"Hostile corporate factions have initiated surveillance across {loc_prose}. "
-            f"Infiltrate protected networks, recover encrypted data chips, and establish counter-measures "
-            f"before your squad is tracked down by automated enforcement units."
-        )
-        sub_objs = [
-            {
-                "id": 1,
-                "archetype": "Investigation",
-                "text": f"Hack into the local comms hub at {loc1_prose} and decrypt illicit network chatter.",
-                "completed": False
-            },
-            {
-                "id": 2,
-                "archetype": "Infiltration",
-                "text": f"Bypass automated firewalls and stealthily breach the mainframe sector at {loc2_prose}.",
-                "completed": False
-            },
-            {
-                "id": 3,
-                "archetype": "Diplomacy",
-                "text": f"Deliver extracted intelligence to black-market contacts or extract assets at {loc3_prose}.",
-                "completed": False
-            }
-        ]
+    if persisted_sess:
+        spine = compile_or_get_campaign_spine(session_id=session_id, scen_key=scen_key, lang=eff_lang)
+        storylet = select_chapter_storylet(session_id, ch_clamped, spine=spine, venue_name=loc1, lang=eff_lang)
     else:
-        title = f"Chapter #{chapter_num}: Shadows Over {loc_short or 'the Frontier'}"
-        archetype = "Frontier Delve"
-        objective = (
-            f"Dark forces and unexplained anomalies threaten the stability of {loc_prose}. "
-            f"Explore uncharted reaches, collect critical relics of power, and coordinate with regional guardians "
-            f"to neutralize the gathering peril."
+        mm_default_name = "President Kaelen" if is_school_scenario(scen_key) else "Lord Vaelen"
+        lts_mem = [
+            {"slot": 1, "name": "Envoy Sera", "status": "active"},
+            {"slot": 2, "name": "Warden Thorne", "status": "active"},
+        ]
+        hb = _roll_hidden_campaign_bible(int(session_id or 1), scen_key, mm_default_name, lts_mem)
+        mm_cfg = hb.get("crisis") or {}
+        mm_prof = {
+            "name": mm_default_name,
+            "title": (mm_cfg.get("title") or {}).get(eff_lang) or "The Hidden Architect",
+            "goal": (mm_cfg.get("goal") or {}).get(eff_lang) or "reshape the realm",
+            "omen": (mm_cfg.get("omen") or {}).get(eff_lang) or "ominous signs",
+        }
+        ch_bps = _build_universal_chapters_blueprint(
+            int(session_id or 1),
+            scen_key,
+            mm_prof,
+            lts_mem,
+            hb,
+            bool(scenario_data.is_non_combat_scenario(scen_key)),
+            lang=eff_lang,
         )
-        sub_objs = [
+        mem_spine = {
+            "session_id": int(session_id or 1),
+            "scenario": scen_key,
+            "mastermind_profile": mm_prof,
+            "lieutenants_roster": lts_mem,
+            "chapters_blueprint": ch_bps,
+            "hidden_bible": hb,
+            "ending_axes": _default_ending_axes(),
+            "climax_status": "pending",
+            "epilogue_status": "pending",
+        }
+        storylet = select_chapter_storylet(0, ch_clamped, spine=mem_spine, venue_name=loc1, lang=eff_lang)
+        spine = mem_spine
+
+    title = str(storylet.get("title") or f"Chapter #{ch_clamped}")
+    archetype = str(storylet.get("engine") or "MYSTERY_CASE")
+    objective = str(storylet.get("objective") or "Advance the chapter objective.")
+    is_peak = bool(ch_clamped in PEAK_CHAPTERS)
+    main_stage_count = 3 if is_peak else 2
+    feat_lt = str(storylet.get("featured_lieutenant") or "the Vanguard Envoy")
+    mm_name = str((spine.get("mastermind_profile") or {}).get("name") or feat_lt)
+    target_npc = mm_name if ch_clamped == 10 else feat_lt
+
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.narrative.blueprints import generate_anomalous_campaign_blueprint
+            bp = generate_anomalous_campaign_blueprint(session_id, sess_dict)
+            anomaly = bp.get("world_ending_anomaly") or {}
+            ent_name = str(anomaly.get("name") or "")
+            if ent_name and ent_name not in title and ent_name not in objective and ch_clamped in (1, 10, 11):
+                objective = f"{objective} ({ent_name})"
+        except Exception:
+            pass
+
+    if starting_hook_context and ch_clamped == 1:
+        arch_title = (
+            starting_hook_context.get("archetype_title")
+            or str(starting_hook_context.get("archetype") or "").replace("_", " ").title()
+        ).strip()
+        if arch_title and arch_title.lower() not in title.lower():
+            title = f"{title} — {arch_title}"
+
+    seed_val = int(session_id or 1) * 37 + ch_clamped * 19
+    opt_min = int(storylet.get("optional_min") or (2 if is_peak else 1))
+    opt_max = int(storylet.get("optional_max") or (2 if ch_clamped == 11 else 3))
+    opt_count = opt_min + (seed_val % max(1, (opt_max - opt_min + 1)))
+    opt_count = max(1, min(3, opt_count))
+
+    if ch_clamped in (8, 9):
+        role_pool = ["threatened", "aid", "alternative"]
+    elif is_peak:
+        role_pool = ["aid", "bypass", "alternative"]
+    elif opt_count == 1:
+        role_pool = ["aid" if (seed_val % 2 == 0) else "bypass"]
+    elif opt_count == 2:
+        role_pool = ["aid", "alternative" if ch_clamped >= 2 else "bypass"]
+    else:
+        role_pool = ["aid", "bypass", "alternative"]
+    chosen_roles = role_pool[:opt_count]
+
+    clean_title = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, title, scen_key))
+    clean_obj = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, objective, scen_key))
+
+    sub_objs: list[dict] = [
+        {
+            "id": 0,
+            "archetype": archetype,
+            "blueprint_id": get_blueprint_for_archetype(archetype, clean_obj),
+            "text": clean_obj,
+            "is_optional": False,
+            "is_main": True,
+            "role": "main",
+            "is_discovered": True,
+            "status": "active",
+            "completed": False,
+        }
+    ]
+
+    main_wps: list[dict] = [
+        {
+            "stage_index": 1,
+            "stage_label": clean_narrative_location_arrows(f"Establish approach and field leverage around {loc1_short}"),
+            "target_location": resolve_session_location_tokens(session_id, loc1, scen_key),
+            "target_npc": "",
+            "completion_trigger": "action",
+            "status": "active",
+        }
+    ]
+    if main_stage_count >= 3:
+        main_wps.append(
             {
-                "id": 1,
-                "archetype": "Investigation",
-                "text": f"Examine the anomaly and recover physical evidence from the threshold of {loc1_prose}.",
-                "completed": False
+                "stage_index": 2,
+                "stage_label": clean_narrative_location_arrows(f"Breach the inner defense nexus at {loc2_short}"),
+                "target_location": resolve_session_location_tokens(session_id, loc2, scen_key),
+                "target_npc": "",
+                "completion_trigger": "action",
+                "status": "locked",
+            }
+        )
+    main_wps.append(
+        {
+            "stage_index": len(main_wps) + 1,
+            "stage_label": clean_narrative_location_arrows(f"Resolve the decisive confrontation with {target_npc} {loc3_prose}"),
+            "target_location": resolve_session_location_tokens(session_id, loc3, scen_key),
+            "target_npc": target_npc,
+            "completion_trigger": "action",
+            "status": "locked",
+        }
+    )
+    sub_waypoints: dict[int, list[dict]] = {0: main_wps}
+
+    opt_locs = [loc2, loc3, loc1]
+    for idx_opt, opt_role in enumerate(chosen_roles, start=1):
+        opt_loc_raw = resolve_session_location_tokens(session_id, opt_locs[(idx_opt - 1) % len(opt_locs)], scen_key)
+        opt_venue_clean = format_clean_location_prose(opt_loc_raw, include_zone=False) or loc2_short
+        rendered = render_optional_objective_template(
+            role=opt_role,
+            slots={
+                "venue": opt_venue_clean,
+                "target": target_npc,
+                "informant": feat_lt,
+                "ally": feat_lt,
+                "faction": "Rival Envoy",
             },
+            seed_idx=seed_val + idx_opt,
+            lang=eff_lang,
+        )
+        is_disc = False if (opt_role == "alternative" and idx_opt >= 2) else True
+        opt_text = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, rendered["label"], scen_key))
+        opt_hint = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, rendered["stakes_hint"], scen_key))
+        sub_objs.append(
             {
-                "id": 2,
-                "archetype": "Infiltration",
-                "text": f"Delve into hazardous ruins and bypass mystical barriers at {loc2_prose}.",
-                "completed": False
-            },
+                "id": idx_opt,
+                "optional_id": f"CH{ch_clamped}-OPT{idx_opt}",
+                "archetype": rendered["badge"],
+                "blueprint_id": get_blueprint_for_archetype(opt_role, opt_text),
+                "text": opt_text,
+                "is_optional": True,
+                "is_main": False,
+                "role": opt_role,
+                "badge": rendered["badge"],
+                "stakes_hint": opt_hint,
+                "is_discovered": is_disc,
+                "unlock_trigger": "clue_found" if not is_disc else "upfront",
+                "status": "active",
+                "completed": False,
+            }
+        )
+        sub_waypoints[idx_opt] = [
             {
-                "id": 3,
-                "archetype": "Diplomacy",
-                "text": f"Negotiate with faction scouts or confront the regional champion at {loc3_prose}.",
-                "completed": False
+                "stage_index": 1,
+                "stage_label": opt_text,
+                "target_location": opt_loc_raw,
+                "target_npc": feat_lt if opt_role in ("alternative", "threatened") else "",
+                "completion_trigger": "action",
+                "status": "active" if is_disc else "locked",
             }
         ]
 
-    from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
-    sub_waypoints = {}
-    for idx, so in enumerate(sub_objs, 1):
-        arch = so.get("archetype", "Investigation")
-        so_bp = get_blueprint_for_archetype(arch, so.get("text", ""))
-        so["blueprint_id"] = so_bp
-        req_item, req_cnt = infer_required_item_and_count_from_text(so.get("text", "")) if so_bp == "ACQUISITION" else ("", 1)
-        so["required_item"] = req_item
-        so["required_item_count"] = req_cnt
-        so_loc = loc1 if idx == 1 else (loc2 if idx == 2 else loc3)
-        sub_waypoints[idx] = ensure_multi_stage_waypoints(
-            [], default_loc=so_loc, archetype=arch, secondary_loc=so_loc,
-            session_id=session_id, scen_key=scen_key, required_item=req_item
-        )
-
-    sub_waypoints = game_engine._distribute_fallback_locations(session_id, scen_key, sub_waypoints, sub_objs)
-
-    for so_id, wps in sub_waypoints.items():
-        for wp in wps:
-            t_loc = wp.get("target_location", "").strip()
-            if t_loc:
-                clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
-                process_llm_location_update(session_id, clean_t, scen_key)
-
-    title = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, title, scen_key))
-    objective = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, objective, scen_key))
-    for so in sub_objs:
-        if "text" in so:
-            so["text"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, so["text"], scen_key))
-    for so_id, wps in sub_waypoints.items():
-        for wp in wps:
-            if wp.get("target_location") and "{" in wp["target_location"]:
-                wp["target_location"] = resolve_session_location_tokens(session_id, wp["target_location"], scen_key)
-            if wp.get("stage_label"):
-                wp["stage_label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, wp["stage_label"], scen_key))
+    if persisted_sess:
+        for wps in sub_waypoints.values():
+            for wp in wps:
+                t_loc = (wp.get("target_location") or "").strip()
+                if t_loc:
+                    clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
+                    process_llm_location_update(session_id, clean_t, scen_key)
 
     return {
-        "title": title,
+        "title": clean_title,
         "archetype": archetype,
-        "objective": objective,
+        "objective": clean_obj,
         "sub_objectives": sub_objs,
         "sub_waypoints": sub_waypoints,
+        "is_peak_chapter": is_peak,
+        "deadline_day": None,
+        "deadline_minute": None,
+        "dossier_stage": "compiled",
     }
 
 def ensure_story_quest_exists(session: dict) -> dict | None:
@@ -417,7 +356,11 @@ def ensure_story_quest_exists(session: dict) -> dict | None:
                 sq = db.get_active_story_quest(session_id)
             try:
                 from game_engine.quest_lifecycle import compile_campaign_spine_at_turn_zero
-                compile_campaign_spine_at_turn_zero(session_id, scen_key=str(session.get("scenario") or "fantasy"))
+                compile_campaign_spine_at_turn_zero(
+                    session_id,
+                    scen_key=str(session.get("scenario") or "fantasy"),
+                    lang=str(session.get("narration_language") or session.get("language") or "en"),
+                )
             except Exception:
                 pass
             return sq
@@ -437,14 +380,17 @@ def ensure_story_quest_exists(session: dict) -> dict | None:
         quest_type=data.get("archetype") or "Story Quest",
         title=data.get("title") or f"Chapter #{cur_ch} Objective",
         objective=data.get("objective") or "Explore the area and resolve regional mysteries.",
-        progress=f"0/{len(sub_objs)} Cleared" if sub_objs else f"Quest #{cur_ch}",
+        progress="0/1 Main Objective" if any(isinstance(s, dict) and s.get("id") == 0 for s in sub_objs) else (f"0/{len(sub_objs)} Cleared" if sub_objs else f"Quest #{cur_ch}"),
         current_clues="",
         status="Active",
         reward_xp=250 + (cur_ch * 30),
         reward_gold=60 + (cur_ch * 10),
         is_story_quest=1,
-        clues_required=len(sub_objs),
-        sub_objectives=sub_objs
+        clues_required=1,
+        sub_objectives=sub_objs,
+        deadline_day=None,
+        deadline_minute=None,
+        dossier_stage="compiled",
     )
 
     for so in sub_objs:
@@ -455,7 +401,11 @@ def ensure_story_quest_exists(session: dict) -> dict | None:
 
     try:
         from game_engine.quest_lifecycle import compile_campaign_spine_at_turn_zero
-        compile_campaign_spine_at_turn_zero(session_id, scen_key=str(session.get("scenario") or "fantasy"))
+        compile_campaign_spine_at_turn_zero(
+            session_id,
+            scen_key=str(session.get("scenario") or "fantasy"),
+            lang=str(session.get("narration_language") or session.get("language") or "en"),
+        )
     except Exception:
         pass
 
@@ -526,6 +476,14 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             "The sub-quests should assemble the final keys, allies, preparations, and revelations needed for the upcoming grand finale in Chapter 10.\n"
         )
 
+    from game_engine.prompt_layout import build_side_channel_language_directive
+    sq_lang_dir = build_side_channel_language_directive(
+        session,
+        text_fields=("title", "objective", "sub_quests[].text", "sub_quests[].waypoints[].stage_label"),
+        preserve_fields=("sub_quests[].archetype", "sub_quests[].waypoints[].target_location", "sub_quests[].waypoints[].completion_trigger"),
+        style="narrative",
+    )
+
     system_prompt = (
         f"You are a Game Master creating a Story Quest for Chapter #{chapter_num} of a text RPG.\n"
         f"{pacing_note}"
@@ -539,7 +497,8 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         f"   - Stage 3: Resolving, securing evidence/relic, or confronting/delivering (`completion_trigger: 'skill_check'`).\n"
         f"   - Sub-quests MAY span across multiple distinct locations across their 3 stages (e.g. Stage 1 @ Location A -> Stage 2 @ Location B -> Stage 3 @ Location C).\n"
         f"4. Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences.\n"
-        f"Schema:\n{NEXT_STORY_QUEST_SCHEMA}"
+        + (f"{sq_lang_dir}\n" if sq_lang_dir else "")
+        + f"Schema:\n{NEXT_STORY_QUEST_SCHEMA}"
     )
 
     if previous_completed_title:
@@ -614,7 +573,8 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         try:
             emergency_system = (
                 f"You are a Game Master creating a Story Quest for Chapter #{chapter_num} of a text RPG.\n"
-                f"CRITICAL REQUIREMENT: Output a single valid JSON object ONLY matching this schema:\n"
+                + (f"{sq_lang_dir}\n" if sq_lang_dir else "")
+                + f"CRITICAL REQUIREMENT: Output a single valid JSON object ONLY matching this schema:\n"
                 f"{NEXT_STORY_QUEST_SCHEMA}"
             )
             emergency_user = (
@@ -632,119 +592,65 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             logging.getLogger(__name__).warning("generate_story_quest Emergency Pass 2 failed for Session %s: %s. Using deterministic fallback.", session_id, e2)
             result = None
 
-    # PASS 3: Deterministic Contextual Generator (Guarantees zero blank quests even offline)
+    # PASS 3: Deterministic Contextual Storylet + Dossier Compiler (`<20ms` offline-safe)
+    base_data = create_contextual_story_quest_data(
+        session_id=session_id,
+        session=session,
+        chapter_num=chapter_num,
+        starting_hook_context=starting_hook_context,
+        previous_completed_title=previous_completed_title,
+    )
     if not result or not isinstance(result, dict):
-        return create_contextual_story_quest_data(
-            session_id=session_id,
-            session=session,
-            chapter_num=chapter_num,
-            starting_hook_context=starting_hook_context,
-            previous_completed_title=previous_completed_title
-        )
+        return base_data
+
+    from mechanics.world.locations import sanitize_location_target, clean_narrative_location_arrows
+    from game_engine.quest_lifecycle import sanitize_dossier_prose
 
     raw_sub = result.get("sub_quests") or result.get("sub_objectives") or []
-    sub_objs = []
-    sub_waypoints = {}
-    from mechanics.world.waypoints import ensure_multi_stage_waypoints
+    polished_texts: list[str] = []
     if isinstance(raw_sub, list):
-        for idx, item in enumerate(raw_sub, 1):
-            so_target = avail_locs_list[idx - 1] if idx - 1 < len(avail_locs_list) else loc
+        for item in raw_sub:
             if isinstance(item, str) and item.strip():
-                sub_objs.append({"id": idx, "archetype": "Investigation", "text": item.strip(), "completed": False})
-                sub_waypoints[idx] = ensure_multi_stage_waypoints([], default_loc=so_target, archetype="Investigation", session_id=session_id)
+                polished_texts.append(sanitize_dossier_prose(clean_narrative_location_arrows(item.strip())))
             elif isinstance(item, dict):
-                so_id = item.get("id", idx)
-                arch = item.get("archetype", "Objective")
-                text_val = (item.get("text") or item.get("objective") or "").strip()
-                if text_val:
-                    sub_objs.append({
-                        "id": so_id,
-                        "archetype": arch,
-                        "text": text_val,
-                        "completed": False
-                    })
-                    wp_list = item.get("waypoints") or []
-                    sub_waypoints[so_id] = ensure_multi_stage_waypoints(wp_list, default_loc=so_target, archetype=arch, session_id=session_id)
+                t_val = (item.get("text") or item.get("objective") or "").strip()
+                if t_val:
+                    polished_texts.append(sanitize_dossier_prose(clean_narrative_location_arrows(t_val)))
 
-    # STRICT PYTHON GUARDRAIL: Guarantee EXACTLY 3 Sub-Objectives
-    if len(sub_objs) < 3:
-        existing_texts = [so["text"].lower() for so in sub_objs]
-        obj_text = (result.get("objective") or "").strip()
-        import re
-        clauses = [c.strip() for c in re.split(r'[;.]|,\s*(?:and|then|to)\s*', obj_text) if len(c.strip()) > 15]
-        for clause in clauses:
-            if len(sub_objs) >= 3:
-                break
-            if not any(clause.lower() in et or et in clause.lower() for et in existing_texts):
-                next_id = len(sub_objs) + 1
-                arch = "Infiltration" if next_id == 2 else "Diplomacy"
-                sub_objs.append({
-                    "id": next_id,
-                    "archetype": arch,
-                    "text": clause,
-                    "completed": False
-                })
-                sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch, session_id=session_id)
-                existing_texts.append(clause.lower())
+    clean_title = sanitize_dossier_prose(clean_narrative_location_arrows((result.get("title") or base_data["title"]).strip())) or base_data["title"]
+    clean_obj = sanitize_dossier_prose(clean_narrative_location_arrows((result.get("objective") or base_data["objective"]).strip())) or base_data["objective"]
+    clean_arch = (result.get("archetype") or base_data["archetype"]).strip() or base_data["archetype"]
 
-        archetype_fallbacks = [
-            ("Investigation", "Investigate the primary disturbance and collect critical clues"),
-            ("Infiltration", "Infiltrate the restricted sector and gather vital intelligence"),
-            ("Diplomacy", "Form an alliance or confront the regional instigator")
-        ]
-        while len(sub_objs) < 3:
-            next_id = len(sub_objs) + 1
-            arch, default_text = archetype_fallbacks[next_id - 1]
-            sub_objs.append({
-                "id": next_id,
-                "archetype": arch,
-                "text": default_text,
-                "completed": False
-            })
-            sub_waypoints[next_id] = ensure_multi_stage_waypoints([], default_loc=loc, archetype=arch, session_id=session_id)
+    sub_objs = [dict(so) for so in (base_data.get("sub_objectives") or [])]
+    sub_waypoints = {k: [dict(w) for w in v] for k, v in (base_data.get("sub_waypoints") or {}).items()}
+    if sub_objs:
+        sub_objs[0]["text"] = clean_obj
+        sub_objs[0]["archetype"] = clean_arch
+    for idx_opt, p_txt in enumerate(polished_texts, start=1):
+        if idx_opt < len(sub_objs) and p_txt:
+            sub_objs[idx_opt]["text"] = p_txt
+            if idx_opt in sub_waypoints and sub_waypoints[idx_opt]:
+                sub_waypoints[idx_opt][0]["stage_label"] = p_txt
 
-    from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text
-    # Normalize IDs to 1, 2, 3 and enrich with blueprints
-    for idx, so in enumerate(sub_objs[:3], 1):
-        old_id = so["id"]
-        so["id"] = idx
-        if old_id != idx and old_id in sub_waypoints:
-            sub_waypoints[idx] = sub_waypoints.pop(old_id)
-        arch = so.get("archetype", "Investigation")
-        so_bp = get_blueprint_for_archetype(arch, so.get("text", ""))
-        so["blueprint_id"] = so_bp
-        req_item, req_cnt = infer_required_item_and_count_from_text(so.get("text", "")) if so_bp == "ACQUISITION" else ("", 1)
-        so["required_item"] = req_item
-        so["required_item_count"] = req_cnt
-        if idx in sub_waypoints and req_item:
-            for wp in sub_waypoints[idx]:
-                if wp.get("stage_index") == len(sub_waypoints[idx]):
-                    wp["required_item"] = req_item
-    sub_objs = sub_objs[:3]
-
-    # Distribute fallback locations so each sub-quest targets a DISTINCT location
-    sub_waypoints = game_engine._distribute_fallback_locations(session_id, scen_key, sub_waypoints, sub_objs)
-
-    # Auto-discover target locations in SQLite
-    from mechanics.world.locations import sanitize_location_target, clean_narrative_location_arrows
-    for so in sub_objs:
-        if so.get("text"):
-            so["text"] = clean_narrative_location_arrows(so["text"])
-    for so_id, wps in sub_waypoints.items():
+    for wps in sub_waypoints.values():
         for wp in wps:
             if wp.get("stage_label"):
                 wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
-            t_loc = wp.get("target_location", "").strip()
-            if t_loc:
+            t_loc = (wp.get("target_location") or "").strip()
+            if t_loc and db.get_session(session_id):
                 clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
                 process_llm_location_update(session_id, clean_t, scen_key)
 
     return {
-        "title": clean_narrative_location_arrows((result.get("title") or f"Chapter #{chapter_num} Objective").strip()),
-        "archetype": (result.get("archetype") or "Story Quest").strip(),
-        "objective": clean_narrative_location_arrows((result.get("objective") or "Complete chapter objectives.").strip()),
+        "title": clean_title,
+        "archetype": clean_arch,
+        "objective": clean_obj,
         "sub_objectives": sub_objs,
         "sub_waypoints": sub_waypoints,
+        "is_peak_chapter": base_data.get("is_peak_chapter", False),
+        "deadline_day": None,
+        "deadline_minute": None,
+        "dossier_stage": "compiled",
     }
 
 async def generate_next_story_quest(session_id: int, session: dict, completed_quest_update: dict) -> dict:
@@ -789,10 +695,7 @@ def sync_deterministic_campaign_goals(session_id: int) -> None:
     active_sq = db.get_active_story_quest(session_id)
     sub_ratio = 0.0
     if active_sq and isinstance(active_sq.get("sub_objectives"), list) and active_sq["sub_objectives"]:
-        subs = [s for s in active_sq["sub_objectives"] if isinstance(s, dict)]
-        if subs:
-            done_cnt = sum(1 for s in subs if s.get("completed"))
-            sub_ratio = done_cnt / len(subs)
+        sub_ratio = db.compute_quest_main_progress_ratio(active_sq["sub_objectives"])
     det_pct = min(100, max(0, int(round(((max(1, cur_ch) - 1 + sub_ratio) / MAX_CAMPAIGN_CHAPTERS) * 100))))
     dirty_goals = False
     for g in goals:
@@ -1074,8 +977,12 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
     # 3. Phase 2 (Climax Overcome on Turn N+1): Only when all sub-objectives were ALREADY complete before this turn started
     #    AND the player successfully overcomes the Climax Encounter (LLM returns status='Completed') does it mark Completed.
     if is_sq and sub_objs:
-        all_done = all(so.get("completed") for so in sub_objs)
-        existing_all_done = bool(existing_sub_objs and len(existing_sub_objs) == len(sub_objs) and all(so.get("completed") for so in existing_sub_objs if isinstance(so, dict)))
+        all_done = db.is_quest_main_objectives_complete(sub_objs)
+        existing_all_done = bool(
+            existing_sub_objs
+            and len(existing_sub_objs) == len(sub_objs)
+            and db.is_quest_main_objectives_complete(existing_sub_objs)
+        )
         
         if not all_done:
             status = "Active"
@@ -1120,12 +1027,20 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
         else:
             status = "Active"
     
-    clues_req = len(sub_objs) if sub_objs else 3
+    main_only_sos = [so for so in sub_objs if isinstance(so, dict) and not bool(so.get("is_optional"))]
+    clues_req = len(main_only_sos) if main_only_sos else (len(sub_objs) if sub_objs else 1)
 
     if is_sq and sub_objs:
-        done_count = sum(1 for so in sub_objs if isinstance(so, dict) and so.get("completed"))
-        total_count = len(sub_objs)
-        progress = f"{done_count}/{total_count} Cleared"
+        has_structured = any(isinstance(so, dict) and ("is_optional" in so or so.get("id") == 0) for so in sub_objs)
+        if has_structured and main_only_sos:
+            m0 = main_only_sos[0]
+            done_st = int(m0.get("completed_stages") or (1 if m0.get("completed") else 0))
+            tot_st = max(1, int(m0.get("total_stages") or 1))
+            progress = "1/1 Main Objective" if m0.get("completed") else f"{done_st}/{tot_st} Main Stages"
+        else:
+            done_count = sum(1 for so in sub_objs if isinstance(so, dict) and so.get("completed"))
+            total_count = len(sub_objs)
+            progress = f"{done_count}/{total_count} Cleared"
 
     db.upsert_quest(
         session_id=session_id,
@@ -1146,7 +1061,8 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
         sub_objectives=sub_objs
     )
 
-    # Sync quest_waypoints status
+    # Sync quest_waypoints status (never overwrite uncompleted Optional `sub_obj_id > 0` rows on Main completion)
+    has_structured_wps = any(isinstance(so, dict) and ("is_optional" in so or so.get("id") == 0) for so in sub_objs)
     with db.get_conn() as conn:
         if sub_objs:
             for so in sub_objs:
@@ -1158,10 +1074,16 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
                             (time.time(), session_id, quest_id, so_id)
                         )
         if status == "Completed":
-            conn.execute(
-                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=?",
-                (time.time(), session_id, quest_id)
-            )
+            if has_structured_wps:
+                conn.execute(
+                    "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id = 0)",
+                    (time.time(), session_id, quest_id)
+                )
+            else:
+                conn.execute(
+                    "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=?",
+                    (time.time(), session_id, quest_id)
+                )
         elif status == "Failed":
             conn.execute(
                 "UPDATE quest_waypoints SET status='failed', updated_at=? WHERE session_id=? AND quest_id=?",
@@ -1187,6 +1109,7 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
             if ch_res.get("epilogue_ready"):
                 notice["epilogue_ready"] = True
                 notice["epilogue_choices"] = ch_res.get("epilogue_choices") or []
+                notice["chronicle_tapestry"] = ch_res.get("chronicle_tapestry") or {}
             if newly_discovered_clue:
                 notice["newly_discovered_clue"] = newly_discovered_clue
             return notice
@@ -1211,6 +1134,7 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
             "claimed": False,
             "failed": True,
             "hard_game_over": bool(ch_fail_res.get("hard_game_over")),
+            "fallen_world": bool(ch_fail_res.get("fallen_world")),
             "fail_forward": bool(ch_fail_res.get("fail_forward")),
             "next_quest_id": ch_fail_res.get("next_quest_id"),
             "world_scar": ch_fail_res.get("world_scar"),
@@ -1362,7 +1286,7 @@ def evaluate_quest_state_predicates(
                 if not isinstance(so, dict) or so.get("completed"):
                     continue
                 so_id = so.get("id")
-                if not so_id:
+                if so_id is None:
                     continue
                 so_bp = so.get("blueprint_id") or get_blueprint_for_archetype(so.get("archetype", ""), so.get("text", ""))
                 if so_bp == "ACQUISITION":
@@ -1428,7 +1352,7 @@ def evaluate_quest_state_predicates(
                         if not isinstance(so, dict) or so.get("completed"):
                             continue
                         so_id = so.get("id")
-                        if not so_id:
+                        if so_id is None:
                             continue
                         so_active_wp = db.get_active_waypoint(session_id, qid, so_id)
                         if so_active_wp:
@@ -2484,6 +2408,7 @@ def _resolve_pre_turn_quests_impl(
                 waypoint_notices.append(stage_notice)
                 if stage_notice.get("all_stages_complete") and not _should_defer_dossier_turn_in(session_id, q):
                     completed_quests.append(q)
+                    continue
             elif trig == "arrival":
                 if act_approach in ("wait_for_window", "wait_until_morning"):
                     continue
@@ -2623,7 +2548,7 @@ def _resolve_pre_turn_quests_impl(
                 if not isinstance(so, dict) or so.get("completed"):
                     continue
                 so_id = so.get("id")
-                if not so_id:
+                if so_id is None:
                     continue
                 so_wp = db.get_active_waypoint(session_id, qid, so_id)
                 so_done = False
@@ -2805,12 +2730,45 @@ def _resolve_pre_turn_quests_impl(
                                 if strike_res and strike_res.get("status") == "dire_cost":
                                     so_done = True
 
-                if not so_done and resolves_so_id and str(resolves_so_id) == str(so_id) and is_success:
+                if not so_done and resolves_so_id is not None and str(resolves_so_id) == str(so_id) and is_success:
                     so_done = True
                     advanced_keys.append((qid, so_id))
                 if so_done:
                     so["completed"] = True
+                    so["status"] = "completed"
                     sub_dirty = True
+                    if session_id:
+                        try:
+                            _dos_chk = db.get_quest_dossier(session_id, qid)
+                            if _dos_chk and _dos_chk.get("status_stage") == "compiled":
+                                if bool(so.get("is_optional")):
+                                    from game_engine.quest_turn_resolver import resolve_quest_optional_objective
+                                    _opt_res = resolve_quest_optional_objective(
+                                        session_id=session_id,
+                                        quest_id=qid,
+                                        optional_id=str(so.get("optional_id") or ""),
+                                        sub_obj_id=int(so_id),
+                                        approach=act_approach or "PER",
+                                        succeeded=True,
+                                        check_result_tier=check_tier,
+                                        party_user_ids=party_uids,
+                                    )
+                                    _q_ref = db.get_quest_by_id(session_id, qid)
+                                    if _q_ref and isinstance(_q_ref.get("sub_objectives"), list):
+                                        sub_objs = _q_ref["sub_objectives"]
+                                        q["sub_objectives"] = sub_objs
+                                        q["status"] = _q_ref.get("status", q.get("status"))
+                                elif int(so_id) == 0:
+                                    _climax_c = dict(_dos_chk.get("climax_spec") or {})
+                                    _ms_c = [dict(ms, status="completed", completed=True) for ms in (_climax_c.get("main_stages") or [])]
+                                    if _ms_c:
+                                        _climax_c["main_stages"] = _ms_c
+                                    _climax_c["completed"] = True
+                                    _saved_d = db.upsert_quest_dossier(session_id, qid, climax_spec=_climax_c)
+                                    if _saved_d:
+                                        db.sync_quest_projection_from_dossier(session_id, qid, dossier=_saved_d)
+                        except Exception as _dos_sync_err:
+                            logger.debug("Optional/Main dossier sync skipped: %s", _dos_sync_err)
                     consume_quest_delivery_item_if_needed(
                         session_id=session_id,
                         quest=q,
@@ -2853,27 +2811,38 @@ def _resolve_pre_turn_quests_impl(
                         except Exception as e:
                             logger.warning("Failed to record pre-registered clue: %s", e)
                     break
-            if sub_dirty and session_id:
+            if sub_dirty and session_id and str(q.get("status") or "Active") == "Active":
                 try:
-                    done_cnt = sum(1 for s in sub_objs if isinstance(s, dict) and s.get("completed"))
+                    has_struct_so = any(isinstance(s, dict) and ("is_optional" in s or s.get("id") == 0) for s in sub_objs)
+                    main_sos = [s for s in sub_objs if isinstance(s, dict) and not bool(s.get("is_optional"))]
+                    if has_struct_so and main_sos:
+                        m0_s = main_sos[0]
+                        prog_str = (
+                            "1/1 Main Objective"
+                            if m0_s.get("completed")
+                            else f"{int(m0_s.get('completed_stages') or 0)}/{max(1, int(m0_s.get('total_stages') or 1))} Main Stages"
+                        )
+                    else:
+                        done_cnt = sum(1 for s in sub_objs if isinstance(s, dict) and s.get("completed"))
+                        prog_str = f"{done_cnt}/{len(sub_objs)} Cleared"
                     db.upsert_quest(
                         session_id=session_id,
                         quest_id=qid,
                         quest_type=q.get("quest_type") or "Story Quest",
                         title=q.get("title") or "Quest",
                         objective=q.get("objective") or "",
-                        progress=f"{done_cnt}/{len(sub_objs)} Cleared",
+                        progress=prog_str,
                         current_clues=q.get("current_clues") or "",
                         status=q.get("status") or "Active",
                         reward_xp=int(q.get("reward_xp") or 100),
                         reward_gold=int(q.get("reward_gold") or 30),
                         is_story_quest=int(q.get("is_story_quest") or 0),
-                        clues_required=int(q.get("clues_required") or len(sub_objs)),
+                        clues_required=int(q.get("clues_required") or (len(main_sos) if main_sos else len(sub_objs))),
                         sub_objectives=sub_objs,
                     )
                 except Exception:
                     pass
-                if not q.get("is_story_quest") and all(isinstance(s, dict) and s.get("completed") for s in sub_objs):
+                if not q.get("is_story_quest") and db.is_quest_main_objectives_complete(sub_objs):
                     if q not in completed_quests and not _should_defer_dossier_turn_in(session_id, q):
                         completed_quests.append(q)
 
@@ -2882,12 +2851,13 @@ def _resolve_pre_turn_quests_impl(
             sq, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
             if sq and sq.get("quest_id") == qid:
                 if ("story climax" in act_low or "⚡" in action_str):
-                    sub_objs_done = all(isinstance(s, dict) and s.get("completed") for s in (q.get("sub_objectives") or []))
+                    sub_objs_done = db.is_quest_main_objectives_complete(q.get("sub_objectives") or [])
                     if is_success:
-                        # Auto-mark all sub-objectives as cleared on successful climax
+                        # Auto-mark Main (non-optional) sub-objectives as cleared on successful climax; keep skipped/failed Optionals truthful!
                         for s in (q.get("sub_objectives") or []):
-                            if isinstance(s, dict):
+                            if isinstance(s, dict) and not bool(s.get("is_optional")):
                                 s["completed"] = True
+                                s["status"] = "completed"
                         if q not in completed_quests:
                             completed_quests.append(q)
                     else:
@@ -3037,31 +3007,29 @@ def _resolve_pre_turn_quests_impl(
     has_completed_sq = bool(completed_quests and any(q.get("is_story_quest") for q in completed_quests))
 
     if has_completed_sq and session_id:
-        from game_engine.quest_lifecycle import build_universal_epilogue_choices
-        scen_key_ep = str(session.get("scenario") or "fantasy") if isinstance(session, dict) else "fantasy"
-        cur_db_ch = db.get_session_chapter(session_id) or cur_ch
-        effective_ch = max(cur_ch, cur_db_ch)
-        if effective_ch >= 11 and not (isinstance(session, dict) and session.get("endless_mode_unlocked")):
-            epilogue_choices = build_universal_epilogue_choices(scen_key_ep)
-            db.update_session(session_id, extra={"epilogue_ready": True, "epilogue_choices": epilogue_choices})
+        from game_engine.quest_lifecycle import resolve_chapter_transition
+        sq_item = next((q for q in (completed_quests or []) if q.get("is_story_quest")), None) or {}
+        ch_res = resolve_chapter_transition(
+            session_id=session_id,
+            quest=sq_item,
+            status="Completed",
+            party_user_ids=party_uids,
+            outcome=session if isinstance(session, dict) else None,
+        )
+        if ch_res.get("epilogue_ready"):
             if isinstance(session, dict):
                 session["epilogue_ready"] = True
-                session["epilogue_choices"] = epilogue_choices
+                session["epilogue_choices"] = ch_res.get("epilogue_choices") or []
+                session["chronicle_tapestry"] = ch_res.get("chronicle_tapestry") or {}
                 session["chapter_climax_phase"] = "resolved"
             directives.append(
-                "[MANDATORY CAMPAIGN EPILOGUE RESOLUTION]: Chapter 11 playable epilogue completed! Present the Post-Game Epilogue choice to archive the chronicle or continue in Endless Sandbox Mode."
+                str(
+                    ch_res.get("directive")
+                    or "[MANDATORY CAMPAIGN EPILOGUE RESOLUTION]: Chapter 11 playable epilogue completed! Present the 4-Slide Chronicle Tapestry and Post-Game Epilogue choice."
+                )
             )
             chapter_climax = True
         else:
-            from game_engine.quest_lifecycle import resolve_chapter_transition
-            sq_item = next((q for q in (completed_quests or []) if q.get("is_story_quest")), None) or {}
-            ch_res = resolve_chapter_transition(
-                session_id=session_id,
-                quest=sq_item,
-                status="Completed",
-                party_user_ids=party_uids,
-                outcome=session if isinstance(session, dict) else None,
-            )
             next_ch = int(ch_res.get("next_chapter") or ch_res.get("chapter") or (cur_ch + 1))
             if isinstance(session, dict):
                 session["chapter"] = next_ch
@@ -3077,7 +3045,7 @@ def _resolve_pre_turn_quests_impl(
         active_sq = db.get_active_story_quest(session_id)
         if active_sq:
             sq_subs = active_sq.get("sub_objectives", []) or []
-            if sq_subs and all(isinstance(s, dict) and s.get("completed") for s in sq_subs):
+            if sq_subs and db.is_quest_main_objectives_complete(sq_subs):
                 if isinstance(session, dict):
                     session["chapter_climax_phase"] = "setup" 
 

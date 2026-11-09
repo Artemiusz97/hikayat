@@ -1191,7 +1191,68 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             except Exception:
                 _dynamic_ledger_section = ""
 
+        _dlg_phys_early = (db.get_session_physical_state(session.get("id", 0)) if session.get("id") else None) or session.get("physical_state", {})
+        _dlg_ic_early = str(_dlg_phys_early.get("intimate_contact", "")).lower() if _dlg_phys_early else ""
+        from mechanics.social.physical_state import is_erotic_intimate_contact as _is_erotic_ic_early
+        _in_active_erotic_dlg = bool(_in_active_erotic_dlg or (is_nsfw and not _is_disengaging_dlg and _is_erotic_ic_early(_dlg_ic_early)))
 
+        _dealt_social_seeds_section = ""
+        if _in_active_erotic_dlg or not new_partners:
+            session.pop("_dealt_social_seeds", None)
+        else:
+            try:
+                from mechanics.social import deck as _social_deck, pacing as _social_pacing
+                _hist_list = session.get("history") or []
+                _last_narr_txt = ""
+                if _hist_list and isinstance(_hist_list[-1], dict):
+                    _last_narr_txt = str(_hist_list[-1].get("next_narrative") or _hist_list[-1].get("narrative") or "")
+                _seed_count = 3 if (active_bounty_contact or is_quest_interrogation) and not has_phone_meetup else 5
+                _dealt = _social_deck.deal_social_deck_seeds(
+                    session=session,
+                    partners=new_partners,
+                    party=party,
+                    current_npcs=session.get("pre_turn_stage_npcs") or session.get("current_npcs") or [],
+                    desired_count=_seed_count,
+                    last_narrative=_last_narr_txt,
+                )
+                session["_dealt_social_seeds"] = _dealt
+                _mood_note = ""
+                if session.get("id"):
+                    _mood_parts = []
+                    for _mp_nm in [p for p in new_partners[:3] if p]:
+                        _c_row = _social_pacing.sync_and_get_composure(
+                            int(session["id"]),
+                            _mp_nm,
+                            current_day=int(session.get("current_day", 1) or 1),
+                            current_minute=_dlg_cur_min,
+                            scenario=_dlg_scen_key,
+                        )
+                        _m_mood, _ = _social_pacing.derive_mood_and_dc_mod(
+                            int(_c_row.get("current_composure", 100)),
+                            int(_c_row.get("max_composure", 100)),
+                            str(_c_row.get("composure_state") or "composed"),
+                            clear_the_air_required=bool(int(_c_row.get("clear_the_air_required") or 0) == 1),
+                        )
+                        _mood_parts.append(f"{_mp_nm}={_m_mood}")
+                    if _mood_parts:
+                        _mood_note = f"  * Active Partner Moods: {', '.join(_mood_parts)}.\n"
+                if _dealt:
+                    _seed_lines = []
+                    for _idx_s, _sd in enumerate(_dealt, start=1):
+                        _rep_tag = " [Direct Reply]" if _sd.get("is_direct_reply") else ""
+                        _ab_tag = " [Class/Covert Ability]" if _sd.get("is_covert_ability") else ""
+                        _seed_lines.append(
+                            f"  {_idx_s}. topic_id=\"{_sd['topic_id']}\" | category=\"{_sd['category']}\" | stat=\"{_sd['stat']}\" | target=\"{_sd['target_npc']}\"{_rep_tag}{_ab_tag} -> Cue: {_sd['prompt_cue']}"
+                        )
+                    _dealt_social_seeds_section = (
+                        "- [PRE-TURN SOCIAL SEEDS & MOOD]:\n"
+                        + _mood_note
+                        + "  * Author bespoke, natural, scene-grounded `next_choices` labels from these server-dealt topic seeds and copy each seed's exact `topic_id` and `category` onto its JSON choice object (NEVER leak stat names, numbers, or spoiler hints into `label` or narrative prose):\n"
+                        + "\n".join(_seed_lines)
+                        + "\n"
+                    )
+            except Exception:
+                _dealt_social_seeds_section = ""
 
         if active_bounty_contact and not has_phone_meetup:
 
@@ -1249,10 +1310,11 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"{intimate_dynamic_openness_section}"
 
-                f"- `next_choices`: Generate 3 to 5 conversational choices reacting directly to what {partner_str} just said. You MUST include at least 1-2 choices that directly advance, accept, clarify, or commit to the bounty task (e.g. accepting the notes, agreeing to the delivery, asking for delivery instructions). Every substantive choice MUST require a skill check (stat: CHA, INT, PER, or AGI, requirement: 5 to 8). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
+                f"- `next_choices`: Generate 4 to 6 conversational choices reacting directly to what {partner_str} just said. Include 1-2 choices that directly advance, accept, clarify, or commit to the bounty task, plus dynamic social seeds from `[PRE-TURN SOCIAL SEEDS & MOOD]` (echoing `topic_id` & `category`). Every substantive choice MUST require a skill check across all 7 SPECIAL stats (STR, PER, END, CHA, INT, AGI, or LUK, requirement: 3 to 12). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
                 f"- CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} about the task details'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 f"{ring2_peer_section}"
                 f"{_dynamic_ledger_section}"
+                f"{_dealt_social_seeds_section}"
                 f"{_stall_note}"
                 f"{multi_partner_note}"
                 f"{recruitment_prompt}"
@@ -1291,11 +1353,12 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"{intimate_dynamic_openness_section}"
 
-                f"- `next_choices`: Generate 3 to 5 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed. Every substantive choice (pressing for evidence/clues, negotiating terms, challenging motives, strategic cooperation) MUST require a skill check (stat: INT, CHA, or PER, requirement: 5 to 8). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
+                f"- `next_choices`: Generate 4 to 6 organic, distinct conversational choices reacting directly to what {partner_str} just said or proposed, combining active investigation stances with `[PRE-TURN SOCIAL SEEDS & MOOD]` (echoing `topic_id` & `category`). Every substantive choice MUST require a skill check across all 7 SPECIAL stats (STR, PER, END, CHA, INT, AGI, or LUK, requirement: 3 to 12). Only the 1 dedicated conversational exit has stat: NONE and requirement: 0.\n"
                 f"- CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Press {partner_str} for details'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
                 f"- Give distinct tactical stances (e.g. pressing for evidence/clues, negotiating terms/compromise, challenging motives, or offering strategic cooperation).\n"
                 f"{ring2_peer_section}"
                 f"{_dynamic_ledger_section}"
+                f"{_dealt_social_seeds_section}"
                 f"{_stall_note}"
 
                 f"{multi_partner_note}"
@@ -1326,14 +1389,13 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 )
             else:
                 _social_next_choices_block = (
-                    f"- `next_choices`: Generate 4 to 6 diverse, rich, and character-driven conversational choices reacting naturally to what {partner_str} just said. Social and banter interactions MUST use proper skill checks (DC 5 to 8) to make roleplaying engaging. Every choice in conversation MUST require a skill check EXCEPT the dedicated exit choice:\n"
-                    f"  1. 🎭 [Playful Banter / Humor]: Playfully tease or crack a witty joke (stat: CHA, INT, or LUK, requirement: 5 to 8).\n"
-                    f"  2. 💬 [Personal Inquiry / Getting to Know Them]: Ask insightful questions about their background/passions or read their mood (stat: PER or INT, requirement: 5 to 7).\n"
-                    f"  3. 💖 [Warmth / Affection / Flirtation]: Give a sincere compliment, show support, or flirt charmingly (or for Shameless/Bold partners, [Bold / Provocative Flirtation / Suggestive Teasing]) (stat: CHA, requirement: 6 to 8, aligned with affinity & dynamic).\n"
-                    f"  4. ☕ [Casual / Shared Atmosphere]: Casual observation, sharing refreshments, or enjoying the setting (stat: PER, AGI, or CHA, requirement: 5 to 7).\n"
-                    f"  5. 🎲 [Fun Activity / Shared Experience / Transition]: Propose trying food/drinks, playing a light game, moving to a new cozy spot, or enjoying the immediate activity together (stat: CHA, AGI, or LUK, requirement: 5 to 8).\n"
-                    f"  6. 🚪 [Dedicated Exit]: The ONLY action with stat: NONE and requirement: 0 is the 1 dedicated conversational exit (e.g. 'Thank {partner_str} and excuse yourself to step away'). Every other conversational choice MUST require a skill check (DC 5-8)!\n"
-                    f"  - CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} how their day has been'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, or requirement numbers inside the label prose.\n"
+                    f"{_dealt_social_seeds_section}"
+                    f"- `next_choices`: Generate 4 to 6 diverse, contextual, Sims-style conversational choices reacting naturally to what {partner_str} just said, grounded in `[PRE-TURN SOCIAL SEEDS & MOOD]` (copy each seed's `topic_id` and `category` onto its JSON choice). Every conversational choice MUST require a skill check across all 7 SPECIAL stats (STR, PER, END, CHA, INT, AGI, or LUK, requirement: 3 to 12) EXCEPT the 1 dedicated conversational exit (`stat: NONE`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away'):\n"
+                    f"  1. 💬 [Getting to Know / Friendly Situational]: Ask about passions, work, personal boundaries, ambient world events/rumors, or immediate surroundings.\n"
+                    f"  2. 🎭 [Banter / Humor / Callbacks]: Crack situational jokes, playful teasing, or callbacks to shared history and promises.\n"
+                    f"  3. 💖 [Chemistry / Bold Gambles / Friction]: Express warmth, bold flirtation, or confident pushback/rivalry challenges matched to the moment.\n"
+                    f"  4. 🚪 [Dedicated Exit]: The ONLY action with stat: NONE and requirement: 0 is the 1 dedicated conversational exit.\n"
+                    f"  - CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} how their day has been'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, spoiler icons, or requirement numbers inside the label prose.\n"
                 )
 
             dialogue_prompt_block = (

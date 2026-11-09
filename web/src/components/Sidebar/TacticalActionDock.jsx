@@ -2,8 +2,9 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Eye, EyeOff, Sparkles, Gift, Package, Clock, Smartphone,
-  Search, ShieldAlert, Target, Zap, Loader2, ArrowRight
+  Search, ShieldAlert, Target, Zap, Loader2, ArrowRight, Flame
 } from 'lucide-react';
+import { isAnomalousScenarioKey } from '../../utils/session';
 
 const TacticalActionDock = ({
   session,
@@ -20,6 +21,7 @@ const TacticalActionDock = ({
   onOpenTimeSkip,
   onOpenQuickBelt,
   onOpenGiveGift,
+  onOpenContracts,
   isMobile = false
 }) => {
   const { t } = useTranslation();
@@ -276,6 +278,30 @@ const TacticalActionDock = ({
       pressed: phoneOpen,
       tone: phoneOpen ? 'is-active' : '',
     },
+    ...(isAnomalousScenarioKey(session?.scenario) && onOpenContracts
+      ? [
+          {
+            id: 'contracts',
+            icon: Flame,
+            label: t('contracts.nav_label', 'Contracts'),
+            title: t('contracts.nav_tooltip', 'Entity Contracts, Devil Pacts & Remote Communion'),
+            onClick: onOpenContracts,
+            disabled: processing,
+            badge: session?.contracts_hud?.has_breach
+              ? '!'
+              : session?.contracts_hud?.available_count > 0
+                ? `+${session.contracts_hud.available_count}`
+                : session?.contracts_hud?.slot_used > 0
+                  ? `${session.contracts_hud.slot_used}/${session.contracts_hud.slot_capacity || 2}`
+                  : null,
+            tone: session?.contracts_hud?.has_breach
+              ? 'is-danger'
+              : session?.contracts_hud?.slot_used > 0
+                ? 'is-active'
+                : '',
+          },
+        ]
+      : []),
   ];
 
   return (

@@ -302,7 +302,14 @@ def is_campus_node_or_location(
     if any(off in combined for off in (
         "zone_commercial", "zone_downtown", "zone_residential", "zone_seaside_bay",
         "zone_mountain_park", "zone_recreational_park", "zone_university", "loc_university", "university",
-        "loc_player_house", "sub_player_bedroom", "loc_cafe", "loc_arcade",
+        "zone_eastern_sanctuary", "zone_woods_reserve", "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
+        "loc_eastern_temple", "loc_es_lantern_tea_street", "loc_es_bamboo_footbath_bridge",
+        "loc_bunian_threshold_glade", "loc_et_fox_torii_tunnel",
+        "loc_player_house", "sub_player_bedroom", "fac_agency_residence", "fac_downtown_walkup",
+        "fac_temple_residence", "fac_suburbs_townhouse", "fac_tenement_flat", "fac_container_loft",
+        "fac_vault_safehouse", "fac_shophouse_loft", "fac_highrise_condo", "fac_ocean_bungalow",
+        "fac_onsen_villa", "fac_sovereign_mansion", "fac_npc_res_", "sub_npc_ent_", "sub_npc_bed_",
+        "loc_cafe", "loc_arcade",
         "loc_convenience_store", "loc_bookstore", "loc_fashion_boutique",
         "loc_karaoke_box", "loc_ramen_shop", "loc_local_park", "loc_city_square",
         "loc_restaurant", "loc_clothing_store", "loc_brand_clothing_store",
@@ -881,5 +888,13 @@ def evaluate_world_schedule_node_access(
                     "force_open": True,
                     "badge_override": "Open",
                 }
+
+    if n_id in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade") and ((300 <= safe_min <= 390) or (1020 <= safe_min <= 1140)):
+        return {
+            "schedule_locked": False,
+            "is_trespassing": False,
+            "force_open": False,
+            "badge_override": "Twilight Veil Thinning",
+        }
 
     return {"schedule_locked": False, "is_trespassing": False, "force_open": False}

@@ -19,10 +19,44 @@ export const useGameSession = (user, character) => {
 
   const socketRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
+  const activeSessionIdRef = useRef(null);
+  const imagePollIntervalRef = useRef(null);
+  const safetyTimerRef = useRef(null);
+
+  const clearImagePoll = useCallback(() => {
+    if (imagePollIntervalRef.current) {
+      clearInterval(imagePollIntervalRef.current);
+      imagePollIntervalRef.current = null;
+    }
+  }, []);
+
+  const clearSafetyTimer = useCallback(() => {
+    if (safetyTimerRef.current) {
+      clearTimeout(safetyTimerRef.current);
+      safetyTimerRef.current = null;
+    }
+  }, []);
+
+  const closeSocket = useCallback(() => {
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+    if (socketRef.current) {
+      const ws = socketRef.current;
+      socketRef.current = null;
+      ws._intentionalClose = true;
+      ws.onclose = null;
+      try {
+        ws.close();
+      } catch (e) {}
+    }
+  }, []);
 
   const isInitialLoadRef = useRef(true);
   const pollForSceneImage = useCallback((sessionId, maxAttempts = 15) => {
     if (!sessionId) return;
+    clearImagePoll();
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
@@ -30,6 +64,9 @@ export const useGameSession = (user, character) => {
         const res = await apiCall(`/api/adventure/session-image/${sessionId}`);
         if (res && res.scene_image_url) {
           clearInterval(interval);
+          if (imagePollIntervalRef.current === interval) {
+            imagePollIntervalRef.current = null;
+          }
           setSession(prev => {
             if (!prev || (prev.id !== sessionId && String(prev.id) !== String(sessionId))) return prev;
             const hist = Array.isArray(prev.history) ? [...prev.history] : [];
@@ -47,14 +84,21 @@ export const useGameSession = (user, character) => {
           });
         } else if (attempts >= maxAttempts) {
           clearInterval(interval);
+          if (imagePollIntervalRef.current === interval) {
+            imagePollIntervalRef.current = null;
+          }
         }
       } catch (e) {
         if (attempts >= maxAttempts) {
           clearInterval(interval);
+          if (imagePollIntervalRef.current === interval) {
+            imagePollIntervalRef.current = null;
+          }
         }
       }
     }, 2000);
-  }, []);
+    imagePollIntervalRef.current = interval;
+  }, [clearImagePoll]);
 
 
   const fetchActiveSession = useCallback(async (options = {}) => {
@@ -90,30 +134,35 @@ export const useGameSession = (user, character) => {
   useEffect(() => {
     fetchActiveSession();
     return () => {
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
+      clearImagePoll();
+      clearSafetyTimer();
+      closeSocket();
     };
-  }, [fetchActiveSession]);
+  }, [fetchActiveSession, clearImagePoll, clearSafetyTimer, closeSocket]);
 
   const connectWebSocket = useCallback((sessionId) => {
-    if (!sessionId || !user?.user_id) return;
+    if (!sessionId || sessionId === 'embarking' || !user?.user_id) return;
+    activeSessionIdRef.current = sessionId;
     if (
       socketRef.current &&
-      socketRef.current._sessionId === sessionId &&
+      String(socketRef.current._sessionId) === String(sessionId) &&
       (socketRef.current.readyState === WebSocket.OPEN || socketRef.current.readyState === WebSocket.CONNECTING)
     ) {
       return;
     }
     if (socketRef.current) {
+      const prevWs = socketRef.current;
+      socketRef.current = null;
+      prevWs._intentionalClose = true;
+      prevWs.onclose = null;
       try {
-        socketRef.current.close();
+        prevWs.close();
       } catch (e) {}
     }
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}?user_id=${user.user_id}`;
+    const tokenParam = user?.auth_token ? `&token=${encodeURIComponent(user.auth_token)}` : '';
+    const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}?user_id=${user.user_id}${tokenParam}`;
 
     const ws = new WebSocket(wsUrl);
     ws._sessionId = sessionId;
@@ -176,7 +225,16 @@ export const useGameSession = (user, character) => {
           pollForSceneImage(data.session.id);
         }
       } else if (data.type === 'HEARTBEAT') {
-        // Keepalive acknowledged from backend turn engine
+        // Keepalive acknowledged from backend turn engine — extend safety timer
+        if (safetyTimerRef.current) {
+          clearTimeout(safetyTimerRef.current);
+          safetyTimerRef.current = setTimeout(() => {
+            console.warn('Action processing exceeded safety window (182s), releasing lock.');
+            setProcessingTurn(false);
+            setPendingAction(null);
+            safetyTimerRef.current = null;
+          }, 182000);
+        }
       } else if (data.type === 'UPDATE_SCENE') {
         setSession(prev => ({
           ...data.session,
@@ -190,6 +248,7 @@ export const useGameSession = (user, character) => {
           waitingCount: data.waiting_count
         });
       } else if (data.type === 'SCENE_IMAGE') {
+        clearImagePoll();
         setSession(prev => {
           if (!prev) return prev;
           const hist = Array.isArray(prev.history) ? [...prev.history] : [];
@@ -225,6 +284,9 @@ export const useGameSession = (user, character) => {
       } else if (data.type === 'WORLD_PULSE_SYNC') {
         setSession(prev => (prev ? { ...prev, world_pulse: data.world_pulse } : prev));
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
+      } else if (data.type === 'REALTY_STATE_SYNC') {
+        setSession(prev => (prev ? { ...prev, realty: data.realty } : prev));
+        setLastSyncTimestamp(Date.now());
       } else if (data.type === 'STEALTH_STATE_UPDATED') {
         setSession(prev => {
           if (!prev) return prev;
@@ -262,10 +324,23 @@ export const useGameSession = (user, character) => {
       if (socketRef.current === ws) {
         socketRef.current = null;
       }
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      // Auto-reconnect unconditionally so server restarts or hot-reloads heal seamlessly
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+      if (
+        ws._intentionalClose ||
+        event?.code === 1008 ||
+        !activeSessionIdRef.current ||
+        String(activeSessionIdRef.current) !== String(sessionId)
+      ) {
+        return;
+      }
+      // Auto-reconnect across server restarts / hot-reloads when session remains active
       reconnectTimeoutRef.current = setTimeout(() => {
-        connectWebSocket(sessionId);
+        if (activeSessionIdRef.current && String(activeSessionIdRef.current) === String(sessionId)) {
+          connectWebSocket(sessionId);
+        }
       }, 2000);
     };
 
@@ -274,7 +349,18 @@ export const useGameSession = (user, character) => {
         ws.close();
       } catch (e) {}
     };
-  }, [user?.user_id]);
+  }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage]);
+
+  useEffect(() => {
+    if (session?.id && session.id !== 'embarking') {
+      activeSessionIdRef.current = session.id;
+      connectWebSocket(session.id);
+    } else if (!session?.id) {
+      activeSessionIdRef.current = null;
+      clearImagePoll();
+      closeSocket();
+    }
+  }, [session?.id, connectWebSocket, clearImagePoll, closeSocket]);
 
   const sendPartyChat = useCallback((messageText, senderName) => {
     const clean = (messageText || '').trim();
@@ -303,14 +389,18 @@ export const useGameSession = (user, character) => {
   }, [user]);
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
+    const safeScenario = (!scenarioKey || ['none', 'null', 'undefined'].includes(String(scenarioKey).trim().toLowerCase()))
+      ? 'fantasy'
+      : scenarioKey;
     // Immediately transition to narration UI with active processing banner
+    setActionError(null);
     setPausedOnDashboard(false);
     setProcessingTurn(true);
     setPendingAction({ label: 'Embarking on new journey...' });
     setSession({
       id: 'embarking',
-      scenario: scenarioKey,
-      scenario_display_name: options.scenario_display_name || scenarioKey,
+      scenario: safeScenario,
+      scenario_display_name: options.scenario_display_name || safeScenario,
       current_location: 'Beginning Journey...',
       narrative: '',
       history: [],
@@ -325,12 +415,12 @@ export const useGameSession = (user, character) => {
         timeout: 180000,
         method: 'POST',
         body: JSON.stringify({
+          ...options,
           user_id: user.user_id,
-          scenario: scenarioKey,
+          scenario: safeScenario,
           mode: mode,
           capacity: options.capacity,
           tags: options.tags,
-          ...options
         })
       });
 
@@ -372,11 +462,13 @@ export const useGameSession = (user, character) => {
     setPendingAction(actionData);
     setActionError(null);
 
-    const safetyTimer = setTimeout(() => {
-      console.warn('Action processing exceeded safety window (60s), releasing lock.');
+    clearSafetyTimer();
+    safetyTimerRef.current = setTimeout(() => {
+      console.warn('Action processing exceeded safety window (182s), releasing lock.');
       setProcessingTurn(false);
       setPendingAction(null);
-    }, 60000);
+      safetyTimerRef.current = null;
+    }, 182000);
 
     try {
       const payload = {
@@ -446,7 +538,7 @@ export const useGameSession = (user, character) => {
       setStreamingState(null);
       throw e;
     } finally {
-      clearTimeout(safetyTimer);
+      clearSafetyTimer();
       setProcessingTurn(false);
       setPendingAction(null);
     }
@@ -515,9 +607,9 @@ export const useGameSession = (user, character) => {
         console.warn("Failed to end session:", e);
       }
     }
-    if (socketRef.current) {
-      socketRef.current.close();
-    }
+    activeSessionIdRef.current = null;
+    clearImagePoll();
+    closeSocket();
     setSession(null);
     setPausedOnDashboard(false);
     setWaitingForParty(false);

@@ -121,6 +121,20 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
     if access_info.get("is_unlocked") and access_info.get("access_tier") in ("restricted", "private"):
         lines.append("- ACCESS PERMISSION: Door unlocked (access granted for this session/day).")
 
+    try:
+        from .residences import get_player_owned_or_starter_property_for_node
+        owned_res = get_player_owned_or_starter_property_for_node(session_id, curr_node.get("node_id", ""))
+        if owned_res:
+            cat_meta = owned_res.get("catalog_entry") or {}
+            qual_sensory = str(cat_meta.get("luxury_sensory") or cat_meta.get("description") or "").strip()
+            if qual_sensory:
+                lines.append(
+                    f"- PRIVATE RESIDENCE AMBIENCE: Player's personal safe haven ({qual_sensory}). "
+                    "Convey comfort and privacy through sensory prose only—never mention game numbers or bonuses."
+                )
+    except Exception:
+        pass
+
     detailed_props = get_detailed_node_props(session_id, curr_node.get("node_id", ""), scenario_key=scen_key)
     room_props = [p["name"] for p in detailed_props] if detailed_props else get_node_props(session_id, curr_node.get("node_id", ""), scenario_key=scen_key)
     if room_props:
@@ -401,8 +415,14 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
     if session_id and curr_node:
         outgoing = db.get_outgoing_edges(session_id, curr_node_id)
         edge_lines = []
+        from .pathfinding import is_node_hidden
         for e in outgoing:
             to_id = e.get("to_node_id")
+            if str(e.get("edge_type") or "") == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1:
+                continue
+            target_w_node = db.get_world_node(session_id, to_id) if to_id else None
+            if target_w_node and is_node_hidden(target_w_node):
+                continue
             to_name = e.get("to_node_name") or to_id
             t_min = e.get("travel_minutes", 1)
             is_locked = e.get("is_locked", 0)
@@ -914,6 +934,16 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         p_item["scene_residue"] = acc.get("scene_residue")
                         p_item["known_npcs_here"] = p_occ["known_npcs"][:3]
                         p_item["unmet_activity_count"] = p_occ["unmet_count"]
+
+                        from .residences import is_unpurchased_realty_node
+                        unbought_realty = is_unpurchased_realty_node(session_id, pnid, session=sess_row)
+                        if unbought_realty:
+                            p_item["is_unpurchased_realty"] = True
+                            p_item["realty_price"] = int(unbought_realty.get("price") or 0)
+                            p_item["realty_property_id"] = str(unbought_realty.get("property_id") or "")
+                            p_item["sub_location_details"] = []
+                            p_item["sub_locations"] = []
+                            child_rooms = []
 
                         sub_details = []
                         for cr in child_rooms:

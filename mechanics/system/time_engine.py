@@ -155,7 +155,7 @@ def scenario_allows_camp_sleep(scen_key: str = "") -> bool:
 BED_KEYWORDS = {
     "bed", "beds", "bedroom", "bedrooms", "bunk", "bunks", "berth", "berths",
     "futon", "futons", "cot", "cots", "mattress", "hammock", "dorm", "dormitory",
-    "dormitories", "stateroom"
+    "dormitories", "stateroom", "suite", "tatami", "studio", "bungalow", "penthouse", "loft", "billet", "quarters"
 }
 
 COUCH_KEYWORDS = {
@@ -179,13 +179,20 @@ def get_location_sleep_context(
     props: Optional[List[str]] = None,
     scenario: str = "",
     session_id: Optional[int] = None,
+    node_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Evaluates whether the current environment provides a viable sleeping/napping surface."""
+    prop_rest_mult = 1.0
+    if not scenario and session_id:
+        try:
+            scenario = str((db.get_session(int(session_id)) or {}).get("scenario") or "")
+        except Exception:
+            scenario = ""
     if scenario_allows_camp_sleep(scenario):
         return {
             "surface": "camp",
             "can_sleep": True,
-            "recovery_ratio": 1.0,
+            "recovery_ratio": round(1.0 * prop_rest_mult, 3),
             "surface_label": "Camp",
             "reason": "Wilderness/fantasy environment permits making camp anywhere."
         }
@@ -237,6 +244,47 @@ def get_location_sleep_context(
     for fb in FALSE_BED_SUBSTRINGS:
         clean_env = clean_env.replace(fb, " ")
 
+    prop_rest_mult = 1.0
+    if session_id:
+        try:
+            from mechanics.world.locations.residences import get_player_owned_or_starter_property_for_node
+            sess_sleep = db.get_session(int(session_id)) or {}
+            resolved_loc_nid = str(node_id or "") or ((db.resolve_node_id_from_location(int(session_id), location_name) or "") if location_name else "")
+            nid_sleep = resolved_loc_nid or str(sess_sleep.get("current_node_id") or "")
+            if nid_sleep:
+                owned_sleep = get_player_owned_or_starter_property_for_node(int(session_id), nid_sleep, session=sess_sleep)
+                if owned_sleep and owned_sleep.get("catalog_entry"):
+                    prop_rest_mult = max(1.0, float(owned_sleep["catalog_entry"].get("rest_multiplier") or 1.0))
+        except Exception:
+            prop_rest_mult = 1.0
+
+    sanctuary_bed_unlocked = False
+    if session_id:
+        try:
+            from mechanics.world.locations.folklore_veil import get_folklore_sanctuary_rest_multiplier
+            sess_sanc = db.get_session(int(session_id)) or {}
+            res_sanc_nid = str(node_id or "") or ((db.resolve_node_id_from_location(int(session_id), location_name) or "") if location_name else "")
+            sanc_nid = res_sanc_nid or str(sess_sanc.get("current_node_id") or "")
+            if sanc_nid in ("sub_kitsune_sovereign_pavilion", "sub_bunian_royal_istana"):
+                sanc_mult = get_folklore_sanctuary_rest_multiplier(
+                    int(session_id),
+                    sanc_nid,
+                    active_companions=(sess_sanc.get("temporary_companions") or []) + (sess_sanc.get("party_npcs") or []),
+                )
+                if sanc_mult > 1.0:
+                    prop_rest_mult = max(prop_rest_mult, float(sanc_mult))
+                    sanctuary_bed_unlocked = True
+        except Exception:
+            pass
+    if sanctuary_bed_unlocked:
+        return {
+            "surface": "bed",
+            "can_sleep": True,
+            "recovery_ratio": round(1.0 * prop_rest_mult, 3),
+            "surface_label": "Sacred Sanctuary Pavilion",
+            "reason": "Welcomed inside the Sovereign/Royal Folklore Pavilion (150% sacred rest recovery).",
+        }
+
     # 1. Check for dedicated bed surfaces (100% recovery)
     words = set(re.findall(r"[a-z]+", clean_env))
     if (
@@ -247,7 +295,7 @@ def get_location_sleep_context(
         return {
             "surface": "bed",
             "can_sleep": True,
-            "recovery_ratio": 1.0,
+            "recovery_ratio": round(1.0 * prop_rest_mult, 3),
             "surface_label": "Bed",
             "reason": "Dedicated bed / sleeping quarters available (100% recovery)."
         }
@@ -261,7 +309,7 @@ def get_location_sleep_context(
         return {
             "surface": "couch",
             "can_sleep": True,
-            "recovery_ratio": 0.5,
+            "recovery_ratio": round(0.5 * prop_rest_mult, 3),
             "surface_label": "Sofa / Couch",
             "reason": "Sofa / couch available (50% recovery)."
         }
@@ -321,11 +369,46 @@ def calculate_action_time_cost(
     if is_combat or any(kw in lbl for kw in ["attack", "strike", "cast ", "shoot", "defend", "brace", "dodge"]):
         return 5
 
+    def _apply_pact_transit_compression(base_mins: int) -> int:
+        if base_mins <= 0 or not session_id:
+            return base_mins
+        try:
+            from mechanics.pacts import compute_pact_travel_time_multiplier, is_entity_contracts_scenario
+            if not is_entity_contracts_scenario(scen_key):
+                return base_mins
+            act_uid = int(action.get("user_id") or (action.get("char") or {}).get("user_id") or 0) if isinstance(action, dict) else 0
+            if not act_uid:
+                sess_tr = db.get_session(int(session_id)) or {}
+                act_uid = int(sess_tr.get("host_user_id") or 0)
+                cur_day_tr = int(sess_tr.get("current_day") or 1)
+            else:
+                cur_day_tr, _, _ = db.get_session_time(int(session_id))
+            if not act_uid:
+                return base_mins
+            pacts_tr = db.get_player_active_pacts(int(session_id), act_uid)
+            if not pacts_tr:
+                return base_mins
+            t_mult, zero_ckey = compute_pact_travel_time_multiplier(
+                pacts_tr,
+                current_day=int(cur_day_tr or 1),
+                scenario_or_key=scen_key,
+            )
+            if zero_ckey:
+                db.mark_pact_zero_minute_step_used(int(session_id), zero_ckey, int(cur_day_tr or 1))
+                return 0
+            if 0.0 < t_mult < 1.0:
+                return max(1, int(round(base_mins * t_mult)))
+        except Exception:
+            pass
+        return base_mins
+
     # 3. Location Travel & Movement
     try:
         if old_loc and new_loc and old_loc != new_loc:
             from mechanics.world.mobility import calculate_route_travel_time
-            return calculate_route_travel_time(old_loc, new_loc, scen_key=scen_key, session_id=session_id)
+            return _apply_pact_transit_compression(
+                calculate_route_travel_time(old_loc, new_loc, scen_key=scen_key, session_id=session_id)
+            )
     except Exception:
         pass
 
@@ -334,8 +417,8 @@ def calculate_action_time_cost(
     if any(tv in lbl for tv in travel_verbs):
         is_modern = is_modern_setting(scen_key)
         if any(kw in lbl for kw in ["district", "downtown", "suburb", "city", "zone", "station", "valley", "mountains", "forest"]):
-            return 25 if is_modern else 120
-        return 5 if is_modern else 15
+            return _apply_pact_transit_compression(25 if is_modern else 120)
+        return _apply_pact_transit_compression(5 if is_modern else 15)
 
     # 4. Dialogue / Social Turn
     if is_dialogue or any(kw in lbl for kw in ["talk", "speak", "discuss", "chat", "ask", "inquire", "whisper", "comfort", "tease", "flirt", "confess"]):

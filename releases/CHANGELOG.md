@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.9.0** | 2026-11-10 | Minor | Entity Contracts & Pacts, Realty & Property Ownership, Folklore Veil Settlements, Social Pacing Engine, and Security Layer. |
 | **v2.8.0** | 2026-11-06 | Minor | Folklore Codex, World Pulse Background Simulation, Multi-Engine Quest Architecture, Forensic Dossiers, and Awakened Resonance. |
 | **v2.7.0** | 2026-10-28 | Minor | Cast Contract Authority, Dynamic Scenery & Lighting, Investigatory Spatial Immunity, Romance Choice Auto-Injection, Clean Headless Pruning & Production Release. |
 | **v2.6.0** | 2026-10-27 | Minor | Five Normalized World Models, Anomalous Incursions, Stealth Escalation, Town & Campus Rosters, Web Contacts & Theme Dock, Test Concurrency Hardening. |
@@ -47,6 +48,26 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.9.0] - 2026-11-10
+
+#### Added & Enhanced
+- **Entity Contracts & Eldritch Covenants**:
+  - Binding agreements with supernatural patrons and anomalous entities granting awakening perks in exchange for deterministic tithes, taboos, and geas restrictions (`api/contracts.py`, `cogs/adventure/views/contracts.py`, `db/contracts.py`, `mechanics/pacts/`).
+  - Interactive pact negotiation UI on Discord and Web (`EntityContractsModal.jsx`).
+- **Realty & Safehouse Ownership Subsystem**:
+  - Property acquisition and lease engine (`api/realty.py`, `db/properties.py`, `mechanics/world/locations/realty_catalog.py`, `mechanics/world/locations/residences.py`).
+  - Functional residences providing private storage, warding protection against anomalies, and discrete rendezvous venues.
+- **Folklore Veil & Rural Mythological Settlements**:
+  - Hidden spatial settlements and spiritual landmarks concealed behind perception and research thresholds (`mechanics/world/locations/folklore_veil.py`, `data/folklore_villages_catalog.json`).
+- **Social Pacing & Conversational Deck Engine**:
+  - Anti-burnout social pacing curves and structured 4-card conversational action deck (`db/social_pacing.py`, `mechanics/social/pacing.py`, `mechanics/social/deck.py`).
+- **Chronicle Tapestry & Campaign History**:
+  - Visual campaign timeline viewer navigating storylets, major world state shifts, and pivotal decisions (`web/src/components/Modals/ChronicleTapestryModal.jsx`, `data/campaign_storylets_catalog.json`).
+- **Security & Input Sanitization Layer**:
+  - Defense-in-depth sanitization preventing prompt injections, control tag spoofing (`[ITEM_JSON]`, `[GEAR_JSON]`), and malformed input vectors (`api/security.py`, `mechanics/system/input_sanitizer.py`).
+- **Modular Anomalous Events Package**:
+  - Replaced legacy monolithic module with modular domain package `mechanics/world/anomalous_events/`.
 
 ### [v2.8.0] - 2026-11-06
 

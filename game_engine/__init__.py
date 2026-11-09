@@ -22,12 +22,15 @@ from .quest_lifecycle import (
     accept_bounty_contract_async,
     forfeit_side_bounty,
     build_universal_epilogue_choices,
+    evaluate_skipped_threatened_optionals,
     resolve_chapter_transition,
     resolve_epilogue_choice,
     complete_remediation_bounty_if_linked,
 )
 from .quest_turn_resolver import (
     is_approach_burned,
+    unlock_hidden_quest_optional,
+    resolve_quest_optional_objective,
     resolve_quest_approach_failure,
     evaluate_nonlinear_leads_and_climax_gate,
     resolve_quest_combat_outcome,
@@ -42,6 +45,7 @@ from .quest_agency import (
     acquire_quest_macguffin,
     resolve_quest_turn_in_or_betrayal,
     evaluate_schedule_curfew_and_coop_precedence,
+    redact_quest_for_fog_of_war,
     build_fog_of_war_quest_payload,
     build_fog_of_war_quest_prompt_block,
 )
@@ -49,6 +53,7 @@ from .state import *
 from .turn import *
 from .turn_context import TurnContext
 from .choices_cleaner import clean_choices_impl, sanitize_and_diversify_choices, build_hybrid_turn_choices, is_malformed_choice_label
+from .prompt_layout import build_language_directive, build_side_channel_language_directive
 from .pronoun_resolver import tag_narrative_pronouns, strip_pronoun_tags, annotate_turn_pronouns
 from llm_client import call_llm_json, call_llm_json_stream
 from mechanics.social.roster_tags import (

@@ -6,6 +6,7 @@ from typing import Any, Optional, Tuple
 import db
 import mechanics.system.phone
 import scenario_data
+from game_engine.prompt_layout import build_side_channel_language_directive
 from mechanics.social.relationships import clamp_score, is_contact_eligible
 
 log = logging.getLogger("hikayat.phone")
@@ -29,6 +30,8 @@ async def handle_dm_over_limit(
     player_char: dict[str, Any],
     user_message: str,
     current_day: int,
+    session: Optional[dict[str, Any]] = None,
+    speaker_gender: str = "",
 ) -> dict[str, Any]:
     """Handles over-limit phone DM attempts with escalating badgering penalties."""
     over_count = daily_limits.get(intent_category, {}).get("over_limit_count", 0) + 1
@@ -67,7 +70,18 @@ async def handle_dm_over_limit(
         )
     system_prompt += (
         "Write a short, realistic mobile text reply (1-2 sentences) in natural messaging style.\n"
-        "Respond with ONLY a single valid JSON object matching:\n"
+        + (
+            (_ref_dir + "\n")
+            if (_ref_dir := build_side_channel_language_directive(
+                session if isinstance(session, dict) else (db.get_session(session_id) or {}),
+                text_fields=("reply_text",),
+                style="sms",
+                speaker_gender=speaker_gender,
+                recipient_gender=str(player_char.get("gender") or ""),
+            ))
+            else ""
+        )
+        + "Respond with ONLY a single valid JSON object matching:\n"
         '{"reply_text": "string"}'
     )
     user_prompt = f"Player ({player_char.get('name', 'Hero')}): {user_message}\nGenerate {contact_name}'s refusal text reply:"

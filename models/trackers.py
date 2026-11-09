@@ -1,7 +1,21 @@
+from __future__ import annotations
 from typing import List, Optional, Dict, Literal, Any, Union
 from pydantic import BaseModel, Field, ConfigDict, model_validator, field_validator
 
-class Appearance(BaseModel):
+
+class DictAccessibleModel(BaseModel):
+    """Base Pydantic model that provides dict-like subscripting and .get() for legacy consumer compatibility."""
+    def __getitem__(self, item: str) -> Any:
+        try:
+            return getattr(self, item)
+        except AttributeError:
+            raise KeyError(item)
+
+    def get(self, item: str, default: Any = None) -> Any:
+        return getattr(self, item, default)
+
+
+class Appearance(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
 
     eye_color: Optional[str] = None
@@ -24,7 +38,7 @@ class Appearance(BaseModel):
     intercourse_experience: Optional[str] = None
     oral_experience: Optional[str] = None
 
-class TrackerEntity(BaseModel):
+class TrackerEntity(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
 
     name: str = Field(..., description="Exact character or entity name")
@@ -100,7 +114,7 @@ class TrackerEntity(BaseModel):
             return {"name": data.strip()}
         return data
 
-class CharacterOutcome(BaseModel):
+class CharacterOutcome(DictAccessibleModel):
     name: str = Field(..., description="Exact character name")
     hp_change: int = Field(default=0)
     temp_hp_change: int = Field(default=0)
@@ -120,12 +134,12 @@ class CharacterOutcome(BaseModel):
         except (TypeError, ValueError):
             return 0
 
-class EntityAudit(BaseModel):
+class EntityAudit(DictAccessibleModel):
     present_named_characters: List[str] = Field(default_factory=list, description="EVERY named individual physically present in the immediate room right now")
     speaking_characters: List[str] = Field(default_factory=list, description="NPCs who speak aloud in this scene")
     departed_characters: List[str] = Field(default_factory=list, description="NPCs who departed, exited, said goodbye, or left during this turn")
 
-class NewEntity(BaseModel):
+class NewEntity(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
 
     type: str = Field(default="person", description="person, place, or faction")
@@ -178,7 +192,7 @@ class NewEntity(BaseModel):
             return "general"
         return None
 
-class MerchantEncounter(BaseModel):
+class MerchantEncounter(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
 
     present: bool = False
@@ -200,7 +214,7 @@ class MerchantEncounter(BaseModel):
                 data["present"] = p_val.lower() in ("true", "1", "yes")
         return data
 
-class RelationshipUpdate(BaseModel):
+class RelationshipUpdate(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
 
     npc_name: str
@@ -261,7 +275,7 @@ class RelationshipUpdate(BaseModel):
         s = str(v).lower().strip()
         return s if s in ("resonated", "clashed", "none") else None
 
-class FactionUpdate(BaseModel):
+class FactionUpdate(DictAccessibleModel):
     faction_name: str
     delta_score: int = Field(default=0)
     notes: Optional[str] = None

@@ -22,7 +22,7 @@ class SettingsCog(commands.Cog):
     settings_group = app_commands.Group(name="settings", description="Your personal Hikayat preferences")
 
     async def _handle_model_info(self, interaction: discord.Interaction):
-        await interaction.response.defer()
+        await interaction.response.defer(ephemeral=True)
         
         # Determine active session and whether NSFW routing is active for this user
         session_id = await adb(db.get_active_session_id_for_user, interaction.user.id)
@@ -120,7 +120,7 @@ class SettingsCog(commands.Cog):
 
 
             embed.set_footer(text=f"Hikayat v{APP_VERSION}")
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Failed to reach LLM (`{active_model}`): `{e}`", ephemeral=True)
 
@@ -132,6 +132,19 @@ class SettingsCog(commands.Cog):
     async def model_info(self, interaction: discord.Interaction):
         await self._handle_model_info(interaction)
 
+
+    @settings_group.command(name="language", description="Set your preferred story narration and interface language")
+    @app_commands.choices(lang=[
+        app_commands.Choice(name="English (GB)", value="en"),
+        app_commands.Choice(name="Polski (PL)", value="pl"),
+        app_commands.Choice(name="Bahasa Melayu (MY)", value="ms"),
+        app_commands.Choice(name="中文 (CN)", value="zh"),
+        app_commands.Choice(name="Deutsch (DE)", value="de"),
+    ])
+    async def language(self, interaction: discord.Interaction, lang: app_commands.Choice[str]):
+        await adb(db.update_settings, interaction.user.id, language=lang.value, ui_language=lang.value, narration_language=lang.value)
+        msg = f"Language set to **{lang.name}**. Story narration and system options will now use this language."
+        await interaction.response.send_message(msg, ephemeral=True)
 
     @settings_group.command(name="verbosity", description="How the narrator should write scenes")
     @app_commands.choices(style=[
@@ -220,6 +233,9 @@ class SettingsCog(commands.Cog):
     async def show(self, interaction: discord.Interaction):
         s = await adb(db.get_settings, interaction.user.id)
         embed = discord.Embed(title="Your Hikayat Settings", color=discord.Color.teal())
+        lang_names = {"en": "English (GB)", "pl": "Polski (PL)", "ms": "Bahasa Melayu (MY)", "zh": "中文 (CN)", "de": "Deutsch (DE)"}
+        active_lang = lang_names.get(s.get("narration_language") or s.get("language") or "en", "English (GB)")
+        embed.add_field(name="Language", value=active_lang, inline=True)
         embed.add_field(name="Verbosity", value=s["verbosity"].capitalize(), inline=True)
         dialogue_disp = s.get("dialogue_mode", "balanced").capitalize()
         embed.add_field(name="Dialogue", value=dialogue_disp, inline=True)

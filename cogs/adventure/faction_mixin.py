@@ -11,26 +11,31 @@ class FactionMixin:
     """Faction HQ menu, membership application, safehouse rest, quartermaster, bounty, and promotion trial handlers for AdventureCog."""
 
     async def open_faction_hq_menu(self, interaction: discord.Interaction, session_id: int, user_id: int):
-        session = db.get_session(session_id)
+        session = await adb(db.get_session, session_id)
+        if not session:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
         current_loc = session.get("current_location", "")
-        faction = db.get_faction_by_hq(session_id, current_loc)
+        faction, char = await asyncio.gather(
+            adb(db.get_faction_by_hq, session_id, current_loc),
+            adb(db.get_character, user_id),
+        )
         if not faction:
             await interaction.response.send_message("No Faction HQ here.", ephemeral=True)
             return
         
         from mechanics.social.factions import FactionHQView
-        view = FactionHQView(self, session_id, session["turn_order"], faction)
+        view = FactionHQView(self, session_id, session["turn_order"], faction, session=session)
         embed = discord.Embed(title=f"🏛️ {faction.get('name', 'HQ')} Headquarters",
                               description=faction.get("notes", "A bustling center of faction activity."),
                               color=discord.Color.blurple())
         
-        char = db.get_character(user_id)
         rep = faction.get("reputation_score", 0)
         from mechanics.social.factions import get_faction_tier
         tier = get_faction_tier(rep)
         
         embed.add_field(name="Your Standing", value=f"**{tier['name']}** ({rep:+d})", inline=True)
-        if char.get("joined_faction_id") == faction["faction_id"]:
+        if char and char.get("joined_faction_id") == faction["faction_id"]:
             embed.add_field(name="Your Rank", value=f"Rank {char.get('faction_rank', 1)}: {char.get('faction_title', 'Member')}", inline=True)
         else:
             embed.add_field(name="Membership", value="Not a member", inline=True)
@@ -79,8 +84,9 @@ class FactionMixin:
             await interaction.response.send_message("You need **Liked** standing or higher to use the safehouse rest.", ephemeral=True)
             return
             
-        char = db.get_character(user_id)
-        db.apply_hp_mp_delta(user_id, char["max_hp"], char["max_mp"], 0)
+        char = await adb(db.get_character, user_id)
+        if char:
+            await adb(db.apply_hp_mp_delta, user_id, char["max_hp"], char["max_mp"], 0)
         await interaction.response.send_message("You rest at the faction safehouse, recovering all HP and MP safely.", ephemeral=True)
 
     async def faction_quartermaster(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
@@ -137,7 +143,7 @@ class FactionMixin:
             False,
             user_id,
         )
-        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx)
+        view = BuySelectView(self, session_id, stock, discount, shop_ctx=shop_ctx, user_id=user_id)
         lines = "\n".join(
             f"**{i['name']}** ({i['item_type']}) — {compute_effective_shop_item_price(i, shop_ctx=shop_ctx, discount_pct=discount)}g "
             f"x{i['quantity']}\n{i.get('description') or ''}".rstrip()
@@ -259,13 +265,13 @@ class FactionMixin:
             new_title = get_rank_title(template, target_rank)
             from mechanics.social.factions import promote_player_in_roster
             new_roster = promote_player_in_roster(roster, char["name"], target_rank, template)
-            db.update_faction_leadership_roster(session_id, faction["faction_id"], new_roster)
-            db.set_character_faction_membership(char["id"], faction["faction_id"], target_rank, new_title)
+            await adb(db.update_faction_leadership_roster, session_id, faction["faction_id"], new_roster)
+            await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], target_rank, new_title)
             await interaction.response.send_message(f"You have been promoted to **{new_title}**!", ephemeral=True)
             return
-            
+
         # Store pending promotion in session so game_engine can resolve it
-        session = db.get_session(session_id)
+        session = await adb(db.get_session, session_id)
         scen_key = session.get("scenario", "fantasy")
         session["pending_promotion"] = {
             "faction_id": faction["faction_id"],
@@ -273,22 +279,25 @@ class FactionMixin:
             "player_name": char["name"],
             "template": template
         }
-        db.update_session(session_id, extra={"pending_promotion": session["pending_promotion"]})
-        
+        await adb(db.update_session, session_id, extra={"pending_promotion": session["pending_promotion"]})
+
         # Inject the promotion trial directive into the current turn
         directive = get_promotion_trial_directive(current_rank, target_rank, incumbent_name, faction.get("name", "Faction"), template, scen_key)
-        
+
         embed = discord.Embed(title="⚔️ Promotion Trial Triggered", description=f"You have challenged **{incumbent_name}** for the rank of {get_rank_title(template, target_rank)}! Wait for the GM to respond.", color=discord.Color.red())
         await interaction.response.send_message(embed=embed, ephemeral=False)
-        
+
         # We manually trigger an LLM turn to resolve the challenge setup
         await self._trigger_promotion_trial_turn(interaction, session_id, directive)
-        
+
     async def _trigger_promotion_trial_turn(self, interaction: discord.Interaction, session_id: int, directive: str):
         # We simulate a turn submission with the directive embedded in the narrative
-        session = db.get_session(session_id)
-        actor_char = db.get_character(interaction.user.id)
-        party = [(db.get_character(uid), db.get_inventory(uid)) for uid in session["turn_order"]]
+        def _load_trial_ctx():
+            s = db.get_session(session_id)
+            ac = db.get_character(interaction.user.id, session_id=session_id)
+            return s, ac
+
+        session, actor_char = await adb(_load_trial_ctx)
         
         async def background_task():
             from services.turn_service import TurnService
@@ -311,18 +320,36 @@ class FactionMixin:
                 
                 # Render next turn
                 from .embeds import sync_scene_embed, scene_embed
-                updated_session = db.get_session(session_id)
-                updated_party = [(db.get_character(uid), db.get_inventory(uid)) for uid in updated_session["turn_order"]]
+                updated_session = await adb(db.get_session, session_id)
+                updated_party = list(await asyncio.gather(
+                    *[(asyncio.gather(adb(db.get_character, uid), adb(db.get_inventory, uid)))
+                      for uid in updated_session["turn_order"]]
+                ))
                 
                 from cogs.adventure import SyncChoiceView, ChoiceView
                 if updated_session["mode"] == "sync":
                     embeds = sync_scene_embed(updated_session, updated_party, updated_session["scene_title"], updated_session["narrative"], updated_session["choices"], updated_session["turn_order"])
-                    view = SyncChoiceView(self, session_id, updated_session["turn_order"], updated_session["choices"], updated_party, updated_session["merchant"])
+                    view = await SyncChoiceView.create(
+                        self, session_id, updated_session["turn_order"], updated_session["choices"],
+                        updated_party, updated_session["merchant"], session=updated_session,
+                    )
                 else:
                     turn_uid = db.current_turn_user_id(updated_session)
-                    turn_char = db.get_character(turn_uid)
+                    party_by_uid = {
+                        (c.get("user_id") or c.get("id")): (c, inv)
+                        for c, inv in updated_party
+                        if c
+                    }
+                    if turn_uid in party_by_uid:
+                        turn_char, turn_inv = party_by_uid[turn_uid]
+                    else:
+                        turn_char = await adb(db.get_character, turn_uid)
+                        turn_inv = None
                     embeds = scene_embed(updated_session, turn_char, updated_session["scene_title"], updated_session["narrative"], updated_session["choices"])
-                    view = ChoiceView(self, session_id, turn_uid, updated_session["choices"], turn_char, updated_session["merchant"])
+                    view = await ChoiceView.create(
+                        self, session_id, turn_uid, updated_session["choices"],
+                        turn_char, updated_session["merchant"], session=updated_session, actor_inv=turn_inv,
+                    )
                     
                 await interaction.channel.send(embeds=embeds, view=view)
                 
@@ -333,3 +360,54 @@ class FactionMixin:
 
     async def faction_leave(self, interaction: discord.Interaction, session_id: int, user_id: int):
         await interaction.response.edit_message(content="You close the faction menu.", view=None, embed=None)
+
+    async def _do_entity_contracts(self, interaction: discord.Interaction) -> None:
+        char = await adb(db.get_character, interaction.user.id)
+        if not char:
+            msg = "You need a character first. Use `/character create`."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        session_id = await adb(db.get_active_session_id_for_user, interaction.user.id)
+        if not session_id:
+            msg = "No active adventure. Start one with `/adventure start` or `/adventure custom`."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        session = await adb(db.get_session, session_id)
+        if not session or session.get("status") != "active":
+            msg = "No active adventure session found."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        from mechanics.pacts import is_entity_contracts_scenario, build_contracts_overview_payload
+        from .views.contracts import EntityContractsView, build_entity_contracts_embed
+        if not is_entity_contracts_scenario(session.get("scenario", "")):
+            msg = "Entity Contracts & Devil Pacts are available in Anomalous Incursions & Anomalous High School scenarios."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
+
+        settings = await adb(db.get_settings, interaction.user.id) or {}
+        lang = str(settings.get("language") or "en").strip().lower()[:2]
+        if lang not in ("en", "pl", "ms", "zh", "de"):
+            lang = "en"
+        overview = await adb(build_contracts_overview_payload, session_id, interaction.user.id, lang=lang)
+        initial_tab = "discover" if (not overview.get("active_pacts") and overview.get("available_patrons")) else "active"
+        view = EntityContractsView(self, session_id, interaction.user.id, overview, tab=initial_tab, lang=lang)
+        embed = build_entity_contracts_embed(overview, tab=initial_tab, selected_patron_id=view.selected_patron_id, lang=lang)
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)

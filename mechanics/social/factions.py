@@ -83,17 +83,23 @@ FACTION_HIERARCHIES: Dict[str, List[Dict[str, Any]]] = {
         {"rank": 3, "title": "High Paladin",                  "required_rep": 60, "is_leader": False},
         {"rank": 4, "title": "Grand Master",                  "required_rep": 85, "is_leader": True},
     ],
+    "bureau": [
+        {"rank": 1, "title": "Field Coordinator",               "required_rep": 1,  "is_leader": False},
+        {"rank": 2, "title": "Section Chief",                   "required_rep": 30, "is_leader": False},
+        {"rank": 3, "title": "Deputy Director",                 "required_rep": 60, "is_leader": False},
+        {"rank": 4, "title": "Bureau Director",                 "required_rep": 85, "is_leader": True},
+    ],
     "corpo": [
-        {"rank": 1, "title": "Lead Project Coordinator",      "required_rep": 1,  "is_leader": False},
-        {"rank": 2, "title": "Operations Manager",            "required_rep": 30, "is_leader": False},
-        {"rank": 3, "title": "Senior Director",               "required_rep": 60, "is_leader": False},
-        {"rank": 4, "title": "Division Executive",            "required_rep": 85, "is_leader": True},
+        {"rank": 1, "title": "Portfolio Lead",                  "required_rep": 1,  "is_leader": False},
+        {"rank": 2, "title": "Operations Director",             "required_rep": 30, "is_leader": False},
+        {"rank": 3, "title": "Vice President of Containment",   "required_rep": 60, "is_leader": False},
+        {"rank": 4, "title": "Chief Executive",                 "required_rep": 85, "is_leader": True},
     ],
     "small_agency": [
-        {"rank": 1, "title": "Junior Case Handler",           "required_rep": 1,  "is_leader": False},
-        {"rank": 2, "title": "Lead Field Contractor",         "required_rep": 30, "is_leader": False},
-        {"rank": 3, "title": "Senior Office Partner",         "required_rep": 60, "is_leader": False},
-        {"rank": 4, "title": "Agency Founder & Boss",         "required_rep": 85, "is_leader": True},
+        {"rank": 1, "title": "Associate Investigator",          "required_rep": 1,  "is_leader": False},
+        {"rank": 2, "title": "Senior Field Specialist",         "required_rep": 30, "is_leader": False},
+        {"rank": 3, "title": "Managing Partner",                "required_rep": 60, "is_leader": False},
+        {"rank": 4, "title": "Principal & Founder",             "required_rep": 85, "is_leader": True},
     ],
     "syndicate": [
         {"rank": 1, "title": "Field Coordinator",             "required_rep": 1,  "is_leader": False},
@@ -970,13 +976,39 @@ def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
     if cat in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
         return cat
     hq = str(faction.get("hq_location_id") or "").lower()
+    hq_node = str(faction.get("hq_node_id") or "").strip().lower()
+    hier = str(faction.get("hierarchy_template") or "").strip().lower()
     notes = str(faction.get("notes") or "").lower()
     name_l = str(faction.get("name") or "").lower()
-    if "loc_hq_executive_dispatch" in hq or "state-sanctioned" in notes or "taxpayer" in notes:
+    if hq_node == "loc_agency_hq":
+        return "public_agency"
+    if hq_node == "loc_private_hq_1":
+        return "private_agency_1"
+    if hq_node == "loc_private_hq_2":
+        return "private_agency_2"
+    if hq_node in ("loc_eastern_temple", "zone_eastern_temple"):
+        return "monastic_order"
+    if hq_node == "loc_cult_sanctum_hq":
+        return "cult_faction"
+    if hq_node == "loc_clandestine_syndicate_hq":
+        return "clandestine_faction"
+    if (
+        "loc_hq_executive_dispatch" in hq
+        or "executive & tactical dispatch" in hq
+        or "state-sanctioned" in notes
+        or "taxpayer" in notes
+    ):
         return "public_agency"
     if "loc_et_main_sanctuary" in hq or "monastic" in notes or "exorcist" in name_l or "shrine" in name_l:
         return "monastic_order"
-    if "regional tower hq" in hq or "corporate tower hq" in hq or "tower hq" in hq or "loc_private_hq_1" in hq or "in-house by corporate r&d" in notes:
+    if (
+        "regional tower hq" in hq
+        or "corporate tower hq" in hq
+        or "tower hq" in hq
+        or "loc_private_hq_1" in hq
+        or "in-house by corporate r&d" in notes
+        or "defense and containment conglomerate" in notes
+    ):
         return "private_agency_1"
     if (
         "field office hq" in hq
@@ -987,12 +1019,20 @@ def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
         or "rival private" in notes
         or "tight-budget local private" in notes
         or "ordinary commercial office" in notes
+        or "partner-owned private investigation" in notes
+        or "brick commercial suite" in notes
     ):
         return "private_agency_2"
     if "hidden sanctum" in hq or "loc_cult_sanctum_hq" in hq or "congregation" in notes or "worship" in notes:
         return "cult_faction"
     if "shadow exchange" in hq or "loc_clandestine_syndicate_hq" in hq or "black-budget" in notes:
         return "clandestine_faction"
+    if hier == "bureau":
+        return "public_agency"
+    if hier == "small_agency":
+        return "private_agency_2"
+    if hier == "corpo":
+        return "private_agency_1"
     if cat == "private_agency":
         return "private_agency_1"
     return cat
@@ -1016,20 +1056,20 @@ def get_anomalous_faction_perks_list(archetype_key: str, promotion_tier: int = 1
         ]
     elif arch in ("private_agency", "private_agency_1"):
         return [
-            "Commission Contractor: 0G Daily Salary — earn full bounty payouts and keep 100% of anomaly loot",
-            "In-House Corporate R&D Armory: Proprietary tech & gear (+20% Anomalous Tag chance & +1 Tier Bias) at 1.35x R&D markup",
+            "Commission Operative: 0G Daily Salary — earn full contract payouts and keep 100% of anomaly loot",
+            "Special Ordnance Vault: Smart-linked & experimental gear (+20% Anomalous Tag chance & +1 Tier Bias) at 1.35x specialty markup",
             "Public Agency Shops: Permitted to purchase at 1.0x standard price (no discount)",
             "Cross-Contracting: May accept own Corporate Conglomerate, Public Agency (paid contract), & Smartphone Freelance bounties",
-            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep with the corporation",
-            "Non-Compete Clause: Barred from Rival Private Agency & Monastic Order bounties",
+            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep with the conglomerate",
+            "Non-Compete Clause: Barred from Independent Private Agency & Monastic Order bounties",
         ]
     elif arch == "private_agency_2":
         return [
-            "Commission Contractor: 0G Daily Salary — earn full bounty payouts and keep 100% of anomaly loot",
-            "Multi-Vendor Surplus Cage: Eclectic third-party & salvaged gear (+20% Anomalous Tag chance & +1 Tier Bias) at 1.35x broker markup",
+            "Retained Specialist: 0G Daily Salary — earn full contract payouts and keep 100% of anomaly loot",
+            "Custom Gunsmith & Specialty Broker Armory: Custom-tuned & ward-fitted gear (+20% Anomalous Tag chance & +1 Tier Bias) at 1.35x broker rate",
             "Public Agency Shops: Permitted to purchase at 1.0x standard price (no discount)",
-            "Cross-Contracting: May accept own Local Agency, Public Agency (paid contract), & Smartphone Freelance bounties",
-            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep with your agency",
+            "Cross-Contracting: May accept own Independent Agency, Public Agency (paid contract), & Smartphone Freelance bounties",
+            "Daily Mandatory Dispatch: Must complete within the day or suffer -15 Rep with your firm",
             "Non-Compete Clause: Barred from Corporate Conglomerate & Monastic Order bounties",
         ]
     elif arch == "monastic_order":
@@ -1131,20 +1171,50 @@ def generate_faction_patrol(faction: Dict[str, Any], avg_party_level: int,
 import discord
 
 class FactionHQView(discord.ui.View):
-    def __init__(self, cog, session_id: int, member_ids: list, faction: dict):
+    def __init__(self, cog, session_id: int, member_ids: list, faction: dict, *, session: dict | None = None):
         super().__init__(timeout=1800)
         self.cog = cog
         self.session_id = session_id
-        self.member_ids = member_ids
+        self.member_ids = [int(m) for m in (member_ids or []) if m is not None]
         self.faction = faction
+        self._initial_session = session
         self.build_buttons(None)
 
     def _in_party(self, user_id: int) -> bool:
-        return user_id in self.member_ids
+        return int(user_id) in self.member_ids
+
+    async def _resolve_allowed_party_ids(self) -> set[int]:
+        if self.member_ids:
+            return set(self.member_ids)
+        if not self.session_id:
+            return set()
+        import db
+
+        def _fetch_party_ids(sid: int) -> set[int]:
+            ids: set[int] = set()
+            for m in (db.get_session_members(sid) or []):
+                if m is not None:
+                    ids.add(int(m))
+            sess = db.get_session(sid)
+            if sess:
+                if sess.get("host_user_id") is not None:
+                    ids.add(int(sess["host_user_id"]))
+                for u in (sess.get("turn_order") or []):
+                    if u is not None:
+                        ids.add(int(u))
+            return ids
+
+        resolved = await db.adb(_fetch_party_ids, int(self.session_id))
+        if resolved:
+            self.member_ids = sorted(resolved)
+        return resolved
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not in this session.", ephemeral=True)
+        uid = int(interaction.user.id)
+        allowed = await self._resolve_allowed_party_ids()
+        if not allowed or uid not in allowed:
+            if interaction.response.is_done() is not True:
+                await interaction.response.send_message("You're not in this session.", ephemeral=True)
             return False
         return True
 
@@ -1175,8 +1245,9 @@ class FactionHQView(discord.ui.View):
         self.add_item(btn)
 
         try:
+            import db
             import scenario_data as _sd_fhq
-            sess_fhq = db.get_session(self.session_id) if self.session_id else None
+            sess_fhq = self._initial_session or (db.get_session(self.session_id) if self.session_id else None)
             if sess_fhq and _sd_fhq.is_anomalous_incursions_scenario(sess_fhq.get("scenario", "")):
                 cal_btn = discord.ui.Button(label="Telemetry Calibration", style=discord.ButtonStyle.primary, emoji="🧬")
                 cal_btn.callback = self._on_calibrate
@@ -1189,37 +1260,36 @@ class FactionHQView(discord.ui.View):
         self.add_item(leave)
 
     async def _on_apply(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not in this session.", ephemeral=True)
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_apply(interaction, self.session_id, interaction.user.id, self.faction)
 
     async def _on_rest(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_rest(interaction, self.session_id, interaction.user.id, self.faction)
 
     async def _on_quartermaster(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_quartermaster(interaction, self.session_id, interaction.user.id, self.faction)
 
     async def _on_bounty(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_bounty(interaction, self.session_id, interaction.user.id, self.faction)
 
     async def _on_promotion(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_promotion(interaction, self.session_id, interaction.user.id, self.faction)
 
     async def _on_calibrate(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
-            await interaction.response.send_message("You're not in this session.", ephemeral=True)
+        if not await self.interaction_check(interaction):
             return
+        import db
         from cogs.adventure.views.loadout import TelemetryCalibrationView
-        cur_3axis = db.get_character_3axis(interaction.user.id) or {}
+        cur_3axis = (await db.adb(db.get_character_3axis, interaction.user.id)) or {}
         view = TelemetryCalibrationView(
             self.cog,
             interaction.user.id,
@@ -1235,7 +1305,7 @@ class FactionHQView(discord.ui.View):
         )
 
     async def _on_leave(self, interaction: discord.Interaction):
-        if not self._in_party(interaction.user.id):
+        if not await self.interaction_check(interaction):
             return
         await self.cog.faction_leave(interaction, self.session_id, interaction.user.id)
 
@@ -1896,6 +1966,7 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
             delta_score=initial_delta,
             category=category,
             hq_location_id=hq,
+            hq_node_id=fac.get("hq_node_id", ""),
             notes=notes,
             hierarchy_template=template,
             leadership_roster=roster,
@@ -1905,42 +1976,45 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
 
         # Seed named roster members into the lorebook so the LLM knows their
         # canonical full names before the player physically meets them.
-        for member in roster:
-            if member.get("is_vacant") or not member.get("name"):
-                continue
-            member_name = member["name"]
-            member_title = member.get("title", "")
-            description = f"{member_title} of {name}." if member_title else f"Member of {name}."
-            from mechanics.social.races import normalize_race
-            from mechanics.social.persona import infer_contact_gender
-            from mechanics.social.persona.intimacy.appearance import normalize_appearance
+        # In Anomalous scenarios, ensure_anomalous_agent_roster below replaces
+        # generic placeholder officers with the canonical Special Agents roster.
+        if not is_anom:
+            for member in roster:
+                if member.get("is_vacant") or not member.get("name"):
+                    continue
+                member_name = member["name"]
+                member_title = member.get("title", "")
+                description = f"{member_title} of {name}." if member_title else f"Member of {name}."
+                from mechanics.social.races import normalize_race
+                from mechanics.social.persona import infer_contact_gender
+                from mechanics.social.persona.intimacy.appearance import normalize_appearance
 
-            if member.get("race"):
-                member_race = normalize_race(member["race"], scen_key=scen_key, seed=member_name)
-            else:
-                fallback_race = normalize_race("", scen_key=scen_key, seed=member_name)
-                member_race = fallback_race if fallback_race != "human" else ""
+                if member.get("race"):
+                    member_race = normalize_race(member["race"], scen_key=scen_key, seed=member_name)
+                else:
+                    fallback_race = normalize_race("", scen_key=scen_key, seed=member_name)
+                    member_race = fallback_race if fallback_race != "human" else ""
 
-            member_gender = member.get("gender") or infer_contact_gender({"name": member_name}) or "female"
-            member_app = normalize_appearance({}, gender=member_gender, race=member_race, scen_key=scen_key, desc=description)
+                member_gender = member.get("gender") or infer_contact_gender({"name": member_name}) or "female"
+                member_app = normalize_appearance({}, gender=member_gender, race=member_race, scen_key=scen_key, desc=description)
 
-            try:
-                db.upsert_lorebook_entity(
-                    session_id=session_id,
-                    entity_type="person",
-                    name=member_name,
-                    description=description,
-                    disposition="neutral",
-                    faction=name,
-                    traits=[],
-                    motivation="",
-                    mannerisms="",
-                    race=member_race,
-                    gender=member_gender,
-                    appearance=member_app,
-                )
-            except Exception:
-                pass
+                try:
+                    db.upsert_lorebook_entity(
+                        session_id=session_id,
+                        entity_type="person",
+                        name=member_name,
+                        description=description,
+                        disposition="neutral",
+                        faction=name,
+                        traits=[],
+                        motivation="",
+                        mannerisms="",
+                        race=member_race,
+                        gender=member_gender,
+                        appearance=member_app,
+                    )
+                except Exception:
+                    pass
 
     if is_anom:
         try:
@@ -1989,7 +2063,7 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             club_name = matched_fac["name"]
         else:
             if joined_fid in ("freelancer", "student_freelancer", "independent_freelancer") or is_student:
-                arch = "freelancer"
+                arch = "student_freelancer" if (is_student or joined_fid == "student_freelancer") else "freelancer"
                 fid = ""
                 fname = default_free_title
                 club_id = ""
@@ -2068,6 +2142,11 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
         state["promotion_title"] = t_info["title"]
 
     db.update_session(session_id, extra={"anomalous_faction_state": state})
+    if session_id:
+        try:
+            db.grant_or_relocate_starter_quarters(int(session_id), "student_freelancer" if is_student else arch)
+        except Exception:
+            pass
     if char and char.get("id"):
         if arch == "freelancer" and state.get("joined_club_id"):
             c_rank = int(state.get("club_rank") or char.get("faction_rank") or 1)
@@ -2223,8 +2302,9 @@ def join_or_transfer_anomalous_faction(
     if target_clean in ("freelancer", "student_freelancer", "independent_freelancer", "leave", "independent", "none", ""):
         _abandon_old_mandatory_bounties()
         state = get_anomalous_faction_state(session_id, user_id=user_id)
+        chosen_key = "student_freelancer" if (is_student or target_clean == "student_freelancer") else "freelancer"
         state.update({
-            "faction_archetype_key": "freelancer",
+            "faction_archetype_key": chosen_key,
             "joined_faction_id": "",
             "joined_faction_name": default_free_title,
             "joined_club_id": "",
@@ -2271,8 +2351,9 @@ def join_or_transfer_anomalous_faction(
         template = matched_fac.get("hierarchy_template") or matched_fac.get("category") or "club"
         rank_1_title = get_rank_title(template, 1)
         state = get_anomalous_faction_state(session_id, user_id=user_id)
+        chosen_key = "student_freelancer" if (is_student or target_clean == "student_freelancer") else "freelancer"
         state.update({
-            "faction_archetype_key": "freelancer",
+            "faction_archetype_key": chosen_key,
             "joined_faction_id": matched_fac["faction_id"],
             "joined_faction_name": matched_fac["name"],
             "joined_club_id": matched_fac["faction_id"],

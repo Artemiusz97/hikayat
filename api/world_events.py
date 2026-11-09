@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 import db
@@ -12,6 +12,7 @@ from mechanics.system.concurrency import distributed_session_lock
 from mechanics.world.world_events.engine import build_client_world_pulse_payload
 from mechanics.world.world_events.social_hooks import record_break_the_news_gossip
 from .deps import manager
+from .security import verify_session_participant
 
 router = APIRouter()
 
@@ -29,11 +30,11 @@ class BreakNewsRequest(BaseModel):
 async def get_session_world_events(
     session_id: int,
     user_id: int | None = Query(None),
+    request: Request = None,
 ) -> dict[str, Any]:
     """Returns safe omnichannel World Pulse state (active macro events + ONLY discovered rumors)."""
-    session = await adb(db.get_session, session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
+    uid = user_id if isinstance(user_id, int) and not isinstance(user_id, bool) else None
+    await verify_session_participant(request, session_id, uid)
     return await adb(build_client_world_pulse_payload, session_id)
 
 
@@ -42,12 +43,12 @@ async def track_session_rumor(
     session_id: int,
     event_key: str,
     req: TrackRumorRequest,
+    request: Request = None,
 ) -> dict[str, Any]:
     """Atomically tracks a discovered rumor under the independent 2-slot rumor investigation cap."""
+    await verify_session_participant(request, session_id, req.user_id)
     async with distributed_session_lock(session_id):
-        session = await adb(db.get_session, session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found.")
+        session, _ = await verify_session_participant(request, session_id, req.user_id)
 
         c_day, c_min, _ = await adb(db.get_session_time, session_id)
         turn_num = await adb(db.infer_session_turn, session)
@@ -64,7 +65,9 @@ async def track_session_rumor(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         world_pulse = await adb(build_client_world_pulse_payload, session_id)
-        quests = await adb(db.get_session_quests, session_id)
+        from .codex_phone import _build_quests_payload
+        quests_payload = await adb(_build_quests_payload, session_id, req.user_id)
+        quests = quests_payload.get("quests", [])
 
     await manager.broadcast(
         session_id,
@@ -90,12 +93,12 @@ async def break_rumor_news_to_npc(
     session_id: int,
     event_key: str,
     req: BreakNewsRequest,
+    request: Request = None,
 ) -> dict[str, Any]:
     """Records a 1/day per-NPC [Break the News] gossip share for an unaware NPC."""
+    await verify_session_participant(request, session_id, req.user_id)
     async with distributed_session_lock(session_id):
-        session = await adb(db.get_session, session_id)
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found.")
+        session, _ = await verify_session_participant(request, session_id, req.user_id)
 
         rumors = await adb(
             db.get_world_events,

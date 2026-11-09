@@ -80,7 +80,20 @@ def _gather_world_slots(session_id: int, rng: random.Random, template: dict[str,
         faction_name = str(picked_fac.get("name") or faction_name)
 
     facilities = cand_ctx.get("facilities") or []
-    if facilities:
+    tmpl_key = str((template or {}).get("template_key") or "")
+    if tmpl_key in ("rumor_kitsune_torii_bells", "evt_kitsune_hundred_foxfires"):
+        from mechanics.world.locations.folklore_veil import get_village_veil_status
+        v_st = get_village_veil_status(session_id, "kitsune")
+        zone_name = "Sacred Mountain Sanctuary & Onsen Quarter"
+        node_id = "sub_kitsune_inner_plaza" if v_st.get("attuned") else "loc_et_fox_torii_tunnel"
+        venue_name = "Sato-no-Inari — Hidden Kitsune Village" if v_st.get("attuned") else "Thousand-Torii Fox Shrine Approach"
+    elif tmpl_key in ("rumor_bunian_cempaka_flute", "evt_bunian_malam_cempaka"):
+        from mechanics.world.locations.folklore_veil import get_village_veil_status
+        v_st = get_village_veil_status(session_id, "bunian")
+        zone_name = "Wilderness Forest Reserve"
+        node_id = "sub_bunian_inner_plaza" if v_st.get("attuned") else "loc_bunian_threshold_glade"
+        venue_name = "Kampung Kayangan — Hidden Bunian Village" if v_st.get("attuned") else "Mist-Veiled Banyan & Bamboo Glade"
+    elif facilities:
         picked_node = rng.choice(facilities)
         node_id = str(picked_node.get("node_id") or node_id)
         venue_name = str(picked_node.get("name") or venue_name)
@@ -488,9 +501,19 @@ def on_quest_or_bounty_completed(
     )
 
     resolved_keys: list[str] = []
+    q_row = db.get_quest_by_id(session_id, str(quest_id)) or {}
+    q_notes = str(q_row.get("quest_notes") or "")
+    scar_ev_target = ""
+    for part in q_notes.split("|"):
+        if part.startswith("remediation_scar:"):
+            scar_ev_target = part.split(":", 1)[1].strip()
+            break
+
     events = db.get_world_events(session_id, include_hidden=True, statuses=("active",))
     for ev in events:
-        if str(ev.get("linked_quest_id") or "") != str(quest_id):
+        matches_link = str(ev.get("linked_quest_id") or "") == str(quest_id)
+        matches_scar_note = bool(scar_ev_target and str(ev.get("event_key") or "") == scar_ev_target)
+        if not (matches_link or matches_scar_note):
             continue
         if ev["entity_type"] == "macro_event" and ev.get("event_subtype") == "festival":
             # Festivals run their full 4-7 day schedule even after completing festival bounties
@@ -654,14 +677,22 @@ def spawn_quest_world_scar(
     faction_id: str = "",
     turn_number: int | None = None,
     spawn_remediation_bounty: bool = True,
+    scar_tier: str = "",
 ) -> dict[str, Any]:
     """
-    Persists a permanent fail-forward `WorldScar` inside `world_events` (`is_world_scar: True`)
-    that applies regional DC/price/stealth penalties until cleared by its Remediation Bounty.
+    Persists a permanent fail-forward `WorldScar` inside `world_events` (`is_world_scar: True`).
+    Two-Tier Overhaul:
+    - Side Bounties (`scar_tier == "bounty"`): spawn standard 65g `REM-` Remediation Bounties.
+    - Main-Quest Buildup Scars (`scar_tier == "buildup"`, Ch. 1, 2, 4, 5, 7): suppress cheap `REM-`
+      and spawn high-danger (`danger_tier >= 3`) `LIB-` Liberation Operations.
+    - Main-Quest Peak Scars (`scar_tier == "peak"`, Ch. 3, 6, 8, 9, 10): spawn ZERO pre-Climax
+      remediation (permanent through Ch. 10; liberatable in post-Ch. 11 Fallen-World Resistance Mode).
     """
     if not session_id:
         return {}
     sess = db.get_session(session_id) or {}
+    eff_lang = str(sess.get("language") or "en").strip().lower()
+    scen_key = str(sess.get("scenario") or "fantasy")
     c_day, _c_min, t_num = resolve_session_time_and_turn(session_id, None, None, turn_number, sess)
     spec = dict(scar_spec or {})
     venue = str(location_name or sess.get("current_location") or "Local District")
@@ -671,9 +702,54 @@ def spawn_quest_world_scar(
     desc = str(spec.get("description") or f"Unresolved consequences from '{source_quest_id}' linger across {venue}.")
     modifiers = dict(spec.get("modifiers") or {"dc_modifiers": {"CHA": 1, "AGI": 1}, "price_multiplier": 1.15})
 
+    # Determine scar_tier ("bounty" | "buildup" | "peak")
+    eff_tier = str(scar_tier or spec.get("scar_tier") or "").strip().lower()
+    if eff_tier not in ("bounty", "buildup", "peak"):
+        src_q = db.get_quest_by_id(session_id, str(source_quest_id or "")) or {}
+        is_story_src = bool(
+            src_q.get("is_story_quest")
+            or str(source_quest_id or "").upper().startswith("SQ-")
+            or "story" in str(src_q.get("quest_type") or "").lower()
+        )
+        if is_story_src:
+            ch_num = int(spec.get("chapter_number") or 0)
+            if ch_num <= 0:
+                spine_row = db.get_campaign_spine(session_id) or {}
+                ch_num = int(spine_row.get("current_chapter") or 1)
+            eff_tier = "peak" if ch_num in (3, 6, 8, 9, 10) else "buildup"
+        else:
+            eff_tier = "bounty"
+
+    # Enforce Safe Hub Sanctuary exemption so >= 1 hub facility NEVER locks down
+    sanctuary_nid = ""
+    try:
+        from mechanics.world.locations.access_gate import get_designated_hub_sanctuary_node_id, is_safe_sanctuary_node
+        sanctuary_nid = get_designated_hub_sanctuary_node_id(session_id)
+        is_lockdown_scar = bool(
+            spec.get("lockdown")
+            or scar_type in ("martial_law", "martial_curfew", "district_lockdown", "occupation", "quarantine")
+        )
+        if eff_tier == "peak" and is_lockdown_scar:
+            modifiers["is_locked"] = True
+            if scar_type in ("martial_law", "martial_curfew", "district_lockdown") or spec.get("lockdown") or not nid:
+                modifiers["martial_law_lockdown"] = True
+        if nid and is_safe_sanctuary_node(session_id, nid):
+            modifiers.pop("is_locked", None)
+        if sanctuary_nid and isinstance(modifiers.get("lockdown_nodes"), list):
+            modifiers["lockdown_nodes"] = [
+                n for n in modifiers["lockdown_nodes"] if str(n).strip().lower() != sanctuary_nid.lower()
+            ]
+    except Exception:
+        pass
+
     clean_qid = "".join(ch if ch.isalnum() else "_" for ch in str(source_quest_id or "q")).strip("_")[:24]
     ev_key = f"scar_{session_id}_{clean_qid}"
-    rem_qid = f"REM-{clean_qid}" if spawn_remediation_bounty else ""
+    if eff_tier == "peak" or not spawn_remediation_bounty:
+        rem_qid = ""
+    elif eff_tier == "buildup":
+        rem_qid = f"LIB-{clean_qid}"
+    else:
+        rem_qid = f"REM-{clean_qid}"
 
     ev = db.create_world_event(
         session_id=session_id,
@@ -697,61 +773,113 @@ def spawn_quest_world_scar(
         modifiers=modifiers,
         metadata={
             "is_world_scar": True,
+            "scar_tier": eff_tier,
             "scar_type": scar_type,
             "source_quest_id": str(source_quest_id or ""),
             "remediation_quest_id": rem_qid,
+            "safe_sanctuary_exempt_node": sanctuary_nid,
         },
         linked_quest_id=rem_qid or None,
     )
 
     if spawn_remediation_bounty and rem_qid:
-        rem_title = str(spec.get("remediation_title") or f"Remediate: {title}")
-        rem_obj = f"Stabilize fallout and lift '{title}' around {venue}."
-        db.upsert_quest(
-            session_id=session_id,
-            quest_id=rem_qid,
-            quest_type="Remediation Bounty",
-            title=rem_title,
-            objective=rem_obj,
-            status="Available",
-            reward_xp=125,
-            reward_gold=65,
-            quest_notes=f"remediation_scar:{ev_key}",
-            blueprint_id="SITE_DEFENSE_RITUAL",
-            client_npc="Civic Dispatcher",
-            client_location=venue,
-            deadline_day=int(c_day) + 7,
-            deadline_minute=720,
-            engine="CRISIS_DEFENSE",
-            dossier_stage="pitch",
-        )
-        db.save_quest_waypoints(
-            session_id,
-            rem_qid,
-            [
-                {"stage_index": 1, "stage_label": f"Assess fallout at {venue}", "target_location": venue, "completion_trigger": "arrival", "status": "active"},
-                {"stage_index": 2, "stage_label": f"Resolve {title}", "target_location": venue, "completion_trigger": "skill_check", "status": "locked"},
-            ],
-        )
-        try:
-            from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
-            compile_bounty_pitch_stub(
+        if eff_tier == "buildup":
+            from mechanics.narrative.quest_engines import render_liberation_op_spec
+            lib_spec = render_liberation_op_spec(venue, lang=eff_lang, is_peak_resistance=False)
+            lib_title = str(spec.get("remediation_title") or lib_spec["title"])
+            lib_obj = str(spec.get("remediation_objective") or lib_spec["objective"])
+            lib_danger = max(3, int(spec.get("danger_tier") or 3))
+            db.upsert_quest(
                 session_id=session_id,
                 quest_id=rem_qid,
-                tag_or_archetype="CRISIS_DEFENSE",
+                quest_type="Liberation Operation",
+                title=lib_title,
+                objective=lib_obj,
+                status="Available",
+                reward_xp=210,
+                reward_gold=140,
+                quest_notes=f"remediation_scar:{ev_key}|liberation_op:1|scar_tier:buildup",
+                blueprint_id="SITE_DEFENSE_RITUAL",
+                client_npc="Resistance Coordinator",
+                client_location=venue,
+                deadline_day=int(c_day) + 10,
+                deadline_minute=720,
+                engine="CRISIS_DEFENSE",
+                dossier_stage="compiled",
+            )
+            try:
+                from mechanics.narrative.dossier_compiler import compile_quest_dossier
+                compile_quest_dossier(
+                    session_id=session_id,
+                    quest_id=rem_qid,
+                    tag_or_archetype="CRISIS_DEFENSE",
+                    title=lib_title,
+                    objective=lib_obj,
+                    family_tier="bounty",
+                    danger_tier=lib_danger,
+                    turn_number=int(t_num),
+                    client_npc="Resistance Coordinator",
+                    preferred_location=venue,
+                    scen_key=scen_key,
+                    lang=eff_lang,
+                )
+            except Exception:
+                db.save_quest_waypoints(
+                    session_id,
+                    rem_qid,
+                    [
+                        {"stage_index": 1, "sub_obj_id": 0, "stage_label": f"Break hostile occupation at {venue}", "target_location": venue, "completion_trigger": "skill_check", "status": "active"},
+                        {"stage_index": 2, "sub_obj_id": 0, "stage_label": f"Restore civic control at {venue}", "target_location": venue, "completion_trigger": "skill_check", "status": "locked"},
+                    ],
+                )
+        else:
+            rem_title = str(spec.get("remediation_title") or f"Remediate: {title}")
+            rem_obj = f"Stabilize fallout and lift '{title}' around {venue}."
+            db.upsert_quest(
+                session_id=session_id,
+                quest_id=rem_qid,
+                quest_type="Remediation Bounty",
                 title=rem_title,
-                public_pitch=rem_obj,
+                objective=rem_obj,
+                status="Available",
+                reward_xp=125,
+                reward_gold=65,
+                quest_notes=f"remediation_scar:{ev_key}",
+                blueprint_id="SITE_DEFENSE_RITUAL",
                 client_npc="Civic Dispatcher",
                 client_location=venue,
-                reward_gold=65,
-                reward_xp=125,
-                danger_tier=2,
                 deadline_day=int(c_day) + 7,
                 deadline_minute=720,
-                scen_key=str(sess.get("scenario") or "fantasy"),
+                engine="CRISIS_DEFENSE",
+                dossier_stage="pitch",
             )
-        except Exception:
-            pass
+            db.save_quest_waypoints(
+                session_id,
+                rem_qid,
+                [
+                    {"stage_index": 1, "stage_label": f"Assess fallout at {venue}", "target_location": venue, "completion_trigger": "arrival", "status": "active"},
+                    {"stage_index": 2, "stage_label": f"Resolve {title}", "target_location": venue, "completion_trigger": "skill_check", "status": "locked"},
+                ],
+            )
+            try:
+                from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+                compile_bounty_pitch_stub(
+                    session_id=session_id,
+                    quest_id=rem_qid,
+                    tag_or_archetype="CRISIS_DEFENSE",
+                    title=rem_title,
+                    public_pitch=rem_obj,
+                    client_npc="Civic Dispatcher",
+                    client_location=venue,
+                    reward_gold=65,
+                    reward_xp=125,
+                    danger_tier=2,
+                    deadline_day=int(c_day) + 7,
+                    deadline_minute=720,
+                    scen_key=scen_key,
+                )
+            except Exception:
+                pass
     return ev or {}
 
 
@@ -777,15 +905,81 @@ def spawn_endless_mode_contracts(
     if not session_id:
         return []
     sess = db.get_session(session_id) or {}
+    eff_lang = str(sess.get("language") or "en").strip().lower()
     scen_key = str(sess.get("scenario") or "fantasy")
     c_day = int(sess.get("current_day") or 1)
     loc = str(sess.get("current_location") or "Central Ward")
     spawned: list[dict[str, Any]] = []
 
-    from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
+    from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub, compile_quest_dossier
+    from mechanics.narrative.campaign_spine import resolve_campaign_ending_archetype
+    from mechanics.narrative.quest_engines import render_liberation_op_spec
+
+    spine = db.get_campaign_spine(session_id) or {}
+    tapestry = spine.get("chronicle_tapestry") or {}
+    ending_id = str(tapestry.get("ending_id") or "")
+    if not ending_id:
+        try:
+            ending_id = resolve_campaign_ending_archetype(session_id, spine=spine)
+        except Exception:
+            ending_id = "golden_restoration"
+    endless_mode_key = str(tapestry.get("endless_mode") or (
+        "fallen_world_resistance" if ending_id == "fallen_world" else "reconstruction_sandbox"
+    ))
+
+    # 0. Fallen-World Resistance & Unresolved Peak Scar Liberation Operations (`LIB-RES-`)
+    active_scars = [
+        ev for ev in (db.get_world_events(session_id, entity_type="macro_event", statuses=("active",)) or [])
+        if isinstance(ev, dict) and (ev.get("metadata") or {}).get("is_world_scar")
+    ]
+    for scar_ev in active_scars:
+        meta = scar_ev.get("metadata") or {}
+        s_tier = str(meta.get("scar_tier") or "")
+        if s_tier != "peak" and endless_mode_key != "fallen_world_resistance":
+            continue
+        ev_key = str(scar_ev.get("event_key") or "")
+        clean_ev = "".join(ch if ch.isalnum() else "_" for ch in ev_key).strip("_")[-20:] or "scar"
+        lib_qid = f"LIB-RES-{clean_ev}".upper()
+        if db.get_quest_by_id(session_id, lib_qid):
+            continue
+        scar_venue = str(scar_ev.get("location_name") or loc)
+        lib_spec = render_liberation_op_spec(scar_venue, lang=eff_lang, is_peak_resistance=True)
+        lib_q = db.upsert_quest(
+            session_id=session_id,
+            quest_id=lib_qid,
+            quest_type="Liberation Operation",
+            title=lib_spec["title"],
+            objective=lib_spec["objective"],
+            status="Available",
+            reward_xp=260,
+            reward_gold=180,
+            quest_notes=f"remediation_scar:{ev_key}|liberation_op:1|scar_tier:peak|endless_mode:{endless_mode_key}",
+            blueprint_id="SITE_DEFENSE_RITUAL",
+            client_npc="Underground Resistance Cell",
+            client_location=scar_venue,
+            deadline_day=c_day + 14,
+            deadline_minute=720,
+            engine="CRISIS_DEFENSE",
+            dossier_stage="compiled",
+        )
+        compile_quest_dossier(
+            session_id=session_id,
+            quest_id=lib_qid,
+            tag_or_archetype="CRISIS_DEFENSE",
+            title=lib_spec["title"],
+            objective=lib_spec["objective"],
+            family_tier="bounty",
+            danger_tier=4,
+            turn_number=turn_number,
+            client_npc="Underground Resistance Cell",
+            preferred_location=scar_venue,
+            scen_key=scen_key,
+            lang=eff_lang,
+        )
+        if lib_q:
+            spawned.append(lib_q)
 
     # 1. Escaped Nemesis Hunts from campaign_spines.nemeses_json
-    spine = db.get_campaign_spine(session_id) or {}
     for nem in (spine.get("nemeses") or []):
         if nem.get("status") != "at_large":
             continue

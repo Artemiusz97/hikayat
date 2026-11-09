@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollText, ChevronDown, ChevronUp, Heart, Zap, Coins, Gift, ShieldAlert, Sparkles } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
-import { extractTurnOutcomes } from '../Sidebar/WorldOutcomeSidebar';
+import { extractTurnOutcomes, formatSocialFeedbackPill } from '../Sidebar/WorldOutcomeSidebar';
 import { parseAndTranslateStatus } from '../Sidebar/CharacterSheet';
 
 const TurnOutcomePanel = ({ session }) => {
@@ -100,7 +100,7 @@ const TurnOutcomePanel = ({ session }) => {
               ? 'bg-gradient-to-r from-rose-950/40 via-pink-950/25 to-black/60 border-pink-500/40 hover:border-pink-400/70 hover:bg-rose-950/60'
               : 'bg-black/60 border-fantasy-border/80 hover:border-fantasy-accent/60 hover:bg-black/80'
         }`}
-        title={isExpanded ? 'Collapse Turn Outcome' : 'Expand to see full Turn Outcome & Details'}
+        title={isExpanded ? t('outcomes.collapse_title', 'Collapse Turn Outcome') : t('outcomes.expand_title', 'Expand to see full Turn Outcome & Details')}
       >
         {/* Left Side: Icon, Turn Title, and Notification Badge */}
         <div className="flex items-center gap-2 min-w-0">
@@ -269,6 +269,19 @@ const TurnOutcomePanel = ({ session }) => {
                   );
                 })}
 
+                {(latestOutcome.socialFeedbackPills || []).map((pill, pIdx) => {
+                  const pillText = formatSocialFeedbackPill(pill, t);
+                  if (!pillText) return null;
+                  return (
+                    <span
+                      key={`soc-pill-${pIdx}`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-950/60 border border-indigo-700/50 text-indigo-200 text-[10px]"
+                    >
+                      💬 {pillText}
+                    </span>
+                  );
+                })}
+
                 {latestOutcome.facUpdates.map((fu, idx) => {
                   const label =
                     typeof fu === 'string'
@@ -352,7 +365,7 @@ const TurnOutcomePanel = ({ session }) => {
                         <span className="font-medium text-pink-100 flex items-center gap-1 truncate max-w-[140px]">
                           <span>{name}</span>
                           {climaxes > 0 && <span className="text-amber-300 text-[9px]">💥 x{climaxes}</span>}
-                          {recoiled && <span className="text-orange-400 text-[9px]" title="Hypersensitive recoil!">⚠️</span>}
+                          {recoiled && <span className="text-orange-400 text-[9px]" title={t('outcomes.hypersensitive_recoil', 'Hypersensitive recoil!')}>⚠️</span>}
                         </span>
                         <span className="font-mono text-pink-300 font-bold text-[11px] shrink-0 flex items-center gap-1">
                           <span>{meter}%</span>

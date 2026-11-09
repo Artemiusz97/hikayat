@@ -311,6 +311,36 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
         res = res.replace("{session_commercial}", get_session_commercial_district_name(session_id, scenario_key))
 
 
+    if "{starting_zone}" in res:
+        h_val = int(session_id) if session_id else 1
+        urban_core_zones = [
+            ("zone_city_center", "City Center"),
+            ("zone_downtown", "Downtown Commercial Core"),
+            ("zone_uptown", "Uptown Financial District"),
+        ]
+        if "{session_private_hq_1}" in res or "{session_private_agency_1}" in res:
+            target_zid, target_raw = urban_core_zones[h_val % 3]
+            target_fac_id = "loc_private_hq_1"
+        elif "{session_private_hq_2}" in res or "{session_private_agency_2}" in res:
+            target_zid, target_raw = urban_core_zones[(h_val + 1) % 3]
+            target_fac_id = "loc_private_hq_2"
+        else:
+            target_zid, target_raw = ("zone_city_center", "City Center")
+            target_fac_id = "loc_agency_hq"
+        resolved_z = ""
+        if session_id:
+            try:
+                fac_node = db.get_world_node(session_id, target_fac_id)
+                parent_zid = (fac_node.get("parent_id") if isinstance(fac_node, dict) else None) or target_zid
+                z_node = db.get_world_node(session_id, parent_zid)
+                if isinstance(z_node, dict) and z_node.get("name"):
+                    resolved_z = str(z_node["name"])
+            except Exception:
+                resolved_z = ""
+        if not resolved_z:
+            resolved_z = get_session_urban_zone_name(session_id, target_zid, target_raw, scenario_key)
+        res = res.replace("{starting_zone}", resolved_z)
+
     if "{session_agency_hq}" in res:
         res = res.replace("{session_agency_hq}", get_session_agency_hq_name(session_id, scenario_key))
 

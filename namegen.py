@@ -2178,11 +2178,11 @@ def generate_private_agency_name(scenario: str = "anomalous_incursions", hash_va
             "Redbrick", "Cornerstone", "Eastgate", "Daybreak", "Westside", "Pinecrest"
         ]
         domains = [
-            "Investigations", "Contracting", "Fieldwork", "Odd-Jobs",
-            "Salvage", "Ward-Work", "Case-Office", "Mitigation"
+            "Investigations", "Containment", "Consultants", "Security",
+            "Wardcraft", "Associates", "Mitigation", "Fieldwork"
         ]
         suffixes = [
-            "LLC", "Co.", "Agency", "Partners", "Office", "Services"
+            "LLC", "Co.", "Agency", "Partners", "Associates", "Group"
         ]
     else:
         prefixes = [
@@ -2373,6 +2373,7 @@ _URBAN_ZONE_PREFIX_POOLS: dict[str, list[str]] = {
     "zone_woods_reserve": ["Mount Takao", "Pinecrest Reserve", "Mount Mitake", "Redwood Ridge", "Cedar Mountain", "Miyagase", "Blue Ridge", "Mount Tsukimi", "Highland Woods", "Okutama", "Silver Lake", "Bukhansan"],
     "zone_theme_park": ["Starlight Wonder", "Grand Bay Wonderland", "Cosmo World", "Pacific Funland", "Adventure Pier", "Bayside World", "Silver Star Lagoon", "Crystal Bay Park", "Wonderland Pier", "Seaside Carnival", "Metro Joypolis", "Lotte World"],
     "zone_eastern_temple": ["Mount Ryujin", "Zojoji", "Senso-ji", "Meiji Shrine", "Tenryu Woods", "Kiyomizu Valley", "Ginkaku Hill", "Fushimi Reserve", "Asakusa Historic", "Jindaiji", "Mount Hiei", "Jogyesa"],
+    "zone_eastern_sanctuary": ["Mount Kurama", "Arashiyama", "Kifune", "Fushimi-Inari", "Mount Hiei", "Hakone-Yumoto", "Kiyomizu", "Mount Takao", "Nikko", "Yoshino", "Kamakura", "Mount Koya"],
     "zone_airport": ["Haneda West", "Metro International", "Pacific Gateway", "Midway", "Sky Harbor", "Narita Express", "Trans-Pacific", "Terminal Central", "Bay Area Regional", "Century Field", "Capital International", "Incheon Air"],
     "zone_hospital": ["Metropolitan General", "St. Jude Memorial", "University Medical", "Saiseikai Central", "Presbyterian Hospital", "Toranomon Medical", "City Mercy", "Kanto Regional", "Providence Health", "Memorial Hospital", "Sinai Medical", "Severance"],
     "zone_university": ["Teito Metropolitan", "State University", "Waseda Central", "St. Ignatius", "Metro Institute of Tech", "Northwestern Collegiate", "Kurokawa State", "City University", "Pacific Coast College", "Gakushuin", "Keio District", "Yonsei"],
@@ -2439,6 +2440,7 @@ _URBAN_FACILITY_EPITHET_POOLS: dict[str, list[str]] = {
     "zone_woods_reserve": ["Pine Valley", "Timber Ridge", "Bear Creek", "Cedar Crest", "Silver Creek", "Redwood", "Eagle Rock", "Misty Trail", "Highland Pass", "Forest Glen", "Whispering Pines", "Lookout Point"],
     "zone_theme_park": ["Wonder Wheel", "Starlight", "Grand Carousel", "Galaxy", "Midway", "Carnival", "Silver Star", "Boardwalk Coaster", "Adventure", "Lagoon Splash", "Sky View", "Fantasy"],
     "zone_eastern_temple": ["Zojoji", "Tenryu", "Meiji", "Lotus", "Asakusa", "Kyoto", "Stone Garden", "Cypress Gate", "Pagoda", "Lantern Hall", "Sanctuary", "Bell Tower"],
+    "zone_eastern_sanctuary": ["Kurama", "Kifune", "Kiyomizu", "Cypress Gate", "Hinoki", "Vermilion", "Stone-Lantern", "Fushimi", "Arashiyama", "Moon-Bridge", "Hakone", "Maple Terrace"],
     "zone_airport": ["Terminal 1", "Concourse A", "Gate 12", "Skyline", "Pacific Bay", "Trans-Air", "Hangar 4", "Runway West", "Express", "Departure Hall", "Air Cargo", "Flight Deck"],
     "zone_hospital": ["St. Luke", "Memorial", "Mercy", "General", "Central Triage", "West Wing", "Clinic Center", "Trauma Care", "Health Pavilion", "Ambulance Bay", "North Clinic", "Community Care"],
     "zone_university": ["Science Wing", "Arts Quad", "North Annex", "Memorial Library", "Faculty Hall", "Research Lab", "Central Quad", "Engineering Hall", "Commons", "Lecture Hall A", "Campus Center", "West Pavilion"],
@@ -2461,7 +2463,16 @@ def generate_urban_facility_name(
     Anomalous Incursions while preserving the full functional title for substring/keyword matching.
     """
     base = str(raw_primary_name or "").strip()
-    if not base or p_id in ("loc_player_house", "loc_homeroom", "loc_private_hq_1", "loc_private_hq_2", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq"):
+    if not base or p_id in (
+        "loc_player_house",
+        "loc_homeroom",
+        "loc_private_hq_1",
+        "loc_private_hq_2",
+        "loc_cult_sanctum_hq",
+        "loc_clandestine_syndicate_hq",
+        "loc_hidden_kitsune_village",
+        "loc_hidden_bunian_village",
+    ):
         return base
     if p_id == "loc_agency_hq" or "{session_agency_hq}" in base:
         if "{session_agency_hq}" in base or base.lower() == "organization headquarters":
@@ -2498,7 +2509,7 @@ def generate_urban_facility_name(
             return base
         return f"{desig}: {base}"
 
-    if p_id.startswith(("sub_priv1_", "sub_priv2_")):
+    if p_id.startswith("sub_priv1_"):
         if ":" in base:
             return base
         if p_id.endswith("_entrance"):
@@ -2509,6 +2520,19 @@ def generate_urban_facility_name(
         else:
             flr = ((h * 11 + p_offset) % 38) + 12
             desig = f"Floor {flr}"
+        return f"{desig}: {base}"
+
+    if p_id.startswith("sub_priv2_"):
+        if ":" in base:
+            return base
+        if p_id.endswith("_entrance"):
+            desig = "Ground Suite"
+        elif p_id.endswith("_vault"):
+            desig = "Sub-Cellar"
+        elif p_id.endswith("_training"):
+            desig = "Basement Level"
+        else:
+            desig = "1st Floor" if ((h * 7 + p_offset) % 2 == 0) else "2nd Floor"
         return f"{desig}: {base}"
 
     # 2. City & Outskirts Facilities: Prepend thematic proper epithet while keeping base functional name intact
@@ -2736,11 +2760,11 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
         h_int = int(hash_val if hash_val is not None else 1)
         p1_zone = urban_core_zones[h_int % 3]
         p2_zone = urban_core_zones[(h_int + 1) % 3]
-        cult_zone = "zone_woods_reserve" if (h_int % 2 == 0) else "zone_undercity"
-        synd_zone = "zone_undercity" if cult_zone == "zone_woods_reserve" else "zone_industrial"
+        cult_zone = "zone_undercity"
+        synd_zone = "zone_industrial"
 
         priv_1_acr = format_org_acronym(priv_1_name)
-        priv_1_hq = f"{priv_1_acr} Corporate Tower HQ" if priv_1_acr else f"{priv_1_name} Tower HQ"
+        priv_1_hq = f"{priv_1_acr} Tower HQ" if priv_1_acr else f"{priv_1_name} Tower HQ"
         priv_2_acr = format_org_acronym(priv_2_name)
         priv_2_hq = f"{priv_2_acr} Field Office HQ" if priv_2_acr else f"{priv_2_name} Office HQ"
 
@@ -2748,13 +2772,13 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
             {
                 "name": agency_name,
                 "archetype_key": "public_agency",
-                "hierarchy_template": "corpo",
+                "hierarchy_template": "bureau",
                 "category": "public_agency",
                 "joinable": True,
                 "diplomatic_stance": "friendly",
                 "hq_zone_id": "zone_city_center",
                 "hq_node_id": "loc_agency_hq",
-                "hq_location_id": "loc_hq_executive_dispatch",
+                "hq_location_id": "Executive & Tactical Dispatch Wing",
                 "notes": "The primary state-sanctioned paranormal investigation and containment organization. Agents receive a daily taxpayer-funded salary and a 50% HQ requisition discount, but must surrender all official bounty payouts and anomaly loot to the Bureau.",
             },
             {
@@ -2767,7 +2791,7 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "hq_zone_id": p1_zone,
                 "hq_node_id": "loc_private_hq_1",
                 "hq_location_id": priv_1_hq,
-                "notes": "A massive multi-billion-credit corporate containment conglomerate operating out of a gleaming downtown skyscraper. Operatives receive no base salary, keep 100% of bounty fees and anomaly loot, and deploy with sleek proprietary weapons and armor developed in-house by corporate R&D.",
+                "notes": "A multi-billion-credit defense and containment conglomerate operating out of a gleaming downtown glass tower. Operatives receive no base salary, keep 100% of contract payouts and anomaly loot, and deploy with serialized smart-linked weapons, cryo-containment cells, and ballisticweave armor.",
             },
             {
                 "name": priv_2_name,
@@ -2779,7 +2803,7 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "hq_zone_id": p2_zone,
                 "hq_node_id": "loc_private_hq_2",
                 "hq_location_id": priv_2_hq,
-                "notes": "A humble, tight-budget local private containment agency operating out of an ordinary commercial office building. Contractors receive no base salary, keep 100% of bounty rewards and salvaged relics, and rely on pragmatic surplus, pawn-shop, and multi-vendor gear sourced from whatever supplier they can find.",
+                "notes": "An independent partner-owned private investigation and containment firm operating out of a renovated brick commercial suite. Specialists receive no base salary, keep 100% of contract retainers and recovered relics, and deploy with custom-tuned firearms, fitted ballistic vests, and calibrated ward instruments.",
             },
             {
                 "name": exorcist_order,
@@ -2788,9 +2812,9 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "category": "monastic_order",
                 "joinable": True,
                 "diplomatic_stance": "friendly",
-                "hq_zone_id": "zone_woods_reserve",
-                "hq_node_id": "loc_et_main_sanctuary",
-                "hq_location_id": "loc_et_main_sanctuary",
+                "hq_zone_id": "zone_eastern_sanctuary",
+                "hq_node_id": "loc_eastern_temple",
+                "hq_location_id": "Eastern Grand Temple & Sanctuary",
                 "notes": "An ancient Eastern monastic exorcist clan and shrine order maintaining sacred seals at the Grand Temple. Initiates receive no salary or order bounty fees, but keep combat spoils and receive 2-3 sacred items completely free each day.",
             },
             {

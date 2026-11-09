@@ -1,8 +1,10 @@
+from __future__ import annotations
 """
 Static reference data: stats, classes, weapons, spells, and progression
 constants. Tweak freely -- this is the "content" layer, separate from
 engine logic.
 """
+from typing import Any
 
 # ------------------------------------------------------------------ stats
 # A SPECIAL-style seven-stat system. Each stat has both a narrative/GM-level
@@ -60,9 +62,11 @@ log = logging.getLogger(__name__)
 DATA_DIR = Path(__file__).resolve().parent / "data"
 CLASS_TEMPLATES_PATH = DATA_DIR / "class_templates.json"
 STARTING_WEAPONS_PATH = DATA_DIR / "starting_weapons.json"
+CLASS_WEAPON_LOCALES_PATH = DATA_DIR / "class_weapon_locales.json"
 
 _class_templates_cache: dict | None = None
 _starting_weapons_cache: dict | None = None
+_class_weapon_locales_cache: dict | None = None
 
 
 def load_class_templates(*, reload: bool = False) -> dict[str, dict]:
@@ -101,6 +105,91 @@ def load_starting_weapons(*, reload: bool = False) -> dict[str, list[str]]:
         return {}
 
 
+def load_class_weapon_locales(*, reload: bool = False) -> dict[str, Any]:
+    global _class_weapon_locales_cache
+    if _class_weapon_locales_cache is not None and not reload:
+        return _class_weapon_locales_cache
+    if not CLASS_WEAPON_LOCALES_PATH.is_file():
+        _class_weapon_locales_cache = {}
+        return _class_weapon_locales_cache
+    try:
+        data = json.loads(CLASS_WEAPON_LOCALES_PATH.read_text(encoding="utf-8"))
+        _class_weapon_locales_cache = data if isinstance(data, dict) else {}
+        return _class_weapon_locales_cache
+    except Exception as exc:
+        log.error("Failed to load class_weapon_locales.json: %s", exc)
+        return {}
+
+
+def localize_class_template(class_name: str, class_info: dict, lang: str | None = None) -> dict:
+    """Returns a non-mutating copy of `class_info` enriched with `display_name`, localized `description`,
+    and `starter_gear_localized` while preserving canonical `starter_gear` for deterministic loadout equips."""
+    if not isinstance(class_info, dict):
+        return {}
+    from scenario_data import normalize_locale_code
+    code = normalize_locale_code(lang)
+    out = dict(class_info)
+    out["canonical_name"] = class_name
+    out["canonical_description"] = str(class_info.get("description") or "")
+    out.setdefault("display_name", class_name)
+    if code == "en":
+        return out
+
+    companion = load_class_weapon_locales()
+    cls_loc = (class_info.get("locales") or {}).get(code)
+    if not isinstance(cls_loc, dict):
+        cls_loc = ((companion.get("classes") or {}).get(class_name) or {}).get(code)
+
+    if isinstance(cls_loc, dict):
+        if cls_loc.get("display_name"):
+            out["display_name"] = cls_loc["display_name"]
+        if cls_loc.get("description"):
+            out["description"] = cls_loc["description"]
+
+    gear_catalog = companion.get("gear_items") or {}
+    loc_gear_map = (cls_loc.get("starter_gear") if isinstance(cls_loc, dict) else None) or {}
+    raw_gear = class_info.get("starter_gear") or {}
+    localized_gear_slots: dict[str, Any] = {}
+    for slot, g_entry in raw_gear.items():
+        if isinstance(g_entry, (list, tuple)) and len(g_entry) >= 2 and g_entry[0]:
+            orig_name = str(g_entry[0])
+            orig_desc = str(g_entry[1])
+            cost = int(g_entry[2]) if len(g_entry) >= 3 else 1
+            slot_override = loc_gear_map.get(slot)
+            if isinstance(slot_override, (list, tuple)) and len(slot_override) >= 2 and slot_override[0]:
+                localized_gear_slots[slot] = [str(slot_override[0]), str(slot_override[1]), cost]
+            else:
+                cat_hit = (gear_catalog.get(orig_name) or {}).get(code)
+                if isinstance(cat_hit, (list, tuple)) and len(cat_hit) >= 2 and cat_hit[0]:
+                    localized_gear_slots[slot] = [str(cat_hit[0]), str(cat_hit[1]), cost]
+                else:
+                    localized_gear_slots[slot] = [orig_name, orig_desc, cost]
+        else:
+            localized_gear_slots[slot] = None
+
+    if localized_gear_slots:
+        out["starter_gear_localized"] = localized_gear_slots
+    return out
+
+
+def get_localized_starting_weapons_map(weapons: list[str] | None = None, lang: str | None = None) -> dict[str, str]:
+    """Returns `{canonical_weapon_name: localized_display_label}` for UI dropdowns."""
+    from scenario_data import normalize_locale_code
+    code = normalize_locale_code(lang)
+    w_list = weapons if weapons is not None else get_all_starting_weapons()
+    if code == "en":
+        return {str(w): str(w) for w in w_list if isinstance(w, str)}
+    wpn_catalog = (load_class_weapon_locales().get("starting_weapons") or {})
+    result: dict[str, str] = {}
+    for w in w_list:
+        w_name = w.get("name") if isinstance(w, dict) else str(w)
+        if not w_name:
+            continue
+        hit = (wpn_catalog.get(w_name) or {}).get(code)
+        result[w_name] = str(hit) if hit else w_name
+    return result
+
+
 TAG_TO_TEMPLATE_KEY = {
     "space": "sci_fi",
     "scifi": "sci_fi",
@@ -129,7 +218,9 @@ TAG_TO_TEMPLATE_KEY = {
 }
 
 
-def _resolve_template_scenario_key(scenario: str, target_dict: dict) -> str:
+def _resolve_template_scenario_key(scenario: str | None, target_dict: dict) -> str:
+    if not scenario or str(scenario).strip().lower() in ("", "none", "null", "undefined"):
+        return "fantasy"
     if scenario in target_dict:
         return scenario
     mapped = TAG_TO_TEMPLATE_KEY.get(scenario)
@@ -171,6 +262,8 @@ def get_all_class_templates() -> dict[str, dict]:
 
 
 def get_class_templates(scenario: str | None = None, starting_faction: str | None = None) -> dict[str, dict]:
+    if not scenario or str(scenario).strip().lower() in ("", "none", "null", "undefined", "all"):
+        return get_all_class_templates()
     try:
         from scenario_data import is_anomalous_incursions_scenario, is_anomalous_high_school_scenario
         if is_anomalous_incursions_scenario(scenario):
@@ -180,8 +273,6 @@ def get_class_templates(scenario: str | None = None, starting_faction: str | Non
     except Exception:
         pass
     templates = load_class_templates()
-    if not scenario or scenario == "all":
-        return get_all_class_templates()
     key = _resolve_template_scenario_key(scenario, templates)
     return templates.get(key, get_all_class_templates())
 
@@ -294,7 +385,7 @@ def get_starter_gear_by_class(scenario: str = "fantasy", char_class: str = "", g
     has_tail = is_tailed_race(race)
 
     for slot, entry in raw_gear.items():
-        if entry and isinstance(entry, list) and len(entry) >= 3:
+        if entry and isinstance(entry, (list, tuple)) and len(entry) >= 3:
             item_name = str(entry[0])
             item_desc = str(entry[1])
             cost = int(entry[2])
@@ -419,7 +510,7 @@ def get_starting_items(scenario: str = "fantasy", char_class: str = "", starting
             anom_items = list(get_anomalous_faction_starting_items(scenario, eff_fac))
             raw_items = class_info.get("starting_items", [])
             for entry in raw_items:
-                if isinstance(entry, list) and len(entry) >= 4 and str(entry[1]).lower() in ("tool", "quest"):
+                if isinstance(entry, (list, tuple)) and len(entry) >= 4 and str(entry[1]).lower() in ("tool", "quest"):
                     anom_items.append((entry[0], entry[1], entry[2], int(entry[3])))
             return anom_items
     except Exception:
@@ -428,7 +519,7 @@ def get_starting_items(scenario: str = "fantasy", char_class: str = "", starting
     raw_items = class_info.get("starting_items", [])
     items = []
     for entry in raw_items:
-        if isinstance(entry, list) and len(entry) >= 4:
+        if isinstance(entry, (list, tuple)) and len(entry) >= 4:
             items.append((entry[0], entry[1], entry[2], int(entry[3])))
     return items or CUSTOM_CLASS_STARTING_ITEMS
 
@@ -683,8 +774,8 @@ def mp_regen(endurance: int) -> int:
     return max(1, endurance // 2)
 
 
-def inventory_capacity(strength: int) -> int:
-    return 30 + strength * 3
+def inventory_capacity(strength: int, bonus_slots: int = 0) -> int:
+    return 30 + int(strength) * 3 + max(0, int(bonus_slots or 0))
 
 
 def crit_chances(luck: int) -> tuple[float, float]:

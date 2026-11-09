@@ -245,6 +245,18 @@ def record_intimate_event(
             except Exception:
                 pass
 
+        if session_id:
+            for _probe_key in (canon_char_id, canon_partner_id or "", partner_name or ""):
+                _pk = str(_probe_key or "").strip()
+                if not _pk or _pk == "player":
+                    continue
+                _fox_row = c.execute(
+                    "SELECT race FROM contacts WHERE session_id = ? AND (npc_id = ? OR lower(name) = ?) LIMIT 1",
+                    (session_id, _pk, _pk.lower()),
+                ).fetchone()
+                if _fox_row and str(_fox_row["race"] or "").strip().lower() == "kitsune:myobu_fox":
+                    raise ValueError("Cannot record intimate events while Kitsune is in non-humanoid Myōbu Spirit Fox form (kitsune:myobu_fox).")
+
         sanitized_direction = enforce_biological_invariants(
             gender=eff_char_gender,
             act_type=act_type,

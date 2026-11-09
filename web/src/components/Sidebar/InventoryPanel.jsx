@@ -21,79 +21,53 @@ const SLOT_ICONS = {
 };
 
 const getItemCategory = (item) => {
+  if (item?.inspect_data?.category) {
+    return item.inspect_data.category;
+  }
   const type = (item.type || item.item_type || '').toLowerCase();
-  const name = (item.name || '').toLowerCase();
-  if (
-    type.includes('weapon') || type.includes('broń') || type.includes('senjata') ||
-    name.includes('sword') || name.includes('blade') || name.includes('bow') || name.includes('staff') || name.includes('dagger') || name.includes('axe') || name.includes('hammer') ||
-    name.includes('miecz') || name.includes('sztylet') || name.includes('ostrze') || name.includes('łuk') || name.includes('laska') || name.includes('topór') || name.includes('młot') ||
-    name.includes('pedang') || name.includes('keris') || name.includes('parang') || name.includes('busur') || name.includes('panah') || name.includes('tongkat') || name.includes('kapak')
-  ) return 'Weapons';
-  if (
-    type.includes('armor') || type.includes('shield') || type.includes('helm') || type.includes('boot') ||
-    type.includes('zbroja') || type.includes('tarcza') || type.includes('perisai') ||
-    name.includes('shield') || name.includes('tarcza') || name.includes('perisai') ||
-    name.includes('armor') || name.includes('zbroja') || name.includes('baju besi') ||
-    name.includes('helm') || name.includes('hełm') || name.includes('topi keledar') ||
-    name.includes('boot') || name.includes('buty') || name.includes('kasut')
-  ) return 'Armor';
-  if (
-    type.includes('potion') || type.includes('consumable') || type.includes('scroll') ||
-    type.includes('food') || type.includes('drink') || type.includes('spellbook') ||
-    type.includes('mikstura') || type.includes('ramuan') || type.includes('ubat') ||
-    name.includes('potion') || name.includes('elixir') || name.includes('tonic') ||
-    name.includes('draught') || name.includes('mikstura') || name.includes('eliksir') ||
-    name.includes('ramuan') || name.includes('penawar') || name.includes('ubat') ||
-    name.includes('spellbook:') || name.includes('grimoire:') || name.includes('tome:') ||
-    name.includes('grimuar:') || name.includes('kitab:')
-  ) return 'Usables';
-  if (type.includes('digital') || type.includes('photo') || type.includes('video') || name.includes('photo') || name.includes('selfie')) return 'Digital';
-  if (type.includes('quest') || type.includes('key') || type.includes('token') || type.includes('klucz') || type.includes('kunci') || item.is_key_item) return 'Quest';
+  if (item.is_key_item || type.includes('quest') || type.includes('key') || type.includes('token')) return 'Quest';
+  if (type.includes('digital') || type.includes('photo') || type.includes('video')) return 'Digital';
+  if (type.includes('potion') || type.includes('consumable') || type.includes('scroll') || type.includes('food') || type.includes('drink') || type.includes('spellbook')) return 'Usables';
+  const slots = Array.isArray(item.valid_slots) ? item.valid_slots : [];
+  if (slots.includes('Weapon') || type.includes('weapon')) return 'Weapons';
+  if (slots.some((s) => ['Armor', 'Shield', 'Head', 'Gloves', 'Shoes', 'Top', 'Bottom'].includes(s)) || type.includes('armor') || type.includes('shield') || type.includes('helm') || type.includes('boot')) return 'Armor';
   return 'Misc';
 };
 
 const isItemUsable = (item) => {
+  if (typeof item?.inspect_data?.is_usable === 'boolean') {
+    return item.inspect_data.is_usable;
+  }
   const cat = getItemCategory(item);
   if (cat === 'Usables' || cat === 'Digital' || cat === 'Quest' || cat === 'Misc') return true;
   const eff = (item.clean_effect || item.effect || '').toLowerCase();
-  return eff.includes('restore') || eff.includes('heal') || eff.includes('leczenie') || eff.includes('pulih') || eff.includes('spellbook_json') || eff.includes('consumable');
+  return eff.includes('restore') || eff.includes('heal') || eff.includes('spellbook_json') || eff.includes('consumable');
 };
 
 const getInferredValidSlots = (item) => {
   if (Array.isArray(item.valid_slots) && item.valid_slots.length > 0) {
     return item.valid_slots;
   }
+  if (item?.inspect_data?.is_equippable === false) {
+    return [];
+  }
+  const targetSlot = item?.inspect_data?.target_slot;
+  if (targetSlot) {
+    return targetSlot.startsWith('Accessory')
+      ? ['Accessory 1', 'Accessory 2', 'Accessory 3', 'Accessory 4']
+      : [targetSlot];
+  }
   const type = (item.type || item.item_type || '').toLowerCase();
-  const name = (item.name || '').toLowerCase();
-  if (type.includes('spellbook') || name.startsWith('spellbook:') || name.startsWith('grimoire:') || name.startsWith('tome:')) return [];
-  if (
-    type.includes('weapon') || type.includes('broń') || type.includes('senjata') ||
-    name.includes('sword') || name.includes('dagger') || name.includes('blade') || name.includes('staff') || name.includes('bow') ||
-    name.includes('miecz') || name.includes('sztylet') || name.includes('ostrze') || name.includes('łuk') ||
-    name.includes('pedang') || name.includes('keris') || name.includes('parang') || name.includes('busur')
-  ) return ['Weapon'];
-  if (
-    type.includes('armor') || type.includes('zbroja') || type.includes('baju zirah') || type.includes('baju perisai') ||
-    name.includes('chest') || name.includes('cuirass') || name.includes('robe') || name.includes('tunic') ||
-    name.includes('zbroja') || name.includes('napierśnik') || name.includes('kolczuga') || name.includes('szata') ||
-    name.includes('baju besi') || name.includes('baju perisai') || name.includes('perisai dada') || name.includes('jubah')
-  ) return ['Armor'];
-  if (
-    type.includes('shield') || type.includes('tarcza') || (type.includes('perisai') && !type.includes('baju perisai')) ||
-    name.includes('shield') || name.includes('buckler') || name.includes('tarcza') || name.includes('puklerz') ||
-    (name.includes('perisai') && !name.includes('baju perisai') && !name.includes('perisai dada'))
-  ) return ['Shield'];
-  if (type.includes('helm') || type.includes('hełm') || type.includes('topi') || name.includes('helm') || name.includes('hat') || name.includes('hood') || name.includes('helmet') || name.includes('hełm') || name.includes('czapka') || name.includes('kaptur') || name.includes('topi')) return ['Head'];
-  if (type.includes('boot') || type.includes('buty') || type.includes('kasut') || name.includes('boot') || name.includes('shoes') || name.includes('greaves') || name.includes('buty') || name.includes('kasut')) return ['Shoes'];
-  if (type.includes('glove') || type.includes('rękawice') || type.includes('sarung tangan') || name.includes('glove') || name.includes('gauntlet') || name.includes('bracer') || name.includes('rękawice') || name.includes('sarung tangan')) return ['Gloves'];
-  if (type.includes('top') || type.includes('koszula') || type.includes('baju') || name.includes('shirt') || name.includes('jacket') || name.includes('dress') || name.includes('koszula') || name.includes('kurtka') || name.includes('baju')) return ['Top'];
-  if (type.includes('bottom') || type.includes('spodnie') || type.includes('seluar') || name.includes('pants') || name.includes('skirt') || name.includes('trousers') || name.includes('spodnie') || name.includes('seluar')) return ['Bottom'];
-  if (
-    type.includes('ring') || type.includes('accessory') || type.includes('pierścień') || type.includes('cincin') ||
-    name.includes('ring') || name.includes('amulet') || name.includes('necklace') || name.includes('pendant') ||
-    name.includes('pierścień') || name.includes('naszyjnik') || name.includes('wisiorek') ||
-    name.includes('cincin') || name.includes('tangkal') || name.includes('loket') || name.includes('rantai')
-  ) {
+  if (type.includes('spellbook')) return [];
+  if (type.includes('weapon')) return ['Weapon'];
+  if (type.includes('armor')) return ['Armor'];
+  if (type.includes('shield')) return ['Shield'];
+  if (type.includes('helm')) return ['Head'];
+  if (type.includes('boot')) return ['Shoes'];
+  if (type.includes('glove')) return ['Gloves'];
+  if (type.includes('top')) return ['Top'];
+  if (type.includes('bottom')) return ['Bottom'];
+  if (type.includes('ring') || type.includes('accessory')) {
     return ['Accessory 1', 'Accessory 2', 'Accessory 3', 'Accessory 4'];
   }
   return [];
@@ -102,7 +76,7 @@ const getInferredValidSlots = (item) => {
 const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, sessionId, session }) => {
   const { t } = useTranslation();
   const {
-    items, equipment, capacity, usedSlots, gold,
+    items, equipment, capacity, propertyBonusSlots = 0, usedSlots, gold,
     loading, equipItem, unequipSlot, dropItem, useItem
   } = inventoryHook;
 
@@ -274,7 +248,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 <span>{t('inventory.capacity')}</span>
               </span>
               <span className={`font-mono font-bold text-[11px] ${isFull ? 'text-red-400' : isNearFull ? 'text-amber-400' : 'text-gray-300'}`}>
-                {usedSlots} / {capacity}
+                {usedSlots} / {capacity}{propertyBonusSlots > 0 ? ` (+${propertyBonusSlots} 🏠)` : ''}
               </span>
             </div>
             <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/50">
@@ -332,6 +306,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 const isSpellbook = (item.item_type || '').toLowerCase() === 'spellbook' || (item.name || '').toLowerCase().match(/^(spellbook|grimoire|tome):/);
                 const isDigital = category === 'Digital';
                 const isKeyItem = Boolean(item.is_key_item || category === 'Quest');
+                const isPactLocked = Boolean(item.is_pact_locked);
                 const isDirectOnly = isSpellbook || isDigital;
                 const isBusy = actionInProgress === item.id;
                 const showTargetPicker = targetPickerItemId === item.id;
@@ -384,13 +359,18 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             </span>
                           )}
                           {item.count > 1 && ['potion', 'food', 'drink', 'consumable'].includes((item.item_type || item.type || '').toLowerCase()) && (item.slot_cost ?? 1) > 0 && (
-                            <span className="text-[9px] font-mono px-1 py-0.2 bg-emerald-950/70 text-emerald-300 rounded border border-emerald-800/60" title="Consumables stack up to 5 per slot">
+                            <span className="text-[9px] font-mono px-1 py-0.2 bg-emerald-950/70 text-emerald-300 rounded border border-emerald-800/60" title={t('inventory.stack_tooltip', 'Consumables stack up to 5 per slot')}>
                               {Math.ceil(item.count / 5) * (item.slot_cost ?? 1)} slot{Math.ceil(item.count / 5) * (item.slot_cost ?? 1) > 1 ? 's' : ''}
                             </span>
                           )}
                           {isKeyItem && (
                             <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/80 text-amber-300 rounded border border-amber-700/60 font-bold flex items-center gap-0.5">
                               🔒 {t('inventory.key_item')}
+                            </span>
+                          )}
+                          {isPactLocked && (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold flex items-center gap-0.5" title={t('contracts.pact_bound_locked', 'Bound to an active Entity Contract — sever the covenant to remove.')}>
+                              🩸 {t('contracts.pact_bound', 'Pact-Bound')}
                             </span>
                           )}
                           {item.slot_cost === 0 && (
@@ -415,7 +395,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                               ? 'bg-cyan-950/70 text-cyan-200 border-cyan-600/60'
                               : 'bg-black/60 hover:bg-neutral-800 text-gray-400 hover:text-gray-200 border-fantasy-border/60'
                           }`}
-                          title="Inspect Item Details & Stat Comparison"
+                          title={t('inventory.inspect_tooltip', 'Inspect Item Details & Stat Comparison')}
                         >
                           🔍 {t('inventory.inspect')}
                         </button>
@@ -454,22 +434,22 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                           </button>
                         )}
 
-                        {/* Drop Button / Confirmation (Disabled on Key Items) */}
-                        {!isKeyItem && (
+                        {/* Drop Button / Confirmation (Disabled on Key Items & Pact-Bound Gear) */}
+                        {!isKeyItem && !isPactLocked && (
                           confirmDropId === item.id ? (
                             <div className="flex items-center gap-0.5">
                               <button
                                 onClick={() => handleDrop(item.id)}
                                 disabled={isBusy}
                                 className="p-1 bg-red-900/60 hover:bg-red-800 text-red-300 rounded"
-                                title="Confirm Drop"
+                                title={t('inventory.confirm_drop', 'Confirm Drop')}
                               >
                                 <Check size={12} />
                               </button>
                               <button
                                 onClick={() => setConfirmDropId(null)}
                                 className="p-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded"
-                                title="Cancel"
+                                title={t('inventory.cancel_drop', 'Cancel')}
                               >
                                 <X size={12} />
                               </button>
@@ -478,7 +458,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                             <button
                               onClick={() => setConfirmDropId(item.id)}
                               className="p-1 text-gray-500 hover:text-red-400 transition-colors"
-                              title="Drop Item"
+                              title={t('inventory.drop_item', 'Drop Item')}
                             >
                               <Trash2 size={12} />
                             </button>
@@ -642,7 +622,14 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                     <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">{t('inventory.' + slot.toLowerCase().replace(/[\s\-]+/g, '_'), slot)}</span>
                     {equippedItem ? (
                       <div>
-                        <span className="text-xs font-semibold text-gray-200 block truncate">{equippedItem.name}</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-xs font-semibold text-gray-200 truncate">{equippedItem.name}</span>
+                          {equippedItem.is_pact_locked && (
+                            <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold">
+                              🩸 {t('contracts.pact_bound', 'Pact-Bound')}
+                            </span>
+                          )}
+                        </div>
                         {eqCleanEffect && (
                           <span className="text-[10px] text-gray-400 block truncate">{eqCleanEffect}</span>
                         )}
@@ -654,13 +641,22 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 </div>
 
                 {equippedItem && (
-                  <button
-                    onClick={() => handleUnequip(slot)}
-                    disabled={isBusy}
-                    className="px-2 py-1 bg-black/60 hover:bg-red-950/40 text-gray-400 hover:text-red-300 border border-fantasy-border hover:border-red-800/60 rounded text-[10px] font-bold uppercase transition-colors shrink-0 disabled:opacity-50"
-                  >
-                    {isBusy ? '...' : t('inventory.unequip')}
-                  </button>
+                  equippedItem.is_pact_locked ? (
+                    <span
+                      className="px-2 py-1 bg-rose-950/50 text-rose-300 border border-rose-800/60 rounded text-[10px] font-bold uppercase shrink-0 cursor-not-allowed"
+                      title={t('contracts.pact_bound_locked', 'Bound to an active Entity Contract — sever the covenant to remove.')}
+                    >
+                      🔒 {t('contracts.pact_bound', 'Pact-Bound')}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => handleUnequip(slot)}
+                      disabled={isBusy}
+                      className="px-2 py-1 bg-black/60 hover:bg-red-950/40 text-gray-400 hover:text-red-300 border border-fantasy-border hover:border-red-800/60 rounded text-[10px] font-bold uppercase transition-colors shrink-0 disabled:opacity-50"
+                    >
+                      {isBusy ? '...' : t('inventory.unequip')}
+                    </button>
+                  )
                 )}
               </div>
             );

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Clock, Moon, Sun, AlertTriangle, FastForward, Check, X, ShieldAlert, Sparkles, Users } from 'lucide-react';
 
 const formatClockTime = (totalMinutes) => {
@@ -8,13 +9,14 @@ const formatClockTime = (totalMinutes) => {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
 };
 
-const getTimePhase = (minute) => {
+const getTimePhase = (minute, t = null) => {
   const norm = ((minute % 1440) + 1440) % 1440;
-  if (norm >= 300 && norm < 420) return { label: 'Dawn', icon: '🌅', color: 'text-amber-300' };
-  if (norm >= 420 && norm < 720) return { label: 'Morning', icon: '☀️', color: 'text-yellow-300' };
-  if (norm >= 720 && norm < 1080) return { label: 'Afternoon', icon: '🌤️', color: 'text-amber-200' };
-  if (norm >= 1080 && norm < 1200) return { label: 'Dusk', icon: '🌇', color: 'text-orange-400' };
-  return { label: 'Night', icon: '🌙', color: 'text-indigo-300' };
+  const tr = (k, def) => (t ? t(k, def) : def);
+  if (norm >= 300 && norm < 420) return { label: tr('timeskip.phase_dawn', 'Dawn'), icon: '🌅', color: 'text-amber-300' };
+  if (norm >= 420 && norm < 720) return { label: tr('timeskip.phase_morning', 'Morning'), icon: '☀️', color: 'text-yellow-300' };
+  if (norm >= 720 && norm < 1080) return { label: tr('timeskip.phase_afternoon', 'Afternoon'), icon: '🌤️', color: 'text-amber-200' };
+  if (norm >= 1080 && norm < 1200) return { label: tr('timeskip.phase_dusk', 'Dusk'), icon: '🌇', color: 'text-orange-400' };
+  return { label: tr('timeskip.phase_night', 'Night'), icon: '🌙', color: 'text-indigo-300' };
 };
 
 const TimeSkipModal = ({
@@ -26,6 +28,7 @@ const TimeSkipModal = ({
   processing
 }) => {
   // Current time parsed from session
+  const { t } = useTranslation();
   const currentDay = Number(session?.current_day || 1);
   const currentMinute = Number(session?.current_minute !== undefined ? session.current_minute : 480); // default 08:00 AM
 
@@ -78,8 +81,8 @@ const TimeSkipModal = ({
   const targetDay = currentDay + targetDayOffset;
   const targetTimeStr = formatClockTime(targetMinute);
   const currentTimeStr = formatClockTime(currentMinute);
-  const targetPhase = getTimePhase(targetMinute);
-  const currentPhase = getTimePhase(currentMinute);
+  const targetPhase = getTimePhase(targetMinute, t);
+  const currentPhase = getTimePhase(currentMinute, t);
 
   const isMultiplayer = Boolean(session?.party_members && session.party_members.length > 1);
 
@@ -161,10 +164,10 @@ const TimeSkipModal = ({
             </div>
             <div>
               <h3 className="font-rpg font-bold text-fantasy-accent text-base leading-tight">
-                Chronos Dial • Time Skip
+                {t('timeskip.title', 'Chronos Dial • Time Skip')}
               </h3>
               <p className="text-[11px] text-gray-400">
-                Turn the hands of time to advance the world and regain energy
+                {t('timeskip.subtitle', 'Turn the hands of time to advance the world and regain energy')}
               </p>
             </div>
           </div>
@@ -214,7 +217,7 @@ const TimeSkipModal = ({
           <div className="flex-1 min-w-0 space-y-2.5 text-center sm:text-left">
             <div>
               <span className="text-[10px] uppercase font-mono font-bold text-gray-400 tracking-wider">
-                Current Time
+                {t('timeskip.current_time', 'Current Time')}
               </span>
               <div className="font-mono text-sm text-gray-300 font-semibold flex items-center justify-center sm:justify-start gap-1.5">
                 <span>{currentPhase.icon}</span>
@@ -225,12 +228,12 @@ const TimeSkipModal = ({
 
             <div className="text-amber-400 font-bold text-xs flex items-center justify-center sm:justify-start gap-1">
               <FastForward size={13} />
-              <span>Advancing +{(skipMinutes / 60).toFixed(1)} hrs ({skipMinutes} mins)</span>
+              <span>{t('timeskip.advancing', 'Advancing')} +{(skipMinutes / 60).toFixed(1)} hrs ({skipMinutes} mins)</span>
             </div>
 
             <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-500/40">
               <span className="text-[10px] uppercase font-mono font-bold text-amber-300 tracking-wider">
-                Projected Arrival
+                {t('timeskip.projected_arrival', 'Projected Arrival')}
               </span>
               <div className="font-mono text-base font-extrabold text-amber-200 flex items-center justify-center sm:justify-start gap-1.5">
                 <span>{targetPhase.icon}</span>
@@ -270,7 +273,7 @@ const TimeSkipModal = ({
         {/* Interactive Time Slider */}
         <div className="space-y-1.5">
           <div className="flex justify-between items-center text-xs">
-            <span className="font-mono font-bold text-gray-300">Skip Duration:</span>
+            <span className="font-mono font-bold text-gray-300">{t('timeskip.skip_duration', 'Skip Duration:')}</span>
             <span className="font-mono font-extrabold text-amber-300">
               {Math.floor(skipMinutes / 60)}h {skipMinutes % 60}m
             </span>
@@ -295,7 +298,7 @@ const TimeSkipModal = ({
         {/* Quick Presets Grid */}
         <div className="space-y-1.5">
           <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">
-            {canSleep ? 'Quick Presets' : 'Quick Presets (Wait Mode • 0% Recovery)'}
+            {canSleep ? t('timeskip.quick_presets', 'Quick Presets') : t('timeskip.quick_presets_wait', 'Quick Presets (Wait Mode • 0% Recovery)')}
           </span>
           {canSleep ? (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -309,28 +312,28 @@ const TimeSkipModal = ({
                 }}
                 className="py-1.5 px-2 rounded-lg bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-700/60 hover:border-indigo-400 text-xs font-semibold text-indigo-200 transition-all text-center"
               >
-                🌙 Sleep to Morning
+                🌙 {t('timeskip.sleep_to_morning', 'Sleep to Morning')}
               </button>
               <button
                 type="button"
                 onClick={() => { setSkipMinutes(60); setMode('nap'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-amber-400/60 text-xs font-semibold text-amber-200 transition-all text-center"
               >
-                ☕ 1h Nap
+                ☕ {t('timeskip.nap_1h', '1h Nap')}
               </button>
               <button
                 type="button"
                 onClick={() => { setSkipMinutes(120); setMode('nap'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-amber-400/60 text-xs font-semibold text-amber-200 transition-all text-center"
               >
-                🛌 2h Nap
+                🛌 {t('timeskip.nap_2h', '2h Nap')}
               </button>
               <button
                 type="button"
                 onClick={() => { setSkipMinutes(60); setMode('wait'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-neutral-500 text-xs font-semibold text-gray-300 transition-all text-center"
               >
-                ⏳ Wait 1 Hour
+                ⏳ {t('timeskip.wait_1h', 'Wait 1 Hour')}
               </button>
             </div>
           ) : (
@@ -340,21 +343,21 @@ const TimeSkipModal = ({
                 onClick={() => { setSkipMinutes(15); setMode('wait'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-neutral-500 text-xs font-semibold text-gray-200 transition-all text-center"
               >
-                ⏳ Wait 15m
+                ⏳ {t('timeskip.wait_15m', 'Wait 15m')}
               </button>
               <button
                 type="button"
                 onClick={() => { setSkipMinutes(60); setMode('wait'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-neutral-500 text-xs font-semibold text-gray-200 transition-all text-center"
               >
-                ⏳ Wait 1 Hour
+                ⏳ {t('timeskip.wait_1h', 'Wait 1 Hour')}
               </button>
               <button
                 type="button"
                 onClick={() => { setSkipMinutes(180); setMode('wait'); }}
                 className="py-1.5 px-2 rounded-lg bg-black/60 hover:bg-neutral-900 border border-fantasy-border hover:border-neutral-500 text-xs font-semibold text-gray-200 transition-all text-center"
               >
-                ⏳ Wait 3 Hours
+                ⏳ {t('timeskip.wait_3h', 'Wait 3 Hours')}
               </button>
               <button
                 type="button"
@@ -378,7 +381,7 @@ const TimeSkipModal = ({
             <div className="flex items-center gap-2">
               <AlertTriangle size={16} className="text-rose-400 shrink-0" />
               <span>
-                <strong>Warning:</strong> You have an upcoming date with {upcomingAppointment.partner_name || 'contact'} at {formatClockTime(upcomingAppointment.target_minute)}!
+                <strong>{t('timeskip.warning', 'Warning:')}</strong> You have an upcoming date with {upcomingAppointment.partner_name || 'contact'} at {formatClockTime(upcomingAppointment.target_minute)}!
               </span>
             </div>
             {nextAppointment && (
@@ -387,7 +390,7 @@ const TimeSkipModal = ({
                 onClick={handleFastForwardToNextEvent}
                 className="shrink-0 px-2.5 py-1 rounded bg-rose-900 hover:bg-rose-800 text-rose-100 font-bold text-[11px] border border-rose-400/60 transition-colors"
               >
-                Catch Meetup
+                {t('timeskip.catch_meetup', 'Catch Meetup')}
               </button>
             )}
           </div>
@@ -397,7 +400,7 @@ const TimeSkipModal = ({
         {isMultiplayer && (
           <div className="flex items-center gap-2 text-xs text-amber-300/90 bg-amber-950/40 border border-amber-700/50 p-2 rounded-lg font-mono">
             <Users size={14} className="shrink-0" />
-            <span>Multiplayer Party Session: Submitting this will request a party time skip.</span>
+            <span>{t('timeskip.multiplayer_note', 'Multiplayer Party Session: Submitting this will request a party time skip.')}</span>
           </div>
         )}
 
@@ -408,7 +411,7 @@ const TimeSkipModal = ({
             onClick={onClose}
             className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
           >
-            Cancel
+            {t('timeskip.cancel', 'Cancel')}
           </button>
           <button
             type="button"
@@ -417,7 +420,7 @@ const TimeSkipModal = ({
             className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs shadow-lg hover:shadow-amber-500/30 transition-all flex items-center gap-1.5 disabled:opacity-50"
           >
             <Clock size={14} />
-            <span>Confirm Time Skip</span>
+            <span>{t('timeskip.confirm', 'Confirm Time Skip')}</span>
           </button>
         </div>
 

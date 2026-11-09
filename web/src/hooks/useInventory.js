@@ -5,6 +5,7 @@ export const useInventory = (user) => {
   const [items, setItems] = useState([]);
   const [equipment, setEquipment] = useState({});
   const [capacity, setCapacity] = useState(10);
+  const [propertyBonusSlots, setPropertyBonusSlots] = useState(0);
   const [usedSlots, setUsedSlots] = useState(0);
   const [gold, setGold] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -19,6 +20,7 @@ export const useInventory = (user) => {
       setItems(data.items || []);
       setEquipment(data.equipment || {});
       setCapacity(data.capacity || 10);
+      setPropertyBonusSlots(data.property_bonus_slots || 0);
       setUsedSlots(data.used_slots || 0);
       setGold(data.gold || 0);
     } catch (err) {
@@ -105,6 +107,7 @@ export const useInventory = (user) => {
     items,
     equipment,
     capacity,
+    propertyBonusSlots,
     usedSlots,
     gold,
     loading,

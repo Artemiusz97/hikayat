@@ -86,6 +86,10 @@ COMBAT_CHOICE_SCHEMA = {
                             "DEFENSIVE_GUARD",
                             "EVADE_TACTICAL_FLEE"
                         ]
+                    },
+                    "incursion_action": {
+                        "type": "string",
+                        "description": "Optional deterministic incursion action key when resolving an anomalous breach."
                     }
                 },
                 "required": ["label", "stat", "requirement", "choice_type"]
@@ -101,7 +105,8 @@ COMBAT_CHOICE_SCHEMA = {
                 "properties": {
                     "label": {"type": "string"},
                     "stat": {"type": "string"},
-                    "requirement": {"type": "integer"}
+                    "requirement": {"type": "integer"},
+                    "incursion_action": {"type": "string"}
                 }
             }
         },
@@ -284,7 +289,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             p_comp.setdefault("weapon_profile", prof["weapon_profile"])
             if not p_comp.get("stats") or not isinstance(p_comp.get("stats"), dict):
                 p_comp["stats"] = prof["stats"]
-            if p_comp.get("max_hp", 0) < 100 and prof["anomalous_npc_tag"] == "special_agent":
+            if p_comp.get("max_hp", 0) < 100 and prof["anomalous_npc_tag"] in ("special_agent", "folklore_villager"):
                 p_comp["max_hp"] = prof["max_hp"]
                 p_comp["hp"] = min(prof["max_hp"], max(p_comp.get("hp", prof["hp"]), prof["hp"]))
                 p_comp["max_mp"] = prof["max_mp"]
@@ -319,6 +324,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         if is_anom_combat:
             from mechanics.social.anomalous_npc_tags import (
                 TAG_CIVILIAN,
+                TAG_FOLKLORE_VILLAGER,
                 TAG_SPECIAL_AGENT,
                 hydrate_anomalous_npc_profile,
                 is_civilian_forced_to_fight_as_ally,
@@ -332,7 +338,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
             )
             npc["anomalous_npc_tag"] = prof_n["anomalous_npc_tag"]
             npc["is_special_agent"] = prof_n["is_special_agent"]
-            if prof_n["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
+            if prof_n["anomalous_npc_tag"] in (TAG_SPECIAL_AGENT, TAG_FOLKLORE_VILLAGER):
                 if npc.get("hp") is None:
                     npc["hp"] = prof_n["hp"]
                 npc["max_hp"] = prof_n["max_hp"]
@@ -347,6 +353,10 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 npc["attribute"] = prof_n.get("attribute")
                 npc["combat_archetype"] = prof_n.get("combat_archetype")
                 npc["ability_medium"] = prof_n.get("ability_medium")
+                if prof_n["anomalous_npc_tag"] == TAG_FOLKLORE_VILLAGER:
+                    npc["is_folklore_villager"] = True
+                    npc["is_beast_companion"] = bool(prof_n.get("is_beast_companion"))
+                    npc["folklore_village"] = prof_n.get("folklore_village")
                 friendly_npcs.append(npc)
                 seen_ally_names.add(n_nm.lower())
             elif prof_n["anomalous_npc_tag"] == TAG_CIVILIAN:
@@ -412,6 +422,8 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         session["_construct_initialized_this_combat"] = True
 
     combat_log = []
+    if isinstance(session, dict):
+        session["_pre_combat_enemies"] = [dict(e) for e in enemies if isinstance(e, dict)]
     player_damage_by_name = {p.get("name", "Hero"): 0 for p in player_chars}
     player_heal_by_name = {p.get("name", "Hero"): 0 for p in player_chars}
     player_mp_change_by_name = {p.get("name", "Hero"): 0 for p in player_chars}
@@ -807,6 +819,12 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 is_dup_emp = bool(spell_id in emp_list) if isinstance(emp_list, list) else bool(spell.get("duplicate_empowered"))
                 eff_spell = dict(spell, duplicate_empowered=is_dup_emp)
                 emp_mult = 1.20 if is_dup_emp else 1.0
+                if spell.get("unavoidable") and tier in ("fail", "failure", "crit_fail"):
+                    tier = "success"
+                if spell.get("is_pact_skill") and action.get("is_lethal_overdraw"):
+                    combat_log.append(
+                        f"🩸 **LETHAL OVERDRAW!** **{acting_char_name}** pours their remaining lifeblood into **{spell['name']}** — the invocation erupts at full power before collapse!"
+                    )
 
                 discipline = spell.get("discipline", "attack")
                 target_type = spell.get("target_type", "single")
@@ -845,9 +863,11 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                     base_dmg = calculate_spell_damage(
                         player_attrs.get("matk", 20), eff_spell, elem_mult,
                         defender_attrs=m_attrs,
-                        armor_type_dt=m_armor.get("type_dt", {}),
-                        armor_base_dt=m_armor.get("base_dt", 0)
+                        armor_type_dt={} if spell.get("pierces_dt") else m_armor.get("type_dt", {}),
+                        armor_base_dt=0 if spell.get("pierces_dt") else m_armor.get("base_dt", 0)
                     )
+                    if spell.get("strips_shields") and int(m.get("temp_hp", 0) or 0) > 0:
+                        m["temp_hp"] = 0
                     base_dmg = int(round(base_dmg * damage_mult))
                     return base_dmg, m_armor, m_attrs
 
@@ -951,11 +971,13 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                             amp_map_st = player_attrs.get("elemental_amp") or {}
                             if isinstance(amp_map_st, dict) and sp_dmg_st in amp_map_st:
                                 elem_mult *= (1.0 + max(0.0, float(amp_map_st[sp_dmg_st])))
+                            if spell.get("strips_shields") and int(target_enemy.get("temp_hp", 0) or 0) > 0:
+                                target_enemy["temp_hp"] = 0
                             m_dmg = calculate_spell_damage(
                                 player_attrs.get("matk", 20), eff_spell, elem_mult,
                                 defender_attrs=enemy_attrs,
-                                armor_type_dt=enemy_armor.get("type_dt", {}),
-                                armor_base_dt=enemy_armor.get("base_dt", 0)
+                                armor_type_dt={} if spell.get("pierces_dt") else enemy_armor.get("type_dt", {}),
+                                armor_base_dt=0 if spell.get("pierces_dt") else enemy_armor.get("base_dt", 0)
                             )
                             m_dmg = _resolve_hit_tier(m_dmg, tier)
 
@@ -1002,9 +1024,42 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                             combat_log.append(f"✨ **Twinned** echo triggers! **{target_enemy['name']}** struck for **{echo_dmg} damage**!")
 
                     # Cleansing: remove 1 debuff from caster
-                    if ("cleansing" in spell_affixes or spell.get("cleanses_debuff")) and acting_char_data.get("status_effects"):
-                        cleansed = acting_char_data["status_effects"].pop(0)
-                        combat_log.append(f"✨ **{acting_char_name}** cleansed **{cleansed}**!")
+                    if ("cleansing" in spell_affixes or spell.get("cleanses_debuff") or spell.get("cleanses_party")) and acting_char_data.get("status_effects"):
+                        if spell.get("cleanses_party"):
+                            acting_char_data["status_effects"] = [
+                                s for s in acting_char_data["status_effects"]
+                                if not any(neg in str(s) for neg in ("Bleed", "Poison", "Burn", "Stun", "Weak", "Blind", "Chill", "Curse", "Disrupt"))
+                            ]
+                            combat_log.append(f"✨ **{acting_char_name}**'s Entity Covenant purged negative afflictions!")
+                        else:
+                            cleansed = acting_char_data["status_effects"].pop(0)
+                            combat_log.append(f"✨ **{acting_char_name}** cleansed **{cleansed}**!")
+                    if spell.get("is_pact_skill"):
+                        if total_enemy_damage > 0 and spell.get("lifesteal_pct") and not action.get("is_lethal_overdraw"):
+                            _ls_val = max(1, int(round(total_enemy_damage * float(spell["lifesteal_pct"]))))
+                            _old_h = int(acting_char_data.get("hp", 0) or 0)
+                            acting_char_data["hp"] = min(int(acting_char_data.get("max_hp", 100) or 100), _old_h + _ls_val)
+                            _gained_h = acting_char_data["hp"] - _old_h
+                            if _gained_h > 0:
+                                player_heal_by_name[acting_char_name] = player_heal_by_name.get(acting_char_name, 0) + _gained_h
+                                combat_log.append(f"🩸 **{acting_char_name}** devoured **{_gained_h} HP** via **{spell['name']}**!")
+                        if spell.get("execute_threshold") and target_enemy.get("hp", 0) > 0 and not target_enemy.get("is_boss") and not target_enemy.get("sparring"):
+                            _ex_cap = max(1, int(round(target_enemy.get("max_hp", 100) * float(spell["execute_threshold"]))))
+                            if target_enemy["hp"] <= _ex_cap:
+                                target_enemy["hp"] = 0
+                                _register_kill(target_enemy)
+                                combat_log.append(f"⚰️ **COVENANT EXECUTION!** **{spell['name']}** reaped **{target_enemy['name']}** outright!")
+                        if spell.get("enters_stealth"):
+                            acting_char_data.setdefault("status_effects", []).append("Hidden in Shadows [2 turns]")
+                            if isinstance(session, dict):
+                                set_actor_combat_vanished(session, True, user_id=acting_user_id, also_set_hidden=False)
+                            combat_log.append(f"🌑 **{acting_char_name}** slipped into anomalous shadow veil!")
+                        if spell.get("grants_temp_hp_pct"):
+                            _thp_p = max(4, int(round(acting_char_data.get("max_hp", 70) * float(spell["grants_temp_hp_pct"]))))
+                            acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), _thp_p)
+                            combat_log.append(f"🛡️ **{acting_char_name}** gained **+{_thp_p} Temp Barrier**!")
+                        if spell.get("self_status_ailment"):
+                            acting_char_data.setdefault("status_effects", []).append(str(spell["self_status_ailment"]))
                     if is_anom_combat and spell.get("party_temp_hp_shield"):
                         sh_v = int(spell["party_temp_hp_shield"])
                         acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), sh_v)
@@ -1023,9 +1078,30 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 elif discipline == "support":
                     if spell.get("temp_hp_shield"):
                         acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), int(spell["temp_hp_shield"]))
+                    if spell.get("grants_temp_hp_pct"):
+                        _sup_thp = max(4, int(round(acting_char_data.get("max_hp", 70) * float(spell["grants_temp_hp_pct"]))))
+                        acting_char_data["temp_hp"] = max(int(acting_char_data.get("temp_hp", 0) or 0), _sup_thp)
+                    if spell.get("cleanses_party") and acting_char_data.get("status_effects"):
+                        acting_char_data["status_effects"] = [
+                            s for s in acting_char_data["status_effects"]
+                            if not any(neg in str(s) for neg in ("Bleed", "Poison", "Burn", "Stun", "Weak", "Blind", "Chill", "Curse", "Disrupt"))
+                        ]
+                    if spell.get("enters_stealth"):
+                        acting_char_data.setdefault("status_effects", []).append("Hidden in Shadows [2 turns]")
+                        if isinstance(session, dict):
+                            set_actor_combat_vanished(session, True, user_id=acting_user_id, also_set_hidden=False)
+                    if spell.get("self_status_ailment"):
+                        acting_char_data.setdefault("status_effects", []).append(str(spell["self_status_ailment"]))
                     if spell.get("mono_attribute_buff"):
                         acting_char_data.setdefault("status_effects", []).append(f"Harmony ({spell['mono_attribute_buff'].title()}) [2 turns]")
-                    if "heal_amount" in spell:
+                    if spell.get("heal_self_pct") or spell.get("heals_party_pct"):
+                        _hp_pct_s = float(spell.get("heals_party_pct") or spell.get("heal_self_pct") or 0.25)
+                        heal_val = max(4, int(round(acting_char_data.get("max_hp", 70) * _hp_pct_s * emp_mult)))
+                        if not action.get("is_lethal_overdraw"):
+                            acting_char_data["hp"] = min(acting_char_data.get("max_hp", 100), acting_char_data.get("hp", 0) + heal_val)
+                            player_heal_by_name[acting_char_name] = player_heal_by_name.get(acting_char_name, 0) + heal_val
+                        combat_log.append(f"💚 **{acting_char_name}** invoked **{spell['name']}**: Restored **{heal_val} HP**.")
+                    elif "heal_amount" in spell:
                         heal_val = int(round(spell["heal_amount"] * emp_mult))
                         if tier == "crit_success":
                             heal_val = int(round(heal_val * 1.4))
@@ -1681,7 +1757,10 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         living_enemies = [m for m in enemies if m.get("hp", 0) > 0]
         if not living_enemies:
             break
-        if is_anom_combat and not comp.get("is_summon") and comp.get("anomalous_npc_tag") in ("special_agent", "civilian"):
+        if is_anom_combat and not comp.get("is_summon") and (
+            comp.get("anomalous_npc_tag") in ("special_agent", "civilian", "folklore_villager")
+            or comp.get("is_folklore_villager")
+        ):
             from mechanics.social.anomalous_npc_tags import resolve_anomalous_ally_combat_action
             resolve_anomalous_ally_combat_action(
                 comp=comp,
@@ -2930,6 +3009,9 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                 "gold_change": total_gold_gain,
                 "xp_change": total_xp_gain
             })
+        if total_xp_gain > 0:
+            _auth_xp_map = llm_outcome.setdefault("_auth_combat_xp", {})
+            _auth_xp_map[p_name.lower()] = int(_auth_xp_map.get(p_name.lower(), 0) or 0) + int(total_xp_gain)
 
     session_id = session.get("id", 0) if session else 0
     import db

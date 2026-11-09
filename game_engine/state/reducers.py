@@ -482,7 +482,7 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
     active_sq = db.get_active_story_quest(session_id)
     if active_sq and active_sq.get("quest_id") not in updated_quest_ids:
         sub_objs = active_sq.get("sub_objectives", [])
-        all_sub_done = bool(sub_objs and all(so.get("completed") for so in sub_objs if isinstance(so, dict)))
+        all_sub_done = bool(sub_objs and db.is_quest_main_objectives_complete(sub_objs))
         action_is_climax = any(
             bool(a.get("is_climax_action")) or
             str(a.get("contract_type", "")).lower() == "climax" or
@@ -803,12 +803,36 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
               if isinstance(rn, dict) and rn.get("item"):
                   auth_loot_names.add(str(rn["item"]).strip().lower())
 
+          _media_capture_kws = (
+              "photo", "selfie", "picture", "snap", "camera",
+              "record", "video", "film", "screenshot", "photograph",
+          )
+          _media_acts = char_actions if char_actions else (actions or [])
+          _has_media_capture_intent = bool(isinstance(outcome, dict) and outcome.get("_pre_turn_media_captured"))
+          if not _has_media_capture_intent and _media_acts:
+              for _ma in _media_acts:
+                  if not isinstance(_ma, dict):
+                      continue
+                  _ma_int = str(_ma.get("intent") or "").lower()
+                  _ma_sub = str(_ma.get("sub_intent") or "").lower()
+                  _ma_txt = f"{_ma.get('label') or ''} {_ma.get('custom_action_text') or ''} {_ma.get('text') or ''}".lower()
+                  if (
+                      _ma_int in ("media_capture", "capture_media", "take_photo", "record_video")
+                      or _ma_sub in ("media_capture", "photo", "selfie", "video", "record")
+                      or any(_kw in _ma_txt for _kw in _media_capture_kws)
+                  ):
+                      _has_media_capture_intent = True
+                      break
+
+          _media_gained_this_turn = 0
           filtered_gained = []
           for itm in gained:
               itm_low = str(itm).strip().lower()
               is_media = any(k in itm_low for k in ("photo", "selfie", "video", "snapshot", "recording", "clip"))
               if is_media and scenario_has_smartphone(scen_key):
-                  filtered_gained.append(itm)
+                  if _has_media_capture_intent and _media_gained_this_turn < 1:
+                      filtered_gained.append(itm)
+                      _media_gained_this_turn += 1
               elif any(al in itm_low or itm_low in al for al in auth_loot_names):
                   filtered_gained.append(itm)
           gained = filtered_gained
@@ -3505,7 +3529,11 @@ def _reduce_media_capture(session_id: int, session: dict, party: list, outcome: 
                 continue
             media_type = str(m_entry.get("media_type") or "photo")
             subject = str(m_entry.get("subject") or "Scene")
-            already_added = any(subject.lower() in str(it).lower() for it in items_gained_by_user.get(user_id, []))
+            already_added = any(
+                subject.lower() in str(it).lower()
+                or any(mk in str(it).lower() for mk in ("photo", "selfie", "video", "snapshot", "recording", "clip", "saved to photo vault"))
+                for it in items_gained_by_user.get(user_id, [])
+            )
             if not already_added:
                 outcome_nar = outcome.get("outcome_narrative") or outcome.get("next_narrative") or f"Captured {media_type} of {subject}"
                 caption_text = str(outcome_nar).split("\n")[0][:250].strip()
@@ -3544,7 +3572,11 @@ def _reduce_media_capture(session_id: int, session: dict, party: list, outcome: 
                 if user_id:
                     media_type = parsed_intent.metadata.get("media_type", "photo")
                     subject = parsed_intent.target_entity or "Scene"
-                    already_added = any(subject.lower() in str(it).lower() for it in items_gained_by_user.get(user_id, []))
+                    already_added = any(
+                subject.lower() in str(it).lower()
+                or any(mk in str(it).lower() for mk in ("photo", "selfie", "video", "snapshot", "recording", "clip", "saved to photo vault"))
+                for it in items_gained_by_user.get(user_id, [])
+            )
                     if not already_added:
                         outcome_nar = outcome.get("outcome_narrative") or outcome.get("next_narrative") or act_label
                         caption_text = outcome_nar.split("\n")[0][:250].strip()

@@ -7,6 +7,14 @@ import time
 import db
 import scenario_data
 from llm_client import call_llm_json
+_ORIG_CALL_LLM_JSON = call_llm_json
+
+
+def _resolve_phone_llm_fn():
+    import mechanics.system.phone as _phone_pkg
+    if call_llm_json is not _ORIG_CALL_LLM_JSON:
+        return call_llm_json
+    return getattr(_phone_pkg, "call_llm_json", call_llm_json)
 from skill_check import resolve_check
 from .embeds import get_phone_branding
 
@@ -99,9 +107,18 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
             system_prompt += "\nACTIVE WORLD PULSE (Reference at least one naturally in timeline chatter):\n" + "\n".join(pulse_lines) + "\n"
     except Exception:
         pass
+    from game_engine.prompt_layout import build_side_channel_language_directive
+    feed_lang_dir = build_side_channel_language_directive(
+        session,
+        text_fields=("posts[].content", "posts[].tag", "posts[].time_ago"),
+        preserve_fields=("posts[].author_name", "posts[].author_handle"),
+        style="sms",
+    )
+    if feed_lang_dir:
+        system_prompt += f"\n{feed_lang_dir}\n"
     user_prompt = f"Active Scenario: {scen_key}\nGenerate 4 fresh timeline posts for {branding['feed_app_name']}:\n{GOSSIP_FEED_SCHEMA}"
 
-    result = await call_llm_json(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+    result = await _resolve_phone_llm_fn()(system_prompt, user_prompt, temperature=0.8, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
     posts = result.get("posts", [])
     if not posts:
         posts = [
@@ -261,7 +278,11 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             f"Location: {loc}.\n"
             f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. anonymous student post, leaked audio file, overheard locker room chat)\"}}"
         )
-        res = await call_llm_json(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
+        from game_engine.prompt_layout import build_side_channel_language_directive
+        rumor_lang_dir = build_side_channel_language_directive(session, text_fields=("clue", "source"), style="sms")
+        if rumor_lang_dir:
+            system_prompt += f"\n{rumor_lang_dir}"
+        res = await _resolve_phone_llm_fn()(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         clue_text = res.get("clue") or f"Unusual after-hours movement reported near {loc} connected to {sq_title}."
         source = res.get("source") or "Encrypted Forum Thread"
         discovered_rm = None

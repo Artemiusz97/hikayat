@@ -68,6 +68,8 @@ function App() {
         onEndSlot={endSessionById}
         refreshCharacter={refreshCharacter}
         refreshSession={refreshSession}
+        actionError={actionError}
+        clearActionError={clearActionError}
         onSessionLoaded={(s) => {
           setSession(s);
           resumeSession();

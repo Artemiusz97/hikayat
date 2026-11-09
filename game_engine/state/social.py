@@ -315,9 +315,14 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                         is_success = True
                     else:
                         is_money_recruit = True
+                    is_fk_rec = eval_res.get("anomalous_npc_tag") == "folklore_villager"
                     anom_extra_comp = {
-                        "anomalous_npc_tag": "special_agent",
-                        "is_special_agent": True,
+                        "anomalous_npc_tag": "folklore_villager" if is_fk_rec else "special_agent",
+                        "is_special_agent": not is_fk_rec,
+                        "is_folklore_villager": is_fk_rec,
+                        "is_beast_companion": bool(eval_res.get("is_beast_companion")),
+                        "folklore_village": eval_res.get("folklore_village", ""),
+                        "spells": eval_res.get("innate_abilities", []),
                         "agent_tier": eval_res.get("agent_tier", 1),
                         "rank_title": eval_res.get("rank_title", ""),
                         "agent_class": eval_res.get("agent_class", ""),
@@ -371,6 +376,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                             "origin_location": origin_loc,
                             "race": lore_ent.get("race") or "",
                             "appearance": lore_ent.get("appearance_json", {}),
+                            "recruited_turn": int((session or {}).get("_target_turn") or db.get_effective_session_turn(session_id)),
                             **anom_extra_comp,
                         }
                         db.add_session_party_npc(session_id, companion_data)
@@ -388,6 +394,16 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                                 "agent_class": anom_extra_comp.get("agent_class", ""),
                                 "faction_id": anom_extra_comp.get("faction_id", ""),
                                 "faction": anom_extra_comp.get("faction_name", ""),
+                                "innate_abilities": anom_extra_comp.get("innate_abilities", []),
+                            }
+                        elif anom_extra_comp.get("anomalous_npc_tag") == "folklore_villager":
+                            rec_binfo = {
+                                "anomalous_npc_tag": "folklore_villager",
+                                "is_special_agent": False,
+                                "is_folklore_villager": True,
+                                "folklore_village": anom_extra_comp.get("folklore_village", ""),
+                                "agent_tier": anom_extra_comp.get("agent_tier", 3),
+                                "rank_title": anom_extra_comp.get("rank_title", ""),
                                 "innate_abilities": anom_extra_comp.get("innate_abilities", []),
                             }
                         db.upsert_contact(
@@ -833,6 +849,10 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             " ".join(str(a.get("label", "")) for a in actions) + " " + narrative_text
         ).lower()
     processed_npcs = set()
+    _v50_handled_npcs: Set[str] = set()
+    _v50_pills: List[Dict[str, Any]] = []
+    _v50_latest_mood: Optional[Dict[str, Any]] = None
+    _v50_turn_num = _resolve_current_turn_1based(session, outcome)
     for idx, rel in enumerate(outcome.get("relationship_updates", []) or []):
         if not isinstance(rel, dict):
             continue
@@ -969,6 +989,36 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             rel["delta_score"] = delta
             rel["reasons"] = aff_reasons
             log.info("Deterministic Social Affinity for %s: delta=%d, breakdown=%s, reasons=%s", npc_name, delta, aff_breakdown, aff_reasons)
+            if session_id and is_target_npc:
+                try:
+                    from mechanics.social import consequences as _v50_conseq
+                    _v50_res = _v50_conseq.apply_v50_social_turn_for_npc(
+                        session_id=session_id,
+                        character_id=first_char_id,
+                        npc_name=npc_name,
+                        raw_delta=delta,
+                        action=primary_action,
+                        session=session,
+                        outcome=outcome,
+                        party=party,
+                        all_scene_npcs=all_scene_npcs,
+                        target_scene_npc=target_scene_npc,
+                        already_cushioned=bool(rel.get("_pre_turn_resolved") or aff_breakdown.get("cha_cushioned")),
+                        is_gift=bool(gift_target_npc and n_low == str(gift_target_npc).lower().strip()),
+                        gift_item_name=str(gift_item_name or ""),
+                        is_confession=bool(is_player_confession_action),
+                        is_intimate_turn=bool(is_player_intimate_action or is_player_intercourse_action or is_player_oral_action),
+                        turn_number=_v50_turn_num,
+                        contact_eligible=True,
+                    )
+                    delta = int(_v50_res.get("delta", delta))
+                    rel["delta_score"] = delta
+                    _v50_handled_npcs.add(db.canon_social_npc_id(npc_name))
+                    _v50_pills.extend(_v50_res.get("pills") or [])
+                    if _v50_res.get("mood_payload"):
+                        _v50_latest_mood = _v50_res["mood_payload"]
+                except Exception as _v50_err:
+                    log.warning("v50 social turn metering failed for %s: %s", npc_name, _v50_err)
 
             traits = rel.get("new_traits", []) or []
             prefs = rel.get("new_preferences", []) or []
@@ -1640,6 +1690,26 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
         except Exception as _affair_err:
             log.warning("Immediate affair discovery check failed: %s", _affair_err)
 
+    if session_id:
+        try:
+            from mechanics.social import consequences as _v50_fin_conseq
+            _v50_fin_conseq.finalize_v50_social_turn(
+                session_id=session_id,
+                character_id=first_char_id,
+                outcome=outcome,
+                session=session,
+                actions=actions,
+                party=party,
+                all_scene_npcs=all_scene_npcs,
+                handled_npc_ids=_v50_handled_npcs,
+                accumulated_pills=_v50_pills,
+                latest_mood=_v50_latest_mood,
+                is_intimate_turn=bool(is_player_intimate_action or is_player_intercourse_action or is_player_oral_action),
+                turn_number=_v50_turn_num,
+            )
+        except Exception as _v50_fin_err:
+            log.warning("v50 social turn finalization failed: %s", _v50_fin_err)
+
 
 
 
@@ -1837,6 +1907,19 @@ def resolve_pre_turn_social_and_disclosures(
             social_impression_reason=_imp_r,
         )
         _pre_intent_low = str(npc_action.get("intent") or "").lower().strip()
+        if is_target and session_id and first_char_id and delta > 0 and _pre_intent_low not in ("romantic_confession", "gift_offer", "intimate_act"):
+            try:
+                from mechanics.social import pacing as _pre_pacing
+                _cur_d_pre = int(session.get("current_day", 1) or 1)
+                _d_row = db.get_character_social_daily(session_id, first_char_id, npc_name, current_day=_cur_d_pre)
+                _cap_lim = _pre_pacing.DAILY_DIGESTION_CAP_DATE if _pre_prof.get("is_private_meetup") else _pre_pacing.DAILY_DIGESTION_CAP_STANDARD
+                if int((_d_row or {}).get("daily_affinity_earned") or 0) >= _cap_lim:
+                    delta = 0
+                    directives.append(
+                        f"[STAGE DIRECTION — DAILY BOND SETTLING]: {npc_name} enjoys talking with {player_name} and answers naturally, though their closeness for today has reached a warm, comfortable plateau."
+                    )
+            except Exception:
+                pass
         if (
             is_target
             and int(_pre_bstate.get("remaining_budget", 3)) <= 0

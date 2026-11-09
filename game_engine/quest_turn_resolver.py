@@ -17,6 +17,7 @@ from game_engine.quest_agency import (
 )
 from game_engine.quest_lifecycle import (
     complete_remediation_bounty_if_linked,
+    evaluate_skipped_threatened_optionals,
     resolve_chapter_transition,
     seed_or_discover_dossier_clue,
 )
@@ -24,6 +25,7 @@ from mechanics.narrative.blueprints import has_quest_note_flag
 from mechanics.narrative.campaign_spine import (
     mutate_spine_on_lieutenant_fate,
     promote_escaped_boss_to_nemesis,
+    update_campaign_ending_axes,
 )
 from mechanics.narrative.quest_engines import render_world_scar_spec
 from mechanics.world.waypoints.choices import get_active_companion_for_waypoint
@@ -56,6 +58,89 @@ def is_approach_burned(
     norm_a = str(approach or "").strip().upper()
     burned_list = [str(x).upper() for x in (burned_map.get(norm_t) or [])]
     return norm_a in burned_list
+
+
+def unlock_hidden_quest_optional(
+    session_id: int,
+    quest_id: str = "",
+    optional_id: str = "",
+    trigger_source: str = "clue_found",
+    turn_number: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Hybrid Discovery Unlocker:
+    Reveals hidden (`is_discovered == False`) Optional objectives when triggered by
+    Caseboard clues (`clue_found`), NPC dialogue (`npc_dialogue`), or SMS/Courier comms (`incoming_comms`),
+    and synchronizes `quests.sub_objectives_json` and `quest_waypoints`.
+    """
+    if not session_id:
+        return []
+    sess = db.get_session(session_id) or {}
+    eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
+    trig_norm = str(trigger_source or "clue_found").strip().lower()
+
+    if quest_id:
+        d_single = db.get_quest_dossier(session_id, quest_id)
+        dossiers = [d_single] if d_single else []
+    else:
+        dossiers = db.get_session_quest_dossiers(session_id, status_stage="compiled") or []
+
+    unlocked_out: List[Dict[str, Any]] = []
+    for dos in dossiers:
+        if not dos:
+            continue
+        qid = str(dos.get("quest_id") or "")
+        q_row = db.get_quest_by_id(session_id, qid)
+        if q_row and str(q_row.get("status") or "Active") != "Active":
+            continue
+        prev_leads = [dict(l) for l in (dos.get("leads_graph") or [])]
+        leads = [dict(l) for l in prev_leads]
+        mutated = False
+
+        for idx, ld in enumerate(leads):
+            if not ld.get("is_optional"):
+                continue
+            if ld.get("is_discovered", True):
+                continue
+            if str(ld.get("status") or "active").lower() in ("failed", "locked_out", "completed"):
+                continue
+
+            if optional_id:
+                cand_ids = {
+                    str(ld.get("optional_id") or "").lower(),
+                    str(ld.get("lead_id") or "").lower(),
+                }
+                if optional_id.strip().lower() not in cand_ids:
+                    continue
+            else:
+                req_trig = str(ld.get("unlock_trigger") or "clue_found").strip().lower()
+                if trig_norm not in ("any", "breakthrough") and req_trig not in ("any", trig_norm):
+                    continue
+
+            ld["is_discovered"] = True
+            ld["discovered_via"] = trig_norm
+            leads[idx] = ld
+            mutated = True
+            unlocked_out.append(
+                {
+                    "quest_id": qid,
+                    "optional_id": ld.get("optional_id") or ld.get("lead_id"),
+                    "sub_obj_id": ld.get("sub_obj_id"),
+                    "role": ld.get("role") or "alternative",
+                    "title": ld.get("title") or ld.get("label") or "",
+                    "stakes_hint": ld.get("stakes_hint") or "",
+                    "trigger_source": trig_norm,
+                }
+            )
+            if not optional_id:
+                break
+
+        if mutated:
+            db.append_dossier_state_event(session_id, qid, eff_turn, "leads_graph", prev_leads, leads)
+            saved = db.upsert_quest_dossier(session_id, qid, leads_graph=leads)
+            db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved or dos)
+
+    return unlocked_out
 
 
 def resolve_quest_approach_failure(
@@ -317,6 +402,173 @@ def resolve_quest_approach_failure(
             cur_list.append(norm_appr)
         new_burned[target_key] = cur_list
 
+        prev_leads_f = [dict(l) for l in (dossier.get("leads_graph") or [])]
+        new_leads_f = [dict(l) for l in prev_leads_f]
+        wp_lead_id = str(waypoint.get("lead_id") or "").strip().lower()
+        wp_opt_id = str(waypoint.get("optional_id") or "").strip().lower()
+        wp_sub_id = int(sub_obj_id) if (sub_obj_id is not None and str(sub_obj_id).lstrip("-").isdigit()) else None
+
+        matched_opt_idx: Optional[int] = None
+        for idx_l, ld_cand in enumerate(new_leads_f):
+            if wp_lead_id and str(ld_cand.get("lead_id") or "").strip().lower() == wp_lead_id:
+                matched_opt_idx = idx_l
+                break
+            if wp_opt_id and str(ld_cand.get("optional_id") or "").strip().lower() == wp_opt_id:
+                matched_opt_idx = idx_l
+                break
+            if wp_sub_id is not None and wp_sub_id >= 1 and int(ld_cand.get("sub_obj_id") or -1) == wp_sub_id:
+                matched_opt_idx = idx_l
+                break
+
+        lead_match = new_leads_f[matched_opt_idx] if matched_opt_idx is not None else None
+        lead_match_status = str((lead_match or {}).get("status") or "active").strip().lower()
+        sub_obj_status = str((sub_obj or {}).get("status") or "active").strip().lower()
+        is_optional_beat = bool(
+            (
+                (sub_obj and sub_obj.get("is_optional") and sub_obj_status not in ("failed", "completed", "locked_out", "bypassed"))
+                or (waypoint.get("is_optional") and lead_match_status not in ("failed", "completed", "locked_out", "bypassed"))
+                or (lead_match and lead_match.get("is_optional") and lead_match_status not in ("failed", "completed", "locked_out", "bypassed"))
+            )
+        )
+
+        if is_optional_beat:
+            prev_climax_f = dict(dossier.get("climax_spec") or {})
+            new_climax_f = dict(prev_climax_f)
+            failed_opt_id = wp_opt_id or wp_lead_id
+            inner_circle_lost_name = ""
+
+            if matched_opt_idx is not None and lead_match is not None:
+                lead_upd = dict(lead_match)
+                lead_upd["status"] = "failed"
+                lead_upd["failed_approach"] = norm_appr
+                failed_opt_id = str(lead_upd.get("optional_id") or lead_upd.get("lead_id") or failed_opt_id)
+                if lead_upd.get("fair_jeopardy_on_screen_only") or lead_upd.get("is_inner_circle_rescue"):
+                    ally_nm = str(lead_upd.get("target_npc") or lead_upd.get("implicated_ally_npc") or "").strip()
+                    if ally_nm and q_fresh.get("is_story_quest"):
+                        inner_circle_lost_name = ally_nm
+                        update_campaign_ending_axes(
+                            session_id,
+                            turn_number=eff_turn,
+                            collateral_delta=1,
+                            inner_circle_loss=ally_nm,
+                        )
+                if lead_upd.get("encounter_roster") and not lead_upd.get("roster_cleared"):
+                    reinf_list = list(new_climax_f.get("reinforcements") or [])
+                    reinf_list.extend([dict(e) for e in lead_upd["encounter_roster"] if isinstance(e, dict)])
+                    new_climax_f["reinforcements"] = reinf_list
+                new_leads_f[matched_opt_idx] = lead_upd
+
+            new_climax_f["alert_dc_bonus"] = int(new_climax_f.get("alert_dc_bonus") or 0) + delta
+            if not scenario_data.is_non_combat_scenario(scen_chk) and not (lead_match and lead_match.get("encounter_roster")):
+                reinf_list = list(new_climax_f.get("reinforcements") or [])
+                reinf_list.append(
+                    {
+                        "name": "Alerted Guard Detail",
+                        "tier_label": "Reinforcement",
+                        "hp": 35,
+                        "max_hp": 35,
+                    }
+                )
+                new_climax_f["reinforcements"] = reinf_list
+
+            # Anti-Softlock on `"secret"` Gates: if ALL viable discovery Optionals are now failed/locked_out,
+            # force-unlock Main via an Enemy Counter-Ambush / Messy Trail!
+            ambush_unlocked = False
+            ambush_scar = None
+            viable_opts = [
+                l_chk
+                for l_chk in new_leads_f
+                if l_chk.get("is_optional")
+                and str(l_chk.get("status") or "active").strip().lower() not in ("failed", "locked_out")
+            ]
+            if (
+                str(new_climax_f.get("gate_type") or "open").strip().lower() == "secret"
+                and not new_climax_f.get("is_unlocked")
+                and len(viable_opts) == 0
+            ):
+                ambush_unlocked = True
+                new_alert = max_alert
+                new_climax_f["is_unlocked"] = True
+                new_climax_f["ambush_unlocked"] = True
+                venue_amb = str(new_climax_f.get("location") or sess_eff.get("current_location") or "District")
+                ch_amb = int(db.get_session_chapter(session_id) or 1)
+                scar_tier_amb = (
+                    "peak"
+                    if (q_fresh.get("is_story_quest") and ch_amb in (3, 6, 8, 9, 10))
+                    else ("buildup" if q_fresh.get("is_story_quest") else "bounty")
+                )
+                ambush_scar = spawn_quest_world_scar(
+                    session_id=session_id,
+                    source_quest_id=f"{qid}_AMBUSH",
+                    scar_spec=render_world_scar_spec(
+                        engine=str(dossier.get("engine") or "MYSTERY_CASE"),
+                        venue_name=venue_amb,
+                    ),
+                    location_name=venue_amb,
+                    turn_number=eff_turn,
+                    spawn_remediation_bounty=False,
+                    scar_tier=scar_tier_amb,
+                )
+                db.unlock_climax_waypoint(
+                    session_id,
+                    qid,
+                    str(new_climax_f.get("location") or ""),
+                    str(new_climax_f.get("true_culprit") or ""),
+                )
+
+            if prev_engaged == 0:
+                db.append_dossier_state_event(session_id, qid, eff_turn, "engaged_flag", 0, 1)
+            db.append_dossier_state_event(session_id, qid, eff_turn, "burned_approaches", prev_burned, new_burned)
+            db.append_dossier_state_event(session_id, qid, eff_turn, "alert_level", prev_alert, new_alert)
+            db.append_dossier_state_event(session_id, qid, eff_turn, "leads_graph", prev_leads_f, new_leads_f)
+            db.append_dossier_state_event(session_id, qid, eff_turn, "climax_spec", prev_climax_f, new_climax_f)
+
+            saved_opt_dos = db.upsert_quest_dossier(
+                session_id,
+                qid,
+                engaged_flag=1,
+                burned_approaches=new_burned,
+                alert_level=new_alert,
+                leads_graph=new_leads_f,
+                climax_spec=new_climax_f,
+            )
+            with db.get_conn() as conn:
+                conn.execute(
+                    "UPDATE quests SET strikes = ?, max_strikes = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                    (new_alert, max_alert, time.time(), session_id, qid),
+                )
+            db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved_opt_dos)
+            if sub_obj is not None:
+                sub_obj["status"] = "failed"
+                sub_obj["completed"] = False
+
+            dir_msg = (
+                f"[OPTIONAL BURNED & COUNTER-AMBUSH UNLOCKED]: All optional leads on '{q_fresh.get('title')}' collapsed—the enemy launched a counter-ambush, exposing the Main Objective under maximum alert!"
+                if ambush_unlocked
+                else (
+                    f"[OPTIONAL OBJECTIVE BURNED & MAIN HARDENED]: Optional route '{waypoint.get('stage_label') or failed_opt_id}' failed and is closed! "
+                    f"Main Objective remains Active with heightened opposition vigilance."
+                )
+            )
+            return {
+                "status": "secret_ambush_unlocked" if ambush_unlocked else "optional_burned_and_hardened",
+                "failed": False,
+                "optional_failed": True,
+                "quest_status": "Active",
+                "optional_id": failed_opt_id,
+                "strikes": new_alert,
+                "max_strikes": max_alert,
+                "alert_level": new_alert,
+                "max_alert": max_alert,
+                "alert_dc_bonus": int(new_climax_f.get("alert_dc_bonus") or 0),
+                "burned_approach": norm_appr,
+                "burned_target": target_key,
+                "ambush_unlocked": ambush_unlocked,
+                "inner_circle_lost": inner_circle_lost_name,
+                "world_scar": ambush_scar,
+                "directive": dir_msg,
+            }
+
         if prev_engaged == 0:
             db.append_dossier_state_event(session_id, qid, eff_turn, "engaged_flag", 0, 1)
         db.append_dossier_state_event(session_id, qid, eff_turn, "burned_approaches", prev_burned, new_burned)
@@ -397,12 +649,15 @@ def resolve_quest_approach_failure(
             )
             return fail_res
 
+        ch_num_sc = int(db.get_session_chapter(session_id) or 1)
+        scar_tier_st = "peak" if ch_num_sc in (3, 6, 8, 9, 10) else "buildup"
         scar_ev = spawn_quest_world_scar(
             session_id=session_id,
             source_quest_id=qid,
             scar_spec=scar_spec,
             location_name=venue,
             turn_number=eff_turn,
+            scar_tier=scar_tier_st,
         )
         now = time.time()
         with db.get_conn() as conn:
@@ -471,6 +726,439 @@ def resolve_quest_approach_failure(
     }
 
 
+def resolve_quest_optional_objective(
+    session_id: int,
+    quest_id: str,
+    optional_id: str = "",
+    sub_obj_id: Optional[int] = None,
+    approach: str = "PER",
+    succeeded: bool = True,
+    check_result_tier: str = "success",
+    user_id: Optional[int] = None,
+    party_user_ids: Optional[List[int]] = None,
+    turn_number: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Typed `1`-Beat Optional Objective Resolver (`aid` | `bypass` | `alternative` | `threatened`):
+    - Idempotent Field Bonus award (`bonus_claimed` guard).
+    - `aid`: lowers Main DC (`aid_dc_reduction += 2`), strips `reinforcements` & `rush_un_nerfed_buffs`,
+      attaches allied striker, and records faction aid (while keeping rival `alternative` open!).
+    - `bypass`: marks Main Stage 1 `status='bypassed'` (`completed=True`) and promotes Stage 2.
+    - `threatened`: averts crisis fallout (`saved_from_threat=True`, `+10` ally affinity).
+    - `alternative`: resolves & closes the Main Objective via rival faction pact / Lieutenant turn / `1.5x` counter-offer;
+      triggers **Eleventh-Hour Double-Cross** (`-25` betrayed faction Rep + ambush) if opposing `aid` was already claimed;
+      locks out ONLY when physically impossible (`status == 'locked_out'`).
+    """
+    dossier = db.get_quest_dossier(session_id, quest_id)
+    q_row = db.get_quest_by_id(session_id, quest_id)
+    if not dossier or not q_row:
+        return {"success": False, "reason": "Quest or dossier not found."}
+
+    sess = db.get_session(session_id) or {}
+    eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
+    uids = list(
+        party_user_ids
+        or ([int(user_id)] if user_id else [])
+        or (db.get_session_members(session_id) or [])
+    )
+    prev_leads = [dict(l) for l in (dossier.get("leads_graph") or [])]
+    leads = [dict(l) for l in prev_leads]
+    prev_climax = dict(dossier.get("climax_spec") or {})
+    climax = dict(prev_climax)
+    econ = dict(dossier.get("contract_economy") or {})
+
+    opt_low = str(optional_id or "").strip().lower()
+    target_idx: Optional[int] = None
+    for idx, ld in enumerate(leads):
+        if opt_low and opt_low in {
+            str(ld.get("optional_id") or "").strip().lower(),
+            str(ld.get("lead_id") or "").strip().lower(),
+        }:
+            target_idx = idx
+            break
+        if sub_obj_id is not None and int(ld.get("sub_obj_id") or -1) == int(sub_obj_id):
+            target_idx = idx
+            break
+    if target_idx is None:
+        target_idx = next(
+            (i for i, l in enumerate(leads) if l.get("is_optional") and str(l.get("status") or "active") == "active"),
+            None,
+        )
+    if target_idx is None:
+        return {"success": False, "reason": "No matching optional objective found."}
+
+    lead = dict(leads[target_idx])
+    cur_status = str(lead.get("status") or "active").strip().lower()
+    t_key = _normalize_target_key(lead)
+    norm_appr = str(approach or "PER").strip().upper()
+    if cur_status == "locked_out":
+        return {
+            "success": False,
+            "blocked": True,
+            "reason": str(lead.get("lockout_reason") or "optional_locked_out"),
+            "message": "This optional route is no longer physically possible.",
+        }
+    if is_approach_burned(session_id, quest_id, t_key, norm_appr):
+        return {
+            "success": False,
+            "blocked": True,
+            "reason": "approach_burned",
+            "message": f"Approach '{norm_appr}' is permanently burned on this optional objective.",
+        }
+    if cur_status == "failed":
+        return {
+            "success": False,
+            "blocked": True,
+            "reason": "optional_failed",
+            "message": "This optional route already failed and is closed.",
+        }
+    if cur_status == "completed" and lead.get("bonus_claimed") and succeeded:
+        return {
+            "success": True,
+            "idempotent_replay": True,
+            "lead_id": lead.get("lead_id"),
+            "optional_id": lead.get("optional_id") or lead.get("lead_id"),
+            "role": lead.get("role") or "aid",
+            "lead_status": "completed",
+            "status": "completed",
+            "field_bonus_awarded": {"xp": 0, "gold": 0, "affinity": 0},
+            "quest_status": str(q_row.get("status") or "Active"),
+            "climax_unlocked": bool(climax.get("is_unlocked")),
+            "dossier": dossier,
+        }
+
+    if norm_appr == "BRIBE" and user_id:
+        appr_obj = next(
+            (a for a in (lead.get("approaches") or []) if str(a.get("approach_id") or "").lower() == "bribe"),
+            None,
+        )
+        cost = int((appr_obj or {}).get("gold_cost") or 20)
+        char = db.get_character(int(user_id)) or {}
+        if int(char.get("gold") or 0) < cost:
+            return {"success": False, "blocked": True, "reason": "insufficient_gold", "required_gold": cost}
+        db.apply_hp_mp_delta(int(user_id), gold_delta=-cost)
+        econ["bribes_spent_gold"] = int(econ.get("bribes_spent_gold") or 0) + cost
+
+    if not succeeded:
+        fail_out = resolve_quest_approach_failure(
+            session_id=session_id,
+            quest=q_row,
+            waypoint={
+                "lead_id": lead.get("lead_id"),
+                "optional_id": lead.get("optional_id"),
+                "sub_obj_id": lead.get("sub_obj_id", target_idx + 1),
+                "is_optional": True,
+                "stage_index": 1,
+                "target_npc": lead.get("target_npc"),
+                "stage_label": lead.get("title"),
+            },
+            approach=norm_appr,
+            check_result_tier=check_result_tier or "failure",
+            party_user_ids=uids,
+            session=sess,
+            turn_number=eff_turn,
+        )
+        return {"success": False, "check_failed": True, "failure_outcome": fail_out}
+
+    role = str(lead.get("role") or "aid").strip().lower()
+    lead["is_discovered"] = True
+    lead["roster_scouted"] = True
+    lead["roster_cleared"] = True
+    lead["status"] = "completed"
+    lead["resolved_approach"] = norm_appr
+
+    # Idempotent Field Bonus Award
+    fb_awarded = {"xp": 0, "gold": 0, "affinity": 0}
+    if not lead.get("bonus_claimed"):
+        fb_spec = dict(lead.get("field_bonus") or {})
+        fb_xp = int(fb_spec.get("xp") or 25)
+        fb_gold = int(fb_spec.get("gold") or 0)
+        fb_aff = int(fb_spec.get("affinity") or 0)
+        for uid in uids:
+            if fb_xp > 0:
+                db.add_xp(int(uid), fb_xp)
+            if fb_gold > 0:
+                db.apply_hp_mp_delta(int(uid), gold_delta=fb_gold)
+        if fb_aff > 0 and lead.get("target_npc"):
+            try:
+                db.update_relationship_score(session_id, str(lead["target_npc"]), delta_score=fb_aff)
+            except Exception:
+                pass
+        lead["bonus_claimed"] = True
+        fb_awarded = {"xp": fb_xp, "gold": fb_gold, "affinity": fb_aff}
+
+    discovered_clue = seed_or_discover_dossier_clue(
+        session_id=session_id,
+        quest_id=quest_id,
+        clue_index=min(target_idx, 1),
+        source_location=str(lead.get("target_location") or ""),
+    )
+
+    q_notes_rec = str(q_row.get("quest_notes") or "")
+    if "anomaly_bp:" in q_notes_rec or "anomaly_blueprint:" in q_notes_rec:
+        try:
+            from mechanics.world.anomalous_events import reveal_anomaly_dossier
+            reveal_anomaly_dossier(session_id, quest_id=quest_id)
+        except Exception:
+            pass
+
+    if str(climax.get("gate_type") or "open").lower() == "secret":
+        climax["is_unlocked"] = True
+        db.unlock_climax_waypoint(
+            session_id,
+            quest_id,
+            str(climax.get("location") or ""),
+            str(climax.get("true_culprit") or ""),
+        )
+
+    double_crossed = False
+    betrayed_faction = ""
+    main_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
+
+    if role == "aid":
+        climax["aid_dc_reduction"] = int(climax.get("aid_dc_reduction") or 0) + 2
+        climax["reinforcements"] = []
+        climax["rush_un_nerfed_buffs"] = {}
+        if lead.get("target_npc") and not climax.get("aid_ally_striker"):
+            climax["aid_ally_striker"] = str(lead["target_npc"])
+        aid_slug = str(lead.get("rival_faction_slug") or "order_faction").strip()
+        claimed_factions = list(climax.get("claimed_aid_factions") or [])
+        if aid_slug and aid_slug not in claimed_factions:
+            claimed_factions.append(aid_slug)
+        climax["claimed_aid_factions"] = claimed_factions
+
+    elif role == "bypass":
+        climax["bypass_unlocked"] = True
+        if main_stages:
+            if str(main_stages[0].get("status") or "active") not in ("completed", "bypassed"):
+                main_stages[0]["status"] = "bypassed"
+                main_stages[0]["completed"] = True
+            if len(main_stages) >= 2 and str(main_stages[1].get("status") or "locked") == "locked":
+                main_stages[1]["status"] = "active"
+            final_approaches = list(main_stages[-1].get("approaches") or [])
+            if not any(str(a.get("approach_id") or "") == "bypass_route" for a in final_approaches):
+                final_approaches.append(
+                    {
+                        "approach_id": "bypass_route",
+                        "stat": "AGI",
+                        "label": "[Bypass] Exploit the secured shortcut route",
+                        "gold_cost": 0,
+                        "after_hours_pivot": False,
+                    }
+                )
+                main_stages[-1]["approaches"] = final_approaches
+            climax["main_stages"] = main_stages
+
+    elif role == "threatened":
+        lead["saved_from_threat"] = True
+        if lead.get("target_npc"):
+            try:
+                db.update_relationship_score(session_id, str(lead["target_npc"]), delta_score=10)
+            except Exception:
+                pass
+
+    elif role == "alternative":
+        climax["is_unlocked"] = True
+        climax["completed"] = True
+        climax["resolved_via_alternative"] = str(lead.get("optional_id") or lead.get("lead_id") or "")
+        for ms in main_stages:
+            ms["status"] = "completed"
+            ms["completed"] = True
+        if main_stages:
+            climax["main_stages"] = main_stages
+
+        prior_aid_claimed = bool(climax.get("claimed_aid_factions")) or any(
+            i != target_idx
+            and str(l_other.get("role") or "").lower() == "aid"
+            and str(l_other.get("status") or "").lower() == "completed"
+            for i, l_other in enumerate(leads)
+        )
+        rival_slug = str(lead.get("rival_faction_slug") or "").strip()
+        if prior_aid_claimed:
+            double_crossed = True
+            all_betrayed_slugs: List[str] = []
+            if lead.get("opposing_faction_slug"):
+                all_betrayed_slugs.append(str(lead["opposing_faction_slug"]).strip())
+            for f_slug in (climax.get("claimed_aid_factions") or []):
+                s_str = str(f_slug).strip()
+                if s_str and s_str not in all_betrayed_slugs and s_str != rival_slug:
+                    all_betrayed_slugs.append(s_str)
+            if not all_betrayed_slugs:
+                all_betrayed_slugs.append("order_faction")
+
+            betrayed_names: List[str] = []
+            for b_slug in all_betrayed_slugs:
+                existing_bet = db.get_faction(session_id, b_slug) if b_slug else None
+                if existing_bet and existing_bet.get("name"):
+                    b_name = str(existing_bet["name"])
+                    db.upsert_faction(session_id, b_name, delta_score=-25)
+                    betrayed_names.append(b_name)
+            betrayed_faction = ", ".join(betrayed_names) if betrayed_names else "Coalition"
+
+            if rival_slug:
+                ex_riv = db.get_faction(session_id, rival_slug)
+                riv_name = str(ex_riv["name"]) if ex_riv and ex_riv.get("name") else rival_slug.replace("_", " ").title()
+                db.upsert_faction(session_id, riv_name, delta_score=15)
+            db.update_session(
+                session_id,
+                extra={
+                    "pending_retaliation": {
+                        "quest_id": quest_id,
+                        "quest_title": q_row.get("title", "Contract"),
+                        "enemy_name": f"Betrayed {betrayed_faction or 'Coalition'} Strike Team",
+                        "origin_location": str(sess.get("current_location") or ""),
+                        "double_cross": True,
+                    }
+                },
+            )
+            for p_npc in (db.get_session_party_npcs(session_id) or []):
+                p_fac = str(p_npc.get("faction") or p_npc.get("affiliation") or "").lower()
+                for b_s, b_n in zip(all_betrayed_slugs, betrayed_names):
+                    if (b_s and b_s.lower() in p_fac) or (b_n and b_n.lower() in p_fac):
+                        try:
+                            db.update_relationship_score(session_id, str(p_npc["name"]), delta_score=-15)
+                        except Exception:
+                            pass
+                        break
+            if q_row.get("is_story_quest"):
+                cur_ch_dc = int(db.get_session_chapter(session_id) or 1)
+                update_campaign_ending_axes(
+                    session_id,
+                    turn_number=eff_turn,
+                    faction_pillar="shadow",
+                    double_cross_delta=1,
+                    usurper_delta=1 if cur_ch_dc >= 6 else 0,
+                )
+        else:
+            if rival_slug:
+                ex_riv = db.get_faction(session_id, rival_slug)
+                riv_name = str(ex_riv["name"]) if ex_riv and ex_riv.get("name") else rival_slug.replace("_", " ").title()
+                db.upsert_faction(session_id, riv_name, delta_score=15)
+            if q_row.get("is_story_quest"):
+                update_campaign_ending_axes(
+                    session_id,
+                    turn_number=eff_turn,
+                    faction_pillar="reform",
+                )
+
+        if lead.get("target_npc"):
+            lt_mut = mutate_spine_on_lieutenant_fate(
+                session_id=session_id,
+                npc_name=str(lead["target_npc"]),
+                fate="recruited",
+                turn_number=eff_turn,
+            )
+            if lt_mut and q_row.get("is_story_quest"):
+                update_campaign_ending_axes(
+                    session_id,
+                    turn_number=eff_turn,
+                    recruited_lieutenant=str(lead["target_npc"]),
+                )
+
+    leads[target_idx] = lead
+    db.append_dossier_state_event(session_id, quest_id, eff_turn, "leads_graph", prev_leads, leads)
+    db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax)
+    if int(dossier.get("engaged_flag") or 0) == 0:
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "engaged_flag", 0, 1)
+
+    if role == "alternative":
+        base_gold = int(econ.get("base_gold") or q_row.get("reward_gold") or 50)
+        adv_paid = int(econ.get("upfront_advance_gold") or 0) if econ.get("advance_taken") else 0
+        gold_mult = 1.0 if q_row.get("is_story_quest") else 1.5
+        final_gold = max(0, int(round(base_gold * gold_mult)) - adv_paid)
+        final_xp = int(q_row.get("reward_xp") or 100)
+        if scenario_data.is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
+            try:
+                res_tax = db.persist_anomalous_quest_containment(session_id, q_row, int(uids[0]), party_user_ids=uids)
+                if res_tax.get("confiscate_gold"):
+                    final_gold = 0
+            except Exception:
+                pass
+
+        with db.get_conn() as conn:
+            conn.execute(
+                "UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?",
+                (time.time(), session_id, quest_id),
+            )
+        for uid in uids:
+            db.apply_hp_mp_delta(int(uid), gold_delta=final_gold)
+            db.add_xp(int(uid), final_xp)
+
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q_row.get("status") or "Active"), "Completed")
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "alternative_deal")
+        updated_alt = db.upsert_quest_dossier(
+            session_id,
+            quest_id,
+            engaged_flag=1,
+            leads_graph=leads,
+            climax_spec=climax,
+            contract_economy=econ,
+            outcome_tier="alternative_deal",
+        )
+        db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=updated_alt)
+        lifted_scars = complete_remediation_bounty_if_linked(session_id, quest_id, turn_number=eff_turn)
+        threat_fallout = (
+            []
+            if q_row.get("is_story_quest")
+            else evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=updated_alt, turn_number=eff_turn)
+        )
+        ch_res = (
+            resolve_chapter_transition(session_id=session_id, quest=q_row, status="Completed", party_user_ids=uids)
+            if q_row.get("is_story_quest")
+            else None
+        )
+        return {
+            "success": True,
+            "lead_id": lead.get("lead_id"),
+            "optional_id": lead.get("optional_id") or lead.get("lead_id"),
+            "role": "alternative",
+            "lead_status": "completed",
+            "status": "completed",
+            "quest_status": "Completed",
+            "outcome_tier": "alternative_deal",
+            "double_crossed": double_crossed,
+            "betrayed_faction": betrayed_faction,
+            "gold_awarded": final_gold,
+            "xp_awarded": final_xp,
+            "field_bonus_awarded": fb_awarded,
+            "roster_scouted": True,
+            "roster_cleared": True,
+            "climax_unlocked": True,
+            "discovered_clue": discovered_clue,
+            "lifted_world_scars": lifted_scars,
+            "skipped_threatened_fallout": threat_fallout,
+            "chapter_transition": ch_res,
+            "dossier": updated_alt,
+        }
+
+    updated = db.upsert_quest_dossier(
+        session_id,
+        quest_id,
+        engaged_flag=1,
+        leads_graph=leads,
+        climax_spec=climax,
+        contract_economy=econ,
+    )
+    db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=updated)
+    return {
+        "success": True,
+        "lead_id": lead.get("lead_id"),
+        "optional_id": lead.get("optional_id") or lead.get("lead_id"),
+        "role": role,
+        "lead_status": "completed",
+        "status": "completed",
+        "quest_status": str(q_row.get("status") or "Active"),
+        "field_bonus_awarded": fb_awarded,
+        "aid_dc_reduction": int(climax.get("aid_dc_reduction") or 0),
+        "bypass_unlocked": bool(climax.get("bypass_unlocked")),
+        "roster_scouted": True,
+        "roster_cleared": True,
+        "climax_unlocked": bool(climax.get("is_unlocked")),
+        "discovered_clue": discovered_clue,
+        "dossier": updated,
+    }
+
+
 def evaluate_nonlinear_leads_and_climax_gate(
     session_id: int,
     quest_id: str,
@@ -483,13 +1171,12 @@ def evaluate_nonlinear_leads_and_climax_gate(
     turn_number: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
-    Non-Linear Lead Graph & Climax Sequence-Break Evaluator (Decisions 7 & 9):
-    - Leads can be completed in ANY order via any unburned approach (`STR`/`PER`/`CHA`/`INT`/`AGI`/`BRIBE`/`ITEM`).
+    Non-Linear Lead / Optional Graph & Climax Sequence-Break Evaluator (Decisions 7 & 9):
+    - Optionals & leads can be completed in ANY order via any unburned approach (`STR`/`PER`/`CHA`/`INT`/`AGI`/`BRIBE`/`ITEM`).
     - Scouting (`is_scout_only=True`) reveals `encounter_roster` (`roster_scouted = True`).
-    - Stealth/Social/Trap attrition (`roster_cleared = True`) neutralizes lead packs so they don't reinforce the Boss.
-    - Open-gate climaxes (`gate_type == 'open'`) can be rushed on Turn 1: unvisited leads become `'bypassed'`
-      and any uncleared lead `encounter_roster` cascades into `climax_spec['reinforcements']` + un-nerfed Boss buffs!
-    - Secret-gate climaxes (`gate_type == 'secret'`) block direct rush until a discovery lead or Caseboard deduction unlocks it.
+    - Typed Optionals (`is_optional == True`) delegate to `resolve_quest_optional_objective`.
+    - Open-gate climaxes (`gate_type == 'open'`) can be rushed directly on Turn 1.
+    - Secret-gate climaxes (`gate_type == 'secret'`) block direct rush until a discovery optional or Caseboard deduction unlocks it.
     """
     dossier = db.get_quest_dossier(session_id, quest_id)
     if not dossier:
@@ -517,6 +1204,9 @@ def evaluate_nonlinear_leads_and_climax_gate(
         bypassed_ids: List[str] = []
         for ld in leads:
             if ld.get("status") == "active":
+                if ld.get("is_optional") and str(ld.get("role") or "").lower() in ("threatened", "alternative"):
+                    # Keep `threatened` evaluable on completion and rival `alternative` open for 11th-hour Double-Cross!
+                    continue
                 ld["status"] = "bypassed"
                 bypassed_ids.append(str(ld.get("lead_id") or ""))
                 if ld.get("encounter_roster") and not ld.get("roster_cleared"):
@@ -544,6 +1234,8 @@ def evaluate_nonlinear_leads_and_climax_gate(
             leads_graph=leads,
             climax_spec=climax,
         )
+        if climax.get("main_stages") or any(l.get("is_optional") for l in leads):
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=updated)
         return {
             "success": True,
             "allowed": True,
@@ -554,13 +1246,31 @@ def evaluate_nonlinear_leads_and_climax_gate(
         }
 
     target_lead_idx = next(
-        (i for i, l in enumerate(leads) if lead_id and str(l.get("lead_id") or "").lower() == lead_id.lower()),
+        (
+            i
+            for i, l in enumerate(leads)
+            if lead_id
+            and lead_id.lower() in {str(l.get("lead_id") or "").lower(), str(l.get("optional_id") or "").lower()}
+        ),
         next((i for i, l in enumerate(leads) if l.get("status") == "active"), None),
     )
     if target_lead_idx is None:
         return {"success": False, "reason": "No active lead matched."}
 
     lead = dict(leads[target_lead_idx])
+    if lead.get("is_optional") and not is_scout_only:
+        return resolve_quest_optional_objective(
+            session_id=session_id,
+            quest_id=quest_id,
+            optional_id=str(lead.get("optional_id") or lead.get("lead_id") or lead_id),
+            sub_obj_id=lead.get("sub_obj_id"),
+            approach=approach,
+            succeeded=succeeded,
+            check_result_tier="success" if succeeded else "failure",
+            user_id=user_id,
+            turn_number=eff_turn,
+        )
+
     t_key = _normalize_target_key(lead)
     norm_appr = str(approach or "PER").strip().upper()
     if is_approach_burned(session_id, quest_id, t_key, norm_appr):
@@ -619,6 +1329,7 @@ def evaluate_nonlinear_leads_and_climax_gate(
                     has_folklore_rec = db.user_has_folklore_recognition(
                         db.get_session_participant_user_ids(session_id),
                         str(bp_lead["codex_id"]),
+                        session_id=session_id,
                     )
                 reveal_anomaly_dossier(session_id, quest_id=quest_id)
             except Exception:
@@ -749,6 +1460,7 @@ def resolve_quest_combat_outcome(
                         has_folklore_rec_cbt = db.user_has_folklore_recognition(
                             db.get_session_participant_user_ids(session_id),
                             str(bp_cbt_l["codex_id"]),
+                            session_id=session_id,
                         )
                     reveal_anomaly_dossier(session_id, quest_id=quest_id)
                 except Exception:
@@ -801,6 +1513,7 @@ def resolve_quest_combat_outcome(
                 "quest_status": "Failed",
                 "outcome_tier": "failure",
                 "hard_game_over": bool(ch_res.get("hard_game_over")),
+                "fallen_world": bool(ch_res.get("fallen_world")),
                 "chapter_transition": ch_res,
             }
 
@@ -860,9 +1573,8 @@ def resolve_quest_combat_outcome(
         part_xp = int(round(int(q.get("reward_xp") or 100) * 0.75))
         try:
             from scenario_data import is_anomalous_incursions_scenario
-            if is_anomalous_incursions_scenario(session.get("scenario", "")):
-                from mechanics.world.anomaly_engine import record_anomalous_quest_containment_and_taxpayer
-                res_tax = record_anomalous_quest_containment_and_taxpayer(session_id, q, int(user_id), party_user_ids=uids)
+            if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
+                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     part_gold = 0
         except Exception:
@@ -892,9 +1604,8 @@ def resolve_quest_combat_outcome(
     final_gold = max(0, int(round(int(q.get("reward_gold") or 50) * mult)) - adv_paid)
     try:
         from scenario_data import is_anomalous_incursions_scenario
-        if is_anomalous_incursions_scenario(session.get("scenario", "")):
-            from mechanics.world.anomaly_engine import record_anomalous_quest_containment_and_taxpayer
-            res_tax = record_anomalous_quest_containment_and_taxpayer(session_id, q, int(user_id), party_user_ids=uids)
+        if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
+            res_tax = db.persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
             if res_tax.get("confiscate_gold"):
                 final_gold = 0
     except Exception:
@@ -903,6 +1614,12 @@ def resolve_quest_combat_outcome(
 
     prev_climax = dict(climax)
     climax["boss_defeated"] = True
+    if climax.get("main_stages"):
+        m_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
+        for ms in m_stages:
+            ms["status"] = "completed"
+            ms["completed"] = True
+        climax["main_stages"] = m_stages
     with db.get_conn() as conn:
         conn.execute(
             "UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?",
@@ -914,8 +1631,12 @@ def resolve_quest_combat_outcome(
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax)
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), tier)
-    db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, outcome_tier=tier)
+    saved_cbt_dos = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, outcome_tier=tier)
+    if climax.get("main_stages") or any(l.get("is_optional") for l in leads):
+        db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_cbt_dos)
     complete_remediation_bounty_if_linked(session_id, quest_id, turn_number=eff_turn)
+    if not q.get("is_story_quest"):
+        evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=saved_cbt_dos, turn_number=eff_turn)
 
     ch_res = None
     if q.get("is_story_quest"):
@@ -1035,6 +1756,14 @@ def evaluate_intimate_liaison_turn(
     if act_concluded:
         gold = int(q.get("reward_gold") or 50)
         xp = int(q.get("reward_xp") or 100)
+        prev_climax_int = dict(climax)
+        if climax.get("main_stages"):
+            m_stages_int = [dict(ms) for ms in (climax.get("main_stages") or [])]
+            for ms in m_stages_int:
+                ms["status"] = "completed"
+                ms["completed"] = True
+            climax["main_stages"] = m_stages_int
+            climax["completed"] = True
         with db.get_conn() as conn:
             conn.execute(
                 "UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?",
@@ -1043,13 +1772,23 @@ def evaluate_intimate_liaison_turn(
         for uid in uids:
             db.apply_hp_mp_delta(int(uid), gold_delta=gold)
             db.add_xp(int(uid), xp)
-        db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier="clean_success")
+        if climax != prev_climax_int:
+            db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax_int, climax)
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "clean_success")
+        saved_int = db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, climax_spec=climax, outcome_tier="clean_success")
+        if climax.get("main_stages") or any(l.get("is_optional") for l in (dossier.get("leads_graph") or [])):
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_int)
+        if not q.get("is_story_quest"):
+            evaluate_skipped_threatened_optionals(session_id, quest_id, dossier=saved_int, turn_number=eff_turn)
+        ch_res_int = resolve_chapter_transition(session_id=session_id, quest=q, status="Completed", party_user_ids=uids) if q.get("is_story_quest") else None
         return {
             "handled": True,
             "quest_status": "Completed",
             "outcome_tier": "clean_success",
             "gold_awarded": gold,
             "xp_awarded": xp,
+            "chapter_transition": ch_res_int,
         }
 
     return {"handled": False}
@@ -1093,6 +1832,38 @@ def handle_npc_death_or_recruitment_fallout(
         cb = {k: dict(v) if isinstance(v, dict) else v for k, v in (dos.get("cast_bindings") or {}).items()}
         inf_name = str((cb.get("informant") or {}).get("name") or "").strip().lower()
         cli_name = str((cb.get("client") or {}).get("name") or "").strip().lower()
+        acc_name = str((cb.get("accomplice") or {}).get("name") or "").strip().lower()
+
+        if event_kind == "dead":
+            prev_leads_fo = [dict(l) for l in (dos.get("leads_graph") or [])]
+            new_leads_fo = [dict(l) for l in prev_leads_fo]
+            locked_opts: List[str] = []
+            for idx_lo, ld_lo in enumerate(new_leads_fo):
+                if (
+                    ld_lo.get("is_optional")
+                    and str(ld_lo.get("role") or "").strip().lower() == "alternative"
+                    and str(ld_lo.get("status") or "active").strip().lower() not in ("completed", "failed", "locked_out")
+                ):
+                    opt_npc = str(ld_lo.get("target_npc") or "").strip().lower()
+                    if opt_npc == target_low or (acc_name and acc_name == target_low and not opt_npc):
+                        ld_lo["status"] = "locked_out"
+                        ld_lo["lockout_reason"] = "envoy_killed"
+                        new_leads_fo[idx_lo] = ld_lo
+                        locked_opts.append(str(ld_lo.get("optional_id") or ld_lo.get("lead_id") or ""))
+            if locked_opts:
+                if "accomplice" in cb and isinstance(cb["accomplice"], dict) and acc_name == target_low:
+                    cb["accomplice"]["status"] = "dead"
+                db.append_dossier_state_event(session_id, qid, eff_turn, "leads_graph", prev_leads_fo, new_leads_fo)
+                saved_lo = db.upsert_quest_dossier(session_id, qid, cast_bindings=cb, leads_graph=new_leads_fo, engaged_flag=1)
+                db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved_lo)
+                affected.append(
+                    {
+                        "quest_id": qid,
+                        "role": "alternative_envoy",
+                        "fallback": "optional_locked_out",
+                        "locked_optionals": locked_opts,
+                    }
+                )
 
         if event_kind == "dead" and inf_name == target_low:
             cb["informant"]["status"] = "dead"
@@ -1146,6 +1917,7 @@ def resolve_post_turn_dossier_hooks(
         "npc_fallout": [],
         "intimate_liaisons": [],
         "quest_combat": None,
+        "unlocked_optionals": [],
     }
 
     # 1. Campaign Epilogue Choice intents
@@ -1156,6 +1928,23 @@ def resolve_post_turn_dossier_hooks(
                 ep_res = resolve_epilogue_choice(session_id, ep_int, eff_turn)
                 out["_epilogue_resolution"] = ep_res
                 summary["epilogue_resolution"] = ep_res
+
+    # 1b. Hybrid Optional Discovery Hooks (Clues, NPC Dialogue, Incoming SMS/Courier)
+    if out.get("new_clues") or out.get("discovered_clue"):
+        summary["unlocked_optionals"].extend(
+            unlock_hidden_quest_optional(session_id, trigger_source="clue_found", turn_number=eff_turn)
+        )
+    if out.get("dialogue_partner") or any(
+        isinstance(a, dict) and str(a.get("intent") or "").lower() in ("dialogue", "social", "persuade", "negotiate")
+        for a in (actions or [])
+    ):
+        summary["unlocked_optionals"].extend(
+            unlock_hidden_quest_optional(session_id, trigger_source="npc_dialogue", turn_number=eff_turn)
+        )
+    if out.get("incoming_sms") or out.get("phone_notifications") or out.get("new_messages"):
+        summary["unlocked_optionals"].extend(
+            unlock_hidden_quest_optional(session_id, trigger_source="incoming_comms", turn_number=eff_turn)
+        )
 
     # 2. Zero-Plot-Armor NPC Death & Turn-Pipeline Recruitment Fallout
     for dead_item in list(out.get("dead_npcs") or []) + list(out.get("_dead_enemies") or []):

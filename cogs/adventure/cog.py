@@ -27,6 +27,9 @@ from character_data import (
 from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
 from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
+from cogs.scenario_picker import (
+    ScenarioVariantSelectView, channel_allows_nsfw, hidden_nsfw_note, needs_variant_step,
+)
 from skill_check import resolve_check, success_chance, CheckResult
 from mechanics.combat.merchant import (
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
@@ -210,7 +213,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         from mechanics.world.locations import get_zone_summary_tree
         zones = get_zone_summary_tree(session_id, scen_key, current_loc=cur_loc, char_name=char_name)
         embed = build_world_map_embed(session_id, scen_key, current_loc=cur_loc, char_name=char_name, zones=zones)
-        view = ZoneSelectView(self, session_id, scen_key, current_loc=cur_loc, char_name=char_name, sync=session.get("mode") == "sync", zones_summary=zones)
+        view = ZoneSelectView(self, session_id, scen_key, current_loc=cur_loc, char_name=char_name, sync=session.get("mode") == "sync", zones_summary=zones, user_id=interaction.user.id)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
     @app_commands.command(name="hub", description="Access your communication device and network hub (Smartphone, Cyberdeck, Comms Pad)")
@@ -287,6 +290,14 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
     async def adventure_world_pulse(self, interaction: discord.Interaction):
         await self._do_world_pulse(interaction)
 
+    @app_commands.command(name="contracts", description="Manage Entity Contracts, Devil Pacts, Appraisal & Remote Communion")
+    async def contracts_cmd(self, interaction: discord.Interaction):
+        await self._do_entity_contracts(interaction)
+
+    @adventure_group.command(name="contracts", description="Manage Entity Contracts, Devil Pacts, Appraisal & Remote Communion")
+    async def adventure_contracts(self, interaction: discord.Interaction):
+        await self._do_entity_contracts(interaction)
+
     @adventure_group.command(name="hub", description="Access your communication device and network hub (Smartphone, Cyberdeck, Comms Pad)")
     async def adventure_hub(self, interaction: discord.Interaction):
         await self._do_hub(interaction)
@@ -360,9 +371,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         else:
             effective_scenario = resolve_scenario_key(scen_val)
 
-        scen_info = get_scenario(effective_scenario)
-        scenario_label = scen_info.get("name", effective_scenario)
-
         session_config = {
             "mode": mode.value,
             "scenario": effective_scenario,
@@ -373,24 +381,58 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             "result_display": effective_result_display,
         }
 
-        if mode.value == "solo":
+        # Slash choices list only scenario families; offer the variants as a second step.
+        allow_nsfw = channel_allows_nsfw(interaction.channel)
+        if scen_val != "custom" and needs_variant_step(effective_scenario, allow_nsfw):
+            family_label = get_scenario(effective_scenario).get("name", effective_scenario)
+
+            async def _on_variant(inter: discord.Interaction, variant_key: str):
+                session_config["scenario"] = variant_key
+                await self._continue_start(inter, char, session_config, from_picker=True)
+
+            await interaction.response.send_message(
+                content=(f"🗺️ **{family_label}** has multiple variants. Choose one:"
+                         f"{hidden_nsfw_note(effective_scenario, allow_nsfw)}"),
+                view=ScenarioVariantSelectView(interaction.user.id, effective_scenario, _on_variant,
+                                               allow_nsfw=allow_nsfw),
+                ephemeral=True)
+            return
+
+        await self._continue_start(interaction, char, session_config, from_picker=False)
+
+    async def _continue_start(self, interaction: discord.Interaction, char: dict, session_config: dict,
+                              *, from_picker: bool) -> None:
+        """Open the solo loadout picker or a multiplayer lobby once the scenario variant is final."""
+        from scenario_data import get_scenario
+        effective_scenario = session_config["scenario"]
+        scenario_label = get_scenario(effective_scenario).get("name", effective_scenario)
+        mode_value = session_config["mode"]
+
+        if mode_value == "solo":
             view = LoadoutClassSelectView(self, interaction.user.id, session_config)
-            await interaction.response.send_message(
-                content=f"🌟 Starting adventure in **{scenario_label}**!\nChoose your profession:",
-                view=view, ephemeral=True
-            )
+            content = f"🌟 Starting adventure in **{scenario_label}**!\nChoose your profession:"
+            if from_picker:
+                await interaction.response.edit_message(content=content, view=view)
+            else:
+                await interaction.response.send_message(content=content, view=view, ephemeral=True)
+            return
+
+        capacity = 2
+        session_id = await adb(db.create_session, interaction.user.id, mode_value, capacity,
+                                        session_config["verbosity"], session_config["dialogue"],
+                                        session_config["image_gen"],
+                                        "dropdown", interaction.channel_id,
+                                        scenario=effective_scenario,
+                                        result_display=session_config["result_display"])
+        lobby_content = (f"**{char['name']}** is looking for a second adventurer for "
+                         f"**{MODE_LABELS[mode_value]}** play in **{scenario_label}**! "
+                         f"Click below to join.")
+        if from_picker:
+            await interaction.response.edit_message(
+                content=f"✅ Lobby opened for **{scenario_label}**.", view=None)
+            await interaction.followup.send(content=lobby_content, view=JoinView(self, session_id))
         else:
-            capacity = 2
-            session_id = await adb(db.create_session, interaction.user.id, mode.value, capacity,
-                                            effective_verbosity, effective_dialogue, effective_image_gen,
-                                            "dropdown", interaction.channel_id,
-                                            scenario=effective_scenario,
-                                            result_display=effective_result_display)
-            await interaction.response.send_message(
-                content=(f"**{char['name']}** is looking for a second adventurer for "
-                         f"**{MODE_LABELS[mode.value]}** play in **{scenario_label}**! "
-                         f"Click below to join."),
-                view=JoinView(self, session_id))
+            await interaction.response.send_message(content=lobby_content, view=JoinView(self, session_id))
 
     @start.autocomplete("tags")
     async def start_tags_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
@@ -466,15 +508,28 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             waiting_on = [uid for uid in session["turn_order"] if str(uid) not in session["pending_picks"]]
             embeds = sync_scene_embed(session, party, session["scene_title"], session["narrative"],
                                       session["choices"], waiting_on, image_url=scene_img)
-            view = SyncChoiceView(self, session["id"], session["turn_order"], session["choices"], party,
-                                   session.get("merchant"))
+            view = await SyncChoiceView.create(
+                self, session["id"], session["turn_order"], session["choices"], party,
+                session.get("merchant"), session=session,
+            )
         else:
             turn_uid = db.current_turn_user_id(session)
-            actor_char = await adb(db.get_character, turn_uid)
+            party_by_uid = {
+                (c.get("user_id") or c.get("id")): (c, inv)
+                for c, inv in party
+                if c
+            }
+            if turn_uid in party_by_uid:
+                actor_char, actor_inv = party_by_uid[turn_uid]
+            else:
+                actor_char = await adb(db.get_character, turn_uid)
+                actor_inv = None
             embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
                                  session["choices"], image_url=scene_img)
-            view = ChoiceView(self, session["id"], turn_uid, session["choices"], actor_char,
-                               session.get("merchant"))
+            view = await ChoiceView.create(
+                self, session["id"], turn_uid, session["choices"], actor_char,
+                session.get("merchant"), session=session, actor_inv=actor_inv,
+            )
         
         _, discord_file = prepare_discord_image(scene_img)
         send_kwargs = {"content": "Resuming your adventure...", "embeds": embeds, "view": view}
@@ -490,7 +545,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         ))
         scen_key = session.get("scenario", "fantasy")
         from mechanics.social.factions import ensure_session_factions_seeded
-        ensure_session_factions_seeded(session["id"], scen_key)
+        await adb(ensure_session_factions_seeded, session["id"], scen_key)
         from mechanics.world.world_forge.seeder import forge_world_state
         await forge_world_state(session, party)
         try:
@@ -528,7 +583,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                                location=location, nearby_enemies=enemies, current_npcs=npcs,
                                dialogue_partner=partner_arg,
                                current_node_id=scene.get("current_node_id"))
-        merchant = _apply_merchant_encounter_result(session["id"], scene.get("merchant_encounter"))
+        merchant = await adb(_apply_merchant_encounter_result, session["id"], scene.get("merchant_encounter"))
         scen_key = session.get("scenario", "fantasy")
         first_char_id = party[0][0]["id"] if party and party[0][0] else 0
         present_npc_names = {game_engine._get_npc_name(n).lower() for n in (npcs or []) if game_engine._get_npc_name(n)}
@@ -593,13 +648,17 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         if session["mode"] == "sync":
             embeds = sync_scene_embed(fresh_session, party, scene.get("scene_title"), narrative,
                                       choices, waiting_on=[], image_url=image_url)
-            view = SyncChoiceView(self, session["id"], fresh_session["turn_order"], choices, party, merchant)
+            view = await SyncChoiceView.create(
+                self, session["id"], fresh_session["turn_order"], choices, party, merchant, session=fresh_session,
+            )
         else:
             turn_uid = db.current_turn_user_id(fresh_session)
             actor_char = await adb(db.get_character, turn_uid)
             embeds = scene_embed(fresh_session, actor_char, scene.get("scene_title"), narrative,
                                  choices, image_url)
-            view = ChoiceView(self, session["id"], turn_uid, choices, actor_char, merchant)
+            view = await ChoiceView.create(
+                self, session["id"], turn_uid, choices, actor_char, merchant, session=fresh_session,
+            )
 
         _, discord_file = prepare_discord_image(image_url)
         send_kwargs = {"embeds": embeds, "view": view}
@@ -782,9 +841,10 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                 except Exception:
                     pass
 
-            # 50027 = Invalid/expired webhook token, 10062 = Unknown interaction, 10015 = Unknown webhook
+            # 50027 = Invalid/expired interaction webhook, 10062 = Unknown interaction, 10015 = Unknown webhook
             if getattr(exc, "code", None) in (50027, 10062, 10015) or (hasattr(exc, "status") and exc.status in (401, 404)):
-                logger.warning("Followup token expired or invalid (%s), falling back to channel.send", exc)
+                err_code = getattr(exc, "code", None) or getattr(exc, "status", type(exc).__name__)
+                logger.warning("Discord interaction followup expired (code=%s), falling back to channel.send", err_code)
                 # Remove webhook-only arguments — channel.send does not support them
                 kwargs.pop("ephemeral", None)
                 kwargs.pop("wait", None)
@@ -800,7 +860,9 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
     async def _announce_levelup(self, interaction: discord.Interaction, user_id: int, levels_gained: list):
         if not levels_gained:
             return
-        char = db.get_character(user_id)
+        char = await adb(db.get_character, user_id)
+        if not char:
+            return
         text = f"🎉 <@{user_id}>'s **{char['name']}** reached level **{levels_gained[-1]}**!"
         if char["level"] >= MAX_LEVEL:
             text += " (max level reached)"
@@ -830,7 +892,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             name = s["slot_name"]
             if current_lower and current_lower not in name.lower():
                 continue
-            scen = str(s.get("scenario", "fantasy")).title()
+            scen = str(s.get("scenario") or "fantasy").title()
             title = (s.get("scene_title") or "Adventure")[:30]
             label = f"{name} [{scen} - {title}]"
             choices.append(app_commands.Choice(name=label[:100], value=name))

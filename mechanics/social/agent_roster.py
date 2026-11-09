@@ -189,138 +189,138 @@ PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
 PRIVATE_AGENCY_1_BLUEPRINTS: List[Dict[str, Any]] = [
     {
         "agent_tier": 5,
-        "role": "Chief Executive & R&D Portfolio Director",
-        "agent_class": "Executive Containment Specialist",
+        "role": "Chief Executive & Containment Portfolio Director",
+        "agent_class": "Executive Containment Agent",
         "division": "Executive Board",
-        "hq_room": "Executive Contract & Telemetry Floor",
+        "hq_room": "Global Contracts & Telemetry Floor",
         "hq_node_id": "sub_priv1_dispatch",
         "city_hangout": "Sovereign Hills & Sky-Estates ➔ Sky-High Penthouse Lounge ➔ 80th-Floor Infinity Pool & Cocktail Deck",
         "hangout_node_id": "sub_sky_infinity_bar",
-        "summary": "Treats anomaly neutralization as a multi-billion-credit defence portfolio; oversees the skyscraper's proprietary R&D labs in immaculate bespoke suits.",
+        "summary": "Treats metropolitan anomaly neutralization as a blue-chip defense portfolio; directs high-floor asset acquisitions in bespoke Obsidian tailoring.",
     },
     {
         "agent_tier": 4,
-        "role": "Lead Corporate Strike Commander",
-        "agent_class": "Corporate Strike Operator",
-        "division": "Apex Strike Wing",
-        "hq_room": "Holographic VR Kill-House & Calibration Deck",
+        "role": "Operations Director & Strike Commander",
+        "agent_class": "Asset Recovery Operator",
+        "division": "Special Recovery Wing",
+        "hq_room": "Simulated Breach & Ballistics Calibration Deck",
         "hq_node_id": "sub_priv1_training",
         "city_hangout": "International Airport & Airfield ➔ First-Class Executive Sky-Lounge & Capsule Hotel ➔ Panoramic Tarmac-View Champagne Bar",
         "hangout_node_id": "sub_ap_runway_bar",
-        "summary": "High-priced corporate veteran who drills squads on serialized in-house smart weapons and grades every breach by quarterly ROI.",
+        "summary": "Precision assault commander who drills squads on smart-linked VX-4 carbines and grades every breach against strict quarterly SLA benchmarks.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior In-House R&D Prototype Lead",
-        "agent_class": "In-House R&D Prototype Tester",
-        "division": "Proprietary R&D Lab",
-        "hq_room": "In-House Anomalous R&D & Fabrication Lab",
+        "role": "Lead Applied Ordnance Architect",
+        "agent_class": "Applied Ordnance Specialist",
+        "division": "Applied Anomalous Sciences",
+        "hq_room": "Applied Anomalous Sciences & Cleanroom Lab",
         "hq_node_id": "sub_priv1_research",
         "city_hangout": "Sovereign Hills & Sky-Estates ➔ The Crimson Masquerade Auction House ➔ Candlelit Amphitheater & Caged Stage",
         "hangout_node_id": "sub_auction_amphitheater",
-        "summary": "Field-tests experimental conglomerate weapons and harvests high-tier anomaly cores for proprietary corporate patents.",
+        "summary": "Calibrates PC-12 directed-pulse emitters in the tower cleanroom and secures volatile anomaly cores for high-margin defense patents.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Telemetry Gauss Marksman",
-        "agent_class": "Proprietary Telemetry Marksman",
-        "division": "Skyline Overwatch Unit",
-        "hq_room": "In-House R&D Ordnance & Prototype Vault",
+        "role": "Senior Skyline Overwatch Marksman",
+        "agent_class": "Overwatch Telemetry Specialist",
+        "division": "Orbital Overwatch Unit",
+        "hq_room": "Special Ordnance & Requisition Vault",
         "hq_node_id": "sub_priv1_armory",
         "city_hangout": "City Center ➔ Sunken Plaza Galleria ➔ Glass Skywalk Dining Terrace",
         "hangout_node_id": "sub_plaza_terrace",
-        "summary": "Cool-headed corporate sharpshooter linked to tower satellite telemetry who calculates dimensional refraction across three city blocks.",
+        "summary": "Unflappable high-altitude sharpshooter networked into orbital OptiLink feeds, calculating spatial refraction across three city blocks.",
     },
     {
         "agent_tier": 2,
-        "role": "Corporate Aegis Breach Specialist",
-        "agent_class": "Corporate Aegis Heavy Vanguard",
-        "division": "Rapid Asset Protection",
-        "hq_room": "Proprietary Exo-Weave & Ballistic Atelier",
+        "role": "Senior Loss-Prevention Breacher",
+        "agent_class": "Heavy Loss-Prevention Vanguard",
+        "division": "Vault & Asset Security",
+        "hq_room": "Ballistic Tailoring & Exo-Weave Atelier",
         "hq_node_id": "sub_priv1_outfitter",
         "city_hangout": "Downtown ➔ Neon Shopping Arcade & Mall ➔ Streetwear & Designer Apparel Boutique",
         "hangout_node_id": "sub_fashion_boutique",
-        "summary": "Models the corporation's latest bespoke aramid techwear and crushes hostile manifestations behind an in-house alloy shield.",
+        "summary": "Anchors high-risk containment cordons in Meridian exo-weave plate behind a Titan-series alloy shield.",
     },
     {
         "agent_tier": 1,
-        "role": "Junior Corporate Retainer Operative",
-        "agent_class": "Corporate Strike Operator",
-        "division": "Corporate Intake Unit",
-        "hq_room": "Corporate Atrium & Biometric Lobby",
+        "role": "Associate Portfolio Operative",
+        "agent_class": "Asset Recovery Operator",
+        "division": "Client Retainer Intake",
+        "hq_room": "Atrium Concierge & Biometric Turnstiles",
         "hq_node_id": "sub_priv1_entrance",
         "city_hangout": "Downtown ➔ 24-Hour Arcade & Billiards Hall ➔ Upstairs Smoke-Hazy Billiards Lounge",
         "hangout_node_id": "sub_billiards_lounge",
-        "summary": "Ambitious recruit who signed a strict corporate NDA and equipment lease to pay off massive family medical debts.",
+        "summary": "Fast-track lateral hire under ironclad non-disclosure covenants, chasing high-tier containment commissions toward partner equity.",
     },
 ]
 
 PRIVATE_AGENCY_2_BLUEPRINTS: List[Dict[str, Any]] = [
     {
         "agent_tier": 5,
-        "role": "Agency Owner & Chief Case Dispatcher",
-        "agent_class": "Storefront Case Investigator",
-        "division": "Front Office Management",
-        "hq_room": "Corkboard Case Room & Dispatch Bullpen",
+        "role": "Principal & Founding Case Partner",
+        "agent_class": "Private Case Investigator",
+        "division": "Partner Management",
+        "hq_room": "Partner Case Room & Dispatch Bullpen",
         "hq_node_id": "sub_priv2_dispatch",
-        "city_hangout": "Suburban Residential District ➔ 24-Hour Corner Convenience Store ➔ Window Eat-In Counter Nook",
-        "hangout_node_id": "sub_subkonbini_nook",
-        "summary": "Scrappy small-business owner juggling commercial office rent, vendor invoices, and local anomaly contracts over lukewarm drip coffee.",
+        "city_hangout": "City Center ➔ Sunken Plaza Galleria ➔ Glass Skywalk Dining Terrace",
+        "hangout_node_id": "sub_plaza_terrace",
+        "summary": "Former municipal inspector who founded an independent partner-owned firm; vets sensitive private retainers over single-origin pour-over coffee.",
     },
     {
         "agent_tier": 4,
-        "role": "Senior Field Contractor & Gun-Cage Boss",
-        "agent_class": "Surplus Ordnance Breacher",
-        "division": "Field Contracting",
-        "hq_room": "Padlocked Back-Room Gun Cage & Surplus Locker",
+        "role": "Managing Partner & Master Gunsmith",
+        "agent_class": "Close-Quarters Entry Specialist",
+        "division": "Tactical Entry & Armory",
+        "hq_room": "Vaulted Armory & Gunsmithing Bench",
         "hq_node_id": "sub_priv2_armory",
         "city_hangout": "City Docks & Harbor ➔ Automated Container Pier 12 ➔ Towering Gantry Crane Operator Cab",
         "hangout_node_id": "sub_pier_gantry",
-        "summary": "Grizzled blue-collar veteran who sources police trade-in shotguns and surplus Kevlar from three different harbor wholesalers.",
+        "summary": "Seasoned entry tactician and master gunsmith who hand-fits match barrels, tritium sights, and cold-iron loads for every specialist on the roster.",
     },
     {
         "agent_tier": 3,
-        "role": "Back-Room Gadgeteer & Curio Appraiser",
-        "agent_class": "Aftermarket Ward Tinkerer",
-        "division": "Workbench Appraisal",
-        "hq_room": "Cluttered Appraisal Bench & Secondhand Lab",
+        "role": "Senior Ward & Forensics Specialist",
+        "agent_class": "Field Ward & Countermeasure Tech",
+        "division": "Anomalous Forensics",
+        "hq_room": "Anomalous Forensics & Ward Calibration Lab",
         "hq_node_id": "sub_priv2_research",
         "city_hangout": "City Center ➔ Sanctuary Antiquities & Licensed Wards ➔ Appraisal Desk & Leyline Map Table",
         "hangout_node_id": "sub_curio_appraisal",
-        "summary": "Keeps the agency's secondhand oscilloscopes and mail-order EMF meters running with solder, copper wire, and sheer stubbornness.",
+        "summary": "Bench-calibrates dual-channel Hume readers and machines braided copper grounding spikes with watchmaker precision.",
     },
     {
         "agent_tier": 3,
-        "role": "Senior Close-Quarters Trouble-Shooter",
-        "agent_class": "Hired-Gun Perimeter Guard",
-        "division": "Cellar & Alley Sweeps",
-        "hq_room": "Soundproofed Cellar Firing Lane & Sandbag Pit",
+        "role": "Senior Protective Escort Specialist",
+        "agent_class": "Containment Escort Vanguard",
+        "division": "Protective Operations",
+        "hq_room": "Sound-Baffled Basement Firing Lane",
         "hq_node_id": "sub_priv2_training",
-        "city_hangout": "The Lower Wards & Tenements ➔ Underground Boxing & Fight Pit ➔ Chain-Link Ring & Betting Bleachers",
-        "hangout_node_id": "sub_fight_cage",
-        "summary": "Swears by hardware-store sledgehammers and mail-order machetes because cheap melee steel never jams inside a magnetic rift.",
+        "city_hangout": "Downtown ➔ Late-Night Ramen & Izakaya Alley ➔ Open-Kitchen Broth & Counter Hall",
+        "hangout_node_id": "sub_ramen_counter_hall",
+        "summary": "Steady close-protection veteran who holds subterranean breach thresholds behind a cold-iron-edged polycarbonate shield.",
     },
     {
         "agent_tier": 2,
-        "role": "Full-Time Case Investigator",
-        "agent_class": "Contract Trouble-Shooter",
-        "division": "Neighborhood Cases",
-        "hq_room": "Fluorescent Breakroom & Drip-Coffee Kitchenette",
+        "role": "Licensed Retainer Investigator",
+        "agent_class": "Licensed Field Specialist",
+        "division": "Private Client Cases",
+        "hq_room": "Timber-Beam Lounge & Pour-Over Kitchenette",
         "hq_node_id": "sub_priv2_canteen",
         "city_hangout": "Downtown ➔ Basement Jazz & Cocktail Bar ➔ Main Cocktail Lounge & Quartet Stage",
         "hangout_node_id": "sub_jazz_lounge",
-        "summary": "Works double shifts in a thrifted trenchcoat chasing modest commercial bounties that the big corporate towers ignore.",
+        "summary": "Discreet field investigator in a tailored wool trenchcoat resolving delicate neighborhood and estate anomalies before headlines break.",
     },
     {
         "agent_tier": 1,
-        "role": "Part-Time Receptionist & Junior Hunter",
-        "agent_class": "Contract Trouble-Shooter",
-        "division": "Front Desk & Intake",
-        "hq_room": "Walk-Up Commercial Foyer & Reception Desk",
+        "role": "Associate Investigator & Intake Liaison",
+        "agent_class": "Private Case Investigator",
+        "division": "Client Intake & Recon",
+        "hq_room": "Brick-Front Vestibule & Security Reception",
         "hq_node_id": "sub_priv2_entrance",
-        "city_hangout": "Downtown ➔ Neon Shopping Arcade & Mall ➔ Neon Atrium Food Court",
-        "hangout_node_id": "sub_food_court",
-        "summary": "Answers the frosted-glass door buzzer between field calls and patches up surplus vests on the office sewing machine.",
+        "city_hangout": "University & Parapsychology Campus ➔ Clocktower Archival Library & Rare Stacks ➔ Warded Iron Cage of Pre-Cataclysm Grimoires",
+        "hangout_node_id": "sub_uni_forbidden_cage",
+        "summary": "Sharp university parapsychology graduate managing client intake, silver-halide evidence logs, and preliminary recon sweeps.",
     },
 ]
 
@@ -332,7 +332,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Inner Sanctum Council",
         "hq_room": "Five-Story Pagoda & Sacred Reliquary",
         "hq_node_id": "loc_et_five_story_pagoda",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
         "hangout_node_id": "loc_et_main_sanctuary",
         "summary": "Keeper of the twelve ancestral sealing bells; views modern urban anomalies as ancient karmic imbalances given concrete form.",
     },
@@ -343,7 +343,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Boundary Protection",
         "hq_room": "Five-Story Pagoda & Sacred Reliquary",
         "hq_node_id": "loc_et_five_story_pagoda",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Five-Story Pagoda & Sacred Reliquary",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Five-Story Pagoda & Sacred Reliquary",
         "hangout_node_id": "loc_et_five_story_pagoda",
         "summary": "Maintains the spiritual ley-line anchors that keep the city's oldest sealed entities slumbering beneath the mountain.",
     },
@@ -354,7 +354,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Paper-Charm Vanguard",
         "hq_room": "Zen Rock Garden & Bamboo Tea House",
         "hq_node_id": "loc_et_zen_tea_garden",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Zen Rock Garden & Bamboo Tea House",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Zen Rock Garden & Bamboo Tea House",
         "hangout_node_id": "loc_et_zen_tea_garden",
         "summary": "Folds origami crane and wolf familiars imbued with purifying flame to scout hazardous spatial rifts.",
     },
@@ -365,7 +365,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Demon-Quelling Division",
         "hq_room": "Main Worship Hall & Incense Courtyard",
         "hq_node_id": "loc_et_main_sanctuary",
-        "city_hangout": "Woods & Mountain Reserve ➔ Pine Forest Hiking Trails ➔ Misty Ravine Suspension Footbridge",
+        "city_hangout": "Wilderness Forest Reserve ➔ Pine Forest Hiking Trails ➔ Misty Ravine Suspension Footbridge",
         "hangout_node_id": "sub_cedar_bridge",
         "summary": "Wields a sanctified ceremonial odachi that slices through incorporeal wraiths and dimensional tethers alike.",
     },
@@ -376,7 +376,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Sanctuary Healing & Rites",
         "hq_room": "Sacred Mountain Hot Springs & Onsen Bathhouse",
         "hq_node_id": "loc_et_onsen_bathhouse",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Sacred Mountain Hot Springs & Onsen Bathhouse",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Sacred Mountain Hot Springs & Onsen Bathhouse",
         "hangout_node_id": "loc_et_onsen_bathhouse",
         "summary": "Tends to spiritually contaminated agents with sacred incense and gentle chanting.",
     },
@@ -409,7 +409,7 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Outer Gate Watch",
         "hq_room": "Main Worship Hall & Incense Courtyard",
         "hq_node_id": "loc_et_main_sanctuary",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand",
         "hangout_node_id": "loc_et_torii_approach",
         "summary": "Sweeps the stone steps at sunrise and guards the outer torii gates with a blessed wooden naginata.",
     },
@@ -735,7 +735,7 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
     {
         "agent_tier": 2,
         "grade": "Senior",
-        "role": "Corporate Sponsored Test Scholar",
+        "role": "Sponsored Telemetry Scholar",
         "agent_class": "After-School Tinkerer",
         "faction_id": "private_agency_1",
         "club": "Science & Robotics Club",
@@ -743,12 +743,12 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "primary_node_id": "loc_senior_class",
         "secondary_node_id": "sub_priv1_training",
         "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ Chemistry & Science Lab",
-        "summary": "Elite scholarship student on a corporate R&D stipend who field-tests compact smart-optics and telemetry carbines on evening anomaly sweeps.",
+        "summary": "Top-ranked honors fellow on a conglomerate fellowship who benchmarks OptiLink smart-visors and gauss coil links during evening containment sweeps.",
     },
     {
         "agent_tier": 1,
         "grade": "Freshman",
-        "role": "Corporate Junior Telemetry Cadet",
+        "role": "Junior Ballistics & Telemetry Fellow",
         "agent_class": "Class Sharpshooter",
         "faction_id": "private_agency_1",
         "club": "Journalism & Media",
@@ -756,33 +756,33 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "primary_node_id": "loc_freshman_class",
         "secondary_node_id": "sub_priv1_entrance",
         "city_hangout": "{session_school} ➔ Student Commons & Campus Cafeteria ➔ Central Courtyard",
-        "summary": "Prep-school prodigy under a strict corporate NDA who calibrates satellite ballistic links between homeroom periods.",
+        "summary": "Poised academy sharpshooter under executive non-disclosure covenants who syncs orbital ballistic feeds between afternoon classes.",
     },
     {
         "agent_tier": 2,
         "grade": "Junior",
-        "role": "Storefront Agency Part-Time Hunter",
-        "agent_class": "Back-Row Rebel",
+        "role": "Apprentice Case Investigator",
+        "agent_class": "Honor Roll Student",
         "faction_id": "private_agency_2",
-        "club": "Campus Delinquents",
-        "clique": "Rebels",
+        "club": "Journalism & Media",
+        "clique": "Academics",
         "primary_node_id": "loc_junior_class",
         "secondary_node_id": "sub_priv2_dispatch",
         "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ School Rooftop",
-        "summary": "Scrappy junior who works after-school shifts at the storefront agency bullpen to help pay family rent, carrying a battered police trade-in shotgun.",
+        "summary": "Observant campus journalist apprenticing under the firm's founding partners after school, cataloging silver-halide anomaly evidence and witness statements.",
     },
     {
         "agent_tier": 1,
         "grade": "Freshman",
-        "role": "Storefront Apprentice Gadgeteer",
+        "role": "Apprentice Ward & Calibration Tech",
         "agent_class": "After-School Tinkerer",
         "faction_id": "private_agency_2",
         "club": "Science & Robotics Club",
-        "clique": "Gamers",
+        "clique": "Academics",
         "primary_node_id": "loc_freshman_class",
         "secondary_node_id": "sub_priv2_research",
         "city_hangout": "{session_school} ➔ Student Commons & Campus Cafeteria ➔ Shaded Vending Machine Pavilion",
-        "summary": "First-year tinkerer who repairs secondhand EMF meters for the storefront agency in exchange for surplus ward ammunition.",
+        "summary": "Methodical robotics prodigy mentored in the firm's forensics lab, machining copper grounding spikes and calibrating handheld Hume readers.",
     },
     {
         "agent_tier": 2,
@@ -794,7 +794,7 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "clique": "Loner",
         "primary_node_id": "loc_junior_class",
         "secondary_node_id": "loc_et_torii_approach",
-        "city_hangout": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Grand Torii Gate & Omikuji Talisman Stand",
         "summary": "Heir to a mountain exorcist lineage who attends high school in a standard uniform while carrying ancestral sealing talismans in their bookbag.",
     },
     {
@@ -1085,8 +1085,8 @@ def generate_anomalous_special_agents_roster(
 
             outfit_by_faction = {
                 "public_agency": f"Standard-issue {faction_name} dark charcoal field trenchcoat with a silver containment badge",
-                "private_agency_1": f"Sleek proprietary corporate ballisticweave suit bearing serialized {faction_name} R&D insignia",
-                "private_agency_2": f"Pragmatic off-the-rack utility jacket over a mismatched surplus Kevlar vest with a laminated {faction_name} ID tag",
+                "private_agency_1": f"Tailored Obsidian ballisticweave coat bearing serialized {faction_name} clearance insignia",
+                "private_agency_2": f"Weatherproof waxed-canvas tactical coat over a fitted Kevlar vest with engraved {faction_name} partner credentials",
                 "monastic_order": f"Traditional purified hakama and haori layered with braided warding cords of the {faction_name}",
                 "cult_faction": "Dark hooded urban overcoat lined with geometric occult stitching",
                 "clandestine_faction": "Matte-black covert operator jacket with concealed relic holsters",
@@ -1138,6 +1138,14 @@ def generate_anomalous_special_agents_roster(
                 "anomalous_npc_tag": "special_agent",
                 "is_hydrated": 0,
             })
+            try:
+                from mechanics.world.locations.residences import resolve_agent_residence_blueprint
+                _bp = resolve_agent_residence_blueprint(session_id, roster[-1], scen_key=scen_key)
+                roster[-1]["residence_node_id"] = _bp["bedroom_node_id"]
+                roster[-1]["residence_facility_id"] = _bp["facility_node_id"]
+                roster[-1]["residence_location"] = _bp["residence_display"]
+            except Exception:
+                pass
             global_idx += 1
 
     # Wire the 4 cross-faction sibling pairs
@@ -1356,6 +1364,14 @@ def generate_student_special_agents_roster(
             "anomalous_npc_tag": "special_agent",
             "is_hydrated": 0,
         })
+        try:
+            from mechanics.world.locations.residences import resolve_agent_residence_blueprint
+            _sbp = resolve_agent_residence_blueprint(session_id, student_agents[-1], scen_key=scen_key)
+            student_agents[-1]["residence_node_id"] = _sbp["bedroom_node_id"]
+            student_agents[-1]["residence_facility_id"] = _sbp["facility_node_id"]
+            student_agents[-1]["residence_location"] = _sbp["residence_display"]
+        except Exception:
+            pass
 
     return student_agents
 
@@ -1445,6 +1461,13 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
     )
     if isinstance(existing_roster, list) and len(existing_roster) == expected_agent_count:
         existing_roster, was_upgraded = _upgrade_legacy_agent_roster_3axis(existing_roster, session_id=session_id)
+        if not any("has_entity_contract" in ag for ag in existing_roster if isinstance(ag, dict)):
+            try:
+                from mechanics.pacts.resolver import assign_special_agent_contracts
+                existing_roster = assign_special_agent_contracts(session_id, existing_roster, scen_key=scen_key)
+                was_upgraded = True
+            except Exception as _pact_seed_err:
+                log.debug("Legacy agent roster pact upgrade skipped: %s", _pact_seed_err)
         if was_upgraded:
             db.update_session(session_id, extra={"anomalous_agent_roster": existing_roster})
         if is_hybrid_hs:
@@ -1487,6 +1510,12 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
             used_names=used_names,
         )
         roster.extend(student_agents)
+
+    try:
+        from mechanics.pacts.resolver import assign_special_agent_contracts
+        roster = assign_special_agent_contracts(session_id, roster, scen_key=scen_key)
+    except Exception as _pact_err:
+        log.debug("Special agent contract seeding skipped: %s", _pact_err)
 
     # 1. Persist in session extra
     db.update_session(session_id, extra={"anomalous_agent_roster": roster})
@@ -1543,6 +1572,12 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
                 "attribute": ag.get("attribute"),
                 "combat_archetype": ag.get("combat_archetype"),
                 "ability_medium": ag.get("ability_medium"),
+                "has_entity_contract": bool(ag.get("has_entity_contract")),
+                "pact_id": ag.get("pact_id", ""),
+                "pact_name": ag.get("pact_name", ""),
+                "pact_tier": int(ag.get("pact_tier") or 0),
+                "pact_spell_id": ag.get("pact_spell_id", ""),
+                "pact_tell": ag.get("pact_tell", ""),
                 "innate_abilities": ability_names,
                 "is_player": False,
                 "is_vacant": False,
@@ -1722,6 +1757,11 @@ def hydrate_faction_colleagues_to_contacts(session_id: int, faction_archetype_ke
                     "primary_node_id": ag.get("primary_node_id", ""),
                     "secondary_node_id": ag.get("secondary_node_id", ""),
                     "is_special_agent": True,
+                    "is_student_agent": bool(ag.get("is_student_agent")),
+                    "age_group": ag.get("age_group", "adult"),
+                    "residence_node_id": ag.get("residence_node_id", ""),
+                    "residence_facility_id": ag.get("residence_facility_id", ""),
+                    "residence_location": ag.get("residence_location", ""),
                     "anomalous_npc_tag": "special_agent",
                 })
                 db.upsert_contact(
@@ -1799,6 +1839,7 @@ def evaluate_anomalous_companion_recruitment(
 
     from mechanics.social.anomalous_npc_tags import (
         TAG_CIVILIAN,
+        TAG_FOLKLORE_VILLAGER,
         TAG_SPECIAL_AGENT,
         classify_anomalous_npc_tag,
         hydrate_anomalous_npc_profile,
@@ -1835,6 +1876,39 @@ def evaluate_anomalous_companion_recruitment(
         player_level=char_level,
         is_party_companion=True,
     )
+
+    if npc_tag == TAG_FOLKLORE_VILLAGER:
+        if affinity_score >= 20 or basic_info.get("contact_added"):
+            return {
+                "allowed": True,
+                "cost": 0,
+                "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+                "is_special_agent": False,
+                "is_folklore_villager": True,
+                "is_beast_companion": bool(hydrated.get("is_beast_companion")),
+                "folklore_village": hydrated.get("folklore_village", ""),
+                "agent_tier": hydrated["agent_tier"],
+                "rank_title": hydrated["rank_title"],
+                "agent_class": hydrated["agent_class"],
+                "faction_id": hydrated["faction_id"],
+                "faction_name": hydrated["faction_name"],
+                "innate_abilities": hydrated["innate_abilities"],
+                "spells": hydrated["innate_abilities"],
+                "hp": hydrated["hp"],
+                "max_hp": hydrated["max_hp"],
+                "mp": hydrated["mp"],
+                "max_mp": hydrated["max_mp"],
+                "level": hydrated["level"],
+                "stats": hydrated["stats"],
+                "weapon_profile": hydrated["weapon_profile"],
+                "reason": f"Befriended sanctuary ally {npc_name} agreed to accompany you beyond the veil (0G).",
+            }
+        return {
+            "allowed": False,
+            "cost": 0,
+            "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+            "reason": f"{npc_name} wishes to build deeper mutual trust before stepping beyond the sanctuary veil with you (Affinity {affinity_score}/20).",
+        }
 
     special_agent = find_special_agent_by_name(sess_id, npc_name, scen_key=scen_key)
     agent_faction_id = str(

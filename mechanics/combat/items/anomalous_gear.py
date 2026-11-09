@@ -19,6 +19,8 @@ Enforces:
 import copy
 import json
 import random
+from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from mechanics.combat.items.envelope import serialize_item
@@ -887,7 +889,7 @@ def convert_object_anomaly_to_gear(
     return anom_eq
 
 
-def sync_equipped_anomalous_spells(user_id: int) -> Dict[str, Any]:
+def sync_equipped_anomalous_spells(user_id: int, *, raise_on_error: bool = False) -> Dict[str, Any]:
     """
     Synchronizes equipment-granted spells with the character's active learned_spells list.
     - Iterates strictly in priority slot order (Weapon > Shield > Armor/Top > Accessory 1..4).
@@ -996,11 +998,11 @@ def sync_equipped_anomalous_spells(user_id: int) -> Dict[str, Any]:
         if g_id not in updated_spells:
             updated_spells.append(g_id)
 
-    set_active_empowered_spells_context(empowered_ids)
     progress["equipped_granted_spells"] = active_relic_ids
     progress["empowered_granted_spells"] = empowered_ids
     db.set_skill_progress(user_id, progress)
     db.set_learned_spells(user_id, updated_spells)
+    set_active_empowered_spells_context(empowered_ids)
 
     return {
         "active_granted_spells": active_relic_ids,
@@ -1009,800 +1011,38 @@ def sync_equipped_anomalous_spells(user_id: int) -> Dict[str, Any]:
     }
 
 
-ANOMALOUS_FACTION_CLASSES: Dict[str, Dict[str, Dict[str, Any]]] = {
-    "public_agency": {
-        "Public Safety Field Hunter": {
-            "description": "High-mobility tactical operative trained in close-quarters anomaly interception, rapid breaching, and lethal entity suppression.",
-            "starting_items": [
-                ["Field Trauma Kit", "Consumable", "Rapid-application coagulant and adrenaline injector.", 1],
-                ["Flashbang Grenade", "Consumable", "High-intensity disorienting charge.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Tactical Balaclava & Comms", "Fire-retardant headwear with radio earpiece.", 1],
-                "Weapon": ["Tactical Suppression Shotgun", "Short-barreled pump-action shotgun loaded with heavy slug rounds.", 2],
-                "Armor": ["Standard-Issue Containment Plate Carrier", "Modular bureau chest rig with lead-lined evidence pouches.", 3],
-                "Top": ["Reinforced Bureau Combat Shirt", "Durable dark tactical utility wear.", 1],
-                "Bottom": ["Reinforced Cargo Trousers", "Ripstop tactical trousers with knee-pad inserts.", 2],
-                "Gloves": ["Tactical Grip Gloves", "Non-slip leather gloves with carbon-fiber knuckle guards.", 1],
-                "Shoes": ["Bureau Rapid-Response Field Boots", "Matte-black tactical boots built for subway tunnels and wet concrete.", 1],
-                "Shield": None,
-            },
-        },
-        "Bureau Forensic Investigator": {
-            "description": "Specialized forensics agent using electronic resonance scanners and occult analysis to track, catalogue, and contain spatial distortions.",
-            "starting_items": [
-                ["Sub-Harmonic Resonance Scanner", "Tool", "Handheld sensor registering spatial distortions and abnormal frequencies.", 2],
-                ["Sealed Evidence Canisters", "Tool", "Lead-lined canisters for hazardous anomalous residues.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Spectral Optical Visor", "Tactical polarized glasses detecting unnatural luminescence and light bends.", 1],
-                "Weapon": ["Bureau Issue Service Pistol", "Standard 9mm duty pistol with precision barrel rifling.", 2],
-                "Armor": ["Concealed Bureau Kevlar Vest", "Taxpayer-funded low-profile ballistic vest worn beneath agency attire.", 2],
-                "Top": ["Dark Trenchcoat & Tie", "Professional bureau field suit with occult-dampening lining.", 2],
-                "Bottom": ["Tailored Field Slacks", "Reinforced charcoal slacks suited for active investigation.", 1],
-                "Gloves": ["Nitrile-Lined Leather Gloves", "Insulated gloves preventing contact contamination.", 1],
-                "Shoes": ["Polished Field Oxfords", "Reinforced rubber-soled leather shoes.", 1],
-                "Shield": None,
-            },
-        },
-        "Quarantine Containment Engineer": {
-            "description": "Heavy hazmat and containment specialist equipped with spatial anchoring tools, suppression foam, and reality barrier emitters.",
-            "starting_items": [
-                ["Emergency Ward Pylon", "Tool", "Deployable tripod emitter establishing a temporary spatial stability zone.", 2],
-                ["Pressurized Suppression Foam", "Consumable", "Aerosol canister spraying fast-hardening anomalous barrier foam.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Hazmat Respirator Helmet", "Full-face positive pressure respirator with filtered air intake.", 2],
-                "Weapon": ["Arc-Discharge Stun Baton", "Heavy telescoping baton delivering pulsed electromagnetic shock.", 2],
-                "Armor": ["Insulated Hazmat Exosuit", "Heavy hermetically sealed hazard containment suit.", 4],
-                "Top": ["Rubberized Utility Overalls", "Chemical and tear-resistant protective workwear.", 2],
-                "Bottom": ["Reinforced Hazmat Trousers", "Heavy insulated overalls with radiation-reflective layering.", 2],
-                "Gloves": ["Heavy Insulated Gauntlets", "Thick rubber-and-kevlar gloves protecting against energy discharge.", 2],
-                "Shoes": ["Hazard Chemical Boots", "Heavy vulcanized rubber boots with puncture-proof soles.", 2],
-                "Shield": None,
-            },
-        },
-        "Occult Precision Marksman": {
-            "description": "Precision suppression marksman neutralizing anomalous vectors from overwatch perches with talisman-inscribed ballistic ammunition.",
-            "starting_items": [
-                ["Runic Precision Monocular", "Tool", "Compact spotter scope revealing ethereal silhouettes through smoke and walls.", 2],
-                ["Consecrated Silver Magazine", "Consumable", "Extended magazine packed with silver-cored ammunition.", 2],
-            ],
-            "starter_gear": {
-                "Head": ["Tactical Ballistic Cap", "Low-profile cap with integrated comms clip.", 1],
-                "Weapon": ["Suppressed Scout Carbine", "Compact semi-automatic rifle equipped with a specialized sound and flash suppressor.", 3],
-                "Armor": ["Modular Plate Carrier", "Lightweight ballistic vest allowing unrestricted arm movement.", 2],
-                "Top": ["Weather-Resistant Windbreaker", "Dark matte windbreaker masking thermal signature.", 1],
-                "Bottom": ["Weatherproof Utility Trousers", "Water-repellent combat trousers with zippered pockets.", 1],
-                "Gloves": ["Shooter Grip Gloves", "Precision shooting gloves with tactile index finger pads.", 1],
-                "Shoes": ["All-Terrain Field Boots", "Silent tread boots providing stable footing on damp concrete.", 1],
-                "Shield": None,
-            },
-        },
-        "Bureau Aegis Esper": {
-            "description": "Regulated psychic liaison channeling sanctioned mental barriers and kinetic disruption fields under strict containment oversight.",
-            "starting_items": [
-                ["Cognitive Stabilizer Ampoule", "Consumable", "Fast-acting neuro-sedative dampening psychological terror.", 1],
-                ["Bureau Mental Dampener Ring", "Tool", "Electromagnetic ring providing resistance to mental incursions.", 2],
-            ],
-            "starter_gear": {
-                "Head": ["Polarized Cognito-Filter Glasses", "Bureau-issue anti-memetic eyewear filtering anomalous visual noise.", 1],
-                "Weapon": ["Kinetic Force Baton", "Reinforced alloy baton weighted with kinetic force-damping coils.", 2],
-                "Armor": ["Bureau Ballistic Trench Under-Rig", "Reinforced weave harness designed for rapid urban containment.", 2],
-                "Top": ["Bureau Field Inspector Blazer", "Structured dark blazer bearing a concealed municipal clearance pin.", 1],
-                "Bottom": ["Tailored Charcoal Bureau Slacks", "Reinforced wool-blend agency slacks tailored for active pursuit.", 1],
-                "Gloves": ["Tactile Trigger-Guard Gauntlets", "Precision contractor gloves engineered for recoil control.", 1],
-                "Shoes": ["Polished Steel-Toe Agency Oxfords", "Dress oxfords concealing puncture-resistant soles and ankle support.", 1],
-                "Shield": None,
-            },
-        },
-    },
-    "private_agency_1": {
-        "Corporate Strike Operator": {
-            "description": "Elite conglomerate assault operative clad in proprietary composite armor, clearing high-rise breach floors with serialized in-house smart carbines.",
-            "starting_items": [
-                ["Proprietary Combat Stim-Injector", "Consumable", "In-house R&D synthetic adrenaline restoring stamina and pain tolerance.", 1],
-                ["Corporate Shaped Breaching Charge", "Consumable", "Cleanroom-engineered directional charge designed to breach sealed vaults.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Proprietary Mk.III AR Telemetry Visor", "In-house corporate R&D heads-up visor streaming live skyscraper threat telemetry.", 1],
-                "Weapon": ["In-House Mk.IV Smart Carbine", "Proprietary gas-piston smart rifle developed in corporate R&D labs with HUD target-lock.", 3],
-                "Armor": ["In-House R&D Composite Plate Rig", "Proprietary corporate ceramic-polymer chest rig engineered in the conglomerate's cleanrooms.", 3],
-                "Top": ["In-House Matte-Carbon Operator Shirt", "Proprietary breathable ballistic-shoulder combat shirt issued exclusively to conglomerate staff.", 1],
-                "Bottom": ["Proprietary Operator Cargo Trousers", "Articulated corporate R&D ripstop trousers with integrated magnetic holster mounts.", 2],
-                "Gloves": ["In-House Smart-Link Operator Gloves", "Proprietary synthetic gloves syncing weapon grip sensors to corporate HUDs.", 1],
-                "Shoes": ["Proprietary Shock-Damped Assault Boots", "Lightweight in-house composite boots built for high-rise corporate deployments.", 1],
-                "Shield": None,
-            },
-        },
-        "In-House R&D Prototype Tester": {
-            "description": "Corporate weapons-division specialist field-testing unreleased directed-pulse shotguns, cleanroom stasis emitters, and patented exo-weave gear.",
-            "starting_items": [
-                ["Patented Stasis Capacitor Cell", "Tool", "Proprietary R&D power cell overcharging experimental corporate equipment.", 2],
-                ["In-House Resonance Null-Grenade", "Consumable", "Corporate prototype pulse charge collapsing localized anomalous fields.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Corporate R&D Ballistic Half-Mask", "Sleek proprietary matte-carbon respirator developed in-house for tower breaches.", 1],
-                "Weapon": ["Corporate Prototype Pulse Shotgun", "Experimental directed-energy scattergun built in-house by conglomerate ordnance engineers.", 3],
-                "Armor": ["Proprietary Corporate Exo-Weave Vest", "Serialized conglomerate tactical vest with magnetic smart-mag caddies.", 3],
-                "Top": ["Corporate R&D Tactical Techwear Coat", "Asymmetric matte-black corporate shell bearing embossed conglomerate R&D serials.", 2],
-                "Bottom": ["Proprietary Operator Cargo Trousers", "Articulated corporate R&D ripstop trousers with integrated magnetic holster mounts.", 2],
-                "Gloves": ["Corporate Carbon-Knuckle Gauntlets", "Serialized R&D contractor gloves engineered for zero-slip recoil control.", 1],
-                "Shoes": ["Corporate Silent-Tread Tech High-Tops", "Custom R&D urban striders with sound-deadening polymer soles.", 1],
-                "Shield": None,
-            },
-        },
-        "Executive Containment Specialist": {
-            "description": "High-clearance corporate bio-containment agent deploying bespoke ballisticweave tailoring and proprietary monomolecular blades to secure high-margin assets.",
-            "starting_items": [
-                ["Corporate Cryo-Specimen Capsule", "Tool", "Patented cleanroom containment cylinder for high-value anomalous cores.", 2],
-                ["Proprietary Optical Cloak Clip", "Tool", "In-house micro-refraction badge bending light across executive attire.", 2],
-            ],
-            "starter_gear": {
-                "Head": ["In-House Carbon-Weave Comms Headset", "Serialized corporate headset with encrypted satellite R&D uplink.", 1],
-                "Weapon": ["Proprietary R&D Monomolecular Katana", "Laser-honed alloy katana forged in corporate cleanrooms to shear anomalous chitin.", 2],
-                "Armor": ["Executive Ballisticweave Tech-Duster", "Bespoke corporate longcoat woven in-house with flexible aramid-nanotube panels.", 3],
-                "Top": ["Executive Security Tailored Blazer", "Bespoke high-collar corporate suit jacket engineered in-house for concealed carry.", 2],
-                "Bottom": ["Corporate Aramid-Stitched Executive Slacks", "Tailored conglomerate combat slacks woven from proprietary slash-proof fibers.", 1],
-                "Gloves": ["In-House Smart-Link Operator Gloves", "Proprietary synthetic gloves syncing weapon grip sensors to corporate HUDs.", 1],
-                "Shoes": ["Corporate Silent-Tread Tech High-Tops", "Custom R&D urban striders with sound-deadening polymer soles.", 1],
-                "Shield": None,
-            },
-        },
-        "Proprietary Telemetry Marksman": {
-            "description": "Skyscraper overwatch sharpshooter linked to corporate satellite telemetry, neutralizing high-threat entities with in-house gauss precision rifles.",
-            "starting_items": [
-                ["Corporate Telemetry Uplink Beacon", "Tool", "Proprietary micro-dart feeding live target vectors to the conglomerate satellite grid.", 2],
-                ["In-House Sub-Zero Sabot Magazine", "Consumable", "Patented corporate cryo-jacketed rounds chilling anomalies on impact.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Proprietary Mk.III AR Telemetry Visor", "In-house corporate R&D heads-up visor streaming live skyscraper threat telemetry.", 1],
-                "Weapon": ["Corporate R&D Gauss Precision Rifle", "Long-range electromagnetic coil-assisted marksman rifle engineered in-house.", 3],
-                "Armor": ["In-House R&D Composite Plate Rig", "Proprietary corporate ceramic-polymer chest rig engineered in the conglomerate's cleanrooms.", 3],
-                "Top": ["In-House Matte-Carbon Operator Shirt", "Proprietary breathable ballistic-shoulder combat shirt issued exclusively to conglomerate staff.", 1],
-                "Bottom": ["Corporate Aramid-Stitched Executive Slacks", "Tailored conglomerate combat slacks woven from proprietary slash-proof fibers.", 1],
-                "Gloves": ["Corporate Carbon-Knuckle Gauntlets", "Serialized R&D contractor gloves engineered for zero-slip recoil control.", 1],
-                "Shoes": ["Proprietary Shock-Damped Assault Boots", "Lightweight in-house composite boots built for high-rise corporate deployments.", 1],
-                "Shield": None,
-            },
-        },
-        "Corporate Aegis Heavy Vanguard": {
-            "description": "Heavily funded corporate frontline tank wearing proprietary exo-weave armor and crushing breach swarms with kinetic R&D hammers and alloy shields.",
-            "starting_items": [
-                ["In-House Nanite Plate Sealant", "Consumable", "Patented corporate aerosol rapidly bonding micro-fractures in composite armor.", 2],
-                ["Corporate Acoustic Stun Charge", "Consumable", "Serialized high-decibel flash-concussion canister.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Corporate R&D Ballistic Half-Mask", "Sleek proprietary matte-carbon respirator developed in-house for tower breaches.", 1],
-                "Weapon": ["In-House Kinetic Breaching Sledgehammer", "Proprietary corporate maul fitted with internal piezo-kinetic impact amplifiers.", 3],
-                "Armor": ["Proprietary Corporate Exo-Weave Vest", "Serialized conglomerate tactical vest with magnetic smart-mag caddies.", 4],
-                "Top": ["Corporate R&D Tactical Techwear Coat", "Asymmetric matte-black corporate shell bearing embossed conglomerate R&D serials.", 2],
-                "Bottom": ["Proprietary Operator Cargo Trousers", "Articulated corporate R&D ripstop trousers with integrated magnetic holster mounts.", 2],
-                "Gloves": ["Corporate Carbon-Knuckle Gauntlets", "Serialized R&D contractor gloves engineered for zero-slip recoil control.", 1],
-                "Shoes": ["Proprietary Shock-Damped Assault Boots", "Lightweight in-house composite boots built for high-rise corporate deployments.", 1],
-                "Shield": ["In-House Alloy Breaching Shield", "Proprietary ballistic entry barrier fabricated in the corporation's metallurgy division.", 2],
-            },
-        },
-    },
-    "private_agency_2": {
-        "Contract Trouble-Shooter": {
-            "description": "Working-stiff local agency contractor making rent with a dependable pawn-shop carbine, mismatched surplus Kevlar, and off-the-shelf hardware.",
-            "starting_items": [
-                ["Hardware-Store Halogen Flashlight", "Tool", "Heavy D-cell aluminum work light taped with a red cellophane filter.", 1],
-                ["Bulk-Box Road Flare & Rock Salt", "Consumable", "Cheap highway flare stuffed with coarse salt to rattle minor entities.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Secondhand Two-Way Radio Headset", "Discount commercial walkie-talkie headset bought in bulk from an electronics liquidator.", 1],
-                "Weapon": ["Pawn-Shop Semi-Auto Carbine", "Scuffed civilian sporting carbine fitted with an aftermarket flashlight mount.", 2],
-                "Armor": ["Mismatched Surplus Kevlar Vest", "Retired security-firm ballistic vest with mismatched Velcro pouches from three different vendors.", 2],
-                "Top": ["Off-the-Rack Utility Windbreaker", "Plain commercial nylon windbreaker with a small iron-on local agency patch.", 1],
-                "Bottom": ["Hardware-Store Reinforced Cargo Pants", "Durable off-the-shelf workwear trousers stuffed with spare batteries, receipts, and chalk.", 1],
-                "Gloves": ["Hardware-Store Impact Work Gloves", "Bright-stitched mechanic's grip gloves picked up on sale down the street.", 1],
-                "Shoes": ["Discount Steel-Toe Work Boots", "Practical warehouse safety boots with oil-resistant rubber soles.", 1],
-                "Shield": None,
-            },
-        },
-        "Surplus Ordnance Breacher": {
-            "description": "Pragmatic point-man clearing cramped commercial basements in discount plate carriers with a secondhand riot shotgun and crowbar.",
-            "starting_items": [
-                ["Hardware-Store Prybar & Bolt Cutters", "Tool", "Well-oiled steel entry tools bought off the shelf for rusted cellar padlocks.", 1],
-                ["Surplus Riot Smoke Canister", "Consumable", "Aging municipal-auction smoke grenade that still pops reliably enough.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Surplus Riot Bump-Helmet", "Scuffed municipal auction helmet with a handwritten agency asset sticker on the back.", 1],
-                "Weapon": ["Secondhand Riot Pump-Shotgun", "Retired police-turn-in 12-gauge pump shotgun with a scratched wooden stock.", 2],
-                "Armor": ["Discount Commercial Plate Carrier", "Budget mail-order nylon carrier fitted with heavy steel aftermarket trauma plates.", 3],
-                "Top": ["Worn Commercial Canvas Work Jacket", "Sturdy hardware-store duck-canvas jacket smelling faintly of gun oil and burnt drip coffee.", 2],
-                "Bottom": ["Hardware-Store Reinforced Cargo Pants", "Durable off-the-shelf workwear trousers stuffed with spare batteries, receipts, and chalk.", 1],
-                "Gloves": ["Duct-Taped Surplus Leather Gloves", "Broken-in military surplus gloves reinforced across the knuckles with silver gaffer tape.", 1],
-                "Shoes": ["Broken-In Surplus Patrol Boots", "Resoled police-surplus leather boots kept watertight with cheap shoe grease.", 1],
-                "Shield": None,
-            },
-        },
-        "Storefront Case Investigator": {
-            "description": "Shoe-leather paranormal detective working out of a commercial walk-up office with a police trade-in revolver, Polaroid camera, and mail-order EMF meter.",
-            "starting_items": [
-                ["Mail-Order Third-Party EMF Meter", "Tool", "Plastic hobbyist ghost-hunting meter rewired at the office bench to track real rifts.", 1],
-                ["Thrift-Shop Instant Film Camera", "Tool", "Clunky analog camera that catches spectral silhouettes digital phone sensors miss.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Off-the-Shelf Clip-On Polarized Glasses", "Drugstore polarized clip-ons taped over safety frames to cut anomalous glare.", 1],
-                "Weapon": ["Police Trade-In .38 Service Revolver", "Reliable six-shot surplus service revolver with worn checkered grip panels.", 2],
-                "Armor": ["Patched Mall-Security Soft-Armor", "Secondhand Kevlar under-vest neatly stitched and duct-taped at the office patching corner.", 2],
-                "Top": ["Thrifted Wrinkled Office Trenchcoat", "Sensible department-store raincoat worn over a short-sleeved button-down shirt.", 1],
-                "Bottom": ["Scuffed Office Slacks with Knee Pads", "Ordinary commercial dress slacks paired with strap-on hardware-store knee pads.", 1],
-                "Gloves": ["Duct-Taped Surplus Leather Gloves", "Broken-in military surplus gloves reinforced across the knuckles with silver gaffer tape.", 1],
-                "Shoes": ["Broken-In Surplus Patrol Boots", "Resoled police-surplus leather boots kept watertight with cheap shoe grease.", 1],
-                "Shield": None,
-            },
-        },
-        "Aftermarket Ward Tinkerer": {
-            "description": "Resourceful small-agency tech cobbling working containment rigs out of used oscilloscopes, car batteries, and whatever third-party parts are on sale.",
-            "starting_items": [
-                ["Solder-Patched Grounding Coil", "Tool", "Homemade copper-pipe grounding rod wired to a scooter battery.", 2],
-                ["Mason-Jar Salt & Iron Shrapnel Pop", "Consumable", "Improvised back-room flash-ward taped together from hardware supplies.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Off-the-Shelf Clip-On Polarized Glasses", "Drugstore polarized clip-ons taped over safety frames to cut anomalous glare.", 1],
-                "Weapon": ["Surplus Imported 9mm Submachinegun", "Boxy cold-war surplus SMG sourced through a licensed third-party broker.", 2],
-                "Armor": ["Mismatched Surplus Kevlar Vest", "Retired security-firm ballistic vest with mismatched Velcro pouches from three different vendors.", 2],
-                "Top": ["Worn Commercial Canvas Work Jacket", "Sturdy hardware-store duck-canvas jacket smelling faintly of gun oil and burnt drip coffee.", 2],
-                "Bottom": ["Hardware-Store Reinforced Cargo Pants", "Durable off-the-shelf workwear trousers stuffed with spare batteries, receipts, and chalk.", 1],
-                "Gloves": ["Hardware-Store Impact Work Gloves", "Bright-stitched mechanic's grip gloves picked up on sale down the street.", 1],
-                "Shoes": ["Discount Steel-Toe Work Boots", "Practical warehouse safety boots with oil-resistant rubber soles.", 1],
-                "Shield": None,
-            },
-        },
-        "Hired-Gun Perimeter Guard": {
-            "description": "Steady small-agency muscle holding the line in patched surplus armor with a scratched polycarbonate riot shield and hardware-store sledgehammer.",
-            "starting_items": [
-                ["Roll of Heavy Silver Duct Tape", "Tool", "Fixes cracked riot visors, torn vest straps, and loose cellar door seals in seconds.", 1],
-                ["Pharmacy Cold-Pack & Smelling Salts", "Consumable", "Over-the-counter ammonia snap-caps to shake off psychic grogginess.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Surplus Riot Bump-Helmet", "Scuffed municipal auction helmet with a handwritten agency asset sticker on the back.", 1],
-                "Weapon": ["Hardware-Modified Breaching Sledgehammer", "Fiberglass-handled demolition hammer welded with iron ward-washers in the cellar.", 2],
-                "Armor": ["Discount Commercial Plate Carrier", "Budget mail-order nylon carrier fitted with heavy steel aftermarket trauma plates.", 3],
-                "Top": ["Off-the-Rack Utility Windbreaker", "Plain commercial nylon windbreaker with a small iron-on local agency patch.", 1],
-                "Bottom": ["Scuffed Office Slacks with Knee Pads", "Ordinary commercial dress slacks paired with strap-on hardware-store knee pads.", 1],
-                "Gloves": ["Hardware-Store Impact Work Gloves", "Bright-stitched mechanic's grip gloves picked up on sale down the street.", 1],
-                "Shoes": ["Discount Steel-Toe Work Boots", "Practical warehouse safety boots with oil-resistant rubber soles.", 1],
-                "Shield": ["Scratched Surplus Polycarbonate Shield", "Retired crowd-control riot shield with the previous department's stenciling painted over.", 2],
-            },
-        },
-    },
-    "monastic_order": {
-        "Shrine Exorcist Ascetic": {
-            "description": "Consecrated warrior-monk wielding sanctified polearms and spirit-binding seals to banish and cleanse incursions.",
-            "starting_items": [
-                ["Consecrated Salt Pouch", "Consumable", "Blessed sea salt scattering spiritual corruption and staggering entities.", 1],
-                ["Purification Paper Talisman (Ofuda)", "Tool", "Inscribed paper seal disrupting anomalous energy fields.", 2],
-            ],
-            "starter_gear": {
-                "Head": ["Braided Shimenawa Headband", "Sacred hemp headband consecrated with mountain shrine incense.", 1],
-                "Weapon": ["Purifying Shrine Naginata", "Curved polearm blade folded from sanctified steel and dipped in shrine waters.", 3],
-                "Armor": ["Ofuda-Lined Lacquered Do-Maru Vest", "Traditional lamellar chest protector woven with warding talismans.", 3],
-                "Top": ["Consecrated Indigo Shrine Haori", "Flowing exorcist coat embroidered with silver bell-flower crests.", 2],
-                "Bottom": ["Pleated Exorcist Hakama", "Divided indigo shrine hakama pleated for swift footwork.", 2],
-                "Gloves": ["Cinnabar-Inscribed Binding Wraps", "Consecrated linen hand-wraps inked with spirit-sealing glyphs.", 1],
-                "Shoes": ["Reinforced Rubber-Soled Tabi Boots", "Modernized split-toe exorcist boots built for silent urban footing.", 1],
-                "Shield": None,
-            },
-        },
-        "Temple Kagura Ritualist": {
-            "description": "Divine maiden or ritual officiant wielding consecrated yumi bows and sacred suzu bells to disperse corruption from afar.",
-            "starting_items": [
-                ["Sacred Kagura Bell", "Tool", "Bronze bell whose chimes calm spiritual agitation and reveal invisibles.", 2],
-                ["Blessed Spring Water Flask", "Consumable", "Purified water restoring mental lucidity and physical vitality.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Consecrated Silk Brow-Wrap", "Indigo cloth band inscribed with protective Sanskrit-inspired wards.", 1],
-                "Weapon": ["Sacred Ritual Yumi Bow", "Asymmetric lacquered bamboo longbow shooting arrows blessed with holy cedar smoke.", 2],
-                "Armor": ["Sacred Hemp & Silk Ward Breastplate", "Lightweight ceremonial armor hardened against spiritual miasma.", 2],
-                "Top": ["Cinnabar-Trimmed Exorcist Kosode", "Traditional wide-sleeved robe consecrated for purification rites.", 2],
-                "Bottom": ["Pleated Exorcist Hakama", "Divided indigo shrine hakama pleated for swift footwork.", 2],
-                "Gloves": ["Sanctified Silk Ritual Bracers", "Armored forearm guards stitched with braided red ward-cord.", 1],
-                "Shoes": ["Sanctified Mountain Waraji Striders", "Weatherproof woven footwear blessed at the Grand Temple torii.", 1],
-                "Shield": None,
-            },
-        },
-        "Consecrated Blade Warden": {
-            "description": "Master of traditional swordsmanship trained to slice through ethereal phantoms with tamahagane blades soaked in sacred oils.",
-            "starting_items": [
-                ["Whetstone of Holy Dew", "Consumable", "Ceremonial whetstone coating weapons in phantom-cleaving light.", 1],
-                ["Incense Smokebomb", "Consumable", "Purifying herbal smoke cloud masking movement and blinding fiends.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Lacquered Crow-Tengu Half-Visor", "Traditional carved half-mask worn by nocturnal shrine exorcists.", 1],
-                "Weapon": ["Consecrated Steel Katana", "Curved tamahagane blade etched with protective purification chants.", 2],
-                "Armor": ["Prayer-Bead Reinforced Chest Wrap", "Layered exorcist chest binding anchored by blessed iron rings.", 2],
-                "Top": ["Warded Monastic Sleeveless Gi", "Agile ascetic martial tunic allowing unrestricted talisman casting.", 1],
-                "Bottom": ["Bound Shinobi-Cut Shrine Trousers", "Ankle-wrapped monastic trousers suited for rooftop pursuit.", 1],
-                "Gloves": ["Cinnabar-Inscribed Binding Wraps", "Consecrated linen hand-wraps inked with spirit-sealing glyphs.", 1],
-                "Shoes": ["Reinforced Rubber-Soled Tabi Boots", "Modernized split-toe exorcist boots built for silent urban footing.", 1],
-                "Shield": None,
-            },
-        },
-        "Crow-Feather Ascetic Warder": {
-            "description": "Mystical ascetic who communes with crow spirits and mountain deities, channeling curse-breaking rosaries and wind incantations.",
-            "starting_items": [
-                ["Crow-Bone Divination Set", "Tool", "Runed avian bones pointing toward focal points of spiritual disturbance.", 2],
-                ["Binding Spirit Rosary", "Consumable", "108-bead wooden rosary snaring malicious phantoms.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Lacquered Crow-Tengu Half-Visor", "Traditional carved half-mask worn by nocturnal shrine exorcists.", 1],
-                "Weapon": ["Crow-Feather Exorcism Staff", "Shakujo ringed staff adorned with midnight corvid feathers.", 2],
-                "Armor": ["Ofuda-Lined Lacquered Do-Maru Vest", "Traditional lamellar chest protector woven with warding talismans.", 3],
-                "Top": ["Consecrated Indigo Shrine Haori", "Flowing exorcist coat embroidered with silver bell-flower crests.", 2],
-                "Bottom": ["Bound Shinobi-Cut Shrine Trousers", "Ankle-wrapped monastic trousers suited for rooftop pursuit.", 1],
-                "Gloves": ["Sanctified Silk Ritual Bracers", "Armored forearm guards stitched with braided red ward-cord.", 1],
-                "Shoes": ["Sanctified Mountain Waraji Striders", "Weatherproof woven footwear blessed at the Grand Temple torii.", 1],
-                "Shield": None,
-            },
-        },
-        "Talisman Seal Scribe": {
-            "description": "Temple scholar specializing in ancient script, entity binding barriers, and portable barrier arrays.",
-            "starting_items": [
-                ["Cinnabar Calligraphy Ink & Brush", "Tool", "Ceremonial tools for painting wards upon stone, steel, or skin.", 2],
-                ["Grand Warding Seal Slip", "Consumable", "Large parchment sealing doorway portals against entity passage.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Braided Shimenawa Headband", "Sacred hemp headband consecrated with mountain shrine incense.", 1],
-                "Weapon": ["Cinnabar-Etched Wakizashi", "Short sword with cinnabar lacquer channels channeling spiritual energy.", 2],
-                "Armor": ["Sacred Hemp & Silk Ward Breastplate", "Lightweight ceremonial armor hardened against spiritual miasma.", 2],
-                "Top": ["Cinnabar-Trimmed Exorcist Kosode", "Traditional wide-sleeved robe consecrated for purification rites.", 2],
-                "Bottom": ["Pleated Exorcist Hakama", "Divided indigo shrine hakama pleated for swift footwork.", 2],
-                "Gloves": ["Cinnabar-Inscribed Binding Wraps", "Consecrated linen hand-wraps inked with spirit-sealing glyphs.", 1],
-                "Shoes": ["Reinforced Rubber-Soled Tabi Boots", "Modernized split-toe exorcist boots built for silent urban footing.", 1],
-                "Shield": None,
-            },
-        },
-    },
-    "freelancer": {
-        "Underground Occult Broker": {
-            "description": "Streetwise informant and grey-market dealer packing a concealed heavy revolver and brass knuckles for close encounters.",
-            "starting_items": [
-                ["Encrypted Burner Phone", "Tool", "Untraceable cellular device connected to the black market bounty net.", 1],
-                ["Street Trauma Patch", "Consumable", "Cheap coagulant compress stopping acute arterial bleeding.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Tinted Night-Runner Shades", "Scratch-resistant urban sunglasses hiding bloodshot late-shift eyes.", 1],
-                "Weapon": ["Concealed Snub-Nose Revolver", "Heavy .38 Special snub-nose revolver concealed in a quick-draw holster.", 2],
-                "Armor": ["Surplus Concealed Soft-Armor Vest", "Modified surplus Kevlar vest worn discreetly under street clothes.", 2],
-                "Top": ["Distressed Leather Moto-Jacket", "Scuffed biker jacket with reinforced elbows and hidden seams.", 2],
-                "Bottom": ["Kevlar-Stitched Dark Raw Denim", "Heavy-duty street jeans reinforced at the knees and seams.", 1],
-                "Gloves": ["Fingerless Padded Moto-Gloves", "Scuffed leather street gloves offering grip without losing touch.", 1],
-                "Shoes": ["Worn Lug-Sole Urban Combat Boots", "Dependable waterproof street boots with steel shanks.", 1],
-                "Shield": None,
-            },
-        },
-        "Rogue Bounty Stalker": {
-            "description": "Rugged tracker scouring abandoned subway lines and back alleys with a modified hunting rifle and survival blade.",
-            "starting_items": [
-                ["High-Intensity Flare", "Consumable", "Blinding chemical torch driving off photophobic entities.", 1],
-                ["Makeshift Entity Snare", "Tool", "Reinforced steel-cable trap immobilizing quadrupeds and crawlers.", 2],
-            ],
-            "starter_gear": {
-                "Head": ["Low-Profile Black Cap & Earbuds", "Unassuming streetwear cap paired with bone-conduction scanner audio.", 1],
-                "Weapon": ["Lever-Action Hunting Rifle", "Rugged .30-30 lever rifle modified with a shortened barrel and fiber-optic sights.", 3],
-                "Armor": ["Street-Modded Trauma Plate Rig", "Custom duct-taped ceramic plate carrier cobbled from salvage.", 2],
-                "Top": ["Reinforced Heavy Canvas Duster", "Rugged street coat lined with makeshift slash-resistant panels.", 2],
-                "Bottom": ["Reinforced Ripstop Streetwear Cargo Pants", "Multi-pocket urban cargo pants holding spare mags and batteries.", 1],
-                "Gloves": ["Taped Street-Brawler Wraps", "Pragmatic athletic tape and leather palm guards.", 1],
-                "Shoes": ["Worn Lug-Sole Urban Combat Boots", "Dependable waterproof street boots with steel shanks.", 1],
-                "Shield": None,
-            },
-        },
-        "Street Alchemist & Tinkerer": {
-            "description": "Crafty urban drifter cobbling anomalous scraps into volatile improvised concoctions and sawed-off firearms.",
-            "starting_items": [
-                ["Improvised Phosphor Flask", "Consumable", "Mason jar of volatile incendiary gel burning with blinding white heat.", 1],
-                ["Copper Grounding Wire Roll", "Tool", "Flexible grounding coil deflecting electrical and psychic arc feedback.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Ribbed Urban Beanie & Mic Clip", "Comfortable knit beanie concealing a throat-mic transceiver.", 1],
-                "Weapon": ["Sawed-Off Street Scattergun", "Double-barreled 12-gauge shotgun cut down for devastating close-quarters blast.", 2],
-                "Armor": ["Street-Modded Trauma Plate Rig", "Custom duct-taped ceramic plate carrier cobbled from salvage.", 2],
-                "Top": ["Urban Concealed-Carry Street Hoodie", "Heavyweight charcoal hoodie with hidden interior draw-pockets.", 1],
-                "Bottom": ["Reinforced Ripstop Streetwear Cargo Pants", "Multi-pocket urban cargo pants holding spare mags and batteries.", 1],
-                "Gloves": ["Taped Street-Brawler Wraps", "Pragmatic athletic tape and leather palm guards.", 1],
-                "Shoes": ["Custom High-Traction Street Runners", "Broken-in athletic sneakers built for sprinting across alleys.", 1],
-                "Shield": None,
-            },
-        },
-        "Grid Runner & Signal Jacker": {
-            "description": "Urban scrapper hacking containment frequencies and running contraband with compact submachine guns and signal scramblers.",
-            "starting_items": [
-                ["Backdoor Scanner Dongle", "Tool", "Hacked RF receiver intercepting municipal agency breach dispatches.", 2],
-                ["Flash Grenade", "Consumable", "High-intensity disorienting charge.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Tinted Night-Runner Shades", "Scratch-resistant urban sunglasses hiding bloodshot late-shift eyes.", 1],
-                "Weapon": ["Scrapped Compact SMG", "Modified 9mm machine pistol with a high-capacity drum magazine.", 2],
-                "Armor": ["Surplus Concealed Soft-Armor Vest", "Modified surplus Kevlar vest worn discreetly under street clothes.", 2],
-                "Top": ["Weatherproof Midnight Windbreaker", "Reflective-piped urban shell jacket built for neon rain.", 1],
-                "Bottom": ["Kevlar-Stitched Dark Raw Denim", "Heavy-duty street jeans reinforced at the knees and seams.", 1],
-                "Gloves": ["Fingerless Padded Moto-Gloves", "Scuffed leather street gloves offering grip without losing touch.", 1],
-                "Shoes": ["Custom High-Traction Street Runners", "Broken-in athletic sneakers built for sprinting across alleys.", 1],
-                "Shield": None,
-            },
-        },
-        "Back-Alley Blade Drifter": {
-            "description": "Silent melee mercenary armed with a wicked combat machete and improvised occult wards etched into scrap metal.",
-            "starting_items": [
-                ["Smuggled Occult Curio", "Tool", "Strange petrified anomalous eyeball detecting nearby illusions.", 2],
-                ["Styptic Powder Canister", "Consumable", "Antiseptic powder preventing septic shock from entity claw lacerations.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Low-Profile Black Cap & Earbuds", "Unassuming streetwear cap paired with bone-conduction scanner audio.", 1],
-                "Weapon": ["Scuffed Trench Machete", "Heavy steel clearing blade etched with defensive glyphs.", 2],
-                "Armor": ["Street-Modded Trauma Plate Rig", "Custom duct-taped ceramic plate carrier cobbled from salvage.", 2],
-                "Top": ["Distressed Leather Moto-Jacket", "Scuffed biker jacket with reinforced elbows and hidden seams.", 2],
-                "Bottom": ["Reinforced Ripstop Streetwear Cargo Pants", "Multi-pocket urban cargo pants holding spare mags and batteries.", 1],
-                "Gloves": ["Taped Street-Brawler Wraps", "Pragmatic athletic tape and leather palm guards.", 1],
-                "Shoes": ["Worn Lug-Sole Urban Combat Boots", "Dependable waterproof street boots with steel shanks.", 1],
-                "Shield": None,
-            },
-        },
-    },
-    "student_freelancer": {
-        "Honor Roll Student": {
-            "description": "Diligent, top-ranking student who balances exam prep by day with clinical after-hours anomaly containment.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Pocket Resonance Calculator", "Tool", "Modified graphing calculator plotting local Hume fluctuations.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Anti-Glare Reading Glasses & Earbud", "Unassuming study frames concealing a bone-conduction anomaly alert receiver.", 1],
-                "Weapon": ["Suppressed 9mm Service Pistol", "Compact 9mm tactical sidearm carried inside a false-bottom leather schoolbag.", 2],
-                "Armor": ["Kevlar-Weave Academy Sweater Vest", "Neat school sweater vest lined with lightweight ballistic aramid panels.", 2],
-                "Top": ["Tailored Academy Blazer & Crisp Shirt", "Standard high school uniform blazer with a reinforced interior draw-pocket.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "Regulation school uniform bottom stitched with ripstop lining.", 1],
-                "Gloves": ["Thin Leather Study & Grip Gloves", "Supple dark gloves that leave no fingerprints on brass casings or chalk.", 1],
-                "Shoes": ["Reinforced Uniform Loafers", "Polished school loafers fitted with non-slip tactical rubber soles.", 1],
-                "Shield": None,
-            },
-        },
-        "Athletic Regular": {
-            "description": "Energetic, physically conditioned student with sharp reflexes who excels in gym class and close-quarters skirmishes alike.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Electrolyte Sports Bottle", "Consumable", "High-electrolyte recovery drink kept in a mesh duffle pocket.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Moisture-Wicking Sweatband & Clip Mic", "Simple athletic headband hiding a sub-vocal transceiver.", 1],
-                "Weapon": ["Live-Steel Wakizashi Blade", "Razor-sharp forged steel short sword carried inside a long canvas sports duffle.", 2],
-                "Armor": ["Impact-Woven Varsity Chest Guard", "Low-profile padded trauma liner worn beneath a school track top.", 2],
-                "Top": ["Reinforced School Track Jacket", "Zip-up academy athletics jacket with slash-resistant sleeve panels.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "Regulation school uniform bottom tailored for high-speed sprinting.", 1],
-                "Gloves": ["Taped Athletic Grip Wraps", "Breathable wrist and palm tape offering firm blade and baton control.", 1],
-                "Shoes": ["High-Traction Court Sneakers", "Cushioned school athletic shoes built for rooftop leaps and alley sprints.", 1],
-                "Shield": None,
-            },
-        },
-        "Quiet Bookworm": {
-            "description": "Soft-spoken library regular who reads arcane folklore texts behind stacked novels and channels high-resonance wards.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Annotated Folklore Notebook", "Tool", "Margin-scribbled notebook cataloging local urban legends and entity taboos.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Braided Bookmark Hair-Clip & Ward", "Discreet silver hair-clip etched with a cognitive grounding sigil.", 1],
-                "Weapon": ["Consecrated Silver Athame", "Lethal ritual silver dagger tucked inside a hollowed-out hardcover reference tome.", 2],
-                "Armor": ["Ward-Stitched Academy Cardigan", "Oversized knit school cardigan woven with spirit-dampening silver thread.", 2],
-                "Top": ["Tailored Academy Blazer & Crisp Shirt", "Tidy school uniform shirt with paper talismans slipped inside the cuff.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "Regulation school uniform bottom with a hidden charm pocket.", 1],
-                "Gloves": ["Archivist Cotton & Silk Gloves", "Soft library handling gloves treated with purifying salt resin.", 1],
-                "Shoes": ["Reinforced Uniform Loafers", "Quiet-soled school loafers that barely make a sound on corridor tile.", 1],
-                "Shield": None,
-            },
-        },
-        "Back-Row Rebel": {
-            "description": "Streetwise, tough-as-nails truant who naps by the classroom window and brawls on the front lines when rifts open.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Battered Zippo & Ward Chalk", "Tool", "Heavy brass lighter and salt-chalk sticks for marking containment lines.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Unbuttoned Collar & Ear-Cuff Comms", "Clip-on gunmetal ear-cuff wired to a police-band anomaly scanner.", 1],
-                "Weapon": ["Sawed-Off Street Scattergun", "Break-action 12-gauge scattergun slung inside a padded canvas guitar gig-bag.", 2],
-                "Armor": ["Chain-Lined Sukajan Under-Vest", "Concealed slash-proof mesh vest worn beneath an open uniform.", 2],
-                "Top": ["Unbuttoned Uniform & Street Jacket", "Scuffed jacket worn loosely over an untucked school shirt.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "Cuffed school uniform trousers reinforced at the knees.", 1],
-                "Gloves": ["Weighted Knuckle Street Gloves", "Fingerless leather gloves with hardened carbon knuckle inserts.", 1],
-                "Shoes": ["Scuffed High-Top School Boots", "Heavy lug-sole boots that kick through rusted padlocks and drywall.", 1],
-                "Shield": None,
-            },
-        },
-        "After-School Tinkerer": {
-            "description": "Resourceful hands-on student whose backpack is packed with custom electronics, resonance sensors, and modified hardware.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Custom EMF & Hume Multimeter", "Tool", "Hand-soldered pocket detector wired from spare science-lab parts.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Flip-Down Magnifier & Telemetry Goggles", "Workshop safety goggles modified with an infrared anomaly overlay.", 1],
-                "Weapon": ["Modified Gauss Coil-Carbine", "Overclocked electromagnetic flechette carbine carried in a drafting tube case.", 2],
-                "Armor": ["Insulated Maker-Lab Apron Rig", "Rubberized workshop vest lined with capacitor shielding and ceramic plates.", 2],
-                "Top": ["Utility Lab Coat Over School Uniform", "Singed white lab coat worn over rolled-sleeve academy attire.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "School uniform bottom clipped with a soldering multi-tool.", 1],
-                "Gloves": ["Insulated High-Voltage Work Gloves", "Dielectric workshop gloves protecting against arc discharge.", 1],
-                "Shoes": ["Rubber-Soled Workshop Sneakers", "Static-grounded sneakers ideal for wet floors and live wiring.", 1],
-                "Shield": None,
-            },
-        },
-        "Class Sharpshooter": {
-            "description": "Cool-headed, eagle-eyed student with steady nerves who never misses a mark from across the courtyard or alley.",
-            "starting_items": [
-                ["Public Agency Freelance Permit", "Tool", "Laminated student freelance permit tucked inside your school ID holder.", 1],
-                ["Laser Rangefinder Monocular", "Tool", "Compact pocket optic calibrated for urban rooftop sightlines.", 1],
-            ],
-            "starter_gear": {
-                "Head": ["Polarized Clip-On Visor & Earpiece", "Tinted glare-cutting lens paired with a wind-sensor earpiece.", 1],
-                "Weapon": ["Folding Takedown Marksman Carbine", "Precision semi-automatic rifle packed inside a hard-shell instrument case.", 2],
-                "Armor": ["Padded Recoil-Braced Uniform Vest", "Structured school vest with a reinforced shoulder recoil pad and kevlar weave.", 2],
-                "Top": ["Tailored Academy Blazer & Crisp Shirt", "Clean-cut academy blazer tailored for unrestricted shoulder draw.", 1],
-                "Bottom": ["Pleated Academy Skirt / Tailored Academy Slacks", "Regulation school uniform bottom with hidden magazine loops.", 1],
-                "Gloves": ["Padded Two-Finger Marksman Gloves", "Precision shooting gloves keeping the trigger finger steady in cold rain.", 1],
-                "Shoes": ["Reinforced Uniform Loafers", "Balanced low-heel school shoes providing rock-solid firing stance.", 1],
-                "Shield": None,
-            },
-        },
-    },
-}
+_STARTER_CATALOG_PATH = Path(__file__).resolve().parents[3] / "data" / "anomalous_starter_classes.json"
 
-ANOMALOUS_FACTION_WEAPONS: Dict[str, List[str]] = {
-    "public_agency": [
-        "Bureau Issue Service Pistol",
-        "Tactical Suppression Shotgun",
-        "Suppressed Scout Carbine",
-        "Arc-Discharge Stun Baton",
-        "Kinetic Force Baton",
-        "Standard-Issue Bureau SMG",
-    ],
-    "private_agency_1": [
-        "In-House Mk.IV Smart Carbine",
-        "Proprietary R&D Monomolecular Katana",
-        "Corporate R&D Gauss Precision Rifle",
-        "In-House Kinetic Breaching Sledgehammer",
-        "Proprietary Caseless Smart-PDW",
-        "Corporate Prototype Pulse Shotgun",
-    ],
-    "private_agency_2": [
-        "Police Trade-In .38 Service Revolver",
-        "Secondhand Riot Pump-Shotgun",
-        "Surplus Imported 9mm Submachinegun",
-        "Pawn-Shop Semi-Auto Carbine",
-        "Mail-Order Heavy Clearing Machete",
-        "Hardware-Modified Breaching Sledgehammer",
-    ],
-    "monastic_order": [
-        "Purifying Shrine Naginata",
-        "Sacred Ritual Yumi Bow",
-        "Consecrated Steel Katana",
-        "Crow-Feather Exorcism Staff",
-        "Cinnabar-Etched Wakizashi",
-        "Temple Exorcism Vajra",
-    ],
-    "freelancer": [
-        "Concealed Snub-Nose Revolver",
-        "Lever-Action Hunting Rifle",
-        "Sawed-Off Street Scattergun",
-        "Scrapped Compact SMG",
-        "Scuffed Trench Machete",
-        "Lead-Weighted Trench Blackjack",
-    ],
-    "student_freelancer": [
-        "Suppressed 9mm Service Pistol",
-        "Live-Steel Wakizashi Blade",
-        "Consecrated Silver Athame",
-        "Sawed-Off Street Scattergun",
-        "Modified Gauss Coil-Carbine",
-        "Folding Takedown Marksman Carbine",
-    ],
-}
 
-ANOMALOUS_FACTION_STARTER_OUTFITS: Dict[str, Dict[str, List[Tuple[str, str]]]] = {
-    "public_agency": {
-        "Head": [
-            ("Polarized Cognito-Filter Glasses", "Bureau-issue anti-memetic eyewear filtering anomalous visual noise."),
-            ("Bureau Tactical Comms Earpiece", "Encrypted municipal dispatch receiver clipped over the ear."),
-            ("Field Investigator Spectral Visor", "Low-profile polarized lenses revealing faint spatial distortions."),
-        ],
-        "Armor": [
-            ("Concealed Bureau Kevlar Vest", "Taxpayer-funded low-profile ballistic vest worn beneath agency attire."),
-            ("Standard-Issue Containment Plate Carrier", "Modular bureau chest rig with lead-lined evidence pouches."),
-            ("Bureau Ballistic Trench Under-Rig", "Reinforced weave harness designed for rapid urban containment."),
-        ],
-        "Top": [
-            ("Tailored Black Bureau Suit & Tie", "Crisp black agency suit jacket with an interior shoulder holster."),
-            ("Charcoal Agency Trenchcoat & Dress Shirt", "Weatherproof bureau trenchcoat with occult-dampening stitching."),
-            ("Bureau Field Inspector Blazer", "Structured dark blazer bearing a concealed municipal clearance pin."),
-        ],
-        "Bottom": [
-            ("Tailored Charcoal Bureau Slacks", "Reinforced wool-blend agency slacks tailored for active pursuit."),
-            ("Tailored Bureau Pencil Skirt / Tailored Field Slacks", "Sharp official agency attire reinforced with ripstop lining."),
-        ],
-        "Gloves": [
-            ("Nitrile-Lined Black Leather Gloves", "Insulated field gloves preventing anomalous contact contamination."),
-            ("Bureau Forensics Grip Gloves", "Tactile leather gloves suited for handling firearms and evidence canisters."),
-        ],
-        "Shoes": [
-            ("Polished Steel-Toe Agency Oxfords", "Dress oxfords concealing puncture-resistant soles and ankle support."),
-            ("Bureau Rapid-Response Field Boots", "Matte-black tactical boots built for subway tunnels and wet concrete."),
-        ],
-        "Accessory 1": [
-            ("Encrypted Bureau Clearance Badge", "Holographic municipal containment ID granting Tier-1 HQ access."),
-            ("Sub-Harmonic Resonance Pager", "Pocket detector that chimes softly near active spatial fractures."),
-        ],
-    },
-    "private_agency_1": {
-        "Head": [
-            ("Proprietary Mk.III AR Telemetry Visor", "In-house corporate R&D heads-up visor streaming live skyscraper threat telemetry."),
-            ("In-House Carbon-Weave Comms Headset", "Serialized corporate headset with encrypted satellite R&D uplink."),
-            ("Corporate R&D Ballistic Half-Mask", "Sleek proprietary matte-carbon respirator developed in-house for tower breaches."),
-        ],
-        "Armor": [
-            ("In-House R&D Composite Plate Rig", "Proprietary corporate ceramic-polymer chest rig engineered in the conglomerate's cleanrooms."),
-            ("Executive Ballisticweave Tech-Duster", "Bespoke corporate longcoat woven in-house with flexible aramid-nanotube panels."),
-            ("Proprietary Corporate Exo-Weave Vest", "Serialized conglomerate tactical vest with magnetic smart-mag caddies."),
-        ],
-        "Top": [
-            ("Corporate R&D Tactical Techwear Coat", "Asymmetric matte-black corporate shell bearing embossed conglomerate R&D serials."),
-            ("In-House Matte-Carbon Operator Shirt", "Proprietary breathable ballistic-shoulder combat shirt issued exclusively to conglomerate staff."),
-            ("Executive Security Tailored Blazer", "Bespoke high-collar corporate suit jacket engineered in-house for concealed carry."),
-        ],
-        "Bottom": [
-            ("Proprietary Operator Cargo Trousers", "Articulated corporate R&D ripstop trousers with integrated magnetic holster mounts."),
-            ("Corporate Aramid-Stitched Executive Slacks", "Tailored conglomerate combat slacks woven from proprietary slash-proof fibers."),
-        ],
-        "Gloves": [
-            ("In-House Smart-Link Operator Gloves", "Proprietary synthetic gloves syncing weapon grip sensors to corporate HUDs."),
-            ("Corporate Carbon-Knuckle Gauntlets", "Serialized R&D contractor gloves engineered for zero-slip recoil control."),
-        ],
-        "Shoes": [
-            ("Corporate Silent-Tread Tech High-Tops", "Custom R&D urban striders with sound-deadening polymer soles."),
-            ("Proprietary Shock-Damped Assault Boots", "Lightweight in-house composite boots built for high-rise corporate deployments."),
-        ],
-        "Accessory 1": [
-            ("Corporate R&D Biometric Clearance Tag", "Encrypted conglomerate ID chip unlocking skyscraper R&D vaults and prototype racks."),
-            ("Proprietary Executive Telemetry Uplink", "Wrist-mounted corporate R&D terminal logging commission bounties in real time."),
-        ],
-    },
-    "private_agency_2": {
-        "Head": [
-            ("Off-the-Shelf Clip-On Polarized Glasses", "Drugstore polarized clip-ons taped over safety frames to cut anomalous glare."),
-            ("Surplus Riot Bump-Helmet", "Scuffed municipal auction helmet with a handwritten agency asset sticker on the back."),
-            ("Secondhand Two-Way Radio Headset", "Discount commercial walkie-talkie headset bought in bulk from an electronics liquidator."),
-        ],
-        "Armor": [
-            ("Mismatched Surplus Kevlar Vest", "Retired security-firm ballistic vest with mismatched Velcro pouches from three different vendors."),
-            ("Discount Commercial Plate Carrier", "Budget mail-order nylon carrier fitted with heavy steel aftermarket trauma plates."),
-            ("Patched Mall-Security Soft-Armor", "Secondhand Kevlar under-vest neatly stitched and duct-taped at the office patching corner."),
-        ],
-        "Top": [
-            ("Off-the-Rack Utility Windbreaker", "Plain commercial nylon windbreaker with a small iron-on local agency patch."),
-            ("Worn Commercial Canvas Work Jacket", "Sturdy hardware-store duck-canvas jacket smelling faintly of gun oil and burnt drip coffee."),
-            ("Thrifted Wrinkled Office Trenchcoat", "Sensible department-store raincoat worn over a short-sleeved button-down shirt."),
-        ],
-        "Bottom": [
-            ("Hardware-Store Reinforced Cargo Pants", "Durable off-the-shelf workwear trousers stuffed with spare batteries, receipts, and chalk."),
-            ("Scuffed Office Slacks with Knee Pads", "Ordinary commercial dress slacks paired with strap-on hardware-store knee pads."),
-        ],
-        "Gloves": [
-            ("Hardware-Store Impact Work Gloves", "Bright-stitched mechanic's grip gloves picked up on sale down the street."),
-            ("Duct-Taped Surplus Leather Gloves", "Broken-in military surplus gloves reinforced across the knuckles with silver gaffer tape."),
-        ],
-        "Shoes": [
-            ("Discount Steel-Toe Work Boots", "Practical warehouse safety boots with oil-resistant rubber soles."),
-            ("Broken-In Surplus Patrol Boots", "Resoled police-surplus leather boots kept watertight with cheap shoe grease."),
-        ],
-        "Accessory 1": [
-            ("Laminated Small-Agency Contractor ID", "Self-laminated paper badge on a beaded chain unlocking the office's back-room gun cage."),
-            ("Mail-Order Third-Party EMF Meter", "Chunky plastic hobbyist ghost-meter rewired to buzz near genuine spatial rifts."),
-        ],
-    },
-    "monastic_order": {
-        "Head": [
-            ("Braided Shimenawa Headband", "Sacred hemp headband consecrated with mountain shrine incense."),
-            ("Lacquered Crow-Tengu Half-Visor", "Traditional carved half-mask worn by nocturnal shrine exorcists."),
-            ("Consecrated Silk Brow-Wrap", "Indigo cloth band inscribed with protective Sanskrit-inspired wards."),
-        ],
-        "Armor": [
-            ("Ofuda-Lined Lacquered Do-Maru Vest", "Traditional lamellar chest protector woven with warding talismans."),
-            ("Sacred Hemp & Silk Ward Breastplate", "Lightweight ceremonial armor hardened against spiritual miasma."),
-            ("Prayer-Bead Reinforced Chest Wrap", "Layered exorcist chest binding anchored by blessed iron rings."),
-        ],
-        "Top": [
-            ("Consecrated Indigo Shrine Haori", "Flowing exorcist coat embroidered with silver bell-flower crests."),
-            ("Cinnabar-Trimmed Exorcist Kosode", "Traditional wide-sleeved robe consecrated for purification rites."),
-            ("Warded Monastic Sleeveless Gi", "Agile ascetic martial tunic allowing unrestricted talisman casting."),
-        ],
-        "Bottom": [
-            ("Pleated Exorcist Hakama", "Divided indigo shrine hakama pleated for swift footwork."),
-            ("Bound Shinobi-Cut Shrine Trousers", "Ankle-wrapped monastic trousers suited for rooftop pursuit."),
-        ],
-        "Gloves": [
-            ("Cinnabar-Inscribed Binding Wraps", "Consecrated linen hand-wraps inked with spirit-sealing glyphs."),
-            ("Sanctified Silk Ritual Bracers", "armored forearm guards stitched with braided red ward-cord."),
-        ],
-        "Shoes": [
-            ("Reinforced Rubber-Soled Tabi Boots", "Modernized split-toe exorcist boots built for silent urban footing."),
-            ("Sanctified Mountain Waraji Striders", "Weatherproof woven footwear blessed at the Grand Temple torii."),
-        ],
-        "Accessory 1": [
-            ("Sacred Cypress Prayer Beads", "108 carved cypress beads that warm in the presence of malice."),
-            ("Cinnabar Bell & Ofuda Pouch", "Waist pouch carrying consecrated paper seals and a bronze kagura bell."),
-        ],
-    },
-    "freelancer": {
-        "Head": [
-            ("Low-Profile Black Cap & Earbuds", "Unassuming streetwear cap paired with bone-conduction scanner audio."),
-            ("Tinted Night-Runner Shades", "Scratch-resistant urban sunglasses hiding bloodshot late-shift eyes."),
-            ("Ribbed Urban Beanie & Mic Clip", "Comfortable knit beanie concealing a throat-mic transceiver."),
-        ],
-        "Armor": [
-            ("Surplus Concealed Soft-Armor Vest", "Modified surplus Kevlar vest worn discreetly under street clothes."),
-            ("Street-Modded Trauma Plate Rig", "Custom duct-taped ceramic plate carrier cobbled from salvage."),
-            ("Reinforced Heavy Canvas Duster", "Rugged street coat lined with makeshift slash-resistant panels."),
-        ],
-        "Top": [
-            ("Urban Concealed-Carry Street Hoodie", "Heavyweight charcoal hoodie with hidden interior draw-pockets."),
-            ("Weatherproof Midnight Windbreaker", "Reflective-piped urban shell jacket built for neon rain."),
-            ("Distressed Leather Moto-Jacket", "Scuffed biker jacket with reinforced elbows and hidden seams."),
-        ],
-        "Bottom": [
-            ("Reinforced Ripstop Streetwear Cargo Pants", "Multi-pocket urban cargo pants holding spare mags and batteries."),
-            ("Kevlar-Stitched Dark Raw Denim", "Heavy-duty street jeans reinforced at the knees and seams."),
-        ],
-        "Gloves": [
-            ("Fingerless Padded Moto-Gloves", "Scuffed leather street gloves offering grip without losing touch."),
-            ("Taped Street-Brawler Wraps", "Pragmatic athletic tape and leather palm guards."),
-        ],
-        "Shoes": [
-            ("Custom High-Traction Street Runners", "Broken-in athletic sneakers built for sprinting across alleys."),
-            ("Worn Lug-Sole Urban Combat Boots", "Dependable waterproof street boots with steel shanks."),
-        ],
-        "Accessory 1": [
-            ("Burner Smartphone & Bounty Dongle", "Jailbroken handset pre-loaded with the Freelance Containment App."),
-            ("Custom Brass Grounding Charm", "Pocket talisman traded from a back-alley curio broker."),
-        ],
-    },
-    "student_freelancer": {
-        "Head": [
-            ("Anti-Glare Reading Glasses & Earbud", "Unassuming study frames concealing a bone-conduction anomaly alert receiver."),
-            ("Moisture-Wicking Sweatband & Clip Mic", "Simple athletic headband hiding a sub-vocal transceiver."),
-            ("Polarized Clip-On Visor & Earpiece", "Tinted glare-cutting lens paired with a wind-sensor earpiece."),
-        ],
-        "Armor": [
-            ("Kevlar-Weave Academy Sweater Vest", "Neat school sweater vest lined with lightweight ballistic aramid panels."),
-            ("Ward-Stitched Academy Cardigan", "Oversized knit school cardigan woven with spirit-dampening silver thread."),
-            ("Impact-Woven Varsity Chest Guard", "Low-profile padded trauma liner worn beneath a school uniform top."),
-        ],
-        "Top": [
-            ("Tailored Academy Blazer & Crisp Shirt", "Standard high school uniform blazer with a reinforced interior draw-pocket."),
-            ("Reinforced School Track Jacket", "Zip-up academy athletics jacket with slash-resistant sleeve panels."),
-            ("Unbuttoned Uniform & Street Jacket", "Scuffed street jacket worn loosely over an untucked school shirt."),
-        ],
-        "Bottom": [
-            ("Pleated Academy Skirt / Tailored Academy Slacks", "Regulation school uniform bottom stitched with ripstop lining."),
-            ("Pleated Uniform Skirt / Cuffed Uniform Trousers", "Durable academy uniform bottom with concealed utility pockets."),
-        ],
-        "Gloves": [
-            ("Thin Leather Study & Grip Gloves", "Supple dark gloves that leave no fingerprints on brass casings or chalk."),
-            ("Taped Athletic Grip Wraps", "Breathable wrist and palm tape offering firm weapon control."),
-        ],
-        "Shoes": [
-            ("Reinforced Uniform Loafers", "Polished school loafers fitted with non-slip tactical rubber soles."),
-            ("High-Traction Court Sneakers", "Cushioned school athletic shoes built for rooftop leaps and alley sprints."),
-        ],
-        "Accessory 1": [
-            ("Student ID & Freelance Permit Lanyard", "Academy student ID holder concealing a laminated Public Agency freelance permit."),
-            ("Clip-On Campus & Hume Pager", "Pocket keychain charm that vibrates quietly when an anomaly rift opens nearby."),
-        ],
-    },
-}
+@lru_cache(maxsize=1)
+def load_anomalous_starter_classes_catalog() -> Dict[str, Any]:
+    """Loads the static Layer-1 Anomalous Incursions starter classes, weapons, and outfit catalogs from JSON."""
+    raw = json.loads(_STARTER_CATALOG_PATH.read_text(encoding="utf-8"))
+    raw_outfits = raw.get("faction_starter_outfits") or {}
+    parsed_outfits: Dict[str, Dict[str, List[Tuple[str, str]]]] = {
+        fac: {
+            slot: [(str(pair[0]), str(pair[1])) for pair in pairs if isinstance(pair, (list, tuple)) and len(pair) >= 2]
+            for slot, pairs in slot_map.items()
+            if isinstance(pairs, list)
+        }
+        for fac, slot_map in raw_outfits.items()
+        if isinstance(slot_map, dict)
+    }
+    return {
+        "faction_classes": raw.get("faction_classes") or {},
+        "faction_weapons": raw.get("faction_weapons") or {},
+        "faction_starter_outfits": parsed_outfits,
+    }
 
+
+def load_anomalous_starter_classes() -> Dict[str, Dict[str, Dict[str, Any]]]:
+    """Returns a deep copy of the 6-faction Anomalous Incursions starter class catalog."""
+    return copy.deepcopy(load_anomalous_starter_classes_catalog()["faction_classes"])
+
+
+ANOMALOUS_FACTION_CLASSES: Dict[str, Dict[str, Dict[str, Any]]] = copy.deepcopy(load_anomalous_starter_classes_catalog()["faction_classes"])
+ANOMALOUS_FACTION_WEAPONS: Dict[str, List[str]] = copy.deepcopy(load_anomalous_starter_classes_catalog()["faction_weapons"])
+ANOMALOUS_FACTION_STARTER_OUTFITS: Dict[str, Dict[str, List[Tuple[str, str]]]] = copy.deepcopy(load_anomalous_starter_classes_catalog()["faction_starter_outfits"])
 
 def normalize_anomalous_starting_faction(starting_faction: Optional[str]) -> str:
     fac = str(starting_faction or "public_agency").strip().lower()
@@ -1953,6 +1193,20 @@ def apply_anomalous_faction_starter_theme(
     return loadout
 
 
+_LEGACY_ANOMALOUS_CLASS_FACTIONS: Dict[str, str] = {
+    "corporate strike operator": "private_agency_1",
+    "in-house r&d prototype tester": "private_agency_1",
+    "executive containment specialist": "private_agency_1",
+    "proprietary telemetry marksman": "private_agency_1",
+    "corporate aegis heavy vanguard": "private_agency_1",
+    "contract trouble-shooter": "private_agency_2",
+    "surplus ordnance breacher": "private_agency_2",
+    "storefront case investigator": "private_agency_2",
+    "aftermarket ward tinkerer": "private_agency_2",
+    "hired-gun perimeter guard": "private_agency_2",
+}
+
+
 def infer_anomalous_faction_from_class(char_class: Optional[str]) -> Optional[str]:
     """Returns the canonical faction archetype key if `char_class` belongs to one of the 5 Anomalous factions."""
     if not char_class:
@@ -1962,7 +1216,7 @@ def infer_anomalous_faction_from_class(char_class: Optional[str]) -> Optional[st
         for cls_name in cls_map:
             if cls_name.lower() == target:
                 return fac_key
-    return None
+    return _LEGACY_ANOMALOUS_CLASS_FACTIONS.get(target)
 
 
 def get_anomalous_faction_starting_items(
@@ -1980,11 +1234,11 @@ def get_anomalous_faction_starting_items(
     stabilizer = generate_procedural_potion(tier=3, effect_tags=["mana_restore"], genre="anomalous_incursions")
 
     if norm_fac == "private_agency_1":
-        medkit["name"] = "Proprietary R&D Nano-Trauma Medkit"
-        stabilizer["name"] = "In-House Cognitive Stabilizer Ampoule"
+        medkit["name"] = "VitaSeal Nano-Trauma Auto-Injector"
+        stabilizer["name"] = "NeuroCalm Cognitive Ampoule"
     elif norm_fac == "private_agency_2":
-        medkit["name"] = "Pharmacy-Bought Field Medkit"
-        stabilizer["name"] = "Generic Off-Brand Focus Ampoule"
+        medkit["name"] = "Compact Trauma First-Aid Kit"
+        stabilizer["name"] = "Concentrated Neural Focus Ampoule"
     elif norm_fac == "monastic_order":
         medkit["name"] = "Field-Issue Trauma Medkit"
         stabilizer["name"] = "Shrine-Blessed Spirit-Calming Incense"
@@ -2006,11 +1260,11 @@ def get_anomalous_faction_starting_items(
         items.append((salt["name"], salt["item_type"], salt["effect"], 1))
     elif norm_fac == "private_agency_1":
         booster = generate_procedural_potion(tier=3, effect_tags=["attack_buff"], genre="anomalous_incursions")
-        booster["name"] = "Corporate Mk.II Combat Stim-Injector"
+        booster["name"] = "VX-II Adrenal Stim-Injector"
         items.append((booster["name"], booster["item_type"], booster["effect"], 1))
     elif norm_fac == "private_agency_2":
         booster = generate_procedural_potion(tier=3, effect_tags=["attack_buff"], genre="anomalous_incursions")
-        booster["name"] = "Bulk-Pack Caffeine & Painkiller Shot"
+        booster["name"] = "High-Potency Adrenal Recovery Shot"
         items.append((booster["name"], booster["item_type"], booster["effect"], 1))
     elif norm_fac == "public_agency":
         purge = generate_procedural_potion(tier=3, effect_tags=["cleanse_all"], genre="anomalous_incursions")

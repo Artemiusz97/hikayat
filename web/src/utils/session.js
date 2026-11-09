@@ -15,3 +15,35 @@ export const isValidSessionId = (id) => {
   const num = Number(id);
   return Number.isInteger(num) && num > 0;
 };
+
+const ANOMALOUS_SCENARIO_ALIASES = new Set([
+  'anomalous_incursions',
+  'nsfw_gore_anomalous_incursions',
+  'furry_anomalous_incursions',
+  'nsfw_furry_gore_anomalous_incursions',
+  'urban_anomalies',
+  'anomalies',
+  'anomaly',
+  'anomalous',
+  'incursions',
+  'incursion',
+  'mcb',
+  'scp',
+  'control',
+  'anomalous_high_school',
+  'anomalous_high',
+  'anomalous_school',
+  'anomaly_school',
+  'anomalous_academy',
+]);
+
+/**
+ * Mirrors Python `scenario_data.is_anomalous_incursions_scenario` so Anomalous Incursions
+ * presets, Anomalous High hybrids, and legacy aliases (`urban_anomalies`, `scp`, etc.)
+ * enable the Folklore Encyclopedia tab while keeping custom combinators separate.
+ */
+export const isAnomalousScenarioKey = (scenario) => {
+  const s = String(scenario || '').trim().toLowerCase();
+  if (!s || s.startsWith('custom')) return false;
+  return s.includes('anomalous') || ANOMALOUS_SCENARIO_ALIASES.has(s);
+};

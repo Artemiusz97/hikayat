@@ -25,6 +25,129 @@ def _get_enemy_base_name(name: str) -> str:
     return re.sub(r'\s+(?:#?\d+|[A-Z])$', '', str(name or "").strip())
 
 
+_INCURSION_SUBDUE_PHRASES = (
+    "subdue & contain",
+    "obezwładnij i zabezpiecz", "obezwładnij anomalię",
+    "tumpaskan & kurung", "tundukkan & kurung",
+    "制服并收容", "压制并收容",
+    "überwältigen & eindämmen", "überwältigen und eindämmen",
+)
+_INCURSION_COMBAT_PERSUADE_PHRASES = (
+    "persuade / calm", "(de-escalate)",
+    "przekonaj / uspokój", "(deeskalacja)",
+    "pujuk / tenangkan", "(redakan)",
+    "劝说 / 安抚", "劝说/安抚", "（缓和局势）",
+    "überreden / beruhigen", "(deeskalieren)",
+)
+_INCURSION_PACIFY_PREFIXES = (
+    "🕊️ pacify & contain", "pacify & contain",
+    "🕊️ uspokój i zabezpiecz", "uspokój i zabezpiecz",
+    "🕊️ tenangkan & kurung", "tenangkan & kurung",
+    "🕊️ 安抚并收容", "安抚并收容",
+    "🕊️ besänftigen & eindämmen", "besänftigen & eindämmen",
+)
+_INCURSION_ANALYZE_PREFIXES = (
+    "🔬 analyze & seal", "analyze & seal",
+    "🔬 przeanalizuj i zapieczętuj", "przeanalizuj i zapieczętuj",
+    "🔬 analisis & meterai", "analisis & meterai",
+    "🔬 分析并封印", "分析并封印",
+    "🔬 analysieren & versiegeln", "analysieren & versiegeln",
+)
+_INCURSION_SCAN_PREFIXES = (
+    "🔍 scan anomaly dossier", "scan anomaly dossier",
+    "🔍 przeskanuj akta anomalii", "przeskanuj akta anomalii",
+    "🔍 imbas fail anomali", "imbas fail anomali",
+    "🔍 扫描异常档案", "扫描异常档案",
+    "🔍 anomalie-akte scannen", "anomalie-akte scannen",
+)
+_INCURSION_SEAL_ABILITY_PREFIXES = (
+    "✨ use sealing ability", "use sealing ability",
+    "✨ użyj zdolności pieczętującej", "użyj zdolności pieczętującej",
+    "✨ guna kebolehan pemeterai", "guna kebolehan pemeterai",
+    "✨ 使用封印技能", "使用封印技能",
+    "✨ versiegelungsfähigkeit nutzen", "versiegelungsfähigkeit nutzen",
+)
+_INCURSION_ATTACK_PREFIXES = (
+    "⚔️ engage anomaly breach", "⚔️ engage anomalous breach", "engage anomaly breach",
+    "⚔️ zaatakuj wyłom anomalii", "zaatakuj wyłom anomalii",
+    "⚔️ gempur rekahan anomali", "gempur rekahan anomali",
+    "⚔️ 迎击异常裂隙", "迎击异常裂隙",
+    "⚔️ anomalie-riss angreifen", "anomalie-riss angreifen",
+)
+_INCURSION_TETHER_PHRASES = (
+    "sever/seal", "przetnij/zapieczętuj", "putuskan/meterai", "斩断/封印", "trennen/versiegeln",
+)
+_INCURSION_RITE_PHRASES = (
+    "folklore counter-rite", "kontrrytuał folkloru", "upacara balas folklor", "民俗反制仪轨", "folklore-gegenritus",
+)
+_INCURSION_INQUIRY_PREFIXES = (
+    "💬 converse with", "💬 [origins", "🔍 [nature", "🧭 [motive",
+    "👁️ study ", "👁️ [vocal", "🔍 [trigger", "🕯️ [courtesy",
+    "💬 [riddle trap]", "🧠 [folklore evasion]",
+    "💬 porozmawiaj z", "💬 berbual dengan", "💬 与", "💬 mit ",
+    "👁️ zbadaj ", "👁️ teliti ", "👁️ 观察", "👁️ untersuche ",
+)
+
+
+def _infer_incursion_action_from_label(
+    inc_lbl_low: str,
+    *,
+    is_inc_tagged: bool = False,
+    has_subdue_enemy_now: bool = False,
+    first_inc_act: dict | None = None,
+) -> str:
+    """Infers canonical incursion_action key across all 5 locales (en, pl, ms, zh, de) when unstamped."""
+    lbl = str(inc_lbl_low or "").strip().lower()
+    act = first_inc_act if isinstance(first_inc_act, dict) else {}
+    if not lbl and not act:
+        return ""
+
+    if lbl.startswith("🛡️") and any(p in lbl for p in _INCURSION_SUBDUE_PHRASES):
+        return "subdue"
+    if any(p in lbl for p in _INCURSION_SUBDUE_PHRASES):
+        return "subdue"
+    if lbl.startswith("👑") or "invoke patron authority" in lbl:
+        return "invoke_patron_authority"
+    if lbl.startswith("🩸") and ("accept entity covenant" in lbl or "forfeit bounty" in lbl):
+        return "accept_boss_pact_surrender"
+    if lbl.startswith("🗣️") and any(p in lbl for p in _INCURSION_COMBAT_PERSUADE_PHRASES):
+        return "combat_persuade"
+    if has_subdue_enemy_now and any(p in lbl for p in _INCURSION_COMBAT_PERSUADE_PHRASES):
+        return "combat_persuade"
+
+    if is_inc_tagged:
+        if any(tag in lbl for tag in ("[persuade]", "[przekonaj]", "[pujuk]", "[劝说]", "[überreden]")):
+            return "persuade"
+        if any(tag in lbl for tag in ("[calm]", "[uspokój]", "[tenangkan]", "[安抚]", "[beruhigen]")):
+            return "calm"
+        if any(tag in lbl for tag in ("[outwit]", "[przechytrz]", "[perdaya]", "[智取]", "[überlisten]")):
+            return "outwit"
+        if any(tag in lbl for tag in ("[use environment]", "[użyj otoczenia]", "[guna persekitaran]", "[利用环境]", "[umgebung nutzen]")):
+            return "environment"
+
+    if lbl.startswith(_INCURSION_PACIFY_PREFIXES):
+        return "pacify"
+    if lbl.startswith(_INCURSION_ANALYZE_PREFIXES):
+        return "analyze"
+    if lbl.startswith(_INCURSION_SCAN_PREFIXES):
+        return "reveal_dossier"
+    if lbl.startswith(_INCURSION_SEAL_ABILITY_PREFIXES):
+        return "seal_ability"
+    if lbl.startswith(_INCURSION_ATTACK_PREFIXES):
+        return "attack"
+    if lbl.startswith("🏺") or any(p in lbl for p in _INCURSION_TETHER_PHRASES):
+        return "sever_tether"
+    if (is_inc_tagged or has_subdue_enemy_now) and any(p in lbl for p in _INCURSION_RITE_PHRASES):
+        return "folklore_offering_rite"
+    if (
+        act.get("is_anomaly_inquiry")
+        or str(act.get("approach") or "").startswith(("anomaly_inquiry", "anomaly_pattern", "question_trap"))
+        or lbl.startswith(_INCURSION_INQUIRY_PREFIXES)
+    ):
+        return str(act.get("incursion_action") or act.get("approach") or "anomaly_inquiry")
+    return ""
+
+
 def _is_enemy_mentioned_in_narrative(enemy_name: str, narrative_text: str) -> bool:
     base = _get_enemy_base_name(enemy_name)
     if not base:
@@ -483,6 +606,26 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         persist_db=False,
         stage_clock_cb=_stage_clock_after_movement,
     )
+    if (stage_info.get("pending_folklore_ops") or {}).get("treaty_violation_village") and not is_retry:
+        exp_new_day = prev_day + ((prev_min + 30) // 1440)
+        exp_new_min = (prev_min + 30) % 1440
+        session["current_day"] = exp_new_day
+        session["current_minute"] = exp_new_min
+        if session_id_val:
+            _pre_turn_sleep_info = None
+            _staged_time_op = {"op": "advance", "delta_minutes": 30, "party_uids": party_uids}
+            _pre_turn_time_info = {
+                "session_id": session_id_val,
+                "old_day": prev_day,
+                "new_day": exp_new_day,
+                "old_minute": prev_min,
+                "new_minute": exp_new_min,
+                "days_elapsed": exp_new_day - prev_day,
+                "minutes_elapsed": 30,
+                "day_rolled_over": exp_new_day > prev_day,
+                "fatigue_applied": [],
+            }
+            session["_staged_time_op"] = _staged_time_op
     new_partners = stage_info["new_partners"]
     has_exited_convo = stage_info["has_exited_convo"]
     effective_location = stage_info["effective_location"]
@@ -609,45 +752,13 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             for e in (session.get("nearby_enemies") or [])
         )
         if not inc_action_key:
-            if inc_lbl_low.startswith("🛡️ subdue & contain") or "subdue & contain" in inc_lbl_low:
-                inc_action_key = "subdue"
-            elif inc_lbl_low.startswith("🗣️ persuade / calm") or (
-                has_subdue_enemy_now and ("persuade / calm" in inc_lbl_low or "(de-escalate)" in inc_lbl_low)
-            ):
-                inc_action_key = "combat_persuade"
-            elif is_inc_tagged and inc_lbl_low.startswith("🗣️ [persuade]"):
-                inc_action_key = "persuade"
-            elif is_inc_tagged and inc_lbl_low.startswith("🕊️ [calm]"):
-                inc_action_key = "calm"
-            elif is_inc_tagged and inc_lbl_low.startswith("🧠 [outwit]"):
-                inc_action_key = "outwit"
-            elif is_inc_tagged and inc_lbl_low.startswith("🏗️ [use environment]"):
-                inc_action_key = "environment"
-            elif inc_lbl_low.startswith("🕊️ pacify & contain"):
-                inc_action_key = "pacify"
-            elif inc_lbl_low.startswith("🔬 analyze & seal"):
-                inc_action_key = "analyze"
-            elif inc_lbl_low.startswith("🔍 scan anomaly dossier"):
-                inc_action_key = "reveal_dossier"
-            elif inc_lbl_low.startswith("✨ use sealing ability"):
-                inc_action_key = "seal_ability"
-            elif inc_lbl_low.startswith("⚔️ engage anomaly breach") or inc_lbl_low.startswith("⚔️ engage anomalous breach"):
-                inc_action_key = "attack"
-            elif inc_lbl_low.startswith("🏺 sever/seal") or "sever/seal" in inc_lbl_low:
-                inc_action_key = "sever_tether"
-            elif (is_inc_tagged or has_subdue_enemy_now) and "folklore counter-rite" in inc_lbl_low:
-                inc_action_key = "folklore_offering_rite"
-            elif (
-                first_inc_act.get("is_anomaly_inquiry")
-                or str(first_inc_act.get("approach") or "").startswith(("anomaly_inquiry", "anomaly_pattern", "question_trap"))
-                or inc_lbl_low.startswith((
-                    "💬 converse with", "💬 [origins", "🔍 [nature", "🧭 [motive",
-                    "👁️ study ", "👁️ [vocal", "🔍 [trigger", "🕯️ [courtesy",
-                    "💬 [riddle trap]", "🧠 [folklore evasion]",
-                ))
-            ):
-                inc_action_key = str(first_inc_act.get("incursion_action") or first_inc_act.get("approach") or "anomaly_inquiry")
-            elif session.get("dialogue_partner"):
+            inc_action_key = _infer_incursion_action_from_label(
+                inc_lbl_low,
+                is_inc_tagged=is_inc_tagged,
+                has_subdue_enemy_now=has_subdue_enemy_now,
+                first_inc_act=first_inc_act,
+            )
+            if not inc_action_key and session.get("dialogue_partner"):
                 _cand_freeform = str(
                     first_inc_act.get("raw_text")
                     or ("" if first_inc_act.get("_server_stamped") else (first_inc_act.get("text") or first_inc_act.get("label") or ""))
@@ -673,18 +784,15 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     resolve_anomalous_combat_containment,
                     resolve_anomaly_dialogue_inquiry,
                 )
-                party_uids_inc = [
-                    p[0].get("user_id")
-                    for p in (party or [])
-                    if p and isinstance(p[0], dict) and p[0].get("user_id")
-                ]
+                party_uids_inc = [uid for uid in party_uids if uid]
                 lead_inc_uid = party_uids_inc[0] if party_uids_inc else session.get("host_user_id")
                 _freeform_inc_txt = str(
                     first_inc_act.get("raw_text")
                     or ("" if first_inc_act.get("_server_stamped") else (first_inc_act.get("text") or first_inc_act.get("label") or ""))
                 ).strip()
                 if inc_action_key.startswith(("anomaly_inquiry", "anomaly_pattern", "question_trap")) or inc_action_key in ("converse", "study_pattern"):
-                    inc_res = resolve_anomaly_dialogue_inquiry(
+                    inc_res = await adb(
+                        resolve_anomaly_dialogue_inquiry,
                         session_id=int(session["id"]),
                         entity_name=str(first_inc_act.get("target_npc") or session.get("dialogue_partner") or ""),
                         quest_id=str(first_inc_act.get("quest_id") or ""),
@@ -696,8 +804,12 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         user_id=lead_inc_uid,
                         session=session,
                     )
-                elif inc_action_key in ("subdue", "combat_persuade", "sever_tether") or (inc_action_key == "folklore_offering_rite" and has_subdue_enemy_now):
-                    inc_res = resolve_anomalous_combat_containment(
+                elif (
+                    inc_action_key in ("subdue", "combat_persuade", "sever_tether", "invoke_patron_authority", "accept_boss_pact_surrender")
+                    or (inc_action_key == "folklore_offering_rite" and has_subdue_enemy_now)
+                ):
+                    inc_res = await adb(
+                        resolve_anomalous_combat_containment,
                         session_id=int(session["id"]),
                         user_id=lead_inc_uid,
                         action_type=inc_action_key,
@@ -707,7 +819,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         party_user_ids=party_uids_inc,
                     )
                 else:
-                    inc_res = resolve_non_hostile_incursion_action(
+                    inc_res = await adb(
+                        resolve_non_hostile_incursion_action,
                         session_id=int(session["id"]),
                         incursion_id=str(first_inc_act.get("incursion_id") or ""),
                         user_id=lead_inc_uid,
@@ -716,7 +829,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         pre_rolled_check=first_inc_act.get("check"),
                         player_text=_freeform_inc_txt,
                     )
-                fresh_inc_sess = db.get_session(int(session["id"])) or {}
+                fresh_inc_sess = await adb(db.get_session, int(session["id"])) or {}
                 session["nearby_enemies"] = fresh_inc_sess.get("nearby_enemies", [])
                 session["current_npcs"] = fresh_inc_sess.get("current_npcs", session.get("current_npcs", []))
                 session["daily_incursions"] = fresh_inc_sess.get("daily_incursions", session.get("daily_incursions", []))
@@ -807,6 +920,26 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         directive_note = f"\n{precomputed['directive']}\n"
     if _pre_turn_incursion_directive:
         directive_note += f"\n{_pre_turn_incursion_directive}\n"
+    try:
+        if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+            from mechanics.pacts import build_pact_turn_stage_direction
+            _pact_z3_events = []
+            for _pa_z3 in (actions or []):
+                if isinstance(_pa_z3, dict) and (_pa_z3.get("is_pact_skill") or str(_pa_z3.get("spell_id") or "").startswith("pact_")):
+                    _meta_z3 = _pa_z3.get("_pact_cast_meta") if isinstance(_pa_z3.get("_pact_cast_meta"), dict) else {}
+                    _actor_nm_z3 = str((_pa_z3.get("char") or {}).get("name") or "You")
+                    _pat_nm_z3 = str(_meta_z3.get("patron_name") or _pa_z3.get("patron_name") or "the covenanted entity")
+                    _pact_z3_events.append({
+                        "type": "lethal_overdraw" if _pa_z3.get("is_lethal_overdraw") else "pact_cast",
+                        "actor": _actor_nm_z3,
+                        "patron_name": _pat_nm_z3,
+                    })
+            if _pact_z3_events:
+                _pact_z3_dir = build_pact_turn_stage_direction(_pact_z3_events)
+                if _pact_z3_dir:
+                    directive_note += f"\n{_pact_z3_dir}\n"
+    except Exception:
+        pass
 
     # Pre-turn stage directives (hybrid sublocations, schedule shifts, canonical role spawns, tension timers)
     if stage_info.get("stage_directives"):
@@ -1172,7 +1305,12 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
                     facility_residents = []
                     try:
-                        facility_residents = db.get_school_characters_by_facility(session["id"], f"{dest_z} ➔ {dest_p}", limit=6)
+                        facility_residents = await adb(
+                            db.get_school_characters_by_facility,
+                            session["id"],
+                            f"{dest_z} ➔ {dest_p}",
+                            limit=6,
+                        )
                     except Exception:
                         facility_residents = []
 
@@ -1191,23 +1329,29 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     # 2. Check active quest sub-objectives if not found yet
                     if not target_station_sub:
                         try:
-                            with db.get_conn() as _c_conn:
-                                q_rows = _c_conn.execute("SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'", (session["id"],)).fetchall()
-                                for qr in q_rows:
-                                    sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
-                                    for so in sub_objs:
-                                        if not so.get("completed"):
-                                            t_loc = so.get("target_location", "")
-                                            t_npc = (so.get("target_npc") or "").strip().lower()
-                                            if t_loc:
-                                                qz, qp, qs = parse_tiered_location(t_loc, scen_key, session_id=session["id"])
-                                                if qp.lower() == dest_p.lower() and qs and qs not in ("Main Area", ""):
-                                                    if not t_npc or (t_npc in lbl_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in lbl_lower)):
-                                                        target_station_sub = qs
-                                                        target_resident_name = so.get("target_npc")
-                                                        break
-                                    if target_station_sub:
-                                        break
+                            def _load_active_quest_sub_objs(sid_q: int) -> list:
+                                with db.get_conn() as _c_conn:
+                                    return _c_conn.execute(
+                                        "SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'",
+                                        (sid_q,),
+                                    ).fetchall()
+
+                            q_rows = await adb(_load_active_quest_sub_objs, session["id"])
+                            for qr in q_rows:
+                                sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
+                                for so in sub_objs:
+                                    if not so.get("completed"):
+                                        t_loc = so.get("target_location", "")
+                                        t_npc = (so.get("target_npc") or "").strip().lower()
+                                        if t_loc:
+                                            qz, qp, qs = parse_tiered_location(t_loc, scen_key, session_id=session["id"])
+                                            if qp.lower() == dest_p.lower() and qs and qs not in ("Main Area", ""):
+                                                if not t_npc or (t_npc in lbl_lower or (len(t_npc.split()) > 1 and t_npc.split()[0] in lbl_lower)):
+                                                    target_station_sub = qs
+                                                    target_resident_name = so.get("target_npc")
+                                                    break
+                                if target_station_sub:
+                                    break
                         except Exception:
                             pass
 
@@ -1308,11 +1452,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
 
 
-    dialogue_prompt_block = _build_dialogue_prompt_block(session, ctx, new_partners, party, actions)
+    dialogue_prompt_block = await db.adb(_build_dialogue_prompt_block, session, ctx, new_partners, party, actions)
 
     if session.get("id"):
         try:
-            curr_day, curr_min, _ = db.get_session_time(session["id"])
+            curr_day, curr_min, _ = await db.adb(db.get_session_time, session["id"])
         except Exception:
             curr_day, curr_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
     else:
@@ -1479,7 +1623,28 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     if dep_nm and dep_nm not in cast_plan.departing_npcs:
                         cast_plan.departing_npcs.append(dep_nm)
             if new_partners:
+                if isinstance(session.get("_dealt_social_seeds"), list) and session.get("_dealt_social_seeds"):
+                    _valid_np_low = {str(np).strip().lower() for np in new_partners if str(np).strip()}
+                    _kept_seeds = [
+                        s for s in session["_dealt_social_seeds"]
+                        if isinstance(s, dict) and str(s.get("target_npc") or "").strip().lower() in _valid_np_low
+                    ]
+                    if not _kept_seeds:
+                        try:
+                            from mechanics.social import deck as _core_deck
+                            _kept_seeds = _core_deck.deal_social_deck_seeds(
+                                session=session,
+                                partners=new_partners,
+                                party=party,
+                                current_npcs=session.get("pre_turn_stage_npcs") or session.get("current_npcs") or [],
+                                desired_count=5,
+                            )
+                        except Exception:
+                            _kept_seeds = []
+                    session["_dealt_social_seeds"] = _kept_seeds
                 directive_note += build_conversation_prompt_directive(session, new_partners, party=party)
+            else:
+                session.pop("_dealt_social_seeds", None)
         except Exception as _conv_dep_err:
             log.warning("Failed evaluating conversation departure state: %s", _conv_dep_err)
 
@@ -1611,6 +1776,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         if isinstance(result.get("character_outcomes"), list):
             for _co_item in result["character_outcomes"]:
                 if isinstance(_co_item, dict):
+                    _co_item.pop("xp_change", None)
                     for _sub_lk in ("items_gained", "items_lost", "status_effects"):
                         if _sub_lk in _co_item and not isinstance(_co_item[_sub_lk], list):
                             _sv = _co_item[_sub_lk]
@@ -1764,6 +1930,10 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 if isinstance(co, dict):
 
                     co["xp_change"] = co.get("xp_change", 0) + dot_xp_gain
+                    if dot_xp_gain > 0 and co.get("name"):
+                        _auth_xp_map = result.setdefault("_auth_combat_xp", {})
+                        _ck_low = str(co["name"]).strip().lower()
+                        _auth_xp_map[_ck_low] = int(_auth_xp_map.get(_ck_low, 0) or 0) + int(dot_xp_gain)
 
                     co["gold_change"] = co.get("gold_change", 0) + dot_gold_gain
 
@@ -2057,15 +2227,27 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         None
                     )
                     check_tier = "fail"
+                    failed_stat = ""
                     for a in (actions or []):
                         t = getattr(a.get("check"), "tier", None) or (a.get("check", {}).get("tier") if isinstance(a.get("check"), dict) else None)
                         if t in ("fail", "crit_fail"):
                             check_tier = t
+                            failed_stat = str(a.get("stat") or "").strip().upper()
                             break
-                    penalty = -2 if check_tier == "crit_fail" else -1
+                    if check_tier == "crit_fail":
+                        penalty = -2
+                    elif failed_stat == "CHA":
+                        penalty = 0
+                    else:
+                        penalty = -1
 
                     if target_ru is not None:
-                        if target_ru.get("delta_score", 0) >= 0:
+                        cur_ds = int(target_ru.get("delta_score", 0) or 0)
+                        if penalty == 0:
+                            if cur_ds > 0:
+                                target_ru["delta_score"] = 0
+                                log.info("[VitalsGuard] Clamped CHA failed check consequence for %s to 0", target_npc)
+                        elif cur_ds >= 0:
                             target_ru["delta_score"] = penalty
                             log.info("[VitalsGuard] Converted failed check consequence for %s into relationship delta: %s", target_npc, penalty)
                     else:
@@ -2081,6 +2263,23 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
 
         if "relationship_updates" in result and isinstance(result["relationship_updates"], list):
+            _home_aff_bonus = 0
+            if session_id_val:
+                try:
+                    from mechanics.world.locations.residences import get_player_owned_or_starter_property_for_node
+                    _eff_aff_nid = str(effective_node_id or session.get("current_node_id") or "")
+                    if _eff_aff_nid:
+                        _owned_aff = get_player_owned_or_starter_property_for_node(int(session_id_val), _eff_aff_nid, session=session)
+                        if _owned_aff and _owned_aff.get("catalog_entry"):
+                            _home_aff_bonus = int(_owned_aff["catalog_entry"].get("hangout_affinity_bonus") or 0)
+                except Exception:
+                    _home_aff_bonus = 0
+            for ru in result["relationship_updates"]:
+                if isinstance(ru, dict) and "delta_score" in ru:
+                    _raw_d = safe_clamp_delta(ru["delta_score"], -20, 20)
+                    if _home_aff_bonus > 0 and _raw_d >= 0:
+                        _raw_d = safe_clamp_delta(_raw_d + _home_aff_bonus, -20, 20)
+                    ru["delta_score"] = _raw_d
 
             for ru in result["relationship_updates"]:
 
@@ -2417,6 +2616,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 "node_id": new_node_id,
                 "unlocked_by": stage_info.get("access_gate", {}).get("unlocked_by", ""),
             }
+        if stage_info.get("pending_folklore_ops"):
+            fk_ops_copy = dict(stage_info["pending_folklore_ops"])
+            if is_retry:
+                fk_ops_copy["is_retry"] = True
+            result["_staged_folklore_ops"] = fk_ops_copy
 
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list
@@ -2457,6 +2661,15 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     pass
 
     res = result
+    if isinstance(res, dict) and (stage_info.get("pending_folklore_ops") or {}).get("treaty_violation_village"):
+        if stage_info.get("effective_location"):
+            res["location"] = stage_info["effective_location"]
+            session["current_location"] = stage_info["effective_location"]
+        if stage_info.get("effective_node_id"):
+            res["current_node_id"] = stage_info["effective_node_id"]
+            session["current_node_id"] = stage_info["effective_node_id"]
+        res["nearby_enemies"] = []
+        session["nearby_enemies"] = []
 
 
 

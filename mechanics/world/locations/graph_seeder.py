@@ -70,6 +70,15 @@ log = logging.getLogger("hikayat.world.graph_seeder")
 def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = "") -> str:
     """Classifies a location node into an immutable semantic domain."""
     low = f"{z_id} {p_id} {name}".lower()
+    from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
+    p_low = str(p_id or "").strip().lower()
+    if p_low in ALL_STATIC_RESIDENTIAL_FACILITY_IDS or p_low.startswith((
+        "fac_npc_res_", "sub_npc_", "sub_walkup_", "sub_agency_res_",
+        "sub_temple_res_", "sub_agency_unit_", "sub_temple_cell_",
+        "sub_tenement_", "sub_container_", "sub_vault_", "sub_shophouse_",
+        "sub_townhouse_", "sub_condo_", "sub_bungalow_", "sub_villa_", "sub_mansion_",
+    )):
+        return "residential"
     if z_id in ("zone_commercial", "zone_downtown") or p_id.lower() in (
         "loc_cafe", "loc_arcade", "loc_karaoke", "loc_convenience_store",
         "loc_restaurant", "loc_clothing_store", "loc_brand_clothing_store",
@@ -138,6 +147,15 @@ def infer_is_transit_hub(node_type: str, z_id: str, p_id: str, name: str, is_zon
     if node_type == "ZONE":
         return 1 if is_zone_hub else 0
     if node_type == "FACILITY":
+        p_low = str(p_id or "").strip().lower()
+        if p_low in (
+            "fac_agency_residence", "fac_downtown_walkup", "fac_temple_residence",
+            "loc_player_house", "fac_suburbs_townhouse", "fac_tenement_flat",
+            "fac_container_loft", "fac_vault_safehouse", "fac_shophouse_loft",
+            "fac_highrise_condo", "fac_ocean_bungalow", "fac_onsen_villa",
+            "fac_sovereign_mansion",
+        ) or p_low.startswith("fac_npc_res_"):
+            return 0
         if any(k in low for k in ("gates", "gate", "courtyard", "fountain", "station", "terminal", "shuttle", "central plaza", "city square", "loc_city_square", "entrance foyer", "town square", "harbor pier", "corridor", "annex", "lobby", "atrium", "hallway")):
             return 1
     return 0
@@ -344,7 +362,7 @@ def infer_facility_atmosphere(fac_id: str, fac_name: str, zone_id: str, raw_fac:
 def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "high_school_drama", char_name: str = "") -> None:
     """
     Populates `world_nodes` and `world_edges` from scenario seeds with personalized names,
-    semantic categories, and navigation edges. Idempotent.
+    semantic categories, and navigation edges inside a single atomic `UnitOfWork`. Idempotent.
     """
     # Guard with schema_epoch: legacy sessions (epoch 1) remain on their legacy macro graph.
     epoch = db.get_session_schema_epoch(session_id)
@@ -353,6 +371,14 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
     existing_nodes = db.get_session_world_nodes(session_id)
     if existing_nodes:
+        return
+
+    with db.UnitOfWork():
+        _seed_session_spatial_graph_tx(session_id, scenario_key=scenario_key, char_name=char_name)
+
+
+def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_school_drama", char_name: str = "") -> None:
+    if db.get_session_world_nodes(session_id):
         return
 
     scen_data = get_scenario_seed_data(scenario_key)
@@ -499,6 +525,10 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
         for primary in zone.get("primary_locations") or []:
             p_id = primary.get("id") or f"fac_{_slugify(primary.get('name', 'facility'))}"
+            if p_id == "fac_suburbs_townhouse":
+                from mechanics.social.origin_mode import is_student_operative
+                if not is_student_operative(session_id):
+                    continue
             primary_name = primary.get("name", "Main Area")
 
             if classroom_name and (primary_name == "Homeroom Classroom" or p_id == "loc_homeroom"):
@@ -514,7 +544,9 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             elif p_id == "loc_agency_hq" or "{session_agency_hq}" in primary_name:
                 primary_name = agency_hq_name
             elif primary_name == "Player's House" or p_id == "loc_player_house":
-                primary_name = player_house
+                from .realty_catalog import is_anomalous_realty_scenario
+                from mechanics.social.origin_mode import is_student_operative
+                primary_name = "Tree-Lined Suburban House" if (is_anomalous_realty_scenario(scenario_key) and not is_student_operative(session_id)) else player_house
             elif park_name and (primary_name == "Neighborhood Park" or p_id == "loc_local_park"):
                 primary_name = park_name
             elif primary_name in ("Local Café", "Sunny Days Café") or p_id == "loc_cafe":
@@ -526,15 +558,24 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             elif primary_name == "Friend's House" or p_id == "loc_friend_house":
                 continue
 
-            if is_urban_anomalous_scenario(scenario_key):
+            pass
+            from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
+            if is_urban_anomalous_scenario(scenario_key) and p_id not in ALL_STATIC_RESIDENTIAL_FACILITY_IDS:
                 primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
-            primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
+            true_primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
+            primary_name = (
+                resolve_session_location_tokens(session_id, str(primary.get("mundane_name") or primary_name), scenario_key, char_name)
+                if primary.get("is_hidden")
+                else true_primary_name
+            )
 
             p_seed_meta = {
                 k: primary[k]
-                for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
+                for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key", "veil_token_item", "is_anomalous", "mundane_name")
                 if k in primary
             }
+            if primary.get("is_hidden"):
+                p_seed_meta["true_name"] = true_primary_name
             p_category = infer_node_category(z_id, p_id, primary_name, parent_category=z_category)
             p_privacy = infer_node_privacy("FACILITY", p_id, primary_name, explicit_meta=p_seed_meta)
             p_enclosed = infer_is_enclosed("FACILITY", p_id, primary_name)
@@ -597,7 +638,7 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
 
                 s_seed_meta = {
                     k: sub[k]
-                    for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only")
+                    for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key", "veil_token_item", "is_anomalous")
                     if k in sub
                 }
                 s_privacy = infer_node_privacy("ROOM", s_id, sub_name, explicit_meta=s_seed_meta) or p_privacy
@@ -781,6 +822,9 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
             ("zone_city_docks", "zone_airport", 15),
             ("zone_suburbs", "zone_woods_reserve", 22),
             ("zone_uptown", "zone_woods_reserve", 25),
+            ("zone_chinatown", "zone_eastern_sanctuary", 12),
+            ("zone_uptown", "zone_eastern_sanctuary", 15),
+            ("zone_eastern_sanctuary", "zone_woods_reserve", 15),
         ]
         for z_a, z_b, mins in urban_district_edges:
             gw_a = zone_gateway_map.get(z_a) or ("loc_agency_hq" if z_a == "zone_agency_hq" else None)
@@ -794,6 +838,27 @@ def ensure_session_spatial_graph_seeded(session_id: int, scenario_key: str = "hi
         gw_uptown = zone_gateway_map.get("zone_uptown")
         if gw_uptown and "loc_eastern_temple" in facility_entrance_map:
             db.save_world_edge(session_id, gw_uptown, "loc_eastern_temple", travel_minutes=16, edge_type="transit")
+        if "loc_hidden_kitsune_village" in facility_entrance_map and "loc_hidden_bunian_village" in facility_entrance_map:
+            db.save_world_edge(
+                session_id,
+                "sub_kitsune_inner_plaza",
+                "sub_bunian_inner_plaza",
+                travel_minutes=2,
+                is_locked=1,
+                skill_check_type="PER",
+                skill_check_dc=15,
+                edge_type="leyline_spirit_passage",
+            )
+            db.save_world_edge(
+                session_id,
+                "sub_kitsune_leyline_shrine",
+                "sub_bunian_orchid_spring",
+                travel_minutes=2,
+                is_locked=1,
+                skill_check_type="PER",
+                skill_check_dc=15,
+                edge_type="leyline_spirit_passage",
+            )
     else:
         genre_zone_edges_table: list[tuple[str, str, int, str]] = [
             # High School Drama (15-30m local & suburban rail/bus)

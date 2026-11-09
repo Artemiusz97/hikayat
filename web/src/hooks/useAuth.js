@@ -67,12 +67,18 @@ export const useAuth = () => {
     setUser(userObj);
   };
 
-  const logout = () => {
+  const logout = useCallback(() => {
     localStorage.removeItem('cf_user');
     setUser(null);
     setCharacter(null);
     setCharacters([]);
-  };
+  }, []);
+
+  useEffect(() => {
+    const handleExpired = () => logout();
+    window.addEventListener('hikayat:auth-expired', handleExpired);
+    return () => window.removeEventListener('hikayat:auth-expired', handleExpired);
+  }, [logout]);
 
   const fetchCharacters = async () => {
     if (!user) return;

@@ -1,20 +1,21 @@
 """
 Deterministic Anaphora & Pronoun Resolution Engine for Hikayat.
 
-Resolves third-person pronouns ('he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself')
+Resolves third-person pronouns ('he', 'him', 'his', 'himself', 'she', 'her', 'hers', 'herself',
+plus Polish gendered pronouns and Malay single-focus pronouns/enclitics)
 in generated narrative prose to their exact canonical character referents, wrapping them in
 lightweight markup tags: <ref char="Character Name" role="Character Role">pronoun</ref>.
 
 Features:
 - Sentence and paragraph subject tracking.
-- Gender-bounded referent matching.
+- Gender-bounded referent matching (English & Polish) and single-NPC focus gating (Malay).
 - Direct speech quote attribution.
-- Active dialogue partner priority fallback for unanchored pronouns.
+- Active dialogue partner priority fallback for unanchored gendered pronouns.
 - Clean strip utilities for raw prompt injection and text sanitization.
 """
 from __future__ import annotations
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple
 
 import db
 from game_engine.keywords import _split_into_sentences
@@ -25,6 +26,250 @@ ALL_PRONOUNS = FEMININE_PRONOUNS | MASCULINE_PRONOUNS
 
 PRONOUN_REGEX = re.compile(rf"\b({'|'.join(ALL_PRONOUNS)})\b", re.IGNORECASE)
 REF_TAG_REGEX = re.compile(r"<ref\b[^>]*>(.*?)</ref>", re.IGNORECASE | re.DOTALL)
+
+# ---------------------------------------------------------------------------
+# Polish ('pl') 3rd-person singular gendered pronouns & guards
+# ---------------------------------------------------------------------------
+POLISH_FEMININE_PRONOUNS = frozenset({"ona", "jej", "ją", "nią", "niej"})
+POLISH_MASCULINE_PRONOUNS = frozenset({"on", "jego", "go", "jemu", "mu", "nim", "niego", "niemu"})
+POLISH_ALL_PRONOUNS = POLISH_FEMININE_PRONOUNS | POLISH_MASCULINE_PRONOUNS
+
+POLISH_PRONOUN_REGEX = re.compile(
+    rf"(?<![-\w])({'|'.join(sorted(POLISH_ALL_PRONOUNS, key=len, reverse=True))})(?![-\w])",
+    re.IGNORECASE,
+)
+
+# In Polish, 'nim' is ALSO a subordinate conjunction meaning 'before' (= 'zanim') when
+# introducing a clause (sentence-initial, after punctuation, or after conjunctions/intensifiers).
+_POLISH_NIM_CONJUNCTION_PREFIX_RE = re.compile(
+    r"(?:^|[,;:\(\[\—\–\-]\s*|\b(?:i|a|ale|lecz|jeszcze|zaledwie|tuż|ledwie|ledwo)\s+)$",
+    re.IGNORECASE,
+)
+
+POLISH_SECOND_PERSON_RE = re.compile(
+    r"(?<![-\w])(?:"
+    r"ty|ciebie|cię|ci|tobą|tobie|"
+    r"twój|twoja|twoje|twojego|twojej|twojemu|twoim|twoją|twoich|twoimi|"
+    r"[a-ząćęłńóśźż]{2,}(?:esz|isz|ysz|eś|aś)"
+    r")(?![-\w])",
+    re.IGNORECASE,
+)
+
+_POLISH_UNNAMED_PERSON_RE = re.compile(
+    r"(?<![-\w])(?:(?P<indef>jakiś|jakaś|pewien|pewna|nieznajomy|nieznajoma)\s+)?"
+    r"(?:[a-ząćęłńóśźż]{3,}\s+){0,2}?"
+    r"(?P<noun>"
+    r"mężczyzn(?:a|y|ę|ą)|mężczyźnie|chłopak(?:a|owi|iem)?|"
+    r"kobiet(?:a|y|ę|ą)|kobiecie|dziewczyn(?:a|y|ę|ą)|dziewczynie|"
+    r"nieznajom(?:y|ego|emu|ym|a|ej|ą)|strażnik(?:a|owi|iem)?|śledcz(?:y|ego|emu|ym)"
+    r")(?![-\w])",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
+# Malay ('ms') 3rd-person singular gender-neutral pronouns & '-nya' enclitics
+# ---------------------------------------------------------------------------
+MALAY_STANDALONE_PRONOUNS = frozenset({"dia", "ia", "beliau"})
+
+MALAY_NON_PRONOUN_NYA_WORDS = frozenset({
+    # Lexicalized discourse adverbs, connectors & fixed expressions
+    "sebenarnya", "biasanya", "akhirnya", "awalnya", "mulanya", "asalnya",
+    "pokoknya", "intinya", "ringkasnya", "pendeknya", "tegasnya", "jelasnya",
+    "nyatanya", "faktanya", "hakikatnya", "realitinya", "kesimpulannya",
+    "natijahnya", "akibatnya", "dampaknya", "hasilnya", "seterusnya",
+    "selanjutnya", "berikutnya", "sebelumnya", "sesudahnya", "selepasnya",
+    "sebaliknya", "selebihnya", "selainnya", "sememangnya", "memangnya",
+    "tentunya", "pastinya", "semestinya", "seharusnya", "sepatutnya",
+    "sewajarnya", "selayaknya", "sebaiknya", "sedapatnya", "sebolehnya",
+    "sekurang-kurangnya", "sekurangnya", "setidaknya", "setidak-tidaknya",
+    "sepenuhnya", "seluruhnya", "keseluruhannya", "kebanyakannya",
+    "rata-ratanya", "umumnya", "khususnya", "terutamanya", "utamanya",
+    "lazimnya", "kebiasaannya", "contohnya", "misalnya", "umpamanya",
+    "ibaratnya", "rupanya", "rupa-rupanya", "agaknya", "rasanya",
+    "kelihatannya", "nampaknya", "tampaknya", "kedengarannya", "bunyinya",
+    "kiranya", "sekiranya", "andainya", "seandainya", "hendaknya",
+    "mungkinnya", "adakalanya", "selalunya", "seringnya", "jarangnya",
+    "cepatnya", "lambatnya", "tingginya", "rendahnya", "besarnya", "kecilnya",
+    "banyaknya", "sedikitnya", "jauhnya", "lamanya", "sebentarnya",
+    "seketikanya", "semuanya", "keduanya", "ketiganya",
+    # Root words ending in 'nya' (not enclitic '-nya')
+    "hanya", "tanya", "bertanya", "menanya", "ditanya", "terpanya",
+    "punya", "empunya", "nyonya", "kunya",
+})
+
+MALAY_PERSON_NYA_STEMS = frozenset({
+    # Prepositions / oblique / spatial stems
+    "kepada", "pada", "untuk", "buat", "dengan", "bersama", "terhadap",
+    "tentang", "mengenai", "dari", "daripada", "oleh", "dekat", "sebelah",
+    "hadapan", "depan", "belakang", "sisi", "arah", "sekitar", "antara",
+    # Reflexive / possessive / identity
+    "diri", "milik", "kepunyaan", "nama",
+    # Anatomy, expression, voice, emotion & motion
+    "wajah", "muka", "mata", "pandangan", "tatapan", "renungan",
+    "senyuman", "senyum", "bibir", "mulut", "suara", "nada", "bisikan",
+    "kata", "ucapan", "jawapan", "jawab", "balas", "ujar", "sahut",
+    "keluh", "keluhan", "tawa", "ketawa", "tangis", "tangisan",
+    "kepala", "rambut", "bahu", "tangan", "jari", "lengan", "dada",
+    "tubuh", "badan", "kaki", "langkah", "gerakan", "postur", "sikap",
+    "hati", "perasaan", "fikiran", "jiwa", "nafas", "leher", "pipi",
+    "dahi", "kening", "telinga", "hidung", "dagu", "pinggang", "punggung",
+    "lutut", "kulit", "darah", "luka", "tenaga", "kekuatan", "kuasa",
+    "bayang", "bayangan", "kelibat", "sosok",
+    # Clothing, personal items & gear
+    "baju", "pakaian", "jubah", "jaket", "kot", "seragam", "topi",
+    "tudung", "selendang", "kasut", "sarung", "pedang", "keris", "pisau",
+    "belati", "senjata", "pistol", "senapang", "perisai", "tongkat", "busur",
+    "beg", "dompet", "poket", "saku", "telefon", "buku", "nota", "surat",
+    "fail", "dokumen", "laporan", "peta", "kunci", "lencana", "kad", "jam",
+    "lampu", "lentera", "obor", "cawan", "gelas", "botol", "seluar", "skarf",
+    "payung", "kamera", "peranti",
+    "cincin", "rantai", "gelang", "cermin", "meja", "kerusi", "katil",
+    "bilik", "kamar", "rumah", "kedai", "pejabat", "tugas", "kerja",
+    "janji", "rahsia", "hidup", "nyawa", "nasib", "takdir",
+    # Kinship & social relations
+    "keluarga", "rakan", "kawan", "teman", "sahabat", "pasangan", "kekasih",
+    "isteri", "suami", "majikan", "ketua", "guru", "anak", "ibu", "emak",
+    "bapa", "ayah", "abang", "kakak", "adik",
+})
+
+MALAY_TOKEN_CANDIDATE_REGEX = re.compile(
+    r"(?<![-\w])(?:dia|ia|beliau|[A-Za-z]{2,}(?:-nya|nya))(?![-\w])",
+    re.IGNORECASE,
+)
+
+_MALAY_NON_2P_MU_WORDS = frozenset({
+    "ilmu", "jamu", "tamu", "tetamu", "ramu", "temu", "bertemu", "ketemu",
+    "jemu", "semu", "ungu", "kamu", "penemu",
+})
+
+MALAY_SECOND_PERSON_WORD_RE = re.compile(
+    r"(?<![-\w])(?:anda|awak|kamu|kau|engkau|kalian)(?![-\w])",
+    re.IGNORECASE,
+)
+
+_MALAY_UNNAMED_PERSON_RE = re.compile(
+    r"(?<![-\w])(?P<indef>seorang|seseorang)\s+"
+    r"(?P<noun>lelaki|pemuda|budak|wanita|perempuan|gadis|orang|insan|pengawal|penyiasat|pelajar|pekedai)"
+    r"(?![-\w])",
+    re.IGNORECASE,
+)
+
+
+def _resolve_pronoun_language(language: Optional[str] = None, session: Optional[dict] = None) -> str:
+    raw = language
+    if not raw and isinstance(session, dict):
+        raw = session.get("narration_language") or session.get("language")
+    code = str(raw or "en").strip().lower()
+    if code in ("pl", "polish", "polski"):
+        return "pl"
+    if code in ("ms", "my", "malay", "melayu", "bm"):
+        return "ms"
+    return code[:2] if len(code) >= 2 else "en"
+
+
+def _has_malay_second_person(text: str) -> bool:
+    if MALAY_SECOND_PERSON_WORD_RE.search(text):
+        return True
+    for m in re.finditer(r"(?<![-\w])([A-Za-z]{5,})(?![-\w])", text):
+        w = m.group(1).lower()
+        if w.endswith("mu") and w not in _MALAY_NON_2P_MU_WORDS:
+            return True
+    return False
+
+
+def _is_valid_malay_pronoun_token(token: str, actor_name_lows: Set[str]) -> bool:
+    w = token.lower()
+    if w in actor_name_lows:
+        return False
+    if w in MALAY_STANDALONE_PRONOUNS:
+        return True
+    if w in MALAY_NON_PRONOUN_NYA_WORDS:
+        return False
+    if w.endswith("-nya"):
+        stem = w[:-4]
+        return len(stem) >= 2 and stem not in MALAY_NON_PRONOUN_NYA_WORDS
+    if w.endswith("nya") and len(w) >= 5:
+        stem = w[:-3]
+        if stem in MALAY_PERSON_NYA_STEMS:
+            return True
+        if stem.startswith(("me", "di")) and len(stem) >= 5:
+            return True
+    return False
+
+
+def _polish_single_token_pattern(token: str) -> str:
+    p = token.strip().lower()
+    esc = re.escape(p)
+    if len(p) < 3:
+        return esc
+    if p.endswith(("ska", "cka", "dzka")) and len(p) >= 5:
+        return rf"{re.escape(p[:-1])}(?:a|iej|ą|ich)"
+    if p.endswith("a") and len(p) >= 4:
+        return rf"{re.escape(p[:-1])}(?:a|y|i|ę|ą|ie|e|o)"
+    if p.endswith(("ski", "cki", "dzki")) and len(p) >= 5:
+        return rf"{esc}(?:ego|emu|m)?"
+    if p.endswith("ek") and len(p) >= 4:
+        stem_no_e = re.escape(p[:-2] + "k")
+        return rf"(?:{esc}(?:a|owi|iem|u)?|{stem_no_e}(?:a|owi|iem|u))"
+    if p.endswith(("i", "y")) and len(p) >= 4:
+        return rf"{esc}(?:ego|emu|m)?"
+    return rf"{esc}(?:a|owi|em|ie|ze|u|ego|emu)?"
+
+
+def _build_actor_regex(cand_tokens: List[str], eff_lang: str) -> re.Pattern:
+    if eff_lang == "pl":
+        parts = []
+        for tok in cand_tokens:
+            words = [w for w in tok.split() if w]
+            if len(words) > 1:
+                parts.append(r"\s+".join(_polish_single_token_pattern(w) for w in words))
+            elif words:
+                parts.append(_polish_single_token_pattern(words[0]))
+        return re.compile(rf"(?<![-\w])(?:{'|'.join(parts)})(?:'s|’s)?(?![-\w])", re.IGNORECASE)
+
+    if eff_lang == "ms":
+        return re.compile(
+            rf"(?<![-\w])(?:{'|'.join(re.escape(t) for t in cand_tokens)})(?:'s|’s)?(?![-\w])",
+            re.IGNORECASE,
+        )
+
+    return re.compile(
+        rf"\b(?:{'|'.join(re.escape(t) for t in cand_tokens)})(?:'s|’s)?\b",
+        re.IGNORECASE,
+    )
+
+
+def _find_unnamed_mentions_for_lang(sentence: str, eff_lang: str) -> List[Tuple[int, int, str, bool, str]]:
+    from game_engine.npcs.descriptor_presence import find_unnamed_person_mentions
+
+    if eff_lang == "pl":
+        out: List[Tuple[int, int, str, bool, str]] = []
+        for m in _POLISH_UNNAMED_PERSON_RE.finditer(sentence):
+            noun_low = (m.group("noun") or "").lower()
+            if noun_low.startswith(("mężczyz", "chłopak", "nieznajomy")) or noun_low in ("nieznajomego", "nieznajomemu", "nieznajomym"):
+                u_gen = "male"
+            elif noun_low.startswith(("kobiet", "kobieci", "dziewczyn", "nieznajoma")) or noun_low in ("nieznajomej", "nieznajomą"):
+                u_gen = "female"
+            else:
+                u_gen = ""
+            u_indef = bool(m.group("indef"))
+            out.append((m.start(), m.end(), u_gen, u_indef, m.group(0)))
+        return out
+
+    if eff_lang == "ms":
+        out = []
+        for m in _MALAY_UNNAMED_PERSON_RE.finditer(sentence):
+            noun_low = (m.group("noun") or "").lower()
+            if noun_low in ("lelaki", "pemuda"):
+                u_gen = "male"
+            elif noun_low in ("wanita", "perempuan", "gadis"):
+                u_gen = "female"
+            else:
+                u_gen = ""
+            out.append((m.start(), m.end(), u_gen, True, m.group(0)))
+        return out
+
+    return find_unnamed_person_mentions(sentence)
 
 
 def strip_pronoun_tags(text: str) -> str:
@@ -190,14 +435,22 @@ def tag_narrative_pronouns(
     party: Optional[list] = None,
     npcs_present: Optional[list] = None,
     dialogue_partner: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> str:
     """
-    Annotates all third-person pronouns in the narrative text with interactive <ref> tags.
+    Annotates third-person pronouns in narrative text with interactive <ref> tags
+    across English ('en'), Polish ('pl'), and Malay ('ms').
     """
     if not text or not str(text).strip():
         return text or ""
 
     clean_text = strip_pronoun_tags(str(text))
+    eff_lang = _resolve_pronoun_language(language=language, session=session)
+
+    # Languages without supported pronoun rules (e.g. 'zh', 'de') pass through cleanly
+    if eff_lang not in ("en", "pl", "ms"):
+        return clean_text
+
     actors, default_female, default_male = build_actor_registry(
         session=session, party=party, npcs_present=npcs_present, dialogue_partner=dialogue_partner
     )
@@ -210,24 +463,27 @@ def tag_narrative_pronouns(
     import namegen
     peer_actor_names = [act["name"] for act in actors if act.get("name")]
     actor_patterns = []
+    actor_name_token_lows: Set[str] = set()
     generic_role_exclusions = {"smith", "rep", "student", "dean", "chief"}
     for act in actors:
         a_name = act["name"]
         a_low = a_name.lower()
+        actor_name_token_lows.add(a_low)
+        for part_tok in a_low.split():
+            actor_name_token_lows.add(part_tok)
         raw_disambig = namegen.get_unique_person_tokens(a_name, peer_names=peer_actor_names, min_len=2)
         cand_tokens = [a_low]
         for tok in sorted(raw_disambig, key=len, reverse=True):
             if tok != a_low and tok not in generic_role_exclusions and tok not in cand_tokens:
                 cand_tokens.append(tok)
 
-        regex_pat = re.compile(rf"\b(?:{'|'.join(re.escape(t) for t in cand_tokens)})(?:'s|’s)?\b", re.IGNORECASE)
+        regex_pat = _build_actor_regex(cand_tokens, eff_lang)
         actor_patterns.append((act, regex_pat))
 
     paragraphs = clean_text.split("\n\n")
     resolved_paragraphs = []
 
     from game_engine.npcs.descriptor_presence import (
-        find_unnamed_person_mentions,
         match_actor_by_descriptor,
         strip_quoted_dialogue,
     )
@@ -240,11 +496,17 @@ def tag_narrative_pronouns(
                 t for t in re.findall(r"[a-z]{4,}", str(_act["role"]).lower())
             }
 
-    # Second-person scenes address the protagonist as "you", so third-person pronouns
-    # can never default to the player (explicit name mentions still re-focus normally).
-    second_person_scene = bool(
-        re.search(r"\b(?:you|your|yours|yourself)\b", strip_quoted_dialogue(clean_text), re.I)
-    )
+    unquoted_scene = strip_quoted_dialogue(clean_text)
+    if eff_lang == "pl":
+        second_person_scene = bool(POLISH_SECOND_PERSON_RE.search(unquoted_scene))
+    elif eff_lang == "ms":
+        second_person_scene = _has_malay_second_person(unquoted_scene)
+    else:
+        # Second-person scenes address the protagonist as "you", so third-person pronouns
+        # can never default to the player (explicit name mentions still re-focus normally).
+        second_person_scene = bool(
+            re.search(r"\b(?:you|your|yours|yourself)\b", unquoted_scene, re.I)
+        )
 
     def _non_player_default(default_actor: Optional[dict], gender: str) -> Optional[dict]:
         if default_actor and default_actor.get("is_player") and second_person_scene:
@@ -255,9 +517,109 @@ def tag_narrative_pronouns(
     # them, which renders as untagged text instead of misattributing to the player.
     unnamed_focus: Dict[str, Any] = {"name": "", "is_unnamed": True}
 
-    # Maintain discourse focal entities across paragraphs in the scene
+    if eff_lang == "ms":
+        # Malay ('ms') uses gender-neutral 3rd-person forms ('dia', 'ia', 'beliau', '-nya').
+        # Only default to an actor scene-wide when a SINGLE 3rd-person candidate exists;
+        # never guess by gender or dialogue_partner when multiple NPCs are present.
+        ms_3p_candidates = (
+            [a for a in actors if not a.get("is_player")]
+            if second_person_scene
+            else list(actors)
+        )
+        current_neutral: Optional[dict] = ms_3p_candidates[0] if len(ms_3p_candidates) == 1 else None
+
+        for para in paragraphs:
+            if not para.strip():
+                resolved_paragraphs.append(para)
+                continue
+
+            sentences = _split_into_sentences(para)
+            tagged_sentences = []
+
+            for sentence in sentences:
+                quote_spans = [
+                    (qm.start(), qm.end())
+                    for qm in re.finditer(r'("[^"]*"|[“][^”]*[”]|[„][^”"]*[”"])', sentence)
+                ]
+
+                def _ms_in_quotes(pos: int) -> bool:
+                    return any(qs <= pos < qe for qs, qe in quote_spans)
+
+                events = []
+                for act, pat in actor_patterns:
+                    for m in pat.finditer(sentence):
+                        if not _ms_in_quotes(m.start()):
+                            events.append((m.start(), m.end(), "actor", act, m.group(0)))
+
+                for m in MALAY_TOKEN_CANDIDATE_REGEX.finditer(sentence):
+                    if not _ms_in_quotes(m.start()) and _is_valid_malay_pronoun_token(m.group(0), actor_name_token_lows):
+                        events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
+
+                for u_start, u_end, u_gender, u_indef, u_text in _find_unnamed_mentions_for_lang(sentence, "ms"):
+                    if not _ms_in_quotes(u_start):
+                        events.append((u_start, u_end, "unnamed", {"gender": u_gender, "indef": u_indef}, u_text))
+
+                events.sort(key=lambda x: (x[0], 0 if x[2] == "actor" else 1))
+
+                out_parts = []
+                last_idx = 0
+                has_2nd_person = _has_malay_second_person(strip_quoted_dialogue(sentence))
+                sentence_3p_seen: Set[str] = set()
+
+                for start, end, ev_type, data, tok_text in events:
+                    if start < last_idx:
+                        continue
+                    out_parts.append(sentence[last_idx:start])
+
+                    if ev_type == "actor":
+                        act_low = data["name"].lower()
+                        if not (data.get("is_player") and (second_person_scene or has_2nd_person)):
+                            sentence_3p_seen.add(act_low)
+                            if len(sentence_3p_seen) == 1:
+                                current_neutral = data
+                            else:
+                                # Multiple 3rd-person actors in the same sentence makes gender-neutral
+                                # Malay pronouns ambiguous — clear focus rather than guessing.
+                                current_neutral = None
+                        out_parts.append(tok_text)
+                    elif ev_type == "unnamed":
+                        u_gender = data.get("gender") or ""
+                        matched_actor = match_actor_by_descriptor(
+                            sentence, actors, gender=u_gender, require_descriptor=True,
+                            exclude_tokens=player_role_tokens,
+                        )
+                        if matched_actor:
+                            m_low = matched_actor["name"].lower()
+                            sentence_3p_seen.add(m_low)
+                            current_neutral = matched_actor if len(sentence_3p_seen) == 1 else None
+                        else:
+                            current_neutral = unnamed_focus
+                        out_parts.append(tok_text)
+                    elif ev_type == "pronoun":
+                        target_actor = current_neutral
+                        if target_actor and target_actor.get("is_player") and (second_person_scene or has_2nd_person):
+                            target_actor = ms_3p_candidates[0] if len(ms_3p_candidates) == 1 else None
+
+                        if target_actor and target_actor.get("name"):
+                            role_attr = f' role="{target_actor["role"]}"' if target_actor.get("role") else ""
+                            out_parts.append(f'<ref char="{target_actor["name"]}"{role_attr}>{tok_text}</ref>')
+                        else:
+                            out_parts.append(tok_text)
+
+                    last_idx = end
+
+                out_parts.append(sentence[last_idx:])
+                tagged_sentences.append("".join(out_parts))
+
+            resolved_paragraphs.append("".join(tagged_sentences))
+
+        return "\n\n".join(resolved_paragraphs)
+
+    # Maintain discourse focal entities across paragraphs in the scene (English & Polish)
     current_female = _non_player_default(default_female, "female")
     current_male = _non_player_default(default_male, "male")
+    active_pronoun_re = POLISH_PRONOUN_REGEX if eff_lang == "pl" else PRONOUN_REGEX
+    active_fem_set = POLISH_FEMININE_PRONOUNS if eff_lang == "pl" else FEMININE_PRONOUNS
 
     for para in paragraphs:
         if not para.strip():
@@ -272,7 +634,7 @@ def tag_narrative_pronouns(
         for sentence in sentences:
             # Identify quote spans in sentence to protect interior dialogue
             quote_spans = []
-            for qm in re.finditer(r'("[^"]*"|[“][^”]*[”])', sentence):
+            for qm in re.finditer(r'("[^"]*"|[“][^”]*[”]|[„][^”"]*[”"])', sentence):
                 quote_spans.append((qm.start(), qm.end()))
 
             def _in_quotes(pos: int) -> bool:
@@ -285,22 +647,30 @@ def tag_narrative_pronouns(
                     if not _in_quotes(m.start()):
                         events.append((m.start(), m.end(), "actor", act, m.group(0)))
 
-            for m in PRONOUN_REGEX.finditer(sentence):
-                if not _in_quotes(m.start()):
-                    events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
+            for m in active_pronoun_re.finditer(sentence):
+                if _in_quotes(m.start()):
+                    continue
+                if eff_lang == "pl" and m.group(0).lower() == "nim":
+                    prefix_slice = sentence[:m.start()]
+                    if _POLISH_NIM_CONJUNCTION_PREFIX_RE.search(prefix_slice):
+                        continue
+                events.append((m.start(), m.end(), "pronoun", None, m.group(0)))
 
-            for u_start, u_end, u_gender, u_indef, u_text in find_unnamed_person_mentions(sentence):
+            for u_start, u_end, u_gender, u_indef, u_text in _find_unnamed_mentions_for_lang(sentence, eff_lang):
                 if not _in_quotes(u_start):
                     events.append((u_start, u_end, "unnamed", {"gender": u_gender, "indef": u_indef}, u_text))
 
-            events.sort(key=lambda x: x[0])
+            events.sort(key=lambda x: (x[0], 0 if x[2] == "actor" else 1))
 
             # Left-to-right sequential discourse attribution:
             # Pronouns directly following an actor reference that actor immediately,
             # avoiding forward-overwriting by characters mentioned later in the sentence.
             out_parts = []
             last_idx = 0
-            has_2nd_person = bool(re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I))
+            if eff_lang == "pl":
+                has_2nd_person = bool(POLISH_SECOND_PERSON_RE.search(strip_quoted_dialogue(sentence)))
+            else:
+                has_2nd_person = bool(re.search(r'\b(?:you|your|yours|yourself)\b', sentence, re.I))
 
             for start, end, ev_type, data, tok_text in events:
                 if start < last_idx:
@@ -344,7 +714,7 @@ def tag_narrative_pronouns(
                     out_parts.append(tok_text)
                 elif ev_type == "pronoun":
                     w_low = tok_text.lower()
-                    target_actor = current_female if w_low in FEMININE_PRONOUNS else current_male
+                    target_actor = current_female if w_low in active_fem_set else current_male
 
                     if target_actor and target_actor.get("is_player") and has_2nd_person:
                         alt_cands = [a for a in actors if a.get("gender") == target_actor.get("gender") and not a.get("is_player")]
@@ -370,6 +740,7 @@ def annotate_turn_pronouns(
     result: dict,
     session: Optional[dict] = None,
     party: Optional[list] = None,
+    language: Optional[str] = None,
 ) -> dict:
     """
     Annotates outcome_narrative, next_narrative, and narrative in the result dict with pronoun tags.
@@ -388,6 +759,7 @@ def annotate_turn_pronouns(
                 party=party,
                 npcs_present=npcs_present,
                 dialogue_partner=dialogue_partner,
+                language=language,
             )
 
     return result

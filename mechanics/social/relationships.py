@@ -83,7 +83,9 @@ def is_contact_eligible(
         role = role or str(d.get("role", "") or (d.get("basic_info") or {}).get("role", "") or (d.get("basic_info") or {}).get("occupation", ""))
         grade = grade or str(d.get("grade", "") or (d.get("basic_info") or {}).get("grade", ""))
         description = description or str(d.get("description", "") or d.get("notes", "") or d.get("background", "") or (d.get("basic_info") or {}).get("description", ""))
-        scenario = scenario if scenario != "fantasy" else str(d.get("scenario", scenario))
+        raw_d_scen = d.get("scenario")
+        if scenario == "fantasy" and raw_d_scen and str(raw_d_scen).strip().lower() not in ("", "none", "null", "undefined"):
+            scenario = str(raw_d_scen).strip()
         disposition = disposition or str(d.get("disposition", ""))
         social_role_type = social_role_type or str(d.get("social_role_type", "") or (d.get("basic_info") or {}).get("social_role_type", ""))
         age_group = age_group or str(d.get("age_group", "") or (d.get("basic_info") or {}).get("age_group", ""))
@@ -173,11 +175,14 @@ def is_contact_eligible(
 
         srt_clean_ahs = str(social_role_type or "").lower().strip()
         is_fam_ahs = bool(is_adult_family or srt_clean_ahs in ("family_relative", "parent"))
+        from mechanics.social.folklore_roster import npc_is_folklore_villager
+        is_folklore_ahs = bool(npc_is_folklore_villager(probe_ent) or srt_clean_ahs == "folklore_villager")
         return is_anomalous_high_school_contact_eligible(
             player_age_group=player_age_grp,
             npc_age_group=npc_age_grp,
             npc_is_special_agent=npc_is_agent,
             is_household_family=is_fam_ahs,
+            npc_is_folklore_villager=is_folklore_ahs,
         )
 
     is_hs = scenario_data.has_tag(scenario, "high_school")
@@ -568,6 +573,8 @@ def reconcile_action_affinity_delta(
 
     # 2. Hostile action handling
     if is_hostile:
+        if isinstance(action, dict) and str(action.get("category") or "").lower() == "friction_rivalry" and not action.get("is_cruel") and overall_check_success:
+            return max(0, min(6, val if val is not None else 2))
         if val is None or val >= 0:
             return -3
         return max(-10, min(-1, val))
@@ -1337,10 +1344,13 @@ def get_discovered_world_codex_persons(
                 background_seeded_names.add(str(ag["name"]).strip().lower())
     except Exception:
         pass
+    seeded_faction_names: Set[str] = set()
     try:
         for fac in (db.get_factions(session_id) or []):
             if not isinstance(fac, dict):
                 continue
+            if fac.get("name"):
+                seeded_faction_names.add(str(fac["name"]).strip().lower())
             if fac.get("leader"):
                 background_seeded_names.add(str(fac["leader"]).strip().lower())
             for mem in (fac.get("members") or []):
@@ -1376,7 +1386,8 @@ def get_discovered_world_codex_persons(
         if not p_n or p_low in ("", "none", player_low):
             continue
         matched_c = contact_by_name.get(p_low)
-        if p_low in background_seeded_names or matched_c is not None:
+        p_fac_low = str(p.get("faction") or "").strip().lower()
+        if p_low in background_seeded_names or (p_fac_low and p_fac_low in seeded_faction_names) or matched_c is not None:
             if not is_npc_discovered_by_player(
                 p_low,
                 matched_c,
@@ -1555,6 +1566,11 @@ def enrich_contact_dossier(
     scen_key: str,
     debug_reveal_all: bool = False,
     phys_st: dict | None = None,
+    preloaded_discoveries: list[dict] | None = None,
+    lang: str = "en",
+    party_npc_keys: set[str] | None = None,
+    kin_npc_keys: set[str] | None = None,
+    romantic_npc_keys: set[str] | None = None,
 ) -> dict:
     """Shared deterministic NPC Contact Dossier enrichment for both Web Codex/Phone and Discord embeds."""
     import mechanics.social.persona
@@ -1675,6 +1691,7 @@ def enrich_contact_dossier(
     )
     app["intimate_memories"] = list(c.get("intimate_memories", []))
     app = enforce_intimacy_safeguard_invariants(app, gender=c_gender)
+    raw_unmasked_app = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v) for k, v in app.items()}
 
     i_exp_val = str(app.get("intercourse_experience") or app.get("virginity_intercourse") or "virgin").strip().lower()
     o_exp_val = str(app.get("oral_experience") or app.get("virginity_oral") or "inexperienced").strip().lower()
@@ -1759,7 +1776,29 @@ def enrich_contact_dossier(
                 pass
 
     # 3. Enrich appearance & Intimate Dossier for Web Codex / Phone display
-    intimate_unlocked = (info_level >= 3) or debug_reveal_all or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
+    from mechanics.social.consequences import is_contact_exempt_from_fog_of_war
+    _ex_basic, _ex_intim = is_contact_exempt_from_fog_of_war(
+        c,
+        session_id=session_id if (party_npc_keys is None and kin_npc_keys is None and romantic_npc_keys is None) else None,
+        party_npc_keys=party_npc_keys,
+        kin_npc_keys=kin_npc_keys,
+        romantic_npc_keys=romantic_npc_keys,
+    )
+    _disc_intimate = False
+    if preloaded_discoveries is not None:
+        _disc_intimate = any(d.get("fact_category") == "intimate" for d in preloaded_discoveries)
+    elif session_id and not debug_reveal_all:
+        try:
+            import db as _db_fow
+            _disc_intimate = any(
+                d.get("fact_category") == "intimate"
+                for d in _db_fow.get_contact_dossier_discoveries(
+                    int(session_id), int(c.get("character_id") or 0), c.get("npc_id") or c.get("name") or ""
+                )
+            )
+        except Exception:
+            _disc_intimate = False
+    intimate_unlocked = _ex_intim or _disc_intimate or debug_reveal_all or c.get("intimate_revealed", False) or c.get("all_revealed", False) or app.get("intimate_revealed", False)
     i_rev = intimate_unlocked or debug_reveal_all or c.get("intercourse_revealed", False) or app.get("intercourse_revealed", False)
     o_rev = intimate_unlocked or debug_reveal_all or c.get("oral_revealed", False) or app.get("oral_revealed", False) or i_rev
     m_rev = intimate_unlocked or debug_reveal_all or c.get("manual_revealed", False) or app.get("manual_revealed", False) or i_rev
@@ -1921,8 +1960,10 @@ def enrich_contact_dossier(
     c["info_level"] = info_level
     c["skill_modifier"] = skill_modifier
     c["dislikes"] = dislikes or []
+    if not c.get("known_schedule") and isinstance(c_basic, dict) and c_basic.get("known_schedule"):
+        c["known_schedule"] = str(c_basic["known_schedule"])
     c["debug_revealed"] = debug_reveal_all
-    history_unlocked = intimate_unlocked or (info_level >= 3) or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
+    history_unlocked = intimate_unlocked or debug_reveal_all or c.get("history_revealed", False) or app.get("history_revealed", False)
     if history_unlocked:
         if isinstance(past_history, list):
             c["past_intimate_history"] = " • ".join(past_history)
@@ -2087,12 +2128,13 @@ def enrich_contact_dossier(
     try:
         debug_rev_flags = {k: True for k in revealed_flags}
         debug_int_sections = format_intimate_profile_sections(
-            app,
+            raw_unmasked_app,
             gender=c_gender,
             race=c_race or "human",
             scen_key=scen_key,
             info_level=3,
-            revealed_flags=debug_rev_flags
+            revealed_flags=debug_rev_flags,
+            intimate_profile=prof,
         )
     except Exception:
         debug_int_sections = {}
@@ -2104,7 +2146,36 @@ def enrich_contact_dossier(
     except Exception:
         debug_disclosed_rel = {}
 
-    debug_app = dict(app)
+    debug_app = dict(raw_unmasked_app)
+    if isinstance(debug_app.get("undergarments"), dict):
+        _dbg_u = debug_app["undergarments"]
+        _dbg_bra = str(_dbg_u.get("bra") or "").strip()
+        _dbg_und = str(_dbg_u.get("underwear") or "").strip()
+        if _dbg_bra:
+            debug_app.setdefault("bra", _dbg_bra)
+        if _dbg_und:
+            debug_app.setdefault("underwear", _dbg_und)
+        if _dbg_bra and _dbg_und:
+            debug_app["undergarments"] = f"Bra: {_dbg_bra} • Underwear: {_dbg_und}"
+        elif _dbg_bra:
+            debug_app["undergarments"] = f"Bra: {_dbg_bra}"
+        elif _dbg_und:
+            debug_app["undergarments"] = f"Underwear: {_dbg_und}"
+    _dbg_t = clean_attribute_list_string(debug_app.get("turn_ons"))
+    if _dbg_t:
+        debug_app["turn_ons"] = [t.strip() for t in _dbg_t.split(",") if t.strip() and t.strip().lower() not in ("none", "unknown")]
+    _dbg_s = clean_attribute_list_string(debug_app.get("sensitive_spots"))
+    if _dbg_s:
+        debug_app["erogenous_zones"] = [s.strip() for s in _dbg_s.split(",") if s.strip() and s.strip().lower() not in ("none", "unknown")]
+    _dbg_f = clean_attribute_list_string(debug_app.get("fetishes") or debug_app.get("kinks"))
+    if _dbg_f and _dbg_f.lower() not in ("none", "none (vanilla)", "unknown", ""):
+        debug_app["kinks"] = [f.strip() for f in _dbg_f.split(",") if f.strip() and f.strip().lower() not in ("none", "none (vanilla)", "unknown")]
+    _dbg_al = clean_attribute_list_string(debug_app.get("act_likes") or debug_app.get("favorite_acts"))
+    if _dbg_al and _dbg_al.lower() not in ("none", "unknown", ""):
+        debug_app["favorite_acts"] = [l.strip() for l in _dbg_al.split(",") if l.strip() and l.strip().lower() not in ("none", "unknown")]
+    _dbg_ad = clean_attribute_list_string(debug_app.get("act_dislikes") or debug_app.get("disliked_acts"))
+    if _dbg_ad and _dbg_ad.lower() not in ("none", "unknown", ""):
+        debug_app["disliked_acts"] = [d.strip() for d in _dbg_ad.split(",") if d.strip() and d.strip().lower() not in ("none", "unknown")]
     if is_male:
         p_sz = str(raw_penis_size or "average").title()
         debug_app["penis_size"] = raw_penis_size or "average"
@@ -2130,6 +2201,18 @@ def enrich_contact_dossier(
         "debug_revealed": True,
     }
     c["is_blocked_contact"] = is_contact_blocked(c)
+    if not debug_reveal_all:
+        from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact
+        c = apply_fog_of_war_to_enriched_contact(
+            c,
+            session_id=session_id,
+            character_id=int(c.get("character_id") or 0),
+            preloaded_discoveries=preloaded_discoveries,
+            lang=lang,
+            party_npc_keys=party_npc_keys,
+            kin_npc_keys=kin_npc_keys,
+            romantic_npc_keys=romantic_npc_keys,
+        )
     return c
 
 

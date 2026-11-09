@@ -26,9 +26,16 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
     existing = get_user_characters(user_id)
     if len(existing) >= 6:
         raise ValueError("Character creation limit reached (maximum 6 characters allowed per user).")
+    from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
     from scenario_data import is_anomalous_incursions_scenario
+    name = sanitize_character_name(name, max_len=60, fallback="Adventurer")
+    char_class = sanitize_character_name(char_class or "Adventurer", max_len=60, fallback="Adventurer")
+    class_description = sanitize_prompt_lore(class_description or "", max_len=1500)
+    gender = sanitize_character_name(gender or "Male", max_len=50, fallback="Male")
+    race = sanitize_character_name(race or "human", max_len=60, fallback="human")
+    race_description = sanitize_prompt_lore(race_description or "", max_len=600)
     norm_race = normalize_race(race, scen_key=scenario, seed=name) if race else "human"
     hp = cd.calculate_max_hp(stats["END"])
     mp = cd.calculate_max_mp(stats["END"])
@@ -55,7 +62,13 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         norm_app["student_grade"] = app_dict["student_grade"]
     app_json = json.dumps(norm_app)
 
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
+        char_count = conn.execute(
+            "SELECT COUNT(*) FROM characters WHERE user_id=?",
+            (user_id,),
+        ).fetchone()[0]
+        if int(char_count or 0) >= 6:
+            raise ValueError("Character creation limit reached (maximum 6 characters allowed per user).")
         conn.execute("UPDATE characters SET is_active=0 WHERE user_id=?", (user_id,))
         cur = conn.execute(
             """INSERT INTO characters
@@ -99,7 +112,12 @@ def apply_adventure_loadout(
         raise ValueError("No active character found for user.")
     char_id = char["id"]
 
+    from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
     from scenario_data import is_non_combat_scenario, is_anomalous_incursions_scenario
+    char_class = sanitize_character_name(char_class or "Adventurer", max_len=60, fallback="Adventurer")
+    class_description = sanitize_prompt_lore(class_description or "", max_len=1500)
+    weapon_name = sanitize_character_name(weapon_name or "", max_len=80, fallback="")
+    weapon_description = sanitize_prompt_lore(weapon_description or "", max_len=500)
     is_non_combat = is_non_combat_scenario(scenario)
     is_anomalous = is_anomalous_incursions_scenario(scenario)
 
@@ -153,12 +171,23 @@ def apply_adventure_loadout(
     if starting_items:
         for raw_entry in starting_items:
             if isinstance(raw_entry, dict):
-                item_name = str(raw_entry.get("name") or "").strip()
-                item_type = str(raw_entry.get("item_type") or "Potion").strip()
-                effect = str(raw_entry.get("effect") or raw_entry.get("description") or "")
-                slot_cost = int(raw_entry.get("slot_cost", 1) or 1)
+                item_name = sanitize_character_name(str(raw_entry.get("name") or ""), max_len=80, fallback="")
+                item_type = sanitize_character_name(str(raw_entry.get("item_type") or "Potion"), max_len=40, fallback="Potion")
+                raw_eff = str(raw_entry.get("effect") or raw_entry.get("description") or "")
+                effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
+                try:
+                    slot_cost = max(1, min(3, int(raw_entry.get("slot_cost", 1) or 1)))
+                except (TypeError, ValueError):
+                    slot_cost = 1
             elif isinstance(raw_entry, (tuple, list)) and len(raw_entry) >= 4:
-                item_name, item_type, effect, slot_cost = raw_entry[0], raw_entry[1], raw_entry[2], int(raw_entry[3])
+                item_name = sanitize_character_name(str(raw_entry[0] or ""), max_len=80, fallback="")
+                item_type = sanitize_character_name(str(raw_entry[1] or "Potion"), max_len=40, fallback="Potion")
+                raw_eff = str(raw_entry[2] or "")
+                effect = raw_eff if raw_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_eff, max_len=500)
+                try:
+                    slot_cost = max(1, min(3, int(raw_entry[3] or 1)))
+                except (TypeError, ValueError):
+                    slot_cost = 1
             else:
                 continue
             if not item_name or item_type in ("Weapon", "Armor", "Shield"):
@@ -191,7 +220,9 @@ def apply_adventure_loadout(
 
             if isinstance(entry, dict):
                 # Generated item from new equipment generation system
-                gear_name = entry["name"]
+                gear_name = sanitize_character_name(str(entry.get("name") or ""), max_len=80, fallback="")
+                if not gear_name:
+                    continue
                 if slot == "Weapon":
                     default_type = "Weapon"
                 elif slot == "Shield":
@@ -210,10 +241,15 @@ def apply_adventure_loadout(
                     default_type = "Accessory"
                 else:
                     default_type = "Armor"
-                gear_type = entry.get("item_type") or default_type
-                gear_effect = entry.get("effect", "")
-                gear_slot_cost = entry.get("slot_cost", 1)
+                gear_type = sanitize_character_name(str(entry.get("item_type") or default_type), max_len=40, fallback=default_type)
+                raw_gear_eff = str(entry.get("effect") or "")
+                gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
+                try:
+                    gear_slot_cost = max(1, min(3, int(entry.get("slot_cost", 1) or 1)))
+                except (TypeError, ValueError):
+                    gear_slot_cost = 1
                 cand_dict = dict(entry)
+                cand_dict["name"] = gear_name
                 cand_dict.setdefault("item_type", gear_type)
                 cand_dict.setdefault("effect", gear_effect)
                 if not can_equip_item_in_scenario(cand_dict, slot, scenario)[0]:
@@ -230,9 +266,15 @@ def apply_adventure_loadout(
             elif isinstance(entry, (tuple, list)) and len(entry) >= 2:
                 if slot == "Weapon":
                     continue
-                gear_name = str(entry[0])
-                gear_effect = str(entry[1])
-                gear_slot_cost = int(entry[2]) if len(entry) > 2 else 1
+                gear_name = sanitize_character_name(str(entry[0] or ""), max_len=80, fallback="")
+                if not gear_name:
+                    continue
+                raw_gear_eff = str(entry[1] or "")
+                gear_effect = raw_gear_eff if raw_gear_eff.lstrip().startswith(("[ITEM_JSON]", "[GEAR_JSON]", "[SPELLBOOK_JSON]")) else sanitize_prompt_lore(raw_gear_eff, max_len=500)
+                try:
+                    gear_slot_cost = max(1, min(3, int(entry[2]) if len(entry) > 2 else 1))
+                except (TypeError, ValueError):
+                    gear_slot_cost = 1
                 if slot == "Shield":
                     default_type = "Shield"
                 elif slot in ("Top", "Bottom"):
@@ -283,7 +325,13 @@ def apply_adventure_loadout(
 
     return db.get_character(user_id)
 
-def _apply_debug_stat_override(char: dict | None) -> dict | None:
+def _apply_debug_stat_override(
+    char: dict | None,
+    *,
+    settings: dict | None = None,
+    session_id: int | None = None,
+    active_pacts: list[dict] | None = None,
+) -> dict | None:
     if not char:
         return char
     user_id = char.get("user_id")
@@ -321,7 +369,15 @@ def _apply_debug_stat_override(char: dict | None) -> dict | None:
         app_dict = normalize_appearance(default_app, gender=char.get("gender", ""), race=char.get("race", "human"), scen_key=char.get("scenario", "fantasy"))
     char["appearance"] = app_dict
 
-    settings = db.get_settings(user_id)
+    # Preserve unmodified SQLite base stats & max_hp before Pact or Debug projection
+    char.setdefault(
+        "_base_stats",
+        {s: int(char.get(STAT_COLUMN[s]) or 1) for s in cd.STATS if STAT_COLUMN.get(s)},
+    )
+    char.setdefault("_base_max_hp", int(char.get("max_hp") or 100))
+
+    if settings is None:
+        settings = db.get_settings(user_id)
     stat_mode = settings.get("debug_stat_mode", "off")
     if stat_mode == "max":
         for s in cd.STATS:
@@ -333,6 +389,24 @@ def _apply_debug_stat_override(char: dict | None) -> dict | None:
             col = STAT_COLUMN.get(s)
             if col:
                 char[col] = cd.BASE_STAT_VALUE
+    else:
+        eff_sid = session_id or char.get("active_session_id")
+        if active_pacts is not None or eff_sid:
+            try:
+                pacts = (
+                    active_pacts
+                    if active_pacts is not None
+                    else db.get_player_active_pacts(int(eff_sid), int(user_id), character_id=char.get("id"))
+                )
+                grudges = (
+                    db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id))
+                    if eff_sid else []
+                )
+                if pacts or grudges:
+                    from mechanics.pacts.appraisal import apply_active_pact_modifiers
+                    char = apply_active_pact_modifiers(char, pacts, active_grudges=grudges)
+            except Exception:
+                pass
     return char
 
 def apply_stat_mode(user_id: int, mode: str):
@@ -372,15 +446,35 @@ def update_character_appearance(character_id: int, appearance_dict: dict) -> dic
         )
     return get_character_by_id(character_id)
 
-def get_character(user_id: int):
+def get_character(user_id: int, session_id: int | None = None, *, settings: dict | None = None):
     user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
+        row = None
+        if session_id is not None:
+            row = conn.execute(
+                """SELECT c.*
+                   FROM characters c
+                   JOIN sessions s ON s.character_id = c.id
+                   WHERE s.id = ? AND c.user_id = ?
+                   LIMIT 1""",
+                (int(session_id), user_id),
+            ).fetchone()
+            if not row:
+                row = conn.execute(
+                    """SELECT * FROM characters
+                       WHERE user_id = ? AND active_session_id = ?
+                       ORDER BY is_active DESC, id DESC
+                       LIMIT 1""",
+                    (user_id, int(session_id)),
+                ).fetchone()
+            if row:
+                return _apply_debug_stat_override(dict(row), settings=settings, session_id=int(session_id))
         row = conn.execute("SELECT * FROM characters WHERE user_id=? AND is_active=1 LIMIT 1", (user_id,)).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
             if row:
                 conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (row["id"],))
-        return _apply_debug_stat_override(dict(row)) if row else None
+        return _apply_debug_stat_override(dict(row), settings=settings, session_id=session_id) if row else None
 
 def get_session_player_character(session_id_or_session: int | dict | None) -> dict | None:
     """Retrieves the active player character associated with a session."""
@@ -510,7 +604,7 @@ def switch_character(user_id: int, character_id_or_name) -> dict | None:
     if not target:
         return None
 
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
         conn.execute("UPDATE characters SET is_active=0 WHERE user_id=?", (user_id,))
         conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (target["id"],))
     return get_character_by_id(target["id"])
@@ -524,7 +618,7 @@ def set_character_active_session(character_id: int, session_id: int | None) -> b
         return cur.rowcount > 0
 
 def delete_character(user_id: int, character_id: int = None) -> bool:
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
         if character_id is None:
             char = db.get_character(user_id)
             if not char:
@@ -539,28 +633,182 @@ def delete_character(user_id: int, character_id: int = None) -> bool:
             was_active = bool(char.get("is_active"))
 
         active_sess_id = char.get("active_session_id")
+        owned_sess_rows = conn.execute(
+            "SELECT id FROM sessions WHERE character_id=?",
+            (target_id,),
+        ).fetchall()
+        candidate_sids = {int(r["id"]) for r in owned_sess_rows if r and r["id"]}
+        if active_sess_id:
+            candidate_sids.add(int(active_sess_id))
 
         conn.execute("DELETE FROM inventory WHERE character_id=?", (target_id,))
         conn.execute("DELETE FROM adventure_saves WHERE character_id=?", (target_id,))
         conn.execute("DELETE FROM characters WHERE id=?", (target_id,))
 
-        if active_sess_id:
-            other_chars = conn.execute("SELECT id FROM characters WHERE active_session_id=?", (active_sess_id,)).fetchall()
-            if not other_chars:
-                _delete_session_records(conn, active_sess_id)
-
         remaining = conn.execute("SELECT id FROM characters WHERE user_id=? ORDER BY id DESC", (user_id,)).fetchall()
         if not remaining:
             user_sessions = conn.execute("SELECT session_id FROM session_members WHERE user_id=?", (user_id,)).fetchall()
-            conn.execute("DELETE FROM session_members WHERE user_id=?", (user_id,))
-            conn.execute("DELETE FROM user_settings WHERE user_id=?", (user_id,))
             for us in user_sessions:
-                s_id = us["session_id"]
-                has_active = conn.execute("SELECT 1 FROM characters WHERE active_session_id=?", (s_id,)).fetchone()
-                if not has_active:
-                    _delete_session_records(conn, s_id)
+                if us and us["session_id"]:
+                    candidate_sids.add(int(us["session_id"]))
+            conn.execute("DELETE FROM inventory WHERE user_id=?", (user_id,))
+            conn.execute("DELETE FROM user_settings WHERE user_id=?", (user_id,))
         elif was_active:
             conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (remaining[0]["id"],))
+
+        for sid in sorted(candidate_sids):
+            same_user_other_char = conn.execute(
+                "SELECT id FROM characters WHERE user_id=? AND active_session_id=? ORDER BY id DESC LIMIT 1",
+                (user_id, sid),
+            ).fetchone()
+            other_member_rows = conn.execute(
+                "SELECT user_id FROM session_members WHERE session_id=? AND user_id!=? ORDER BY COALESCE(joined_at, 0) ASC, rowid ASC",
+                (sid, user_id),
+            ).fetchall()
+            other_uids = [int(r["user_id"]) for r in other_member_rows if r and r["user_id"] is not None]
+            if not other_uids:
+                other_active_rows = conn.execute(
+                    "SELECT user_id FROM characters WHERE active_session_id=? AND user_id!=? ORDER BY id ASC",
+                    (sid, user_id),
+                ).fetchall()
+                other_uids = [int(r["user_id"]) for r in other_active_rows if r and r["user_id"] is not None]
+
+            if same_user_other_char:
+                same_other_cid = int(same_user_other_char["id"])
+                conn.execute(
+                    "UPDATE OR IGNORE contacts SET character_id=? WHERE session_id=? AND character_id=?",
+                    (same_other_cid, sid, target_id),
+                )
+                conn.execute(
+                    """UPDATE world_events
+                       SET implicated_contact_id = (
+                           SELECT c_keep.id FROM contacts c_old
+                           JOIN contacts c_keep
+                             ON c_keep.session_id = c_old.session_id
+                            AND c_keep.npc_id = c_old.npc_id
+                            AND c_keep.character_id = ?
+                           WHERE c_old.id = world_events.implicated_contact_id
+                             AND c_old.session_id = ?
+                             AND c_old.character_id = ?
+                           LIMIT 1
+                       )
+                       WHERE session_id = ?
+                         AND implicated_contact_id IN (
+                             SELECT id FROM contacts WHERE session_id = ? AND character_id = ?
+                         )""",
+                    (same_other_cid, sid, target_id, sid, sid, target_id),
+                )
+                conn.execute(
+                    "UPDATE sessions SET character_id=?, updated_at=? WHERE id=? AND character_id=?",
+                    (same_other_cid, time.time(), sid, target_id),
+                )
+                continue
+
+            if not other_uids:
+                conn.execute("DELETE FROM session_members WHERE session_id=?", (sid,))
+                _delete_session_records(conn, sid)
+            else:
+                conn.execute("DELETE FROM session_members WHERE session_id=? AND user_id=?", (sid, user_id))
+                sess_row = conn.execute(
+                    "SELECT host_user_id, character_id, turn_order, current_turn_index, pending_picks_json FROM sessions WHERE id=?",
+                    (sid,),
+                ).fetchone()
+                if sess_row:
+                    try:
+                        raw_order = json.loads(sess_row["turn_order"] or "[]")
+                    except Exception:
+                        raw_order = []
+                    clean_old = [int(u) for u in raw_order if u is not None]
+                    old_idx = int(sess_row["current_turn_index"] or 0)
+                    old_active_uid = clean_old[old_idx % len(clean_old)] if clean_old else None
+                    new_order = [u for u in clean_old if u != int(user_id)]
+                    if not new_order:
+                        new_order = list(dict.fromkeys(other_uids))
+                    if not new_order:
+                        new_turn_idx = 0
+                    elif old_active_uid is not None and old_active_uid in new_order:
+                        new_turn_idx = new_order.index(old_active_uid)
+                    else:
+                        norm_old_idx = (old_idx % len(clean_old)) if clean_old else 0
+                        new_turn_idx = norm_old_idx % len(new_order)
+
+                    try:
+                        picks = json.loads(sess_row["pending_picks_json"] or "{}")
+                        if not isinstance(picks, dict):
+                            picks = {}
+                    except Exception:
+                        picks = {}
+                    picks.pop(str(user_id), None)
+
+                    new_host_uid = sess_row["host_user_id"]
+                    new_char_id = sess_row["character_id"]
+                    if new_host_uid is None or int(new_host_uid) == int(user_id):
+                        new_host_uid = int(other_uids[0])
+                    if (
+                        new_char_id is None
+                        or int(new_char_id) == int(target_id)
+                        or (sess_row["host_user_id"] is not None and int(sess_row["host_user_id"]) == int(user_id))
+                    ):
+                        lookup_uid = int(new_host_uid) if new_host_uid is not None else int(other_uids[0])
+                        host_char = (
+                            conn.execute(
+                                "SELECT id FROM characters WHERE user_id=? AND active_session_id=? ORDER BY id DESC LIMIT 1",
+                                (lookup_uid, sid),
+                            ).fetchone()
+                            or conn.execute(
+                                "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
+                                (lookup_uid,),
+                            ).fetchone()
+                            or conn.execute(
+                                "SELECT id FROM characters WHERE user_id=? ORDER BY id DESC LIMIT 1",
+                                (lookup_uid,),
+                            ).fetchone()
+                        )
+                        new_char_id = int(host_char["id"]) if host_char else None
+
+                    if new_char_id is not None:
+                        conn.execute(
+                            "UPDATE OR IGNORE contacts SET character_id=? WHERE session_id=? AND character_id=?",
+                            (new_char_id, sid, target_id),
+                        )
+                        conn.execute(
+                            """UPDATE world_events
+                               SET implicated_contact_id = (
+                                   SELECT c_keep.id FROM contacts c_old
+                                   JOIN contacts c_keep
+                                     ON c_keep.session_id = c_old.session_id
+                                    AND c_keep.npc_id = c_old.npc_id
+                                    AND c_keep.character_id = ?
+                                   WHERE c_old.id = world_events.implicated_contact_id
+                                     AND c_old.session_id = ?
+                                     AND c_old.character_id = ?
+                                   LIMIT 1
+                               )
+                               WHERE session_id = ?
+                                 AND implicated_contact_id IN (
+                                     SELECT id FROM contacts WHERE session_id = ? AND character_id = ?
+                                 )""",
+                            (new_char_id, sid, target_id, sid, sid, target_id),
+                        )
+
+                    conn.execute(
+                        """UPDATE sessions
+                           SET host_user_id=?, character_id=?, turn_order=?, current_turn_index=?, pending_picks_json=?, updated_at=?
+                           WHERE id=?""",
+                        (
+                            new_host_uid,
+                            new_char_id,
+                            json.dumps(new_order),
+                            new_turn_idx,
+                            json.dumps(picks),
+                            time.time(),
+                            sid,
+                        ),
+                    )
+
+        conn.execute("DELETE FROM contacts WHERE character_id=?", (target_id,))
+        if not remaining:
+            conn.execute("DELETE FROM session_members WHERE user_id=?", (user_id,))
         return True
 
 def update_character_fields(user_id: int, **fields):
@@ -569,13 +817,40 @@ def update_character_fields(user_id: int, **fields):
     char = db.get_character(user_id)
     if not char:
         return
+    from mechanics.system.input_sanitizer import sanitize_character_name, sanitize_prompt_lore
+    if "name" in fields and fields["name"] is not None:
+        fields["name"] = sanitize_character_name(str(fields["name"]), max_len=60, fallback=char.get("name") or "Adventurer")
+    if "char_class" in fields and fields["char_class"] is not None:
+        fields["char_class"] = sanitize_character_name(str(fields["char_class"]), max_len=60, fallback="Adventurer")
+    if "gender" in fields and fields["gender"] is not None:
+        fields["gender"] = sanitize_character_name(str(fields["gender"]), max_len=50, fallback="Male")
+    if "race" in fields and fields["race"] is not None:
+        fields["race"] = sanitize_character_name(str(fields["race"]), max_len=60, fallback="human")
+    if "class_description" in fields and fields["class_description"] is not None:
+        fields["class_description"] = sanitize_prompt_lore(str(fields["class_description"]), max_len=1500)
+    if "race_description" in fields and fields["race_description"] is not None:
+        fields["race_description"] = sanitize_prompt_lore(str(fields["race_description"]), max_len=600)
     cols = ", ".join(f"{k}=?" for k in fields)
     with get_conn() as conn:
         conn.execute(f"UPDATE characters SET {cols} WHERE id=?",
                      (*fields.values(), char["id"]))
 
-def apply_hp_mp_delta(user_id: int, hp_delta: int = 0, mp_delta: int = 0, gold_delta: int = 0, temp_hp_delta: int = 0):
-    char = db.get_character(user_id)
+def apply_hp_mp_delta(
+    user_id: int,
+    hp_delta: int = 0,
+    mp_delta: int = 0,
+    gold_delta: int = 0,
+    temp_hp_delta: int = 0,
+    *,
+    character_id: int | None = None,
+):
+    char = None
+    if character_id:
+        with get_conn() as conn:
+            row = conn.execute("SELECT * FROM characters WHERE id=?", (int(character_id),)).fetchone()
+            char = _apply_debug_stat_override(dict(row)) if row else None
+    if not char:
+        char = db.get_character(user_id)
     if not char:
         return None
     
@@ -606,6 +881,14 @@ def apply_hp_mp_delta(user_id: int, hp_delta: int = 0, mp_delta: int = 0, gold_d
         
     new_mp = max(0, min(char.get("max_mp", 50), char.get("mp", 0) + mp_delta))
     new_gold = max(0, char.get("gold", 0) + gold_delta)
+    if character_id:
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE characters SET hp=?, temp_hp=?, mp=?, gold=? WHERE id=?",
+                (new_hp, new_temp_hp, new_mp, new_gold, int(char["id"])),
+            )
+            updated_row = conn.execute("SELECT * FROM characters WHERE id=?", (int(char["id"]),)).fetchone()
+            return _apply_debug_stat_override(dict(updated_row)) if updated_row else None
     db.update_character_fields(user_id, hp=new_hp, temp_hp=new_temp_hp, mp=new_mp, gold=new_gold)
     return db.get_character(user_id)
 
@@ -666,18 +949,26 @@ def bump_stat(user_id: int, stat: str, amount: int = 1):
     if not char:
         return
     col = STAT_COLUMN[stat]
-    new_value = min(cd.MAX_STAT_VALUE, char[col] + amount)
-    if new_value == char[col]:
+    base_val = int((char.get("_base_stats") or {}).get(stat, char[col]))
+    new_value = min(cd.MAX_STAT_VALUE, base_val + amount)
+    if new_value == base_val:
         return
     db.update_character_fields(user_id, **{col: new_value})
 
     if stat == "END":
-        old_max_hp, old_max_mp = char["max_hp"], char["max_mp"]
-        new_max_hp, new_max_mp = cd.derive_hp(new_value), cd.derive_mp(new_value)
-        hp_gain, mp_gain = new_max_hp - old_max_hp, new_max_mp - old_max_mp
-        db.update_character_fields(user_id, max_hp=new_max_hp, max_mp=new_max_mp,
-                                 hp=min(new_max_hp, char["hp"] + hp_gain),
-                                 mp=min(new_max_mp, char["mp"] + mp_gain))
+        old_base_max_hp = int(char.get("_base_max_hp") or char["max_hp"])
+        old_max_mp = char["max_mp"]
+        new_base_max_hp, new_max_mp = cd.derive_hp(new_value), cd.derive_mp(new_value)
+        hp_gain, mp_gain = new_base_max_hp - old_base_max_hp, new_max_mp - old_max_mp
+        eff_char = db.get_character(user_id)
+        eff_cap_hp = int(eff_char["max_hp"]) if eff_char else new_base_max_hp
+        db.update_character_fields(
+            user_id,
+            max_hp=new_base_max_hp,
+            max_mp=new_max_mp,
+            hp=min(eff_cap_hp, max(0, char["hp"] + hp_gain)),
+            mp=min(new_max_mp, char["mp"] + mp_gain),
+        )
 
 def spend_stat_point(user_id: int, stat: str) -> str:
     """Spend one pending stat point on `stat`. This -- fed exclusively by
@@ -693,7 +984,8 @@ def spend_stat_point(user_id: int, stat: str) -> str:
     if not char or char["pending_stat_points"] <= 0:
         return "no_points"
     col = STAT_COLUMN[stat]
-    if char[col] >= cd.MAX_STAT_VALUE:
+    base_val = int((char.get("_base_stats") or {}).get(stat, char[col]))
+    if base_val >= cd.MAX_STAT_VALUE:
         return "capped"
     bump_stat(user_id, stat, 1)
     db.update_character_fields(user_id, pending_stat_points=char["pending_stat_points"] - 1)

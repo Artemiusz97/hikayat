@@ -1505,5 +1505,173 @@
         "bounty_objective": "Prüfe die Anmeldezeiten am Terminal in {venue}, um die Identität des Stalkers zu klären."
       }
     }
+  },
+  {
+    "template_key": "rumor_kitsune_torii_bells",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": -1}},
+    "locales": {
+      "en": {
+        "title": "Unseen Brass Bells Along {venue}",
+        "description": "Pilgrims descending {zone} swear that at twilight, faint brass suzu bells chime behind {venue}—and travelers carrying a consecrated shrine bell vanish into drifting blue fox-fire.",
+        "bounty_title": "Investigate the Torii Mirage",
+        "bounty_objective": "Visit {venue} at dusk or acquire a consecrated shrine bell to test the shimmering veil."
+      },
+      "pl": {
+        "title": "Niewidzialne Dzwonki przy {venue}",
+        "description": "Pielgrzymi w {zone} przysięgają, że o zmierzchu za {venue} dźwięczą mosiężne dzwonki suzu, a wędrowcy z poświęconym dzwonkiem znikają wśród błękitnych lisich ogni.",
+        "bounty_title": "Zbadaj Miraż Torii",
+        "bounty_objective": "Odwiedź {venue} o zmierzchu lub zdobądź poświęcony dzwonek świątynny, by zbadać zasłonę."
+      },
+      "ms": {
+        "title": "Loceng Tembaga Ghaib di {venue}",
+        "description": "Para penziarah di {zone} bersumpah bahawa ketika senja, bunyi loceng suzu berdenting di sebalik {venue} dan pengembara yang membawa loceng suci lenyap ke dalam cahaya api rubah biru.",
+        "bounty_title": "Siasat Fatamorgana Torii",
+        "bounty_objective": "Kunjungi {venue} pada waktu senja atau dapatkan loceng suci kuil untuk menguji tabir ilusi itu."
+      },
+      "zh": {
+        "title": "{venue}暮色无形铃音传闻",
+        "description": "自{zone}下山的香客言之凿凿：逢魔时刻{venue}深处会响起清脆铜铃，手持开光狐火铜铃的旅人往往踏入幽蓝狐火后便悄然隐没。",
+        "bounty_title": "探查千本鸟居幻境",
+        "bounty_objective": "在黄昏前往{venue}，或携开光神铃试探灵雾结界。"
+      },
+      "de": {
+        "title": "Unsichtbare Messingglocken am {venue}",
+        "description": "Pilger aus {zone} schwören, dass in der Dämmerung hinter {venue} leise Suzu-Glocken erklingen und Wanderer mit einer geweihten Schrein-Glocke in blauem Fuchsfeuer verschwinden.",
+        "bounty_title": "Das Torii-Trugbild prüfen",
+        "bounty_objective": "Suche {venue} in der Dämmerung auf oder beschaffe eine geweihte Schrein-Glocke, um den Schleier zu testen."
+      }
+    }
+  },
+  {
+    "template_key": "rumor_bunian_cempaka_flute",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "rumor",
+    "event_subtype": "intrigue",
+    "is_nsfw": 0,
+    "escalation_chance": 0.25,
+    "default_duration_minutes": 5760,
+    "modifiers": {"dc_modifiers": {"PER": -1}},
+    "locales": {
+      "en": {
+        "title": "Fragrant Cempaka Mist & Flute Song at {venue}",
+        "description": "Hikers in {zone} whisper of sweet white cempaka blossoms and distant reed serunai melodies drifting from {venue}, where polite, luminous-skinned strangers occasionally barter golden songket charms.",
+        "bounty_title": "Follow the Serunai Melody",
+        "bounty_objective": "Explore {venue} with keen senses or seek a brass serunai from the forest ranger outfitter."
+      },
+      "pl": {
+        "title": "Mgła Cempaka i Pieśń Fletu przy {venue}",
+        "description": "Wędrowcy w {zone} szepczą o słodkiej woni kwiatów cempaka i melodii fletu serunai dobiegającej z {venue}, gdzie świetliste postacie wymieniają czasem złote talizmany songket.",
+        "bounty_title": "Podążaj za Melodią Serunai",
+        "bounty_objective": "Zbadaj {venue} wyostrzonymi zmysłami lub poszukaj mosiężnego serunai w stacji strażników."
+      },
+      "ms": {
+        "title": "Kabus Harum Cempaka & Tiupan Serunai di {venue}",
+        "description": "Pendaki di {zone} berbisik tentang haruman bunga cempaka putih serta alunan serunai merdu dari {venue}, tempat insan rupawan berseri kadang-kadang muncul bertukar azimat songket emas.",
+        "bounty_title": "Jejaki Alunan Serunai",
+        "bounty_objective": "Terokai {venue} dengan pengamatan tajam atau dapatkan serunai tembaga daripada renjer hutan."
+      },
+      "zh": {
+        "title": "{venue}白兰香雾与芦笛异闻",
+        "description": "{zone}的登山客私下流传：{venue}常飘出清甜白兰花香与悠远芦笛声，偶有容貌清丽绝伦的神秘旅人现身交换金丝宋吉护符。",
+        "bounty_title": "寻访幽林笛声",
+        "bounty_objective": "凝神探查{venue}的迷雾缝隙，或向护林站寻购黄铜芦笛。"
+      },
+      "de": {
+        "title": "Cempaka-Duftnebel und Flötenklang in {venue}",
+        "description": "Wanderer in {zone} flüstern von süßem weißen Cempaka-Duft und fernen Serunai-Flötentönen aus {venue}, wo anmutige Fremde bisweilen goldene Songket-Talismane tauschen.",
+        "bounty_title": "Der Serunai-Melodie folgen",
+        "bounty_objective": "Erkunde {venue} mit wachen Sinnen oder erwirb eine Messing-Serunai an der Rangerstation."
+      }
+    }
+  },
+  {
+    "template_key": "evt_kitsune_hundred_foxfires",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"dc_modifiers": {"PER": -2, "CHA": -1}, "price_multiplier": 0.9, "crowd_density": "high"},
+    "locales": {
+      "en": {
+        "title": "Night of a Hundred Fox-Fires Near {venue}",
+        "description": "Floating azure fox-fire lanterns dance along the mountain ridges of {zone}, thinning the spiritual veil around {venue} as celestial shrine music drifts on the night breeze.",
+        "bounty_title": "Honor the Fox-Fire Procession",
+        "bounty_objective": "Walk {venue} respectfully while the fox-fire lanterns thin the mountain veil."
+      },
+      "pl": {
+        "title": "Noc Stu Lisich Ogni koło {venue}",
+        "description": "Błękitne lisie ognie tańczą wzdłuż grzbietów {zone}, rozrzedzając duchową zasłonę wokół {venue} przy dźwiękach niebiańskiej muzyki.",
+        "bounty_title": "Uczcij Procesję Lisich Ogni",
+        "bounty_objective": "Odwiedź {venue} z szacunkiem, gdy lisie lampiony odsłaniają górską zasłonę."
+      },
+      "ms": {
+        "title": "Malam Seratus Api Rubah di {venue}",
+        "description": "Lentera api rubah biru menari di sepanjang permatang gunung {zone}, menipiskan tabir rohani di sekitar {venue} diiringi muzik kuil kayangan.",
+        "bounty_title": "Hormati Perarakan Api Rubah",
+        "bounty_objective": "Kunjungi {venue} dengan penuh tertib sewaktu tabir gunung menipis."
+      },
+      "zh": {
+        "title": "{venue}百狐夜灯祭",
+        "description": "百盏苍蓝狐火灯笼沿着{zone}山脊翩然起舞，清越神乐随夜风回荡，令{venue}外的灵雾结界大幅变薄。",
+        "bounty_title": "参拜狐火夜巡",
+        "bounty_objective": "趁百狐灯祭结界变薄之际，怀敬畏之心造访{venue}。"
+      },
+      "de": {
+        "title": "Nacht der Hundert Fuchsfeuer nahe {venue}",
+        "description": "Schwebende azurblaue Fuchsfeuerlaternen tanzen über die Bergkämme von {zone} und lassen den spirituellen Schleier um {venue} dünner werden.",
+        "bounty_title": "Die Fuchsfeuer-Prozession ehren",
+        "bounty_objective": "Betritt {venue} respektvoll, solange die Fuchsfeuer den Bergschleier lichten."
+      }
+    }
+  },
+  {
+    "template_key": "evt_bunian_malam_cempaka",
+    "genre_families": ["urban_fantasy"],
+    "entity_type": "macro_event",
+    "event_subtype": "festival",
+    "is_nsfw": 0,
+    "escalation_chance": 0.0,
+    "default_duration_minutes": 4320,
+    "modifiers": {"dc_modifiers": {"PER": -2, "CHA": -1}, "price_multiplier": 0.9, "crowd_density": "high"},
+    "locales": {
+      "en": {
+        "title": "Malam Bunga Cempaka Mist Convergence at {venue}",
+        "description": "Luminous silver mist and golden gamelan chimes drift through {zone}, thinning the ancient veil around {venue} during the sacred Malam Bunga Cempaka court celebration.",
+        "bounty_title": "Witness Malam Bunga Cempaka",
+        "bounty_objective": "Approach {venue} with courtesy while the silver banyan mist parts."
+      },
+      "pl": {
+        "title": "Malam Bunga Cempaka — Srebrna Mgła przy {venue}",
+        "description": "Świetlista mgła i złote dźwięki gamelanu płyną przez {zone}, rozrzedzając prastarą zasłonę wokół {venue} podczas święta Malam Bunga Cempaka.",
+        "bounty_title": "Świadek Malam Bunga Cempaka",
+        "bounty_objective": "Zbliż się z szacunkiem do {venue}, gdy srebrna mgła banianów się rozstępuje."
+      },
+      "ms": {
+        "title": "Malam Bunga Cempaka di {venue}",
+        "description": "Kabus perak berkilauan dan paluan gamelan emas mengalun merentasi {zone}, menipiskan tabir purba di sekitar {venue} sempena perayaan diraja Malam Bunga Cempaka.",
+        "bounty_title": "Saksikan Malam Bunga Cempaka",
+        "bounty_objective": "Dekati {venue} dengan penuh adab tatkala kabus beringin perak terbuka."
+      },
+      "zh": {
+        "title": "{venue}白兰花夜灵雾庆典",
+        "description": "皎洁银雾与金色佳美兰乐音萦绕{zone}林间，神圣的“白兰花之夜”庆典令{venue}四周的古林幻障悄然消融。",
+        "bounty_title": "寻访白兰花夜盛典",
+        "bounty_objective": "趁银色榕雾散开之际，彬彬有礼地探访{venue}。"
+      },
+      "de": {
+        "title": "Malam Bunga Cempaka — Silbernebel bei {venue}",
+        "description": "Leuchtender Silbernebel und goldene Gamelan-Klänge ziehen durch {zone} und lichten während des Festes Malam Bunga Cempaka den uralten Schleier um {venue}.",
+        "bounty_title": "Malam Bunga Cempaka erleben",
+        "bounty_objective": "Nähere dich {venue} höflich, während sich der silberne Banyan-Nebel teilt."
+      }
+    }
   }
 ]

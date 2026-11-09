@@ -8,6 +8,16 @@ import db
 from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
+ATMOSPHERE_ADJECTIVE_BLACKLIST = frozenset({
+    "area", "spot", "your", "main", "room", "place", "zone",
+    "quiet", "silent", "empty", "bright", "dark", "calm", "bustling",
+    "crowded", "warm", "cold", "dim", "sunlit", "shadowy", "spacious",
+    "cramped", "cozy", "peaceful", "dusty", "gloomy", "misty", "foggy",
+    "chilly", "humid", "breezy", "hushed", "serene", "tranquil", "shady",
+    "stark", "bleak", "musty", "drafty", "ancient", "abandoned", "ruined", "secluded"
+})
+
+
 def is_invalid_location_string(name: str) -> bool:
 
     """
@@ -1954,7 +1964,7 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                     cand_lower = sub_cand.lower()
 
-                    cand_words = [w for w in cand_lower.split() if len(w) >= 4 and w not in ("area", "spot", "your", "main", "room", "place", "zone")]
+                    cand_words = [w for w in cand_lower.split() if len(w) >= 4 and w not in ATMOSPHERE_ADJECTIVE_BLACKLIST]
 
                     if "bedroom" in cand_lower and "bed" not in cand_words:
 
@@ -1962,11 +1972,13 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                     act_sub_match = is_move and (cand_lower in act_lower or (cand_words and any(cw in act_lower for cw in cand_words)))
 
-                    narr_sub_match = any((cue + cw) in narr_prose for cue in sub_cues for cw in cand_words) or (
-
-                        cand_lower in narr_prose and any(sc in narr_prose for sc in ("enter the room", "threshold", "transition", "stops beside the bed", "bedside", "door clicks shut"))
-
-                    )
+                    is_opening = any(op in act_lower for op in ("begin adventure", "begin your adventure", "start adventure"))
+                    if is_opening:
+                        narr_sub_match = False
+                    else:
+                        narr_sub_match = any((cue + cw) in narr_prose for cue in sub_cues for cw in cand_words) or (
+                            cand_lower in narr_prose and any(sc in narr_prose for sc in ("enter the room", "threshold", "transition", "stops beside the bed", "bedside", "door clicks shut"))
+                        )
 
                     if act_sub_match:
 

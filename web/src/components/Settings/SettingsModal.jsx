@@ -6,7 +6,7 @@ import { AVAILABLE_LANGUAGES } from '../../i18n';
 
 const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSessionUpdated, onRefreshCharacter, onRefreshCodex }) => {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState('preferences'); // 'preferences' | 'telemetry'
+  const [activeTab, setActiveTab] = useState('preferences'); // 'preferences' | 'language' | 'telemetry'
   const [telemetry, setTelemetry] = useState(null);
   const [debugStatMode, setDebugStatMode] = useState('off');
   const [debugCheckMode, setDebugCheckMode] = useState('off');
@@ -140,6 +140,17 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
             <span>{t('settings.tab_preferences', 'Preferences')}</span>
           </button>
           <button
+            onClick={() => setActiveTab('language')}
+            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+              activeTab === 'language'
+                ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <Globe size={13} />
+            <span>{t('settings.tab_language', t('settings.language', 'Language'))}</span>
+          </button>
+          <button
             onClick={() => setActiveTab('telemetry')}
             className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
               activeTab === 'telemetry'
@@ -154,91 +165,8 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
 
         {/* Content */}
         <div className="flex-1 min-h-0 p-4 sm:p-5 space-y-5 overflow-y-auto overscroll-contain custom-scrollbar">
-          {activeTab === 'preferences' ? (
+          {activeTab === 'preferences' && (
             <>
-{/* Section 0A: Interface Language (UI & System) */}
-              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Monitor size={16} className="text-fantasy-accent" />
-                      <span className="font-semibold text-gray-200 text-sm">{t('settings.ui_language')}</span>
-                    </div>
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                      {t('settings.ui_language_desc')}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                  {AVAILABLE_LANGUAGES.map((lang) => {
-                    const activeCode = (settings.ui_language || i18n.language || 'en').split('-')[0].toLowerCase();
-                    const isSelected = activeCode === lang.code;
-                    return (
-                      <button
-                        key={lang.code}
-                        type="button"
-                        onClick={() => {
-                          i18n.changeLanguage(lang.code);
-                          localStorage.setItem('hikayat_ui_language', lang.code);
-                          localStorage.setItem('hikayat_language', lang.code);
-                          updateSettings({ ui_language: lang.code });
-                        }}
-                        disabled={saving}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
-                          isSelected
-                            ? 'bg-fantasy-accent/20 border-fantasy-accent text-fantasy-accent font-bold shadow-sm'
-                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
-                        }`}
-                      >
-                        <span className="text-sm">{lang.flag}</span>
-                        <span>{lang.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Section 0B: Game & Story Language (Narration & Mechanics) */}
-              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
-                <div className="flex items-start justify-between gap-4 mb-3">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={16} className="text-amber-400" />
-                      <span className="font-semibold text-gray-200 text-sm">{t('settings.narration_language')}</span>
-                    </div>
-                    <p className="text-xs text-gray-400 leading-relaxed">
-                      {t('settings.narration_language_desc')}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
-                  {AVAILABLE_LANGUAGES.map((lang) => {
-                    const activeCode = (settings.narration_language || settings.language || 'en').split('-')[0].toLowerCase();
-                    const isSelected = activeCode === lang.code;
-                    return (
-                      <button
-                        key={lang.code}
-                        type="button"
-                        onClick={() => {
-                          updateSettings({ narration_language: lang.code, language: lang.code });
-                        }}
-                        disabled={saving}
-                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
-                          isSelected
-                            ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold shadow-sm'
-                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
-                        }`}
-                      >
-                        <span className="text-sm">{lang.flag}</span>
-                        <span>{lang.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Section 1: Real-Time Narrative Streaming */}
               <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
                 <div className="flex items-start justify-between gap-4">
@@ -406,12 +334,12 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
               <div className="space-y-2.5">
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                   <ShieldAlert size={14} className="text-fantasy-accent" />
-                  Outcome Format & Odds
+                  {t('settings.outcome_format', 'Outcome Format & Odds')}
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {[
-                    { id: 'detailed', label: 'Detailed Breakdown', desc: 'Full stat breakdowns, modifiers & mechanics' },
-                    { id: 'compact', label: 'Streamlined', desc: 'Clean summary badges only' }
+                    { id: 'detailed', label: t('settings.detailed_breakdown', 'Detailed Breakdown'), desc: t('settings.detailed_breakdown_desc', 'Full stat breakdowns, modifiers & mechanics') },
+                    { id: 'compact', label: t('settings.streamlined', 'Streamlined'), desc: t('settings.streamlined_desc', 'Clean summary badges only') }
                   ].map((r) => {
                     const isSelected = (settings.result_display || 'detailed') === r.id;
                     return (
@@ -436,8 +364,8 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
 
                 <div className="flex items-center justify-between bg-black/30 border border-fantasy-border/60 rounded-lg p-3">
                   <div>
-                    <span className="text-xs font-semibold text-gray-200 block">Show Skill Check Percentages</span>
-                    <span className="text-[11px] text-gray-400">Display exact success chance (%) on action choices and check outcomes</span>
+                    <span className="text-xs font-semibold text-gray-200 block">{t('settings.show_percentages', 'Show Skill Check Percentages')}</span>
+                    <span className="text-[11px] text-gray-400">{t('settings.show_percentages_desc', 'Display exact success chance (%) on action choices and check outcomes')}</span>
                   </div>
                   <button
                     type="button"
@@ -460,12 +388,12 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
               <div className="space-y-2.5">
                 <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
                   <Activity size={14} className="text-fantasy-accent" />
-                  Combat Interface
+                  {t('settings.combat_interface', 'Combat Interface')}
                 </label>
                 <div className="flex items-center justify-between bg-black/30 border border-fantasy-border/60 rounded-lg p-3">
                   <div>
-                    <span className="text-xs font-semibold text-gray-200 block">Show Enemy Health Bars</span>
-                    <span className="text-[11px] text-gray-400">Display exact HP values and visual bars for enemies</span>
+                    <span className="text-xs font-semibold text-gray-200 block">{t('settings.show_enemy_hp', 'Show Enemy Health Bars')}</span>
+                    <span className="text-[11px] text-gray-400">{t('settings.show_enemy_hp_desc', 'Display exact HP values and visual bars for enemies')}</span>
                   </div>
                   <button
                     type="button"
@@ -484,8 +412,8 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                 </div>
                 <div className="flex items-center justify-between bg-black/30 border border-fantasy-border/60 rounded-lg p-3">
                   <div>
-                    <span className="text-xs font-semibold text-gray-200 block">Show Combat Intent</span>
-                    <span className="text-[11px] text-gray-400">Display what actions enemies are planning</span>
+                    <span className="text-xs font-semibold text-gray-200 block">{t('settings.show_enemy_intent', 'Show Combat Intent')}</span>
+                    <span className="text-[11px] text-gray-400">{t('settings.show_enemy_intent_desc', 'Display what actions enemies are planning')}</span>
                   </div>
                   <button
                     type="button"
@@ -504,14 +432,103 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                 </div>
               </div>
             </>
-          ) : (
+          )}
+
+          {activeTab === 'language' && (
+            <>
+{/* Section 0A: Interface Language (UI & System) */}
+              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Monitor size={16} className="text-fantasy-accent" />
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.ui_language')}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      {t('settings.ui_language_desc')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  {AVAILABLE_LANGUAGES.map((lang) => {
+                    const activeCode = (settings.ui_language || i18n.language || 'en').split('-')[0].toLowerCase();
+                    const isSelected = activeCode === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          i18n.changeLanguage(lang.code);
+                          localStorage.setItem('hikayat_ui_language', lang.code);
+                          localStorage.setItem('hikayat_language', lang.code);
+                          updateSettings({ ui_language: lang.code });
+                        }}
+                        disabled={saving}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
+                          isSelected
+                            ? 'bg-fantasy-accent/20 border-fantasy-accent text-fantasy-accent font-bold shadow-sm'
+                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm">{lang.flag}</span>
+                        <span>{lang.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Section 0B: Game & Story Language (Narration & Mechanics) */}
+              <div className="bg-black/30 border border-fantasy-border/60 rounded-lg p-4">
+                <div className="flex items-start justify-between gap-4 mb-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <Sparkles size={16} className="text-amber-400" />
+                      <span className="font-semibold text-gray-200 text-sm">{t('settings.narration_language')}</span>
+                    </div>
+                    <p className="text-xs text-gray-400 leading-relaxed">
+                      {t('settings.narration_language_desc')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                  {AVAILABLE_LANGUAGES.map((lang) => {
+                    const activeCode = (settings.narration_language || settings.language || 'en').split('-')[0].toLowerCase();
+                    const isSelected = activeCode === lang.code;
+                    return (
+                      <button
+                        key={lang.code}
+                        type="button"
+                        onClick={() => {
+                          updateSettings({ narration_language: lang.code, language: lang.code });
+                        }}
+                        disabled={saving}
+                        className={`px-3 py-2 rounded-lg text-xs font-medium border flex items-center justify-center gap-2 transition-all ${
+                          isSelected
+                            ? 'bg-amber-500/20 border-amber-500/60 text-amber-300 font-bold shadow-sm'
+                            : 'bg-black/40 border-neutral-800 text-gray-300 hover:border-neutral-700 hover:text-white'
+                        }`}
+                      >
+                        <span className="text-sm">{lang.flag}</span>
+                        <span>{lang.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          )}
+
+          {activeTab === 'telemetry' && (
             <div className="space-y-5">
               {/* Live LLM Telemetry & Circuit Breakers */}
               <div className="bg-black/30 border border-fantasy-border/70 rounded-lg p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-fantasy-accent flex items-center gap-1.5">
                     <Activity size={14} />
-                    <span>LLM Gateway Telemetry & Circuit Breakers</span>
+                    <span>{t('settings.telemetry_title', 'LLM Gateway Telemetry & Circuit Breakers')}</span>
                   </h3>
                   <button
                     onClick={loadDiagnostics}
@@ -519,25 +536,25 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                     className="text-xs text-gray-400 hover:text-fantasy-accent flex items-center gap-1"
                   >
                     <RefreshCw size={12} className={loadingTelemetry ? 'animate-spin' : ''} />
-                    <span>Refresh</span>
+                    <span>{t('settings.refresh', 'Refresh')}</span>
                   </button>
                 </div>
 
                 <div className="grid grid-cols-4 gap-2 text-center">
                   <div className="bg-black/50 border border-fantasy-border/60 rounded p-2">
-                    <div className="text-[10px] text-gray-400 uppercase">Total Calls</div>
+                    <div className="text-[10px] text-gray-400 uppercase">{t('settings.total_calls', 'Total Calls')}</div>
                     <div className="font-mono text-sm font-bold text-gray-100">{telemetry?.total_calls ?? 0}</div>
                   </div>
                   <div className="bg-black/50 border border-emerald-900/50 rounded p-2">
-                    <div className="text-[10px] text-emerald-400 uppercase">Succeeded</div>
+                    <div className="text-[10px] text-emerald-400 uppercase">{t('settings.succeeded', 'Succeeded')}</div>
                     <div className="font-mono text-sm font-bold text-emerald-300">{telemetry?.successful_calls ?? 0}</div>
                   </div>
                   <div className="bg-black/50 border border-red-900/50 rounded p-2">
-                    <div className="text-[10px] text-red-400 uppercase">Failed</div>
+                    <div className="text-[10px] text-red-400 uppercase">{t('settings.failed', 'Failed')}</div>
                     <div className="font-mono text-sm font-bold text-red-300">{telemetry?.failed_calls ?? 0}</div>
                   </div>
                   <div className="bg-black/50 border border-amber-900/50 rounded p-2">
-                    <div className="text-[10px] text-amber-400 uppercase">Failovers</div>
+                    <div className="text-[10px] text-amber-400 uppercase">{t('settings.failovers', 'Failovers')}</div>
                     <div className="font-mono text-sm font-bold text-amber-300">{telemetry?.fallback_activations ?? 0}</div>
                   </div>
                 </div>
@@ -578,7 +595,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
                       <Terminal size={14} />
-                      <span>Developer Sandbox Overrides</span>
+                      <span>{t('settings.sandbox_overrides', 'Developer Sandbox Overrides')}</span>
                     </h3>
                     {debugNotice && (
                       <span className="text-[10px] font-mono text-emerald-400">{debugNotice}</span>
@@ -595,11 +612,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                         onChange={(e) => handleDebugUpdate({ debug_check_mode: e.target.value }, 'Skill check mode updated')}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                       >
-                        <option value="off">Normal (Standard Odds)</option>
-                        <option value="always_success">Always Succeed (100%)</option>
-                        <option value="always_fail">Always Fail (0%)</option>
-                        <option value="always_crit_success">Force Critical Success</option>
-                        <option value="always_crit_fail">Force Critical Failure</option>
+                        <option value="off">{t('settings.odds_normal', 'Normal (Standard Odds)')}</option>
+                        <option value="always_success">{t('settings.odds_always_succeed', 'Always Succeed (100%)')}</option>
+                        <option value="always_fail">{t('settings.odds_always_fail', 'Always Fail (0%)')}</option>
+                        <option value="always_crit_success">{t('settings.odds_force_crit_success', 'Force Critical Success')}</option>
+                        <option value="always_crit_fail">{t('settings.odds_force_crit_failure', 'Force Critical Failure')}</option>
                       </select>
                     </div>
 
@@ -612,9 +629,9 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                         onChange={(e) => handleDebugUpdate({ debug_stat_mode: e.target.value }, 'Stat mode updated')}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                       >
-                        <option value="off">Normal Character Stats</option>
-                        <option value="max">God Mode (All Stats 10)</option>
-                        <option value="min">Weakened (All Stats 1)</option>
+                        <option value="off">{t('settings.stats_normal', 'Normal Character Stats')}</option>
+                        <option value="max">{t('settings.stats_god_mode', 'God Mode (All Stats 10)')}</option>
+                        <option value="min">{t('settings.stats_weakened', 'Weakened (All Stats 1)')}</option>
                       </select>
                     </div>
                   </div>
@@ -626,7 +643,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       className="py-1.5 px-3 rounded bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/60 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <HeartPulse size={13} />
-                      <span>Full Heal HP/MP</span>
+                      <span>{t('settings.full_heal', 'Full Heal HP/MP')}</span>
                     </button>
                     <button
                       type="button"
@@ -634,7 +651,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       className="py-1.5 px-3 rounded bg-red-950/60 hover:bg-red-900/70 border border-red-800/60 text-red-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <Skull size={13} />
-                      <span>Set HP to 1</span>
+                      <span>{t('settings.set_hp_one', 'Set HP to 1')}</span>
                     </button>
                     <button
                       type="button"
@@ -652,7 +669,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       onClick={() => handleDebugUpdate({ action: 'force_enemy', session_id: session?.id }, 'Dummy enemy spawned!')}
                       className="py-1.5 px-3 rounded bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <span>👹 Force Enemy (Spawn Dummy)</span>
+                      <span>{t('settings.force_enemy', '👹 Force Enemy (Spawn Dummy)')}</span>
                     </button>
                     <button
                       type="button"
@@ -664,7 +681,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       }, 'All sandbox overrides reset!')}
                       className="col-span-2 py-1.5 px-3 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      <span>🔄 Reset All Overrides</span>
+                      <span>{t('settings.reset_overrides', '🔄 Reset All Overrides')}</span>
                     </button>
                   </div>
                 </div>

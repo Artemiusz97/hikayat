@@ -812,6 +812,31 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                 save_cast_state(session, outcome["_staged_cast_state"], persist_db=True)
             except Exception as _cs_e:
                 log.warning("Failed committing staged cast_state: %s", _cs_e)
+        if isinstance(outcome, dict) and isinstance(outcome.get("_staged_folklore_ops"), dict) and session_id:
+            try:
+                from mechanics.social.folklore_roster import commit_staged_folklore_ops
+                _fk_ops = outcome["_staged_folklore_ops"]
+                _fk_adv = (not bool(outcome.get("_staged_time_op"))) and (not bool(_fk_ops.get("is_retry")))
+                _fk_committed = commit_staged_folklore_ops(
+                    session_id,
+                    _fk_ops,
+                    session=session,
+                    turn_number=int(outcome.get("_target_turn") or (session.get("_target_turn") if isinstance(session, dict) else 0) or 0),
+                    advance_clock_on_expel=_fk_adv,
+                )
+                if _fk_committed.get("treaty_violation") and isinstance(_fk_committed["treaty_violation"], dict):
+                    _tv = _fk_committed["treaty_violation"]
+                    if _tv.get("ejected_location"):
+                        outcome["location"] = _tv["ejected_location"]
+                    if _tv.get("ejected_node_id"):
+                        outcome["current_node_id"] = _tv["ejected_node_id"]
+                        if isinstance(outcome.get("_staged_scene_residue"), dict):
+                            outcome["_staged_scene_residue"]["node_id"] = _tv["ejected_node_id"]
+                    outcome["focal_point"] = None
+                    outcome["nearby_enemies"] = []
+                session = db.get_session(session_id) or session
+            except Exception as _fk_c_err:
+                log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
 
         scen_key_curr = session.get("scenario", "fantasy") if session else "fantasy"
         game_engine._sanitize_outcome_person_names(outcome, session_id, scen_key_curr)
@@ -825,16 +850,41 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         first_char_name = party[0][0].get("name", "Player") if party else "Player"
         _reduce_vitals_and_inventory(session_id, session, party, outcome, mp_already_spent, scen_key, is_combat, items_gained_by_user, actions=actions)
 
+        # ── Entity Contracts Post-Turn Toll, Lethal Overdraw, Breaches & Exorcisms ──
+        try:
+            import scenario_data as _pact_sd
+            if session_id and _pact_sd.is_anomalous_incursions_scenario(scen_key):
+                from mechanics.pacts import evaluate_post_turn_pact_costs_and_breaches
+                _eff_pact_turn = int(
+                    ((outcome or {}).get("_target_turn") if isinstance(outcome, dict) else 0)
+                    or ((session or {}).get("_target_turn") if isinstance(session, dict) else 0)
+                    or ((session or {}).get("turn_count") if isinstance(session, dict) else 0)
+                    or 1
+                )
+                evaluate_post_turn_pact_costs_and_breaches(
+                    int(session_id),
+                    session if isinstance(session, dict) else {},
+                    party,
+                    outcome if isinstance(outcome, dict) else {},
+                    actions,
+                    turn_number=_eff_pact_turn,
+                )
+        except Exception as _pact_err:
+            log.warning("Failed evaluating post-turn Entity Contracts: %s", _pact_err)
+
         # ── 0-HP Recovery: Anomalous Extraction OR D8 Non-Combat Hazard Knockout ──
         try:
             import scenario_data
             if scenario_data.is_anomalous_incursions_scenario(scen_key) and party_uids and not (isinstance(outcome, dict) and outcome.get("_anomalous_extracted")):
-                lead_uid = party_uids[0]
-                fresh_char = db.get_character(lead_uid)
-                if fresh_char and int(fresh_char.get("hp", 1) or 0) <= 0:
+                downed_uids = [
+                    u for u in party_uids
+                    if int((db.get_character(u) or {}).get("hp", 1) or 0) <= 0
+                ]
+                if downed_uids:
                     from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
-                    ext_res = resolve_anomalous_emergency_extraction(session_id, lead_uid)
-                    for extra_uid in party_uids[1:]:
+                    primary_downed_uid = downed_uids[0]
+                    ext_res = resolve_anomalous_emergency_extraction(session_id, primary_downed_uid)
+                    for extra_uid in downed_uids[1:]:
                         p_ch = db.get_character(extra_uid)
                         if p_ch and int(p_ch.get("hp", 1) or 0) <= 0:
                             t_hp = max(1, int(p_ch.get("max_hp", 20) or 20) // 2)

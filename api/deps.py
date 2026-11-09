@@ -1,7 +1,10 @@
+from __future__ import annotations
+
+import json
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import WebSocket
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import db
 from db import adb
@@ -86,12 +89,13 @@ class ConnectionManager:
                 await conn["ws"].send_json(safe_message)
             except Exception as e:
                 logger.error(f"Error broadcasting to user {conn['user_id']}: {e}")
+                self.disconnect(clean_sid, conn["ws"])
 
 
 manager = ConnectionManager()
 
 
-_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot"})
+_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot", "_dealt_social_seeds"})
 
 
 def _to_json_safe(val, _seen: set[int] | None = None):
@@ -128,7 +132,15 @@ def _serializable_action(action: dict) -> dict:
     return _to_json_safe(action)
 
 
-def enrich_choices_with_odds(choices: list, user_id: int, session: dict = None) -> list:
+def enrich_choices_with_odds(
+    choices: list,
+    user_id: int,
+    session: dict = None,
+    *,
+    char: dict | None = None,
+    user_settings: dict | None = None,
+    inv: list | None = None,
+) -> list:
     """Enriches scene choices with calculated success_pct, chance, and Discord-matching action icons."""
     from cogs.adventure.embeds import (
         _get_choice_quest_icon,
@@ -137,10 +149,15 @@ def enrich_choices_with_odds(choices: list, user_id: int, session: dict = None) 
     )
     from mechanics.stealth import compute_choice_stealth_odds
 
-    char = db.get_character(user_id) if user_id else None
-    user_settings = db.get_settings(char["user_id"]) if char else {}
+    if user_settings is None and user_id:
+        user_settings = db.get_settings(user_id)
+    if char is None and user_id:
+        char = db.get_character(user_id, settings=user_settings)
+    if user_settings is None:
+        user_settings = db.get_settings(char["user_id"]) if char else {}
     check_mode = (user_settings or {}).get("debug_check_mode", "off")
-    inv = (db.get_inventory(user_id) or []) if (char and choices and isinstance(session, dict)) else None
+    if inv is None and char and choices and isinstance(session, dict):
+        inv = db.get_inventory(user_id, char=char) or []
 
     enriched = []
     for c in (choices or []):
@@ -187,33 +204,108 @@ def enrich_choices_with_odds(choices: list, user_id: int, session: dict = None) 
     return enriched
 
 
-def enrich_session_party_members(session_dict: dict) -> list:
+def _parse_status_effects_list(raw_val: Any) -> List[Any]:
+    if not raw_val:
+        return []
+    if isinstance(raw_val, list):
+        return raw_val
+    if isinstance(raw_val, str):
+        try:
+            parsed = json.loads(raw_val)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            return []
+    return list(raw_val) if isinstance(raw_val, (tuple, set)) else []
+
+
+def _hydrate_party_char_row(row: Any, settings_by_uid: Dict[int, Dict[str, Any]]) -> Tuple[int, Dict[str, Any]]:
+    u_key = int(row["user_id"])
+    raw_eff = row["status_effects"] if "status_effects" in row.keys() else None
+    hydrated = db.characters._apply_debug_stat_override(dict(row), settings=settings_by_uid.get(u_key, {}))
+    hydrated["status_effects"] = _parse_status_effects_list(raw_eff)
+    return u_key, hydrated
+
+
+def _batch_load_party_characters(missing_uids: List[int]) -> Dict[int, Dict[str, Any]]:
+    loaded: Dict[int, Dict[str, Any]] = {}
+    uids_json = json.dumps(missing_uids)
+    try:
+        with db.get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM characters WHERE user_id IN (SELECT value FROM json_each(?)) AND is_active = 1",
+                (uids_json,),
+            ).fetchall()
+            s_rows = conn.execute(
+                "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
+                (uids_json,),
+            ).fetchall()
+        settings_by_uid = {
+            int(sr["user_id"]): dict(sr)
+            for sr in s_rows
+            if sr and sr["user_id"] is not None
+        }
+        for r in rows:
+            u_key, hydrated = _hydrate_party_char_row(r, settings_by_uid)
+            loaded[u_key] = hydrated
+        return loaded
+    except Exception as exc:
+        logger.debug("Batch party character preload fallback: %s", exc)
+        return {}
+
+
+def _format_party_member_entry(uid: Any, char_data: Dict[str, Any]) -> Dict[str, Any]:
+    raw_eff_val = _parse_status_effects_list(char_data.get("status_effects"))
+    return {
+        "user_id": uid,
+        "character_id": char_data.get("id"),
+        "name": char_data.get("name"),
+        "char_class": char_data.get("char_class"),
+        "level": char_data.get("level", 1),
+        "hp": char_data.get("hp", 0),
+        "max_hp": char_data.get("max_hp", 0),
+        "mp": char_data.get("mp", 0),
+        "max_mp": char_data.get("max_mp", 0),
+        "gold": char_data.get("gold", 0),
+        "stats": {
+            "str": char_data.get("str_", 1),
+            "per": char_data.get("per_", 1),
+            "end": char_data.get("end_", 1),
+            "cha": char_data.get("cha", 1),
+            "int": char_data.get("int_", 1),
+            "agi": char_data.get("agi", 1),
+            "luk": char_data.get("luk", 1),
+        },
+        "status_effects": cd.sanitize_status_effects(raw_eff_val),
+        "gender": char_data.get("gender"),
+        "scenario": char_data.get("scenario"),
+    }
+
+
+def enrich_session_party_members(
+    session_dict: Dict[str, Any],
+    *,
+    preloaded_chars: Optional[Dict[int, Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """Fetches real-time vitals and status effects for all human characters in the party."""
     session_id = session_dict.get("id")
     if not session_id:
         return []
-    uids = db.get_session_members(session_id)
-    if not uids and session_dict.get("host_user_id"):
-        uids = [session_dict["host_user_id"]]
-    members = []
+    uids = db.get_session_members(session_id) or (
+        [session_dict["host_user_id"]] if session_dict.get("host_user_id") else []
+    )
+    chars_by_uid: Dict[int, Dict[str, Any]] = {
+        int(k): v for k, v in (preloaded_chars or {}).items() if k is not None and isinstance(v, dict)
+    }
+    missing_uids = [int(u) for u in uids if u is not None and int(u) not in chars_by_uid]
+    if len(missing_uids) > 1:
+        chars_by_uid.update(_batch_load_party_characters(missing_uids))
+
+    members: List[Dict[str, Any]] = []
     for uid in uids:
-        c = db.get_character(uid)
+        u_int = int(uid)
+        c = chars_by_uid[u_int] if u_int in chars_by_uid else db.get_character(uid)
         if c:
-            members.append({
-                "user_id": uid,
-                "character_id": c.get("id"),
-                "name": c.get("name"),
-                "char_class": c.get("char_class"),
-                "level": c.get("level", 1),
-                "hp": c.get("hp", 0),
-                "max_hp": c.get("max_hp", 0),
-                "mp": c.get("mp", 0),
-                "max_mp": c.get("max_mp", 0),
-                "gold": c.get("gold", 0),
-                "status_effects": cd.sanitize_status_effects(c.get("status_effects") or []),
-                "gender": c.get("gender"),
-                "scenario": c.get("scenario"),
-            })
+            members.append(_format_party_member_entry(uid, c))
     return members
 
 
@@ -263,8 +355,6 @@ class CharacterCreateRequest(BaseModel):
     attribute: Optional[str] = None
     combat_archetype: Optional[str] = None
     ability_medium: Optional[str] = None
-    origin_mode: Optional[str] = None
-    student_grade: Optional[str] = None
 
 
 class CharacterAppearanceUpdateRequest(BaseModel):
@@ -338,6 +428,8 @@ class JoinAdventureRequest(BaseModel):
 
 
 class StartAdventureRequest(BaseModel):
+    model_config = {"populate_by_name": True}
+
     user_id: int
     mode: str = "solo"
     scenario: str = "fantasy"
@@ -366,11 +458,16 @@ class StartAdventureRequest(BaseModel):
     attribute: Optional[str] = None
     combat_archetype: Optional[str] = None
     ability_medium: Optional[str] = None
-    origin_mode: Optional[str] = None
-    student_grade: Optional[str] = None
     appearance: Optional[Dict[str, Any]] = None
     slot: Optional[int] = 1
     character_id: Optional[int] = None
+
+    @field_validator("scenario", mode="before")
+    @classmethod
+    def coerce_req_scenario(cls, v: Any) -> str:
+        if not v or str(v).strip().lower() in ("", "none", "null", "undefined"):
+            return "fantasy"
+        return str(v).strip()
 
 
 class ResumeSessionRequest(BaseModel):

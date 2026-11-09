@@ -441,5 +441,21 @@
       "zh": {"title": "区域隐患坐大", "description": "{venue}附近未除的威胁正扰乱补给、动摇人心。", "remediation_title": "肃清{venue}的盘踞隐患"},
       "de": {"title": "Erstarkte Bedrohung", "description": "Eine ungebremste Gefahr nahe {venue} stört Versorgung und Sicherheit.", "remediation_title": "Beseitige die Gefahr bei {venue}"}
     }
+  },
+  "liberation_ops": {
+    "buildup": {
+      "en": {"title": "Liberation Op: Reclaim {venue}", "objective": "Break entrenched enemy checkpoints and liberate {venue} from occupation fallout."},
+      "pl": {"title": "Operacja Wyzwolenia: Odbij {venue}", "objective": "Przełam umocnione posterunki wroga i wyzwól {venue} spod okupacji."},
+      "ms": {"title": "Operasi Pembebasan: Tawan Semula {venue}", "objective": "Pecahkan kubu sekatan musuh dan bebaskan {venue} daripada kesan pendudukan."},
+      "zh": {"title": "解放行动：收复{venue}", "objective": "击破敌方盘踞哨卡，将{venue}从失陷封锁中彻底解放。"},
+      "de": {"title": "Befreiungsoperation: {venue} Zurückerobern", "objective": "Zerschlage befestigte Kontrollpunkte und befreie {venue} von der Besatzung."}
+    },
+    "peak_resistance": {
+      "en": {"title": "Resistance Strike: Shatter Peak Cordon at {venue}", "objective": "Lead a high-risk Resistance assault to dismantle the regime's iron cordon holding {venue}."},
+      "pl": {"title": "Uderzenie Oporu: Skrusz Kordon w {venue}", "objective": "Poprowadź ryzykowny szturm Ruchu Oporu i rozbij żelazny kordon wokół {venue}."},
+      "ms": {"title": "Serangan Penentangan: Runtuhkan Kepungan di {venue}", "objective": "Pimpin gempuran berisiko tinggi sel Penentangan untuk meruntuhkan kepungan besi di {venue}."},
+      "zh": {"title": "抵抗军奇袭：击碎{venue}铁幕封锁", "objective": "率领地下抵抗军发起高危强袭，拔除统治{venue}的铁血封锁中枢。"},
+      "de": {"title": "Widerstandsschlag: Sperrriegel bei {venue} Brechen", "objective": "Führe einen riskanten Angriff des Widerstands an, um den eisernen Kordon um {venue} zu sprengen."}
+    }
   }
 }

@@ -1,0 +1,528 @@
+{
+  "villages": {
+    "kitsune": {
+      "village_id": "loc_hidden_kitsune_village",
+      "zone_id": "zone_eastern_sanctuary",
+      "zone_name": "Sacred Mountain Sanctuary & Onsen Quarter",
+      "mundane_name": "Thousand-Torii Fox Shrine Approach",
+      "true_name": "Hidden Sato-no-Inari Kitsune Village",
+      "outer_threshold_id": "loc_et_fox_torii_tunnel",
+      "outer_threshold_name": "Thousand-Torii Fox Shrine Approach",
+      "inner_plaza_id": "sub_kitsune_inner_plaza",
+      "inner_plaza_name": "Starlit Fox-Fire Lantern Plaza",
+      "royal_pavilion_id": "sub_kitsune_sovereign_pavilion",
+      "royal_pavilion_name": "Nine-Tail Sovereign's Hinoki Pavilion",
+      "merchant_room_id": "sub_kitsune_spirit_apothecary",
+      "merchant_room_name": "Myōbu Spirit-Fire Curio & Apothecary",
+      "leyline_room_id": "sub_kitsune_leyline_shrine",
+      "leyline_room_name": "Celestial Inari Sanctum & Spirit Arch",
+      "permission_token_name": "Fox-Fire Brass Suzu Bell",
+      "permission_token_slug": "fox-fire brass suzu bell",
+      "veil_dc": 14,
+      "twilight_veil_dc": 12,
+      "atonement_cost_gold": 100,
+      "atonement_offering_label": "Sacred Aburaage & Cedar Incense Offering"
+    },
+    "bunian": {
+      "village_id": "loc_hidden_bunian_village",
+      "zone_id": "zone_woods_reserve",
+      "zone_name": "Wilderness Forest Reserve",
+      "mundane_name": "Mist-Veiled Banyan & Bamboo Glade",
+      "true_name": "Veiled Kampung Kayangan Bunian",
+      "outer_threshold_id": "loc_bunian_threshold_glade",
+      "outer_threshold_name": "Mist-Veiled Banyan & Bamboo Glade",
+      "inner_plaza_id": "sub_bunian_inner_plaza",
+      "inner_plaza_name": "Laman Seri Cempaka Plaza",
+      "royal_pavilion_id": "sub_bunian_royal_istana",
+      "royal_pavilion_name": "Balairung & Puteri's Songket Pavilion",
+      "merchant_room_id": "sub_bunian_pusaka_hall",
+      "merchant_room_name": "Empu's Pusaka Artisan Hall",
+      "leyline_room_id": "sub_bunian_orchid_spring",
+      "leyline_room_name": "Moonlit Cempaka Bathing Spring & Spirit Arch",
+      "permission_token_name": "Cempaka Brass Serunai",
+      "permission_token_slug": "cempaka brass serunai",
+      "veil_dc": 14,
+      "twilight_veil_dc": 12,
+      "atonement_cost_gold": 100,
+      "atonement_offering_label": "Bunga Rampai & Benzoin Kemeyan Offering"
+    }
+  },
+  "permission_tokens": {
+    "fox_fire_suzu_bell": {
+      "name": "Fox-Fire Brass Suzu Bell",
+      "slug": "fox-fire brass suzu bell",
+      "village_key": "kitsune",
+      "price": 180,
+      "item_type": "quest_item",
+      "rarity": "rare",
+      "quest_locked": true,
+      "unsellable": true,
+      "undroppable": true,
+      "vendor_location_id": "loc_eastern_temple",
+      "description": "A consecrated brass shrine suzu bell etched with nine-tail Inari clouds; its clear chime parts the illusion veil of the Hidden Kitsune Village."
+    },
+    "cempaka_brass_serunai": {
+      "name": "Cempaka Brass Serunai",
+      "slug": "cempaka brass serunai",
+      "village_key": "bunian",
+      "price": 180,
+      "item_type": "quest_item",
+      "rarity": "rare",
+      "quest_locked": true,
+      "unsellable": true,
+      "undroppable": true,
+      "vendor_location_id": "loc_ranger_station",
+      "description": "A handcrafted Nusantara reed-and-brass flute carrying the timeless scent of white cempaka blossoms; opens the veiled paths of Kampung Kayangan Bunian."
+    }
+  },
+  "name_pools": {
+    "kitsune": {
+      "female_given": ["Tamamo", "Kuzunoha", "Kohaku", "Suzuha", "Kagura", "Mikage", "Hotaru", "Shirayuki", "Akane", "Yuzuki", "Konoha", "Komachi"],
+      "male_given": ["Hakumen", "Kurama", "Izuna", "Byakko", "Yakumo", "Kenshin", "Subaru", "Kagetsu", "Shigure", "Haku", "Renji", "Ukon"],
+      "surnames": ["Inari", "Minamoto", "Shirakawa", "Tsukishiro", "Kitsunebi", "Takamagahara", "Fujinomiya", "Kasuga"],
+      "sovereign_female": "Lady Tamamo-no-Shirakawa",
+      "sovereign_male": "Lord Hakumen-no-Shirakawa"
+    },
+    "bunian": {
+      "female_given": ["Cempaka", "Melur", "Kirana", "Kasturi", "Seroja", "Nilam", "Puspita", "Delima", "Mayang", "Anggerik", "Ratna", "Kesuma"],
+      "male_given": ["Indera", "Purnama", "Sakti", "Bayu", "Megat", "Naga", "Wira", "Kencana", "Nirwana", "Adi", "Jebat", "Tuah"],
+      "royal_female": "Puteri Seri Cempaka",
+      "royal_male": "Putera Indera Purnama",
+      "honorifics": {
+        "elder_male": "Penghulu",
+        "elder_female": "Tok Puan",
+        "merchant_male": "Empu",
+        "merchant_female": "Empu Seri",
+        "guardian_male": "Hulubalang",
+        "guardian_female": "Srikandi",
+        "healer_male": "Pawang",
+        "healer_female": "Bidan Seri",
+        "scout_male": "Awang",
+        "scout_female": "Dayang"
+      }
+    }
+  },
+  "appearance_palettes": {
+    "kitsune_coats": [
+      "Celestial Gold-Tipped Snow-White Kitsune Fur",
+      "Vibrant Rust-Red Fox Fur",
+      "Snow-White Kitsune Fur",
+      "Pastel Sakura-Pink Fox Fur",
+      "Ethereal Sky-Blue Fox Fur",
+      "Jade-Green Kitsune Fur",
+      "Luminous Violet Fox Fur",
+      "Silver-Tipped Midnight Fox Fur"
+    ],
+    "kitsune_eyes": [
+      "Sunburst Gold",
+      "Bright Amber",
+      "Glistening Emerald",
+      "Ruby Red",
+      "Amethyst Purple",
+      "Sapphire Ice-Blue"
+    ],
+    "bunian_skin_tones": [
+      "Luminous Ivory-Fair Porcelain",
+      "Radiant Pearl-Fair",
+      "Dewy Moonlight-Fair",
+      "Warm Alabaster Fair",
+      "Sun-Kissed Champagne Fair",
+      "Clear Rose-Ivory Fair"
+    ],
+    "bunian_female_builds": [
+      "Slender Regal Hourglass",
+      "Graceful Lithe Sculpted",
+      "Slender Willow-Graceful",
+      "Toned Dancer Lithe"
+    ],
+    "bunian_male_builds": [
+      "Lean Sculpted Regal",
+      "Tall Lithe Athletic",
+      "Graceful Martial Swimmer's Build",
+      "Slender Noble Poised"
+    ],
+    "bunian_female_regalia": [
+      "Ivory-and-gold Nusantara royal songket kebaya labuh with golden cempaka cucuk sanggul hairpins",
+      "Emerald silk baju kurung songket woven with silver jasmine threads and draped selendang shawl",
+      "Saffron-gold embroidered kebaya diraja paired with a pleated sarong songket and filigree anklet bells",
+      "Moonlit celadon silk kebaya with intricate floral gold brocade and carved jade-and-gold hairpins"
+    ],
+    "bunian_male_regalia": [
+      "Ivory-and-gold royal Nusantara baju sikap with woven songket samping, folded tengkolok, and gilded keris sash",
+      "Deep emerald silk baju melayu cekak musang with gold-threaded songket samping and royal pending buckle",
+      "Crimson-and-gold pendekar baju sikap jacket over fine linen, bound with a sacred songket waist-sash",
+      "Midnight-indigo Nusantara court tunic embroidered in gold lotus filigree with a ceremonial folded destar"
+    ]
+  },
+  "kitsune_roster_slots": [
+    {
+      "slot_key": "kitsune_sovereign",
+      "role": "Nine-Tailed Myōbu Sovereign",
+      "rank_title": "Myōbu Sovereign",
+      "agent_tier": 5,
+      "tails": 9,
+      "is_sovereign": true,
+      "opposite_gender_to_pc": true,
+      "forced_initial_form": "kitsune:humanoid",
+      "coat": "Celestial Gold-Tipped Snow-White Kitsune Fur",
+      "eyes": "Sunburst Gold",
+      "combat_kit": "kitsune_sovereign",
+      "home_node": "sub_kitsune_sovereign_pavilion",
+      "schedule": {
+        "morning": "sub_kitsune_sovereign_pavilion",
+        "afternoon": "sub_kitsune_inner_plaza",
+        "evening": "sub_kitsune_leyline_shrine",
+        "night": "sub_kitsune_sovereign_pavilion"
+      },
+      "personality": "Regal, centuries-old nine-tailed shrine sovereign who speaks with playful courtly poise and fiercely upholds the Sanctuary Non-Aggression Pact."
+    },
+    {
+      "slot_key": "kitsune_elder",
+      "role": "Six-Tailed Shrine Elder",
+      "rank_title": "High Inari Diviner",
+      "agent_tier": 4,
+      "tails": 6,
+      "coat": "Silver-Tipped Midnight Fox Fur",
+      "eyes": "Amethyst Purple",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_leyline_shrine",
+      "schedule": {
+        "morning": "sub_kitsune_leyline_shrine",
+        "afternoon": "sub_kitsune_leyline_shrine",
+        "evening": "sub_kitsune_inner_plaza",
+        "night": "sub_kitsune_leyline_shrine"
+      },
+      "personality": "Serene keeper of the Leyline Spirit Arch who reads starlight ripples and tests mortal sincerity."
+    },
+    {
+      "slot_key": "kitsune_merchant",
+      "role": "Five-Tailed Spirit Apothecary",
+      "rank_title": "Fox-Fire Curio Broker",
+      "agent_tier": 3,
+      "tails": 5,
+      "forced_initial_form": "kitsune:humanoid",
+      "merchant_type": "kitsune_spirit_merchant",
+      "coat": "Pastel Sakura-Pink Fox Fur",
+      "eyes": "Ruby Red",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_spirit_apothecary",
+      "schedule": {
+        "morning": "sub_kitsune_spirit_apothecary",
+        "afternoon": "sub_kitsune_spirit_apothecary",
+        "evening": "sub_kitsune_spirit_apothecary",
+        "night": "sub_kitsune_inner_plaza"
+      },
+      "personality": "Shrewd, silver-tongued apothecary brewing starlight elixirs and bartering warded Myōbu relics to trusted mortals."
+    },
+    {
+      "slot_key": "kitsune_guardian",
+      "role": "Seven-Tailed Torii Blade-Warden",
+      "rank_title": "Torii Sentinel",
+      "agent_tier": 4,
+      "tails": 7,
+      "coat": "Vibrant Rust-Red Fox Fur",
+      "eyes": "Bright Amber",
+      "combat_kit": "kitsune_guardian",
+      "home_node": "sub_kitsune_inner_plaza",
+      "schedule": {
+        "morning": "loc_et_fox_torii_tunnel",
+        "afternoon": "sub_kitsune_inner_plaza",
+        "evening": "loc_et_fox_torii_tunnel",
+        "night": "sub_kitsune_inner_plaza"
+      },
+      "personality": "Disciplined shrine sentinel patrolling the vermilion torii border against Syndicate poachers and occult cultists."
+    },
+    {
+      "slot_key": "kitsune_chronicler",
+      "role": "Four-Tailed Mirage Scribe",
+      "rank_title": "Illusion Chronicler",
+      "agent_tier": 3,
+      "tails": 4,
+      "coat": "Ethereal Sky-Blue Fox Fur",
+      "eyes": "Glistening Emerald",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_inner_plaza",
+      "schedule": {
+        "morning": "sub_kitsune_inner_plaza",
+        "afternoon": "sub_kitsune_sovereign_pavilion",
+        "evening": "sub_kitsune_inner_plaza",
+        "night": "sub_kitsune_leyline_shrine"
+      },
+      "personality": "Inquisitive folklore chronicler fascinated by modern human smartphones, tea sweets, and urban legends."
+    },
+    {
+      "slot_key": "kitsune_wanderer",
+      "role": "Two-Tailed Glamour Scout",
+      "rank_title": "Wayward Shrine Scout",
+      "agent_tier": 2,
+      "tails": 2,
+      "is_daytime_wanderer": true,
+      "coat": "Jade-Green Kitsune Fur",
+      "eyes": "Sapphire Ice-Blue",
+      "combat_kit": "kitsune_guardian",
+      "home_node": "sub_kitsune_inner_plaza",
+      "glamour_tell": "a faint twin-tailed shadow flickering under lantern light and the warm scent of roasted sesame and shrine cedar",
+      "schedule": {
+        "morning": "loc_es_lantern_tea_street",
+        "afternoon": "loc_es_bamboo_footbath_bridge",
+        "evening": "sub_kitsune_inner_plaza",
+        "night": "sub_kitsune_inner_plaza"
+      },
+      "personality": "Playful young kitsune who slips into human glamour during the day to sample street-stall sweets along the Sanctuary tea steps."
+    },
+    {
+      "slot_key": "kitsune_novice",
+      "role": "One-Tailed Fox-Fire Initiate",
+      "rank_title": "Lantern Novice",
+      "agent_tier": 2,
+      "tails": 1,
+      "coat": "Luminous Violet Fox Fur",
+      "eyes": "Bright Amber",
+      "combat_kit": "kitsune_guardian",
+      "home_node": "sub_kitsune_leyline_shrine",
+      "schedule": {
+        "morning": "sub_kitsune_leyline_shrine",
+        "afternoon": "sub_kitsune_inner_plaza",
+        "evening": "sub_kitsune_inner_plaza",
+        "night": "sub_kitsune_leyline_shrine"
+      },
+      "personality": "Earnest, spirited young fox spirit tending the blue kitsunebi lanterns and eager to accompany friendly mortals on city delves."
+    }
+  ],
+  "bunian_roster_slots": [
+    {
+      "slot_key": "bunian_royal_heir",
+      "role": "Royal Heir of Kampung Kayangan",
+      "rank_title": "Royal Heir",
+      "agent_tier": 5,
+      "is_sovereign": true,
+      "is_royal_heir": true,
+      "opposite_gender_to_pc": true,
+      "secret_crush_on_pc": true,
+      "initial_affinity": 20,
+      "virgin": true,
+      "single": true,
+      "combat_kit": "bunian_royal",
+      "home_node": "sub_bunian_royal_istana",
+      "schedule": {
+        "morning": "sub_bunian_orchid_spring",
+        "afternoon": "sub_bunian_royal_istana",
+        "evening": "sub_bunian_inner_plaza",
+        "night": "sub_bunian_royal_istana"
+      },
+      "personality": "Ethereal, pure-hearted royal heir of the Orang Bunian who feels a quiet, destined longing toward the protagonist from first sight, hiding shy warmth behind courtly Nusantara grace."
+    },
+    {
+      "slot_key": "bunian_elder",
+      "role": "Council Elder of the Mist-Banyan",
+      "rank_title": "Council Elder",
+      "agent_tier": 4,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_inner_plaza",
+      "schedule": {
+        "morning": "sub_bunian_inner_plaza",
+        "afternoon": "sub_bunian_royal_istana",
+        "evening": "sub_bunian_inner_plaza",
+        "night": "sub_bunian_inner_plaza"
+      },
+      "personality": "Wise, soft-spoken custodian of ancient forest adat and treaties who honors courteous mortals and banishes Oath-breakers into the mist."
+    },
+    {
+      "slot_key": "bunian_merchant",
+      "role": "Master Empu of Pusaka Relics",
+      "rank_title": "Master Pusaka Artisan",
+      "agent_tier": 3,
+      "merchant_type": "bunian_pusaka_merchant",
+      "combat_kit": "bunian_hulubalang",
+      "home_node": "sub_bunian_pusaka_hall",
+      "schedule": {
+        "morning": "sub_bunian_pusaka_hall",
+        "afternoon": "sub_bunian_pusaka_hall",
+        "evening": "sub_bunian_pusaka_hall",
+        "night": "sub_bunian_inner_plaza"
+      },
+      "personality": "Master Nusantara metalsmith and songket weaver forging meteoric-iron keris charms and mist-warded regalia."
+    },
+    {
+      "slot_key": "bunian_guardian",
+      "role": "Veil Sentinel of the Banyan Gate",
+      "rank_title": "Veil Sentinel",
+      "agent_tier": 4,
+      "combat_kit": "bunian_hulubalang",
+      "home_node": "sub_bunian_inner_plaza",
+      "schedule": {
+        "morning": "loc_bunian_threshold_glade",
+        "afternoon": "sub_bunian_inner_plaza",
+        "evening": "loc_bunian_threshold_glade",
+        "night": "sub_bunian_inner_plaza"
+      },
+      "personality": "Poised silat warrior-sentinel guarding the banyan mist boundary with wind-step grace and unwavering loyalty."
+    },
+    {
+      "slot_key": "bunian_healer",
+      "role": "Keeper of the Moonlit Cempaka Spring",
+      "rank_title": "Kayangan Herbalist",
+      "agent_tier": 3,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_orchid_spring",
+      "schedule": {
+        "morning": "sub_bunian_orchid_spring",
+        "afternoon": "sub_bunian_orchid_spring",
+        "evening": "sub_bunian_inner_plaza",
+        "night": "sub_bunian_orchid_spring"
+      },
+      "personality": "Gentle spring keeper who distills moon-dew tonics and tends the glowing leyline orchids linking the two spirit enclaves."
+    },
+    {
+      "slot_key": "bunian_wanderer",
+      "role": "Mist-Trail Glamour Envoy",
+      "rank_title": "Forest Envoy",
+      "agent_tier": 2,
+      "is_daytime_wanderer": true,
+      "combat_kit": "bunian_hulubalang",
+      "home_node": "sub_bunian_inner_plaza",
+      "glamour_tell": "a lingering fragrance of white cempaka blossoms on windless air and slender pointed ear-tips half-hidden beneath dark hair",
+      "schedule": {
+        "morning": "sub_trail_gateway",
+        "afternoon": "sub_cedar_bridge",
+        "evening": "sub_bunian_inner_plaza",
+        "night": "sub_bunian_orchid_spring"
+      },
+      "personality": "Observant Bunian envoy who walks the outer cedar trails in human guise by day, quietly guiding lost hikers away from dangerous rifts."
+    },
+    {
+      "slot_key": "bunian_minstrel",
+      "role": "Serunai & Gambus Courtier",
+      "rank_title": "Kayangan Lyricist",
+      "agent_tier": 2,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_orchid_spring",
+      "schedule": {
+        "morning": "sub_bunian_inner_plaza",
+        "afternoon": "sub_bunian_orchid_spring",
+        "evening": "sub_bunian_royal_istana",
+        "night": "sub_bunian_orchid_spring"
+      },
+      "personality": "Melodic courtier whose bamboo flute echoes across the reserve at twilight, curious about mortal music and stories."
+    }
+  ],
+  "combat_kits": {
+    "kitsune_sovereign": [
+      {"name": "Kitsunebi Ninefold Barrage", "type": "offensive", "power": 34, "mp_cost": 14, "stat": "INT", "description": "Unleashes nine orbiting azure fox-fire spheres that sear anomalous corruption."},
+      {"name": "Torii Mirage Veil", "type": "buff", "power": 22, "mp_cost": 10, "stat": "AGI", "description": "Wraps allies in refracting shrine mist, sharply boosting evasion and ward resistance."},
+      {"name": "Bewitching Suzu Resonance", "type": "debuff", "power": 24, "mp_cost": 12, "stat": "CHA", "description": "Rings a sacred chime that disorients hostile entities and disrupts their focus."},
+      {"name": "Inari Sunlit Mending", "type": "heal", "power": 30, "mp_cost": 14, "stat": "INT", "description": "Restores vitality and purges psychic static with warm golden shrine light."},
+      {"name": "Ultimate: Celestial Myōbu Nine-Tail Eclipse", "type": "ultimate", "power": 58, "mp_cost": 28, "stat": "INT", "is_ultimate": true, "description": "Manifests the full nine-tailed celestial corona, incinerating hostile rifts while shielding the party."}
+    ],
+    "kitsune_guardian": [
+      {"name": "Fox-Fire Iaijutsu Slash", "type": "offensive", "power": 28, "mp_cost": 10, "stat": "AGI", "description": "Draws a spirit-wreathed shrine blade in a blinding vermilion arc."},
+      {"name": "Flicker-Step Phantasms", "type": "buff", "power": 18, "mp_cost": 8, "stat": "AGI", "description": "Splits into twin foxfire afterimages to evade incoming strikes."},
+      {"name": "Shimenawa Spirit Bind", "type": "debuff", "power": 20, "mp_cost": 10, "stat": "PER", "description": "Pins an enemy's shadow with consecrated talisman cords."},
+      {"name": "Guardian's Shrine Ward", "type": "defensive", "power": 22, "mp_cost": 10, "stat": "END", "description": "Raises a vermilion torii barrier that absorbs incoming blows."},
+      {"name": "Ultimate: Thousand-Torii Crimson Tempest", "type": "ultimate", "power": 48, "mp_cost": 24, "stat": "AGI", "is_ultimate": true, "description": "Summons a corridor of spectral torii gates to blitz through every foe in foxfire."}
+    ],
+    "kitsune_mystic": [
+      {"name": "Azure Kitsunebi Wisp", "type": "offensive", "power": 25, "mp_cost": 9, "stat": "INT", "description": "Launches homing spirit-lantern flames that bypass mundane armor."},
+      {"name": "Aburaage Vitality Brew", "type": "heal", "power": 26, "mp_cost": 11, "stat": "INT", "description": "Infuses an ally with warm shrine spirit-nectar to mend wounds."},
+      {"name": "Fox-Mist Confusion", "type": "debuff", "power": 19, "mp_cost": 9, "stat": "CHA", "description": "Blankets foes in illusory twilight fog, lowering accuracy."},
+      {"name": "Starlit Tail Blessing", "type": "buff", "power": 20, "mp_cost": 10, "stat": "LUK", "description": "Blesses the party with auspicious Inari fortune and critical focus."},
+      {"name": "Ultimate: Star-Lantern Grand Exorcism", "type": "ultimate", "power": 45, "mp_cost": 22, "stat": "INT", "is_ultimate": true, "description": "Ignites a constellation of shrine lanterns that purges anomalies and restores ally spirit."}
+    ],
+    "kitsune_myobu_beast": [
+      {"name": "Spirit-Fox Fang Lunge", "type": "offensive", "power": 24, "mp_cost": 6, "stat": "AGI", "description": "Darts across the battlefield as a silver-fast spirit fox, biting with foxfire fangs."},
+      {"name": "Multi-Tail Ember Sweep", "type": "offensive", "power": 26, "mp_cost": 9, "stat": "INT", "description": "Sweeps blazing spirit tails to scatter ghostly embers across clustered enemies."},
+      {"name": "Myōbu Howl of Warding", "type": "buff", "power": 18, "mp_cost": 8, "stat": "PER", "description": "Lets out a crystalline spirit yip that sharpens party perception and dodge."},
+      {"name": "Shadow-Brush Pounce", "type": "debuff", "power": 18, "mp_cost": 8, "stat": "AGI", "description": "Harries a target's flank, throwing them off balance."},
+      {"name": "Ultimate: Wild Myōbu Astral Stampede", "type": "ultimate", "power": 44, "mp_cost": 20, "stat": "AGI", "is_ultimate": true, "description": "Multiplies into a pack of blazing spirit foxes that overwhelm all hostile targets."}
+    ],
+    "bunian_royal": [
+      {"name": "Sinar Seri Kayangan", "type": "offensive", "power": 33, "mp_cost": 14, "stat": "INT", "description": "Calls down a radiant beam of moonlit Kayangan grace that dissolves anomalous taint."},
+      {"name": "Cempaka Royal Restorative", "type": "heal", "power": 32, "mp_cost": 14, "stat": "CHA", "description": "Showers allies in fragrant golden cempaka petals, deeply restoring health and composure."},
+      {"name": "Selendang Mist Sanctuary", "type": "buff", "power": 24, "mp_cost": 11, "stat": "AGI", "description": "Weaves royal songket mist around the party, softening harm and hiding their presence."},
+      {"name": "Titah Diraja Command", "type": "debuff", "power": 23, "mp_cost": 11, "stat": "CHA", "description": "Utters a sovereign Nusantara cadence that stills violent malice in enemies."},
+      {"name": "Ultimate: Mahkota Kayangan Sovereign Bloom", "type": "ultimate", "power": 58, "mp_cost": 28, "stat": "CHA", "is_ultimate": true, "description": "Unfurls the full majesty of the veiled Kayangan realm, healing allies and banishing hostile horrors in golden mist."}
+    ],
+    "bunian_hulubalang": [
+      {"name": "Keris Halilintar Thrust", "type": "offensive", "power": 29, "mp_cost": 10, "stat": "AGI", "description": "Lunges with a sinuous meteoric-iron keris wreathed in emerald wind."},
+      {"name": "Langkah Angin Silat", "type": "buff", "power": 20, "mp_cost": 8, "stat": "AGI", "description": "Adopts a weightless Kayangan silat footwork stance to counter incoming strikes."},
+      {"name": "Banyan Root Snare", "type": "debuff", "power": 20, "mp_cost": 10, "stat": "PER", "description": "Commands spectral banyan roots to entangle an enemy's stride."},
+      {"name": "Pendekar Songket Aegis", "type": "defensive", "power": 23, "mp_cost": 10, "stat": "END", "description": "Channels ancestral pusaka warding through gold-woven cloth."},
+      {"name": "Ultimate: Tujuh Lapis Pusaka Storm", "type": "ultimate", "power": 49, "mp_cost": 24, "stat": "AGI", "is_ultimate": true, "description": "Executes a seven-step Kayangan pendekar blitz that cleaves through every dimensional threat."}
+    ],
+    "bunian_pawang": [
+      {"name": "Serunai Resonance Bolt", "type": "offensive", "power": 24, "mp_cost": 9, "stat": "INT", "description": "Projects a piercing harmonic note that shatters unnatural distortions."},
+      {"name": "Air Embun Kayangan", "type": "heal", "power": 28, "mp_cost": 11, "stat": "INT", "description": "Applies blessed moonlit orchid dew to mend wounds and fatigue."},
+      {"name": "Kabut Rimba Veil", "type": "debuff", "power": 20, "mp_cost": 9, "stat": "PER", "description": "Shrouds adversaries in disorienting primeval forest mist."},
+      {"name": "Semangat Rimba Blessing", "type": "buff", "power": 20, "mp_cost": 10, "stat": "END", "description": "Harmonizes ally vital spirit with ancient forest leylines."},
+      {"name": "Ultimate: Malam Berinai Spirit Chorus", "type": "ultimate", "power": 46, "mp_cost": 22, "stat": "INT", "is_ultimate": true, "description": "Calls forth the unseen chorus of the elder woods to rejuvenate the party and purge corruption."}
+    ]
+  },
+  "merchant_catalogs": {
+    "kitsune_spirit_merchant": {
+      "open_stock": [
+        {"name": "Fox-Fire Lantern Talisman", "item_type": "consumable", "tier": 3, "price": 95, "effect": "Restores 35 MP and illuminates hidden anomalies"},
+        {"name": "Inari Honeyed Aburaage Box", "item_type": "consumable", "tier": 3, "price": 65, "effect": "Restores 40 HP and grants warm shrine fortune"},
+        {"name": "Vermilion Kitsune Ward Haori", "item_type": "armor", "slot": "chest", "tier": 2, "price": 420, "defense": 12, "effect": "Silk shrine haori threaded with foxfire wards (+2 AGI, +2 INT)"},
+        {"name": "Myōbu Silver Suzu Blade", "item_type": "weapon", "slot": "main_hand", "tier": 2, "price": 460, "attack": 16, "effect": "Consecrated shrine wakizashi that rings with azure foxfire (+2 PER)"}
+      ],
+      "trusted_tier1_stock": [
+        {"name": "Celestial Nine-Tail Regalia Robe", "item_type": "armor", "slot": "chest", "tier": 1, "price": 1250, "defense": 22, "min_trust": 60, "effect": "Sovereign-blessed hinoki-silk vestment woven from starlit foxfire (+4 INT, +3 AGI)"},
+        {"name": "Kitsunebi Sovereign Kagura Fan", "item_type": "weapon", "slot": "main_hand", "tier": 1, "price": 1350, "attack": 26, "min_trust": 60, "effect": "Relic iron-and-gold ritual fan commanding ninefold spirit flame (+4 INT, +3 CHA)"}
+      ]
+    },
+    "bunian_pusaka_merchant": {
+      "open_stock": [
+        {"name": "Embun Cempaka Dew Vial", "item_type": "consumable", "tier": 3, "price": 95, "effect": "Restores 45 HP and clears psychic exhaustion"},
+        {"name": "Bunga Rampai Spirit Sachet", "item_type": "consumable", "tier": 3, "price": 80, "effect": "Restores 30 MP and calms hostile forest spirits"},
+        {"name": "Songket Kayangan Pendekar Vestment", "item_type": "armor", "slot": "chest", "tier": 2, "price": 440, "defense": 13, "effect": "Gold-brocaded Nusantara royal cloth light as mist (+2 AGI, +2 CHA)"},
+        {"name": "Keris Lok Tujuh Berpamur", "item_type": "weapon", "slot": "main_hand", "tier": 2, "price": 480, "attack": 17, "effect": "Seven-wave meteoric-iron pusaka keris humming with leyline wind (+2 AGI)"}
+      ],
+      "trusted_tier1_stock": [
+        {"name": "Busana Diraja Seri Kayangan", "item_type": "armor", "slot": "chest", "tier": 1, "price": 1300, "defense": 23, "min_trust": 60, "effect": "Heirloom royal Bunian songket regalia blessed against all mortal & anomalous harm (+4 CHA, +3 END)"},
+        {"name": "Keris Pusaka Taming Sari Kayangan", "item_type": "weapon", "slot": "main_hand", "tier": 1, "price": 1400, "attack": 27, "min_trust": 60, "effect": "Legendary veiled-realm pusaka keris that moves of its own accord to parry lethal blows (+4 AGI, +3 PER)"}
+      ]
+    },
+    "ranger_station_outfitter": {
+      "open_stock": [
+        {"name": "Cempaka Brass Serunai", "item_type": "quest_item", "tier": 2, "price": 180, "quest_locked": true, "unsellable": true, "undroppable": true, "effect": "Handcrafted brass-and-bamboo Nusantara reed flute scented with white cempaka; parts the mist veil of Kampung Kayangan Bunian"},
+        {"name": "Alpine Trail Trauma Medkit", "item_type": "consumable", "tier": 3, "price": 75, "effect": "Restores 45 HP during wilderness expeditions"},
+        {"name": "Cold-Iron Signal Flare Pack", "item_type": "consumable", "tier": 3, "price": 85, "effect": "Grounds ambient spatial distortion and reveals trail hazards"},
+        {"name": "Reinforced Ranger Field Parka", "item_type": "armor", "slot": "chest", "tier": 3, "price": 260, "defense": 9, "effect": "Weatherproof forestry canvas jacket lined with warding mesh (+1 END, +1 PER)"}
+      ]
+    }
+  },
+  "rumors": [
+    {
+      "id": "rumor_kitsune_suzu_veil",
+      "village_key": "kitsune",
+      "target_node_id": "loc_hidden_kitsune_village",
+      "title": "Blue Lanterns Beyond the Thousand Torii",
+      "text": "Late-evening pilgrims along the Sacred Mountain Sanctuary swear the Thousand-Torii Fox Shrine Approach stretches further at twilight—and that the Omikuji stand sells an old Fox-Fire Brass Suzu Bell whose chime reveals a hidden lantern plaza."
+    },
+    {
+      "id": "rumor_bunian_cempaka_veil",
+      "village_key": "bunian",
+      "target_node_id": "loc_hidden_bunian_village",
+      "title": "Fragrance of Cempaka in the Banyan Mist",
+      "text": "Forestry rangers at the Old Ranger Station speak of lost hikers guided home by graceful figures in gold-threaded songket near the Mist-Veiled Banyan & Bamboo Glade—and keep a curious Cempaka Brass Serunai traded by an unseen flute-player."
+    }
+  ],
+  "festivals": [
+    {
+      "id": "evt_kitsune_hundred_foxfires",
+      "name": "Night of a Hundred Fox-Fires",
+      "zone_id": "zone_eastern_sanctuary",
+      "facility_id": "loc_es_lantern_tea_street",
+      "description": "Paper fox masks and floating azure lanterns illuminate the Stone-Lantern Pilgrimage & Tea Street as the spiritual veil between the sanctuary and Sato-no-Inari grows paper-thin.",
+      "veil_dc_reduction": 2
+    },
+    {
+      "id": "evt_bunian_malam_cempaka",
+      "name": "Malam Seri Cempaka Mist-Bloom",
+      "zone_id": "zone_woods_reserve",
+      "facility_id": "loc_bunian_threshold_glade",
+      "description": "Luminous white cempaka blossoms bloom out of season across the Wilderness Forest Reserve while distant gamelan and serunai melodies drift from the Mist-Veiled Banyan Glade.",
+      "veil_dc_reduction": 2
+    }
+  ]
+}

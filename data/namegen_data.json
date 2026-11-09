@@ -3893,6 +3893,85 @@
             "Kristjansson",
             "Gislason"
           ]
+        },
+        "folklore_kitsune": {
+          "male": [
+            "Hakumen",
+            "Kurama",
+            "Izuna",
+            "Byakko",
+            "Yakumo",
+            "Kenshin",
+            "Subaru",
+            "Kagetsu",
+            "Shigure",
+            "Haku",
+            "Renji",
+            "Ukon"
+          ],
+          "female": [
+            "Tamamo",
+            "Kuzunoha",
+            "Kohaku",
+            "Suzuha",
+            "Kagura",
+            "Mikage",
+            "Hotaru",
+            "Shirayuki",
+            "Akane",
+            "Yuzuki",
+            "Konoha",
+            "Komachi"
+          ],
+          "last": [
+            "Inari",
+            "Minamoto",
+            "Shirakawa",
+            "Tsukishiro",
+            "Kitsunebi",
+            "Takamagahara",
+            "Fujinomiya",
+            "Kasuga"
+          ]
+        },
+        "folklore_bunian": {
+          "male": [
+            "Indera",
+            "Purnama",
+            "Sakti",
+            "Bayu",
+            "Megat",
+            "Naga",
+            "Wira",
+            "Kencana",
+            "Nirwana",
+            "Adi",
+            "Jebat",
+            "Tuah"
+          ],
+          "female": [
+            "Cempaka",
+            "Melur",
+            "Kirana",
+            "Kasturi",
+            "Seroja",
+            "Nilam",
+            "Puspita",
+            "Delima",
+            "Mayang",
+            "Anggerik",
+            "Ratna",
+            "Kesuma"
+          ],
+          "last": [
+            "Kayangan",
+            "Seri",
+            "Diraja",
+            "Purnama",
+            "Indera",
+            "Melati",
+            "Kusuma"
+          ]
         }
       }
     },

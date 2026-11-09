@@ -1,989 +1,1411 @@
 {
-  "fantasy": {
-    "name": "Realms of Myth & Magic",
-    "display_name": "Realms of Myth & Magic",
-    "emoji": "⚔️",
-    "dropdown_label": "Realms of Myth & Magic [Fantasy]",
-    "tags": [
-      "fantasy"
-    ],
-    "description": "A vibrant world of abundant magic, diverse races, epic dungeons, and an ancient threat.",
-    "tone_guidelines": "Write epic, mythic prose focused on classic high fantasy heroism, political intrigue, and grand adventure."
-  },
-  "sci_fi": {
-    "name": "Beyond the Outer Rim",
-    "display_name": "Beyond the Outer Rim",
-    "emoji": "🚀",
-    "dropdown_label": "Beyond the Outer Rim [Space]",
-    "tags": [
-      "space"
-    ],
-    "description": "An expansive galactic expanse of uncharted star systems, ancient alien ruins, interstellar trading hubs, and rogue spacefarers.",
-    "tone_guidelines": "Write clinical, awe-inspiring prose focused on technological wonder, interstellar politics, and exploration."
-  },
-  "cyberpunk": {
-    "name": "Neon Chrome & Mirrors",
-    "display_name": "Neon Chrome & Mirrors",
-    "emoji": "🦾",
-    "dropdown_label": "Neon Chrome & Mirrors [Cyberpunk]",
-    "tags": [
-      "cyberpunk"
-    ],
-    "description": "A neon-soaked dystopian megacity ruled by ruthless megacorporations, cybernetic black markets, and rogue netrunners.",
-    "tone_guidelines": "Write gritty, cynical prose focused on neon-drenched urban decay, corporate oppression, and high-tech rebellion."
-  },
-  "steampunk": {
-    "name": "Brass, Steam & Aether",
-    "display_name": "Brass, Steam & Aether",
-    "emoji": "⚙️",
-    "dropdown_label": "Brass, Steam & Aether [Steampunk]",
-    "tags": [
-      "steampunk"
-    ],
-    "description": "A soot-choked Victorian metropolis of brass gears, steam-powered airships, clockwork automata, and alchemical mysteries.",
-    "tone_guidelines": "Write ornate, Victorian-styled prose focusing on industrial expansion, clockwork invention, and high society intrigue."
-  },
-  "dark_fantasy": {
-    "name": "Cursed Blood & Ashen Crowns",
-    "display_name": "Cursed Blood & Ashen Crowns",
-    "emoji": "💀",
-    "dropdown_label": "Cursed Blood & Ashen Crowns [Fantasy • Grimdark]",
-    "tags": [
-      "fantasy",
-      "grimdark"
-    ],
-    "description": "A cursed land where hope is thin, blood has currency, and every bargain exacts a price.",
-    "tone_guidelines": "Write oppressive, gothic prose where magic is corrupting, mercy is scarce, and the stakes are consistently lethal.",
-    "starting_hooks": [
-      {
-        "archetype": "hub_launchpad",
-        "starting_minute": 1050,
-        "hook": "at 05:30 PM within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
-        "suggested_location": "Gallows Hill Settlement ➔ The Weeping Hound Tavern ➔ Smoke-Choked Taproom & Hearth",
-        "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices.",
-        "focal_point": "Huddled near the cracked stone hearth drinking watered ale with scarred sentinels before the twilight gates close",
-        "scheduled_roles": [
-          "Scarred Veteran",
-          "Bleak Quartermaster"
+    "fantasy": {
+        "name": "Realms of Myth & Magic",
+        "display_name": "Realms of Myth & Magic",
+        "emoji": "⚔️",
+        "dropdown_label": "Realms of Myth & Magic [Fantasy]",
+        "tags": [
+            "fantasy"
         ],
-        "initial_physical_state": {
-          "posture": "sitting",
-          "posture_qualifier": "on a rough wooden bench by the hearth",
-          "holding": "iron cup of bitter ale",
-          "stance": "Relaxed",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Tarnished Silver Sigil",
-          "item_type": "tool",
-          "effect": "A blessed silver amulet that burns cold against the skin when undead or cursed blood draw near"
-        },
-        "visual_cues": "grim twilight seeping through narrow arrow-slits, guttering iron hearth fire, scarred armored sentinels, bleak gothic stone masonry"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "starting_minute": 660,
-        "hook": "at 11:00 AM in the cobblestone square of a plague-shadowed cathedral town where beaked physicians burn sulfur incense and flagellants chant beneath iron gallows",
-        "suggested_location": "Gallows Hill Settlement ➔ Hanging Tree Square ➔ Cobblestone Gallows Green",
-        "directive": "Open Hub Exploration: Gothic plague-town atmosphere, sulfur-choked air, desperate townsfolk, ominous bounty posts, and cautious exploration choices.",
-        "focal_point": "Standing on the bloodstained chapel steps watching silent plague doctors in beaked masks distribute tallow rations",
-        "scheduled_roles": [
-          "Beaked Plague Doctor",
-          "Weeping Penitent"
+        "description": "A vibrant world of abundant magic, diverse races, epic dungeons, and an ancient threat.",
+        "tone_guidelines": "Write epic, mythic prose focused on classic high fantasy heroism, political intrigue, and grand adventure.",
+        "locales": {
+            "ms": {
+                "display_name": "Alam Mitos & Sihir",
+                "dropdown_label": "Alam Mitos & Sihir [Fantasi]",
+                "description": "Dunia yang meriah penuh limpahan magis, pelbagai kaum, kurungan bawah tanah epik, dan ancaman purba."
+            },
+            "pl": {
+                "display_name": "Krainy Mitu i Magii",
+                "dropdown_label": "Krainy Mitu i Magii [Fantasy]",
+                "description": "Tętniący życiem świat przepełniony magią, różnorodnymi rasami, epickimi lochami i starożytnym zagrożeniem."
+            }
+        }
+    },
+    "sci_fi": {
+        "name": "Beyond the Outer Rim",
+        "display_name": "Beyond the Outer Rim",
+        "emoji": "🚀",
+        "dropdown_label": "Beyond the Outer Rim [Space]",
+        "tags": [
+            "space"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "on the worn chapel steps",
-          "holding": "brass incense censer",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Aromatic Censer of Dried Thyme",
-          "item_type": "tool",
-          "effect": "A small brass burner emitting pungent herbal smoke to mask charnel stench and repel airborne miasma"
-        },
-        "visual_cues": "pale sickly midday sun veiled by ash clouds, gallows on cobblestones, black-robed plague doctors, stone chapel gargoyles"
-      },
-      {
-        "archetype": "in_media_res",
-        "starting_minute": 1320,
-        "hook": "at 10:00 PM in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
-        "suggested_location": "Withered Ancient Woods ➔ Corrupted Hunter Encampment ➔ Bone-Totem Palisade Clearing",
-        "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices.",
-        "focal_point": "Crawling through bloodstained mud behind burning wooden barricades as horned shadows stalk the tree line",
-        "scheduled_roles": [
-          "Dying Militia Soldier",
-          "Gothic Enforcer"
+        "description": "An expansive galactic expanse of uncharted star systems, ancient alien ruins, interstellar trading hubs, and rogue spacefarers.",
+        "tone_guidelines": "Write clinical, awe-inspiring prose focused on technological wonder, interstellar politics, and exploration.",
+        "locales": {
+            "ms": {
+                "display_name": "Melangkaui Lingkaran Luar",
+                "dropdown_label": "Melangkaui Lingkaran Luar [Angkasa]",
+                "description": "Keluasan galaksi yang luas merangkumi sistem bintang yang belum dipetakan, runtuhan makhluk asing purba, pusat perdagangan antara bintang, dan pengembara angkasa liar."
+            },
+            "pl": {
+                "display_name": "Poza Zewnętrzną Rubieżą",
+                "dropdown_label": "Poza Zewnętrzną Rubieżą [Kosmos]",
+                "description": "Rozległe galaktyczne przestrzenie niezbadanych układów gwiezdnych, pradawnych obcych ruin, międzygwiezdnych węzłów handlowych i zbuntowanych kosmicznych wędrowców."
+            }
+        }
+    },
+    "cyberpunk": {
+        "name": "Neon Chrome & Mirrors",
+        "display_name": "Neon Chrome & Mirrors",
+        "emoji": "🦾",
+        "dropdown_label": "Neon Chrome & Mirrors [Cyberpunk]",
+        "tags": [
+            "cyberpunk"
         ],
-        "initial_physical_state": {
-          "posture": "crouching",
-          "posture_qualifier": "in the muddy trench",
-          "holding": "notched black iron dagger",
-          "stance": "Combat Ready",
-          "composure": "adrenaline_spiked",
-          "is_wet": 1
-        },
-        "starting_prop": {
-          "name": "Notched Black Iron Dagger",
-          "item_type": "tool",
-          "effect": "A wicked trench blade forged from meteorite iron that leaves necrotic black marks on monstrous flesh"
-        },
-        "visual_cues": "midnight darkness illuminated by burning wooden stakes, thick black mud, heavy fog, silhouetted monstrous shadows in woods"
-      },
-      {
-        "archetype": "in_media_res",
-        "starting_minute": 180,
-        "hook": "at 03:00 AM trapped in the belfry of a half-collapsed cathedral as a blood-red moon rises and leathery-winged gargoyle beasts smash through the gothic stained glass",
-        "suggested_location": "Gallows Hill Settlement ➔ Desecrated Cathedral Ruins ➔ Desecrated Nave & High Altar",
-        "directive": "In Media Res: Desperate high-altitude gothic siege, howling nocturnal predators, falling stained glass shards, and violent tactical choices.",
-        "focal_point": "Bracing against the cracked bronze cathedral bell as leathery wings buffet the narrow belfry arches",
-        "scheduled_roles": [
-          "Terrified Bell-Ringer"
+        "description": "A neon-soaked dystopian megacity ruled by ruthless megacorporations, cybernetic black markets, and rogue netrunners.",
+        "tone_guidelines": "Write gritty, cynical prose focused on neon-drenched urban decay, corporate oppression, and high-tech rebellion.",
+        "locales": {
+            "ms": {
+                "display_name": "Krom Neon & Cermin",
+                "dropdown_label": "Krom Neon & Cermin [Siberpunk]",
+                "description": "Sebuah metropolis distopia bermandikan cahaya neon yang dikuasai perbadanan gergasi kejam, pasaran gelap sibernetik, dan penggodam netrunner liar."
+            },
+            "pl": {
+                "display_name": "Neonowy Chrom i Lustra",
+                "dropdown_label": "Neonowy Chrom i Lustra [Cyberpunk]",
+                "description": "Dystopijna metropolia skąpana w neonach, rządzona przez bezwzględne megakorporacje, cybernetyczny czarny rynek i zbuntowanych netrunnerów."
+            }
+        }
+    },
+    "steampunk": {
+        "name": "Brass, Steam & Aether",
+        "display_name": "Brass, Steam & Aether",
+        "emoji": "⚙️",
+        "dropdown_label": "Brass, Steam & Aether [Steampunk]",
+        "tags": [
+            "steampunk"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "behind the cracked bronze bell",
-          "holding": "heavy iron bell-hammer",
-          "stance": "Combat Ready",
-          "composure": "tense",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Vial of Consecrated Blood",
-          "item_type": "tool",
-          "effect": "A stoppered glass vial of blessed martyr blood capable of burning occult abominations like boiling acid"
-        },
-        "visual_cues": "blood-red moon hanging in stormy sky, cracked colossal bronze bell, lunging gothic gargoyle beast, stone debris falling"
-      },
-      {
-        "archetype": "delve_threshold",
-        "starting_minute": 1140,
-        "hook": "at 07:00 PM before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
-        "suggested_location": "Sunken Bone Catacombs ➔ Grand Ossuary Hall ➔ Skull-Lined Stairwell Descent",
-        "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve.",
-        "focal_point": "Standing before the yawning maw of the mossy crypt as freezing subterranean mist spills across gravestones",
-        "scheduled_roles": [
-          "Grave Robber",
-          "Tortured Ghost"
+        "description": "A soot-choked Victorian metropolis of brass gears, steam-powered airships, clockwork automata, and alchemical mysteries.",
+        "tone_guidelines": "Write ornate, Victorian-styled prose focusing on industrial expansion, clockwork invention, and high society intrigue.",
+        "locales": {
+            "ms": {
+                "display_name": "Tembaga, Stim & Eter",
+                "dropdown_label": "Tembaga, Stim & Eter [Stimpunk]",
+                "description": "Metropolis era Victoria berjelaga yang dipenuhi roda gear tembaga, kapal udara berkuasa stim, automata mekanikal, dan misteri alkimia."
+            },
+            "pl": {
+                "display_name": "Mosiądz, Para i Eter",
+                "dropdown_label": "Mosiądz, Para i Eter [Steampunk]",
+                "description": "Spowita sadzą wiktoriańska metropolia mosiężnych kół zębatych, parowych sterowców, mechanicznych automatów i alchemicznych tajemnic."
+            }
+        }
+    },
+    "dark_fantasy": {
+        "name": "Cursed Blood & Ashen Crowns",
+        "display_name": "Cursed Blood & Ashen Crowns",
+        "emoji": "💀",
+        "dropdown_label": "Cursed Blood & Ashen Crowns [Fantasy • Grimdark]",
+        "tags": [
+            "fantasy",
+            "grimdark"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "at the crypt entrance arch",
-          "holding": "cold iron crowbar",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Cold Iron Crowbar",
-          "item_type": "tool",
-          "effect": "An iron prybar inscribed with wards that can pry heavy crypt seals without triggering occult curses"
-        },
-        "visual_cues": "dusk cold blue fog, cracked tilted gravestones, crows scattering from dead trees, yawning dark stone staircase into crypt"
-      },
-      {
-        "archetype": "delve_threshold",
-        "starting_minute": 1260,
-        "hook": "at 09:00 PM on the rotting wooden boardwalk above a stagnant black bog before a circle of bleached ribcage bones marking a witch-coven threshold",
-        "suggested_location": "Plague-Blighted Marshes ➔ Witch-Tree Coven Hollow ➔ Wicker-Effigy Bog Clearing",
-        "directive": "Delve Threshold: Cursed mire exploration, testing unstable boardwalks, deciphering witch marks, and entering the sunken hollow.",
-        "focal_point": "Kneeling at the threshold of a half-submerged wooden hut built from twisted willow roots in stagnant black water",
-        "scheduled_roles": [
-          "Bog Hermit"
+        "description": "A cursed land where hope is thin, blood has currency, and every bargain exacts a price.",
+        "tone_guidelines": "Write oppressive, gothic prose where magic is corrupting, mercy is scarce, and the stakes are consistently lethal.",
+        "starting_hooks": [
+            {
+                "archetype": "hub_launchpad",
+                "starting_minute": 1050,
+                "hook": "at 05:30 PM within a bleak, fortified enclave where weary sentinels drink watered ale and murmur grim warnings about the encroaching dark",
+                "suggested_location": "Gallows Hill Settlement ➔ The Weeping Hound Tavern ➔ Smoke-Choked Taproom & Hearth",
+                "directive": "Open Hub Exploration: Tense military haven, scarred veterans, grim bounty ledger, and cautious social choices.",
+                "focal_point": "Huddled near the cracked stone hearth drinking watered ale with scarred sentinels before the twilight gates close",
+                "scheduled_roles": [
+                    "Scarred Veteran",
+                    "Bleak Quartermaster"
+                ],
+                "initial_physical_state": {
+                    "posture": "sitting",
+                    "posture_qualifier": "on a rough wooden bench by the hearth",
+                    "holding": "iron cup of bitter ale",
+                    "stance": "Relaxed",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Tarnished Silver Sigil",
+                    "item_type": "tool",
+                    "effect": "A blessed silver amulet that burns cold against the skin when undead or cursed blood draw near"
+                },
+                "visual_cues": "grim twilight seeping through narrow arrow-slits, guttering iron hearth fire, scarred armored sentinels, bleak gothic stone masonry"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "starting_minute": 660,
+                "hook": "at 11:00 AM in the cobblestone square of a plague-shadowed cathedral town where beaked physicians burn sulfur incense and flagellants chant beneath iron gallows",
+                "suggested_location": "Gallows Hill Settlement ➔ Hanging Tree Square ➔ Cobblestone Gallows Green",
+                "directive": "Open Hub Exploration: Gothic plague-town atmosphere, sulfur-choked air, desperate townsfolk, ominous bounty posts, and cautious exploration choices.",
+                "focal_point": "Standing on the bloodstained chapel steps watching silent plague doctors in beaked masks distribute tallow rations",
+                "scheduled_roles": [
+                    "Beaked Plague Doctor",
+                    "Weeping Penitent"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "on the worn chapel steps",
+                    "holding": "brass incense censer",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Aromatic Censer of Dried Thyme",
+                    "item_type": "tool",
+                    "effect": "A small brass burner emitting pungent herbal smoke to mask charnel stench and repel airborne miasma"
+                },
+                "visual_cues": "pale sickly midday sun veiled by ash clouds, gallows on cobblestones, black-robed plague doctors, stone chapel gargoyles"
+            },
+            {
+                "archetype": "in_media_res",
+                "starting_minute": 1320,
+                "hook": "at 10:00 PM in the muddy aftermath of a brutal ambush surrounded by burning barricades as shadows stalk the treeline",
+                "suggested_location": "Withered Ancient Woods ➔ Corrupted Hunter Encampment ➔ Bone-Totem Palisade Clearing",
+                "directive": "In Media Res: Visceral blood-soaked crisis, enemy closing in, wounded allies, and desperate survival choices.",
+                "focal_point": "Crawling through bloodstained mud behind burning wooden barricades as horned shadows stalk the tree line",
+                "scheduled_roles": [
+                    "Dying Militia Soldier",
+                    "Gothic Enforcer"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "in the muddy trench",
+                    "holding": "notched black iron dagger",
+                    "stance": "Combat Ready",
+                    "composure": "adrenaline_spiked",
+                    "is_wet": 1
+                },
+                "starting_prop": {
+                    "name": "Notched Black Iron Dagger",
+                    "item_type": "tool",
+                    "effect": "A wicked trench blade forged from meteorite iron that leaves necrotic black marks on monstrous flesh"
+                },
+                "visual_cues": "midnight darkness illuminated by burning wooden stakes, thick black mud, heavy fog, silhouetted monstrous shadows in woods"
+            },
+            {
+                "archetype": "in_media_res",
+                "starting_minute": 180,
+                "hook": "at 03:00 AM trapped in the belfry of a half-collapsed cathedral as a blood-red moon rises and leathery-winged gargoyle beasts smash through the gothic stained glass",
+                "suggested_location": "Gallows Hill Settlement ➔ Desecrated Cathedral Ruins ➔ Desecrated Nave & High Altar",
+                "directive": "In Media Res: Desperate high-altitude gothic siege, howling nocturnal predators, falling stained glass shards, and violent tactical choices.",
+                "focal_point": "Bracing against the cracked bronze cathedral bell as leathery wings buffet the narrow belfry arches",
+                "scheduled_roles": [
+                    "Terrified Bell-Ringer"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "behind the cracked bronze bell",
+                    "holding": "heavy iron bell-hammer",
+                    "stance": "Combat Ready",
+                    "composure": "tense",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Vial of Consecrated Blood",
+                    "item_type": "tool",
+                    "effect": "A stoppered glass vial of blessed martyr blood capable of burning occult abominations like boiling acid"
+                },
+                "visual_cues": "blood-red moon hanging in stormy sky, cracked colossal bronze bell, lunging gothic gargoyle beast, stone debris falling"
+            },
+            {
+                "archetype": "delve_threshold",
+                "starting_minute": 1140,
+                "hook": "at 07:00 PM before the yawning maw of a desecrated crypt as cold fog spills across mossy gravestones and crows scatter",
+                "suggested_location": "Sunken Bone Catacombs ➔ Grand Ossuary Hall ➔ Skull-Lined Stairwell Descent",
+                "directive": "Delve Threshold: Dread expedition threshold, occult ward examination, lighting torches, and steeling resolve.",
+                "focal_point": "Standing before the yawning maw of the mossy crypt as freezing subterranean mist spills across gravestones",
+                "scheduled_roles": [
+                    "Grave Robber",
+                    "Tortured Ghost"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "at the crypt entrance arch",
+                    "holding": "cold iron crowbar",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Cold Iron Crowbar",
+                    "item_type": "tool",
+                    "effect": "An iron prybar inscribed with wards that can pry heavy crypt seals without triggering occult curses"
+                },
+                "visual_cues": "dusk cold blue fog, cracked tilted gravestones, crows scattering from dead trees, yawning dark stone staircase into crypt"
+            },
+            {
+                "archetype": "delve_threshold",
+                "starting_minute": 1260,
+                "hook": "at 09:00 PM on the rotting wooden boardwalk above a stagnant black bog before a circle of bleached ribcage bones marking a witch-coven threshold",
+                "suggested_location": "Plague-Blighted Marshes ➔ Witch-Tree Coven Hollow ➔ Wicker-Effigy Bog Clearing",
+                "directive": "Delve Threshold: Cursed mire exploration, testing unstable boardwalks, deciphering witch marks, and entering the sunken hollow.",
+                "focal_point": "Kneeling at the threshold of a half-submerged wooden hut built from twisted willow roots in stagnant black water",
+                "scheduled_roles": [
+                    "Bog Hermit"
+                ],
+                "initial_physical_state": {
+                    "posture": "kneeling",
+                    "posture_qualifier": "on the damp mossy bog planks",
+                    "holding": "bone talisman on leather cord",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 1
+                },
+                "starting_prop": {
+                    "name": "Bone Witch-Talisman",
+                    "item_type": "tool",
+                    "effect": "A fetish carved from raven bone that pulses when traversing invisible curse boundaries or illusion wards"
+                },
+                "visual_cues": "moonlit stagnant swamp water, gnarled willow roots, eerie green will-o'-the-wisps, skulls mounted on wooden poles"
+            }
         ],
-        "initial_physical_state": {
-          "posture": "kneeling",
-          "posture_qualifier": "on the damp mossy bog planks",
-          "holding": "bone talisman on leather cord",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 1
-        },
-        "starting_prop": {
-          "name": "Bone Witch-Talisman",
-          "item_type": "tool",
-          "effect": "A fetish carved from raven bone that pulses when traversing invisible curse boundaries or illusion wards"
-        },
-        "visual_cues": "moonlit stagnant swamp water, gnarled willow roots, eerie green will-o'-the-wisps, skulls mounted on wooden poles"
-      }
-    ]
-  },
-  "isekai_fantasy": {
-    "name": "Summoned to Another World",
-    "display_name": "Summoned to Another World",
-    "emoji": "✨",
-    "dropdown_label": "Summoned to Another World [Isekai • Fantasy]",
-    "tags": [
-      "isekai",
-      "fantasy"
-    ],
-    "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
-    "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes and power progression."
-  },
-  "nsfw_isekai_fantasy": {
-    "name": "Summoned: Desires of Another World",
-    "display_name": "Summoned: Desires of Another World",
-    "emoji": "🔞",
-    "dropdown_label": "Summoned: Desires of Another World [Isekai • NSFW]",
-    "base_scenario": "isekai_fantasy",
-    "tags": [
-      "isekai",
-      "fantasy",
-      "nsfw"
-    ],
-    "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
-    "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes, power progression, and passionate, unfiltered romantic encounters."
-  },
-  "high_school_drama": {
-    "name": "Youth, Bells & Rooftop Breezes",
-    "display_name": "Youth, Bells & Rooftop Breezes",
-    "emoji": "🏫",
-    "dropdown_label": "Youth, Bells & Rooftop Breezes [High School]",
-    "tags": [
-      "high_school",
-      "non_combat"
-    ],
-    "description": "A modern high school landscape where social status, academic pressure, and teenage romance collide.",
-    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama, heartbreak, and personal growth. Lean heavily into classic high school tropes and archetype dynamics."
-  },
-  "nsfw_high_school_drama": {
-    "name": "After-School Desires & Secrets",
-    "display_name": "After-School Desires & Secrets",
-    "emoji": "🔞",
-    "dropdown_label": "After-School Desires & Secrets [High School • NSFW]",
-    "base_scenario": "high_school_drama",
-    "tags": [
-      "high_school",
-      "nsfw",
-      "non_combat"
-    ],
-    "description": "A modern high school landscape where social status, academic pressure, and explicit romance intertwine.",
-    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama and personal growth. Lean heavily into classic high school tropes and archetype dynamics while including very explicit and unfiltered sensual sexual encounters."
-  },
-  "furry_high_school_drama": {
-    "name": "Paws, Bells & Rooftop Breezes",
-    "display_name": "Paws, Bells & Rooftop Breezes",
-    "emoji": "🐾",
-    "dropdown_label": "Paws, Bells & Rooftop Breezes [High School • Furry]",
-    "base_scenario": "high_school_drama",
-    "tags": [
-      "high_school",
-      "furry",
-      "non_combat"
-    ],
-    "description": "A vibrant modern high school landscape where social status, academic pressure, and teenage romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and heartwarming relationships.",
-    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, friendship, heartbreak, and personal growth in an academic setting."
-  },
-  "nsfw_furry_high_school_drama": {
-    "name": "After-School Instincts & Desires",
-    "display_name": "After-School Instincts & Desires",
-    "emoji": "🔞🐾",
-    "dropdown_label": "After-School Instincts & Desires [High School • Furry • NSFW]",
-    "base_scenario": "nsfw_high_school_drama",
-    "tags": [
-      "high_school",
-      "furry",
-      "nsfw",
-      "non_combat"
-    ],
-    "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. A diverse anthropomorphic student body spanning felines (cats, tigers, cheetahs, lions), canines (wolves, foxes, fennecs), avians/birds, bears, reptiles, and lagomorphs/rodents navigate campus life, clubs, and passionate relationships.",
-    "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms and coy phrasing like 'length,' 'member,' or 'grow', use direct and explicit anatomical and sexual terms instead (e.g., dick, cock, pussy, tits, ass, fuck, cum."
-  },
-  "slice_of_life": {
-    "name": "Downtown Lights & Lattes",
-    "display_name": "Downtown Lights & Lattes",
-    "emoji": "☕",
-    "dropdown_label": "Downtown Lights & Lattes [Slice of Life]",
-    "tags": [
-      "slice_of_life"
-    ],
-    "description": "A vibrant contemporary city district of cozy third-wave cafés, bustling shopping arcades, neon nightlife alleys, and tight-knit neighborhood characters.",
-    "tone_guidelines": "Write grounded, character-driven prose balancing warm everyday routines, neighborhood gossip, and personal relationships with street-level urban drama and late-night excitement."
-  },
-  "nuclear_post_apocalypse": {
-    "name": "Ashes of the Fallout",
-    "display_name": "Ashes of the Fallout",
-    "emoji": "☢️",
-    "dropdown_label": "Ashes of the Fallout [Post-Apocalypse]",
-    "tags": [
-      "post_apocalypse"
-    ],
-    "description": "A bleak, ash-choked wasteland set a few decades after atomic fire, where radiation, raiders, and mutated horrors stalk the ruins.",
-    "tone_guidelines": "Write bleak, gritty, and unforgiving prose where survival of the fittest governs the ruins, occasionally balanced by dark humor."
-  },
-  "anomalous_incursions": {
-    "name": "Anomalous Incursions",
-    "display_name": "Anomalous Incursions",
-    "emoji": "👁️🏢",
-    "dropdown_label": "Anomalous Incursions [Urban Fantasy • Horror]",
-    "tags": [
-      "urban_fantasy",
-      "horror"
-    ],
-    "description": "A modern metropolis where anomalous phenomena, spatial distortions, and reality incursions are public knowledge. As a licensed field operative for {session_agency}, you respond to municipal breach incidents, contain surreal manifestations, and investigate uncanny entities across the city.",
-    "tone_guidelines": "Write tense, atmospheric prose blending modern urban reality with eerie, reality-bending horror. Maintain a sharp sense of public awareness, civil alarms, emergency evacuation orders, and containment protocols.",
-    "starting_hooks": [
-      {
-        "archetype": "hub_launchpad",
-        "faction": "public_agency",
-        "starting_minute": 510,
-        "hook": "at 08:30 AM inside the bustling main security rotunda of {session_agency_hq} as incident status terminals flash amber across the high glass atrium and armed response details clear security turnstiles",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
-        "directive": "Open Hub Exploration: Metropolitan crisis monitors active, response teams mustering, dispatch officers distributing clearance passes, and open deployment choices.",
-        "focal_point": "Standing beside the central biometric turnstile reviewing the morning breach incident log",
-        "scheduled_roles": ["Dispatch Operator", "Senior Field Agent"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "beside the biometric turnstile", "holding": "encrypted bureau terminal pad", "stance": "Neutral", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Encrypted Bureau Terminal", "item_type": "tool", "effect": "A ruggedized government handheld terminal linking to dispatch records, incident manifests, and secure frequencies"},
-        "visual_cues": "towering glass-and-steel lobby atrium, biometric security gates, wall-mounted metropolitan crisis monitors, armed bureau officers in tactical suits"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "public_agency",
-        "starting_minute": 1275,
-        "hook": "at 09:15 PM inside the reinforced security concourse of {session_agency_hq} as sudden red emergency strobes bathe the hall and klaxons shriek, signaling a containment breach in lower sector 4 while titanium blast doors automatically lock down",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
-        "directive": "High-Tension Crisis: Containment breach alarm in progress inside headquarters, automated blast barriers descending, security teams securing perimeter, and immediate containment decisions.",
-        "focal_point": "Taking cover behind the reinforced ballistic reception counter with sidearm drawn as warning sirens echo through the atrium",
-        "scheduled_roles": ["Perimeter Enforcer", "Duty Watch Officer"],
-        "initial_physical_state": {"posture": "crouching", "posture_qualifier": "behind the reinforced reception counter", "holding": "service sidearm", "stance": "Defensive", "composure": "focused", "is_wet": 0},
-        "starting_prop": {"name": "Resonance Stabilization Flare", "item_type": "tool", "effect": "A magnesium-and-salt emergency flare that anchors reality and suppresses minor spatial warps for several minutes"},
-        "visual_cues": "strobe lights flashing crimson, blaring containment sirens, descending titanium blast shutters, nervous tactical sentries aiming down sealed corridor gates"
-      },
-      {
-        "archetype": "delve_threshold",
-        "faction": "public_agency",
-        "starting_minute": 570,
-        "hook": "at 09:30 AM before the heavy pressure airlock of the Subterranean Containment Sector in {session_agency_hq} as technicians calibrate psychic dampening wards and prepare the breach response squad for an expedition into quarantined vault corridors",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Subterranean Containment & Quarantine Sector",
-        "directive": "Threshold Preparation: Final equipment and ward checks before descending into quarantined subterranean containment vaults.",
-        "focal_point": "Checking the pressure seals on your tactical vest before the heavy decontamination airlock",
-        "scheduled_roles": ["Containment Engineer", "Hazmat Specialist"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "before the heavy decontamination airlock", "holding": "tactical loadout harness", "stance": "Neutral", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Metropolitan Breach Passkey", "item_type": "tool", "effect": "An encrypted authorization keycard granting entry into Tier-2 sealed containment areas"},
-        "visual_cues": "heavy steel vault doors, warning hazard stripes, hiss of chemical misting vents, ultraviolet sterilization lamps overhead"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "private_agency_1",
-        "starting_minute": 540,
-        "hook": "at 09:00 AM inside the soaring glass-and-granite atrium of {session_private_agency_1}'s skyscraper headquarters as live market valuations and high-margin containment contracts scroll across panoramic telemetry tickers above operatives outfitted in proprietary in-house R&D gear",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Corporate Atrium & Biometric Lobby",
-        "directive": "Corporate Conglomerate Operations: Mega-corporate skyscraper hub, high-value client contracts, proprietary R&D ordnance requisitions, and executive bounty selection.",
-        "focal_point": "Standing beside the holographic portfolio wall reviewing corporate client containment contracts",
-        "scheduled_roles": ["Corporate Portfolio Liaison", "Proprietary R&D Armorer"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "beside the holographic contract wall", "holding": "proprietary corporate tablet", "stance": "Neutral", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Corporate Retainer & NDA Packet", "item_type": "tool", "effect": "An encrypted conglomerate service contract detailing corporate bounty commissions and proprietary R&D equipment terms"},
-        "visual_cues": "polished black granite atrium, panoramic downtown skyline glass, biometric turnstiles, backlit display cases showcasing serialized in-house prototype rifles"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "private_agency_1",
-        "starting_minute": 1320,
-        "hook": "at 10:00 PM on the upper telemetry and R&D floor of {session_private_agency_1}'s corporate skyscraper as an uncontained spatial fracture shatters the cleanroom glass, spinning up automated corporate defense turrets and emergency lockdown shutters",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Corporate Atrium & Biometric Lobby",
-        "directive": "High-Tension Corporate Crisis: Hostile manifestation inside a luxury corporate skyscraper, protecting proprietary R&D prototypes, and immediate tactical suppression.",
-        "focal_point": "Crouching behind a marble concierge barrier with your serialized corporate weapon raised as cleanroom suppression mist vents down the hall",
-        "scheduled_roles": ["Executive Security Detail", "Corporate R&D Technician"],
-        "initial_physical_state": {"posture": "crouching", "posture_qualifier": "behind a marble security barrier", "holding": "proprietary tactical weapon", "stance": "Defensive", "composure": "focused", "is_wet": 0},
-        "starting_prop": {"name": "Proprietary Stasis Flare", "item_type": "tool", "effect": "An in-house corporate R&D magnesium-salt flare that anchors local Euclidean space against minor rifts"},
-        "visual_cues": "strobing executive amber lockdown strips, hissing Halon mist, shattered cleanroom glass on polished stone, servo whine of ceiling defense turrets"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "private_agency_2",
-        "starting_minute": 540,
-        "hook": "at 09:00 AM inside the cramped walk-up commercial office of {session_private_agency_2} as fluorescent ceiling tubes hum above mismatched metal desks, a burnt-glass coffee pot, and a corkboard bristling with pinned local anomaly bounties",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Walk-Up Commercial Foyer & Reception Desk",
-        "directive": "Small-Business Agency Operations: Humble rented office suite, checking pinned local contracts on the corkboard, signing out surplus multi-vendor gear from the padlocked back cage, and making rent.",
-        "focal_point": "Standing in front of the pin-covered corkboard flipping through local containment flyers with a chipped mug of drip coffee nearby",
-        "scheduled_roles": ["Office Dispatcher", "Surplus Supply Clerk"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "before the bounty corkboard", "holding": "manila case folder", "stance": "Neutral", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Laminated Contractor Keytag", "item_type": "tool", "effect": "A scuffed plastic agency badge on a hardware-store keyring unlocking the back-room surplus gun cage"},
-        "visual_cues": "frosted glass office door with peel-and-stick lettering, buzzing fluorescent tubes, mismatched filing cabinets, crackling police-band scanner on a cluttered desk"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "private_agency_2",
-        "starting_minute": 1350,
-        "hook": "at 10:30 PM in the cramped ground-floor foyer of {session_private_agency_2}'s ordinary commercial building as a salvaged curio in the cellar boiler-room evidence cage cracks its chalk-salt safe, blowing the building's fuse box and rattling the frosted glass door",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Walk-Up Commercial Foyer & Reception Desk",
-        "directive": "High-Tension Small-Office Crisis: Cellar evidence-cage containment failure in a modest commercial building, protecting the block with surplus gear before the entity slips into the street.",
-        "focal_point": "Taking cover behind the dented reception counter as violet static crawls up the stairwell from the cellar boiler room",
-        "scheduled_roles": ["Night-Shift Clerk", "On-Call Field Contractor"],
-        "initial_physical_state": {"posture": "crouching", "posture_qualifier": "behind the reception counter", "holding": "surplus field weapon", "stance": "Defensive", "composure": "focused", "is_wet": 0},
-        "starting_prop": {"name": "Hardware-Store Road Flare & Salt Tube", "item_type": "tool", "effect": "A duct-taped highway flare packed with coarse rock salt to disrupt minor spatial warps on a budget"},
-        "visual_cues": "flickering emergency exit sign, smell of ozone and damp cellar concrete, rattling padlock on the basement door, streetlamp glow through frosted glass"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "monastic_order",
-        "starting_minute": 390,
-        "hook": "at 06:30 AM in the incense-scented courtyard of the Eastern Grand Temple as monastic bells toll through the cool mountain mist and elder disciples prepare sacred warding charms",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
-        "directive": "Spiritual Hub: Preparing talismans and warding salt, consulting senior temple monks, and choosing which metropolitan anomaly to purify.",
-        "focal_point": "Standing beside the great bronze incense burner watching sacred cedar smoke rise into the morning canopy",
-        "scheduled_roles": ["Temple Acolyte", "Senior Exorcist Monk"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "beside the bronze incense burner", "holding": "purification prayer beads", "stance": "Relaxed", "composure": "calm", "is_wet": 0},
-        "starting_prop": {"name": "Consecrated Purging Salt", "item_type": "consumable", "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"},
-        "visual_cues": "ancient moss-covered stone lanterns, drifting sandalwood incense smoke, weeping pine needles heavy with dew, weathered vermilion temple pillars"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "monastic_order",
-        "starting_minute": 1410,
-        "hook": "at 11:30 PM before the grand altar of the Eastern Grand Temple as brass warding bells ring violently of their own accord and sacred purification lanterns extinguish one by one against a sudden surge of corrupting spiritual pressure",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
-        "directive": "High-Tension Crisis: Defending the sanctuary against sudden spiritual incursion, relighting sacred purification lanterns, and driving back anomalous corruption.",
-        "focal_point": "Bracing in front of the central shrine altar with sacred blade drawn as supernatural cold settles over the worship hall",
-        "scheduled_roles": ["Temple Guardian", "Shrine Maiden"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "before the inner sanctuary altar", "holding": "ritual exorcism blade", "stance": "Defensive", "composure": "focused", "is_wet": 0},
-        "starting_prop": {"name": "Consecrated Purging Salt", "item_type": "consumable", "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"},
-        "visual_cues": "pitch-black temple hall, single flickering candle before golden shrine deity, frost creeping across tatami mats, echoing spectral whispers"
-      },
-      {
-        "archetype": "delve_threshold",
-        "faction": "monastic_order",
-        "starting_minute": 450,
-        "hook": "at 07:30 AM before the mossy stone entrance of the Weeping Stone Statues & Forbidden Graveyard behind the temple as elder monks string sacred shimenawa ropes to demarcate the corrupt burial ground",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Weeping Stone Statues & Forbidden Graveyard",
-        "directive": "Sacred Threshold: Preparing ritual wards and offerings before descending into the cursed mountain hollow.",
-        "focal_point": "Examining the braided talisman cord tied across the entrance of the overgrown cemetery path",
-        "scheduled_roles": ["Shrine Warden", "Ritual Diviner"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "at the boundary talisman cord", "holding": "paper warding charms", "stance": "Neutral", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Paper Warding Charms", "item_type": "tool", "effect": "Inscribed talismans that temporarily suppress minor spiritual aberrations when affixed to doorways"},
-        "visual_cues": "moss-covered stone jizo statues, thick mountain fog, white paper zigzag streamers fluttering on sacred rope, damp soil smell"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "freelancer",
-        "starting_minute": 480,
-        "hook": "at 08:00 AM in the sunlit living room of {session_player_house} sipping fresh coffee as the police scanner crackles on the kitchen counter with urgent reports of anomalous activity downtown",
-        "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
-        "directive": "Independent Preparation: Reviewing freelance bounty alerts on your smartphone, maintaining independent gear, and planning your morning investigation.",
-        "focal_point": "Sitting at the kitchen table tuning the emergency civil band frequency on your handheld radio scanner",
-        "scheduled_roles": ["Helpful Neighbor", "Informant Contact"],
-        "initial_physical_state": {"posture": "sitting", "posture_qualifier": "at the kitchen table", "holding": "hot ceramic coffee mug", "stance": "Relaxed", "composure": "composed", "is_wet": 0},
-        "starting_prop": {"name": "Modified Police Scanner", "item_type": "tool", "effect": "A handheld civilian radio modified to intercept civil defense emergency frequencies and private agency dispatch chatter"},
-        "visual_cues": "morning sunlight filtering through venetian blinds, half-empty coffee mug, maps of city districts spread across wooden table, soft crackle of radio scanner"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "freelancer",
-        "starting_minute": 150,
-        "hook": "at 02:30 AM in {session_player_house} awakened abruptly by the piercing shriek of the metropolitan emergency alert broadcasting over your smartphone as violet electromagnetic static crackles across your living room television",
-        "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
-        "directive": "High-Tension Crisis: Sudden neighborhood anomaly outbreak, investigating mysterious static affecting your home, and securing your immediate surroundings.",
-        "focal_point": "Standing in the darkened living room with flashlight raised as strange violet shadows drift past your front window",
-        "scheduled_roles": ["Alarmed Neighbor"],
-        "initial_physical_state": {"posture": "standing", "posture_qualifier": "in the darkened living room", "holding": "heavy aluminum flashlight", "stance": "Defensive", "composure": "focused", "is_wet": 0},
-        "starting_prop": {"name": "Heavy Aluminum Flashlight", "item_type": "tool", "effect": "A durable tactical flashlight with a high-lumen beam and sturdy casing suitable for self-defense"},
-        "visual_cues": "dark suburban street visible through window, strobing violet light in the sky, crackling television static, distant sirens echoing through the neighborhood"
-      }
-    ]
-  },
-  "nsfw_gore_anomalous_incursions": {
-    "name": "Anomalous Incursions: Unrated",
-    "display_name": "Anomalous Incursions: Unrated",
-    "emoji": "🔞🩸",
-    "dropdown_label": "Anomalous Incursions: Unrated [Urban Fantasy • Horror • NSFW • Gore]",
-    "base_scenario": "anomalous_incursions",
-    "tags": [
-      "urban_fantasy",
-      "horror",
-      "nsfw",
-      "gore"
-    ],
-    "description": "The raw, unfiltered reality of anomaly containment in the metropolis. Visceral, bone-shattering incursion violence, desperate survival, and explicit intimate encounters behind closed bureau doors.",
-    "tone_guidelines": "Write unflinching, explicit prose with visceral body horror and intense intimate encounters in the line of duty. Describe brutal physical trauma during entity clashes and graphic, unfiltered romantic/sexual passions during private downtime."
-  },
-  "furry_anomalous_incursions": {
-    "name": "Anomalous Incursions: Feral Watch",
-    "display_name": "Anomalous Incursions: Feral Watch",
-    "emoji": "🐾🏢",
-    "dropdown_label": "Anomalous Incursions: Feral Watch [Urban Fantasy • Horror • Furry]",
-    "base_scenario": "anomalous_incursions",
-    "tags": [
-      "urban_fantasy",
-      "horror",
-      "furry"
-    ],
-    "description": "The urban anomaly crisis unfolded across a thriving anthropomorphic metropolis. Beastfolk field agents (canine, feline, vulpine, ursine) employ heightened senses and tactical doctrine to track and contain entities.",
-    "tone_guidelines": "Write tense, atmospheric urban fantasy where anthropomorphic physical traits (twitching animal ears, claws, scent tracking, tail posture) and animal instincts interact with uncanny horrors and high-tech containment operations."
-  },
-  "nsfw_furry_gore_anomalous_incursions": {
-    "name": "Anomalous Incursions: Feral Carnage",
-    "display_name": "Anomalous Incursions: Feral Carnage",
-    "emoji": "🔞🐾🩸",
-    "dropdown_label": "Anomalous Incursions: Feral Carnage [Urban Fantasy • Horror • Furry • NSFW • Gore]",
-    "base_scenario": "nsfw_gore_anomalous_incursions",
-    "tags": [
-      "urban_fantasy",
-      "horror",
-      "furry",
-      "nsfw",
-      "gore"
-    ],
-    "description": "High-intensity anomaly suppression with an anthropomorphic roster. Primal beastfolk instincts collide with gruesome manifestations and raw, unfiltered passions.",
-    "tone_guidelines": "Write unfiltered, visceral prose blending graphic incursion violence, primal animal instincts, explicit romantic/sensual encounters, and distinct beastfolk physical traits."
-  },
-  "anomalous_high_school": {
-    "name": "Anomalous High: Academy & Incursions",
-    "display_name": "Anomalous High: Academy & Incursions",
-    "emoji": "👁️🏫",
-    "dropdown_label": "Anomalous High: Academy & Incursions [Urban Fantasy • High School • Horror]",
-    "tags": [
-      "urban_fantasy",
-      "high_school",
-      "horror"
-    ],
-    "description": "A modern metropolis where anomalous incursions are public knowledge and {session_school} sits at the heart of the city. Play either as an adult field operative for one of the city's agencies, or as an awakened high school student who attends classes by day and takes freelance anomaly contracts after the final bell.",
-    "tone_guidelines": "Blend grounded high school slice-of-life (classes, clubs, friendships, gossip) with eerie urban anomaly horror. Keep the school day feeling ordinary so that anomalies intruding on it feel unsettling. Student characters are students first: they worry about exams, curfews and classmates as well as containment.",
-    "starting_hooks": [
-      {
-        "archetype": "hub_launchpad",
-        "faction": "public_agency",
-        "starting_minute": 510,
-        "hook": "at 08:30 AM inside the bustling main security rotunda of {session_agency_hq} as incident status terminals flash amber across the high glass atrium and armed response details clear security turnstiles",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
-        "directive": "Open Hub Exploration: Metropolitan crisis monitors active, response teams mustering, dispatch officers distributing clearance passes, and open deployment choices.",
-        "focal_point": "Standing beside the central biometric turnstile reviewing the morning breach incident log",
-        "scheduled_roles": [
-          "Dispatch Operator",
-          "Senior Field Agent"
+        "locales": {
+            "ms": {
+                "display_name": "Darah Terkutuk & Mahkota Abu",
+                "dropdown_label": "Darah Terkutuk & Mahkota Abu [Fantasi • Grimdark]",
+                "description": "Bumi terkutuk di mana harapan pudar, darah bernilai tinggi, dan setiap perjanjian menuntut bayaran."
+            },
+            "pl": {
+                "display_name": "Przeklęta Krew i Popielne Korony",
+                "dropdown_label": "Przeklęta Krew i Popielne Korony [Fantasy • Grimdark]",
+                "description": "Przeklęta kraina, w której nadzieja dogorywa, walutą jest krew, a każdy pakt wymaga okrutnej zapłaty."
+            }
+        }
+    },
+    "isekai_fantasy": {
+        "name": "Summoned to Another World",
+        "display_name": "Summoned to Another World",
+        "emoji": "✨",
+        "dropdown_label": "Summoned to Another World [Isekai • Fantasy]",
+        "tags": [
+            "isekai",
+            "fantasy"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "beside the biometric turnstile",
-          "holding": "encrypted bureau terminal pad",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Encrypted Bureau Terminal",
-          "item_type": "tool",
-          "effect": "A ruggedized government handheld terminal linking to dispatch records, incident manifests, and secure frequencies"
-        },
-        "visual_cues": "towering glass-and-steel lobby atrium, biometric security gates, wall-mounted metropolitan crisis monitors, armed bureau officers in tactical suits"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "public_agency",
-        "starting_minute": 1275,
-        "hook": "at 09:15 PM inside the reinforced security concourse of {session_agency_hq} as sudden red emergency strobes bathe the hall and klaxons shriek, signaling a containment breach in lower sector 4 while titanium blast doors automatically lock down",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
-        "directive": "High-Tension Crisis: Containment breach alarm in progress inside headquarters, automated blast barriers descending, security teams securing perimeter, and immediate containment decisions.",
-        "focal_point": "Taking cover behind the reinforced ballistic reception counter with sidearm drawn as warning sirens echo through the atrium",
-        "scheduled_roles": [
-          "Perimeter Enforcer",
-          "Duty Watch Officer"
+        "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
+        "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes and power progression.",
+        "locales": {
+            "ms": {
+                "display_name": "Diseru ke Dunia Lain",
+                "dropdown_label": "Diseru ke Dunia Lain [Isekai • Fantasi]",
+                "description": "Seorang insan moden yang ditarik keluar daripada kehidupan biasanya dan tiba-tiba dicampakkan ke alam fantasi penuh magis dan raksasa."
+            },
+            "pl": {
+                "display_name": "Przeniesiony do Innego Świata",
+                "dropdown_label": "Przeniesiony do Innego Świata [Isekai • Fantasy]",
+                "description": "Zwykły człowiek wyrwany z nowoczesnego życia i nagle rzucony w pełen klasycznych motywów świat fantasy, przepełniony magią i potworami."
+            }
+        }
+    },
+    "nsfw_isekai_fantasy": {
+        "name": "Summoned: Desires of Another World",
+        "display_name": "Summoned: Desires of Another World",
+        "emoji": "🔞",
+        "dropdown_label": "Summoned: Desires of Another World [Isekai • NSFW]",
+        "base_scenario": "isekai_fantasy",
+        "tags": [
+            "isekai",
+            "fantasy",
+            "nsfw"
         ],
-        "initial_physical_state": {
-          "posture": "crouching",
-          "posture_qualifier": "behind the reinforced reception counter",
-          "holding": "service sidearm",
-          "stance": "Defensive",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Resonance Stabilization Flare",
-          "item_type": "tool",
-          "effect": "A magnesium-and-salt emergency flare that anchors reality and suppresses minor spatial warps for several minutes"
-        },
-        "visual_cues": "strobe lights flashing crimson, blaring containment sirens, descending titanium blast shutters, nervous tactical sentries aiming down sealed corridor gates"
-      },
-      {
-        "archetype": "delve_threshold",
-        "faction": "public_agency",
-        "starting_minute": 570,
-        "hook": "at 09:30 AM before the heavy pressure airlock of the Subterranean Containment Sector in {session_agency_hq} as technicians calibrate psychic dampening wards and prepare the breach response squad for an expedition into quarantined vault corridors",
-        "suggested_location": "City Center ➔ {session_agency_hq} ➔ Subterranean Containment & Quarantine Sector",
-        "directive": "Threshold Preparation: Final equipment and ward checks before descending into quarantined subterranean containment vaults.",
-        "focal_point": "Checking the pressure seals on your tactical vest before the heavy decontamination airlock",
-        "scheduled_roles": [
-          "Containment Engineer",
-          "Hazmat Specialist"
+        "description": "A modern-world individual ripped from their ordinary life and abruptly thrust into a trope-filled fantasy realm full of magic, and monsters.",
+        "tone_guidelines": "Write energetic, lighthearted prose blending modern sensibilities with high-fantasy tropes, power progression, and passionate, unfiltered romantic encounters.",
+        "locales": {
+            "ms": {
+                "display_name": "Diseru: Hasrat Dunia Lain",
+                "dropdown_label": "Diseru: Hasrat Dunia Lain [Isekai • NSFW]",
+                "description": "Seorang insan moden yang ditarik keluar daripada kehidupan biasanya dan tiba-tiba dicampakkan ke alam fantasi penuh magis, nafsu, dan raksasa."
+            },
+            "pl": {
+                "display_name": "Wezwanie: Żądze Innego Świata",
+                "dropdown_label": "Wezwanie: Żądze Innego Świata [Isekai • NSFW]",
+                "description": "Zwykły człowiek wyrwany ze swojego codziennego życia i nagle rzucony w pełen magii, namiętności i potworów świat fantasy."
+            }
+        }
+    },
+    "high_school_drama": {
+        "name": "Youth, Bells & Rooftop Breezes",
+        "display_name": "Youth, Bells & Rooftop Breezes",
+        "emoji": "🏫",
+        "dropdown_label": "Youth, Bells & Rooftop Breezes [High School]",
+        "tags": [
+            "high_school",
+            "non_combat"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "before the heavy decontamination airlock",
-          "holding": "tactical loadout harness",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Metropolitan Breach Passkey",
-          "item_type": "tool",
-          "effect": "An encrypted authorization keycard granting entry into Tier-2 sealed containment areas"
-        },
-        "visual_cues": "heavy steel vault doors, warning hazard stripes, hiss of chemical misting vents, ultraviolet sterilization lamps overhead"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "private_agency_1",
-        "starting_minute": 540,
-        "hook": "at 09:00 AM inside the soaring glass-and-granite atrium of {session_private_agency_1}'s skyscraper headquarters as live market valuations and high-margin containment contracts scroll across panoramic telemetry tickers above operatives outfitted in proprietary in-house R&D gear",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Corporate Atrium & Biometric Lobby",
-        "directive": "Corporate Conglomerate Operations: Mega-corporate skyscraper hub, high-value client contracts, proprietary R&D ordnance requisitions, and executive bounty selection.",
-        "focal_point": "Standing beside the holographic portfolio wall reviewing corporate client containment contracts",
-        "scheduled_roles": [
-          "Corporate Portfolio Liaison",
-          "Proprietary R&D Armorer"
+        "description": "A modern high school landscape where social status, academic pressure, and teenage romance collide.",
+        "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama, heartbreak, and personal growth. Lean heavily into classic high school tropes and archetype dynamics.",
+        "locales": {
+            "ms": {
+                "display_name": "Remaja, Loceng & Bayu Bumbung",
+                "dropdown_label": "Remaja, Loceng & Bayu Bumbung [Sekolah Menengah]",
+                "description": "Lanskap sekolah menengah moden di mana status sosial, tekanan akademik, dan percintaan remaja bertembung."
+            },
+            "pl": {
+                "display_name": "Młodość, Dzwonki i Wiatr na Dachu",
+                "dropdown_label": "Młodość, Dzwonki i Wiatr na Dachu [Liceum]",
+                "description": "Współczesne licealne realia, gdzie status społeczny, presja ocen i nastoletnie zauroczenia zderzają się ze sobą."
+            }
+        }
+    },
+    "nsfw_high_school_drama": {
+        "name": "After-School Desires & Secrets",
+        "display_name": "After-School Desires & Secrets",
+        "emoji": "🔞",
+        "dropdown_label": "After-School Desires & Secrets [High School • NSFW]",
+        "base_scenario": "high_school_drama",
+        "tags": [
+            "high_school",
+            "nsfw",
+            "non_combat"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "beside the holographic contract wall",
-          "holding": "proprietary corporate tablet",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Corporate Retainer & NDA Packet",
-          "item_type": "tool",
-          "effect": "An encrypted conglomerate service contract detailing corporate bounty commissions and proprietary R&D equipment terms"
-        },
-        "visual_cues": "polished black granite atrium, panoramic downtown skyline glass, biometric turnstiles, backlit display cases showcasing serialized in-house prototype rifles"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "private_agency_1",
-        "starting_minute": 1320,
-        "hook": "at 10:00 PM on the upper telemetry and R&D floor of {session_private_agency_1}'s corporate skyscraper as an uncontained spatial fracture shatters the cleanroom glass, spinning up automated corporate defense turrets and emergency lockdown shutters",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Corporate Atrium & Biometric Lobby",
-        "directive": "High-Tension Corporate Crisis: Hostile manifestation inside a luxury corporate skyscraper, protecting proprietary R&D prototypes, and immediate tactical suppression.",
-        "focal_point": "Crouching behind a marble concierge barrier with your serialized corporate weapon raised as cleanroom suppression mist vents down the hall",
-        "scheduled_roles": [
-          "Executive Security Detail",
-          "Corporate R&D Technician"
+        "description": "A modern high school landscape where social status, academic pressure, and explicit romance intertwine.",
+        "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose that captures the emotional intensity of youth. Balance whimsical, comedic high school banter with genuinely serious moments of social drama and personal growth. Lean heavily into classic high school tropes and archetype dynamics while including very explicit and unfiltered sensual sexual encounters.",
+        "locales": {
+            "ms": {
+                "display_name": "Hasrat & Rahsia Selepas Sekolah",
+                "dropdown_label": "Hasrat & Rahsia Selepas Sekolah [Sekolah Menengah • NSFW]",
+                "description": "Lanskap sekolah menengah moden di mana status sosial, tekanan akademik, dan percintaan intim berjalin rapat."
+            },
+            "pl": {
+                "display_name": "Sekrety i Żądze po Lekcjach",
+                "dropdown_label": "Sekrety i Żądze po Lekcjach [Liceum • NSFW]",
+                "description": "Nowoczesne liceum, w którym status społeczny, presja edukacyjna i pikantne romanse splatają się ze sobą."
+            }
+        }
+    },
+    "furry_high_school_drama": {
+        "name": "Paws, Bells & Rooftop Breezes",
+        "display_name": "Paws, Bells & Rooftop Breezes",
+        "emoji": "🐾",
+        "dropdown_label": "Paws, Bells & Rooftop Breezes [High School • Furry]",
+        "base_scenario": "high_school_drama",
+        "tags": [
+            "high_school",
+            "furry",
+            "non_combat"
         ],
-        "initial_physical_state": {
-          "posture": "crouching",
-          "posture_qualifier": "behind a marble security barrier",
-          "holding": "proprietary tactical weapon",
-          "stance": "Defensive",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Proprietary Stasis Flare",
-          "item_type": "tool",
-          "effect": "An in-house corporate R&D magnesium-salt flare that anchors local Euclidean space against minor rifts"
-        },
-        "visual_cues": "strobing executive amber lockdown strips, hissing Halon mist, shattered cleanroom glass on polished stone, servo whine of ceiling defense turrets"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "private_agency_2",
-        "starting_minute": 540,
-        "hook": "at 09:00 AM inside the cramped walk-up commercial office of {session_private_agency_2} as fluorescent ceiling tubes hum above mismatched metal desks, a burnt-glass coffee pot, and a corkboard bristling with pinned local anomaly bounties",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Walk-Up Commercial Foyer & Reception Desk",
-        "directive": "Small-Business Agency Operations: Humble rented office suite, checking pinned local contracts on the corkboard, signing out surplus multi-vendor gear from the padlocked back cage, and making rent.",
-        "focal_point": "Standing in front of the pin-covered corkboard flipping through local containment flyers with a chipped mug of drip coffee nearby",
-        "scheduled_roles": [
-          "Office Dispatcher",
-          "Surplus Supply Clerk"
+        "description": "A vibrant modern high school landscape where social status, academic pressure, and teenage romance intertwine in a thriving anthropomorphic student body. Furry and beastfolk students (cat, fox, wolf, rabbit, and bear sub-races) navigate campus life, clubs, and heartwarming relationships.",
+        "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, friendship, heartbreak, and personal growth in an academic setting.",
+        "locales": {
+            "ms": {
+                "display_name": "Kaki Cakar, Loceng & Bayu Bumbung",
+                "dropdown_label": "Kaki Cakar, Loceng & Bayu Bumbung [Sekolah Menengah • Furry]",
+                "description": "Lanskap sekolah menengah moden yang meriah di mana status sosial, tekanan akademik, dan percintaan remaja berjalin dalam komuniti pelajar antropomorfik. Pelajar separa binatang (kucing, musang, serigala, arnab, dan beruang) menelusuri kehidupan kampus, kelab, dan hubungan yang mesra."
+            },
+            "pl": {
+                "display_name": "Łapy, Dzwonki i Wiatr na Dachu",
+                "dropdown_label": "Łapy, Dzwonki i Wiatr na Dachu [Liceum • Furry]",
+                "description": "Tętniąca życiem współczesna szkoła średnia, gdzie status towarzyski, presja nauki i młodzieńcze romanse łączą społeczność antropomorficznych uczniów. Zwierzoludzie (koty, lisy, wilki, króliki i niedźwiedzie) wspólnie mierzą się z życiem szkolnym, klubami i ciepłymi relacjami."
+            }
+        }
+    },
+    "nsfw_furry_high_school_drama": {
+        "name": "After-School Instincts & Desires",
+        "display_name": "After-School Instincts & Desires",
+        "emoji": "🔞🐾",
+        "dropdown_label": "After-School Instincts & Desires [High School • Furry • NSFW]",
+        "base_scenario": "nsfw_high_school_drama",
+        "tags": [
+            "high_school",
+            "furry",
+            "nsfw",
+            "non_combat"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "before the bounty corkboard",
-          "holding": "manila case folder",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Laminated Contractor Keytag",
-          "item_type": "tool",
-          "effect": "A scuffed plastic agency badge on a hardware-store keyring unlocking the back-room surplus gun cage"
-        },
-        "visual_cues": "frosted glass office door with peel-and-stick lettering, buzzing fluorescent tubes, mismatched filing cabinets, crackling police-band scanner on a cluttered desk"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "private_agency_2",
-        "starting_minute": 1350,
-        "hook": "at 10:30 PM in the cramped ground-floor foyer of {session_private_agency_2}'s ordinary commercial building as a salvaged curio in the cellar boiler-room evidence cage cracks its chalk-salt safe, blowing the building's fuse box and rattling the frosted glass door",
-        "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Walk-Up Commercial Foyer & Reception Desk",
-        "directive": "High-Tension Small-Office Crisis: Cellar evidence-cage containment failure in a modest commercial building, protecting the block with surplus gear before the entity slips into the street.",
-        "focal_point": "Taking cover behind the dented reception counter as violet static crawls up the stairwell from the cellar boiler room",
-        "scheduled_roles": [
-          "Night-Shift Clerk",
-          "On-Call Field Contractor"
+        "description": "A vibrant modern high school landscape where social status, academic pressure, and explicit romance intertwine in a thriving anthropomorphic student body. A diverse anthropomorphic student body spanning felines (cats, tigers, cheetahs, lions), canines (wolves, foxes, fennecs), avians/birds, bears, reptiles, and lagomorphs/rodents navigate campus life, clubs, and passionate relationships.",
+        "tone_guidelines": "Write engaging slice-of-life, coming-of-age prose focusing on emotional intensity, social drama, personal growth, and passionate, explicit romantic encounters in an academic setting. Use explicit sexual terms, sexual acts & vulgar words. Avoid euphemisms and coy phrasing like 'length,' 'member,' or 'grow', use direct and explicit anatomical and sexual terms instead (e.g., dick, cock, pussy, tits, ass, fuck, cum.",
+        "locales": {
+            "ms": {
+                "display_name": "Naluri & Hasrat Selepas Sekolah",
+                "dropdown_label": "Naluri & Hasrat Selepas Sekolah [Sekolah Menengah • Furry • NSFW]",
+                "description": "Lanskap sekolah menengah moden yang meriah di mana status sosial, tekanan akademik, dan percintaan intim berjalin dalam komuniti pelajar antropomorfik. Pelajar merangkumi felin (kucing, harimau, cheetah, singa), kanin (serigala, musang, fennec), unggas, beruang, reptilia, dan rodensia menelusuri kehidupan kampus, kelab, serta perhubungan berahi yang ghairah."
+            },
+            "pl": {
+                "display_name": "Instynkty i Żądze po Lekcjach",
+                "dropdown_label": "Instynkty i Żądze po Lekcjach [Liceum • Furry • NSFW]",
+                "description": "Barwne współczesne liceum, gdzie pozycja społeczna, presja nauki i jawny erotyzm przeplatają się w różnorodnej antropomorficznej społeczności. Kotowate, psowate, ptaki, niedźwiedzie, gady i gryzonie odkrywają uroki życia szkolnego, klubów i namiętnych relacji."
+            }
+        }
+    },
+    "slice_of_life": {
+        "name": "Downtown Lights & Lattes",
+        "display_name": "Downtown Lights & Lattes",
+        "emoji": "☕",
+        "dropdown_label": "Downtown Lights & Lattes [Slice of Life]",
+        "tags": [
+            "slice_of_life"
         ],
-        "initial_physical_state": {
-          "posture": "crouching",
-          "posture_qualifier": "behind the reception counter",
-          "holding": "surplus field weapon",
-          "stance": "Defensive",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Hardware-Store Road Flare & Salt Tube",
-          "item_type": "tool",
-          "effect": "A duct-taped highway flare packed with coarse rock salt to disrupt minor spatial warps on a budget"
-        },
-        "visual_cues": "flickering emergency exit sign, smell of ozone and damp cellar concrete, rattling padlock on the basement door, streetlamp glow through frosted glass"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "monastic_order",
-        "starting_minute": 390,
-        "hook": "at 06:30 AM in the incense-scented courtyard of the Eastern Grand Temple as monastic bells toll through the cool mountain mist and elder disciples prepare sacred warding charms",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
-        "directive": "Spiritual Hub: Preparing talismans and warding salt, consulting senior temple monks, and choosing which metropolitan anomaly to purify.",
-        "focal_point": "Standing beside the great bronze incense burner watching sacred cedar smoke rise into the morning canopy",
-        "scheduled_roles": [
-          "Temple Acolyte",
-          "Senior Exorcist Monk"
+        "description": "A vibrant contemporary city district of cozy third-wave cafés, bustling shopping arcades, neon nightlife alleys, and tight-knit neighborhood characters.",
+        "tone_guidelines": "Write grounded, character-driven prose balancing warm everyday routines, neighborhood gossip, and personal relationships with street-level urban drama and late-night excitement.",
+        "locales": {
+            "ms": {
+                "display_name": "Cahaya Kota & Kopi Late",
+                "dropdown_label": "Cahaya Kota & Kopi Late [Kisah Kehidupan]",
+                "description": "Daerah bandar kontemporari yang meriah dengan kafe santai gelombang ketiga, arked beli-belah yang sibuk, lorong kehidupan malam berneon, dan penduduk kejiranan yang akrab."
+            },
+            "pl": {
+                "display_name": "Światła Śródmieścia i Latte",
+                "dropdown_label": "Światła Śródmieścia i Latte [Okruchy Życia]",
+                "description": "Tętniąca życiem dzielnica współczesnego miasta z przytulnymi kawiarniami speciality, gwarnymi pasażami handlowymi, neonowymi alejkami nocnego życia i zżytymi mieszkańcami."
+            }
+        }
+    },
+    "nuclear_post_apocalypse": {
+        "name": "Ashes of the Fallout",
+        "display_name": "Ashes of the Fallout",
+        "emoji": "☢️",
+        "dropdown_label": "Ashes of the Fallout [Post-Apocalypse]",
+        "tags": [
+            "post_apocalypse"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "beside the bronze incense burner",
-          "holding": "purification prayer beads",
-          "stance": "Relaxed",
-          "composure": "calm",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Consecrated Purging Salt",
-          "item_type": "consumable",
-          "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
-        },
-        "visual_cues": "ancient moss-covered stone lanterns, drifting sandalwood incense smoke, weeping pine needles heavy with dew, weathered vermilion temple pillars"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "monastic_order",
-        "starting_minute": 1410,
-        "hook": "at 11:30 PM before the grand altar of the Eastern Grand Temple as brass warding bells ring violently of their own accord and sacred purification lanterns extinguish one by one against a sudden surge of corrupting spiritual pressure",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
-        "directive": "High-Tension Crisis: Defending the sanctuary against sudden spiritual incursion, relighting sacred purification lanterns, and driving back anomalous corruption.",
-        "focal_point": "Bracing in front of the central shrine altar with sacred blade drawn as supernatural cold settles over the worship hall",
-        "scheduled_roles": [
-          "Temple Guardian",
-          "Shrine Maiden"
+        "description": "A bleak, ash-choked wasteland set a few decades after atomic fire, where radiation, raiders, and mutated horrors stalk the ruins.",
+        "tone_guidelines": "Write bleak, gritty, and unforgiving prose where survival of the fittest governs the ruins, occasionally balanced by dark humor.",
+        "locales": {
+            "ms": {
+                "display_name": "Debu Pasca-Kejatuhan",
+                "dropdown_label": "Debu Pasca-Kejatuhan [Pasca-Apokalips]",
+                "description": "Gurun tandus suram diselubungi abu beberapa dekad selepas api atom, di mana sinaran radiasi, perompak ganas, dan makhluk mutasi berkeliaran di runtuhan."
+            },
+            "pl": {
+                "display_name": "Popioły Opadu",
+                "dropdown_label": "Popioły Opadu [Postapokalipsa]",
+                "description": "Ponure, zasnute pyłem pustkowie kilkadziesiąt lat po wojnie nuklearnej, gdzie promieniowanie, łupieżcy i zmutowane bestie krążą wśród ruin."
+            }
+        }
+    },
+    "anomalous_incursions": {
+        "name": "Anomalous Incursions",
+        "display_name": "Anomalous Incursions",
+        "emoji": "👁️🏢",
+        "dropdown_label": "Anomalous Incursions [Urban Fantasy • Horror]",
+        "tags": [
+            "urban_fantasy",
+            "horror"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "before the inner sanctuary altar",
-          "holding": "ritual exorcism blade",
-          "stance": "Defensive",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Consecrated Purging Salt",
-          "item_type": "consumable",
-          "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
-        },
-        "visual_cues": "pitch-black temple hall, single flickering candle before golden shrine deity, frost creeping across tatami mats, echoing spectral whispers"
-      },
-      {
-        "archetype": "delve_threshold",
-        "faction": "monastic_order",
-        "starting_minute": 450,
-        "hook": "at 07:30 AM before the mossy stone entrance of the Weeping Stone Statues & Forbidden Graveyard behind the temple as elder monks string sacred shimenawa ropes to demarcate the corrupt burial ground",
-        "suggested_location": "Woods & Mountain Reserve ➔ Eastern Grand Temple & Sanctuary ➔ Weeping Stone Statues & Forbidden Graveyard",
-        "directive": "Sacred Threshold: Preparing ritual wards and offerings before descending into the cursed mountain hollow.",
-        "focal_point": "Examining the braided talisman cord tied across the entrance of the overgrown cemetery path",
-        "scheduled_roles": [
-          "Shrine Warden",
-          "Ritual Diviner"
+        "description": "A modern metropolis where anomalous phenomena, spatial distortions, and reality incursions are public knowledge. As a licensed field operative for {session_agency}, you respond to municipal breach incidents, contain surreal manifestations, and investigate uncanny entities across the city.",
+        "tone_guidelines": "Write tense, atmospheric prose blending modern urban reality with eerie, reality-bending horror. Maintain a sharp sense of public awareness, civil alarms, emergency evacuation orders, and containment protocols.",
+        "starting_hooks": [
+            {
+                "archetype": "hub_launchpad",
+                "faction": "public_agency",
+                "starting_minute": 510,
+                "hook": "at 08:30 AM inside the bustling main security rotunda of {session_agency_hq} as incident status terminals flash amber across the high glass atrium and armed response details clear security turnstiles",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
+                "directive": "Open Hub Exploration: Metropolitan crisis monitors active, response teams mustering, dispatch officers distributing clearance passes, and open deployment choices.",
+                "focal_point": "Standing beside the central biometric turnstile reviewing the morning breach incident log",
+                "scheduled_roles": [
+                    "Dispatch Operator",
+                    "Senior Field Agent"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the biometric turnstile",
+                    "holding": "encrypted bureau terminal pad",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Encrypted Bureau Terminal",
+                    "item_type": "tool",
+                    "effect": "A ruggedized government handheld terminal linking to dispatch records, incident manifests, and secure frequencies"
+                },
+                "visual_cues": "towering glass-and-steel lobby atrium, biometric security gates, wall-mounted metropolitan crisis monitors, armed bureau officers in tactical suits"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "public_agency",
+                "starting_minute": 1275,
+                "hook": "at 09:15 PM inside the reinforced security concourse of {session_agency_hq} as sudden red emergency strobes bathe the hall and klaxons shriek, signaling a containment breach in lower sector 4 while titanium blast doors automatically lock down",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
+                "directive": "High-Tension Crisis: Containment breach alarm in progress inside headquarters, automated blast barriers descending, security teams securing perimeter, and immediate containment decisions.",
+                "focal_point": "Taking cover behind the reinforced ballistic reception counter with sidearm drawn as warning sirens echo through the atrium",
+                "scheduled_roles": [
+                    "Perimeter Enforcer",
+                    "Duty Watch Officer"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the reinforced reception counter",
+                    "holding": "service sidearm",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Resonance Stabilization Flare",
+                    "item_type": "tool",
+                    "effect": "A magnesium-and-salt emergency flare that anchors reality and suppresses minor spatial warps for several minutes"
+                },
+                "visual_cues": "strobe lights flashing crimson, blaring containment sirens, descending titanium blast shutters, nervous tactical sentries aiming down sealed corridor gates"
+            },
+            {
+                "archetype": "delve_threshold",
+                "faction": "public_agency",
+                "starting_minute": 570,
+                "hook": "at 09:30 AM before the heavy pressure airlock of the Subterranean Containment Sector in {session_agency_hq} as technicians calibrate psychic dampening wards and prepare the breach response squad for an expedition into quarantined vault corridors",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Subterranean Containment & Quarantine Sector",
+                "directive": "Threshold Preparation: Final equipment and ward checks before descending into quarantined subterranean containment vaults.",
+                "focal_point": "Checking the pressure seals on your tactical vest before the heavy decontamination airlock",
+                "scheduled_roles": [
+                    "Containment Engineer",
+                    "Hazmat Specialist"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the heavy decontamination airlock",
+                    "holding": "tactical loadout harness",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Metropolitan Breach Passkey",
+                    "item_type": "tool",
+                    "effect": "An encrypted authorization keycard granting entry into Tier-2 sealed containment areas"
+                },
+                "visual_cues": "heavy steel vault doors, warning hazard stripes, hiss of chemical misting vents, ultraviolet sterilization lamps overhead"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "private_agency_1",
+                "starting_minute": 540,
+                "hook": "at 09:00 AM inside the soaring black-granite atrium of {session_private_agency_1}'s downtown glass tower as live breach valuations and high-margin containment retainers scroll across panoramic telemetry tickers above operatives clad in Obsidian ballisticweave and OptiLink visors",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Atrium Concierge & Biometric Turnstiles",
+                "directive": "Conglomerate Tower Operations: High-security skyscraper hub, reviewing executive client retainers, drawing smart-linked ordnance from the Special Ordnance Vault, and selecting high-margin bounties.",
+                "focal_point": "Standing beside the holographic portfolio wall reviewing active containment retainers",
+                "scheduled_roles": [
+                    "Portfolio Operations Liaison",
+                    "Special Ordnance Officer"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the holographic portfolio wall",
+                    "holding": "encrypted sapphire-glass slate",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Encrypted Retainer & NDA Dossier",
+                    "item_type": "tool",
+                    "effect": "An encrypted conglomerate service dossier detailing commission terms and Special Ordnance Vault clearance"
+                },
+                "visual_cues": "polished black granite waterwall, panoramic downtown skyline glass, biometric turnstiles, backlit display cases of serialized VX-4 smart carbines"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "private_agency_1",
+                "starting_minute": 1320,
+                "hook": "at 10:00 PM in the biometric atrium of {session_private_agency_1}'s downtown tower as an uncontained spatial fracture shatters an upper cleanroom seal, spinning up ceiling overwatch turrets and dropping blast shutters across the concourse",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Atrium Concierge & Biometric Turnstiles",
+                "directive": "High-Tension Tower Lockdown: Hostile manifestation inside a gleaming defense-conglomerate tower, securing high-value specimen cores, and immediate tactical suppression.",
+                "focal_point": "Crouching behind the granite concierge desk with your smart-linked weapon raised as cryo-suppression mist vents down the concourse",
+                "scheduled_roles": [
+                    "Executive Containment Detail",
+                    "Cleanroom Sciences Specialist"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the granite concierge barrier",
+                    "holding": "smart-linked tactical weapon",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Solstice Spatial Anchor Flare",
+                    "item_type": "tool",
+                    "effect": "A cleanroom-engineered cryo-magnesium flare that stabilizes local Euclidean space against minor rifts"
+                },
+                "visual_cues": "strobing amber lockdown strips, hissing cryo-suppression mist, fractured safety glass on polished granite, quiet servo sweep of ceiling turrets"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "private_agency_2",
+                "starting_minute": 540,
+                "hook": "at 09:00 AM inside the renovated brick-and-timber suite of {session_private_agency_2} as morning light warms the walnut reception desk, fresh pour-over coffee steams beside calibrated Hume meters, and the magnetic incident board fills with private client retainers",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Brick-Front Vestibule & Security Reception",
+                "directive": "Independent Partner Firm Operations: Boutique investigation suite, reviewing private client retainers in the partner case room, checking custom-tuned gear at the vaulted gunsmithing bench, and choosing fieldwork.",
+                "focal_point": "Standing before the magnetic incident pinboard reviewing vetted client case files with a mug of pour-over coffee nearby",
+                "scheduled_roles": [
+                    "Managing Case Partner",
+                    "Master Gunsmith"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the magnetic incident pinboard",
+                    "holding": "wax-sealed client case dossier",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Engraved Brass Suite Keycard",
+                    "item_type": "tool",
+                    "effect": "A serialized brass-and-leather partner credential unlocking the firm's vaulted armory and forensics lab"
+                },
+                "visual_cues": "exposed red-brick walls, etched brass suite plaque, warm banker's lamps over oak partner desks, faint scent of Hoppe's gun oil and roasted coffee beans"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "private_agency_2",
+                "starting_minute": 1350,
+                "hook": "at 10:30 PM in the brick-front vestibule of {session_private_agency_2} as a volatile relic locked inside the sub-cellar lead-lined evidence vault fractures its cold-iron chest, tripping copper grounding breakers and sending violet static up the stairwell",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Brick-Front Vestibule & Security Reception",
+                "directive": "High-Tension Boutique Firm Crisis: Sub-cellar evidence vault breach inside the firm's brick suite, containing the entity with custom-tuned firearms and ward charges before it reaches the street.",
+                "focal_point": "Taking cover behind the solid walnut reception desk with your custom-tuned weapon readied as ozone static curls up from the sub-cellar stairs",
+                "scheduled_roles": [
+                    "On-Call Ward Specialist",
+                    "Senior Field Partner"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the walnut reception desk",
+                    "holding": "custom-tuned field weapon",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Warded Iron Containment Flare",
+                    "item_type": "tool",
+                    "effect": "A gunsmith-packed magnesium and cold-iron flare calibrated to ground localized spatial static"
+                },
+                "visual_cues": "amber emergency sconces against exposed brick, sharp ozone tang, humming copper grounding busbars, rain streaking the etched brass street window"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "monastic_order",
+                "starting_minute": 390,
+                "hook": "at 06:30 AM in the incense-scented courtyard of the Eastern Grand Temple as monastic bells toll through the cool mountain mist and elder disciples prepare sacred warding charms",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
+                "directive": "Spiritual Hub: Preparing talismans and warding salt, consulting senior temple monks, and choosing which metropolitan anomaly to purify.",
+                "focal_point": "Standing beside the great bronze incense burner watching sacred cedar smoke rise into the morning canopy",
+                "scheduled_roles": [
+                    "Temple Acolyte",
+                    "Senior Exorcist Monk"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the bronze incense burner",
+                    "holding": "purification prayer beads",
+                    "stance": "Relaxed",
+                    "composure": "calm",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Consecrated Purging Salt",
+                    "item_type": "consumable",
+                    "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
+                },
+                "visual_cues": "ancient moss-covered stone lanterns, drifting sandalwood incense smoke, weeping pine needles heavy with dew, weathered vermilion temple pillars"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "monastic_order",
+                "starting_minute": 1410,
+                "hook": "at 11:30 PM before the grand altar of the Eastern Grand Temple as brass warding bells ring violently of their own accord and sacred purification lanterns extinguish one by one against a sudden surge of corrupting spiritual pressure",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
+                "directive": "High-Tension Crisis: Defending the sanctuary against sudden spiritual incursion, relighting sacred purification lanterns, and driving back anomalous corruption.",
+                "focal_point": "Bracing in front of the central shrine altar with sacred blade drawn as supernatural cold settles over the worship hall",
+                "scheduled_roles": [
+                    "Temple Guardian",
+                    "Shrine Maiden"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the inner sanctuary altar",
+                    "holding": "ritual exorcism blade",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Consecrated Purging Salt",
+                    "item_type": "consumable",
+                    "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
+                },
+                "visual_cues": "pitch-black temple hall, single flickering candle before golden shrine deity, frost creeping across tatami mats, echoing spectral whispers"
+            },
+            {
+                "archetype": "delve_threshold",
+                "faction": "monastic_order",
+                "starting_minute": 450,
+                "hook": "at 07:30 AM before the mossy stone entrance of the Weeping Stone Statues & Forbidden Graveyard behind the temple as elder monks string sacred shimenawa ropes to demarcate the corrupt burial ground",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Weeping Stone Statues & Forbidden Graveyard",
+                "directive": "Sacred Threshold: Preparing ritual wards and offerings before descending into the cursed mountain hollow.",
+                "focal_point": "Examining the braided talisman cord tied across the entrance of the overgrown cemetery path",
+                "scheduled_roles": [
+                    "Shrine Warden",
+                    "Ritual Diviner"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "at the boundary talisman cord",
+                    "holding": "paper warding charms",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Paper Warding Charms",
+                    "item_type": "tool",
+                    "effect": "Inscribed talismans that temporarily suppress minor spiritual aberrations when affixed to doorways"
+                },
+                "visual_cues": "moss-covered stone jizo statues, thick mountain fog, white paper zigzag streamers fluttering on sacred rope, damp soil smell"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "freelancer",
+                "starting_minute": 480,
+                "hook": "at 08:00 AM in the sunlit living room of {session_player_house} sipping fresh coffee as the police scanner crackles on the kitchen counter with urgent reports of anomalous activity downtown",
+                "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
+                "directive": "Independent Preparation: Reviewing freelance bounty alerts on your smartphone, maintaining independent gear, and planning your morning investigation.",
+                "focal_point": "Sitting at the kitchen table tuning the emergency civil band frequency on your handheld radio scanner",
+                "scheduled_roles": [
+                    "Helpful Neighbor",
+                    "Informant Contact"
+                ],
+                "initial_physical_state": {
+                    "posture": "sitting",
+                    "posture_qualifier": "at the kitchen table",
+                    "holding": "hot ceramic coffee mug",
+                    "stance": "Relaxed",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Modified Police Scanner",
+                    "item_type": "tool",
+                    "effect": "A handheld civilian radio modified to intercept civil defense emergency frequencies and private agency dispatch chatter"
+                },
+                "visual_cues": "morning sunlight filtering through venetian blinds, half-empty coffee mug, maps of city districts spread across wooden table, soft crackle of radio scanner"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "freelancer",
+                "starting_minute": 150,
+                "hook": "at 02:30 AM in {session_player_house} awakened abruptly by the piercing shriek of the metropolitan emergency alert broadcasting over your smartphone as violet electromagnetic static crackles across your living room television",
+                "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
+                "directive": "High-Tension Crisis: Sudden neighborhood anomaly outbreak, investigating mysterious static affecting your home, and securing your immediate surroundings.",
+                "focal_point": "Standing in the darkened living room with flashlight raised as strange violet shadows drift past your front window",
+                "scheduled_roles": [
+                    "Alarmed Neighbor"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "in the darkened living room",
+                    "holding": "heavy aluminum flashlight",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Heavy Aluminum Flashlight",
+                    "item_type": "tool",
+                    "effect": "A durable tactical flashlight with a high-lumen beam and sturdy casing suitable for self-defense"
+                },
+                "visual_cues": "dark suburban street visible through window, strobing violet light in the sky, crackling television static, distant sirens echoing through the neighborhood"
+            }
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "at the boundary talisman cord",
-          "holding": "paper warding charms",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Paper Warding Charms",
-          "item_type": "tool",
-          "effect": "Inscribed talismans that temporarily suppress minor spiritual aberrations when affixed to doorways"
-        },
-        "visual_cues": "moss-covered stone jizo statues, thick mountain fog, white paper zigzag streamers fluttering on sacred rope, damp soil smell"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "freelancer",
-        "starting_minute": 480,
-        "hook": "at 08:00 AM in the sunlit living room of {session_player_house} sipping fresh coffee as the police scanner crackles on the kitchen counter with urgent reports of anomalous activity downtown",
-        "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
-        "directive": "Independent Preparation: Reviewing freelance bounty alerts on your smartphone, maintaining independent gear, and planning your morning investigation.",
-        "focal_point": "Sitting at the kitchen table tuning the emergency civil band frequency on your handheld radio scanner",
-        "scheduled_roles": [
-          "Helpful Neighbor",
-          "Informant Contact"
+        "locales": {
+            "ms": {
+                "display_name": "Pencerobohan Anomali",
+                "dropdown_label": "Pencerobohan Anomali [Fantasi Bandar • Seram]",
+                "description": "Metropolis moden di mana fenomena anomali, herotan ruang, dan pencerobohan realiti diketahui umum. Sebagai ejen lapangan berlesen untuk {session_agency}, anda bertindak balas terhadap insiden pencerobohan bandar, membendung manifestasi aneh, dan menyiasat entiti misteri di seluruh kota."
+            },
+            "pl": {
+                "display_name": "Inkursje Anomalne",
+                "dropdown_label": "Inkursje Anomalne [Urban Fantasy • Horror]",
+                "description": "Współczesna metropolia, w której anomalie, zaburzenia przestrzeni i pęknięcia rzeczywistości są wiedzą powszechną. Jako licencjonowany agent operacyjny agencji {session_agency} reagujesz na miejskie incydenty przełamania, zabezpieczasz surrealistyczne manifestacje i badasz niesamowite byty w całym mieście."
+            }
+        }
+    },
+    "nsfw_gore_anomalous_incursions": {
+        "name": "Anomalous Incursions: Unrated",
+        "display_name": "Anomalous Incursions: Unrated",
+        "emoji": "🔞🩸",
+        "dropdown_label": "Anomalous Incursions: Unrated [Urban Fantasy • Horror • NSFW • Gore]",
+        "base_scenario": "anomalous_incursions",
+        "tags": [
+            "urban_fantasy",
+            "horror",
+            "nsfw",
+            "gore"
         ],
-        "initial_physical_state": {
-          "posture": "sitting",
-          "posture_qualifier": "at the kitchen table",
-          "holding": "hot ceramic coffee mug",
-          "stance": "Relaxed",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Modified Police Scanner",
-          "item_type": "tool",
-          "effect": "A handheld civilian radio modified to intercept civil defense emergency frequencies and private agency dispatch chatter"
-        },
-        "visual_cues": "morning sunlight filtering through venetian blinds, half-empty coffee mug, maps of city districts spread across wooden table, soft crackle of radio scanner"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "freelancer",
-        "starting_minute": 150,
-        "hook": "at 02:30 AM in {session_player_house} awakened abruptly by the piercing shriek of the metropolitan emergency alert broadcasting over your smartphone as violet electromagnetic static crackles across your living room television",
-        "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
-        "directive": "High-Tension Crisis: Sudden neighborhood anomaly outbreak, investigating mysterious static affecting your home, and securing your immediate surroundings.",
-        "focal_point": "Standing in the darkened living room with flashlight raised as strange violet shadows drift past your front window",
-        "scheduled_roles": [
-          "Alarmed Neighbor"
+        "description": "The raw, unfiltered reality of anomaly containment in the metropolis. Visceral, bone-shattering incursion violence, desperate survival, and explicit intimate encounters behind closed bureau doors.",
+        "tone_guidelines": "Write unflinching, explicit prose with visceral body horror and intense intimate encounters in the line of duty. Describe brutal physical trauma during entity clashes and graphic, unfiltered romantic/sexual passions during private downtime.",
+        "locales": {
+            "ms": {
+                "display_name": "Pencerobohan Anomali: Tanpa Tapisan",
+                "dropdown_label": "Pencerobohan Anomali: Tanpa Tapisan [Fantasi Bandar • Seram • NSFW • Ganas]",
+                "description": "Realiti mentah tanpa tapisan mengenai pembendungan anomali di kota raya. Keganasan pencerobohan yang menghancurkan tulang, perjuangan hidup terdesak, dan pertemuan intim di sebalik pintu tertutup agensi."
+            },
+            "pl": {
+                "display_name": "Inkursje Anomalne: Bez Cenzury",
+                "dropdown_label": "Inkursje Anomalne: Bez Cenzury [Urban Fantasy • Horror • NSFW • Gore]",
+                "description": "Brutalna, bezkompromisowa rzeczywistość zabezpieczania anomalii w metropolii. Druzgocąca, krwawa przemoc pęknięć czasoprzestrzennych, desperacka walka o przetrwanie i intymne uniesienia za zamkniętymi drzwiami agencji."
+            }
+        }
+    },
+    "furry_anomalous_incursions": {
+        "name": "Anomalous Incursions: Feral Watch",
+        "display_name": "Anomalous Incursions: Feral Watch",
+        "emoji": "🐾🏢",
+        "dropdown_label": "Anomalous Incursions: Feral Watch [Urban Fantasy • Horror • Furry]",
+        "base_scenario": "anomalous_incursions",
+        "tags": [
+            "urban_fantasy",
+            "horror",
+            "furry"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "in the darkened living room",
-          "holding": "heavy aluminum flashlight",
-          "stance": "Defensive",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Heavy Aluminum Flashlight",
-          "item_type": "tool",
-          "effect": "A durable tactical flashlight with a high-lumen beam and sturdy casing suitable for self-defense"
-        },
-        "visual_cues": "dark suburban street visible through window, strobing violet light in the sky, crackling television static, distant sirens echoing through the neighborhood"
-      },
-      {
-        "archetype": "hub_launchpad",
-        "faction": "student_freelancer",
-        "starting_minute": 475,
-        "hook": "at 07:55 AM in your homeroom at {session_school} as classmates trade gossip before the first bell, your phone buzzing with a quiet Metropolitan Anomaly Watch alert that only you seem to notice",
-        "suggested_location": "{session_school} ➔ Main Academic Building & Classrooms ➔ Homeroom Classroom",
-        "directive": "Open Hub Exploration: Ordinary school morning with 2-3 classmates present, a homeroom teacher arriving soon, and a faint anomalous omen somewhere on campus. Offer social choices, checking the alert discreetly, and heading out once classes end.",
-        "focal_point": "Sitting at your desk by the window with your school bag hiding something heavier than textbooks",
-        "scheduled_roles": [
-          "Homeroom Teacher",
-          "Class Representative"
+        "description": "The urban anomaly crisis unfolded across a thriving anthropomorphic metropolis. Beastfolk field agents (canine, feline, vulpine, ursine) employ heightened senses and tactical doctrine to track and contain entities.",
+        "tone_guidelines": "Write tense, atmospheric urban fantasy where anthropomorphic physical traits (twitching animal ears, claws, scent tracking, tail posture) and animal instincts interact with uncanny horrors and high-tech containment operations.",
+        "locales": {
+            "ms": {
+                "display_name": "Pencerobohan Anomali: Kawalan Liar",
+                "dropdown_label": "Pencerobohan Anomali: Kawalan Liar [Fantasi Bandar • Seram • Furry]",
+                "description": "Krisis anomali bandar yang meletus di kota metropolis antropomorfik yang makmur. Ejen lapangan berbangsa binatang (kanin, felin, vulpin, ursin) menggunakan deria tajam dan doktrin taktikal untuk menjejak dan membendung entiti."
+            },
+            "pl": {
+                "display_name": "Inkursje Anomalne: Dzika Warta",
+                "dropdown_label": "Inkursje Anomalne: Dzika Warta [Urban Fantasy • Horror • Furry]",
+                "description": "Kryzys anomalii miejskich w tętniącej życiem antropomorficznej metropolii. Zwierzęcy agenci operacyjni (psowate, kotowate, lisowate, niedźwiedziowate) wykorzystują wyostrzone zmysły i doktrynę taktyczną, by tropić i neutralizować byty."
+            }
+        }
+    },
+    "nsfw_furry_gore_anomalous_incursions": {
+        "name": "Anomalous Incursions: Feral Carnage",
+        "display_name": "Anomalous Incursions: Feral Carnage",
+        "emoji": "🔞🐾🩸",
+        "dropdown_label": "Anomalous Incursions: Feral Carnage [Urban Fantasy • Horror • Furry • NSFW • Gore]",
+        "base_scenario": "nsfw_gore_anomalous_incursions",
+        "tags": [
+            "urban_fantasy",
+            "horror",
+            "furry",
+            "nsfw",
+            "gore"
         ],
-        "initial_physical_state": {
-          "posture": "sitting",
-          "posture_qualifier": "at your desk by the window",
-          "holding": "smartphone under the desk",
-          "stance": "Neutral",
-          "composure": "composed",
-          "is_wet": 0
-        },
-        "starting_prop": {
-          "name": "Public Agency Freelance Permit",
-          "item_type": "tool",
-          "effect": "A laminated student freelance permit tucked inside your school ID holder, valid for Public Agency contract work after school hours"
-        },
-        "visual_cues": "sunlit homeroom, rows of desks, chalkboard with today's timetable, students in uniform chatting, cherry trees outside the window"
-      },
-      {
-        "archetype": "in_media_res",
-        "faction": "student_freelancer",
-        "starting_minute": 735,
-        "hook": "at 12:15 PM during lunch break when the fourth-floor washroom mirror at {session_school} begins to fog from the inside and the corridor lights stutter while students drift past unaware",
-        "suggested_location": "{session_school} ➔ The 13th Stairwell & Mirror Washroom Anomaly ➔ Dimly Lit East Corridor Landing",
-        "directive": "In Media Res: A small anomaly is waking on campus during school hours. Stage urgent choices to contain it quietly before civilian classmates or teachers notice or get hurt.",
-        "focal_point": "Standing at the corridor landing, lunch bread still in hand, watching the washroom door rattle",
-        "scheduled_roles": [
-          "Hall Monitor"
+        "description": "High-intensity anomaly suppression with an anthropomorphic roster. Primal beastfolk instincts collide with gruesome manifestations and raw, unfiltered passions.",
+        "tone_guidelines": "Write unfiltered, visceral prose blending graphic incursion violence, primal animal instincts, explicit romantic/sensual encounters, and distinct beastfolk physical traits.",
+        "locales": {
+            "ms": {
+                "display_name": "Pencerobohan Anomali: Pembantaian Liar",
+                "dropdown_label": "Pencerobohan Anomali: Pembantaian Liar [Fantasi Bandar • Seram • Furry • NSFW • Ganas]",
+                "description": "Penindasan anomali intensiti tinggi bersama barisan ejen antropomorfik. Naluri liar binatang bertembung dengan manifestasi ngeri dan nafsu berahi tanpa tapisan."
+            },
+            "pl": {
+                "display_name": "Inkursje Anomalne: Dzika Rzeź",
+                "dropdown_label": "Inkursje Anomalne: Dzika Rzeź [Urban Fantasy • Horror • Furry • NSFW • Gore]",
+                "description": "Pacyfikacja anomalii o najwyższym stopniu zagrożenia z antropomorficzną kadrą. Pierwotne instynkty zwierzęce zderzają się z makabrycznymi manifestacjami i nieskrępowanymi namiętnościami."
+            }
+        }
+    },
+    "anomalous_high_school": {
+        "name": "Anomalous High: Academy & Incursions",
+        "display_name": "Anomalous High: Academy & Incursions",
+        "emoji": "👁️🏫",
+        "dropdown_label": "Anomalous High: Academy & Incursions [Urban Fantasy • High School • Horror]",
+        "tags": [
+            "urban_fantasy",
+            "high_school",
+            "horror"
         ],
-        "initial_physical_state": {
-          "posture": "standing",
-          "posture_qualifier": "at the east corridor landing",
-          "holding": "half-eaten melon bread",
-          "stance": "Alert",
-          "composure": "tense",
-          "is_wet": 0
-        },
-        "starting_prop": null,
-        "visual_cues": "flickering fluorescent corridor lights, fogged mirror visible through a half-open door, distant cafeteria noise"
-      },
-      {
-        "archetype": "delve_threshold",
-        "faction": "student_freelancer",
-        "starting_minute": 940,
-        "hook": "at 03:40 PM after the final bell, standing before the padlocked heritage wing doors of {session_school} where a freelance contract on your phone reports a ticking sound from a clock tower that stopped decades ago",
-        "suggested_location": "{session_school} ➔ Abandoned Old Campus Wing & Clock Tower ➔ Padlocked Heritage Wing Double Doors",
-        "directive": "Delve Threshold: After-school investigation of the old campus wing. Offer scouting, gathering clues, preparing gear, and deciding whether to enter now or return after dark.",
-        "focal_point": "Kneeling by the rusted padlock, school bag unzipped to reach your gear",
-        "scheduled_roles": [
-          "Groundskeeper"
+        "description": "A modern metropolis where anomalous incursions are public knowledge and {session_school} sits at the heart of the city. Play either as an adult field operative for one of the city's agencies, or as an awakened high school student who attends classes by day and takes freelance anomaly contracts after the final bell.",
+        "tone_guidelines": "Blend grounded high school slice-of-life (classes, clubs, friendships, gossip) with eerie urban anomaly horror. Keep the school day feeling ordinary so that anomalies intruding on it feel unsettling. Student characters are students first: they worry about exams, curfews and classmates as well as containment.",
+        "starting_hooks": [
+            {
+                "archetype": "hub_launchpad",
+                "faction": "public_agency",
+                "starting_minute": 510,
+                "hook": "at 08:30 AM inside the bustling main security rotunda of {session_agency_hq} as incident status terminals flash amber across the high glass atrium and armed response details clear security turnstiles",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
+                "directive": "Open Hub Exploration: Metropolitan crisis monitors active, response teams mustering, dispatch officers distributing clearance passes, and open deployment choices.",
+                "focal_point": "Standing beside the central biometric turnstile reviewing the morning breach incident log",
+                "scheduled_roles": [
+                    "Dispatch Operator",
+                    "Senior Field Agent"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the biometric turnstile",
+                    "holding": "encrypted bureau terminal pad",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Encrypted Bureau Terminal",
+                    "item_type": "tool",
+                    "effect": "A ruggedized government handheld terminal linking to dispatch records, incident manifests, and secure frequencies"
+                },
+                "visual_cues": "towering glass-and-steel lobby atrium, biometric security gates, wall-mounted metropolitan crisis monitors, armed bureau officers in tactical suits"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "public_agency",
+                "starting_minute": 1275,
+                "hook": "at 09:15 PM inside the reinforced security concourse of {session_agency_hq} as sudden red emergency strobes bathe the hall and klaxons shriek, signaling a containment breach in lower sector 4 while titanium blast doors automatically lock down",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Main Lobby & Security Hub",
+                "directive": "High-Tension Crisis: Containment breach alarm in progress inside headquarters, automated blast barriers descending, security teams securing perimeter, and immediate containment decisions.",
+                "focal_point": "Taking cover behind the reinforced ballistic reception counter with sidearm drawn as warning sirens echo through the atrium",
+                "scheduled_roles": [
+                    "Perimeter Enforcer",
+                    "Duty Watch Officer"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the reinforced reception counter",
+                    "holding": "service sidearm",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Resonance Stabilization Flare",
+                    "item_type": "tool",
+                    "effect": "A magnesium-and-salt emergency flare that anchors reality and suppresses minor spatial warps for several minutes"
+                },
+                "visual_cues": "strobe lights flashing crimson, blaring containment sirens, descending titanium blast shutters, nervous tactical sentries aiming down sealed corridor gates"
+            },
+            {
+                "archetype": "delve_threshold",
+                "faction": "public_agency",
+                "starting_minute": 570,
+                "hook": "at 09:30 AM before the heavy pressure airlock of the Subterranean Containment Sector in {session_agency_hq} as technicians calibrate psychic dampening wards and prepare the breach response squad for an expedition into quarantined vault corridors",
+                "suggested_location": "City Center ➔ {session_agency_hq} ➔ Subterranean Containment & Quarantine Sector",
+                "directive": "Threshold Preparation: Final equipment and ward checks before descending into quarantined subterranean containment vaults.",
+                "focal_point": "Checking the pressure seals on your tactical vest before the heavy decontamination airlock",
+                "scheduled_roles": [
+                    "Containment Engineer",
+                    "Hazmat Specialist"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the heavy decontamination airlock",
+                    "holding": "tactical loadout harness",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Metropolitan Breach Passkey",
+                    "item_type": "tool",
+                    "effect": "An encrypted authorization keycard granting entry into Tier-2 sealed containment areas"
+                },
+                "visual_cues": "heavy steel vault doors, warning hazard stripes, hiss of chemical misting vents, ultraviolet sterilization lamps overhead"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "private_agency_1",
+                "starting_minute": 540,
+                "hook": "at 09:00 AM inside the soaring black-granite atrium of {session_private_agency_1}'s downtown glass tower as live breach valuations and high-margin containment retainers scroll across panoramic telemetry tickers above operatives clad in Obsidian ballisticweave and OptiLink visors",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Atrium Concierge & Biometric Turnstiles",
+                "directive": "Conglomerate Tower Operations: High-security skyscraper hub, reviewing executive client retainers, drawing smart-linked ordnance from the Special Ordnance Vault, and selecting high-margin bounties.",
+                "focal_point": "Standing beside the holographic portfolio wall reviewing active containment retainers",
+                "scheduled_roles": [
+                    "Portfolio Operations Liaison",
+                    "Special Ordnance Officer"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the holographic portfolio wall",
+                    "holding": "encrypted sapphire-glass slate",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Encrypted Retainer & NDA Dossier",
+                    "item_type": "tool",
+                    "effect": "An encrypted conglomerate service dossier detailing commission terms and Special Ordnance Vault clearance"
+                },
+                "visual_cues": "polished black granite waterwall, panoramic downtown skyline glass, biometric turnstiles, backlit display cases of serialized VX-4 smart carbines"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "private_agency_1",
+                "starting_minute": 1320,
+                "hook": "at 10:00 PM in the biometric atrium of {session_private_agency_1}'s downtown tower as an uncontained spatial fracture shatters an upper cleanroom seal, spinning up ceiling overwatch turrets and dropping blast shutters across the concourse",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_1} ➔ Atrium Concierge & Biometric Turnstiles",
+                "directive": "High-Tension Tower Lockdown: Hostile manifestation inside a gleaming defense-conglomerate tower, securing high-value specimen cores, and immediate tactical suppression.",
+                "focal_point": "Crouching behind the granite concierge desk with your smart-linked weapon raised as cryo-suppression mist vents down the concourse",
+                "scheduled_roles": [
+                    "Executive Containment Detail",
+                    "Cleanroom Sciences Specialist"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the granite concierge barrier",
+                    "holding": "smart-linked tactical weapon",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Solstice Spatial Anchor Flare",
+                    "item_type": "tool",
+                    "effect": "A cleanroom-engineered cryo-magnesium flare that stabilizes local Euclidean space against minor rifts"
+                },
+                "visual_cues": "strobing amber lockdown strips, hissing cryo-suppression mist, fractured safety glass on polished granite, quiet servo sweep of ceiling turrets"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "private_agency_2",
+                "starting_minute": 540,
+                "hook": "at 09:00 AM inside the renovated brick-and-timber suite of {session_private_agency_2} as morning light warms the walnut reception desk, fresh pour-over coffee steams beside calibrated Hume meters, and the magnetic incident board fills with private client retainers",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Brick-Front Vestibule & Security Reception",
+                "directive": "Independent Partner Firm Operations: Boutique investigation suite, reviewing private client retainers in the partner case room, checking custom-tuned gear at the vaulted gunsmithing bench, and choosing fieldwork.",
+                "focal_point": "Standing before the magnetic incident pinboard reviewing vetted client case files with a mug of pour-over coffee nearby",
+                "scheduled_roles": [
+                    "Managing Case Partner",
+                    "Master Gunsmith"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the magnetic incident pinboard",
+                    "holding": "wax-sealed client case dossier",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Engraved Brass Suite Keycard",
+                    "item_type": "tool",
+                    "effect": "A serialized brass-and-leather partner credential unlocking the firm's vaulted armory and forensics lab"
+                },
+                "visual_cues": "exposed red-brick walls, etched brass suite plaque, warm banker's lamps over oak partner desks, faint scent of Hoppe's gun oil and roasted coffee beans"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "private_agency_2",
+                "starting_minute": 1350,
+                "hook": "at 10:30 PM in the brick-front vestibule of {session_private_agency_2} as a volatile relic locked inside the sub-cellar lead-lined evidence vault fractures its cold-iron chest, tripping copper grounding breakers and sending violet static up the stairwell",
+                "suggested_location": "{starting_zone} ➔ {session_private_hq_2} ➔ Brick-Front Vestibule & Security Reception",
+                "directive": "High-Tension Boutique Firm Crisis: Sub-cellar evidence vault breach inside the firm's brick suite, containing the entity with custom-tuned firearms and ward charges before it reaches the street.",
+                "focal_point": "Taking cover behind the solid walnut reception desk with your custom-tuned weapon readied as ozone static curls up from the sub-cellar stairs",
+                "scheduled_roles": [
+                    "On-Call Ward Specialist",
+                    "Senior Field Partner"
+                ],
+                "initial_physical_state": {
+                    "posture": "crouching",
+                    "posture_qualifier": "behind the walnut reception desk",
+                    "holding": "custom-tuned field weapon",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Warded Iron Containment Flare",
+                    "item_type": "tool",
+                    "effect": "A gunsmith-packed magnesium and cold-iron flare calibrated to ground localized spatial static"
+                },
+                "visual_cues": "amber emergency sconces against exposed brick, sharp ozone tang, humming copper grounding busbars, rain streaking the etched brass street window"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "monastic_order",
+                "starting_minute": 390,
+                "hook": "at 06:30 AM in the incense-scented courtyard of the Eastern Grand Temple as monastic bells toll through the cool mountain mist and elder disciples prepare sacred warding charms",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
+                "directive": "Spiritual Hub: Preparing talismans and warding salt, consulting senior temple monks, and choosing which metropolitan anomaly to purify.",
+                "focal_point": "Standing beside the great bronze incense burner watching sacred cedar smoke rise into the morning canopy",
+                "scheduled_roles": [
+                    "Temple Acolyte",
+                    "Senior Exorcist Monk"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "beside the bronze incense burner",
+                    "holding": "purification prayer beads",
+                    "stance": "Relaxed",
+                    "composure": "calm",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Consecrated Purging Salt",
+                    "item_type": "consumable",
+                    "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
+                },
+                "visual_cues": "ancient moss-covered stone lanterns, drifting sandalwood incense smoke, weeping pine needles heavy with dew, weathered vermilion temple pillars"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "monastic_order",
+                "starting_minute": 1410,
+                "hook": "at 11:30 PM before the grand altar of the Eastern Grand Temple as brass warding bells ring violently of their own accord and sacred purification lanterns extinguish one by one against a sudden surge of corrupting spiritual pressure",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Main Worship Hall & Incense Courtyard",
+                "directive": "High-Tension Crisis: Defending the sanctuary against sudden spiritual incursion, relighting sacred purification lanterns, and driving back anomalous corruption.",
+                "focal_point": "Bracing in front of the central shrine altar with sacred blade drawn as supernatural cold settles over the worship hall",
+                "scheduled_roles": [
+                    "Temple Guardian",
+                    "Shrine Maiden"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "before the inner sanctuary altar",
+                    "holding": "ritual exorcism blade",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Consecrated Purging Salt",
+                    "item_type": "consumable",
+                    "effect": "Blessed mountain salt capable of dispelling ethereal corruption and reinforcing physical wards"
+                },
+                "visual_cues": "pitch-black temple hall, single flickering candle before golden shrine deity, frost creeping across tatami mats, echoing spectral whispers"
+            },
+            {
+                "archetype": "delve_threshold",
+                "faction": "monastic_order",
+                "starting_minute": 450,
+                "hook": "at 07:30 AM before the mossy stone entrance of the Weeping Stone Statues & Forbidden Graveyard behind the temple as elder monks string sacred shimenawa ropes to demarcate the corrupt burial ground",
+                "suggested_location": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Eastern Grand Temple & Sanctuary ➔ Weeping Stone Statues & Forbidden Graveyard",
+                "directive": "Sacred Threshold: Preparing ritual wards and offerings before descending into the cursed mountain hollow.",
+                "focal_point": "Examining the braided talisman cord tied across the entrance of the overgrown cemetery path",
+                "scheduled_roles": [
+                    "Shrine Warden",
+                    "Ritual Diviner"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "at the boundary talisman cord",
+                    "holding": "paper warding charms",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Paper Warding Charms",
+                    "item_type": "tool",
+                    "effect": "Inscribed talismans that temporarily suppress minor spiritual aberrations when affixed to doorways"
+                },
+                "visual_cues": "moss-covered stone jizo statues, thick mountain fog, white paper zigzag streamers fluttering on sacred rope, damp soil smell"
+            },
+            {
+                "archetype": "hub_launchpad",
+                "faction": "freelancer",
+                "starting_minute": 480,
+                "hook": "at 08:00 AM in the sunlit living room of {session_player_house} sipping fresh coffee as the police scanner crackles on the kitchen counter with urgent reports of anomalous activity downtown",
+                "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
+                "directive": "Independent Preparation: Reviewing freelance bounty alerts on your smartphone, maintaining independent gear, and planning your morning investigation.",
+                "focal_point": "Sitting at the kitchen table tuning the emergency civil band frequency on your handheld radio scanner",
+                "scheduled_roles": [
+                    "Helpful Neighbor",
+                    "Informant Contact"
+                ],
+                "initial_physical_state": {
+                    "posture": "sitting",
+                    "posture_qualifier": "at the kitchen table",
+                    "holding": "hot ceramic coffee mug",
+                    "stance": "Relaxed",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Modified Police Scanner",
+                    "item_type": "tool",
+                    "effect": "A handheld civilian radio modified to intercept civil defense emergency frequencies and private agency dispatch chatter"
+                },
+                "visual_cues": "morning sunlight filtering through venetian blinds, half-empty coffee mug, maps of city districts spread across wooden table, soft crackle of radio scanner"
+            },
+            {
+                "archetype": "in_media_res",
+                "faction": "freelancer",
+                "starting_minute": 150,
+                "hook": "at 02:30 AM in {session_player_house} awakened abruptly by the piercing shriek of the metropolitan emergency alert broadcasting over your smartphone as violet electromagnetic static crackles across your living room television",
+                "suggested_location": "Suburban Residential District ➔ {session_player_house} ➔ Cozy Living Room & Kitchenette",
+                "directive": "High-Tension Crisis: Sudden neighborhood anomaly outbreak, investigating mysterious static affecting your home, and securing your immediate surroundings.",
+                "focal_point": "Standing in the darkened living room with flashlight raised as strange violet shadows drift past your front window",
+                "scheduled_roles": [
+                    "Alarmed Neighbor"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "in the darkened living room",
+                    "holding": "heavy aluminum flashlight",
+                    "stance": "Defensive",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Heavy Aluminum Flashlight",
+                    "item_type": "tool",
+                    "effect": "A durable tactical flashlight with a high-lumen beam and sturdy casing suitable for self-defense"
+                },
+                "visual_cues": "dark suburban street visible through window, strobing violet light in the sky, crackling television static, distant sirens echoing through the neighborhood"
+            },
+            {
+                "id": "hook_anom_student_hub",
+                "archetype": "hub_launchpad",
+                "faction": "student_freelancer",
+                "starting_minute": 475,
+                "hook": "at 07:55 AM in your homeroom at {session_school} as classmates trade gossip before the first bell, your phone buzzing with a quiet Metropolitan Anomaly Watch alert that only you seem to notice",
+                "suggested_location": "{session_school} ➔ Main Academic Building & Classrooms ➔ Homeroom Classroom",
+                "directive": "Open Hub Exploration: Ordinary school morning with 2-3 classmates present, a homeroom teacher arriving soon, and a faint anomalous omen somewhere on campus. Offer social choices, checking the alert discreetly, and heading out once classes end.",
+                "focal_point": "Sitting at your desk by the window with your school bag hiding something heavier than textbooks",
+                "scheduled_roles": [
+                    "Homeroom Teacher",
+                    "Class Representative"
+                ],
+                "initial_physical_state": {
+                    "posture": "sitting",
+                    "posture_qualifier": "at your desk by the window",
+                    "holding": "smartphone under the desk",
+                    "stance": "Neutral",
+                    "composure": "composed",
+                    "is_wet": 0
+                },
+                "starting_prop": {
+                    "name": "Public Agency Freelance Permit",
+                    "item_type": "tool",
+                    "effect": "A laminated student freelance permit tucked inside your school ID holder, valid for Public Agency contract work after school hours"
+                },
+                "visual_cues": "sunlit homeroom, rows of desks, chalkboard with today's timetable, students in uniform chatting, cherry trees outside the window"
+            },
+            {
+                "id": "hook_anom_student_res",
+                "archetype": "in_media_res",
+                "faction": "student_freelancer",
+                "starting_minute": 735,
+                "hook": "at 12:15 PM during lunch break when the fourth-floor washroom mirror at {session_school} begins to fog from the inside and the corridor lights stutter while students drift past unaware",
+                "suggested_location": "{session_school} ➔ The 13th Stairwell & Mirror Washroom Anomaly ➔ Dimly Lit East Corridor Landing",
+                "directive": "In Media Res: A small anomaly is waking on campus during school hours. Stage urgent choices to contain it quietly before civilian classmates or teachers notice or get hurt.",
+                "focal_point": "Standing at the corridor landing, lunch bread still in hand, watching the washroom door rattle",
+                "scheduled_roles": [
+                    "Hall Monitor"
+                ],
+                "initial_physical_state": {
+                    "posture": "standing",
+                    "posture_qualifier": "at the east corridor landing",
+                    "holding": "half-eaten melon bread",
+                    "stance": "Alert",
+                    "composure": "tense",
+                    "is_wet": 0
+                },
+                "starting_prop": null,
+                "visual_cues": "flickering fluorescent corridor lights, fogged mirror visible through a half-open door, distant cafeteria noise"
+            },
+            {
+                "id": "hook_anom_student_delve",
+                "archetype": "delve_threshold",
+                "faction": "student_freelancer",
+                "starting_minute": 940,
+                "hook": "at 03:40 PM after the final bell, standing before the padlocked heritage wing doors of {session_school} where a freelance contract on your phone reports a ticking sound from a clock tower that stopped decades ago",
+                "suggested_location": "{session_school} ➔ Abandoned Old Campus Wing & Clock Tower ➔ Padlocked Heritage Wing Double Doors",
+                "directive": "Delve Threshold: After-school investigation of the old campus wing. Offer scouting, gathering clues, preparing gear, and deciding whether to enter now or return after dark.",
+                "focal_point": "Kneeling by the rusted padlock, school bag unzipped to reach your gear",
+                "scheduled_roles": [
+                    "Groundskeeper"
+                ],
+                "initial_physical_state": {
+                    "posture": "kneeling",
+                    "posture_qualifier": "by the heritage wing doors",
+                    "holding": "smartphone showing the freelance contract",
+                    "stance": "Ready",
+                    "composure": "focused",
+                    "is_wet": 0
+                },
+                "starting_prop": null,
+                "visual_cues": "late-afternoon sun across overgrown brickwork, chained double doors, silent clock tower overhead"
+            }
         ],
-        "initial_physical_state": {
-          "posture": "kneeling",
-          "posture_qualifier": "by the heritage wing doors",
-          "holding": "smartphone showing the freelance contract",
-          "stance": "Ready",
-          "composure": "focused",
-          "is_wet": 0
-        },
-        "starting_prop": null,
-        "visual_cues": "late-afternoon sun across overgrown brickwork, chained double doors, silent clock tower overhead"
-      }
-    ]
-  },
-  "nsfw_gore_anomalous_high_school": {
-    "name": "Anomalous High: Unrated",
-    "display_name": "Anomalous High: Unrated",
-    "emoji": "🔞🩸",
-    "dropdown_label": "Anomalous High: Unrated [Urban Fantasy • High School • Horror • NSFW • Gore]",
-    "base_scenario": "anomalous_high_school",
-    "tags": [
-      "urban_fantasy",
-      "high_school",
-      "horror",
-      "nsfw",
-      "gore"
-    ],
-    "description": "Unrated variant of Anomalous High with explicit content and graphic anomalous violence.",
-    "tone_guidelines": "Same as Anomalous High, with explicit content allowed between adults and graphic body horror during anomaly encounters."
-  },
-  "furry_anomalous_high_school": {
-    "name": "Anomalous High: Feral Watch",
-    "display_name": "Anomalous High: Feral Watch",
-    "emoji": "🐾🏫",
-    "dropdown_label": "Anomalous High: Feral Watch [Urban Fantasy • High School • Horror • Furry]",
-    "base_scenario": "anomalous_high_school",
-    "tags": [
-      "urban_fantasy",
-      "high_school",
-      "horror",
-      "furry"
-    ],
-    "description": "Anthropomorphic variant of Anomalous High: an academy and city populated by furry residents.",
-    "tone_guidelines": "Same as Anomalous High, with all residents depicted as anthropomorphic characters."
-  },
-  "nsfw_furry_gore_anomalous_high_school": {
-    "name": "Anomalous High: Feral Carnage",
-    "display_name": "Anomalous High: Feral Carnage",
-    "emoji": "🔞🐾🩸",
-    "dropdown_label": "Anomalous High: Feral Carnage [Urban Fantasy • High School • Horror • Furry • NSFW • Gore]",
-    "base_scenario": "nsfw_gore_anomalous_high_school",
-    "tags": [
-      "urban_fantasy",
-      "high_school",
-      "horror",
-      "furry",
-      "nsfw",
-      "gore"
-    ],
-    "description": "Unrated anthropomorphic variant of Anomalous High.",
-    "tone_guidelines": "Same as Anomalous High: Unrated, with all residents depicted as anthropomorphic characters."
-  }
+        "locales": {
+            "ms": {
+                "display_name": "Akademi Anomali: Sekolah & Pencerobohan",
+                "dropdown_label": "Akademi Anomali: Sekolah & Pencerobohan [Fantasi Bandar • Sekolah Menengah • Seram]",
+                "description": "Metropolis moden di mana pencerobohan anomali diketahui umum dan {session_school} terletak di tengah-tengah kota. Bermain sama ada sebagai ejen lapangan dewasa untuk salah satu agensi bandar, atau sebagai pelajar sekolah menengah yang terbangkit kuasanya, menghadiri kelas pada waktu siang dan menerima kontrak anomali bebas selepas loceng akhir berbunyi."
+            },
+            "pl": {
+                "display_name": "Akademia Anomalii: Szkoła i Inkursje",
+                "dropdown_label": "Akademia Anomalii: Szkoła i Inkursje [Urban Fantasy • Liceum • Horror]",
+                "description": "Nowoczesna metropolia, w której anomalne inkursje są jawne, a szkoła {session_school} leży w samym sercu miasta. Wciel się w dorosłego agenta terenowego jednej z miejskich agencji lub w przebudzonego licealistę, który za dnia chodzi na lekcje, a po dzwonku realizuje zlecenia na anomalie."
+            }
+        }
+    },
+    "nsfw_gore_anomalous_high_school": {
+        "name": "Anomalous High: Unrated",
+        "display_name": "Anomalous High: Unrated",
+        "emoji": "🔞🩸",
+        "dropdown_label": "Anomalous High: Unrated [Urban Fantasy • High School • Horror • NSFW • Gore]",
+        "base_scenario": "anomalous_high_school",
+        "tags": [
+            "urban_fantasy",
+            "high_school",
+            "horror",
+            "nsfw",
+            "gore"
+        ],
+        "description": "Unrated variant of Anomalous High with explicit content and graphic anomalous violence.",
+        "tone_guidelines": "Same as Anomalous High, with explicit content allowed between adults and graphic body horror during anomaly encounters.",
+        "locales": {
+            "ms": {
+                "display_name": "Akademi Anomali: Tanpa Tapisan",
+                "dropdown_label": "Akademi Anomali: Tanpa Tapisan [Fantasi Bandar • Sekolah Menengah • Seram • NSFW • Ganas]",
+                "description": "Varian tanpa tapisan bagi Akademi Anomali dengan kandungan eksplisit serta keganasan anomali yang mengerikan."
+            },
+            "pl": {
+                "display_name": "Akademia Anomalii: Bez Cenzury",
+                "dropdown_label": "Akademia Anomalii: Bez Cenzury [Urban Fantasy • Liceum • Horror • NSFW • Gore]",
+                "description": "Wersja Akademii Anomalii bez cenzury, zawierająca dosadne treści erotyczne oraz drastyczną przemoc anomalną."
+            }
+        }
+    },
+    "furry_anomalous_high_school": {
+        "name": "Anomalous High: Feral Watch",
+        "display_name": "Anomalous High: Feral Watch",
+        "emoji": "🐾🏫",
+        "dropdown_label": "Anomalous High: Feral Watch [Urban Fantasy • High School • Horror • Furry]",
+        "base_scenario": "anomalous_high_school",
+        "tags": [
+            "urban_fantasy",
+            "high_school",
+            "horror",
+            "furry"
+        ],
+        "description": "Anthropomorphic variant of Anomalous High: an academy and city populated by furry residents.",
+        "tone_guidelines": "Same as Anomalous High, with all residents depicted as anthropomorphic characters.",
+        "locales": {
+            "ms": {
+                "display_name": "Akademi Anomali: Kawalan Liar",
+                "dropdown_label": "Akademi Anomali: Kawalan Liar [Fantasi Bandar • Sekolah Menengah • Seram • Furry]",
+                "description": "Varian antropomorfik bagi Akademi Anomali: sebuah akademi dan bandar yang dihuni oleh penduduk separa binatang."
+            },
+            "pl": {
+                "display_name": "Akademia Anomalii: Dzika Warta",
+                "dropdown_label": "Akademia Anomalii: Dzika Warta [Urban Fantasy • Liceum • Horror • Furry]",
+                "description": "Antropomorficzny wariant Akademii Anomalii: szkoła i metropolia zamieszkane przez zwierzoludzi."
+            }
+        }
+    },
+    "nsfw_furry_gore_anomalous_high_school": {
+        "name": "Anomalous High: Feral Carnage",
+        "display_name": "Anomalous High: Feral Carnage",
+        "emoji": "🔞🐾🩸",
+        "dropdown_label": "Anomalous High: Feral Carnage [Urban Fantasy • High School • Horror • Furry • NSFW • Gore]",
+        "base_scenario": "nsfw_gore_anomalous_high_school",
+        "tags": [
+            "urban_fantasy",
+            "high_school",
+            "horror",
+            "furry",
+            "nsfw",
+            "gore"
+        ],
+        "description": "Unrated anthropomorphic variant of Anomalous High.",
+        "tone_guidelines": "Same as Anomalous High: Unrated, with all residents depicted as anthropomorphic characters.",
+        "locales": {
+            "ms": {
+                "display_name": "Akademi Anomali: Pembantaian Liar",
+                "dropdown_label": "Akademi Anomali: Pembantaian Liar [Fantasi Bandar • Sekolah Menengah • Seram • Furry • NSFW • Ganas]",
+                "description": "Varian antropomorfik tanpa tapisan bagi Akademi Anomali."
+            },
+            "pl": {
+                "display_name": "Akademia Anomalii: Dzika Rzeź",
+                "dropdown_label": "Akademia Anomalii: Dzika Rzeź [Urban Fantasy • Liceum • Horror • Furry • NSFW • Gore]",
+                "description": "Nieocenzurowany antropomorficzny wariant Akademii Anomalii."
+            }
+        }
+    }
 }
