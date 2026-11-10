@@ -18,6 +18,11 @@ log = logging.getLogger("hikayat.world.access_gate")
 
 class Phase2Choice(str):
     """A choice string subclass that also provides dictionary-like properties for choices_cleaner."""
+    label: str
+    stat: str
+    requirement: int
+    mp_cost: int
+
     def __new__(cls, label: str, stat: str = "NONE", requirement: int = 0, mp_cost: int = 0, **kwargs):
         val = super().__new__(cls, str(label).strip())
         val.label = str(label).strip()
@@ -1549,7 +1554,11 @@ def record_turn_scene_residue(
                 break
         # Persist sparse prop delta if a room prop was searched or focused during clue discovery
         try:
-            room_props = get_node_props(session_id, node_id)
+            from mechanics.world.locations.seeds import get_node_props
+            room_props = get_node_props(
+                session_id, node_id,
+                scenario_key=str((session or {}).get("scenario") or "high_school_drama"),
+            )
             if room_props:
                 focal_str = str(session.get("focal_point") or "").lower()
                 act_labels = " ".join(
@@ -1707,7 +1716,8 @@ def get_privacy_nudge_choice(
                     home_dc_mod = int(p_cat.get("cha_invite_dc_mod") or 0)
     except Exception:
         home_dc_mod = 0
-    req_dc = max(3, min(14, 12 - score_discount - track_bonus + home_dc_mod))
+    base_dc = max(5, min(14, 12 - score_discount - track_bonus))
+    req_dc = max(3, min(14, base_dc + home_dc_mod))
 
     scen_key = str(sess_dict.get('scenario') or 'high_school_drama')
     from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
@@ -1715,6 +1725,7 @@ def get_privacy_nudge_choice(
 
     # 1. Prefer adjacent secluded sibling room under the same facility for full room transition
     all_nodes = db.get_session_world_nodes(session_id)
+    curr_nid = str(curr_node.get('node_id') or '')
     siblings = [
         n for n in all_nodes
         if n.get('parent_id') == parent_id
@@ -1723,29 +1734,40 @@ def get_privacy_nudge_choice(
         and (n.get('privacy_level') in ('semi_private', 'private', 'restricted') or bool(n.get('is_discreet')))
     ]
 
-    if siblings:
-        def _sibling_priority(n: dict) -> tuple:
-            nid = str(n.get('node_id') or '')
-            curr_nid = str(curr_node.get('node_id') or '')
-            is_affiliated = nid.startswith(curr_nid + '_')
-            name_low = str(n.get('name') or '').lower()
-            has_secluded_name = any(k in name_low for k in ('balcony', 'terrace', 'booth', 'alcove', 'shed', 'nook', 'private', 'corner'))
-            sj_raw = n.get('state_json')
-            sj_dict = json.loads(sj_raw) if isinstance(sj_raw, str) and sj_raw.strip().startswith('{') else (sj_raw if isinstance(sj_raw, dict) else {})
-            is_child = bool(getattr(sj_dict, 'get', lambda _k: None)('parent_sub_id') == curr_nid)
-            is_discreet = bool(n.get('is_discreet')) or bool(getattr(sj_dict, 'get', lambda _k: None)('is_discreet'))
-            return (0 if (is_affiliated or is_child) else 1, 0 if is_discreet else 1, 0 if has_secluded_name else 1)
+    affiliated_siblings = []
+    other_siblings = []
+    for n in siblings:
+        nid = str(n.get('node_id') or '')
+        sj_raw = n.get('state_json')
+        sj_dict = json.loads(sj_raw) if isinstance(sj_raw, str) and sj_raw.strip().startswith('{') else (sj_raw if isinstance(sj_raw, dict) else {})
+        is_child = bool(getattr(sj_dict, 'get', lambda _k: None)('parent_sub_id') == curr_nid)
+        if nid.startswith(curr_nid + '_') or is_child:
+            affiliated_siblings.append(n)
+        else:
+            other_siblings.append(n)
 
-        def _sibling_priority_stable(n: dict) -> tuple:
-            pri = _sibling_priority(n)
-            try:
-                idx = all_nodes.index(n)
-            except Exception:
-                idx = 999
-            return (pri[0], pri[1], pri[2], idx)
+    def _sibling_priority(n: dict) -> tuple:
+        nid = str(n.get('node_id') or '')
+        is_affiliated = nid.startswith(curr_nid + '_')
+        name_low = str(n.get('name') or '').lower()
+        has_secluded_name = any(k in name_low for k in ('balcony', 'terrace', 'booth', 'alcove', 'shed', 'nook', 'private', 'corner'))
+        sj_raw = n.get('state_json')
+        sj_dict = json.loads(sj_raw) if isinstance(sj_raw, str) and sj_raw.strip().startswith('{') else (sj_raw if isinstance(sj_raw, dict) else {})
+        is_child = bool(getattr(sj_dict, 'get', lambda _k: None)('parent_sub_id') == curr_nid)
+        is_discreet = bool(n.get('is_discreet')) or bool(getattr(sj_dict, 'get', lambda _k: None)('is_discreet'))
+        return (0 if (is_affiliated or is_child) else 1, 0 if is_discreet else 1, 0 if has_secluded_name else 1)
 
-        siblings.sort(key=_sibling_priority_stable)
-        chosen_sub = siblings[0]
+    def _sibling_priority_stable(n: dict) -> tuple:
+        pri = _sibling_priority(n)
+        try:
+            idx = all_nodes.index(n)
+        except Exception:
+            idx = 999
+        return (pri[0], pri[1], pri[2], idx)
+
+    if affiliated_siblings:
+        affiliated_siblings.sort(key=_sibling_priority_stable)
+        chosen_sub = affiliated_siblings[0]
         dest_loc = format_tiered_location_string(pz, pp, chosen_sub['name'])
         return Phase2Choice(
             f'Step into {chosen_sub["name"]} with {partner_name} for privacy',
@@ -1768,7 +1790,7 @@ def get_privacy_nudge_choice(
         for pr in room_props:
             pr_low = pr.lower()
             if pr_low != curr_focal and any(k in pr_low for k in secluded_keywords):
-                dest_loc = format_tiered_location_string(pz, pp, pr)
+                dest_loc = format_tiered_location_string(pz, curr_node.get('name') or pp, pr)
                 return Phase2Choice(
                     f'Step into {pr} with {partner_name} for privacy',
                     stat='CHA',
@@ -1785,6 +1807,25 @@ def get_privacy_nudge_choice(
                 )
     except Exception:
         pass
+
+    # 3. Fall back to other secluded sibling rooms under the same facility
+    if other_siblings:
+        other_siblings.sort(key=_sibling_priority_stable)
+        chosen_sub = other_siblings[0]
+        dest_loc = format_tiered_location_string(pz, pp, chosen_sub['name'])
+        return Phase2Choice(
+            f'Step into {chosen_sub["name"]} with {partner_name} for privacy',
+            stat='CHA',
+            requirement=req_dc,
+            mp_cost=0,
+            intent='social_invite',
+            sub_intent='privacy_nudge',
+            target_npc=partner_name,
+            target_node_id=chosen_sub['node_id'],
+            target_location=dest_loc,
+            _privacy_nudge=True,
+            _band=2,
+        )
 
     return None
 

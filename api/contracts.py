@@ -117,7 +117,7 @@ async def perform_entity_contract_ritual(
             "overview": safe_res.get("overview") or {},
         },
     )
-    if enriched_session and res.get("spawned_exorcism_boss"):
+    if enriched_session and (res.get("spawned_exorcism_boss") or res.get("boss_surrender")):
         await manager.broadcast(
             session_id,
             {

@@ -16,7 +16,7 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import db
 
@@ -1638,14 +1638,12 @@ def seed_contact_social_graph(
             rg_app = contact.get("appearance") or {}
             if isinstance(rg_app, str):
                 try:
-                    import json
                     rg_app = json.loads(rg_app)
                 except Exception:
                     rg_app = {}
             rg_binfo = contact.get("basic_info") or {}
             if isinstance(rg_binfo, str):
                 try:
-                    import json
                     rg_binfo = json.loads(rg_binfo)
                 except Exception:
                     rg_binfo = {}

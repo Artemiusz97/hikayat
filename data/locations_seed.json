@@ -7248,7 +7248,7 @@
                 "name": "Residential Security Lobby & Mailboxes",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Turnstile",
+                  "Keycard Scanner Pedestal",
                   "Agent Brass Mailboxes",
                   "Duty Roster Bulletin",
                   "Umbrella Stand"
@@ -7915,7 +7915,7 @@
                 "name": "Private Elevator Vestibule",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Elevator Doors",
+                  "Keycard Elevator Panel",
                   "Travertine Console Table",
                   "Recessed Gallery Spotlights",
                   "Smart Home Panel"
@@ -8211,7 +8211,7 @@
                 "name": "Gated Marble Portico & Motorcourt",
                 "is_entrance": 1,
                 "props": [
-                  "Wrought-Iron Security Gates",
+                  "Wrought-Iron Security Grille",
                   "Calacatta Marble Columns",
                   "Reflecting Water Basin",
                   "Encrypted Palm Scanner"
@@ -8573,7 +8573,7 @@
                 "name": "Iron-Grate Corridor & Deadbolt Door",
                 "is_entrance": 1,
                 "props": [
-                  "Reinforced Steel Door",
+                  "Reinforced Steel Bulkhead",
                   "Peephole & Chain",
                   "Exposed Conduit Pipes",
                   "Flickering Hallway Bulb"
@@ -9432,7 +9432,7 @@
                   "Brick Stoop & Planters",
                   "Smart Deadbolt Lock",
                   "Parcel Dropbox",
-                  "Picket Garden Gate"
+                  "Picket Garden Fence"
                 ]
               },
               {
@@ -9443,7 +9443,7 @@
                   "Sectional Linen Sofa",
                   "Quartz Breakfast Island",
                   "Hardwood Bookcase",
-                  "Garden Patio Doors"
+                  "Garden Patio French Panes"
                 ]
               },
               {
@@ -10097,7 +10097,7 @@
                 "props": [
                   "Rattan Daybed & Throws",
                   "Sea-Glass Coffee Table",
-                  "Sliding Louvered Doors",
+                  "Sliding Louvered Shutters",
                   "Espresso & Wine Nook"
                 ]
               },
@@ -10446,7 +10446,7 @@
                 "veil_token_item": "Cempaka Brass Serunai",
                 "props": [
                   "Warm Moonlit Mineral Spring Basin",
-                  "Luminous Leyline Spirit Archway",
+                  "Luminous Leyline Spirit Conduit",
                   "Floating White Cempaka & Orchid Petals",
                   "Carved Alabaster Dressing Alcove"
                 ]
@@ -10672,7 +10672,7 @@
                 "props": [
                   "Mossy Stone Fox-Guardian Statues",
                   "Vermilion Torii Tunnel Corridor",
-                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Dusk-Lit Foxfire Mirage Shimmer",
                   "Offered Fried Tofu & Sake Altar"
                 ]
               },
@@ -10804,7 +10804,7 @@
                 "name": "Hinoki Gatehouse & Moss Courtyard",
                 "is_entrance": 1,
                 "props": [
-                  "Tiled Hinoki Gate",
+                  "Tiled Hinoki Portico",
                   "Bamboo Shishi-Odoshi",
                   "Stone Lantern Path",
                   "Discreet Biometric Latch"
@@ -11612,7 +11612,7 @@
                 "name": "Carved Side-Alley Stairway",
                 "is_entrance": 1,
                 "props": [
-                  "Lacquered Lattice Door",
+                  "Lacquered Lattice Screen",
                   "Silk Crimson Lanterns",
                   "Brass Mail Slot",
                   "Steep Timber Stair"
@@ -11908,7 +11908,7 @@
                 "name": "Decommissioned Blast Bulkhead",
                 "is_entrance": 1,
                 "props": [
-                  "Spoked Vault Wheel Door",
+                  "Spoked Vault Locking Wheel",
                   "Recessed Biometric Pad",
                   "Amber Bulkhead Light",
                   "Geothermal Pipe Niche"
@@ -12426,7 +12426,7 @@
                 "name": "Residential Security Lobby & Mailboxes",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Turnstile",
+                  "Keycard Scanner Pedestal",
                   "Agent Brass Mailboxes",
                   "Duty Roster Bulletin",
                   "Umbrella Stand"
@@ -13093,7 +13093,7 @@
                 "name": "Private Elevator Vestibule",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Elevator Doors",
+                  "Keycard Elevator Panel",
                   "Travertine Console Table",
                   "Recessed Gallery Spotlights",
                   "Smart Home Panel"
@@ -13389,7 +13389,7 @@
                 "name": "Gated Marble Portico & Motorcourt",
                 "is_entrance": 1,
                 "props": [
-                  "Wrought-Iron Security Gates",
+                  "Wrought-Iron Security Grille",
                   "Calacatta Marble Columns",
                   "Reflecting Water Basin",
                   "Encrypted Palm Scanner"
@@ -13751,7 +13751,7 @@
                 "name": "Iron-Grate Corridor & Deadbolt Door",
                 "is_entrance": 1,
                 "props": [
-                  "Reinforced Steel Door",
+                  "Reinforced Steel Bulkhead",
                   "Peephole & Chain",
                   "Exposed Conduit Pipes",
                   "Flickering Hallway Bulb"
@@ -14610,7 +14610,7 @@
                   "Brick Stoop & Planters",
                   "Smart Deadbolt Lock",
                   "Parcel Dropbox",
-                  "Picket Garden Gate"
+                  "Picket Garden Fence"
                 ]
               },
               {
@@ -14621,7 +14621,7 @@
                   "Sectional Linen Sofa",
                   "Quartz Breakfast Island",
                   "Hardwood Bookcase",
-                  "Garden Patio Doors"
+                  "Garden Patio French Panes"
                 ]
               },
               {
@@ -15653,7 +15653,7 @@
                 "props": [
                   "Rattan Daybed & Throws",
                   "Sea-Glass Coffee Table",
-                  "Sliding Louvered Doors",
+                  "Sliding Louvered Shutters",
                   "Espresso & Wine Nook"
                 ]
               },
@@ -16002,7 +16002,7 @@
                 "veil_token_item": "Cempaka Brass Serunai",
                 "props": [
                   "Warm Moonlit Mineral Spring Basin",
-                  "Luminous Leyline Spirit Archway",
+                  "Luminous Leyline Spirit Conduit",
                   "Floating White Cempaka & Orchid Petals",
                   "Carved Alabaster Dressing Alcove"
                 ]
@@ -16228,7 +16228,7 @@
                 "props": [
                   "Mossy Stone Fox-Guardian Statues",
                   "Vermilion Torii Tunnel Corridor",
-                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Dusk-Lit Foxfire Mirage Shimmer",
                   "Offered Fried Tofu & Sake Altar"
                 ]
               },
@@ -16360,7 +16360,7 @@
                 "name": "Hinoki Gatehouse & Moss Courtyard",
                 "is_entrance": 1,
                 "props": [
-                  "Tiled Hinoki Gate",
+                  "Tiled Hinoki Portico",
                   "Bamboo Shishi-Odoshi",
                   "Stone Lantern Path",
                   "Discreet Biometric Latch"
@@ -17168,7 +17168,7 @@
                 "name": "Carved Side-Alley Stairway",
                 "is_entrance": 1,
                 "props": [
-                  "Lacquered Lattice Door",
+                  "Lacquered Lattice Screen",
                   "Silk Crimson Lanterns",
                   "Brass Mail Slot",
                   "Steep Timber Stair"
@@ -17464,7 +17464,7 @@
                 "name": "Decommissioned Blast Bulkhead",
                 "is_entrance": 1,
                 "props": [
-                  "Spoked Vault Wheel Door",
+                  "Spoked Vault Locking Wheel",
                   "Recessed Biometric Pad",
                   "Amber Bulkhead Light",
                   "Geothermal Pipe Niche"
@@ -17982,7 +17982,7 @@
                 "name": "Residential Security Lobby & Mailboxes",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Turnstile",
+                  "Keycard Scanner Pedestal",
                   "Agent Brass Mailboxes",
                   "Duty Roster Bulletin",
                   "Umbrella Stand"
@@ -18649,7 +18649,7 @@
                 "name": "Private Elevator Vestibule",
                 "is_entrance": 1,
                 "props": [
-                  "Keycard Elevator Doors",
+                  "Keycard Elevator Panel",
                   "Travertine Console Table",
                   "Recessed Gallery Spotlights",
                   "Smart Home Panel"
@@ -18945,7 +18945,7 @@
                 "name": "Gated Marble Portico & Motorcourt",
                 "is_entrance": 1,
                 "props": [
-                  "Wrought-Iron Security Gates",
+                  "Wrought-Iron Security Grille",
                   "Calacatta Marble Columns",
                   "Reflecting Water Basin",
                   "Encrypted Palm Scanner"
@@ -19307,7 +19307,7 @@
                 "name": "Iron-Grate Corridor & Deadbolt Door",
                 "is_entrance": 1,
                 "props": [
-                  "Reinforced Steel Door",
+                  "Reinforced Steel Bulkhead",
                   "Peephole & Chain",
                   "Exposed Conduit Pipes",
                   "Flickering Hallway Bulb"
@@ -20166,7 +20166,7 @@
                   "Brick Stoop & Planters",
                   "Smart Deadbolt Lock",
                   "Parcel Dropbox",
-                  "Picket Garden Gate"
+                  "Picket Garden Fence"
                 ]
               },
               {
@@ -20177,7 +20177,7 @@
                   "Sectional Linen Sofa",
                   "Quartz Breakfast Island",
                   "Hardwood Bookcase",
-                  "Garden Patio Doors"
+                  "Garden Patio French Panes"
                 ]
               },
               {
@@ -20831,7 +20831,7 @@
                 "props": [
                   "Rattan Daybed & Throws",
                   "Sea-Glass Coffee Table",
-                  "Sliding Louvered Doors",
+                  "Sliding Louvered Shutters",
                   "Espresso & Wine Nook"
                 ]
               },
@@ -21180,7 +21180,7 @@
                 "veil_token_item": "Cempaka Brass Serunai",
                 "props": [
                   "Warm Moonlit Mineral Spring Basin",
-                  "Luminous Leyline Spirit Archway",
+                  "Luminous Leyline Spirit Conduit",
                   "Floating White Cempaka & Orchid Petals",
                   "Carved Alabaster Dressing Alcove"
                 ]
@@ -21406,7 +21406,7 @@
                 "props": [
                   "Mossy Stone Fox-Guardian Statues",
                   "Vermilion Torii Tunnel Corridor",
-                  "Dusk-Lit Foxfire Mirage Threshold",
+                  "Dusk-Lit Foxfire Mirage Shimmer",
                   "Offered Fried Tofu & Sake Altar"
                 ]
               },
@@ -21538,7 +21538,7 @@
                 "name": "Hinoki Gatehouse & Moss Courtyard",
                 "is_entrance": 1,
                 "props": [
-                  "Tiled Hinoki Gate",
+                  "Tiled Hinoki Portico",
                   "Bamboo Shishi-Odoshi",
                   "Stone Lantern Path",
                   "Discreet Biometric Latch"
@@ -22346,7 +22346,7 @@
                 "name": "Carved Side-Alley Stairway",
                 "is_entrance": 1,
                 "props": [
-                  "Lacquered Lattice Door",
+                  "Lacquered Lattice Screen",
                   "Silk Crimson Lanterns",
                   "Brass Mail Slot",
                   "Steep Timber Stair"
@@ -22642,7 +22642,7 @@
                 "name": "Decommissioned Blast Bulkhead",
                 "is_entrance": 1,
                 "props": [
-                  "Spoked Vault Wheel Door",
+                  "Spoked Vault Locking Wheel",
                   "Recessed Biometric Pad",
                   "Amber Bulkhead Light",
                   "Geothermal Pipe Niche"

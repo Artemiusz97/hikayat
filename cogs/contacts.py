@@ -38,7 +38,7 @@ def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenar
     is_anom = scenario_data.is_anomalous_incursions_scenario(scenario_key)
     unlocked = []
     for c in contacts:
-        if not is_unlocked_contact(c, party_names):
+        if not is_unlocked_contact(c, party_names, include_party=True):
             continue
         if is_hs or is_anom:
             b_info = c.get("basic_info") or {}

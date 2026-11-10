@@ -1102,7 +1102,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                         )
                 elif not _in_active_erotic_dlg:
                     refr_partners_dlg = exc_dlg.get("refractory_partners") if isinstance(exc_dlg.get("refractory_partners"), dict) else {}
-                    for p in partners_list:
+                    for p in (new_partners or []):
                         matched_rp = _match_actor_key(p, refr_partners_dlg) if refr_partners_dlg else ""
                         if matched_rp and refr_partners_dlg.get(matched_rp):
                             intimate_dynamic_openness_blocks.append(
@@ -1166,8 +1166,8 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 from mechanics.social.conversation_choices import (
                     resolve_partner_conversation_profile,
                     get_partner_conversation_budget_state,
-                    _recent_action_labels_lower,
                 )
+                from mechanics.social.band_fallbacks import _recent_action_labels_lower
                 _lead_prof = resolve_partner_conversation_profile(session, new_partners[0], party=party)
                 _b_state = get_partner_conversation_budget_state(session, _lead_prof)
                 _asked = _recent_action_labels_lower(session, limit=12, actions=actions, partner_name=new_partners[0])
@@ -1393,7 +1393,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                     f"- `next_choices`: Generate 4 to 6 diverse, contextual, Sims-style conversational choices reacting naturally to what {partner_str} just said, grounded in `[PRE-TURN SOCIAL SEEDS & MOOD]` (copy each seed's `topic_id` and `category` onto its JSON choice). Every conversational choice MUST require a skill check across all 7 SPECIAL stats (STR, PER, END, CHA, INT, AGI, or LUK, requirement: 3 to 12) EXCEPT the 1 dedicated conversational exit (`stat: NONE`, `requirement: 0`, e.g. 'Thank {partner_str} and excuse yourself to step away'):\n"
                     f"  1. 💬 [Getting to Know / Friendly Situational]: Ask about passions, work, personal boundaries, ambient world events/rumors, or immediate surroundings.\n"
                     f"  2. 🎭 [Banter / Humor / Callbacks]: Crack situational jokes, playful teasing, or callbacks to shared history and promises.\n"
-                    f"  3. 💖 [Chemistry / Bold Gambles / Friction]: Express warmth, bold flirtation, or confident pushback/rivalry challenges matched to the moment.\n"
+                    f"  3. 💖 [Chemistry / Bold Gambles / Friction]: Express warmth, bold flirtation, or confident pushback/rivalry challenges matched to the moment (or for Shameless/Bold partners, [Bold / Provocative Flirtation / Suggestive Teasing]).\n"
                     f"  4. 🚪 [Dedicated Exit]: The ONLY action with stat: NONE and requirement: 0 is the 1 dedicated conversational exit.\n"
                     f"  - CHOICE LABEL PROSE INTEGRITY (STRICT): The 'label' field must contain ONLY in-world narrative action text (e.g. 'Ask {partner_str} how their day has been'). NEVER include raw JSON field names, LaTeX math formatting (\\text, \\mathbf), stat badges, spoiler icons, or requirement numbers inside the label prose.\n"
                 )

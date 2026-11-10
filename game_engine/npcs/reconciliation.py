@@ -765,9 +765,9 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
                         existing_n[k] = v
 
-        elif isinstance(n, str) and n.strip():
+        elif isinstance(n, str) and n.strip():  # pylint: disable=no-member
 
-            raw_name = n.strip()
+            raw_name = n.strip()  # pylint: disable=no-member
 
             canon_name = _resolve_canonical_name(raw_name)
 
@@ -814,6 +814,14 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
 
     left_behind_names = set()
+
+    newly_recruited = set()
+    for r in (result.get("relationship_updates") or []):
+        if isinstance(r, dict):
+            r_name = str(r.get("npc_name") or r.get("name") or "").lower().strip()
+            r_disp = str(r.get("disposition") or "").lower()
+            if r_name and (r_disp in ("companion", "ally", "friendly") or r.get("affinity", 0) >= 30):
+                newly_recruited.add(r_name)
 
     if new_loc != old_loc:
         # Complete or abandon any phone appointments / rendezvous that were 'arrived' at old_loc when moving away
@@ -878,19 +886,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
 
 
-        newly_recruited = set()
-
-        for r in (result.get("relationship_updates") or []):
-
-            if isinstance(r, dict):
-
-                r_name = str(r.get("npc_name") or r.get("name") or "").lower().strip()
-
-                r_disp = str(r.get("disposition") or "").lower()
-
-                if r_name and (r_disp in ("companion", "ally", "friendly") or r.get("affinity", 0) >= 30):
-
-                    newly_recruited.add(r_name)
 
 
 
@@ -1464,7 +1459,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                 if fn_nm in dir_map:
                     hydrate_school_character(session["id"], dir_map[fn_nm])
                 if raw_fn_nm:
-                    maybe_promote_scene_parent(session["id"], raw_fn_nm, location=new_loc)
+                    maybe_promote_scene_parent(session["id"], raw_fn_nm)
         except Exception:
             pass
 

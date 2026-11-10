@@ -807,6 +807,8 @@ def compute_item_resale_payout(
         return 0, "Unequip this item before selling it"
     if item.get("is_quest_locked"):
         return 0, "Quest-locked items cannot be sold"
+    if item.get("is_pact_locked"):
+        return 0, "Pact-bound items cannot be sold"
 
     from mechanics.combat.items import is_key_item, is_digital_item, parse_item_tier
 

@@ -472,7 +472,7 @@ def resolve_partner_conversation_profile(
 
         try:
             from mechanics.system.commitments_engine import get_active_commitments
-            for cm in (get_active_commitments(session_id, npc_key=partner_name) or []):
+            for cm in (get_active_commitments(session_id, entity_name=partner_name) or []):
                 if str(cm.get("commitment_type") or "") == "rendezvous":
                     cm_loc = str(cm.get("location") or cm.get("target_location") or "").strip()
                     cm_nid = str(cm.get("node_id") or cm.get("target_node_id") or "").strip()

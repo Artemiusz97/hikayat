@@ -11,9 +11,8 @@ import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
+from .core import _delete_session_records
 log = logging.getLogger(__name__)
-
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
 
 def create_character(user_id: int, name: str, char_class: str = "Adventurer", class_description: str = "",
                      stats: dict = None, gold: int = cd.STARTING_GOLD, pending_stat_points: int = 0,
@@ -195,7 +194,10 @@ def apply_adventure_loadout(
             item_id = db.add_item(user_id, item_name, item_type, effect, slot_cost)
             default_slot = cd.DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE.get(item_type)
             if default_slot and item_id:
-                db.equip_item(user_id, item_id, default_slot)
+                try:
+                    db.equip_item(user_id, item_id, default_slot)
+                except ValueError as equip_err:
+                    log.warning("Starter item %r could not be equipped to %s for user %s: %s", item_name, default_slot, user_id, equip_err)
 
     # 2. Starting armor / clothing / accessories from gear_map
     equipped_weapon = False
@@ -314,7 +316,10 @@ def apply_adventure_loadout(
         w_item = gen_weapon(scenario=scenario, slot="Weapon", tier=3, name=target_w_name)
         weapon_id = db.add_item(user_id, w_item["name"], "Weapon", w_item["effect"], w_item.get("slot_cost", 1))
         if weapon_id:
-            db.equip_item(user_id, weapon_id, "Weapon")
+            try:
+                db.equip_item(user_id, weapon_id, "Weapon")
+            except ValueError as equip_err:
+                log.warning("Starter weapon %r could not be equipped for user %s: %s", w_item.get("name"), user_id, equip_err)
 
     if is_anomalous:
         try:
@@ -1025,16 +1030,21 @@ def update_character_stats(user_id: int, stats: dict):
     char = db.get_character(user_id)
     if not char:
         return
-    str_val = int(stats.get('str') or stats.get('STR') or char.get('str_', 1))
-    per_val = int(stats.get('per') or stats.get('PER') or char.get('per_', 1))
-    end_val = int(stats.get('end') or stats.get('END') or char.get('end_', 1))
-    cha_val = int(stats.get('cha') or stats.get('CHA') or char.get('cha', 1))
-    int_val = int(stats.get('int') or stats.get('INT') or char.get('int_', 1))
-    agi_val = int(stats.get('agi') or stats.get('AGI') or char.get('agi', 1))
-    luk_val = int(stats.get('luk') or stats.get('LUK') or char.get('luk', 1))
+    base_stats = char.get("_base_stats") or {}
+    str_val = int(stats.get('str') or stats.get('STR') or base_stats.get('STR', char.get('str_', 1)))
+    per_val = int(stats.get('per') or stats.get('PER') or base_stats.get('PER', char.get('per_', 1)))
+    end_val = int(stats.get('end') or stats.get('END') or base_stats.get('END', char.get('end_', 1)))
+    cha_val = int(stats.get('cha') or stats.get('CHA') or base_stats.get('CHA', char.get('cha', 1)))
+    int_val = int(stats.get('int') or stats.get('INT') or base_stats.get('INT', char.get('int_', 1)))
+    agi_val = int(stats.get('agi') or stats.get('AGI') or base_stats.get('AGI', char.get('agi', 1)))
+    luk_val = int(stats.get('luk') or stats.get('LUK') or base_stats.get('LUK', char.get('luk', 1)))
     
-    max_hp = cd.calculate_max_hp(end_val)
-    max_mp = cd.calculate_max_mp(end_val)
+    max_hp = int(stats.get('max_hp')) if stats.get('max_hp') is not None else cd.calculate_max_hp(end_val)
+    max_mp = int(stats.get('max_mana') or stats.get('max_mp')) if (stats.get('max_mana') is not None or stats.get('max_mp') is not None) else cd.calculate_max_mp(end_val)
+    current_hp = int(char.get('hp') if char.get('hp') is not None else max_hp)
+    current_mp = int(char.get('mp') if char.get('mp') is not None else max_mp)
+    hp_val = int(stats.get('hp')) if stats.get('hp') is not None else min(current_hp, max_hp)
+    mp_val = int(stats.get('mana') or stats.get('mp')) if (stats.get('mana') is not None or stats.get('mp') is not None) else min(current_mp, max_mp)
     
     db.update_character_fields(
         user_id,
@@ -1046,9 +1056,9 @@ def update_character_stats(user_id: int, stats: dict):
         agi=agi_val,
         luk=luk_val,
         max_hp=max_hp,
-        hp=max_hp,
+        hp=hp_val,
         max_mp=max_mp,
-        mp=max_mp
+        mp=mp_val
     )
 
 

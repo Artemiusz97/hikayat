@@ -950,19 +950,18 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     climax_st: Dict[str, Any] = {}
     phys_st = None
 
+    primary_partner = partners_list[0] if partners_list else ""
+    from mechanics.social.intimate_excitement import (
+        INTIMATE_CHOICE_KEYWORDS,
+        INTIMATE_EXIT_KEYWORDS,
+        has_state_contradiction_in_choice,
+        build_intimate_choice_blueprints,
+        infer_last_act_from_state,
+        is_in_refractory_cooldown,
+        matches_boundary,
+        sanitize_scunthorpe_text,
+    )
     if partners_list:
-        primary_partner = partners_list[0]
-
-        from mechanics.social.intimate_excitement import (
-            INTIMATE_CHOICE_KEYWORDS,
-            INTIMATE_EXIT_KEYWORDS,
-            has_state_contradiction_in_choice,
-            build_intimate_choice_blueprints,
-            infer_last_act_from_state,
-            is_in_refractory_cooldown,
-            matches_boundary,
-            sanitize_scunthorpe_text,
-        )
         if session_id:
             try:
                 phys_st = db.get_session_physical_state(session_id)
@@ -2661,9 +2660,9 @@ def build_hybrid_turn_choices(
         for bc in active_gate["barrier_choices"][:2]:
             priority_buttons.append(_to_choice_dict(bc))
     else:
-        if schedule_transition_choice is not None and not in_active_dialogue_turn:
+        if schedule_transition_choice is not None:
             priority_buttons.append(_to_choice_dict(schedule_transition_choice, "NONE", 0))
-        if schedule_stay_choice is not None and not in_active_dialogue_turn and len(priority_buttons) < 2:
+        if schedule_stay_choice is not None and len(priority_buttons) < 2:
             priority_buttons.append(_to_choice_dict(schedule_stay_choice, "CHA", 11))
         if new_partners and session_id and eff_node_id:
             try:

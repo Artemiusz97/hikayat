@@ -255,11 +255,14 @@ def is_excluded_from_random_incursions(
                 }
             )
             try:
-                from .seeds_anomalous import ANOMALOUS_SEED_NODES
-                for z in ANOMALOUS_SEED_NODES:
-                    for fac in z.get("primaries", []):
-                        if fac.get("id") in ALL_STATIC_RESIDENTIAL_FACILITY_IDS and fac.get("name"):
-                            static_names.add(str(fac["name"]).strip().lower())
+                # Anomalous seed zones live in data/locations_seed.json (the old `seeds_anomalous`
+                # module no longer exists, so this lookup previously failed silently every call).
+                from .seeds import get_scenario_seed_data
+                for _anom_scen in ("anomalous_incursions", "anomalous_high_school", "urban_anomalies"):
+                    for z in (get_scenario_seed_data(_anom_scen) or {}).get("zones", []):
+                        for fac in z.get("primary_locations", []):
+                            if isinstance(fac, dict) and fac.get("id") in ALL_STATIC_RESIDENTIAL_FACILITY_IDS and fac.get("name"):
+                                static_names.add(str(fac["name"]).strip().lower())
             except Exception:
                 pass
             if prim_low in static_names:

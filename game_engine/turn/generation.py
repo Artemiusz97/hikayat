@@ -503,13 +503,17 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"{choice_directive}\n"
         f"Respond with JSON matching the required schema structure:\n{schema_to_use}"
     )
-    result = await game_engine.call_llm_json(
-        system_prompt, user_prompt,
-        is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
-        response_model=OpeningScene,
-        required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]],
-        system_zones=(zone_0, zone_1, zone_1b),
-    )
+    try:
+        result = await game_engine.call_llm_json(
+            system_prompt, user_prompt,
+            is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
+            response_model=OpeningScene,
+            required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]],
+            system_zones=(zone_0, zone_1, zone_1b),
+        )
+    except Exception as llm_err:
+        log.warning("Opening scene LLM generation failed (%s); engaging deterministic fallback.", llm_err)
+        result = {}
 
     # Safety coercion: llm_client now returns dicts, but guard against Pydantic objects leaking through
 
@@ -557,6 +561,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception as e:
             log.warning("Failed to seed/resolve initial current_node_id in generate_opening_scene: %s", e)
 
+    narrative = ""
     if isinstance(res_deep, dict):
 
         narrative = (res_deep.get("narrative") or res_deep.get("next_narrative") or res_deep.get("outcome_narrative") or "").strip()
@@ -656,6 +661,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
     if not existing_sq:
 
+        starting_hook_ctx = None
         try:
 
             starting_hook_ctx = {

@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 import db
 from db import adb
 import game_engine
+import scenario_data
 from character_data import XP_REWARDS
 from mechanics.combat.merchant import apply_merchant_encounter_result
 
@@ -762,12 +763,7 @@ class TurnService:
                     if not is_custom and enforce_explicit_mp:
                         raise PermissionError("You do not hold an active Entity Contract for that invocation!")
                 else:
-                    cost_info = compute_pact_cast_costs(
-                        char,
-                        matched_p_row,
-                        matched_pat,
-                        current_day=int(session.get("current_day") or 1),
-                    )
+                    cost_info = compute_pact_cast_costs(char, matched_p_row, matched_pat)
                     if not cost_info["can_invoke"] and not is_custom and enforce_explicit_mp:
                         raise PermissionError(cost_info["blocked_reason"] or "Cannot invoke this Entity Contract right now!")
                     chosen["is_pact_skill"] = True
@@ -1667,8 +1663,6 @@ class TurnService:
                 session.pop("_target_turn", None)
             try:
                 await adb(db.rollback_session_normalized_state_after_turn, session_id, pre_turn_count_val)
-                for _rf_uid, _rf_gold, _rf_cid in _property_gold_refunds:
-                    await adb(db.apply_hp_mp_delta, _rf_uid, gold_delta=int(_rf_gold), character_id=_rf_cid)
             except Exception as _rb_norm_err:
                 log.warning("Normalized state rollback failed for session %s: %s", session_id, _rb_norm_err)
             try:
@@ -1706,9 +1700,10 @@ class TurnService:
         pre_turn_nearby_enemies_snapshot = copy.deepcopy(list(session.get("nearby_enemies") or []))
         try:
             await adb(db.snapshot_session_physical_state_for_turn, session_id, pre_turn_count_val)
+            await adb(db.snapshot_session_social_state_for_turn, session_id, pre_turn_count_val)
             await adb(db.save_contract_turn_snapshot, session_id, pre_turn_count_val)
         except Exception as _ps_pre_err:
-            log.warning("Pre-turn physical snapshot failed (non-fatal): %s", _ps_pre_err)
+            log.warning("Pre-turn physical/social snapshot failed (non-fatal): %s", _ps_pre_err)
         try:
             outcome = await game_engine.resolve_turn(session, party, actions, stream_callback=stream_callback)
             if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
@@ -1735,9 +1730,10 @@ class TurnService:
             items_gained = {}
         try:
             await adb(db.snapshot_session_physical_state_for_turn, session_id, target_turn)
+            await adb(db.snapshot_session_social_state_for_turn, session_id, target_turn)
             await adb(db.save_contract_turn_snapshot, session_id, target_turn, overwrite=True)
         except Exception as _ps_post_err:
-            log.warning("Post-turn physical snapshot failed (non-fatal): %s", _ps_post_err)
+            log.warning("Post-turn physical/social snapshot failed (non-fatal): %s", _ps_post_err)
 
         # Post-turn World Event & Rumor Resolution + Mid-Rumor Companion/Romance Loyalty Promotion
         if isinstance(outcome, dict):
@@ -1767,10 +1763,11 @@ class TurnService:
                                 quest_type=str(_rn.get("quest_type") or "bounty"),
                                 is_story_quest=bool(_rn.get("is_story_quest")),
                             )
+                _fk_scen_key = str((session or {}).get("scenario") or "fantasy")
                 _is_fk_scen = bool(
-                    scenario_data.is_anomalous_incursions_scenario(scen_key)
-                    or scenario_data.is_anomalous_high_school_scenario(scen_key)
-                    or "urban_anomalies" in str(scen_key).lower()
+                    scenario_data.is_anomalous_incursions_scenario(_fk_scen_key)
+                    or scenario_data.is_anomalous_high_school_scenario(_fk_scen_key)
+                    or "urban_anomalies" in _fk_scen_key.lower()
                 )
                 for _ru in (outcome.get("relationship_updates") or []):
                     if isinstance(_ru, dict) and _ru.get("name"):

@@ -570,6 +570,8 @@ def _scene_context_text(session_id: int, current_location: str,
                 f"{p['name']} ({p['description']})" if p.get("description") else p["name"]
                 for p in nearby))
 
+    contacts_by_name: dict = {}
+    school_dir: dict = {}
     if lore["person"] or contacts or current_npcs:
         scene_npc_names = {e.get("name", "").lower().strip() for e in (current_npcs or []) if isinstance(e, dict)}
 

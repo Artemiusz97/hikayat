@@ -1196,6 +1196,11 @@ async def start_adventure(req: StartAdventureRequest, request: Request = None):
         session_row = await adb(db.get_session, session_id)
         session = dict(session_row)
 
+        from mechanics.social.factions import ensure_session_factions_seeded
+        await adb(ensure_session_factions_seeded, session_id, scenario_key)
+        from mechanics.world.world_forge.seeder import forge_world_state
+        await forge_world_state(session, party)
+
         try:
             scene = await game_engine.generate_opening_scene(session, party)
             await adb(game_engine.apply_quest_update, session_id, scene)

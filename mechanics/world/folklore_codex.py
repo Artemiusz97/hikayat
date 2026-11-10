@@ -675,6 +675,7 @@ def build_encyclopedia_payload(
     )
 
     user_unlocks: Dict[str, Dict[str, Any]] = {}
+    part_uids: list = []
     if session_id:
         part_uids = db.get_session_participant_user_ids(int(session_id), extra_user_id=eff_uid)
         rank_map = {"sighted": 1, "verified": 2, "contained": 3}

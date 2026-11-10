@@ -20,12 +20,15 @@ Each Agent includes:
 """
 import hashlib
 import json
+import logging
 import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import db
 import namegen
 import scenario_data
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------

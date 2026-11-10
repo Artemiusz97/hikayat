@@ -19,6 +19,7 @@ Implements 3-Tier Situational Persona Gating:
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
 import hashlib
+import json
 import re
 
 from mechanics.social.persona.core import (

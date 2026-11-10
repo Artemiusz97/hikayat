@@ -371,6 +371,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     _staged_time_op = None
     scen_key = session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy"
 
+    prev_day = int(session.get("current_day", 1) or 1) if isinstance(session, dict) else 1
+    prev_min = int(session.get("current_minute", 480) or 480) if isinstance(session, dict) else 480
+    party_uids: list = []
     if not is_retry:
         if session_id_val:
             try:
@@ -2018,6 +2021,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
     from mechanics.social.relationships import safe_clamp_delta
 
+    outcome_narrative = ""
+    next_narrative = ""
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list
         result["_llm_user_prompt"] = user_prompt
@@ -2213,8 +2218,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 if not target_npc:
                     target_npc = dp_list[0] if dp_list else None
 
+                _is_anom_rel_skip = False
                 if target_npc:
-                    _is_anom_rel_skip = False
                     try:
                         from mechanics.world.anomalous_events import is_anomalous_scene_entity
                         _is_anom_rel_skip = bool(is_anomalous_scene_entity(target_npc, session=session))
@@ -2267,7 +2272,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             if session_id_val:
                 try:
                     from mechanics.world.locations.residences import get_player_owned_or_starter_property_for_node
-                    _eff_aff_nid = str(effective_node_id or session.get("current_node_id") or "")
+                    _eff_aff_nid = str(
+                        (stage_info.get("effective_node_id") if isinstance(stage_info, dict) else None)
+                        or session.get("current_node_id")
+                        or ""
+                    )
                     if _eff_aff_nid:
                         _owned_aff = get_player_owned_or_starter_property_for_node(int(session_id_val), _eff_aff_nid, session=session)
                         if _owned_aff and _owned_aff.get("catalog_entry"):

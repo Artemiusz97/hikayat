@@ -23,7 +23,7 @@ from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
 from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
 from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import (
+from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
     handle_talk_to_merchant as _handle_talk_to_merchant,
     build_merchant_embed as _merchant_embed,

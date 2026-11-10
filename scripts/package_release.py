@@ -41,7 +41,9 @@ EXCLUDE_EXTS = {
 EXCLUDE_EXACT_FILES = {
     '.env', '.DS_Store', 'Thumbs.db',
     'pytest.ini', 'run_tests.bat', 'requirements-dev.txt',
-    'AGENTS.md', 'GEMINI.md'
+    'AGENTS.md', 'GEMINI.md', '.testmondata',
+    'run_tests.py', 'package_release.py',
+    'static_check.py', 'static_baseline.json',
 }
 
 
@@ -70,6 +72,8 @@ def package_release(dry_run: bool = False) -> str:
             if file.startswith('.env') and file != '.env.example':
                 continue
             if 'hikayat.db' in file:
+                continue
+            if file.startswith('simulate_') or file.startswith('.testmon'):
                 continue
 
             filepath = os.path.join(root, file)

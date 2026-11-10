@@ -285,6 +285,17 @@ def get_location_sleep_context(
             "reason": "Welcomed inside the Sovereign/Royal Folklore Pavilion (150% sacred rest recovery).",
         }
 
+    # If the active leaf sub-location explicitly provides a couch and lacks a dedicated bed,
+    # prioritize the local room's couch over facility-wide building nouns (e.g. "studio", "dorm")
+    if leaf_has_explicit_couch and not leaf_has_explicit_bed:
+        return {
+            "surface": "couch",
+            "can_sleep": True,
+            "recovery_ratio": round(0.5 * prop_rest_mult, 3),
+            "surface_label": "Sofa / Couch",
+            "reason": "Sofa / couch available (50% recovery)."
+        }
+
     # 1. Check for dedicated bed surfaces (100% recovery)
     words = set(re.findall(r"[a-z]+", clean_env))
     if (

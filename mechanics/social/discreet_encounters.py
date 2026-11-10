@@ -1070,13 +1070,15 @@ def resolve_discreet_couple_action(
                 add_commitment(
                     session_id=sess_id,
                     commitment_type="promise",
-                    title=f"Sworn Discretion: {a_name} & {b_name}",
                     description=f"Promised to keep {a_name} and {b_name}'s secret tryst hidden from {betrayed_name}; both owe you a quiet favor.",
                     source_entity=a_key,
                     target_entity="player",
-                    scheduled_day=curr_day,
-                    start_minute=curr_min,
-                    is_confidential=True,
+                    metadata={
+                        "title": f"Sworn Discretion: {a_name} & {b_name}",
+                        "scheduled_day": curr_day,
+                        "start_minute": curr_min,
+                        "is_confidential": True,
+                    },
                 )
             except Exception:
                 pass
