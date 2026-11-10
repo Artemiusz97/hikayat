@@ -1349,8 +1349,8 @@ def get_npc_scheduled_node_id(
     """Returns the canonical node_id where the NPC is scheduled at (current_minute, current_day) or time_slot."""
     story_nid = ""
     date_nid = ""
+    import db
     if session_id:
-        import db
         npc_nm_clean = str(npc.get("name") or "").strip().lower()
         if npc_nm_clean:
             try:

@@ -651,7 +651,7 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
                     continue
                 p_tier = int(p_row.get("tier") or 1)
                 sp_pact = build_pact_spell_def(patron_cg, p_tier)
-                cost_info = compute_pact_cast_costs(char, p_row, patron_cg, current_day=int((session or {}).get("current_day") or 1) if isinstance(session, dict) else 1)
+                cost_info = compute_pact_cast_costs(char, p_row, patron_cg)
                 p_disc = sp_pact.get("discipline", "attack")
                 p_ttype = sp_pact.get("target_type", "single")
                 if p_ttype in ("support", "summon") or sp_pact.get("unavoidable"):
@@ -762,7 +762,7 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
 
     # AGI Tactic: Vanish into Shadows (only if not already vanished)
     if not is_vanished:
-        dc_vanish = calculate_opposed_dc(p_agi if 'p_agi' in locals() else _get_stat_val(char, "AGI"), m_per, player_luk)
+        dc_vanish = calculate_opposed_dc(_get_stat_val(char, "AGI"), m_per, player_luk)
         pct_vanish = _dc_to_pct(dc_vanish)
         tactics.append({
             "label": f"💨 Vanish into Shadows ({pct_vanish}% • AGI)",

@@ -71,7 +71,7 @@ async def handle_dm_over_limit(
     system_prompt += (
         "Write a short, realistic mobile text reply (1-2 sentences) in natural messaging style.\n"
         + (
-            (_ref_dir + "\n")
+            (_ref_dir + "\n")  # pylint: disable=used-before-assignment
             if (_ref_dir := build_side_channel_language_directive(
                 session if isinstance(session, dict) else (db.get_session(session_id) or {}),
                 text_fields=("reply_text",),

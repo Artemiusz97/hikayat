@@ -637,8 +637,8 @@ def apply_cast_events(
             pass
     if not is_private_room and curr_loc:
         try:
-            from mechanics.world.locations import is_private_intimate_space
-            if is_private_intimate_space(curr_loc):
+            from mechanics.social.physical_state import is_private_intimate_venue
+            if is_private_intimate_venue(curr_loc, node_id=str(curr_node or ""), session_id=int(sess_id or 0)):
                 is_private_room = True
         except Exception:
             pass

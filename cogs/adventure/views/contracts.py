@@ -401,7 +401,7 @@ class EntityContractsView(SessionRestrictedView):
                 pass
 
             await interaction.followup.send(f"🩸 {res.get('message', 'Covenant updated.')}", ephemeral=True)
-            if res.get("spawned_exorcism_boss") and self.cog is not None:
+            if (res.get("spawned_exorcism_boss") or res.get("boss_surrender")) and self.cog is not None:
                 fresh_session = await adb(db.get_session, self.session_id)
                 if fresh_session:
                     await self.cog._resend_current_scene(interaction, fresh_session, use_followup=True)

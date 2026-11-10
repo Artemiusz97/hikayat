@@ -2249,6 +2249,8 @@ def ensure_contact_relations(
                     s_rel["family"] = sib_tree
                     _sib_solo_res = None
                     try:
+                        from mechanics.world.locations.residences import is_adult_special_agent_contact, resolve_agent_residence_blueprint
+                        from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
                         _sib_src = sib_contact if is_adult_special_agent_contact(sib_contact) else None
                         if _sib_src is None and session_id and is_anomalous_realty_scenario(scenario):
                             from mechanics.social.agent_roster import find_special_agent_by_name

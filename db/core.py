@@ -676,6 +676,7 @@ CREATE INDEX IF NOT EXISTS idx_contacts_session ON contacts(session_id, npc_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_char ON contacts(character_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_char_user ON inventory(character_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_user_linked_quest ON inventory(user_id, linked_quest_id);
+CREATE INDEX IF NOT EXISTS idx_inventory_pact_contract ON inventory(linked_contract_key) WHERE linked_contract_key != '';
 CREATE INDEX IF NOT EXISTS idx_phone_messages_session ON phone_messages(session_id, contact_npc_id);
 CREATE INDEX IF NOT EXISTS idx_phone_appointments_sess ON phone_appointments(session_id);
 CREATE INDEX IF NOT EXISTS idx_phone_gossip_sess ON phone_gossip_feed(session_id);
@@ -1216,6 +1217,28 @@ def _delete_session_child_records_only(conn, session_id: int, preserve_members: 
             conn.execute(f"DELETE FROM {opt_tbl} WHERE session_id=?", (session_id,))
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute("""
+            UPDATE user_patron_compendium SET is_currently_contracted = 0
+            WHERE (user_id, patron_id) IN (
+                SELECT CAST(holder_id AS INTEGER), patron_id
+                FROM session_entity_contracts WHERE session_id = ? AND holder_type = 'player'
+            )
+            AND NOT EXISTS (
+                SELECT 1 FROM session_entity_contracts sec
+                WHERE sec.session_id != ? AND sec.holder_type = 'player'
+                  AND CAST(sec.holder_id AS INTEGER) = user_patron_compendium.user_id
+                  AND sec.patron_id = user_patron_compendium.patron_id
+                  AND sec.status = 'active'
+            )
+        """, (session_id, session_id))
+        conn.execute("""
+            DELETE FROM inventory WHERE is_pact_locked = 1 AND linked_contract_key IN (
+                SELECT contract_key FROM session_entity_contracts WHERE session_id = ?
+            )
+        """, (session_id,))
+    except sqlite3.OperationalError:
+        pass
     for tbl in SESSION_CHILD_TABLES:
         if preserve_members and tbl == "session_members":
             continue

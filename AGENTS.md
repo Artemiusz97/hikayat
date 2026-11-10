@@ -1,6 +1,6 @@
 # Hikayat Engineering Invariants & Best Practices
 
-These architectural contracts apply to **every** code change in Hikayat. They are verified by `tests/test_codebase_contracts.py` (facade call resolution, serialization, Pydantic dual-access), `tests/test_agent_docs_contracts.py` (agent docs reference only real files, flags, and `db.*` functions), and `scripts/package_release.py` (personal path scan). See §5 for commands.
+These architectural contracts apply to **every** code change in Hikayat. They are verified by `scripts/static_check.py` (crash-class static bugs), `tests/test_codebase_contracts.py` (facade call resolution, serialization, Pydantic dual-access), `tests/test_agent_docs_contracts.py` (agent docs reference only real files, flags, and `db.*` functions), and `scripts/package_release.py` (personal path scan). See §5 for commands.
 
 ## 1. Domain-Driven Modularity & Package Contracts
 - **4-Layer Separation of Concerns**: Keep clear boundaries between:
@@ -14,6 +14,7 @@ These architectural contracts apply to **every** code change in Hikayat. They ar
 
 ## 2. Type Safety, Serialization & Schema Contracts
 - **Explicit Typing & Annotations**: Include `from __future__ import annotations` and explicit `typing` imports in Python modules so static checks and pytest collection never fail with `NameError`.
+- **No Shadowing Local Imports or Branch-Only Bindings**: Never re-import a module-level name inside a function (`import db` / `import json` deep in a function makes that name local to the *whole* function → `UnboundLocalError` on earlier lines). Initialize any variable read after an `if`/`try` block *before* that block. `scripts/static_check.py` enforces both.
 - **`CheckResult` JSON Safety**: `skill_check.CheckResult` is a dataclass and fails raw `json.dumps()`. Always pass action dicts through `server._serializable_action()` before JSON or WebSocket serialization.
 - **Pydantic Dual-Access & Defensive Coercion**: LLM schemas in `models/llm_schemas.py` (`TurnOutcome`, `OpeningScene`, `ActionClassification`, `Choice`) must support **both** attribute (`obj.field`) and dict (`obj["field"]`, `obj.get()`) access, and gracefully coerce empty strings `""`, `None`, or malformed outputs returned by local/open-weights models.
 
@@ -29,6 +30,8 @@ These architectural contracts apply to **every** code change in Hikayat. They ar
 
 ## 5. Verification & the Local-Only Test Suite
 - **Tests are local-only**: `tests/`, `pytest.ini`, `scripts/run_tests.py`, and `scripts/simulate_*.py` exist in the working tree but are **gitignored** (kept out of the public repo). Use them freely, but never `git add -f` or commit them, and don't treat their absence from `git ls-files` as missing.
+- **After any Python edit**: `python scripts/static_check.py --changed` must report 0 new findings (undefined names, unbound locals, imports of missing names, bad call signatures). Full scan: `python scripts/static_check.py`. Install the commit gate once with `python scripts/static_check.py --install-hook`.
+- **Strict mode is on by default** in pytest and the fuzz simulators (`tests/strict_mode.py`): a test fails if its code path *swallowed* a `NameError`, `UnboundLocalError`, or an `ImportError` of a Hikayat module inside an `except` block. Fix the bug; don't widen the `except`. `HIKAYAT_STRICT=0` disables, `HIKAYAT_STRICT=2` also reports `TypeError`/`AttributeError`.
 - **After structural or `db/` edits**: `python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_five_normalized_models_cutover.py`
 - **After editing `AGENTS.md` or `.agents/`**: `python scripts/run_tests.py agent tests/test_agent_docs_contracts.py`
 - **Before a release**: `python scripts/package_release.py --dry-run`

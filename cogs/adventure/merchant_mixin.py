@@ -5,7 +5,7 @@ from db import adb
 import game_engine
 from character_data import inventory_capacity
 from skill_check import resolve_check
-from mechanics.combat.merchant import (
+from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     build_merchant_embed as _merchant_embed,
     discounted_price as _discounted_price,
     sell_bonus_price as _sell_bonus_price,
@@ -488,6 +488,8 @@ class MerchantMixin:
         session history so future narration can stay consistent with it."""
         from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
 
+        stale_click = False
+        result_text = ""
         try:
             async with distributed_session_lock(session_id, raise_http_error=False):
                 session = await adb(db.get_session, session_id)

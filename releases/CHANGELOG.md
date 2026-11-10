@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.10.0** | 2026-11-10 | Minor | Flow-Sensitive Static Bug Gate, Deterministic Social State Snapshots, Privacy Nudge Hierarchy, Contract Indexing & Packaging Hardening. |
 | **v2.9.0** | 2026-11-10 | Minor | Entity Contracts & Pacts, Realty & Property Ownership, Folklore Veil Settlements, Social Pacing Engine, and Security Layer. |
 | **v2.8.0** | 2026-11-06 | Minor | Folklore Codex, World Pulse Background Simulation, Multi-Engine Quest Architecture, Forensic Dossiers, and Awakened Resonance. |
 | **v2.7.0** | 2026-10-28 | Minor | Cast Contract Authority, Dynamic Scenery & Lighting, Investigatory Spatial Immunity, Romance Choice Auto-Injection, Clean Headless Pruning & Production Release. |
@@ -48,6 +49,23 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.10.0] - 2026-11-10
+
+#### Added & Enhanced
+- **Flow-Sensitive Static Bug Gate & Definite Assignment (`scripts/static_check.py`)**:
+  - High-signal pylint crash checks paired with custom AST flow-sensitive definite-assignment analysis preventing `UnboundLocalError`, `NameError`, and import shadowing.
+  - Baselined and zero-defect gate enforced across all 262 project modules (`scripts/static_baseline.json`).
+- **Full-Fidelity Social & Contract Turn Snapshots (`services/turn_service.py`, `db/`)**:
+  - Atomic pre/post turn snapshots for social states (`db.snapshot_session_social_state_for_turn`) and entity contracts alongside physical state.
+  - Safe session resets for opening retry and character adventure start unlinking active session bindings and cleaning pact-locked items without integrity failures (`db/sessions.py`, `db/core.py`).
+  - Added SQLite partial index `idx_inventory_pact_contract` on `linked_contract_key`.
+- **Privacy Nudge & Spatial Access Hierarchy (`mechanics/world/locations/access_gate.py`)**:
+  - Priority ranking for affiliated sibling rooms (balconies, terraces, alcoves, corners) and privacy zone fallbacks during discreet social encounters.
+- **Resilient Opening Scene & Intent Generation (`game_engine/turn/generation.py`)**:
+  - Defensive fallback wrappers and definite assignment scoping for starting hook contexts and scenario identifiers.
+- **Clean Distribution Packaging Hardening (`scripts/package_release.py`)**:
+  - Strict exclusion of local-only testmon state, test runners, simulation harnesses, and personal paths from release archives.
 
 ### [v2.9.0] - 2026-11-10
 

@@ -188,12 +188,12 @@ def is_contact_eligible(
     is_hs = scenario_data.has_tag(scenario, "high_school")
     
     if is_hs:
-        # Kinship exception: adult family members are allowed for household mechanics
-        srt_clean = str(social_role_type or "").lower().strip()
-        if is_adult_family or srt_clean in ("family_relative", "parent"):
+        # Kinship exception: household family members (is_adult_family=True) are allowed for family SMS/curfew mechanics
+        if is_adult_family:
             return True
 
-        if srt_clean in ("faculty_staff", "adult_service"):
+        srt_clean = str(social_role_type or "").lower().strip()
+        if srt_clean in ("faculty_staff", "adult_service", "family_relative", "parent"):
             return False
         if srt_clean in ("student_peer", "peer", "contemporary", "classmate"):
             return True
@@ -1203,6 +1203,7 @@ def is_unlocked_contact(
     contact: dict,
     party_names: set[str] = None,
     met_in_story_names: Optional[Set[str]] = None,
+    include_party: bool = False,
 ) -> bool:
     """
     Determines whether a contact record is eligible to be displayed in the player's
@@ -1229,6 +1230,10 @@ def is_unlocked_contact(
         or str(contact.get("social_role_type") or b_info.get("social_role_type") or "").lower() == "anomaly"
     ):
         return False
+    if include_party and party_names:
+        c_nm = str(contact.get("name") or "").strip().lower()
+        if c_nm in {str(p).strip().lower() for p in party_names}:
+            return True
     score = int(contact.get("relationship_score", 0) or 0)
     if (
         score >= 100
@@ -2021,6 +2026,7 @@ def enrich_contact_dossier(
             comp_level = 1
             if session_id:
                 try:
+                    import db
                     for p_npc in (db.get_session_party_npcs(session_id) or []):
                         if str(p_npc.get("name") or "").strip().lower() == str(c_name or "").strip().lower():
                             in_party_companion = True

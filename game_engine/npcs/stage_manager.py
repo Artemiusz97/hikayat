@@ -7,6 +7,7 @@ import random
 import re
 
 import db
+import scenario_data
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
@@ -267,6 +268,18 @@ def compute_pre_turn_stage(
             "has_exited_convo": False,
             "target_resident_name": None,
             "target_station_sub": None,
+            "access_gate": {"gated": False},
+            "schedule_departed_npcs": [],
+            "spawned_role_npcs": [],
+            "stage_directives": [],
+            "unlocked_edges": [],
+            "unlocked_nodes": [],
+            "consumed_key_items": [],
+            "blocked_invalid_exit": False,
+            "party_cohesion_deferred": False,
+            "pending_folklore_ops": {},
+            "effective_node_id": None,
+            "focal_point": None,
         }
 
     sess_id = session.get("id")
@@ -293,6 +306,9 @@ def compute_pre_turn_stage(
     focal_point: Optional[str] = session.get("focal_point") or None
     stage_directives: list[str] = []
     schedule_departed_npcs: list[str] = []
+    effective_node_id: Optional[str] = None
+    access_gate_info: dict = {"gated": False}
+    pending_folklore_ops: dict = {}
 
     cached_stage_contacts: Optional[list] = None
     cached_stage_roster: Optional[list] = None
@@ -694,7 +710,6 @@ def compute_pre_turn_stage(
                         if unmatched_res.get("directive"):
                             stage_directives.append(unmatched_res["directive"])
 
-        pending_folklore_ops: dict = {}
         if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and target_nid and sess_id:
             from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route, is_node_hidden
             if not curr_nid or target_nid == curr_nid:
@@ -1014,7 +1029,7 @@ def compute_pre_turn_stage(
     # Compute stage_npcs
     stage_npcs: list[dict] = []
     seen_stage_names = set()
-    access_gate_info = access_gate_info if ('access_gate_info' in locals() and access_gate_info and access_gate_info.get("gated")) else {"gated": False}
+    access_gate_info = access_gate_info if (access_gate_info and access_gate_info.get("gated")) else {"gated": False}
 
     def _add_stage_npc(npc_dict: dict):
         if not isinstance(npc_dict, dict):
@@ -1032,7 +1047,7 @@ def compute_pre_turn_stage(
         for c in traveling_companions:
             _add_stage_npc(c)
 
-        if not ('effective_node_id' in locals() and effective_node_id):
+        if not effective_node_id:
             effective_node_id = db.resolve_node_id_from_location(sess_id, effective_location) if (sess_id and effective_location) else None
 
         if access_gate_info.get("patrol_npc"):
@@ -1454,7 +1469,7 @@ def compute_pre_turn_stage(
                 pending_folklore_ops["ensure_roster"] = True
 
             active_stage_nid = str(
-                (effective_node_id if ('effective_node_id' in locals() and effective_node_id) else "")
+                (effective_node_id or "")
                 or session.get("current_node_id")
                 or ""
             ).strip()
@@ -1879,7 +1894,7 @@ def compute_pre_turn_stage(
             )
 
     resolved_node_id = (
-        effective_node_id if (is_movement and 'effective_node_id' in locals() and effective_node_id)
+        effective_node_id if (is_movement and effective_node_id)
         else (session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, effective_location) if sess_id else None))
     )
 

@@ -807,7 +807,7 @@ def spawn_manifestation_exorcism_boss(
         "gold_drop": 0,
         "intent": f"Enforcing {entity_name}'s binding covenant in ritual combat",
     }
-    enemies = list(session.get("nearby_enemies") or [])
+    enemies = [e for e in (session.get("nearby_enemies") or []) if isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0]
     if not any(e.get("exorcism_contract_key") == boss_dict["exorcism_contract_key"] for e in enemies if isinstance(e, dict)):
         enemies.append(boss_dict)
     session["nearby_enemies"] = enemies
@@ -877,8 +877,10 @@ def execute_pact_ritual_action(
 
         events: List[Dict[str, Any]] = []
         # If signed via Mid-Delve <=15% HP Boss Surrender, pacify enemy & forfeit kill bounty!
+        is_boss_surrender = False
         surr_name = str(matched_offer.get("surrender_enemy_name") or "").strip()
         if matched_offer.get("channel") == "boss_surrender" and surr_name:
+            is_boss_surrender = True
             updated_enemies = []
             for enem in (sess.get("nearby_enemies") or []):
                 if isinstance(enem, dict) and str(enem.get("name") or "").strip().lower() == surr_name.lower():
@@ -920,6 +922,7 @@ def execute_pact_ritual_action(
             "message": f"Sealed Tier {signed['tier']} covenant with {p_disp}.",
             "stage_direction": build_pact_turn_stage_direction(events),
             "spawned_exorcism_boss": None,
+            "boss_surrender": is_boss_surrender,
             "overview": build_contracts_overview_payload(sid, uid, lang=lang),
         }
 
@@ -939,6 +942,7 @@ def execute_pact_ritual_action(
             "message": f"Deepened covenant with {patron.get('display_name', pid)} to Tier {upgraded['tier']}.",
             "stage_direction": "",
             "spawned_exorcism_boss": None,
+            "boss_surrender": False,
             "overview": build_contracts_overview_payload(sid, uid, lang=lang),
         }
 
@@ -1001,6 +1005,7 @@ def execute_pact_ritual_action(
             "message": f"Communed with {cur_row['entity_name']} ({payment_desc}); Resonance +1 and displeasure cleared.",
             "stage_direction": "",
             "spawned_exorcism_boss": None,
+            "boss_surrender": False,
             "overview": build_contracts_overview_payload(sid, uid, lang=lang),
         }
 
@@ -1091,7 +1096,7 @@ def _spawn_grudge_nemesis_enemy(
         "grudge_patron_id": patron_id,
         "intent": f"Hunting the oathbreaker who spurned {entity_name}",
     }
-    enemies = list(session.get("nearby_enemies") or [])
+    enemies = [e for e in (session.get("nearby_enemies") or []) if isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0]
     if not any(e.get("grudge_patron_id") == patron_id for e in enemies if isinstance(e, dict)):
         enemies.append(nemesis)
     session["nearby_enemies"] = enemies
@@ -1287,6 +1292,7 @@ def evaluate_post_turn_pact_costs_and_breaches(
 
     # C. Check Overdue Blood Debts & Tithe Deadlines across all party members
     pending_soul_scar_uids: List[int] = []
+    processed_breach_ckeys: set[str] = set()
     with db.get_conn() as conn:
         expired_debts = conn.execute(
             """SELECT id, metadata_json FROM commitments_ledger
@@ -1306,6 +1312,13 @@ def evaluate_post_turn_pact_costs_and_breaches(
             if not ckey:
                 continue
             conn.execute("UPDATE commitments_ledger SET status = 'flaked', updated_at = ? WHERE id = ?", (time.time(), ed["id"]))
+            if ckey in processed_breach_ckeys:
+                continue
+            processed_breach_ckeys.add(ckey)
+            if em.get("subtype") == "pact_tithe":
+                db.record_pact_resonance_and_charges(
+                    int(session_id), ckey, xp_delta=0, current_day=cur_day, advance_tithe=True, turn_number=t_num, conn=conn
+                )
             strike = db.apply_contract_breach_strike(
                 int(session_id), ckey, reason=f"expired_{em['subtype']}", turn_number=t_num, conn=conn
             )
@@ -1335,6 +1348,8 @@ def evaluate_post_turn_pact_costs_and_breaches(
         h_uid = int(hid_str)
         c_obj = party_chars.get(h_uid) or db.get_character(h_uid, session_id=int(session_id)) or {}
         for row in p_list:
+            if row.get("contract_key") in processed_breach_ckeys:
+                continue
             tithe = row.get("tithe_schedule") or {}
             due_day = tithe.get("next_due_day")
             if due_day is not None and cur_day > int(due_day):
@@ -1357,6 +1372,10 @@ def evaluate_post_turn_pact_costs_and_breaches(
                         "_spawn_nemesis_for": (h_uid, strike.get("entity_name", "Patron"), strike.get("patron_id", "")),
                     })
 
+    if isinstance(outcome, dict) and "nearby_enemies" in outcome and outcome["nearby_enemies"] is not None:
+        session["nearby_enemies"] = list(outcome["nearby_enemies"])
+
+    nemesis_spawned = False
     for ev in events:
         nem_info = ev.pop("_spawn_nemesis_for", None)
         if nem_info and ev.get("grudge_nemesis_spawned"):
@@ -1366,6 +1385,10 @@ def evaluate_post_turn_pact_costs_and_breaches(
             _spawn_grudge_nemesis_enemy(
                 int(session_id), session, c_obj, str(n_ename), str(n_pid), str(p_def.get("element") or "aether")
             )
+            nemesis_spawned = True
+
+    if nemesis_spawned and isinstance(outcome, dict) and "nearby_enemies" in session:
+        outcome["nearby_enemies"] = list(session["nearby_enemies"])
 
     session["_last_pact_eval_turn"] = t_num
     session["_last_pact_turn_events"] = events

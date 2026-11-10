@@ -1,6 +1,6 @@
 from __future__ import annotations
 import random
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from mechanics.combat.items.tags import derive_weapon_tags, is_narrative_item, make_narrative_metadata
 from mechanics.combat.items.envelope import serialize_item

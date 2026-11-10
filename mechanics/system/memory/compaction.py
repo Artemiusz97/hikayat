@@ -67,7 +67,7 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
             from game_engine.prompt_layout import build_side_channel_language_directive
             raw_result = await _llm_client.call_llm_json(
                 system_prompt=(
-                    f"{SAGA_SYSTEM_PROMPT}\n\n{_saga_dir}"
+                    f"{SAGA_SYSTEM_PROMPT}\n\n{_saga_dir}"  # pylint: disable=used-before-assignment
                     if (_saga_dir := build_side_channel_language_directive(
                         _db.get_session(session_id) or {},
                         text_fields=("act_title", "summary_narrative", "key_consequences"),

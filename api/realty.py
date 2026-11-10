@@ -83,7 +83,8 @@ async def get_realty_state(
     """Fetches Starter Quarters, Owned Deeds, 9-Tier Market Listings, and Spare Key state."""
     uid = user_id if isinstance(user_id, int) and not isinstance(user_id, bool) else None
     _, canonical_uid = await verify_session_participant(request, session_id, uid)
-    return await adb(build_realty_payload, session_id, canonical_uid or uid)
+    payload = await adb(build_realty_payload, session_id, canonical_uid or uid)
+    return _serializable_action(payload)
 
 
 @router.post("/api/realty/{session_id}/purchase")

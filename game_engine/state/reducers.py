@@ -436,7 +436,7 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
             session["chapter"] = pre_q["_pre_chapter"]
         pre_q = game_engine.resolve_pre_turn_quests_and_clues(
             session,
-            party=pre_q.get("_party_snapshot") or party,
+            party=pre_q.get("_party_snapshot") or [c for c in (db.get_character(u) for u in (party_uids or []) if u) if c],
             actions=actions,
             persist_db=True,
         )
@@ -990,7 +990,7 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                   **(p_exc.get("refractory_partners") or {})
               }
               c_name = char.get("name", "") if isinstance(char, dict) else ""
-              from mechanics.social.intimate_excitement import _match_actor_key
+              from mechanics.social.physical_state import _match_actor_key
               m_k = _match_actor_key(c_name, part_climax_map) if part_climax_map else ""
               char_climaxed_flag = bool(part_climax_map.get(m_k or c_name, False) or p_climax_st.get("partner_climaxed", False))
 
@@ -1596,6 +1596,9 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         updated_phys["combat_focus"] = "none"
 
     # 6. Automatic Intimate Contact inference, Climax Primacy & Disengagement Clearance
+    dps: list = []
+    partner = ""
+    player_name = "Hero"
     if not is_combat:
         from mechanics.social.physical_state import (
             is_erotic_intimate_contact,
@@ -2275,7 +2278,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 char_record = db.get_character(u_id)
                                 c_effs = char_record.get("status_effects") if char_record else []
                                 if isinstance(c_effs, str):
-                                    import json
                                     try:
                                         c_effs = json.loads(c_effs)
                                     except Exception:
@@ -2359,7 +2361,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                                 char_record = db.get_character(u_id)
                                 c_effs = char_record.get("status_effects") if char_record else []
                                 if isinstance(c_effs, str):
-                                    import json
                                     try:
                                         c_effs = json.loads(c_effs)
                                     except Exception:
@@ -2416,7 +2417,6 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             char_record = db.get_character(u_id)
                             c_effs = char_record.get("status_effects") if char_record else []
                             if isinstance(c_effs, str):
-                                import json
                                 try:
                                     c_effs = json.loads(c_effs)
                                 except Exception:
@@ -3037,6 +3037,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         _is_aftercare_now = "aftercare" in _upd_ic_str.lower()
 
         _ac_partners_list = []
+        _ac_partner = ""
         if _is_aftercare_now:
             _ac_partner = partner or ""
             if not _ac_partner and " with " in _upd_ic_str:

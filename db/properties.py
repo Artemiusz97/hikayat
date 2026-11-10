@@ -177,7 +177,7 @@ def grant_or_relocate_starter_quarters(
     now = time.time()
     with _uow_ctx(conn) as c:
         sess = _session_dict_from_conn(c, int(session_id))
-        if sess and not is_anomalous_realty_scenario(str(sess.get("scenario") or "")):
+        if not sess or not is_anomalous_realty_scenario(str(sess.get("scenario") or "")):
             return {}
         spec = resolve_starter_quarters_spec(faction_key, session_or_id=sess or session_id)
         is_student = False
@@ -578,12 +578,18 @@ def rollback_player_properties_after_turn(
 
     with _uow_ctx(conn) as c:
         to_revert = c.execute(
-            "SELECT id, facility_node_id FROM player_properties WHERE session_id = ? AND is_starter = 0 AND purchased_turn > ?",
+            "SELECT id, facility_node_id, price_paid FROM player_properties WHERE session_id = ? AND is_starter = 0 AND purchased_turn > ?",
             (int(session_id), t_num),
         ).fetchall()
         for r in to_revert:
             c.execute("DELETE FROM player_properties WHERE id = ?", (int(r["id"]),))
             _set_facility_unlock_state(c, int(session_id), r["facility_node_id"], unlocked=False, marker_key="deed_owned")
+            price = int(r["price_paid"] or 0)
+            if price > 0:
+                c.execute(
+                    "UPDATE characters SET gold = gold + ? WHERE id = (COALESCE((SELECT character_id FROM sessions WHERE id = ?), (SELECT id FROM characters WHERE active_session_id = ? LIMIT 1)))",
+                    (price, int(session_id), int(session_id)),
+                )
             deleted_cnt += 1
 
         remaining = c.execute(

@@ -505,7 +505,7 @@ def generate_quest_action_choices(
                 st_warranted = is_stealth_context_warranted(sess_wp)
                 contrasting = build_stage_contrasting_approaches(
                     blueprint_id=bp_id,
-                    stage_index=stage_index if "stage_index" in locals() else stage_idx,
+                    stage_index=stage_idx,
                     total_stages=total_stages,
                     stage_label=stage_label,
                     target_npc=target_npc,

@@ -882,7 +882,7 @@ def compose_turn_image_prompt(
                         collect_pact_sdxl_tags(
                             [{"patron_id": _pid_img, "tier": action.get("pact_tier", 1), "status": "active"}],
                             active_cast_patron_id=_pid_img,
-                            scenario_or_key=scenario,
+                            scenario_or_key=scen_key,
                         )
                     )
             except Exception:

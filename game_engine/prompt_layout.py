@@ -228,7 +228,7 @@ def build_anomalous_resonance_directive(session: dict) -> str:
         "- Every Awakened Special Agent (including the protagonist) has a permanently locked Attribute, Combat Archetype, and Ability Medium listed in `[Awakened Resonance: ...]` on their Character Sheet.\n"
         "- Freeform actions aligned with a character's locked Attribute and Medium manifest naturally with sensory flavor and circumstantial synergy.\n"
         "- If the protagonist attempts a freeform anomalous power outside their locked Attribute or Medium (unless channelled through an explicitly equipped Relic), narrate the attempt fizzling—it must fizzle or fail to resonate in-universe.\n"
-        "- Awakened agents may also bear additive zero-MP Entity Contracts (`[Entity Covenants: ...]`); weave their subtle physical Contract Tells naturally into sensory prose, and when a Pact invocation or toll occurs, portray the atmospheric anomalous manifestation without quoting raw HP, Credits, percentages, or DC numbers.\n"
+        "- Awakened agents may also bear additive zero-MP Entity Contracts (`[Entity Contracts — ...]`); weave their subtle physical Contract Tells naturally into sensory prose, and when a Pact invocation or toll occurs, portray the atmospheric anomalous manifestation without quoting raw HP, Credits, percentages, or DC numbers.\n"
         "- Mundane Civilians possess zero mana or resonance abilities. Never leak raw stat numbers, Pip counts, Stability percentages, or bracketed internal tags into narrative prose."
     )
 

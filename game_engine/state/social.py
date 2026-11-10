@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
 from .constants import *
 from .helpers import get_combined_narrative, is_check_success
 from .reducers import _evaluate_npc_milestones, _resolve_current_turn_1based
@@ -422,6 +422,8 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                         db.set_recruitment_cooldown(session_id, target_npc_name, turns=3)
   
     # Auto-register all non-hostile scene NPCs into contacts
+    party_names: set = set()
+    all_scene_npcs: list = []
     if is_mechanic_enabled(scen_key, "contact_list") or is_mechanic_enabled(scen_key, "relationship_meter"):
         enemy_list = game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)
         enemy_names = {game_engine._get_npc_name(e).lower() for e in enemy_list if e}
@@ -1667,7 +1669,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                         if cheat_row:
                             ch_key = rg.canonical_person_key(cheat_row["character_id"])
                             if ch_key and ch_key != prim_key:
-                                ch_person = rg.get_person(session_id, ch_key)
+                                ch_person = rg.get_person_by_key(session_id, ch_key)
                                 caught_affair_name = str((ch_person or {}).get("display_name") or ch_key.replace("_", " ").title())
 
                     if caught_affair_name:

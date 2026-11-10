@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import game_engine
 from .core import *
+import logging
+
+logger = logging.getLogger(__name__)
 
 def create_contextual_story_quest_data(
     session_id: int,
@@ -1339,7 +1342,9 @@ def evaluate_quest_state_predicates(
             target_status = str(event_info.get("status") or "").strip().lower()
             changed_npc = str(event_info.get("name") or "").strip().lower()
             if target_status in ("deceased", "captured", "disappeared", "spared"):
-                from mechanics.world.waypoints.matching import advance_waypoint_stage
+                def advance_waypoint_stage(_sid: int, _qid: str, _so_id):
+                    _wp = db.get_active_waypoint(_sid, _qid, _so_id)
+                    return db.advance_waypoint(_sid, _qid, int((_wp or {}).get("stage_index") or 1), _so_id) if _wp else None
                 top_active_wp = db.get_active_waypoint(session_id, qid, None)
                 if top_active_wp:
                     wp_npc = str(top_active_wp.get("target_npc") or "").strip().lower()

@@ -237,22 +237,22 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
     sess_id_cbt = int(session.get("id") or 0) if isinstance(session, dict) else 0
     scen_cbt = str(session.get("scenario") or "fantasy") if isinstance(session, dict) else "fantasy"
     lead_lvl_cbt = int(acting_char_data.get("level", 1) or 1)
+    from mechanics.combat.awakened_resonance import (
+        apply_stability_and_break,
+        compute_attribute_matchup_modifiers,
+        compute_stability_shred,
+        ensure_autonomous_construct,
+        get_starting_encounter_pips,
+        init_enemy_stability_profile,
+        tick_enemy_breach_recovery,
+        update_encounter_pips,
+    )
+    from mechanics.combat.spells.awakened_kits import (
+        derive_default_3axis,
+        get_awakened_basic_strike,
+        normalize_anomalous_attribute,
+    )
     if is_anom_combat:
-        from mechanics.combat.awakened_resonance import (
-            apply_stability_and_break,
-            compute_attribute_matchup_modifiers,
-            compute_stability_shred,
-            ensure_autonomous_construct,
-            get_starting_encounter_pips,
-            init_enemy_stability_profile,
-            tick_enemy_breach_recovery,
-            update_encounter_pips,
-        )
-        from mechanics.combat.spells.awakened_kits import (
-            derive_default_3axis,
-            get_awakened_basic_strike,
-            normalize_anomalous_attribute,
-        )
         for _em in enemies:
             init_enemy_stability_profile(_em)
 
@@ -540,7 +540,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         return dmg
 
     # --- PHASE 1: ACTIVE PLAYER ACTION ---
-    import db
     from mechanics.social.attributes import calculate_combat_attributes
     acting_user_id = acting_char_data.get("user_id")
     player_equip = db.get_equipment(acting_user_id) if acting_user_id else {}
@@ -2492,7 +2491,10 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
 
     # Session enemies, NPCs, and Resonance Pips were mutated by precompute_combat_turn (or passed in precomputed)
     if isinstance(precomputed, dict):
-        if "surviving_enemies" in precomputed:
+        if precomputed.get("fled_battle"):
+            session["nearby_enemies"] = []
+            precomputed["surviving_enemies"] = []
+        elif "surviving_enemies" in precomputed:
             session["nearby_enemies"] = precomputed["surviving_enemies"]
         if "player_resonance_pips" in precomputed:
             session["player_resonance_pips"] = precomputed["player_resonance_pips"]
@@ -2680,6 +2682,8 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
     if yielded_enemies and not enemies:
         llm_outcome["_combat_resolved_notice"] = f"⚔️ Duel Concluded! {', '.join(yielded_enemies)} yielded!"
         llm_outcome["faction_promotion_result"] = "success"
+    elif precomputed.get("fled_battle") and not enemies:
+        llm_outcome["_combat_resolved_notice"] = "🏃 Tactical Retreat! The party successfully disengaged and fled from combat."
     elif fled_enemies and not enemies:
         if parley_contained_messages:
             llm_outcome["_combat_resolved_notice"] = "\n".join(parley_contained_messages)
@@ -3191,7 +3195,7 @@ def cleanup_anomalous_combat_session_state(session: dict) -> None:
         if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
     ]
     try:
-        from mechanics.combat.stealth_tether import clear_all_combat_vanished
+        from mechanics.stealth.core import clear_all_combat_vanished
         clear_all_combat_vanished(session)
     except Exception:
         pass

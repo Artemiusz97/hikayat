@@ -105,6 +105,7 @@ ENTITY_CONTRACTS_V52_DDL: Tuple[str, ...] = (
     "CREATE INDEX IF NOT EXISTS idx_user_patron_comp_codex ON user_patron_compendium(user_id, codex_id)",
     "ALTER TABLE inventory ADD COLUMN is_pact_locked INTEGER DEFAULT 0",
     "ALTER TABLE inventory ADD COLUMN linked_contract_key TEXT DEFAULT ''",
+    "CREATE INDEX IF NOT EXISTS idx_inventory_pact_contract ON inventory(linked_contract_key) WHERE linked_contract_key != ''",
 )
 
 
@@ -573,6 +574,12 @@ def sign_entity_contract(
     sid = int(session_id)
     uid = int(user_id)
     hid = str(uid)
+    if isinstance(patron, str):
+        from mechanics.pacts.catalog import get_patron_by_id
+        patron_dict = get_patron_by_id(patron)
+        if not patron_dict:
+            raise ValueError(f"Unknown patron id: {patron}")
+        patron = patron_dict
     pid = str(patron.get("patron_id") or "").strip()
     if not pid:
         raise ValueError("Invalid Patron definition.")

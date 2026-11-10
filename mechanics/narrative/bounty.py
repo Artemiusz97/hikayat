@@ -500,13 +500,11 @@ def resolve_or_seed_bounty_client(
     if isinstance(session, str):
         scen_key = session
         try:
-            import db
             session = db.get_session(session_id) or {}
         except Exception:
             session = {}
     elif session is None and session_id:
         try:
-            import db
             session = db.get_session(session_id) or {}
         except Exception:
             session = {}
@@ -986,7 +984,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
     except Exception as _bnt_err:
-        logger.warning("Dynamic notice board LLM generation failed: %s. Using fallback.", _bnt_err)
+        log.warning("Dynamic notice board LLM generation failed: %s. Using fallback.", _bnt_err)
         bounties_raw = []
 
     if not bounties_raw:
@@ -1326,7 +1324,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
         bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
     except Exception as _fac_err:
-        logger.warning("Dynamic faction bounty LLM generation failed: %s. Using fallback.", _fac_err)
+        log.warning("Dynamic faction bounty LLM generation failed: %s. Using fallback.", _fac_err)
         bounties_raw = []
 
     if not bounties_raw:

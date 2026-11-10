@@ -1019,7 +1019,7 @@ def match_freeform_spatial_destination(
             if matched_len == 0:
                 # Multi-word phrase match from node name (e.g. 'running track', 'basketball court', 'library stacks')
                 tokens_in_clean = [
-                    w for w in name_words
+                    w for w in set(name_words)
                     if len(w) >= 4 and re.search(r"(?<!\w)" + re.escape(w) + r"(?!\w)", clean)
                 ]
                 if len(tokens_in_clean) >= 2 and any(w not in _generic_loc_words or w in ("track", "court", "stacks", "gate", "foyer") for w in tokens_in_clean):

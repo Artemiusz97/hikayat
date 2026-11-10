@@ -99,7 +99,7 @@ class FactionMixin:
         faction_id = faction.get("faction_id") or faction.get("id") or faction.get("name", "default")
         faction_key = f"faction_{faction_id}"
 
-        from mechanics.combat.merchant import (
+        from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
             generate_faction_quartermaster_shop,
             BuySelectView,
             get_or_create_merchant_catalogue,

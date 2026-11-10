@@ -326,7 +326,7 @@ async def generate_arc_digest(
         try:
             result = await llm_client.call_llm_json(
                 system_prompt=(
-                    f"{_DIGEST_SYSTEM}\n\n{_dig_dir}"
+                    f"{_DIGEST_SYSTEM}\n\n{_dig_dir}"  # pylint: disable=used-before-assignment
                     if (_dig_dir := build_side_channel_language_directive(
                         _db_dig.get_session(session_id) or {},
                         text_fields=("key_events", "commitments[].description", "mechanical_summary", "active_hooks"),

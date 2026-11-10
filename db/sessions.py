@@ -722,16 +722,16 @@ def reset_character_for_new_adventure(
             "DELETE FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
             (char_id, user_id)
         )
-        # Reset vitals, gold, and status effects on the character row
+        # Reset vitals, gold, status effects, scenario, and unlink stale active session
         if not is_anom_scen:
             conn.execute(
-                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]', attribute=NULL, combat_archetype=NULL, ability_medium=NULL WHERE id=?",
-                (max_hp, max_mp, cd.STARTING_GOLD, char_id)
+                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]', scenario=?, active_session_id=NULL, attribute=NULL, combat_archetype=NULL, ability_medium=NULL WHERE id=?",
+                (max_hp, max_mp, cd.STARTING_GOLD, scenario, char_id)
             )
         else:
             conn.execute(
-                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]' WHERE id=?",
-                (max_hp, max_mp, cd.STARTING_GOLD, char_id)
+                "UPDATE characters SET hp=?, mp=?, gold=?, status_effects='[]', scenario=?, active_session_id=NULL WHERE id=?",
+                (max_hp, max_mp, cd.STARTING_GOLD, scenario, char_id)
             )
 
     # Clear transient scenario-specific spell state on reset before re-granting loadout
@@ -964,11 +964,8 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
             conn.execute(
                 """DELETE FROM inventory
                    WHERE is_pact_locked = 1
-                     AND (
-                         character_id IN (SELECT id FROM characters WHERE active_session_id = ? OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?))
-                         OR user_id IN (SELECT user_id FROM session_members WHERE session_id = ?)
-                     )""",
-                (session_id, session_id, session_id),
+                     AND linked_contract_key IN (SELECT contract_key FROM session_entity_contracts WHERE session_id = ?)""",
+                (session_id,),
             )
             conn.execute(
                 """UPDATE user_patron_compendium
@@ -977,8 +974,15 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
                        SELECT CAST(holder_id AS INTEGER), patron_id
                        FROM session_entity_contracts
                        WHERE session_id = ? AND holder_type = 'player'
+                   )
+                   AND NOT EXISTS (
+                       SELECT 1 FROM session_entity_contracts sec
+                       WHERE sec.session_id != ? AND sec.holder_type = 'player'
+                         AND CAST(sec.holder_id AS INTEGER) = user_patron_compendium.user_id
+                         AND sec.patron_id = user_patron_compendium.patron_id
+                         AND sec.status = 'active'
                    )""",
-                (session_id,),
+                (session_id, session_id),
             )
         except sqlite3.OperationalError:
             pass
