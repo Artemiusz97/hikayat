@@ -40,6 +40,7 @@ from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # 
 from mechanics.social.races import normalize_race
 from mechanics.social.persona import normalize_appearance
 from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
+from mechanics.system.concurrency import distributed_adventure_lock
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 import unicodedata
@@ -1571,3 +1572,38 @@ class SyncChoiceView(SessionRestrictedView):
 from .quests import BountyBoardView
 from .social import PartyDialogueSelectView
 from .locations import PrimarySelectView, SceneItemSelectView
+
+
+class GameOverView(discord.ui.View):
+    """View presented upon party defeat or game over, providing interactive reload and restart options."""
+    def __init__(self, cog, session_id: int, user_id: int):
+        super().__init__(timeout=600)
+        self.cog = cog
+        self.session_id = session_id
+        self.user_id = user_id
+
+    @discord.ui.button(label="Reload Checkpoint", style=discord.ButtonStyle.danger, emoji="🔄")
+    async def reload_checkpoint(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Only the session owner can reload.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        saves = await adb(db.list_adventure_saves, self.user_id)
+        if not saves:
+            await interaction.followup.send("No saved checkpoints found. Please restart with `/adventure start`.", ephemeral=True)
+            return
+        latest_slot = saves[0]["slot_name"]
+        try:
+            async with distributed_adventure_lock(self.user_id):
+                res = await adb(db.load_adventure_slot, self.user_id, latest_slot)
+                new_sid = res.get("id") or res.get("new_session_id")
+                await interaction.followup.send(f"🔄 Checkpoint **{latest_slot}** reloaded! Use `/adventure status` or continue in session #{new_sid}.")
+        except Exception as e:
+            await interaction.followup.send(f"Failed to reload checkpoint: {e}", ephemeral=True)
+
+    @discord.ui.button(label="Restart Campaign", style=discord.ButtonStyle.secondary, emoji="🏠")
+    async def restart_campaign(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("Only the session owner can restart.", ephemeral=True)
+            return
+        await interaction.response.send_message("Campaign concluded. You can begin anew at any time with `/adventure start`.")

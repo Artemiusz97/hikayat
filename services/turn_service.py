@@ -32,6 +32,9 @@ def _is_llm_unavailable_exception(exc: BaseException) -> bool:
     return False
 
 
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
+
 class TurnResponse(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
     success: bool
@@ -117,6 +120,8 @@ class TurnService:
             dialogue_partner=partner_arg,
             current_node_id=outcome.get("current_node_id") if isinstance(outcome, dict) else None,
             focal_point=outcome.get("focal_point") if isinstance(outcome, dict) else None,
+            combat_threat_ledger=outcome.get("combat_threat_ledger") if isinstance(outcome, dict) else None,
+            combat_boss_telegraph=outcome.get("combat_boss_telegraph") if isinstance(outcome, dict) else None,
         )
         return scene_title, next_narrative, cleaned_choices
 
@@ -213,7 +218,7 @@ class TurnService:
                 target_e = None
                 if combat_target:
                     target_e = next(
-                        (e for e in active_enemies if str(e.get("name") or "").strip().lower() == str(combat_target).strip().lower()),
+                        (e for e in active_enemies if str(e.get("name") or "").strip().lower() == str(combat_target).strip().lower() or (e.get("id") is not None and str(e.get("id")) == str(combat_target))),
                         None,
                     )
                 cand_enemies = [target_e] if target_e else active_enemies
@@ -1323,6 +1328,7 @@ class TurnService:
         )
         action = dict(chosen) if not is_custom else {}
         action.update({
+            "is_non_lethal": bool(session.get("non_lethal_mode") or action.get("is_non_lethal") or (isinstance(chosen, dict) and chosen.get("is_non_lethal"))),
             "user_id": user_id,
             "character_name": char.get("name", "Player"),
             "char": dict(char),
@@ -1361,7 +1367,10 @@ class TurnService:
             "spawns_npc_role": chosen.get("spawns_npc_role") or (classification.get("spawns_npc_role", "") if is_custom else "") or "",
             "triggers_loot_roll": bool(chosen.get("triggers_loot_roll") or (classification.get("triggers_loot_roll", False) if is_custom else False)),
             "is_quest_action": bool(chosen.get("is_quest_action", False)),
+            "is_story_quest": bool(chosen.get("is_story_quest", False)),
             "is_climax_action": bool(chosen.get("is_climax_action", False)),
+            "clue_source_id": str(chosen.get("clue_source_id") or ""),
+            "is_bonus_clue": bool(chosen.get("is_bonus_clue", False)),
             "breakthrough_leveraged": bool(chosen.get("breakthrough_leveraged", False)),
             "clue_pair_ids": list(chosen.get("clue_pair_ids") or []),
             "quest_id": chosen.get("quest_id") or "",
@@ -1532,6 +1541,10 @@ class TurnService:
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
                 "stage_index": a.get("stage_index"),
+                "is_quest_action": bool(a.get("is_quest_action", False)),
+                "is_climax_action": bool(a.get("is_climax_action", False)),
+                "is_story_quest": bool(a.get("is_story_quest", False)),
+                "contract_type": a.get("contract_type") or "",
                 "breakthrough_leveraged": bool(a.get("breakthrough_leveraged", False)),
                 "clue_pair_ids": list(a.get("clue_pair_ids") or []),
                 "active_recall": a.get("active_recall"),
@@ -1634,7 +1647,10 @@ class TurnService:
                 "narrative": session.get("narrative", ""),
                 "scene_title": session.get("scene_title", ""),
                 "npcs": copy.deepcopy(list(session.get("current_npcs") or [])),
+                "party_npcs": copy.deepcopy(list(session.get("party_npcs") or [])),
                 "enemies": copy.deepcopy(list(session.get("nearby_enemies") or [])),
+                "combat_threat_ledger": copy.deepcopy(session.get("combat_threat_ledger") or {}),
+                "combat_boss_telegraph": copy.deepcopy(session.get("combat_boss_telegraph") or {}),
                 "daily_incursions": copy.deepcopy(pre_turn_daily_incursions_snapshot),
                 "stealth_state": prev_st_rollback,
                 "player_resonance_pips": (
@@ -1658,9 +1674,12 @@ class TurnService:
             except Exception:
                 session["_world_events_snapshot"] = {}
 
+        pre_turn_nearby_enemies_snapshot = copy.deepcopy(list(session.get("nearby_enemies") or []))
+
         async def _rollback_turn_failure(err: BaseException) -> None:
             if isinstance(session, dict):
                 session.pop("_target_turn", None)
+                session.pop("_pre_turn_quest_res", None)
             try:
                 await adb(db.rollback_session_normalized_state_after_turn, session_id, pre_turn_count_val)
             except Exception as _rb_norm_err:
@@ -1671,6 +1690,14 @@ class TurnService:
                     "current_npcs": snapshot["pre_turn"]["npcs"],
                     "dialogue_partner": pre_turn_dialogue_partner,
                 }
+                if "party_npcs" in snapshot["pre_turn"]:
+                    rollback_kwargs["party_npcs"] = snapshot["pre_turn"]["party_npcs"]
+                    try:
+                        await adb(db.set_session_party_npcs, session_id, snapshot["pre_turn"]["party_npcs"])
+                        if isinstance(session, dict):
+                            session["party_npcs"] = copy.deepcopy(snapshot["pre_turn"]["party_npcs"])
+                    except Exception as _rb_comp_err:
+                        log.warning("party_npcs rollback failed for session %s: %s", session_id, _rb_comp_err)
                 if prev_st_rollback is not None:
                     rollback_kwargs["stealth_state"] = prev_st_rollback
                 if sync_picks_rollback_json is not None:
@@ -1697,7 +1724,6 @@ class TurnService:
             await adb(db.set_turn_snapshot, session_id, snapshot)
 
         # Resolve the turn with the LLM — resolve_turn now always returns a dict
-        pre_turn_nearby_enemies_snapshot = copy.deepcopy(list(session.get("nearby_enemies") or []))
         try:
             await adb(db.snapshot_session_physical_state_for_turn, session_id, pre_turn_count_val)
             await adb(db.snapshot_session_social_state_for_turn, session_id, pre_turn_count_val)
@@ -1763,6 +1789,7 @@ class TurnService:
                                 quest_type=str(_rn.get("quest_type") or "bounty"),
                                 is_story_quest=bool(_rn.get("is_story_quest")),
                             )
+
                 _fk_scen_key = str((session or {}).get("scenario") or "fantasy")
                 _is_fk_scen = bool(
                     scenario_data.is_anomalous_incursions_scenario(_fk_scen_key)
@@ -1828,6 +1855,54 @@ class TurnService:
             except Exception as _ps_post_hook_err:
                 log.warning("Post-hook physical snapshot refresh failed (non-fatal): %s", _ps_post_hook_err)
 
+            # Surface Threat Clock ticks & directives if time/sleep advanced during the turn
+            tc_tick = (
+                (outcome.get("_sleep_info") or {}).get("threat_clock_tick")
+                or (outcome.get("_time_info") or {}).get("threat_clock_tick")
+                or outcome.get("threat_clock_tick")
+            )
+            if isinstance(tc_tick, dict) and tc_tick.get("ticked"):
+                outcome["threat_clock_tick"] = tc_tick
+                tc_dirs = [str(d) for d in (tc_tick.get("directives") or []) if d]
+                if tc_dirs:
+                    existing_qd = list(outcome.get("quest_directives") or [])
+                    outcome["quest_directives"] = existing_qd + tc_dirs
+
+            # Option C Mid-Chapter Stage 2 Prewarm Hook (fires when Stage 1 completes -> Ch.N+1 AI ChapterPlan in background)
+            cur_ch = int(await adb(db.get_session_chapter, session_id) or 1)
+            if cur_ch < 11:
+                next_ch = cur_ch + 1
+                if session.get("_last_prewarmed_chapter") != next_ch:
+                    active_sq = await adb(db.get_active_story_quest, session_id)
+                    if active_sq:
+                        sq_dos = await adb(db.get_quest_dossier, session_id, str(active_sq.get("quest_id") or ""))
+                        climax_sp = (sq_dos or {}).get("climax_spec") or {}
+                        m_stages = climax_sp.get("main_stages") or []
+                        stage2_active = any(
+                            (int(ms.get("stage_index") or 0) >= 2 and ms.get("status") in ("active", "completed"))
+                            for ms in m_stages
+                        ) or any(
+                            bool(int(so.get("completed_stages") or 0) >= 1 or int(so.get("stage_index") or 1) >= 2)
+                            for so in (active_sq.get("sub_objectives") or [])
+                            if isinstance(so, dict)
+                        )
+                        if stage2_active:
+                            session["_last_prewarmed_chapter"] = next_ch
+                            try:
+                                await adb(db.update_session, session_id, extra={"_last_prewarmed_chapter": next_ch})
+                            except Exception:
+                                pass
+                            from game_engine.quest_lifecycle import prewarm_chapter_ahead
+                            pw_task = asyncio.create_task(
+                                prewarm_chapter_ahead(
+                                    session_id=session_id,
+                                    current_chapter=cur_ch,
+                                    target_chapter=next_ch,
+                                )
+                            )
+                            _BACKGROUND_TASKS.add(pw_task)
+                            pw_task.add_done_callback(_BACKGROUND_TASKS.discard)
+
         # Re-tag quest choices now that arrival/skill_check waypoint progression has unlocked next stages
         from mechanics.social.physical_state import is_erotic_intimate_contact as _ts_is_erotic
         _ts_phys = (outcome.get("_physical_state") if isinstance(outcome, dict) else None) or {}
@@ -1837,15 +1912,14 @@ class TurnService:
         if (
             isinstance(outcome, dict)
             and outcome.get("_waypoint_notices")
-            and not outcome.get("_hybrid_choices_built")
             and not _ts_in_intimate
             and not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(outcome))
         ):
             try:
-
                 from mechanics.world.waypoints import tag_and_enrich_quest_choices
                 lead_char = party[0][0] if party and party[0] else None
-                raw_c = outcome.get("next_choices") or outcome.get("choices") or []
+                raw_c = list(outcome.get("next_choices") or outcome.get("choices") or [])
+
                 eff_loc = outcome.get("location") or session.get("current_location", "")
                 eff_dp = outcome.get("dialogue_partners") if "dialogue_partners" in outcome else outcome.get("dialogue_partner", ...)
                 eff_npcs = outcome.get("npcs_present")
@@ -1859,6 +1933,10 @@ class TurnService:
                     dialogue_partner=eff_dp,
                     current_npcs=eff_npcs,
                 )
+
+                # Prune enriched choices that target already completed waypoint stages
+                from game_engine import prune_completed_stage_choices
+                enriched_c = prune_completed_stage_choices(enriched_c, outcome.get("_waypoint_notices") or [])
                 if enriched_c:
                     free_actions = [c for c in raw_c if isinstance(c, dict) and c.get("stat") == "FREE"]
                     filler_budget = 3
@@ -1990,6 +2068,8 @@ class TurnService:
             history_entry["intimate_update"] = outcome["intimate_update"]
         if outcome.get("_refractory_recovered_notice"):
             history_entry["_refractory_recovered_notice"] = outcome["_refractory_recovered_notice"]
+        if outcome.get("threat_clock_tick"):
+            history_entry["threat_clock_tick"] = outcome["threat_clock_tick"]
 
         raw_hist = list(session.get("history") or [])
         if not raw_hist and session.get("narrative"):
@@ -2175,6 +2255,11 @@ class TurnService:
         session = await adb(db.get_session, session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found")
+
+        try:
+            await adb(game_engine.heal_session_quests_on_load, session_id)
+        except Exception as _heal_err:
+            log.debug("heal_session_quests_on_load failed (non-fatal): %s", _heal_err)
             
         snapshot = await adb(db.get_turn_snapshot, session_id)
         if not snapshot or snapshot.get("status") != "completed":

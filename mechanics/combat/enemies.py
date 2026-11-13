@@ -285,8 +285,8 @@ def build_companion_stat_sheet(level: int, archetype_name: str = None) -> dict:
     allowed = [s for s in ALL_STATS if s not in forbidden_upper]
     if not allowed: allowed = ALL_STATS
         
-    stats = {"STR": 1, "PER": 1, "END": 1, "CHA": 1, "INT": 1, "AGI": 1, "LUK": 1}
-    extra_points = max(0, level - 1)
+    stats = {"STR": 3, "PER": 3, "END": 3, "CHA": 3, "INT": 3, "AGI": 3, "LUK": 3}
+    extra_points = max(0, 3 + (level - 1) * 2)
     
     weights = []
     for s in allowed:
@@ -502,6 +502,47 @@ def infer_taxonomy_from_archetype(archetype: str, scenario: str = "fantasy") -> 
     return ["humanoid"], "corporeal", "mundane"
 
 
+CANONICAL_INTENT_CODES = {
+    "heavy": [
+        "winding up a heavy swing", "preparing a devastating crush",
+        "overcharging weapons", "lashing out with mutated tendrils",
+        "heavy", "crush", "overcharging", "tendrils"
+    ],
+    "magic": [
+        "channeling a massive spell", "drawing arcane energy",
+        "preparing a burst", "broadcasting a cognitohazardous frequency",
+        "spell", "arcane", "burst", "cognitohazardous", "channeling", "magic"
+    ],
+    "ambush": [
+        "preparing to ambush", "fading into shadows", "targeting the weak",
+        "folding spatial vectors for a blink-strike", "ambush", "shadows",
+        "blink-strike", "spatial vectors"
+    ],
+    "defensive": [
+        "assuming a defensive posture", "shielding allies", "preparing a counter",
+        "hardening its cursed exterior", "defensive", "shielding", "counter",
+        "hardening", "analyzing targets", "shifting stance"
+    ],
+    "swarm": [
+        "preparing to swarm", "multiplying rapidly", "swarm", "multiplying"
+    ],
+    "basic": [
+        "preparing next strike", "basic strike", "attacking"
+    ]
+}
+
+
+def get_intent_code(intent_label: str) -> str:
+    """Deterministically extracts canonical intent_code token from an intent label."""
+    if not intent_label:
+        return "basic"
+    lbl = str(intent_label).lower().strip()
+    for code, keywords in CANONICAL_INTENT_CODES.items():
+        if any(kw in lbl for kw in keywords):
+            return code
+    return "basic"
+
+
 def roll_enemy_intent(archetype: str) -> str:
     """Generates an initial or round-based telegraphed combat intent based on archetype."""
     arch = (archetype or "Brute").strip()
@@ -522,6 +563,7 @@ def roll_enemy_intent(archetype: str) -> str:
 def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_name: str = None,
                             custom_archetype: str = None, custom_primary: list = None, custom_forbidden: list = None,
                             exact_tier: int = None, exact_extra_points: int = None,
+                            exact_level: int = None,
                             language: str = "en") -> dict:
     scenario_lower = _resolve_enemy_scenario_key(scenario)
     
@@ -559,7 +601,10 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
     else:
         category, form, essence = infer_taxonomy_from_archetype(arch_name, scenario_lower)
 
-    level = max(1, chapter + random.randint(0, 1))
+    if exact_level is not None:
+        level = max(1, int(exact_level))
+    else:
+        level = max(1, chapter + random.randint(0, 1))
     
     if exact_tier is not None:
         tier_rank = exact_tier
@@ -610,6 +655,7 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
     display_affix = translate_affix(affixes[0], language) if affixes else ""
     final_name = f"{display_affix} {name}" if display_affix else name
     initial_intent = roll_enemy_intent(arch_name) if tier_rank >= 3 else None
+    initial_intent_code = get_intent_code(initial_intent) if initial_intent else None
 
     enemy_dict = {
         "name": final_name,
@@ -623,6 +669,9 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
         "essence": essence,
         "affixes": affixes,
         "intent": initial_intent,
+        "intent_code": initial_intent_code,
+        "weapon_profile": get_enemy_weapon_profile(arch_name),
+        "armor_profile": get_enemy_armor_profile(arch_name),
         "hp": max_hp,
         "max_hp": max_hp,
         "mp": max_mp,
@@ -767,6 +816,7 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
             scenario=scenario_lower, location=location, chapter=chapter,
             custom_name=base_name, custom_archetype=arch_name,
             exact_tier=tier_rank, exact_extra_points=extra_pts,
+            exact_level=enemy_level,
             language=language
         )
         if scenario_lower == "anomalous_incursions" and not e_obj.get("anomaly_blueprint") and not e_obj.get("is_human_operative"):

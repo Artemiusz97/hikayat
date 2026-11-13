@@ -643,6 +643,13 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                 )
 
         fresh_session = await adb(db.get_session, session["id"])
+        try:
+            sq_disc = await adb(db.get_active_story_quest, session["id"])
+            if sq_disc and sq_disc.get("quest_id"):
+                from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                schedule_background_chapter_plan(session["id"], str(sq_disc["quest_id"]))
+        except Exception:
+            pass
         image_url = await self._maybe_generate_image(fresh_session, scene.get("image_prompt"), outcome=scene)
 
         if session["mode"] == "sync":

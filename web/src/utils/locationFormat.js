@@ -61,36 +61,54 @@ export const parseCleanLocationParts = (rawLoc) => {
   };
 };
 
+export const formatFullLocationPath = (rawLoc) => {
+  if (!rawLoc) return '';
+  const cleaned = String(rawLoc)
+    .replace(/([A-Za-z]{3,})(-[A-Za-z0-9]+)\s+\1\b/gi, '$1$2')
+    .replace(/([A-Za-z0-9]+-([A-Za-z]{3,}))\s+\2\b/gi, '$1');
+  return cleaned
+    .split(/\s*(?:➔|->|✖|\|)\s*/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .join(' · ');
+};
+
 export const formatCleanLocation = (rawLoc, { includeZone = true, style = 'badge' } = {}) => {
   if (!rawLoc) return '';
-  const { zone, facility, subRoom, primary, secondary } = parseCleanLocationParts(rawLoc);
+  const { zone, facility, subRoom, primary } = parseCleanLocationParts(rawLoc);
   if (!primary) return '';
 
-  if (style === 'short' || !includeZone) {
-    return subRoom ? `${subRoom} (${facility})` : facility || primary;
+  const room = subRoom || facility || primary;
+  const distinctZone =
+    zone &&
+    room.toLowerCase() !== zone.toLowerCase() &&
+    !room.toLowerCase().includes(zone.toLowerCase())
+      ? zone
+      : '';
+
+  if (style === 'short' || !includeZone || !distinctZone) {
+    return room;
   }
 
   if (style === 'prose') {
-    if (subRoom) {
-      return secondary ? `${subRoom} at ${facility} in ${secondary}` : `${subRoom} at ${facility}`;
-    }
-    return secondary ? `${facility} in ${secondary}` : facility || primary;
+    const roomWithArticle = /^the\s+/i.test(room) ? room : `the ${room}`;
+    return `${roomWithArticle} in ${distinctZone}`;
   }
 
-  // Default 'badge' style: Facility first, Zone in parentheses so truncation never hides the facility name
-  return secondary ? `${primary} (${secondary})` : primary;
+  // Default 'badge' style: Room · Zone (full path stays in tooltip via formatFullLocationPath)
+  return `${room} · ${distinctZone}`;
 };
 
-const PROSE_LOC_SEG = `[A-Z0-9][A-Za-z0-9.\\-'’:]*(?:\\s+(?:(?:of|the|&)\\s+)?[A-Z0-9][A-Za-z0-9.\\-'’:]*){0,7}`;
+const PROSE_LOC_SEG = `[A-Z0-9\\u00C0-\\u024F\\u1E00-\\u1EFF\\u4E00-\\u9FFF][A-Za-z0-9\\u00C0-\\u024F\\u1E00-\\u1EFF\\u4E00-\\u9FFF.\\-'’:]*(?:\\s+(?:(?:of|the|&|in|der|die|das|des|dem|den|und|im|am|zur|zum|w|z|ze|we|na|do|od|di|ke|dari)\\s+)?[A-Z0-9\\u00C0-\\u024F\\u1E00-\\u1EFF\\u4E00-\\u9FFF][A-Za-z0-9\\u00C0-\\u024F\\u1E00-\\u1EFF\\u4E00-\\u9FFF.\\-'’:]*){0,7}`;
 const PROSE_TIERED_ARROW_RE = new RegExp(
-  `(${PROSE_LOC_SEG})\\s*(?:➔|->)\\s*(${PROSE_LOC_SEG})(?:\\s*(?:➔|->)\\s*(${PROSE_LOC_SEG}))?`,
+  `(${PROSE_LOC_SEG})\\s*(?:➔|->|✖)\\s*(${PROSE_LOC_SEG})(?:\\s*(?:➔|->|✖)\\s*(${PROSE_LOC_SEG}))?`,
   'g'
 );
 
 export const cleanProseLocations = (text, { includeZone = true } = {}) => {
   if (!text) return '';
   const deduped = dedupeLocationStutter(String(text));
-  if (!deduped.includes('➔') && !deduped.includes('->')) {
+  if (!deduped.includes('➔') && !deduped.includes('->') && !deduped.includes('✖')) {
     return deduped;
   }
 

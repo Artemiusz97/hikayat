@@ -5,7 +5,7 @@ import {
   MapPin, Coins, Sparkles, ChevronDown, ChevronRight, ShieldAlert,
   FileSearch, RefreshCw, PlusCircle, Trash2, Zap, ScrollText, Star
 } from 'lucide-react';
-import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
+import { formatCleanLocation, formatFullLocationPath, cleanProseLocations } from '../../utils/locationFormat';
 import ChronicleTapestryModal from '../Modals/ChronicleTapestryModal';
 
 const CATEGORY_META = {
@@ -295,7 +295,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 <div className="flex items-center justify-between gap-2 pt-0.5">
                   <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                     <MapPin size={12} className="text-amber-400 shrink-0" />
-                    <span className="truncate" title={formatCleanLocation(activeStage.target_location)}>
+                    <span className="truncate" title={formatFullLocationPath(activeStage.target_location)}>
                       📍 <strong>{formatCleanLocation(activeStage.target_location)}</strong>
                     </span>
                   </div>
@@ -315,6 +315,60 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   <span>{t('quests.key_contact', '👤 Key Contact:')} <strong>{activeStage.target_npc}</strong></span>
                 </div>
               )}
+              {Array.isArray(activeStage.clue_sources) && activeStage.clue_sources.length > 0 && (
+                <div className="pt-1 mt-1 border-t border-amber-500/20 space-y-1">
+                  <div className="text-[9px] uppercase tracking-wider font-bold text-amber-300/80">
+                    {t('quests.clue_sources', 'Clue Avenues')}
+                  </div>
+                  {activeStage.clue_sources.map((src, sIdx) => {
+                    const srcStat = String(src.status || 'open').toLowerCase();
+                    const isBurnedOrCold = srcStat === 'burned' || srcStat === 'cold';
+                    const isClaimed = srcStat === 'claimed';
+                    const isBonus = Boolean(src.bonus) && srcStat === 'closed';
+                    const badgeLabel = isClaimed
+                      ? t('quests.source_claimed', 'Claimed')
+                      : srcStat === 'burned'
+                        ? t('quests.source_burned', 'Burned')
+                        : srcStat === 'cold'
+                          ? t('quests.source_cold', 'Cold')
+                          : isBonus
+                            ? t('quests.source_bonus', 'Bonus Lead')
+                            : t('quests.source_open', 'Open');
+                    return (
+                      <div
+                        key={src.source_id || sIdx}
+                        className={`text-[10px] flex items-start justify-between gap-1.5 leading-tight ${
+                          isBurnedOrCold ? 'text-gray-500 line-through' : isClaimed ? 'text-emerald-300/85' : 'text-gray-200'
+                        }`}
+                      >
+                        <div className="min-w-0 flex-1">
+                          <span className="mr-1">{isClaimed ? '☑️' : srcStat === 'burned' ? '🔥' : srcStat === 'cold' ? '❄️' : '🔎'}</span>
+                          <span>{cleanProseLocations(src.approach_hint || src.label || '')}</span>
+                          {src.location && (
+                            <span
+                              className="block text-[9px] text-amber-300/85 font-mono pl-4 truncate"
+                              title={formatFullLocationPath(src.location)}
+                            >
+                              ↳ {src.location_display || formatCleanLocation(src.location)}{src.npc ? ` • ${src.npc}` : ''}
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          className={`text-[9px] px-1.5 py-0.2 rounded border shrink-0 font-mono ${
+                            isBurnedOrCold
+                              ? 'bg-neutral-900/70 text-gray-500 border-gray-700/40'
+                              : isClaimed
+                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/40'
+                                : 'bg-amber-950/50 text-amber-200 border-amber-600/40'
+                          }`}
+                        >
+                          {badgeLabel}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
 
@@ -326,6 +380,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 const stDone = Boolean(st.completed || stStatus === 'completed');
                 const stBypassed = Boolean(st.bypassed || stStatus === 'bypassed');
                 const stActive = stStatus === 'active' && !stDone && !stBypassed;
+                const bonusSources = stDone && Array.isArray(st.clue_sources)
+                  ? st.clue_sources.filter(src => src && src.bonus && String(src.status || '').toLowerCase() === 'closed')
+                  : [];
                 return (
                   <div
                     key={sIdx}
@@ -347,10 +404,20 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         {t('quests.stage_label_short', 'Stage')} {st.stage_index || sIdx + 1}: {cleanProseLocations(st.stage_label || st.text)}
                       </span>
                       {st.target_location && st.target_location !== 'Hidden Lair' && (
-                        <span className={`block text-[9px] font-mono ${stActive ? 'text-amber-300' : 'text-gray-500'}`}>
+                        <span className={`block text-[9px] font-mono ${stActive ? 'text-amber-300' : 'text-gray-500'}`} title={formatFullLocationPath(st.target_location)}>
                           ↳ 📍 {formatCleanLocation(st.target_location)}{st.target_npc ? ` • 👤 ${st.target_npc}` : ''}
                         </span>
                       )}
+                      {bonusSources.map((bSrc, bIdx) => (
+                        <span
+                          key={bSrc.source_id || bIdx}
+                          className="block text-[9px] text-cyan-300 not-italic no-underline font-normal mt-0.5"
+                          style={{ textDecoration: 'none' }}
+                          title={formatFullLocationPath(bSrc.location)}
+                        >
+                          ⭐ {t('quests.source_bonus', 'Bonus Lead')}: {cleanProseLocations(bSrc.approach_hint || bSrc.label || '')} ({bSrc.location_display || formatCleanLocation(bSrc.location)})
+                        </span>
+                      ))}
                     </div>
                   </div>
                 );
@@ -488,6 +555,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
     const displayLeads = hasStructured ? leads.filter(ld => !ld.is_optional || (Array.isArray(ld.scouted_enemies) && ld.scouted_enemies.length > 0)) : leads;
     const twist = fow.twist || {};
     const tItem = fow.tangible_item || {};
+    const threatClock = fow.threat_clock && fow.threat_clock.enabled ? fow.threat_clock : null;
+    const tcMax = threatClock ? Math.max(2, Number(threatClock.max_segments || 6)) : 6;
+    const tcFilled = threatClock ? Math.min(tcMax, Math.max(0, Number(threatClock.filled || 0))) : 0;
 
     return (
       <div className="space-y-2 pt-1.5 border-t border-fantasy-border/30">
@@ -504,6 +574,87 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             ))}
           </div>
         </div>
+
+        {threatClock && (
+          <div className="bg-black/50 px-2 py-1.5 rounded border border-orange-500/30 space-y-1">
+            <div className="flex items-center justify-between text-[10px]">
+              <span className="font-bold uppercase tracking-wider text-orange-300/90">
+                ⏳ {t('quests.threat_clock', 'Threat')}:{' '}
+                <span className={tcFilled >= 4 ? 'text-red-400' : tcFilled >= 2 ? 'text-orange-300' : 'text-amber-200'}>
+                  {tcFilled}/{tcMax}
+                </span>
+              </span>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: tcMax }).map((_, i) => (
+                  <span
+                    key={i}
+                    className={`w-2.5 h-2 rounded-sm ${
+                      i < tcFilled
+                        ? tcFilled >= 6
+                          ? 'bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.85)]'
+                          : tcFilled >= 4
+                            ? 'bg-orange-500 shadow-[0_0_4px_rgba(249,115,22,0.75)]'
+                            : 'bg-amber-400'
+                        : 'bg-neutral-700'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+            {(threatClock.paused || threatClock.engaged === false || threatClock.next_threshold_teaser || threatClock.last_consequence_note || threatClock.last_consequence_event || threatClock.reinforced || threatClock.world_scar_pending) && (
+              <div className="flex items-center justify-between gap-1.5 flex-wrap text-[9px] text-gray-300">
+                <span className="text-orange-200/85">
+                  {cleanProseLocations(
+                    (() => {
+                      const ev = threatClock.last_consequence_event;
+                      if (ev && ev.type) {
+                        const tr = t('quest.threat_clock.consequences.' + ev.type, {
+                          param: ev.param,
+                          defaultValue: threatClock.last_consequence_note || '',
+                        });
+                        if (tr) {
+                          return tr
+                            .replace('{param}', ev.param != null ? ev.param : '')
+                            .replace(/\s*\(\s*\)/g, '')
+                            .replace(/\s*（\s*）/g, '')
+                            .replace(/:\s*$/g, '')
+                            .replace(/：\s*$/g, '')
+                            .trim();
+                        }
+                      }
+                      return (
+                        threatClock.last_consequence_note ||
+                        `${t('quests.threat_next', 'Next Threshold')} (${threatClock.next_threshold || 2}/${tcMax}): ${threatClock.next_threshold_teaser || threatClock.next_threshold_label || ''}`
+                      );
+                    })()
+                  )}
+                </span>
+                <div className="flex items-center gap-1">
+                  {threatClock.paused && (
+                    <span className="px-1 py-0.2 rounded bg-sky-950/70 text-sky-300 border border-sky-700/50 font-mono">
+                      ⏸️ {t('quests.threat_paused', 'Paused (Climax)')}
+                    </span>
+                  )}
+                  {threatClock.engaged === false && (
+                    <span className="px-1 py-0.2 rounded bg-neutral-800/80 text-gray-300 border border-neutral-600/50 font-mono">
+                      💤 {t('quests.threat_dormant', 'Dormant until Chapter engaged')}
+                    </span>
+                  )}
+                  {threatClock.reinforced && (
+                    <span className="px-1 py-0.2 rounded bg-red-950/70 text-red-300 border border-red-700/50 font-mono">
+                      {t('quests.threat_reinforced', 'Reinforcements')}
+                    </span>
+                  )}
+                  {threatClock.world_scar_pending && (
+                    <span className="px-1 py-0.2 rounded bg-rose-950/70 text-rose-200 border border-rose-700/50 font-mono">
+                      {t('quests.threat_scar_pending', 'Chapter Scar Risk')}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {displayLeads.length > 0 && (
           <div className="space-y-1.5 bg-black/35 p-2 rounded border border-fantasy-border/40">
@@ -1086,7 +1237,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                         <div className="flex items-center justify-between gap-2 pt-0.5">
                                           <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                                             <MapPin size={12} className="text-amber-400 shrink-0" />
-                                            <span className="truncate" title={formatCleanLocation(targetLoc)}>📍 <strong>{formatCleanLocation(targetLoc)}</strong></span>
+                                            <span className="truncate" title={formatFullLocationPath(targetLoc)}>📍 <strong>{formatCleanLocation(targetLoc)}</strong></span>
                                           </div>
                                           {onOpenWorldMap && (
                                             <button
@@ -1241,7 +1392,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                                         <MapPin size={12} className="text-amber-400 shrink-0" />
-                                        <span className="truncate" title={formatCleanLocation(q.target_location)}>📍 <strong>{formatCleanLocation(q.target_location)}</strong></span>
+                                        <span className="truncate" title={formatFullLocationPath(q.target_location)}>📍 <strong>{formatCleanLocation(q.target_location)}</strong></span>
                                       </div>
                                       {onOpenWorldMap && (
                                         <button
@@ -1430,7 +1581,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                               <div className="flex items-center justify-between gap-2 bg-amber-950/30 border border-amber-700/40 rounded px-2 py-1 text-[10px] text-amber-300">
                                 <div className="flex items-center gap-1 min-w-0">
                                   <MapPin size={11} className="text-amber-400 shrink-0" />
-                                  <span className="truncate" title={formatCleanLocation(b.target_location)}>📍 <strong>{formatCleanLocation(b.target_location)}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
+                                  <span className="truncate" title={formatFullLocationPath(b.target_location)}>📍 <strong>{formatCleanLocation(b.target_location)}</strong>{b.target_npc ? ` • 👤 ${b.target_npc}` : ''}</span>
                                 </div>
                               </div>
                             )}
@@ -1497,7 +1648,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
                       <option value="">{t('quests.select_evidence_a', 'Select Primary Evidence A...')}</option>
-                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction').map((c, idx) => (
+                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction' && (!clueBId || String(c.id) !== String(clueBId))).map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
                         </option>
@@ -1510,7 +1661,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
                       <option value="">{t('quests.select_evidence_b', 'Select Corroborating Evidence B...')}</option>
-                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction').map((c, idx) => (
+                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction' && (!clueAId || String(c.id) !== String(clueAId))).map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
                         </option>
@@ -1621,7 +1772,15 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           {isObj && c.id && clues.length >= 2 && (
                             <div className="flex items-center gap-1 shrink-0">
                               <button
-                                onClick={() => setClueAId(String(c.id))}
+                                onClick={() => {
+                                  const cid = String(c.id);
+                                  if (String(clueAId) === cid) {
+                                    setClueAId('');
+                                  } else {
+                                    setClueAId(cid);
+                                    if (String(clueBId) === cid) setClueBId('');
+                                  }
+                                }}
                                 className={`text-[9px] px-1.5 py-0.5 rounded font-mono border ${
                                   String(clueAId) === String(c.id)
                                     ? 'bg-purple-600 text-white border-purple-400'
@@ -1631,7 +1790,15 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                 Lead A
                               </button>
                               <button
-                                onClick={() => setClueBId(String(c.id))}
+                                onClick={() => {
+                                  const cid = String(c.id);
+                                  if (String(clueBId) === cid) {
+                                    setClueBId('');
+                                  } else {
+                                    setClueBId(cid);
+                                    if (String(clueAId) === cid) setClueAId('');
+                                  }
+                                }}
                                 className={`text-[9px] px-1.5 py-0.5 rounded font-mono border ${
                                   String(clueBId) === String(c.id)
                                     ? 'bg-purple-600 text-white border-purple-400'

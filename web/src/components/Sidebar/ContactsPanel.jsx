@@ -55,6 +55,26 @@ const formatRace = (str) => {
   return formatTitle(clean);
 };
 
+const isEmptyAffil = (v) => !v || ['none', 'unaffiliated', 'unknown', 'general'].includes(String(v).trim().toLowerCase());
+
+// Club (school-only) and faction/agency are separate axes: student agents carry both.
+const resolveAffiliations = (npc, basic) => {
+  const isStudent = isStudentNpc(npc, basic);
+  const club = isStudent && !isEmptyAffil(basic.club || npc.club) ? String(basic.club || npc.club) : '';
+  const rawFaction = npc.faction_affiliation || npc.faction_name || basic.faction_name || basic.faction || basic.affiliation || npc.affiliation || '';
+  const faction = !isEmptyAffil(rawFaction) && String(rawFaction).trim().toLowerCase() !== club.trim().toLowerCase() ? String(rawFaction) : '';
+  return { isStudent, club, faction };
+};
+
+// Age group badge label, e.g. "Teen · Student", "Teen", "Adult".
+const resolveAgeGroupLabel = (npc, basic, isStudent) => {
+  const ag = String(npc.age_group || basic.age_group || '').trim().toLowerCase();
+  if (!ag) return '';
+  if (ag === 'teen') return isStudent ? 'Teen · Student' : 'Teen';
+  if (ag === 'adult') return 'Adult';
+  return formatTitle(ag);
+};
+
 const renderBulletPoints = (lines) => {
   if (!lines || !lines.length) return null;
   return (
@@ -402,6 +422,7 @@ const ContactsPanel = ({
               (session?.scenario && String(session.scenario).toLowerCase().includes('nsfw')) ||
               (Array.isArray(session?.scenario_tags) && session.scenario_tags.includes('nsfw'))
             );
+            const isSchoolScenario = /school|academy/i.test(String(session?.scenario || ''));
 
             return (
               <div
@@ -534,24 +555,27 @@ const ContactsPanel = ({
                       </span>
                     )}
                     {(() => {
-                      const isStudent = isStudentNpc(npc, basic);
-                      const clubVal = basic.club || npc.club;
-                      const affilVal = basic.affiliation || npc.affiliation;
-                      if (isStudent && clubVal && clubVal.toLowerCase() !== 'none') {
-                        return (
-                          <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
-                            Club: {formatTitle(clubVal)}
-                          </span>
-                        );
-                      }
-                      if (!isStudent && affilVal && affilVal.toLowerCase() !== 'none') {
-                        return (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
-                            {formatTitle(affilVal)}
-                          </span>
-                        );
-                      }
-                      return null;
+                      const { isStudent, club, faction } = resolveAffiliations(npc, basic);
+                      const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent);
+                      return (
+                        <>
+                          {ageLabel && (
+                            <span className="px-1.5 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40 text-[10.5px]">
+                              {ageLabel}
+                            </span>
+                          )}
+                          {club && (
+                            <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
+                              Club: {formatTitle(club)}
+                            </span>
+                          )}
+                          {faction && (
+                            <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
+                              Faction: {formatTitle(faction)}
+                            </span>
+                          )}
+                        </>
+                      );
                     })()}
                     {(basic.race || npc.race) && (
                       <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
@@ -889,24 +913,27 @@ const ContactsPanel = ({
                                 </span>
                               )}
                               {(() => {
-                                const isStudent = isStudentNpc(npc, basic);
-                                const clubVal = basic.club || npc.club;
-                                const affilVal = basic.affiliation || npc.affiliation;
-                                if (isStudent && clubVal && clubVal.toLowerCase() !== 'none') {
-                                  return (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
-                                      Club: {formatTitle(clubVal)}
-                                    </span>
-                                  );
-                                }
-                                if (!isStudent && affilVal && affilVal.toLowerCase() !== 'none') {
-                                  return (
-                                    <span className="text-xs px-2 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50">
-                                      {formatTitle(affilVal)}
-                                    </span>
-                                  );
-                                }
-                                return null;
+                                const { isStudent, club, faction } = resolveAffiliations(npc, basic);
+                                const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent);
+                                return (
+                                  <>
+                                    {ageLabel && (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40">
+                                        {ageLabel}
+                                      </span>
+                                    )}
+                                    {club && (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
+                                        Club: {formatTitle(club)}
+                                      </span>
+                                    )}
+                                    {faction && (
+                                      <span className="text-xs px-2 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50">
+                                        Faction: {formatTitle(faction)}
+                                      </span>
+                                    )}
+                                  </>
+                                );
                               })()}
                             </div>
 

@@ -127,3 +127,32 @@ async def distributed_adventure_lock(
                 await loop.run_in_executor(None, db.release_distributed_lock, lk, owner_id)
             except Exception as e:
                 log.exception("Failed to release hierarchical lock %s: %s", lk, e)
+
+
+@asynccontextmanager
+async def acquire_background_session_lock(
+    session_id: int,
+    *,
+    retries: int = 12,
+    delay_seconds: float = 0.5,
+) -> AsyncGenerator[bool, None]:
+    """Retries non-blocking session lock briefly so background jobs serialize behind an active turn."""
+    lock_key = f"session_{session_id}"
+    owner_id = str(uuid.uuid4())
+    loop = asyncio.get_running_loop()
+    acquired = False
+    attempts = max(1, int(retries or 1))
+    for attempt in range(attempts):
+        acquired = await loop.run_in_executor(None, db.acquire_distributed_lock, lock_key, owner_id)
+        if acquired:
+            break
+        if attempt + 1 < attempts:
+            await asyncio.sleep(delay_seconds)
+    try:
+        yield acquired
+    finally:
+        if acquired:
+            try:
+                await loop.run_in_executor(None, db.release_distributed_lock, lock_key, owner_id)
+            except Exception as e:
+                log.exception("Failed to release background session lock for %s: %s", session_id, e)

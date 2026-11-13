@@ -1073,6 +1073,44 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     pass
         except Exception:
             _has_active_incursion_here = False
+    # --- Post-combat breathing room & peaceful-dialogue protection ---
+    _turn_now = int(session.get("turn_count") or 0)
+    if is_in_combat(session) and session.get("id"):
+        session["_last_combat_turn"] = _turn_now
+        session["_last_combat_location"] = _enc_loc
+        try:
+            db.update_session(
+                int(session["id"]),
+                extra={"_last_combat_turn": _turn_now, "_last_combat_location": _enc_loc},
+            )
+        except Exception:
+            pass
+    _last_cbt_turn = session.get("_last_combat_turn")
+    _turns_since_combat = (_turn_now - int(_last_cbt_turn)) if isinstance(_last_cbt_turn, (int, float)) else 99
+    _same_room_as_last_combat = bool(
+        _enc_loc and str(session.get("_last_combat_location") or "").strip().lower() == _enc_loc.strip().lower()
+    )
+    _random_ambush_on_cooldown = _turns_since_combat <= 2
+    _act_dicts = [a for a in (actions or []) if isinstance(a, dict)]
+    _explicit_quest_action = any(
+        a.get("quest_id") or a.get("lead_id") or "quest" in str(a.get("intent") or "").lower()
+        for a in _act_dicts
+    )
+    _hostile_action = any(
+        str(a.get("intent") or "").lower() in ("attack", "combat", "combat_action", "ability", "spell", "confront")
+        or any(w in str(a.get("label") or "").lower() for w in ("attack", "confront", "ambush", "fight", "strike"))
+        for a in _act_dicts
+    )
+    _peaceful_dialogue_action = bool(_in_dialogue_mode) and not _explicit_quest_action and not _hostile_action and all(
+        str(a.get("intent") or "").lower() in ("", "dialogue", "social", "general_action", "persuade", "negotiate", "ask", "talk")
+        for a in _act_dicts
+    )
+    _quest_spawn_on_cooldown = _same_room_as_last_combat and _turns_since_combat <= 1 and not _explicit_quest_action
+    try:
+        from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location as _is_sanctuary
+        _in_safe_sanctuary = _is_sanctuary(_enc_loc)
+    except Exception:
+        _in_safe_sanctuary = False
     # Deterministic Predetermined Quest Encounter Spawner (Climax Boss & Lead Combat Rosters)
     if (
         not is_in_combat(session)
@@ -1080,6 +1118,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         and not is_retry
         and not _in_intimate_for_core
         and not _in_aftercare_for_core
+        and not _quest_spawn_on_cooldown
+        and not (_in_safe_sanctuary and not _explicit_quest_action)
         and scenario_data.is_mechanic_enabled(scen_key, "tactical_combat")
         and session.get("id")
         and _enc_loc
@@ -1096,10 +1136,20 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     continue
                 _climax = _qd.get("climax_spec") or {}
                 _c_loc = str(_climax.get("location") or "").strip().lower()
+                _c_target = str(_climax.get("target_npc") or "").strip().lower()
+                _talking_to_target = bool(_c_target) and any(_c_target in p or p in _c_target for p in _pre_turn_dialogue_partners)
+                _climax_escalated = bool(
+                    not _climax.get("boss_escalation_only")
+                    or _climax.get("escalated")
+                    or _climax.get("ambush_unlocked")
+                    or _hostile_action
+                )
                 if (
                     _climax.get("is_unlocked")
                     and not _climax.get("boss_defeated")
                     and isinstance(_climax.get("boss_sheet"), dict)
+                    and _climax_escalated
+                    and not (_peaceful_dialogue_action and not _talking_to_target)
                     and _c_loc
                     and (_c_loc in _enc_loc_low or _enc_loc_low in _c_loc)
                 ):
@@ -1109,12 +1159,12 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         _boss_unit = hydrate_boss_sheet_from_quest_blueprint(_boss_unit, _q_row)
                     except Exception:
                         pass
-                    _boss_unit.setdefault("linked_quest_id", _qid)
+                    _boss_unit["linked_quest_id"] = _qid
                     _reinf_units = []
                     for _rf in (_climax.get("reinforcements") or []):
                         if isinstance(_rf, dict) and int(_rf.get("hp", 1) or 1) > 0:
                             _rf_copy = dict(_rf)
-                            _rf_copy.setdefault("linked_quest_id", _qid)
+                            _rf_copy["linked_quest_id"] = _qid
                             _reinf_units.append(_rf_copy)
                     _spawned_q_enemies = [_boss_unit] + _reinf_units
                     _q_enc_meta = {"quest_id": _qid, "is_climax_boss": True}
@@ -1149,6 +1199,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     if (
                         _ld.get("encounter_roster")
                         and not _ld.get("roster_cleared")
+                        and not _peaceful_dialogue_action
                         and str(_ld.get("status") or "").lower() != "completed"
                         and _ld_loc
                         and (_ld_loc in _enc_loc_low or _enc_loc_low in _ld_loc)
@@ -1158,7 +1209,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                             if isinstance(_le, dict):
                                 _le_copy = dict(_le)
                                 _le_copy.setdefault("hp", int(_le_copy.get("max_hp") or 24))
-                                _le_copy.setdefault("linked_quest_id", _qid)
+                                _le_copy["linked_quest_id"] = _qid
                                 _spawned_lead.append(_le_copy)
                         if _spawned_lead:
                             _q_enc_meta = {"quest_id": _qid, "is_climax_boss": False, "lead_id": _ld.get("lead_id")}
@@ -1196,6 +1247,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         and not is_retry
         and not _in_intimate_for_core
         and not _in_aftercare_for_core
+        and not _random_ambush_on_cooldown
+        and not _peaceful_dialogue_action
         and scenario_data.is_mechanic_enabled(scen_key, "tactical_combat")
         and not is_hub_location(_enc_loc)
     ):
@@ -1503,6 +1556,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             session['id'],
             scene_loc,
             movement_dest_str,
+            session=session,
         )
         quest_board_text = "".join(
             f"{b}\n\n" for b in (budget.trim(wp_block, "quest"), budget.trim(caseboard_block, "caseboard")) if b

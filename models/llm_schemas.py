@@ -1479,3 +1479,165 @@ class OpeningScene(DictAccessibleModel):
             return res
         return []
 
+
+
+class ChapterPlanBeatContract(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    player_verb: str = ""
+    reveal: str = ""
+    handover: str = ""
+    next_pointer: str = ""
+
+    @field_validator("player_verb", "reveal", "handover", "next_pointer", mode="before")
+    @classmethod
+    def coerce_beat_str(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:240]
+
+
+class ChapterPlanKeyClue(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    title: str = ""
+    lead_text: str = ""
+    category: str = "document"
+
+    @field_validator("title", "lead_text", mode="before")
+    @classmethod
+    def coerce_clue_text(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:260]
+
+    @field_validator("category", mode="before")
+    @classmethod
+    def coerce_clue_category(cls, v: Any) -> str:
+        val = str(v or "document").strip().lower()
+        return val if val in ("physical", "testimonial", "digital", "document") else "document"
+
+
+class ChapterPlanClueSource(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    source_id: str = ""
+    kind: str = "record"
+    location: str = ""
+    npc_name: Optional[str] = None
+    approach_hint: str = ""
+    stat: str = "PER"
+    dc_offset: int = 0
+
+    @field_validator("source_id", "location", "approach_hint", mode="before")
+    @classmethod
+    def coerce_src_str(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:200]
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def coerce_src_kind(cls, v: Any) -> str:
+        val = str(v or "record").strip().lower()
+        return val if val in ("witness", "record", "item") else "record"
+
+    @field_validator("npc_name", mode="before")
+    @classmethod
+    def coerce_npc_name(cls, v: Any) -> Optional[str]:
+        if not v or isinstance(v, (dict, list)):
+            return None
+        s = str(v).replace("\x00", "").strip()[:80]
+        return s or None
+
+    @field_validator("stat", mode="before")
+    @classmethod
+    def coerce_src_stat(cls, v: Any) -> str:
+        val = str(v or "PER").strip().upper()
+        return val if val in ("STR", "PER", "END", "CHA", "INT", "AGI", "LUK") else "PER"
+
+    @field_validator("dc_offset", mode="before")
+    @classmethod
+    def coerce_dc_offset(cls, v: Any) -> int:
+        try:
+            return max(-2, min(2, int(v or 0)))
+        except (TypeError, ValueError):
+            return 0
+
+
+class ChapterPlanStage(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    stage_index: int = 1
+    stage_label: str = ""
+    is_climax_stage: bool = False
+    beat_contract: ChapterPlanBeatContract = Field(default_factory=ChapterPlanBeatContract)
+    key_clue: ChapterPlanKeyClue = Field(default_factory=ChapterPlanKeyClue)
+    clue_sources: List[ChapterPlanClueSource] = Field(default_factory=list)
+
+    @field_validator("stage_index", mode="before")
+    @classmethod
+    def coerce_stage_idx(cls, v: Any) -> int:
+        try:
+            return max(1, int(v or 1))
+        except (TypeError, ValueError):
+            return 1
+
+    @field_validator("stage_label", mode="before")
+    @classmethod
+    def coerce_stage_label(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:220]
+
+    @field_validator("is_climax_stage", mode="before")
+    @classmethod
+    def coerce_is_climax(cls, v: Any) -> bool:
+        return _coerce_bool_value(v)
+
+    @field_validator("beat_contract", mode="before")
+    @classmethod
+    def coerce_beat_contract(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            return v
+        return {}
+
+    @field_validator("key_clue", mode="before")
+    @classmethod
+    def coerce_key_clue(cls, v: Any) -> Any:
+        if isinstance(v, dict):
+            return v
+        return {}
+
+    @field_validator("clue_sources", mode="before")
+    @classmethod
+    def coerce_clue_sources(cls, v: Any) -> List[Any]:
+        if not isinstance(v, list):
+            return []
+        return [item for item in v if isinstance(item, (dict, BaseModel))]
+
+
+class ChapterPlan(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    title: str = ""
+    objective: str = ""
+    climax_location: str = ""
+    stages: List[ChapterPlanStage] = Field(default_factory=list)
+    optional_hooks: List[str] = Field(default_factory=list)
+
+    @field_validator("title", "objective", "climax_location", mode="before")
+    @classmethod
+    def coerce_plan_str(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:400]
+
+    @field_validator("stages", mode="before")
+    @classmethod
+    def coerce_stages(cls, v: Any) -> List[Any]:
+        if not isinstance(v, list):
+            return []
+        return [s for s in v if isinstance(s, (dict, BaseModel))]
+
+    @field_validator("optional_hooks", mode="before")
+    @classmethod
+    def coerce_opt_hooks(cls, v: Any) -> List[str]:
+        if not isinstance(v, list):
+            return []
+        return [str(x).replace("\x00", "").strip()[:200] for x in v if str(x or "").strip()][:4]

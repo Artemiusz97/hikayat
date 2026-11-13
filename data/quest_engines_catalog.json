@@ -13,16 +13,136 @@
         "de": "Mysterium & Ermittlung"
       },
       "pitch_templates": {
-        "en": {"title": "The {zone} Cold File", "pitch": "{client} needs discreet eyes on {venue} after unsettling anomalies surfaced."},
-        "pl": {"title": "Zimne Akta: {zone}", "pitch": "{client} potrzebuje dyskretnego śledztwa w miejscu {venue}."},
-        "ms": {"title": "Fail Sulit {zone}", "pitch": "{client} memerlukan siasatan sulit di {venue}."},
-        "zh": {"title": "{zone}悬案卷宗", "pitch": "{client}委托你在{venue}展开秘密调查。"},
-        "de": {"title": "Die Akte {zone}", "pitch": "{client} benötigt diskrete Ermittlungen rund um {venue}."}
+        "en": {
+          "title": "The {zone} Cold File",
+          "pitch": "{client} needs discreet eyes on {venue} after unsettling anomalies surfaced."
+        },
+        "pl": {
+          "title": "Zimne Akta: {zone}",
+          "pitch": "{client} potrzebuje dyskretnego śledztwa w miejscu {venue}."
+        },
+        "ms": {
+          "title": "Fail Sulit {zone}",
+          "pitch": "{client} memerlukan siasatan sulit di {venue}."
+        },
+        "zh": {
+          "title": "{zone}悬案卷宗",
+          "pitch": "{client}委托你在{venue}展开秘密调查。"
+        },
+        "de": {
+          "title": "Die Akte {zone}",
+          "pitch": "{client} benötigt diskrete Ermittlungen rund um {venue}."
+        }
       },
       "lead_templates": [
-        {"role": "forensics", "stats": ["PER", "INT", "ITEM"], "labels": {"en": "Inspect physical traces at {venue}", "pl": "Zbadaj ślady w {venue}", "ms": "Periksa bukti fizikal di {venue}", "zh": "勘查{venue}的现场痕迹", "de": "Untersuche Spuren in {venue}"}},
-        {"role": "informant", "stats": ["CHA", "BRIBE", "AGI"], "labels": {"en": "Question {informant} about unrecorded movements", "pl": "Przesłuchaj osobę {informant}", "ms": "Soal {informant} tentang pergerakan rahsia", "zh": "向{informant}打探隐秘动向", "de": "Befrage {informant} zu verdächtigen Vorgängen"}}
-      ]
+        {
+          "role": "forensics",
+          "stats": [
+            "PER",
+            "INT",
+            "ITEM"
+          ],
+          "labels": {
+            "en": "Inspect physical traces at {venue}",
+            "pl": "Zbadaj ślady w {venue}",
+            "ms": "Periksa bukti fizikal di {venue}",
+            "zh": "勘查{venue}的现场痕迹",
+            "de": "Untersuche Spuren in {venue}"
+          }
+        },
+        {
+          "role": "informant",
+          "stats": [
+            "CHA",
+            "BRIBE",
+            "AGI"
+          ],
+          "labels": {
+            "en": "Question {informant} about unrecorded movements",
+            "pl": "Przesłuchaj osobę {informant}",
+            "ms": "Soal {informant} tentang pergerakan rahsia",
+            "zh": "向{informant}打探隐秘动向",
+            "de": "Befrage {informant} zu verdächtigen Vorgängen"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Question {informant} for field leads",
+            "pl": "Przesłuchaj {informant} w sprawie poszlak",
+            "ms": "Soal {informant} untuk petunjuk lapangan",
+            "zh": "向{informant}打探现场线索",
+            "de": "Befrage {informant} nach Hinweisen vor Ort"
+          },
+          "reveal": {
+            "en": "Archived telemetry traces {target}'s clandestine trail to {next_venue}",
+            "pl": "Zarchiwizowane dane wskazują tajny szlak {target} do: {next_venue}",
+            "ms": "Data arkib mengesan laluan sulit {target} ke {next_venue}",
+            "zh": "归档数据确认{target}正潜往{next_venue}",
+            "de": "Archivdaten führen die Spur von {target} nach {next_venue}"
+          },
+          "handover": {
+            "en": "Decrypted relay logs",
+            "pl": "Odszyfrowane logi przekaźnika",
+            "ms": "Log geganti terdekripsi",
+            "zh": "解密的中继通信日志",
+            "de": "Entschlüsselte Relais-Protokolle"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Breach the relay nexus at {venue}",
+            "pl": "Przełam węzeł przekaźnikowy w: {venue}",
+            "ms": "Tembusi pusat geganti di {venue}",
+            "zh": "突破{venue}的中继中枢",
+            "de": "Durchbrich den Relaisknoten bei {venue}"
+          },
+          "reveal": {
+            "en": "Internal dispatch reveals {target}'s fortified lair at {next_venue}",
+            "pl": "Wewnętrzny meldunek ujawnia ufortyfikowaną kryjówkę {target} w: {next_venue}",
+            "ms": "Perutusan dalaman membongkar sarang berkubu {target} di {next_venue}",
+            "zh": "内部调度令暴露了{target}位于{next_venue}的巢穴",
+            "de": "Interne Meldungen verraten den befestigten Unterschlupf von {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Fortified lair coordinates and access cipher",
+            "pl": "Współrzędne kryjówki i szyfr dostępu",
+            "ms": "Koordinat sarang dan sifir akses",
+            "zh": "秘密巢穴坐标与访问密匙",
+            "de": "Koordinaten des Unterschlupfs und Zugangsschlüssel"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Confront {target} at {venue}",
+            "pl": "Rozstrzygnij konfrontację z {target} w: {venue}",
+            "ms": "Hadapi {target} di {venue}",
+            "zh": "在{venue}直面{target}并彻底清算",
+            "de": "Stelle {target} in {venue}"
+          },
+          "reveal": {
+            "en": "{target}'s network is shattered, breaking their foothold across the sector",
+            "pl": "Siatka {target} została rozbita, niszcząc ich wpływy w sektorze",
+            "ms": "Rangkaian {target} dihancurkan, melumpuhkan cengkaman mereka di sektor ini",
+            "zh": "{target}的渗透网络被瓦解，拔除了该区域的暗中控制",
+            "de": "Das Netzwerk von {target} ist zerschlagen und verliert jeden Einfluss im Sektor"
+          },
+          "handover": {
+            "en": "Mastermind network ledger and case trophies",
+            "pl": "Rejestr siatki przywódcy i trofea śledztwa",
+            "ms": "Lejar rangkaian dalang dan bukti kejayaan kes",
+            "zh": "幕后网络账本与结案凭证",
+            "de": "Netzwerk-Hauptbuch des Drahtziehers und Falltrophäen"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "HEIST_BREACH": {
       "legacy_blueprint": "HEIST_INFILTRATION",
@@ -37,16 +157,136 @@
         "de": "Einbruch & Infiltration"
       },
       "pitch_templates": {
-        "en": {"title": "Silent Breach at {venue}", "pitch": "{client} is paying well to slip past security at {venue} and secure a sealed target."},
-        "pl": {"title": "Cichy Włam: {venue}", "pitch": "{client} płaci za ominięcie ochrony w {venue} i przejęcie ładunku."},
-        "ms": {"title": "Pencerobohan Senyap {venue}", "pitch": "{client} menawarkan upah lumayan untuk menyusup masuk ke {venue}."},
-        "zh": {"title": "暗夜潜入：{venue}", "pitch": "{client}重金聘人潜入{venue}夺取封存目标。"},
-        "de": {"title": "Lautloser Zugriff: {venue}", "pitch": "{client} zahlt gut für das Überwinden der Sicherheit in {venue}."}
+        "en": {
+          "title": "Silent Breach at {venue}",
+          "pitch": "{client} is paying well to slip past security at {venue} and secure a sealed target."
+        },
+        "pl": {
+          "title": "Cichy Włam: {venue}",
+          "pitch": "{client} płaci za ominięcie ochrony w {venue} i przejęcie ładunku."
+        },
+        "ms": {
+          "title": "Pencerobohan Senyap {venue}",
+          "pitch": "{client} menawarkan upah lumayan untuk menyusup masuk ke {venue}."
+        },
+        "zh": {
+          "title": "暗夜潜入：{venue}",
+          "pitch": "{client}重金聘人潜入{venue}夺取封存目标。"
+        },
+        "de": {
+          "title": "Lautloser Zugriff: {venue}",
+          "pitch": "{client} zahlt gut für das Überwinden der Sicherheit in {venue}."
+        }
       },
       "lead_templates": [
-        {"role": "security_recon", "stats": ["AGI", "PER", "INT"], "labels": {"en": "Map patrol blind spots and lockwarding at {venue}", "pl": "Rozpoznaj patrole i zamki w {venue}", "ms": "Kenal pasti laluan rondaan di {venue}", "zh": "摸清{venue}的巡逻盲区与门禁", "de": "Kundschafte Wachrouten in {venue} aus"}},
-        {"role": "insider_key", "stats": ["CHA", "BRIBE", "LUK"], "labels": {"en": "Lift or buy credentials from {informant}", "pl": "Zdobądź przepustkę od {informant}", "ms": "Dapatkan kunci akses daripada {informant}", "zh": "从{informant}处获取通行凭证", "de": "Beschaffe Zugangsdaten von {informant}"}}
-      ]
+        {
+          "role": "security_recon",
+          "stats": [
+            "AGI",
+            "PER",
+            "INT"
+          ],
+          "labels": {
+            "en": "Map patrol blind spots and lockwarding at {venue}",
+            "pl": "Rozpoznaj patrole i zamki w {venue}",
+            "ms": "Kenal pasti laluan rondaan di {venue}",
+            "zh": "摸清{venue}的巡逻盲区与门禁",
+            "de": "Kundschafte Wachrouten in {venue} aus"
+          }
+        },
+        {
+          "role": "insider_key",
+          "stats": [
+            "CHA",
+            "BRIBE",
+            "LUK"
+          ],
+          "labels": {
+            "en": "Lift or buy credentials from {informant}",
+            "pl": "Zdobądź przepustkę od {informant}",
+            "ms": "Dapatkan kunci akses daripada {informant}",
+            "zh": "从{informant}处获取通行凭证",
+            "de": "Beschaffe Zugangsdaten von {informant}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Procure blueprints and bypass codes from {informant}",
+            "pl": "Zdobądź plany i kody obejścia od {informant}",
+            "ms": "Dapatkan pelan tapak dan kod pintas daripada {informant}",
+            "zh": "从{informant}处取得结构蓝图与绕行密匙",
+            "de": "Beschaffe Baupläne und Umgehungscodes von {informant}"
+          },
+          "reveal": {
+            "en": "Schematics expose an unmonitored sub-level duct leading to {next_venue}",
+            "pl": "Schematy ujawniają niemonitorowany szyb techniczny do: {next_venue}",
+            "ms": "Skematik mendedahkan laluan saliran tersembunyi ke {next_venue}",
+            "zh": "结构图显露了直达{next_venue}的未设防通风管道",
+            "de": "Baupläne enthüllen einen unbewachten Schacht nach {next_venue}"
+          },
+          "handover": {
+            "en": "Facility bypass schematics",
+            "pl": "Schematy obejścia obiektu",
+            "ms": "Skematik pintasan fasiliti",
+            "zh": "安防设施绕行图纸",
+            "de": "Schaltpläne zur Sicherheitsumgehung"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Disable security grid at {venue}",
+            "pl": "Wyłącz siatkę zabezpieczeń w: {venue}",
+            "ms": "Lumpuhkan grid keselamatan di {venue}",
+            "zh": "瘫痪{venue}的安防电网",
+            "de": "Deaktiviere das Sicherheitsgitter bei {venue}"
+          },
+          "reveal": {
+            "en": "Security terminal override unlocks the inner vault at {next_venue}",
+            "pl": "Przełamanie terminala otwiera drogę do wewnętrznego skarbca w: {next_venue}",
+            "ms": "Penggodaman terminal membuka laluan bilik kebal di {next_venue}",
+            "zh": "控制台覆写指令解锁了通往{next_venue}内室保险库的通道",
+            "de": "Terminal-Überbrückung öffnet den Zugang zum Tresorraum in {next_venue}"
+          },
+          "handover": {
+            "en": "Vault master override key",
+            "pl": "Główny klucz obejścia skarbca",
+            "ms": "Kunci pintas utama bilik kebal",
+            "zh": "核心保险库覆写主钥匙",
+            "de": "Hauptschlüssel für den Tresor"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Crack the inner vault and neutralize {target} at {venue}",
+            "pl": "Otwórz skarbiec i zneutralizuj {target} w: {venue}",
+            "ms": "Pecahkan bilik kebal dan tumpaskan {target} di {venue}",
+            "zh": "破解核心库并制服守卫者{target}于{venue}",
+            "de": "Knacke den Tresor und schalte {target} in {venue} aus"
+          },
+          "reveal": {
+            "en": "The vault payload is secured and {target}'s defensive cordon is breached",
+            "pl": "Ładunek ze skarbca został zabezpieczony, a obrona {target} przełamana",
+            "ms": "Muatan berharga berjaya diamankan dan benteng {target} ditembusi",
+            "zh": "核心货物已安全到手，{target}的防御防线全线瓦解",
+            "de": "Die Beute ist gesichert und die Abwehr von {target} durchbrochen"
+          },
+          "handover": {
+            "en": "Secured high-value payload",
+            "pl": "Zabezpieczony cenny ładunek",
+            "ms": "Muatan bernilai tinggi yang selamat diambil",
+            "zh": "已安全起获的高价值目标物",
+            "de": "Gesicherte Wertfracht"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "HUNT_CONTAINMENT": {
       "legacy_blueprint": "NEUTRALIZATION",
@@ -61,16 +301,136 @@
         "de": "Jagd & Eindämmung"
       },
       "pitch_templates": {
-        "en": {"title": "Warrant on the {zone} Threat", "pitch": "{client} posted an urgent neutralization warrant near {venue}."},
-        "pl": {"title": "List Gończy: {zone}", "pitch": "{client} wystawił pilne zlecenie neutralizacji w pobliżu {venue}."},
-        "ms": {"title": "Waran Buruan {zone}", "pitch": "{client} mengeluarkan waran pembendungan segera berhampiran {venue}."},
-        "zh": {"title": "{zone}紧急讨伐令", "pitch": "{client}发布了针对{venue}周边威胁的讨伐委托。"},
-        "de": {"title": "Jagdbefehl in {zone}", "pitch": "{client} hat ein dringendes Kopfgeld nahe {venue} ausgeschrieben."}
+        "en": {
+          "title": "Warrant on the {zone} Threat",
+          "pitch": "{client} posted an urgent neutralization warrant near {venue}."
+        },
+        "pl": {
+          "title": "List Gończy: {zone}",
+          "pitch": "{client} wystawił pilne zlecenie neutralizacji w pobliżu {venue}."
+        },
+        "ms": {
+          "title": "Waran Buruan {zone}",
+          "pitch": "{client} mengeluarkan waran pembendungan segera berhampiran {venue}."
+        },
+        "zh": {
+          "title": "{zone}紧急讨伐令",
+          "pitch": "{client}发布了针对{venue}周边威胁的讨伐委托。"
+        },
+        "de": {
+          "title": "Jagdbefehl in {zone}",
+          "pitch": "{client} hat ein dringendes Kopfgeld nahe {venue} ausgeschrieben."
+        }
       },
       "lead_templates": [
-        {"role": "track_spoor", "stats": ["PER", "END", "INT"], "labels": {"en": "Track fresh signs and isolate lair approaches near {venue}", "pl": "Wytrop ślady w pobliżu {venue}", "ms": "Jejak tanda sasaran berhampiran {venue}", "zh": "追踪{venue}附近的猎物踪迹", "de": "Verfolge frische Fährten nahe {venue}"}},
-        {"role": "vanguard_cull", "stats": ["STR", "AGI", "ITEM"], "labels": {"en": "Thin out vanguard lookouts before the main clash", "pl": "Wyeliminuj czujki przed starciem", "ms": "Lumpuhkan pengawal hadapan sebelum pertempuran utama", "zh": "在决战前削弱外围哨卫", "de": "Schalte Vorposten vor dem Hauptkampf aus"}}
-      ]
+        {
+          "role": "track_spoor",
+          "stats": [
+            "PER",
+            "END",
+            "INT"
+          ],
+          "labels": {
+            "en": "Track fresh signs and isolate lair approaches near {venue}",
+            "pl": "Wytrop ślady w pobliżu {venue}",
+            "ms": "Jejak tanda sasaran berhampiran {venue}",
+            "zh": "追踪{venue}附近的猎物踪迹",
+            "de": "Verfolge frische Fährten nahe {venue}"
+          }
+        },
+        {
+          "role": "vanguard_cull",
+          "stats": [
+            "STR",
+            "AGI",
+            "ITEM"
+          ],
+          "labels": {
+            "en": "Thin out vanguard lookouts before the main clash",
+            "pl": "Wyeliminuj czujki przed starciem",
+            "ms": "Lumpuhkan pengawal hadapan sebelum pertempuran utama",
+            "zh": "在决战前削弱外围哨卫",
+            "de": "Schalte Vorposten vor dem Hauptkampf aus"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Track spoor and perimeter disturbances near {venue}",
+            "pl": "Wytrop ślady i anomalie w pobliżu {venue}",
+            "ms": "Jejak tanda gangguan di sekitar {venue}",
+            "zh": "搜寻{venue}周边的侵蚀迹象与活动踪迹",
+            "de": "Spüre Fährten und Störungen nahe {venue} auf"
+          },
+          "reveal": {
+            "en": "Fresh kinetic spoor confirms {target} is nesting deeper at {next_venue}",
+            "pl": "Świeże ślady potwierdzają, że {target} gnieździ się głębiej w: {next_venue}",
+            "ms": "Jejak kinetik baharu mengesahkan sarang {target} berada di {next_venue}",
+            "zh": "现场残留痕迹证实{target}正盘踞在{next_venue}深处",
+            "de": "Frische Spuren bestätigen das Nest von {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Target bio-sample residue",
+            "pl": "Próbka biologiczna celu",
+            "ms": "Sampel sisa biologi sasaran",
+            "zh": "目标残留的生物活性样本",
+            "de": "Biologische Rückstände des Ziels"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Cull vanguard broods and sever escape routes at {venue}",
+            "pl": "Wyeliminuj straż przednią i odetnij ucieczkę w: {venue}",
+            "ms": "Hapuskan pengawal hadapan dan sekat laluan lari di {venue}",
+            "zh": "清除{venue}的前哨爪牙并切断退路",
+            "de": "Beseitige die Vorhut und schneide Fluchtwege bei {venue} ab"
+          },
+          "reveal": {
+            "en": "Perimeter breach cuts off support, cornering {target} inside {next_venue}",
+            "pl": "Przełamanie kordonu odcina wsparcie, zapędzając {target} w kozi róg w: {next_venue}",
+            "ms": "Serangan luar menyekat bantuan, memerangkap {target} di {next_venue}",
+            "zh": "外围击破切断了增援，将{target}死死逼入{next_venue}",
+            "de": "Der Durchbruch isoliert {target} im Inneren von {next_venue}"
+          },
+          "handover": {
+            "en": "Lair pheromone beacon",
+            "pl": "Nadajnik feromonowy leża",
+            "ms": "Pemberitahu feromon sarang",
+            "zh": "锁定巢穴位置的气味信号标",
+            "de": "Pheromon-Peilsender des Unterschlupfs"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Neutralize and contain {target} at {venue}",
+            "pl": "Zneutralizuj i zabezpiecz cel {target} w: {venue}",
+            "ms": "Tumpaskan dan bendung {target} di {venue}",
+            "zh": "在{venue}击杀或收容{target}",
+            "de": "Neutralisiere und sichere {target} in {venue}"
+          },
+          "reveal": {
+            "en": "{target} is subdued and the local infestation core is stabilized",
+            "pl": "{target} został obezwładniony, a rdzeń anomalii ustabilizowany",
+            "ms": "{target} ditundukkan dan teras ancaman berjaya distabilkan",
+            "zh": "{target}已被彻底制伏，局部异化核心恢复稳定",
+            "de": "{target} ist überwältigt und die örtliche Bedrohung eingedämmt"
+          },
+          "handover": {
+            "en": "Neutralized creature core trophy",
+            "pl": "Trofeum zneutralizowanego rdzenia bestii",
+            "ms": "Teras piala makhluk tertumpas",
+            "zh": "已净化的异化生物核心战利品",
+            "de": "Kern-Trophäe der neutralisierten Kreatur"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "ACQUISITION_EXCHANGE": {
       "legacy_blueprint": "ACQUISITION",
@@ -85,16 +445,136 @@
         "de": "Beschaffung & Übergabe"
       },
       "pitch_templates": {
-        "en": {"title": "Consignment for {client}", "pitch": "{client} requires a rare consignment recovered from {venue} and delivered intact."},
-        "pl": {"title": "Przesyłka dla: {client}", "pitch": "{client} zleca odzyskanie rzadkiego przedmiotu z {venue}."},
-        "ms": {"title": "Kiriman Khas {client}", "pitch": "{client} memerlukan barangan nadir dari {venue} dihantar dengan selamat."},
-        "zh": {"title": "{client}的特许征集", "pitch": "{client}急需从{venue}寻回一件稀有货物并完好交割。"},
-        "de": {"title": "Frachtauftrag für {client}", "pitch": "{client} verlangt die Bergung eines seltenen Objekts aus {venue}."}
+        "en": {
+          "title": "Consignment for {client}",
+          "pitch": "{client} requires a rare consignment recovered from {venue} and delivered intact."
+        },
+        "pl": {
+          "title": "Przesyłka dla: {client}",
+          "pitch": "{client} zleca odzyskanie rzadkiego przedmiotu z {venue}."
+        },
+        "ms": {
+          "title": "Kiriman Khas {client}",
+          "pitch": "{client} memerlukan barangan nadir dari {venue} dihantar dengan selamat."
+        },
+        "zh": {
+          "title": "{client}的特许征集",
+          "pitch": "{client}急需从{venue}寻回一件稀有货物并完好交割。"
+        },
+        "de": {
+          "title": "Frachtauftrag für {client}",
+          "pitch": "{client} verlangt die Bergung eines seltenen Objekts aus {venue}."
+        }
       },
       "lead_templates": [
-        {"role": "appraise_source", "stats": ["INT", "PER", "CHA"], "labels": {"en": "Verify provenance and storage cache with {informant}", "pl": "Sprawdź pochodzenie ładunku z {informant}", "ms": "Sahkan lokasi simpanan bersama {informant}", "zh": "向{informant}核实货源与藏匿处", "de": "Prüfe Herkunft und Lagerort mit {informant}"}},
-        {"role": "extract_item", "stats": ["AGI", "STR", "BRIBE"], "labels": {"en": "Secure the consignment at {venue}", "pl": "Przejmij ładunek w {venue}", "ms": "Dapatkan barangan sasaran di {venue}", "zh": "在{venue}取得目标货物", "de": "Sichere den Gegenstand in {venue}"}}
-      ]
+        {
+          "role": "appraise_source",
+          "stats": [
+            "INT",
+            "PER",
+            "CHA"
+          ],
+          "labels": {
+            "en": "Verify provenance and storage cache with {informant}",
+            "pl": "Sprawdź pochodzenie ładunku z {informant}",
+            "ms": "Sahkan lokasi simpanan bersama {informant}",
+            "zh": "向{informant}核实货源与藏匿处",
+            "de": "Prüfe Herkunft und Lagerort mit {informant}"
+          }
+        },
+        {
+          "role": "extract_item",
+          "stats": [
+            "AGI",
+            "STR",
+            "BRIBE"
+          ],
+          "labels": {
+            "en": "Secure the consignment at {venue}",
+            "pl": "Przejmij ładunek w {venue}",
+            "ms": "Dapatkan barangan sasaran di {venue}",
+            "zh": "在{venue}取得目标货物",
+            "de": "Sichere den Gegenstand in {venue}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Authenticate consignment provenance with {informant}",
+            "pl": "Zweryfikuj pochodzenie przesyłki z {informant}",
+            "ms": "Sahkan ketulenan barangan bersama {informant}",
+            "zh": "向{informant}查验物资清单与真伪来源",
+            "de": "Prüfe die Herkunft der Fracht mit {informant}"
+          },
+          "reveal": {
+            "en": "Manifest confirms the genuine consignment was transferred to {next_venue}",
+            "pl": "Manifest potwierdza, że przesyłkę przeniesiono do: {next_venue}",
+            "ms": "Manifes mengesahkan barangan tulen telah dipindahkan ke {next_venue}",
+            "zh": "货单查实正品物资已秘密转运至{next_venue}",
+            "de": "Das Manifest bestätigt den Weitertransport nach {next_venue}"
+          },
+          "handover": {
+            "en": "Consignment chain-of-custody seal",
+            "pl": "Pieczęć łańcucha dostaw przesyłki",
+            "ms": "Meterai rantaian jagaan barangan",
+            "zh": "正品物资流转凭证印章",
+            "de": "Siegel der Fracht-Lieferkette"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Intercept the freight depot at {venue}",
+            "pl": "Przechwyć skład towarowy w: {venue}",
+            "ms": "Pintas depot muatan di {venue}",
+            "zh": "截击{venue}的转运中转货栈",
+            "de": "Fange das Frachtlager bei {venue} ab"
+          },
+          "reveal": {
+            "en": "Waybill documents trace the final crate to {target}'s vault at {next_venue}",
+            "pl": "List przewozowy wskazuje skrzynię w sejfie {target} w: {next_venue}",
+            "ms": "Surat muatan mengesan peti akhir ke bilik kebal {target} di {next_venue}",
+            "zh": "运单终点直指{target}位于{next_venue}的密藏库",
+            "de": "Der Frachtbrief führt zur Kiste im Tresor von {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Depot freight bill of lading",
+            "pl": "Konosament ze składu",
+            "ms": "Surat muatan depot",
+            "zh": "货站终验提货提单",
+            "de": "Lagerschein und Frachtbrief"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Secure the consignment from {target} at {venue}",
+            "pl": "Przejmij ładunek od {target} w: {venue}",
+            "ms": "Ambil barangan daripada {target} di {venue}",
+            "zh": "在{venue}从{target}手中夺取目标物资",
+            "de": "Sichere die Fracht von {target} in {venue}"
+          },
+          "reveal": {
+            "en": "Consignment recovered intact and verified against client specifications",
+            "pl": "Przesyłka odzyskana w całości i zgodna ze specyfikacją zleceniodawcy",
+            "ms": "Barangan berjaya diambil tanpa kerosakan mengikut spesifikasi",
+            "zh": "全套珍品完好无损地查扣并满足交付规格",
+            "de": "Die Fracht ist unversehrt geborgen und entspricht den Vorgaben"
+          },
+          "handover": {
+            "en": "Sealed client consignment crate",
+            "pl": "Zapieczętowana skrzynia przesyłki",
+            "ms": "Peti barangan pelanggan yang termeterai",
+            "zh": "封存完好的特许交割物资箱",
+            "de": "Versiegelte Kiste für den Auftraggeber"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "SOCIAL_BROKERAGE": {
       "legacy_blueprint": "SOCIAL_MANIPULATION",
@@ -109,16 +589,136 @@
         "de": "Diplomatie & Intrige"
       },
       "pitch_templates": {
-        "en": {"title": "Quiet Leverage in {zone}", "pitch": "{client} needs delicate persuasion or leverage applied at {venue} without public fallout."},
-        "pl": {"title": "Ciche Wpływy: {zone}", "pitch": "{client} potrzebuje delikatnej dyplomacji w {venue} bez skandalu."},
-        "ms": {"title": "Pengaruh Halus di {zone}", "pitch": "{client} memerlukan rundingan bijak di {venue} tanpa kekecohan awam."},
-        "zh": {"title": "{zone}暗流斡旋", "pitch": "{client}需要你在{venue}悄然施压达成协议，避免公开风波。"},
-        "de": {"title": "Diskreter Einfluss in {zone}", "pitch": "{client} wünscht feinfühlige Verhandlungen in {venue} ohne Aufsehen."}
+        "en": {
+          "title": "Quiet Leverage in {zone}",
+          "pitch": "{client} needs delicate persuasion or leverage applied at {venue} without public fallout."
+        },
+        "pl": {
+          "title": "Ciche Wpływy: {zone}",
+          "pitch": "{client} potrzebuje delikatnej dyplomacji w {venue} bez skandalu."
+        },
+        "ms": {
+          "title": "Pengaruh Halus di {zone}",
+          "pitch": "{client} memerlukan rundingan bijak di {venue} tanpa kekecohan awam."
+        },
+        "zh": {
+          "title": "{zone}暗流斡旋",
+          "pitch": "{client}需要你在{venue}悄然施压达成协议，避免公开风波。"
+        },
+        "de": {
+          "title": "Diskreter Einfluss in {zone}",
+          "pitch": "{client} wünscht feinfühlige Verhandlungen in {venue} ohne Aufsehen."
+        }
       },
       "lead_templates": [
-        {"role": "gather_leverage", "stats": ["CHA", "PER", "BRIBE"], "labels": {"en": "Draw out private motives via {informant}", "pl": "Poznaj sekrety przez {informant}", "ms": "Korek rahsia peribadi melalui {informant}", "zh": "通过{informant}摸清对方底牌", "de": "Erfahre Hintergründe über {informant}"}},
-        {"role": "stage_setting", "stats": ["INT", "CHA", "LUK"], "labels": {"en": "Arrange favorable terms before confronting {target}", "pl": "Przygotuj grunt pod rozmowę z {target}", "ms": "Susun syarat rundingan sebelum bertemu {target}", "zh": "在与{target}摊牌前布局筹码", "de": "Schaffe günstige Bedingungen gegenüber {target}"}}
-      ]
+        {
+          "role": "gather_leverage",
+          "stats": [
+            "CHA",
+            "PER",
+            "BRIBE"
+          ],
+          "labels": {
+            "en": "Draw out private motives via {informant}",
+            "pl": "Poznaj sekrety przez {informant}",
+            "ms": "Korek rahsia peribadi melalui {informant}",
+            "zh": "通过{informant}摸清对方底牌",
+            "de": "Erfahre Hintergründe über {informant}"
+          }
+        },
+        {
+          "role": "stage_setting",
+          "stats": [
+            "INT",
+            "CHA",
+            "LUK"
+          ],
+          "labels": {
+            "en": "Arrange favorable terms before confronting {target}",
+            "pl": "Przygotuj grunt pod rozmowę z {target}",
+            "ms": "Susun syarat rundingan sebelum bertemu {target}",
+            "zh": "在与{target}摊牌前布局筹码",
+            "de": "Schaffe günstige Bedingungen gegenüber {target}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Draw out compromising leverage via {informant}",
+            "pl": "Zdobądź kompromitujące materiały przez {informant}",
+            "ms": "Dapatkan maklumat pengaruh sulit melalui {informant}",
+            "zh": "通过{informant}搜集切中要害的交涉把柄",
+            "de": "Beschaffe Druckmittel über {informant}"
+          },
+          "reveal": {
+            "en": "Private correspondence exposes {target}'s vulnerable proxy meeting at {next_venue}",
+            "pl": "Korespondencja ujawnia wrażliwe spotkanie pośrednika {target} w: {next_venue}",
+            "ms": "Surat rahsia mendedahkan pertemuan wakil {target} di {next_venue}",
+            "zh": "密函揭露了{target}将在{next_venue}进行的机密代理碰头会",
+            "de": "Private Briefe enthüllen ein verletzliches Treffen von {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Compromising correspondence dossier",
+            "pl": "Teczka kompromitującej korespondencji",
+            "ms": "Dossier surat rahsia yang memudaratkan",
+            "zh": "记载秘密筹码的信函卷宗",
+            "de": "Dossier mit kompromittierenden Briefen"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Turn {target}'s proxy intermediary at {venue}",
+            "pl": "Przeciągnij na swoją stronę pośrednika {target} w: {venue}",
+            "ms": "Pujuk wakil perantara {target} di {venue}",
+            "zh": "在{venue}策反或迫服{target}的联络掮客",
+            "de": "Bringe die Kontaktperson von {target} in {venue} auf deine Seite"
+          },
+          "reveal": {
+            "en": "The proxy breaks loyalty, opening private audience terms with {target} at {next_venue}",
+            "pl": "Pośrednik łamie lojalność, otwierając drogę do prywatnego spotkania z {target} w: {next_venue}",
+            "ms": "Wakil berpaling tadah, membuka laluan rundingan terus bersama {target} di {next_venue}",
+            "zh": "掮客倒戈供出了与{target}在{next_venue}的独家密谈底线",
+            "de": "Die Kontaktperson bricht ihr Schweigen und ermöglicht ein Treffen mit {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Intermediary signed testimony",
+            "pl": "Podpisane zeznanie pośrednika",
+            "ms": "Pengakuan bertulis wakil perantara",
+            "zh": "掮客签署的亲笔自认保证书",
+            "de": "Unterzeichnetes Geständnis der Kontaktperson"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Confront {target} and force a settlement at {venue}",
+            "pl": "Skonfrontuj {target} i wymuś ugodę w: {venue}",
+            "ms": "Hadapi {target} dan meterai perjanjian di {venue}",
+            "zh": "在{venue}迫使{target}签署臣服协议",
+            "de": "Stelle {target} und erzwinge eine Einigung in {venue}"
+          },
+          "reveal": {
+            "en": "{target} yields to pressure and concessions are locked without public scandal",
+            "pl": "{target} ulega presji, a warunki ugody zostają przypieczętowane bez skandalu",
+            "ms": "{target} mengalah dan terma penyelesaian dipersetujui tanpa skandal",
+            "zh": "{target}在铁证前退让并签署协议，风波得以在私下全面平息",
+            "de": "{target} gibt dem Druck nach und die Vereinbarung ist ohne Skandal besiegelt"
+          },
+          "handover": {
+            "en": "Signed concession accord",
+            "pl": "Podpisany akt ustępstw",
+            "ms": "Surat perjanjian konsesi bertandatangan",
+            "zh": "已签署生效的退让和解协议",
+            "de": "Unterzeichnete Vereinbarung über Zugeständnisse"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "CRISIS_DEFENSE": {
       "legacy_blueprint": "SITE_DEFENSE_RITUAL",
@@ -133,16 +733,136 @@
         "de": "Krisenabwehr & Eskorte"
       },
       "pitch_templates": {
-        "en": {"title": "Hold the Line at {venue}", "pitch": "{client} warns that {venue} faces imminent pressure—fortify or extract the endangered party."},
-        "pl": {"title": "Obrona Pozycji: {venue}", "pitch": "{client} ostrzega przed zagrożeniem w {venue} — zabezpiecz miejsce lub ewakuuj cel."},
-        "ms": {"title": "Pertahankan {venue}", "pitch": "{client} memberi amaran ancaman di {venue} — perkukuh pertahanan atau selamatkan mangsa."},
-        "zh": {"title": "死守防线：{venue}", "pitch": "{client}示警{venue}危在旦夕，需立即加固防线或护送受困者撤离。"},
-        "de": {"title": "Stellung Halten: {venue}", "pitch": "{client} meldet akute Gefahr bei {venue} – sichere den Ort oder evakuiere Schutzbefohlene."}
+        "en": {
+          "title": "Hold the Line at {venue}",
+          "pitch": "{client} warns that {venue} faces imminent pressure—fortify or extract the endangered party."
+        },
+        "pl": {
+          "title": "Obrona Pozycji: {venue}",
+          "pitch": "{client} ostrzega przed zagrożeniem w {venue} — zabezpiecz miejsce lub ewakuuj cel."
+        },
+        "ms": {
+          "title": "Pertahankan {venue}",
+          "pitch": "{client} memberi amaran ancaman di {venue} — perkukuh pertahanan atau selamatkan mangsa."
+        },
+        "zh": {
+          "title": "死守防线：{venue}",
+          "pitch": "{client}示警{venue}危在旦夕，需立即加固防线或护送受困者撤离。"
+        },
+        "de": {
+          "title": "Stellung Halten: {venue}",
+          "pitch": "{client} meldet akute Gefahr bei {venue} – sichere den Ort oder evakuiere Schutzbefohlene."
+        }
       },
       "lead_templates": [
-        {"role": "fortify_wards", "stats": ["INT", "END", "STR"], "labels": {"en": "Reinforce chokepoints and emergency wards at {venue}", "pl": "Wzmocnij punkty obronne w {venue}", "ms": "Perkukuh benteng kecemasan di {venue}", "zh": "加固{venue}的防线与应急障壁", "de": "Verstärke Engpässe und Schutzvorkehrungen in {venue}"}},
-        {"role": "rally_allies", "stats": ["CHA", "PER", "ITEM"], "labels": {"en": "Coordinate evacuation lanes with {informant}", "pl": "Skonsultuj drogę ewakuacji z {informant}", "ms": "Selaraskan laluan keselamatan bersama {informant}", "zh": "与{informant}协调撤离路线", "de": "Koordiniere Evakuierungswege mit {informant}"}}
-      ]
+        {
+          "role": "fortify_wards",
+          "stats": [
+            "INT",
+            "END",
+            "STR"
+          ],
+          "labels": {
+            "en": "Reinforce chokepoints and emergency wards at {venue}",
+            "pl": "Wzmocnij punkty obronne w {venue}",
+            "ms": "Perkukuh benteng kecemasan di {venue}",
+            "zh": "加固{venue}的防线与应急障壁",
+            "de": "Verstärke Engpässe und Schutzvorkehrungen in {venue}"
+          }
+        },
+        {
+          "role": "rally_allies",
+          "stats": [
+            "CHA",
+            "PER",
+            "ITEM"
+          ],
+          "labels": {
+            "en": "Coordinate evacuation lanes with {informant}",
+            "pl": "Skonsultuj drogę ewakuacji z {informant}",
+            "ms": "Selaraskan laluan keselamatan bersama {informant}",
+            "zh": "与{informant}协调撤离路线",
+            "de": "Koordiniere Evakuierungswege mit {informant}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Scout evacuation routes and check in with {informant}",
+            "pl": "Rozpoznaj drogi ewakuacji i skonsultuj się z {informant}",
+            "ms": "Tinjau laluan keluar dan berhubung dengan {informant}",
+            "zh": "勘察撤离走廊并与{informant}取得联络",
+            "de": "Erkunde Evakuierungsrouten und halte Rücksprache mit {informant}"
+          },
+          "reveal": {
+            "en": "Scouts report hostile forward parties marching to assault {next_venue}",
+            "pl": "Zwiadowcy donoszą o wrogiej szpicy zmierzającej do: {next_venue}",
+            "ms": "Peninjau melaporkan gerombolan musuh sedang mara menyerang {next_venue}",
+            "zh": "前哨侦悉敌方主力突击队正向{next_venue}扑来",
+            "de": "Aufklärer melden anrückende feindliche Truppen auf {next_venue}"
+          },
+          "handover": {
+            "en": "Evacuation corridor route map",
+            "pl": "Mapa korytarza ewakuacyjnego",
+            "ms": "Peta laluan kecemasan pemindahan",
+            "zh": "紧急疏散走廊行军详图",
+            "de": "Karte des Evakuierungskorridors"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Fortify barricades and repel invaders at {venue}",
+            "pl": "Wzmocnij barykady i odeprzyj intruzów w: {venue}",
+            "ms": "Kukuhkan sekatan dan patahkan serangan di {venue}",
+            "zh": "在{venue}加固街垒并击退突前敌兵",
+            "de": "Verstärke Barrikaden und wehre Angreifer bei {venue} ab"
+          },
+          "reveal": {
+            "en": "Barricade defense holds the line, drawing {target} to commit forces at {next_venue}",
+            "pl": "Obrona barykad wytrzymuje, zmuszając {target} do uderzenia na: {next_venue}",
+            "ms": "Benteng bertahan kental, memaksa {target} turun padang di {next_venue}",
+            "zh": "阻击战成功迟滞了攻势，逼得敌首{target}孤注一掷现身于{next_venue}",
+            "de": "Die Stellung hält und zwingt {target} zum Großangriff auf {next_venue}"
+          },
+          "handover": {
+            "en": "Captured siege ordnance",
+            "pl": "Przejęte uzbrojenie oblężnicze",
+            "ms": "Senjata kepungan musuh yang dirampas",
+            "zh": "缴获的敌军攻城重械构件",
+            "de": "Erbeutetes Belagerungsgerät"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Break {target}'s final assault at {venue}",
+            "pl": "Odparto ostateczny szturm {target} w: {venue}",
+            "ms": "Patahkan serangan mutlak {target} di {venue}",
+            "zh": "在{venue}彻底粉碎{target}的决死总攻",
+            "de": "Brich den finalen Sturm von {target} bei {venue}"
+          },
+          "reveal": {
+            "en": "{target} is crushed and the defended sanctuary is secured",
+            "pl": "{target} został rozgromiony, a bezpieczna strefa ocalona",
+            "ms": "{target} ditumpaskan dan kubu perlindungan berjaya diselamatkan",
+            "zh": "敌首{target}败退伏诛，受庇护的核心防区彻底转危为安",
+            "de": "{target} ist besiegt und der Zufluchtsort dauerhaft gesichert"
+          },
+          "handover": {
+            "en": "Citadel defense commendation trophy",
+            "pl": "Odznaczenie obrony cytadeli",
+            "ms": "Piala sanjungan pertahanan kubu",
+            "zh": "防卫战胜利纪念授勋徽章",
+            "de": "Ehrenzeichen für die Verteidigung der Zuflucht"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "RIVALRY_SHOWDOWN": {
       "legacy_blueprint": "CONTEST_RIVALRY",
@@ -157,16 +877,136 @@
         "de": "Rivalität & Showdown"
       },
       "pitch_templates": {
-        "en": {"title": "Challenge at {venue}", "pitch": "{target} issued a high-stakes challenge at {venue}, backed by {client}'s wager."},
-        "pl": {"title": "Wyzwanie w: {venue}", "pitch": "{target} rzuca wyzwanie o wysoką stawkę w {venue}."},
-        "ms": {"title": "Cabaran di {venue}", "pitch": "{target} melontarkan cabaran berisiko tinggi di {venue}."},
-        "zh": {"title": "{venue}宿命约战", "pitch": "{target}在{venue}立下高赌注战书，{client}已押下重注。"},
-        "de": {"title": "Herausforderung in {venue}", "pitch": "{target} fordert ein Kräftemessen mit hohem Einsatz in {venue}."}
+        "en": {
+          "title": "Challenge at {venue}",
+          "pitch": "{target} issued a high-stakes challenge at {venue}, backed by {client}'s wager."
+        },
+        "pl": {
+          "title": "Wyzwanie w: {venue}",
+          "pitch": "{target} rzuca wyzwanie o wysoką stawkę w {venue}."
+        },
+        "ms": {
+          "title": "Cabaran di {venue}",
+          "pitch": "{target} melontarkan cabaran berisiko tinggi di {venue}."
+        },
+        "zh": {
+          "title": "{venue}宿命约战",
+          "pitch": "{target}在{venue}立下高赌注战书，{client}已押下重注。"
+        },
+        "de": {
+          "title": "Herausforderung in {venue}",
+          "pitch": "{target} fordert ein Kräftemessen mit hohem Einsatz in {venue}."
+        }
       },
       "lead_templates": [
-        {"role": "study_technique", "stats": ["PER", "INT", "AGI"], "labels": {"en": "Analyze {target}'s tell and signature style", "pl": "Przeanalizuj styl walki osoby {target}", "ms": "Kaji kelemahan gaya {target}", "zh": "洞悉{target}的习惯破绽与招牌技法", "de": "Analysiere die Technik und Schwächen von {target}"}},
-        {"role": "secure_arena_edge", "stats": ["CHA", "END", "LUK"], "labels": {"en": "Win crowd momentum or referee terms via {informant}", "pl": "Zdobądź przychylność widowni przez {informant}", "ms": "Raih sokongan gelanggang melalui {informant}", "zh": "借{informant}争取主场声势与规则优势", "de": "Sichere dir Rückhalt und faire Regeln über {informant}"}}
-      ]
+        {
+          "role": "study_technique",
+          "stats": [
+            "PER",
+            "INT",
+            "AGI"
+          ],
+          "labels": {
+            "en": "Analyze {target}'s tell and signature style",
+            "pl": "Przeanalizuj styl walki osoby {target}",
+            "ms": "Kaji kelemahan gaya {target}",
+            "zh": "洞悉{target}的习惯破绽与招牌技法",
+            "de": "Analysiere die Technik und Schwächen von {target}"
+          }
+        },
+        {
+          "role": "secure_arena_edge",
+          "stats": [
+            "CHA",
+            "END",
+            "LUK"
+          ],
+          "labels": {
+            "en": "Win crowd momentum or referee terms via {informant}",
+            "pl": "Zdobądź przychylność widowni przez {informant}",
+            "ms": "Raih sokongan gelanggang melalui {informant}",
+            "zh": "借{informant}争取主场声势与规则优势",
+            "de": "Sichere dir Rückhalt und faire Regeln über {informant}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Analyze combat telemetry and sparring tapes with {informant}",
+            "pl": "Przeanalizuj styl walki i nagrania z {informant}",
+            "ms": "Kaji gaya tempur dan rakaman bersama {informant}",
+            "zh": "向{informant}调阅{target}的历史战法记录与破绽",
+            "de": "Analysiere Kampfaufzeichnungen mit {informant}"
+          },
+          "reveal": {
+            "en": "Sparring records expose {target}'s signature vulnerability in {next_venue}",
+            "pl": "Nagrania ujawniają kluczową słabość {target} w warunkach: {next_venue}",
+            "ms": "Rakaman mendedahkan kelemahan utama {target} di {next_venue}",
+            "zh": "战术回放揭露了{target}在{next_venue}环境下的致命破绽",
+            "de": "Aufzeichnungen verraten eine gravierende Schwäche von {target} in {next_venue}"
+          },
+          "handover": {
+            "en": "Combat telemetry analysis log",
+            "pl": "Analiza telemetryczna walki",
+            "ms": "Log analisis telemetri tempur",
+            "zh": "宿敌战术习惯与破绽拆解图谱",
+            "de": "Analysebericht zur Kampftelemetrie"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Win arena momentum and control venue stakes at {venue}",
+            "pl": "Zdobądź przewagę na arenie w: {venue}",
+            "ms": "Kuasai momentum gelanggang di {venue}",
+            "zh": "在{venue}争夺竞技声势并夺取主场掌控权",
+            "de": "Erkämpfe den Heimvorteil in der Arena bei {venue}"
+          },
+          "reveal": {
+            "en": "Winning the crowd forces {target} to accept the final duel terms at {next_venue}",
+            "pl": "Przychylność tłumu zmusza {target} do przyjęcia warunków pojedynku w: {next_venue}",
+            "ms": "Sorakan penonton memaksa {target} bersetuju dengan syarat duel di {next_venue}",
+            "zh": "全场声势尽归己方，迫使{target}按你的规则赴会{next_venue}",
+            "de": "Der Jubel der Menge zwingt {target} zum Duell in {next_venue}"
+          },
+          "handover": {
+            "en": "Signed arena duel waiver",
+            "pl": "Podpisana zgoda na pojedynek na arenie",
+            "ms": "Surat persetujuan duel gelanggang bertandatangan",
+            "zh": "正式签署的生死约斗公证书",
+            "de": "Unterzeichnete Duell-Vereinbarung"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Defeat rival {target} in decisive combat at {venue}",
+            "pl": "Pokonaj rywala {target} w decydującym starciu w: {venue}",
+            "ms": "Tumpaskan seteru {target} dalam pertarungan muktamad di {venue}",
+            "zh": "在{venue}正面对决并彻底击败宿敌{target}",
+            "de": "Besiege den Rivalen {target} im finalen Duell in {venue}"
+          },
+          "reveal": {
+            "en": "{target} is decisively bested, cementing your undisputed supremacy",
+            "pl": "{target} zostaje definitywnie pokonany, przypieczętowując twoją supremację",
+            "ms": "{target} ditundukkan sepenuhnya, mengesahkan kehebatan mutlak anda",
+            "zh": "宿敌{target}完败伏首，彻底确立了无人可撼动的胜者地位",
+            "de": "{target} ist geschlagen und deine Überlegenheit unbestritten"
+          },
+          "handover": {
+            "en": "Champion's wager purse and rival trophy",
+            "pl": "Wygrana ze stawki mistrzowskiej i trofeum rywala",
+            "ms": "Pundi taruhan juara dan trofi piala seteru",
+            "zh": "胜者高额赌注赏金与宿敌认负信物",
+            "de": "Siegesprämie und Trophäe des Rivalen"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     },
     "INTIMATE_LIAISON": {
       "legacy_blueprint": "INTIMATE_ENCOUNTER",
@@ -182,16 +1022,136 @@
         "de": "Intimes Rendezvous"
       },
       "pitch_templates": {
-        "en": {"title": "Velvet Rendezvous with {target}", "pitch": "Draw {target} into a mutually thrilling private liaison away from prying eyes at {venue}."},
-        "pl": {"title": "Aksamitna Schadzka: {target}", "pitch": "Zaaranżuj dyskretne, namiętne spotkanie z osobą {target} w {venue}."},
-        "ms": {"title": "Janji Temu Sulit bersama {target}", "pitch": "Aturkan pertemuan peribadi penuh kemesraan bersama {target} di {venue}."},
-        "zh": {"title": "与{target}的绯色密会", "pitch": "避开耳目，在{venue}与{target}共度心照不宣的私密时刻。"},
-        "de": {"title": "Vertrauliches Rendezvous mit {target}", "pitch": "Arrangiere ein leidenschaftliches, diskretes Treffen mit {target} in {venue}."}
+        "en": {
+          "title": "Velvet Rendezvous with {target}",
+          "pitch": "Draw {target} into a mutually thrilling private liaison away from prying eyes at {venue}."
+        },
+        "pl": {
+          "title": "Aksamitna Schadzka: {target}",
+          "pitch": "Zaaranżuj dyskretne, namiętne spotkanie z osobą {target} w {venue}."
+        },
+        "ms": {
+          "title": "Janji Temu Sulit bersama {target}",
+          "pitch": "Aturkan pertemuan peribadi penuh kemesraan bersama {target} di {venue}."
+        },
+        "zh": {
+          "title": "与{target}的绯色密会",
+          "pitch": "避开耳目，在{venue}与{target}共度心照不宣的私密时刻。"
+        },
+        "de": {
+          "title": "Vertrauliches Rendezvous mit {target}",
+          "pitch": "Arrangiere ein leidenschaftliches, diskretes Treffen mit {target} in {venue}."
+        }
       },
       "lead_templates": [
-        {"role": "build_tension", "stats": ["CHA", "PER", "ITEM"], "labels": {"en": "Kindle mutual chemistry and unspoken tension with {target}", "pl": "Rozbudź wzajemne napięcie z {target}", "ms": "Bina keserasian dan tarikan bersama {target}", "zh": "与{target}升温暧昧默契与情绪张力", "de": "Wecke knisternde Vertrautheit mit {target}"}},
-        {"role": "secure_privacy", "stats": ["AGI", "INT", "BRIBE"], "labels": {"en": "Secure an undisturbed, discreet setting at {venue}", "pl": "Zadbaj o pełną dyskrecję w {venue}", "ms": "Pastikan ruang peribadi bebas gangguan di {venue}", "zh": "确保{venue}私密无人打扰", "de": "Sorge für ungestörte Diskretion in {venue}"}}
-      ]
+        {
+          "role": "build_tension",
+          "stats": [
+            "CHA",
+            "PER",
+            "ITEM"
+          ],
+          "labels": {
+            "en": "Kindle mutual chemistry and unspoken tension with {target}",
+            "pl": "Rozbudź wzajemne napięcie z {target}",
+            "ms": "Bina keserasian dan tarikan bersama {target}",
+            "zh": "与{target}升温暧昧默契与情绪张力",
+            "de": "Wecke knisternde Vertrautheit mit {target}"
+          }
+        },
+        {
+          "role": "secure_privacy",
+          "stats": [
+            "AGI",
+            "INT",
+            "BRIBE"
+          ],
+          "labels": {
+            "en": "Secure an undisturbed, discreet setting at {venue}",
+            "pl": "Zadbaj o pełną dyskrecję w {venue}",
+            "ms": "Pastikan ruang peribadi bebas gangguan di {venue}",
+            "zh": "确保{venue}私密无人打扰",
+            "de": "Sorge für ungestörte Diskretion in {venue}"
+          }
+        }
+      ],
+      "beat_templates": {
+        "stage_1": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Ignite intimate interest and share private signals with {target}",
+            "pl": "Rozbudź intymne zainteresowanie i wymień spojrzenia z {target}",
+            "ms": "Nyalakan rasa tertarik dan bertukar isyarat mesra bersama {target}",
+            "zh": "与{target}暗通款曲，点燃彼此心领神会的私密暧昧",
+            "de": "Wecke intimes Interesse und tausche Blicke mit {target}"
+          },
+          "reveal": {
+            "en": "{target} shares an unspoken longing and hints at a secluded room at {next_venue}",
+            "pl": "{target} zdradza skrywane pragnienie i napomyka o zacisznym pokoju w: {next_venue}",
+            "ms": "{target} meluahkan kerinduan tersembunyi dan membayangkan bilik sunyi di {next_venue}",
+            "zh": "{target}流露出难耐情愫，悄声暗示移步{next_venue}的私密静室",
+            "de": "{target} teilt ein stilles Verlangen und deutet auf ein Zimmer in {next_venue}"
+          },
+          "handover": {
+            "en": "Personal token of shared affection",
+            "pl": "Osobista pamiątka wzajemnego uczucia",
+            "ms": "Tanda kasih peribadi",
+            "zh": "传情寄意的私人物件信物",
+            "de": "Persönliches Pfand gegenseitiger Zuneigung"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_mid": {
+          "is_dialogue_beat": false,
+          "player_verb": {
+            "en": "Arrange seclusion and secure privacy at {venue}",
+            "pl": "Zadbaj o odosobnienie i pełną dyskrecję w: {venue}",
+            "ms": "Sediakan ruang privasi bebas gangguan di {venue}",
+            "zh": "在{venue}布置幽静私密的空间，隔绝外界窥视",
+            "de": "Sorge für Ungestörtheit und Diskretion in {venue}"
+          },
+          "reveal": {
+            "en": "The setting is made utterly secure, leaving {target} waiting unguarded at {next_venue}",
+            "pl": "Miejsce jest w pełni bezpieczne, a {target} czeka bezbronnie w: {next_venue}",
+            "ms": "Suasana telah selamat sepenuhnya, membiarkan {target} menanti di {next_venue}",
+            "zh": "私密结界已万无一失，{target}已然卸下防备在{next_venue}静候",
+            "de": "Die Umgebung ist vollkommen diskret und {target} wartet in {next_venue}"
+          },
+          "handover": {
+            "en": "Private suite room key",
+            "pl": "Klucz do prywatnego apartamentu",
+            "ms": "Kunci bilik suite peribadi",
+            "zh": "私密雅阁的门禁钥匙",
+            "de": "Schlüssel zur privaten Suite"
+          },
+          "next_pointer": "{next_venue}"
+        },
+        "stage_climax": {
+          "is_dialogue_beat": true,
+          "player_verb": {
+            "en": "Share a passionate private liaison with {target} at {venue}",
+            "pl": "Przeżyj namiętne, intymne chwile z {target} w: {venue}",
+            "ms": "Kecapi detik intim yang hangat bersama {target} di {venue}",
+            "zh": "在{venue}与{target}共赴情意绵绵的幽会深宵",
+            "de": "Erlebe eine leidenschaftliche Zweisamkeit mit {target} in {venue}"
+          },
+          "reveal": {
+            "en": "Deep mutual intimacy blossoms, binding {target}'s trust to you irrevocably",
+            "pl": "Głęboka więź rozkwita, wiążąc zaufanie {target} na zawsze z tobą",
+            "ms": "Kemesraan mendalam mekar, mengikat kepercayaan {target} kepada anda",
+            "zh": "两心交融契合，{target}对你的信任与依恋在此刻牢不可破",
+            "de": "Tiefes Vertrauen erwächst und bindet {target} unwiderruflich an dich"
+          },
+          "handover": {
+            "en": "Intimate liaison keepsake",
+            "pl": "Pamiątka intymnego spotkania",
+            "ms": "Cenderahati pertemuan intim",
+            "zh": "铭记温存之宵的贴身定情信物",
+            "de": "Andenken an die vertraulichen Stunden"
+          },
+          "next_pointer": "{venue}"
+        }
+      }
     }
   },
   "tag_to_engine": {
@@ -219,7 +1179,6 @@
     "sleuthing": "MYSTERY_CASE",
     "espionage": "MYSTERY_CASE",
     "hedonist intrigue": "MYSTERY_CASE",
-
     "heist_infiltration": "HEIST_BREACH",
     "campus infiltration": "HEIST_BREACH",
     "infiltrate syndicate": "HEIST_BREACH",
@@ -240,7 +1199,6 @@
     "cult_ritual_disruption": "HEIST_BREACH",
     "syndicate_black_market_interception": "HEIST_BREACH",
     "bondage escape": "HEIST_BREACH",
-
     "neutralization": "HUNT_CONTAINMENT",
     "assassination": "HUNT_CONTAINMENT",
     "monster hunting": "HUNT_CONTAINMENT",
@@ -256,7 +1214,6 @@
     "eliminate hostile anomalous entity": "HUNT_CONTAINMENT",
     "rogue_entity_termination": "HUNT_CONTAINMENT",
     "apocalyptic boss confrontation": "HUNT_CONTAINMENT",
-
     "acquisition": "ACQUISITION_EXCHANGE",
     "resource run": "ACQUISITION_EXCHANGE",
     "gathering": "ACQUISITION_EXCHANGE",
@@ -281,7 +1238,6 @@
     "aphrodisiac": "ACQUISITION_EXCHANGE",
     "aphrodisiac run": "ACQUISITION_EXCHANGE",
     "lust alchemy": "ACQUISITION_EXCHANGE",
-
     "social_manipulation": "SOCIAL_BROKERAGE",
     "gossip control": "SOCIAL_BROKERAGE",
     "gossip": "SOCIAL_BROKERAGE",
@@ -303,7 +1259,6 @@
     "masquerade revelry": "SOCIAL_BROKERAGE",
     "masquerade": "SOCIAL_BROKERAGE",
     "revelry": "SOCIAL_BROKERAGE",
-
     "site_defense_ritual": "CRISIS_DEFENSE",
     "escort_rescue": "CRISIS_DEFENSE",
     "academic rescue": "CRISIS_DEFENSE",
@@ -346,7 +1301,6 @@
     "anomalous_autopsy_escort": "CRISIS_DEFENSE",
     "captive rescue": "CRISIS_DEFENSE",
     "bondage": "CRISIS_DEFENSE",
-
     "contest_rivalry": "RIVALRY_SHOWDOWN",
     "honor duel": "RIVALRY_SHOWDOWN",
     "duel": "RIVALRY_SHOWDOWN",
@@ -358,7 +1312,6 @@
     "rogue operative / rival hunter interception": "RIVALRY_SHOWDOWN",
     "rogue operative": "RIVALRY_SHOWDOWN",
     "rival hunter": "RIVALRY_SHOWDOWN",
-
     "intimate_encounter": "INTIMATE_LIAISON",
     "intimate_liaison": "INTIMATE_LIAISON",
     "seduction": "INTIMATE_LIAISON",
@@ -418,44 +1371,319 @@
   },
   "world_scars": {
     "security_crackdown": {
-      "modifiers": {"dc_modifiers": {"AGI": 2, "CHA": 1}, "stealth_modifier": 2, "price_multiplier": 1.15},
-      "en": {"title": "Heightened Patrol Crackdown", "description": "Unresolved fallout tightened checkpoints and inflated black-market prices across {venue}.", "remediation_title": "Clear Crackdown Heat at {venue}"},
-      "pl": {"title": "Zaostrzone Patrole", "description": "Nierozwiązany kryzys zaostrzył kontrole i podniósł ceny wokół {venue}.", "remediation_title": "Złagodź Obławę w {venue}"},
-      "ms": {"title": "Kawalan Keselamatan Diperketat", "description": "Kegagalan operasi meningkatkan rondaan dan harga pasaran sekitar {venue}.", "remediation_title": "Redakan Tekanan Rondaan di {venue}"},
-      "zh": {"title": "戒严搜捕升级", "description": "任务失利导致{venue}周边哨卡森严、物价上涨。", "remediation_title": "平息{venue}的戒严风波"},
-      "de": {"title": "Verschärfte Sicherheitskontrollen", "description": "Nachwirkungen erhöhen Wachpräsenz und Preise rund um {venue}.", "remediation_title": "Entschärfe die Razzia bei {venue}"}
+      "modifiers": {
+        "dc_modifiers": {
+          "AGI": 2,
+          "CHA": 1
+        },
+        "stealth_modifier": 2,
+        "price_multiplier": 1.15
+      },
+      "en": {
+        "title": "Heightened Patrol Crackdown",
+        "description": "Unresolved fallout tightened checkpoints and inflated black-market prices across {venue}.",
+        "remediation_title": "Clear Crackdown Heat at {venue}"
+      },
+      "pl": {
+        "title": "Zaostrzone Patrole",
+        "description": "Nierozwiązany kryzys zaostrzył kontrole i podniósł ceny wokół {venue}.",
+        "remediation_title": "Złagodź Obławę w {venue}"
+      },
+      "ms": {
+        "title": "Kawalan Keselamatan Diperketat",
+        "description": "Kegagalan operasi meningkatkan rondaan dan harga pasaran sekitar {venue}.",
+        "remediation_title": "Redakan Tekanan Rondaan di {venue}"
+      },
+      "zh": {
+        "title": "戒严搜捕升级",
+        "description": "任务失利导致{venue}周边哨卡森严、物价上涨。",
+        "remediation_title": "平息{venue}的戒严风波"
+      },
+      "de": {
+        "title": "Verschärfte Sicherheitskontrollen",
+        "description": "Nachwirkungen erhöhen Wachpräsenz und Preise rund um {venue}.",
+        "remediation_title": "Entschärfe die Razzia bei {venue}"
+      }
     },
     "gossip_scandal": {
-      "modifiers": {"dc_modifiers": {"CHA": 2}, "price_multiplier": 1.05, "arousal_multiplier": 0.85},
-      "en": {"title": "Whispers & Scandal Fallout", "description": "Salacious rumors around {venue} have put locals on guard and strained reputations.", "remediation_title": "Quash the {venue} Scandal"},
-      "pl": {"title": "Echo Skandalu", "description": "Plotki wokół {venue} nadszarpnęły reputację i usztywniły rozmówców.", "remediation_title": "Wycisz Skandal w {venue}"},
-      "ms": {"title": "Gelombang Gosip & Skandal", "description": "Khabar angin hangat di {venue} menjejaskan reputasi dan kepercayaan.", "remediation_title": "Padamkan Skandal {venue}"},
-      "zh": {"title": "绯闻风波发酵", "description": "围绕{venue}的流言蜚语令众人戒心骤起、声誉受损。", "remediation_title": "平息{venue}的流言风波"},
-      "de": {"title": "Skandalgerüchte im Umlauf", "description": "Tuscheleien rund um {venue} belasten den Ruf und erschweren Gespräche.", "remediation_title": "Beende den Skandal um {venue}"}
+      "modifiers": {
+        "dc_modifiers": {
+          "CHA": 2
+        },
+        "price_multiplier": 1.05,
+        "arousal_multiplier": 0.85
+      },
+      "en": {
+        "title": "Whispers & Scandal Fallout",
+        "description": "Salacious rumors around {venue} have put locals on guard and strained reputations.",
+        "remediation_title": "Quash the {venue} Scandal"
+      },
+      "pl": {
+        "title": "Echo Skandalu",
+        "description": "Plotki wokół {venue} nadszarpnęły reputację i usztywniły rozmówców.",
+        "remediation_title": "Wycisz Skandal w {venue}"
+      },
+      "ms": {
+        "title": "Gelombang Gosip & Skandal",
+        "description": "Khabar angin hangat di {venue} menjejaskan reputasi dan kepercayaan.",
+        "remediation_title": "Padamkan Skandal {venue}"
+      },
+      "zh": {
+        "title": "绯闻风波发酵",
+        "description": "围绕{venue}的流言蜚语令众人戒心骤起、声誉受损。",
+        "remediation_title": "平息{venue}的流言风波"
+      },
+      "de": {
+        "title": "Skandalgerüchte im Umlauf",
+        "description": "Tuscheleien rund um {venue} belasten den Ruf und erschweren Gespräche.",
+        "remediation_title": "Beende den Skandal um {venue}"
+      }
     },
     "unchecked_threat": {
-      "modifiers": {"dc_modifiers": {"PER": 1, "END": 1}, "stealth_modifier": 1, "price_multiplier": 1.2},
-      "en": {"title": "Emboldened Regional Threat", "description": "An uncontained threat near {venue} disrupts supply lines and rattles the district.", "remediation_title": "Purge Lingering Threat at {venue}"},
-      "pl": {"title": "Rozzuchwalone Zagrożenie", "description": "Niezneutralizowane zagrożenie przy {venue} paraliżuje okolicę.", "remediation_title": "Usuń Zagrożenie w {venue}"},
-      "ms": {"title": "Ancaman Wilayah Memuncak", "description": "Ancaman yang gagal dibendung di {venue} mengganggu bekalan kawasan.", "remediation_title": "Hapuskan Ancaman Tertunggak di {venue}"},
-      "zh": {"title": "区域隐患坐大", "description": "{venue}附近未除的威胁正扰乱补给、动摇人心。", "remediation_title": "肃清{venue}的盘踞隐患"},
-      "de": {"title": "Erstarkte Bedrohung", "description": "Eine ungebremste Gefahr nahe {venue} stört Versorgung und Sicherheit.", "remediation_title": "Beseitige die Gefahr bei {venue}"}
+      "modifiers": {
+        "dc_modifiers": {
+          "PER": 1,
+          "END": 1
+        },
+        "stealth_modifier": 1,
+        "price_multiplier": 1.2
+      },
+      "en": {
+        "title": "Emboldened Regional Threat",
+        "description": "An uncontained threat near {venue} disrupts supply lines and rattles the district.",
+        "remediation_title": "Purge Lingering Threat at {venue}"
+      },
+      "pl": {
+        "title": "Rozzuchwalone Zagrożenie",
+        "description": "Niezneutralizowane zagrożenie przy {venue} paraliżuje okolicę.",
+        "remediation_title": "Usuń Zagrożenie w {venue}"
+      },
+      "ms": {
+        "title": "Ancaman Wilayah Memuncak",
+        "description": "Ancaman yang gagal dibendung di {venue} mengganggu bekalan kawasan.",
+        "remediation_title": "Hapuskan Ancaman Tertunggak di {venue}"
+      },
+      "zh": {
+        "title": "区域隐患坐大",
+        "description": "{venue}附近未除的威胁正扰乱补给、动摇人心。",
+        "remediation_title": "肃清{venue}的盘踞隐患"
+      },
+      "de": {
+        "title": "Erstarkte Bedrohung",
+        "description": "Eine ungebremste Gefahr nahe {venue} stört Versorgung und Sicherheit.",
+        "remediation_title": "Beseitige die Gefahr bei {venue}"
+      }
     }
   },
   "liberation_ops": {
     "buildup": {
-      "en": {"title": "Liberation Op: Reclaim {venue}", "objective": "Break entrenched enemy checkpoints and liberate {venue} from occupation fallout."},
-      "pl": {"title": "Operacja Wyzwolenia: Odbij {venue}", "objective": "Przełam umocnione posterunki wroga i wyzwól {venue} spod okupacji."},
-      "ms": {"title": "Operasi Pembebasan: Tawan Semula {venue}", "objective": "Pecahkan kubu sekatan musuh dan bebaskan {venue} daripada kesan pendudukan."},
-      "zh": {"title": "解放行动：收复{venue}", "objective": "击破敌方盘踞哨卡，将{venue}从失陷封锁中彻底解放。"},
-      "de": {"title": "Befreiungsoperation: {venue} Zurückerobern", "objective": "Zerschlage befestigte Kontrollpunkte und befreie {venue} von der Besatzung."}
+      "en": {
+        "title": "Liberation Op: Reclaim {venue}",
+        "objective": "Break entrenched enemy checkpoints and liberate {venue} from occupation fallout."
+      },
+      "pl": {
+        "title": "Operacja Wyzwolenia: Odbij {venue}",
+        "objective": "Przełam umocnione posterunki wroga i wyzwól {venue} spod okupacji."
+      },
+      "ms": {
+        "title": "Operasi Pembebasan: Tawan Semula {venue}",
+        "objective": "Pecahkan kubu sekatan musuh dan bebaskan {venue} daripada kesan pendudukan."
+      },
+      "zh": {
+        "title": "解放行动：收复{venue}",
+        "objective": "击破敌方盘踞哨卡，将{venue}从失陷封锁中彻底解放。"
+      },
+      "de": {
+        "title": "Befreiungsoperation: {venue} Zurückerobern",
+        "objective": "Zerschlage befestigte Kontrollpunkte und befreie {venue} von der Besatzung."
+      }
     },
     "peak_resistance": {
-      "en": {"title": "Resistance Strike: Shatter Peak Cordon at {venue}", "objective": "Lead a high-risk Resistance assault to dismantle the regime's iron cordon holding {venue}."},
-      "pl": {"title": "Uderzenie Oporu: Skrusz Kordon w {venue}", "objective": "Poprowadź ryzykowny szturm Ruchu Oporu i rozbij żelazny kordon wokół {venue}."},
-      "ms": {"title": "Serangan Penentangan: Runtuhkan Kepungan di {venue}", "objective": "Pimpin gempuran berisiko tinggi sel Penentangan untuk meruntuhkan kepungan besi di {venue}."},
-      "zh": {"title": "抵抗军奇袭：击碎{venue}铁幕封锁", "objective": "率领地下抵抗军发起高危强袭，拔除统治{venue}的铁血封锁中枢。"},
-      "de": {"title": "Widerstandsschlag: Sperrriegel bei {venue} Brechen", "objective": "Führe einen riskanten Angriff des Widerstands an, um den eisernen Kordon um {venue} zu sprengen."}
+      "en": {
+        "title": "Resistance Strike: Shatter Peak Cordon at {venue}",
+        "objective": "Lead a high-risk Resistance assault to dismantle the regime's iron cordon holding {venue}."
+      },
+      "pl": {
+        "title": "Uderzenie Oporu: Skrusz Kordon w {venue}",
+        "objective": "Poprowadź ryzykowny szturm Ruchu Oporu i rozbij żelazny kordon wokół {venue}."
+      },
+      "ms": {
+        "title": "Serangan Penentangan: Runtuhkan Kepungan di {venue}",
+        "objective": "Pimpin gempuran berisiko tinggi sel Penentangan untuk meruntuhkan kepungan besi di {venue}."
+      },
+      "zh": {
+        "title": "抵抗军奇袭：击碎{venue}铁幕封锁",
+        "objective": "率领地下抵抗军发起高危强袭，拔除统治{venue}的铁血封锁中枢。"
+      },
+      "de": {
+        "title": "Widerstandsschlag: Sperrriegel bei {venue} Brechen",
+        "objective": "Führe einen riskanten Angriff des Widerstands an, um den eisernen Kordon um {venue} zu sprengen."
+      }
+    }
+  },
+  "clue_source_templates": {
+    "witness": {
+      "player_verb": {
+        "en": "Question {npc} in {venue} for the {clue_title}",
+        "pl": "Przesłuchaj {npc} w {venue} w sprawie: {clue_title}",
+        "ms": "Soal {npc} di {venue} tentang {clue_title}",
+        "zh": "在{venue}向{npc}打探「{clue_title}」的线索",
+        "de": "Befrage {npc} in {venue} zu {clue_title}"
+      },
+      "reveal": {
+        "en": "{npc} slips up and reveals concrete evidence linking '{clue_title}' to the plot.",
+        "pl": "{npc} popełnia błąd i ujawnia twarde dowody łączące „{clue_title}” ze spiskiem.",
+        "ms": "{npc} tersilap kata lalu membocorkan bukti kukuh mengenai '{clue_title}'.",
+        "zh": "{npc}失言吐露了与「{clue_title}」直接相关的关键内情。",
+        "de": "{npc} verplappert sich und liefert handfeste Beweise zu „{clue_title}“."
+      }
+    },
+    "record": {
+      "player_verb": {
+        "en": "Audit ledgers and records at {venue} for {clue_title}",
+        "pl": "Przejrzyj rejestry i akta w {venue} pod kątem: {clue_title}",
+        "ms": "Semak rekod dan catatan di {venue} bagi {clue_title}",
+        "zh": "核查{venue}的账簿与记录，追查「{clue_title}」",
+        "de": "Prüfe Akten und Register in {venue} auf {clue_title}"
+      },
+      "reveal": {
+        "en": "Cross-checked entries in {venue} confirm the {clue_title}.",
+        "pl": "Porównane wpisy w {venue} potwierdzają trop: {clue_title}.",
+        "ms": "Rekod semak silang di {venue} mengesahkan {clue_title}.",
+        "zh": "{venue}的交叉比对档案印证了「{clue_title}」的真相。",
+        "de": "Abgeglichene Einträge in {venue} bestätigen {clue_title}."
+      }
+    },
+    "item": {
+      "player_verb": {
+        "en": "Examine physical traces at {venue} to recover {clue_title}",
+        "pl": "Zbadaj ślady fizyczne w {venue}, aby zdobyć: {clue_title}",
+        "ms": "Periksa kesan fizikal di {venue} untuk mendapatkan {clue_title}",
+        "zh": "勘查{venue}的实物痕迹以追回「{clue_title}」",
+        "de": "Untersuche physische Spuren in {venue} nach {clue_title}"
+      },
+      "reveal": {
+        "en": "Recovered physical evidence at {venue} establishes {clue_title}.",
+        "pl": "Zabezpieczone dowody rzeczowe w {venue} potwierdzają: {clue_title}.",
+        "ms": "Bukti fizikal yang ditemui di {venue} membuktikan {clue_title}.",
+        "zh": "在{venue}提取的物证锁定了「{clue_title}」的来龙去脉。",
+        "de": "Gesicherte Beweisstücke in {venue} belegen {clue_title}."
+      }
+    }
+  },
+  "threat_thresholds": {
+    "2": {
+      "en": {
+        "title": "Closing Window",
+        "teaser": "At 2/6, opposition patrols tighten and pressure mounts",
+        "directive": "[THREAT CLOCK 2/6 — CLOSING WINDOW]: Time is passing and the opposition is mobilizing. Weave subtle urgency, nervous watchers, or tightening patrols into the scene without inventing fake timers."
+      },
+      "pl": {
+        "title": "Zacieśniająca się Pętla",
+        "teaser": "Przy 2/6 patrole wroga gęstnieją, a presja rośnie",
+        "directive": "[ZEGAR ZAGROŻENIA 2/6]: Czas ucieka, a przeciwnicy wzmacniają czujność. Podkreśl narastającą presję i ostrożne patrole w scenie."
+      },
+      "ms": {
+        "title": "Ruang Semakin Sempit",
+        "teaser": "Pada 2/6, rondaan lawan mengetat dan tekanan meningkat",
+        "directive": "[JAM ANCAMAN 2/6]: Masa semakin suntuk dan pihak lawan mula berkumpul. Selitkan rasa genting serta pengawasan ketat dalam babak."
+      },
+      "zh": {
+        "title": "时间窗口收紧",
+        "teaser": "达到 2/6 时敌方巡防加紧，局势压力骤增",
+        "directive": "[威胁时钟 2/6 — 压力迫近]：时间推移，敌对势力开始调动戒备。请在叙事中体现暗中收紧的巡逻与紧迫感。"
+      },
+      "de": {
+        "title": "Schließendes Zeitfenster",
+        "teaser": "Bei 2/6 ziehen Patrouillen an und der Druck wächst",
+        "directive": "[BEDROHUNGSUHR 2/6]: Die Zeit drängt und Gegenspieler werden wachsamer. Vermittle spürbare Eile und verstärkte Kontrollen in der Szene."
+      }
+    },
+    "4": {
+      "en": {
+        "title": "Lead Threatened",
+        "teaser": "At 4/6, a trail goes cold or a threatened optional is lost",
+        "directive": "[THREAT CLOCK 4/6 — LEAD GONE COLD]: Stalling cost momentum — a trail has been scrubbed or an optional opportunity slipped away. Reflect the narrowed path starkly."
+      },
+      "pl": {
+        "title": "Utrata Tropu",
+        "teaser": "Przy 4/6 jeden ze śladów stygnie lub przepada cel poboczny",
+        "directive": "[ZEGAR ZAGROŻENIA 4/6]: Zwłoka miała cenę — jeden z tropów zatarł się lub szansa przepadła. Ukaż zawężone pole manewru."
+      },
+      "ms": {
+        "title": "Petunjuk Terancam",
+        "teaser": "Pada 4/6, satu jejak membeku atau peluang pilihan terlepas",
+        "directive": "[JAM ANCAMAN 4/6]: Penangguhan membawa padah — satu jejak dipadamkan atau peluang sampingan lenyap. Gambarkan pilihan yang semakin sempit."
+      },
+      "zh": {
+        "title": "线索遭损危机",
+        "teaser": "达到 4/6 时一条线索中断，或濒危支线机会失守",
+        "directive": "[威胁时钟 4/6 — 线索冷却]：拖延带来了代价——一处线索被抹除或支线时机溜走。请在描写中凸显余地收窄的危机。"
+      },
+      "de": {
+        "title": "Spur Bedroht",
+        "teaser": "Bei 4/6 wird eine Spur kalt oder ein optionales Ziel geht verloren",
+        "directive": "[BEDROHUNGSUHR 4/6]: Zögern fordert seinen Tribut — eine Spur wurde verwischt oder eine Nebenoption verstrich."
+      }
+    },
+    "6": {
+      "en": {
+        "title": "Climax Reinforced",
+        "teaser": "At 6/6, climax foes reinforce and the district suffers a lingering scar",
+        "directive": "[THREAT CLOCK 6/6 — FULL ESCALATION]: Maximum escalation reached! Opposition reinforces the climax site and collateral damage leaves an enduring mark unless swiftly confronted."
+      },
+      "pl": {
+        "title": "Wzmocniony Finał",
+        "teaser": "Przy 6/6 finałowi wrogowie zyskują posiłki, a dzielnica nosi bliznę",
+        "directive": "[ZEGAR ZAGROŻENIA 6/6]: Pełna eskalacja! Przeciwnicy wzmacniają pozycje przed finałem, a sytuacja w dzielnicy ulega trwałemu pogorszeniu."
+      },
+      "ms": {
+        "title": "Klimaks Diperkukuh",
+        "teaser": "Pada 6/6, musuh klimaks diperkuat dan daerah menanggung parut",
+        "directive": "[JAM ANCAMAN 6/6]: Eskalasi penuh! Musuh memperkukuh lokasi klimaks dan kerosakan berlarutan menanti daerah ini."
+      },
+      "zh": {
+        "title": "决战全面增援",
+        "teaser": "达到 6/6 时终局强敌增援，章节结束将留下地区伤痕",
+        "directive": "[威胁时钟 6/6 — 全面升级]：局势已至极点！敌方已在终局据点集结援军，持续的失序将在本章落幕时留下地区伤痕。"
+      },
+      "de": {
+        "title": "Verstärktes Finale",
+        "teaser": "Bei 6/6 verstärkt sich der Showdown und hinterlässt eine Bezirksnarbe",
+        "directive": "[BEDROHUNGSUHR 6/6]: Maximale Eskalation! Gegner verstärken das Finale und die Folgen werden nach Kapitelende nachwirken."
+      }
+    },
+    "consequences": {
+      "en": {
+        "lead_cold": "Lead gone cold ({param})",
+        "threatened_lost": "Threatened objective lost: {param}",
+        "alert_up": "Opposition Alert +1 ({param})",
+        "reinforced": "Climax reinforced with enemy vanguard"
+      },
+      "pl": {
+        "lead_cold": "Utracono trop ({param})",
+        "threatened_lost": "Utracono zagrożony cel: {param}",
+        "alert_up": "Czujność wroga +1 ({param})",
+        "reinforced": "Finał wzmocniony przednią strażą wroga"
+      },
+      "ms": {
+        "lead_cold": "Jejak membeku ({param})",
+        "threatened_lost": "Objektif terancam terlepas: {param}",
+        "alert_up": "Kewaspadaan Lawan +1 ({param})",
+        "reinforced": "Klimaks diperkukuh dengan barisan hadapan musuh"
+      },
+      "zh": {
+        "lead_cold": "线索已中断（{param}）",
+        "threatened_lost": "濒危目标失守：{param}",
+        "alert_up": "警戒等级提升 +1（{param}）",
+        "reinforced": "强敌先锋增援决战据点"
+      },
+      "de": {
+        "lead_cold": "Spur verloren ({param})",
+        "threatened_lost": "Bedrohtes Ziel verloren: {param}",
+        "alert_up": "Gegner-Alarmstufe +1 ({param})",
+        "reinforced": "Finale durch gegnerische Vorhut verstärkt"
+      }
     }
   }
 }

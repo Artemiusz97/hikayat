@@ -242,6 +242,7 @@ def apply_stability_and_break(
     breaker_attr: str,
     attacker_atk: int,
     combat_log: Optional[List[str]] = None,
+    non_lethal_mode: bool = False,
 ) -> Dict[str, Any]:
     """
     Applies integer Stability shred, triggers 9-Attribute Signature Break Payoffs on 0 Stability,
@@ -351,7 +352,7 @@ def apply_stability_and_break(
             target["temp_hp"] = thp - absorbed
             rem -= absorbed
         if rem > 0:
-            if target.get("requires_non_lethal_subdue") or target.get("delayed_phase_2"):
+            if target.get("requires_non_lethal_subdue") or target.get("delayed_phase_2") or non_lethal_mode:
                 target["hp"] = max(1, cur_hp - rem)
             else:
                 target["hp"] = max(0, cur_hp - rem)
@@ -599,6 +600,7 @@ def ensure_autonomous_construct(
         "owner_id": owner_uid,
         "attribute": attr,
         "combat_archetype": actor.get("combat_archetype") or "vanguard",
+        "level": max(1, int(actor.get("level") or actor.get("tier") or 1)),
         "hp": max_hp,
         "max_hp": max_hp,
         "atk": max(10, int(round(eff_pow * 0.55))),

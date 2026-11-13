@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.11.0** | 2026-11-13 | Minor | Modular Combat Engine Decomposition, Chapter Plan & Clue Progression, 6-Segment Threat Clock, Quest Agency Overhaul, and 5-Language Parity. |
 | **v2.10.0** | 2026-11-10 | Minor | Flow-Sensitive Static Bug Gate, Deterministic Social State Snapshots, Privacy Nudge Hierarchy, Contract Indexing & Packaging Hardening. |
 | **v2.9.0** | 2026-11-10 | Minor | Entity Contracts & Pacts, Realty & Property Ownership, Folklore Veil Settlements, Social Pacing Engine, and Security Layer. |
 | **v2.8.0** | 2026-11-06 | Minor | Folklore Codex, World Pulse Background Simulation, Multi-Engine Quest Architecture, Forensic Dossiers, and Awakened Resonance. |
@@ -49,6 +50,23 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.11.0] - 2026-11-13
+
+#### Added & Enhanced
+- **Combat Engine Domain Decomposition (`mechanics/combat/`)**:
+  - Decomposed monolithic combat core into focused submodules: `damage.py` (Fallout-style DT and reduction formulas), `precompute.py` (initiative and telegraphed enemy moves), `reconcile.py` (post-turn synchronization and rewards), `status_effects.py` (tick-based condition processing), and `types.py` (strongly typed phase models).
+- **Chapter Plan & Clue Progression Engine (`mechanics/narrative/chapter_plan.py`)**:
+  - Structured `ChapterPlan` schema (`models/llm_schemas.py`) driving non-linear clue discovery for Story Quests and Mystery/Social bounties.
+  - 5-locale procedural clue prose with leak protection against stats, raw numbers, and system tags.
+- **6-Segment Threat Clock Countdown (`mechanics/narrative/threat_clock.py`)**:
+  - Tabletop doom clock ticking forward every 4 in-game hours, driving story tension and world escalation across Chapters 1–10.
+  - Omnichannel UI display parity on Discord embeds and the Web UI Quest Log panel.
+- **Multi-Engine Quest Agency & Dossier Expansion (`game_engine/quests.py`, `mechanics/narrative/dossier_compiler.py`)**:
+  - Expanded `data/quest_engines_catalog.json` with 1,400+ lines of operational templates and forensic interview mechanics.
+- **5-Language Localization Sync & Frontend Upgrades**:
+  - Complete parity across English, Polish, Malay, German, and Chinese in `localization/` and `web/src/locales/`.
+  - Recompiled production frontend assets (`dist/assets/index-DinMBlv-.css`, `dist/assets/index-C94Dvpsg.js`).
 
 ### [v2.10.0] - 2026-11-10
 

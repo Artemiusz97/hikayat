@@ -192,6 +192,17 @@ QUEST_UI_LABELS = {
     "locked_out": "Zablokowane",
     "fallen_world_epilogue": "Upadły Świat — Epilog Ruchu Oporu",
     "base_reward_note": "Podstawowe Nagrody za Ukończenie",
+    "threat_clock": "Zegar Zagrożenia",
+    "threat_paused": "Wstrzymany (Kulminacja)",
+    "threat_dormant": "Uśpiony do rozpoczęcia rozdziału",
+    "threat_reinforced": "Posiłki Wroga",
+    "threat_scar_pending": "Ryzyko Blizny Rozdziału",
+    "clue_sources": "Tropy i Źródła",
+    "source_open": "Otwarty",
+    "source_burned": "Spalony",
+    "source_cold": "Wygasł",
+    "source_claimed": "Zdobyty",
+    "source_bonus": "Dodatkowy Trop",
 }
 
 PACT_UI_LABELS = {

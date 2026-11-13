@@ -12,6 +12,14 @@ import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
 
+def _json_dataclass_default(obj):
+    import dataclasses
+    if hasattr(obj, "model_dump") and not isinstance(obj, type):
+        return obj.model_dump()
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
+    return str(obj)
+
 def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                     dialogue_mode: str, image_gen_enabled: bool, choices_style: str = "dropdown",
                     channel_id: int = 0, scenario: str = "fantasy",
@@ -94,6 +102,8 @@ def get_session(session_id: int):
         except Exception:
             d["physical_state"] = json.loads(raw_phys_str)
         d["last_turn_snapshot"] = json.loads(d.pop("last_turn_snapshot_json", None) or "{}")
+        d["combat_threat_ledger"] = json.loads(d.pop("combat_threat_ledger_json", None) or "{}")
+        d["combat_boss_telegraph"] = json.loads(d.pop("combat_boss_telegraph_json", None) or "{}")
         d["party_npcs"] = json.loads(d.pop("party_npcs_json", None) or "[]")
         d["party_recruit_cooldowns"] = json.loads(d.pop("party_recruit_cooldowns_json", None) or "{}")
         d["confession_cooldowns"] = json.loads(d.pop("confession_cooldowns_json", None) or "{}")
@@ -212,7 +222,9 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
                         dialogue_partner: str = "__NOOP__",
                         current_node_id: str = None,
                         focal_point: str = None,
-                        scene_image_url: str = None):
+                        scene_image_url: str = None,
+                        combat_threat_ledger: dict = None,
+                        combat_boss_telegraph: dict = None):
     clean_narrative = _to_str(narrative)
     if clean_narrative:
         from game_engine.keywords import sanitize_meta_objective_leaks
@@ -316,6 +328,11 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
         else:
             fields["dialogue_partner"] = dialogue_partner if dialogue_partner else None
 
+    if combat_threat_ledger is not None:
+        fields["combat_threat_ledger_json"] = json.dumps(combat_threat_ledger, default=_json_dataclass_default) if not isinstance(combat_threat_ledger, str) else combat_threat_ledger
+    if combat_boss_telegraph is not None:
+        fields["combat_boss_telegraph_json"] = json.dumps(combat_boss_telegraph, default=_json_dataclass_default) if not isinstance(combat_boss_telegraph, str) else combat_boss_telegraph
+
     cols = ", ".join(f"{k}=?" for k in fields)
     with get_conn() as conn:
         if phys_dict_to_sync is not None:
@@ -381,6 +398,8 @@ def update_session(session_id: int, **kwargs):
         "physical_state": "physical_state_json",
         "party_npcs": "party_npcs_json",
         "last_turn_snapshot": "last_turn_snapshot_json",
+        "combat_threat_ledger": "combat_threat_ledger_json",
+        "combat_boss_telegraph": "combat_boss_telegraph_json",
     }
 
     fields = {}
@@ -571,7 +590,15 @@ def update_session_enemies(session_id: int, enemies: list):
         conn.execute("UPDATE sessions SET nearby_enemies_json=?, updated_at=? WHERE id=?",
                      (json_str, time.time(), session_id))
 
-def get_session_party_npcs(session_id: int) -> list[dict]:
+def get_session_party_npcs(session_id: int, conn: Optional[sqlite3.Connection] = None) -> list[dict]:
+    if conn is not None:
+        row = conn.execute("SELECT party_npcs_json FROM sessions WHERE id=?", (session_id,)).fetchone()
+        if not row or not row["party_npcs_json"]:
+            return []
+        try:
+            return json.loads(row["party_npcs_json"])
+        except Exception:
+            return []
     with get_conn() as conn:
         row = conn.execute("SELECT party_npcs_json FROM sessions WHERE id=?", (session_id,)).fetchone()
         if not row or not row["party_npcs_json"]:
@@ -581,14 +608,27 @@ def get_session_party_npcs(session_id: int) -> list[dict]:
         except Exception:
             return []
 
-def set_session_party_npcs(session_id: int, party_npcs: list[dict]):
+def set_session_party_npcs(
+    session_id: int,
+    party_npcs: list[dict],
+    conn: Optional[sqlite3.Connection] = None,
+) -> None:
+    payload = json.dumps(party_npcs or [], default=_json_dataclass_default)
+    if conn is not None:
+        conn.execute("UPDATE sessions SET party_npcs_json=?, updated_at=? WHERE id=?",
+                     (payload, time.time(), session_id))
+        return
     with get_conn() as conn:
         conn.execute("UPDATE sessions SET party_npcs_json=?, updated_at=? WHERE id=?",
-                     (json.dumps(party_npcs or []), time.time(), session_id))
+                     (payload, time.time(), session_id))
 
-def add_session_party_npc(session_id: int, npc_dict: dict) -> bool:
+def add_session_party_npc(
+    session_id: int,
+    npc_dict: dict,
+    conn: Optional[sqlite3.Connection] = None,
+) -> bool:
     """Adds an NPC to party_npcs if total party size (humans + companions) is under 4."""
-    party = get_session_party_npcs(session_id)
+    party = get_session_party_npcs(session_id, conn=conn)
     sess = db.get_session(session_id)
     human_count = len(sess.get("turn_order", [])) if sess else 1
     if human_count + len(party) >= 4:
@@ -597,11 +637,15 @@ def add_session_party_npc(session_id: int, npc_dict: dict) -> bool:
     if any(str(p.get("name", "")).strip().lower() == name_clean for p in party):
         return False
     party.append(npc_dict)
-    set_session_party_npcs(session_id, party)
+    set_session_party_npcs(session_id, party, conn=conn)
     return True
 
-def remove_session_party_npc(session_id: int, npc_name: str) -> dict | None:
-    party = get_session_party_npcs(session_id)
+def remove_session_party_npc(
+    session_id: int,
+    npc_name: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    party = get_session_party_npcs(session_id, conn=conn)
     name_clean = str(npc_name).strip().lower()
     removed = None
     new_party = []
@@ -611,7 +655,7 @@ def remove_session_party_npc(session_id: int, npc_name: str) -> dict | None:
         else:
             new_party.append(p)
     if removed is not None:
-        set_session_party_npcs(session_id, new_party)
+        set_session_party_npcs(session_id, new_party, conn=conn)
     return removed
 
 def get_temporary_companions(session_id: int) -> list[dict]:
@@ -888,14 +932,6 @@ def prune_orphaned_and_finished_sessions(dry_run: bool = False, include_finished
 
         return counts
 
-def _json_dataclass_default(obj):
-    import dataclasses
-    if hasattr(obj, "model_dump") and not isinstance(obj, type):
-        return obj.model_dump()
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
-    return str(obj)
-
 
 def set_pending_pick(session_id: int, user_id: int, pick: dict):
     session = db.get_session(session_id)
@@ -991,6 +1027,7 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
             """UPDATE sessions
                SET history_json='[]', narrative=NULL, choices_json='[]',
                    last_turn_snapshot_json='{}', merchant_json='{}', party_npcs_json='[]',
+                   combat_threat_ledger_json='{}', combat_boss_telegraph_json='{}',
                    current_npcs_json='[]', nearby_enemies_json='[]', dialogue_partner=NULL,
                    physical_state_json='{}', current_node_id=NULL, focal_point='',
                    event_pity_counter=0.0, rumor_pity_counter=0.0, minor_event_pity_counter=0.0,
@@ -1254,6 +1291,25 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                                 "UPDATE sessions SET nearby_enemies_json = ?, updated_at = ? WHERE id = ?",
                                 (json.dumps(pre_enemies, default=str), time.time(), session_id),
                             )
+                    if "party_npcs" in pre_t and isinstance(pre_t["party_npcs"], list):
+                        conn.execute(
+                            "UPDATE sessions SET party_npcs_json = ?, updated_at = ? WHERE id = ?",
+                            (json.dumps(pre_t["party_npcs"], default=str), time.time(), session_id),
+                        )
+                    if "combat_threat_ledger" in pre_t or "combat_threat_ledger_json" in pre_t:
+                        tl = pre_t.get("combat_threat_ledger") if "combat_threat_ledger" in pre_t else pre_t.get("combat_threat_ledger_json")
+                        tl_str = tl if isinstance(tl, str) else json.dumps(tl or {}, default=str)
+                        conn.execute(
+                            "UPDATE sessions SET combat_threat_ledger_json = ?, updated_at = ? WHERE id = ?",
+                            (tl_str, time.time(), session_id),
+                        )
+                    if "combat_boss_telegraph" in pre_t or "combat_boss_telegraph_json" in pre_t:
+                        bt = pre_t.get("combat_boss_telegraph") if "combat_boss_telegraph" in pre_t else pre_t.get("combat_boss_telegraph_json")
+                        bt_str = bt if isinstance(bt, str) else json.dumps(bt or {}, default=str)
+                        conn.execute(
+                            "UPDATE sessions SET combat_boss_telegraph_json = ?, updated_at = ? WHERE id = ?",
+                            (bt_str, time.time(), session_id),
+                        )
                     if (
                         "player_resonance_pips" in pre_t
                         or "telemetry_calibrations_used" in pre_t

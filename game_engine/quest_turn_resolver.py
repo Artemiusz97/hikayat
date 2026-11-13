@@ -19,7 +19,9 @@ from game_engine.quest_lifecycle import (
     complete_remediation_bounty_if_linked,
     evaluate_skipped_threatened_optionals,
     resolve_chapter_transition,
+    sanitize_dossier_prose,
     seed_or_discover_dossier_clue,
+    sync_dossier_main_stage_advance,
 )
 from mechanics.narrative.blueprints import has_quest_note_flag
 from mechanics.narrative.campaign_spine import (
@@ -33,6 +35,8 @@ from mechanics.world.world_events.engine import spawn_quest_world_scar
 
 
 def _normalize_target_key(waypoint_or_lead: Dict[str, Any]) -> str:
+    if str(waypoint_or_lead.get("_matched_clue_source_id") or ""):
+        return str(waypoint_or_lead.get("_matched_clue_source_id") or "").strip().lower()
     raw = (
         waypoint_or_lead.get("lead_id")
         or waypoint_or_lead.get("target_npc")
@@ -41,6 +45,235 @@ def _normalize_target_key(waypoint_or_lead: Dict[str, Any]) -> str:
         or f"stage_{waypoint_or_lead.get('stage_index', 1)}"
     )
     return str(raw).strip().lower()
+
+
+def resolve_clue_source_claim(
+    session_id: int,
+    quest_id: str,
+    stage_index: int,
+    source_id: str = "",
+    cur_loc: str = "",
+    is_bonus: bool = False,
+    fail_forward: bool = False,
+    conn: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """
+    Claims a `"key_clue"` source (discovering stage key_clue, closing sibling open sources,
+    flagging the first reachable closed sibling as `bonus=True`, recording Caseboard nodes,
+    and advancing the dossier stage) OR claims an E2 `bonus=True` corroborating source on a
+    completed stage to pair on the Caseboard.
+    """
+    if not session_id or not quest_id:
+        return {}
+    dos = db.get_quest_dossier(session_id, quest_id, conn=conn)
+    if not dos:
+        return {}
+
+    eff_turn = int(db.get_effective_session_turn(session_id))
+    sess = db.get_session(session_id) or {}
+    cur_ch = int(db.get_session_chapter(session_id) or (dos.get("climax_spec") or {}).get("chapter") or 1)
+    prev_climax = dict(dos.get("climax_spec") or {})
+    climax = dict(prev_climax)
+    main_stages = [dict(s) for s in (climax.get("main_stages") or []) if isinstance(s, dict)]
+    prev_cg = [dict(c) for c in (dos.get("clue_graph") or []) if isinstance(c, dict)]
+    clue_graph = [dict(c) for c in prev_cg]
+
+    target_st_idx = None
+    for i, s in enumerate(main_stages):
+        if int(s.get("stage_index") or 0) == int(stage_index):
+            target_st_idx = i
+            break
+    if target_st_idx is None:
+        return {}
+
+    st = dict(main_stages[target_st_idx])
+    sources = [dict(src) for src in (st.get("clue_sources") or []) if isinstance(src, dict)]
+    kc = dict(st.get("key_clue") or {})
+    kc_key = str(kc.get("clue_id") or f"{quest_id}-KC-{stage_index}").strip()
+    kc_title = sanitize_dossier_prose(str(kc.get("title") or st.get("stage_label") or f"Stage {stage_index} Evidence")).strip()
+    kc_lead = sanitize_dossier_prose(str(kc.get("lead_text") or (st.get("beat_contract") or {}).get("reveal") or kc_title)).strip()
+    kc["clue_id"] = kc_key
+    kc["title"] = kc_title
+    kc["lead_text"] = kc_lead
+    bonus_key = f"{quest_id}-BONUS-{stage_index}"
+
+    def _find_or_materialize_kc_node() -> Dict[str, Any]:
+        for idx_cg, node in enumerate(clue_graph):
+            ck = str(node.get("clue_key") or node.get("key_clue_id") or "")
+            if ck == kc_key or (int(node.get("stage_index") or 0) == int(stage_index) and not node.get("is_bonus") and not node.get("is_red_herring")):
+                upd = dict(node)
+                cid_val = upd.get("clue_id")
+                existing_sc = db.get_session_clue_by_id(int(cid_val), conn=conn) if cid_val else None
+                if not existing_sc:
+                    cid_val = db.add_session_clue(
+                        session_id=session_id,
+                        title=kc_title,
+                        lead_text=kc_lead,
+                        category="testimonial" if st.get("target_npc") else "physical",
+                        source_location=cur_loc or str(st.get("target_location") or climax.get("location") or "District"),
+                        linked_npc=str(climax.get("true_culprit") or st.get("target_npc") or ""),
+                        quest_id=quest_id,
+                        chapter=cur_ch,
+                        conn=conn,
+                    )
+                upd["clue_key"] = kc_key
+                upd["clue_id"] = int(cid_val)
+                upd["stage_index"] = int(stage_index)
+                upd["title"] = kc_title
+                upd["lead_text"] = kc_lead
+                upd["unlocks_climax"] = True
+                pw = list(upd.get("paired_with") or [])
+                if bonus_key not in [str(x) for x in pw]:
+                    pw.append(bonus_key)
+                upd["paired_with"] = pw
+                clue_graph[idx_cg] = upd
+                return upd
+        cid_new = db.add_session_clue(
+            session_id=session_id,
+            title=kc_title,
+            lead_text=kc_lead,
+            category="testimonial" if st.get("target_npc") else "physical",
+            source_location=cur_loc or str(st.get("target_location") or climax.get("location") or "District"),
+            linked_npc=str(climax.get("true_culprit") or st.get("target_npc") or ""),
+            quest_id=quest_id,
+            chapter=cur_ch,
+            conn=conn,
+        )
+        new_node = {
+            "clue_key": kc_key,
+            "key_clue_id": kc_key,
+            "stage_index": int(stage_index),
+            "clue_id": int(cid_new),
+            "title": kc_title,
+            "lead_text": kc_lead,
+            "is_red_herring": False,
+            "paired_with": [bonus_key],
+            "unlocks_climax": True,
+            "conclusion": f"Corroborated evidence cracks open {climax.get('location') or 'the primary target'}.",
+        }
+        clue_graph.append(new_node)
+        return new_node
+
+    if is_bonus:
+        matched_src = None
+        for idx_s, src in enumerate(sources):
+            if source_id and str(src.get("source_id") or "") == str(source_id):
+                matched_src = (idx_s, src)
+                break
+        if matched_src is None:
+            for idx_s, src in enumerate(sources):
+                if bool(src.get("bonus")) and str(src.get("status") or "").lower() != "claimed":
+                    matched_src = (idx_s, src)
+                    break
+        if matched_src is None:
+            return {}
+        m_idx, m_src = matched_src
+        m_src["status"] = "claimed"
+        sources[m_idx] = m_src
+        st["clue_sources"] = sources
+        main_stages[target_st_idx] = st
+        climax["main_stages"] = main_stages
+
+        kc_node = _find_or_materialize_kc_node()
+        b_title = sanitize_dossier_prose(f"Corroboration: {kc_title}")[:80]
+        b_lead = sanitize_dossier_prose(
+            str(m_src.get("discovery_text") or m_src.get("approach_hint") or f"Independently verified '{kc_title}'.")
+        )
+        b_cid = db.add_session_clue(
+            session_id=session_id,
+            title=b_title,
+            lead_text=b_lead,
+            category="testimonial" if str(m_src.get("kind") or "").lower() == "witness" else "physical",
+            source_location=cur_loc or str(m_src.get("location") or "District"),
+            linked_npc=str(m_src.get("npc_name") or climax.get("true_culprit") or ""),
+            quest_id=quest_id,
+            chapter=cur_ch,
+            conn=conn,
+        )
+        pw_kc = list(kc_node.get("paired_with") or [])
+        for tok in (bonus_key, str(b_cid)):
+            if tok not in [str(x) for x in pw_kc]:
+                pw_kc.append(tok)
+        kc_node["paired_with"] = pw_kc
+        bonus_node = {
+            "clue_key": bonus_key,
+            "stage_index": int(stage_index),
+            "is_bonus": True,
+            "is_red_herring": False,
+            "clue_id": int(b_cid),
+            "title": b_title,
+            "lead_text": b_lead,
+            "paired_with": [kc_key, str(kc_node["clue_id"])],
+            "unlocks_climax": True,
+            "conclusion": f"Corroborated evidence for {kc_title} exposes the direct route to climax!",
+        }
+        clue_graph = [c for c in clue_graph if str(c.get("clue_key") or "") != bonus_key] + [bonus_node]
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax, conn=conn)
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "clue_graph", prev_cg, clue_graph, conn=conn)
+        saved_b = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, clue_graph=clue_graph, engaged_flag=1, conn=conn)
+        if saved_b:
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved_b, conn=conn)
+        return {
+            "status": "bonus_clue_claimed",
+            "is_bonus_clue": True,
+            "clue_id": int(b_cid),
+            "paired_with_clue_id": int(kc_node["clue_id"]),
+            "directive": (
+                f"[CORROBORATING CLUE UNCOVERED — CASEBOARD BYPASS READY]: Secondary evidence corroborates '{kc_title}'. "
+                f"Pairing them on the Caseboard unlocks the direct breakthrough shortcut!"
+            ),
+        }
+
+    # Active stage key_clue claim (close siblings & mark first reachable closed sibling as E2 bonus=True)
+    claimed_idx = None
+    if source_id:
+        for idx_s, src in enumerate(sources):
+            if str(src.get("source_id") or "") == str(source_id):
+                claimed_idx = idx_s
+                break
+    if claimed_idx is None:
+        for idx_s, src in enumerate(sources):
+            if str(src.get("status") or "open").lower() == "open":
+                claimed_idx = idx_s
+                break
+    bonus_assigned = False
+    for idx_s, src in enumerate(sources):
+        cur_st = str(src.get("status") or "open").lower()
+        if idx_s == claimed_idx:
+            src["status"] = "claimed"
+            src["bonus"] = False
+        elif cur_st == "open":
+            src["status"] = "closed"
+            if not bonus_assigned:
+                src["bonus"] = True
+                bonus_assigned = True
+            else:
+                src["bonus"] = False
+        sources[idx_s] = src
+    st["clue_sources"] = sources
+    main_stages[target_st_idx] = st
+    climax["main_stages"] = main_stages
+    kc_node = _find_or_materialize_kc_node()
+
+    prev_engaged = int(dos.get("engaged_flag") or 0)
+    if prev_engaged == 0:
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "engaged_flag", 0, 1, conn=conn)
+    db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax, conn=conn)
+    db.append_dossier_state_event(session_id, quest_id, eff_turn, "clue_graph", prev_cg, clue_graph, conn=conn)
+    db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, clue_graph=clue_graph, engaged_flag=1, conn=conn)
+    try:
+        from mechanics.narrative.threat_clock import mark_chapter_clock_engaged
+        mark_chapter_clock_engaged(session_id, quest_id, eff_turn=eff_turn, conn=conn)
+    except Exception:
+        pass
+    adv_res = sync_dossier_main_stage_advance(session_id, quest_id, stage_index, cur_loc=cur_loc, conn=conn)
+    return {
+        "status": "fail_forward" if fail_forward else "key_clue_claimed",
+        "is_bonus_clue": False,
+        "clue_id": int(kc_node.get("clue_id") or 0),
+        "key_clue": kc,
+        "advance_result": adv_res,
+    }
 
 
 def is_approach_burned(
@@ -175,7 +408,7 @@ def resolve_quest_approach_failure(
         return None
 
     sess_eff = session if isinstance(session, dict) else (db.get_session(session_id) or {})
-    eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess_eff))
+    eff_turn = int(db.get_effective_session_turn(session_id))
     q_fresh = db.get_quest_by_id(session_id, qid) or quest
     q_notes = str(q_fresh.get("quest_notes") or quest.get("quest_notes") or "")
 
@@ -459,7 +692,14 @@ def resolve_quest_approach_failure(
                 new_leads_f[matched_opt_idx] = lead_upd
 
             new_climax_f["alert_dc_bonus"] = int(new_climax_f.get("alert_dc_bonus") or 0) + delta
-            if not scenario_data.is_non_combat_scenario(scen_chk) and not (lead_match and lead_match.get("encounter_roster")):
+            # A burned approach escalates investigative climaxes from peaceful resolution to a boss confrontation
+            new_climax_f["escalated"] = True
+            if (
+                not scenario_data.is_non_combat_scenario(scen_chk)
+                and str(dossier.get("engine") or "").strip().upper() != "INTIMATE_LIAISON"
+                and new_climax_f.get("boss_sheet") is not None
+                and not (lead_match and lead_match.get("encounter_roster"))
+            ):
                 reinf_list = list(new_climax_f.get("reinforcements") or [])
                 reinf_list.append(
                     {
@@ -587,6 +827,139 @@ def resolve_quest_approach_failure(
                 (new_alert, max_alert, time.time(), session_id, qid),
             )
 
+        # D3 (Hybrid Fail-Forward) & Q3 Key-Clue Burn Guard
+        climax_fail = dict(dossier.get("climax_spec") or {})
+        ms_list = [dict(m) for m in (climax_fail.get("main_stages") or []) if isinstance(m, dict)]
+        cur_ms_idx = next((i for i, m in enumerate(ms_list) if int(m.get("stage_index") or 0) == stage_idx), None)
+        cur_ms = ms_list[cur_ms_idx] if cur_ms_idx is not None else {}
+        cur_sources = [dict(s) for s in (cur_ms.get("clue_sources") or []) if isinstance(s, dict)]
+        is_climax_boss = bool(cur_ms.get("is_climax_stage") or (len(ms_list) > 0 and stage_idx >= len(ms_list)))
+
+        if (str(cur_ms.get("completion_trigger") or "") == "key_clue" or cur_sources) and not is_climax_boss and cur_ms_idx is not None:
+            matched_sid = str(waypoint.get("_matched_clue_source_id") or (waypoint.get("_matched_clue_source") or {}).get("source_id") or "").strip()
+            open_indices = [i for i, s in enumerate(cur_sources) if str(s.get("status") or "open").lower() == "open"]
+            burn_idx = None
+            if matched_sid:
+                burn_idx = next((i for i in open_indices if str(cur_sources[i].get("source_id") or "") == matched_sid), None)
+            if burn_idx is None and open_indices:
+                w_npc = str(waypoint.get("target_npc") or "").strip().lower()
+                if w_npc:
+                    burn_idx = next((i for i in open_indices if str(cur_sources[i].get("npc_name") or "").strip().lower() == w_npc), None)
+            if burn_idx is None and open_indices:
+                burn_idx = open_indices[0]
+            if burn_idx is not None:
+                cur_sources[burn_idx]["status"] = "burned"
+            rem_open = [s for s in cur_sources if str(s.get("status") or "open").lower() == "open"]
+            cur_ms["clue_sources"] = cur_sources
+            eff_turn_q3 = int(db.get_effective_session_turn(session_id))
+
+            if rem_open:
+                cur_ms["target_location"] = str(rem_open[0].get("location") or cur_ms.get("target_location") or "")
+                cur_ms["target_npc"] = str(rem_open[0].get("npc_name") or "")
+                ms_list[cur_ms_idx] = cur_ms
+                new_climax_q3 = dict(climax_fail)
+                new_climax_q3["main_stages"] = ms_list
+                db.append_dossier_state_event(session_id, qid, eff_turn_q3, "climax_spec", climax_fail, new_climax_q3)
+                saved_burn = db.upsert_quest_dossier(session_id, qid, engaged_flag=1, climax_spec=new_climax_q3)
+                if saved_burn:
+                    db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved_burn)
+                try:
+                    from mechanics.narrative.threat_clock import mark_chapter_clock_engaged
+                    mark_chapter_clock_engaged(session_id, qid, eff_turn=eff_turn_q3)
+                except Exception:
+                    pass
+                return {
+                    "status": "clue_source_burned",
+                    "failed": False,
+                    "stage_advanced": False,
+                    "open_sources_remaining": len(rem_open),
+                    "strikes": new_alert,
+                    "max_strikes": max_alert,
+                    "alert_level": new_alert,
+                    "max_alert": max_alert,
+                    "burned_approach": norm_appr,
+                    "burned_target": target_key,
+                    "directive": (
+                        f"[CLUE SOURCE BURNED — ALTERNATIVE PATHS OPEN]: That lead went cold ({check_result_tier}), "
+                        f"raising Alert to {new_alert}/{max_alert}. {len(rem_open)} alternate clue source(s) remain open in other locations."
+                    ),
+                }
+
+            # Last open source failed -> D3 Fail-Forward (extract key clue at cost to prevent soft-lock)
+            ms_list[cur_ms_idx] = cur_ms
+            new_climax_ff = dict(climax_fail)
+            new_climax_ff["main_stages"] = ms_list
+            db.append_dossier_state_event(session_id, qid, eff_turn_q3, "climax_spec", climax_fail, new_climax_ff)
+            db.upsert_quest_dossier(session_id, qid, engaged_flag=1, climax_spec=new_climax_ff)
+            claim_res = resolve_clue_source_claim(
+                session_id,
+                qid,
+                stage_idx,
+                source_id=matched_sid,
+                cur_loc=str(sess_eff.get("current_location") or ""),
+                is_bonus=False,
+                fail_forward=True,
+            )
+            adv_res = claim_res.get("advance_result") or {}
+            db.advance_waypoint(session_id, qid, stage_idx, sub_obj_id)
+            nxt_wp = db.get_active_waypoint(session_id, qid, sub_obj_id)
+            kc_lbl = ((cur_ms.get("key_clue") or {}).get("title")) or cur_ms.get("stage_label") or q_fresh.get("title")
+            return {
+                "status": "fail_forward",
+                "failed": False,
+                "stage_advanced": True,
+                "completed_stage": stage_idx,
+                "next_stage": adv_res.get("next_stage_idx", stage_idx + 1),
+                "all_stages_complete": bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)),
+                "next_waypoint": dict(nxt_wp) if nxt_wp else None,
+                "strikes": new_alert,
+                "max_strikes": max_alert,
+                "alert_level": new_alert,
+                "max_alert": max_alert,
+                "burned_approach": norm_appr,
+                "burned_target": target_key,
+                "directive": (
+                    f"[LAST CLUE FAIL-FORWARD — COSTLY PAYOFF]: The final lead on '{kc_lbl}' collapsed ({check_result_tier}), "
+                    f"forcing the key clue out under fire! Alert increased to {new_alert}/{max_alert}."
+                ),
+            }
+
+        b_contract = cur_ms.get("beat_contract") or {}
+        is_dialogue_beat = bool(
+            b_contract.get("is_dialogue_beat")
+            or waypoint.get("is_dialogue_beat")
+            or waypoint.get("target_npc")
+            or cur_ms.get("target_npc")
+            or any(kw in str(waypoint.get("stage_label") or "").lower() for kw in ("interview", "interrogate", "speak", "talk", "question", "bribe", "persuade", "confront", "inquire", "ask"))
+        )
+
+        if is_dialogue_beat and not is_climax_boss:
+            from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+            adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
+            nxt_wp = db.get_active_waypoint(session_id, qid, sub_obj_id)
+            target_name = waypoint.get("target_npc") or cur_ms.get("target_npc") or waypoint.get("stage_label") or q_fresh.get("title")
+            dir_msg = (
+                f"[QUEST BEAT FAIL-FORWARD — COSTLY PAYOFF]: The inquiry check with {target_name} faltered ({check_result_tier}), "
+                f"but the critical lead was extracted under pressure at a steep price! Alert increased to {new_alert}/{max_alert}. "
+                f"Narrate the compromised breakthrough and the hostile attention drawn."
+            )
+            return {
+                "status": "fail_forward",
+                "failed": False,
+                "stage_advanced": True,
+                "completed_stage": stage_idx,
+                "next_stage": adv_res.get("next_stage_idx", stage_idx + 1),
+                "all_stages_complete": bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)),
+                "next_waypoint": dict(nxt_wp) if nxt_wp else None,
+                "strikes": new_alert,
+                "max_strikes": max_alert,
+                "alert_level": new_alert,
+                "max_alert": max_alert,
+                "burned_approach": norm_appr,
+                "burned_target": target_key,
+                "directive": dir_msg,
+            }
+
         if new_alert < max_alert:
             return {
                 "status": "strike_warning",
@@ -660,13 +1033,12 @@ def resolve_quest_approach_failure(
             scar_tier=scar_tier_st,
         )
         now = time.time()
-        with db.get_conn() as conn:
-            conn.execute(
-                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
-                (now, session_id, qid, sub_obj_id),
-            )
+        from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+        adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
+        is_final = bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)) if ms_list else True
         if sub_obj:
-            sub_obj["completed"] = True
+            if is_final:
+                sub_obj["completed"] = True
             sub_obj["resolution_approach"] = "dire_cost"
         db.set_quest_resolution_approach(session_id, qid, "dire_cost")
         db.upsert_quest_dossier(session_id, qid, alert_level=0)
@@ -706,10 +1078,16 @@ def resolve_quest_approach_failure(
 
     now = time.time()
     with db.get_conn() as conn:
-        conn.execute(
-            "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
-            (now, session_id, qid, sub_obj_id),
-        )
+        if sub_obj_id is not None:
+            conn.execute(
+                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
+                (now, session_id, qid, sub_obj_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE quest_waypoints SET status='completed', updated_at=? WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id = '')",
+                (now, session_id, qid),
+            )
     if sub_obj:
         sub_obj["completed"] = True
         sub_obj["resolution_approach"] = "dire_cost"
@@ -1812,7 +2190,7 @@ def handle_npc_death_or_recruitment_fallout(
         return {"spine_mutated": False, "affected_quests": []}
 
     sess = db.get_session(session_id) or {}
-    eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
+    eff_turn = int(turn_number if turn_number is not None else db.get_effective_session_turn(session_id))
     loc = str(current_location or sess.get("current_location") or "Crime Scene")
 
     spine_after = mutate_spine_on_lieutenant_fate(
@@ -1889,6 +2267,105 @@ def handle_npc_death_or_recruitment_fallout(
                 db.upsert_quest_dossier(session_id, qid, cast_bindings=cb, outcome_tier="failure")
                 affected.append({"quest_id": qid, "role": "client", "fallback": "contract_voided"})
 
+        # E4: Witness NPC dead/departed/recruited -> mark clue_source "cold" & spawn item replacement if 0 open remain
+        if event_kind in ("dead", "recruited", "departed"):
+            fresh_dos_e4 = db.get_quest_dossier(session_id, qid) or dos
+            prev_clx_e4 = dict(fresh_dos_e4.get("climax_spec") or {})
+            clx_e4 = dict(prev_clx_e4)
+            ms_e4 = [dict(s) for s in (clx_e4.get("main_stages") or []) if isinstance(s, dict)]
+            stage_mutated = False
+            replaced_any = False
+            for idx_st, st_e4 in enumerate(ms_e4):
+                st_stat = str(st_e4.get("status") or "").lower()
+                if st_e4.get("is_climax_stage") or st_e4.get("completed") or st_stat in ("completed", "bypassed"):
+                    continue
+                srcs_e4 = [dict(s) for s in (st_e4.get("clue_sources") or []) if isinstance(s, dict)]
+                if not srcs_e4:
+                    continue
+                chilled_here = False
+                for idx_src, src_e4 in enumerate(srcs_e4):
+                    if (
+                        str(src_e4.get("kind") or "").lower() == "witness"
+                        and str(src_e4.get("status") or "open").lower() == "open"
+                        and str(src_e4.get("npc_name") or "").strip().lower() == target_low
+                    ):
+                        src_e4["status"] = "cold"
+                        src_e4["cold_reason"] = event_kind
+                        srcs_e4[idx_src] = src_e4
+                        chilled_here = True
+                        stage_mutated = True
+                if not chilled_here:
+                    continue
+                open_rem = [s for s in srcs_e4 if str(s.get("status") or "open").lower() == "open"]
+                if not open_rem:
+                    from mechanics.narrative.chapter_plan import (
+                        build_chapter_plan_candidates,
+                        build_clue_source_prose,
+                    )
+                    from mechanics.narrative.quest_engines import build_engine_lead_approaches, normalize_quest_locale
+
+                    lang_e4 = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
+                    cands_e4 = build_chapter_plan_candidates(
+                        session_id,
+                        fresh_dos_e4,
+                        climax_location=str(clx_e4.get("location") or ""),
+                    )
+                    used_leaves_e4 = {
+                        str(s.get("location") or "").split("➔")[-1].strip().lower()
+                        for s in srcs_e4
+                        if s.get("location")
+                    }
+                    rep_loc = ""
+                    for r_cand in (cands_e4.get("rooms") or []):
+                        lf = str(r_cand).split("➔")[-1].strip().lower()
+                        if lf and lf not in used_leaves_e4:
+                            rep_loc = str(r_cand)
+                            break
+                    if not rep_loc:
+                        rep_loc = str(loc or "Central District ➔ Unattended Locker")
+                    kc_title_e4 = str((st_e4.get("key_clue") or {}).get("title") or st_e4.get("stage_label") or "Critical Evidence")
+                    v_txt, r_txt = build_clue_source_prose(
+                        kind="item",
+                        location=rep_loc,
+                        clue_title=kc_title_e4,
+                        npc_name="",
+                        lang=lang_e4,
+                    )
+                    rep_src = {
+                        "source_id": f"S{st_e4.get('stage_index', idx_st + 1)}-R{len(srcs_e4) + 1}",
+                        "kind": "item",
+                        "location": rep_loc,
+                        "npc_name": "",
+                        "approach_hint": v_txt,
+                        "discovery_text": r_txt,
+                        "stat": "PER",
+                        "dc_offset": 0,
+                        "approaches": build_engine_lead_approaches(["PER", "INT"], danger_tier=max(1, int(fresh_dos_e4.get("danger_tier") or 1))),
+                        "status": "open",
+                        "bonus": False,
+                    }
+                    srcs_e4.append(rep_src)
+                    open_rem = [rep_src]
+                    replaced_any = True
+                st_e4["clue_sources"] = srcs_e4
+                st_e4["target_location"] = str(open_rem[0].get("location") or st_e4.get("target_location") or "")
+                st_e4["target_npc"] = str(open_rem[0].get("npc_name") or "")
+                ms_e4[idx_st] = st_e4
+            if stage_mutated:
+                clx_e4["main_stages"] = ms_e4
+                db.append_dossier_state_event(session_id, qid, eff_turn, "climax_spec", prev_clx_e4, clx_e4)
+                saved_e4 = db.upsert_quest_dossier(session_id, qid, climax_spec=clx_e4, engaged_flag=1)
+                if saved_e4:
+                    db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved_e4)
+                affected.append(
+                    {
+                        "quest_id": qid,
+                        "role": "clue_witness",
+                        "fallback": "clue_source_replaced_with_item" if replaced_any else "clue_source_cold",
+                        "reason": event_kind,
+                    }
+                )
+
     return {
         "spine_mutated": spine_after is not None,
         "spine": spine_after,
@@ -1909,7 +2386,7 @@ def resolve_post_turn_dossier_hooks(
 
     sess = session if isinstance(session, dict) else (db.get_session(session_id) or {})
     out = outcome if isinstance(outcome, dict) else {}
-    eff_turn = int(db.infer_session_turn(sess))
+    eff_turn = int(db.get_effective_session_turn(session_id))
     cur_loc = str(out.get("location") or sess.get("current_location") or "")
 
     summary: Dict[str, Any] = {
@@ -1974,8 +2451,44 @@ def resolve_post_turn_dossier_hooks(
             )
             summary["npc_fallout"].append(f_res)
 
+    for dep_item in list(out.get("departed_npcs") or []) + list(out.get("left_npcs") or []):
+        dep_str = str(dep_item.get("name") if isinstance(dep_item, dict) else dep_item).strip()
+        if dep_str:
+            f_res = handle_npc_death_or_recruitment_fallout(
+                session_id,
+                dep_str,
+                event_kind="departed",
+                current_location=cur_loc,
+                turn_number=eff_turn,
+            )
+            summary["npc_fallout"].append(f_res)
+
     # 3. Quest Combat Outcome Resolution (when a quest-linked encounter ends)
     q_enc = sess.get("_active_quest_encounter") or out.get("_active_quest_encounter")
+    if isinstance(q_enc, dict) and q_enc.get("quest_id") and not out.get("_quest_combat_resolved"):
+        # Orphan guard: the linked quest resolved peacefully this turn before any blow was struck
+        # -> dissolve the unengaged quest encounter instead of leaving a stale ambush behind.
+        try:
+            q_enc_row = db.get_quest_by_id(session_id, str(q_enc["quest_id"])) or {}
+        except Exception:
+            q_enc_row = {}
+        enc_pool = [e for e in (sess.get("nearby_enemies") or out.get("nearby_enemies") or []) if isinstance(e, dict)]
+        linked_pool = [e for e in enc_pool if str(e.get("linked_quest_id") or "") == str(q_enc["quest_id"])]
+        untouched = bool(linked_pool) and all(
+            int(e.get("hp", 0) or 0) >= int(e.get("max_hp", e.get("hp", 0)) or 0) for e in linked_pool
+        )
+        if q_enc_row and str(q_enc_row.get("status") or "").lower() != "active" and untouched:
+            remaining = [e for e in enc_pool if e not in linked_pool]
+            out["nearby_enemies"] = remaining
+            out["_quest_combat_resolved"] = {"handled": True, "orphan_encounter_cleared": True}
+            if isinstance(session, dict):
+                session["nearby_enemies"] = remaining
+                session.pop("_active_quest_encounter", None)
+            try:
+                db.update_session(session_id, nearby_enemies=remaining, extra={"_active_quest_encounter": None})
+            except Exception:
+                pass
+            q_enc = None
     if isinstance(q_enc, dict) and q_enc.get("quest_id") and not out.get("_quest_combat_resolved"):
         rem_enemies = [
             e for e in (sess.get("nearby_enemies") or out.get("nearby_enemies") or [])
@@ -1998,6 +2511,8 @@ def resolve_post_turn_dossier_hooks(
             )
             out["_quest_combat_resolved"] = c_res
             summary["quest_combat"] = c_res
+            if isinstance(c_res, dict) and c_res.get("chapter_transition"):
+                out["chapter_transition"] = c_res["chapter_transition"]
             if isinstance(session, dict):
                 session.pop("_active_quest_encounter", None)
             try:
@@ -2050,5 +2565,7 @@ def resolve_post_turn_dossier_hooks(
                 turn_number=eff_turn,
             )
             summary["intimate_liaisons"].append(il_res)
+            if isinstance(il_res, dict) and il_res.get("chapter_transition"):
+                out["chapter_transition"] = il_res["chapter_transition"]
 
     return summary

@@ -538,6 +538,18 @@ def advance_time(
     except Exception as e:
         log.warning("Failed advancing world pulse for session %s: %s", session_id, e)
 
+    threat_clock_tick = None
+    try:
+        from mechanics.narrative.threat_clock import tick_threat_clock
+        threat_clock_tick = tick_threat_clock(
+            session_id,
+            new_day,
+            new_minute,
+            turn_number=db.get_effective_session_turn(session_id),
+        )
+    except Exception as e:
+        log.warning("Failed ticking Threat Clock for session %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "old_day": curr_day,
@@ -547,7 +559,8 @@ def advance_time(
         "days_elapsed": days_elapsed,
         "minutes_elapsed": delta_minutes,
         "day_rolled_over": day_rolled,
-        "fatigue_applied": fatigue_notices
+        "fatigue_applied": fatigue_notices,
+        "threat_clock_tick": threat_clock_tick,
     }
 
 
@@ -625,6 +638,18 @@ def apply_sleep_rest(
         )
     except Exception as e:
         log.warning("Failed advancing world pulse on sleep for session %s: %s", session_id, e)
+
+    sleep_clock_tick = None
+    try:
+        from mechanics.narrative.threat_clock import tick_threat_clock
+        sleep_clock_tick = tick_threat_clock(
+            session_id,
+            new_day,
+            new_minute,
+            turn_number=db.get_effective_session_turn(session_id),
+        )
+    except Exception as e:
+        log.warning("Failed ticking Threat Clock on sleep for session %s: %s", session_id, e)
 
     # Restock all merchant catalogues upon sleeping / morning wake-up
     try:
@@ -822,6 +847,7 @@ def apply_sleep_rest(
         "recovery_ratio": recovery_ratio,
         "surface_label": surface_label,
         "morning_npcs": morning_npcs,
+        "threat_clock_tick": sleep_clock_tick,
     }
 
 

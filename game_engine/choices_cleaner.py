@@ -761,9 +761,20 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 except Exception:
                     pass
 
-            has_climax_prefix = "⚡" in label_str or "[story climax]" in label_lower
-            has_story_prefix = "⭐" in label_str or "[story quest]" in label_lower or "sq-" in str(c.get("quest_id", "")).lower()
-            has_bounty_prefix = "🎯" in label_str or "[bounty]" in label_lower
+            has_explicit_quest_tag = bool(
+                c.get("is_quest_action")
+                or c.get("is_story_quest")
+                or c.get("is_climax_action")
+                or "sq-" in str(c.get("quest_id", "")).lower()
+                or any(
+                    k in label_lower
+                    for k in (
+                        "[story climax", "[höhepunkt der geschichte", "[kemuncak cerita", "[punkt kulminacyjny", "[剧情高潮",
+                        "[story quest", "[hauptquest", "[misi utama", "[zadanie główne", "[主线任务",
+                        "[bounty", "[kopfgeld", "[ganjaran", "[zlecenie", "[悬赏",
+                    )
+                )
+            )
             _preserve_anom_brackets = bool(
                 c.get("is_anomaly_inquiry")
                 or c.get("intent") == "property_purchase"
@@ -772,10 +783,15 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 or (c.get("_server_stamped") and c.get("sapience"))
                 or str(c.get("approach") or "").startswith(("nh_", "anomaly_", "question_trap"))
             )
-            if _preserve_anom_brackets and not (has_climax_prefix or has_story_prefix or has_bounty_prefix):
+            if _preserve_anom_brackets and not has_explicit_quest_tag:
                 clean_label_str = label_str.strip()
             else:
-                clean_label_str = _strip_leading_emojis(label_str)
+                clean_label_str = re.sub(
+                    r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Main|Side|Optional[^\]\r\n]*|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?)\]\s*)+",
+                    "",
+                    _strip_leading_emojis(label_str),
+                    flags=re.IGNORECASE,
+                ).strip() or _strip_leading_emojis(label_str)
             if not clean_label_str or clean_label_str.lower() in ("act", "action", "choice", "none", "null") or is_malformed_choice_label(clean_label_str):
                 clean_label_str = getattr(cls, 'STAT_FALLBACK_LABELS', DEFAULT_STAT_FALLBACK_LABELS).get(stat, 'Take action')
             elif is_party_recruit:
@@ -883,6 +899,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "dual_wield", "stance", "label_detail", "spell_id", "combat_target",
                 "combat_tactical_archetype", "item_name", "item", "item_consumed",
                 "skip_minutes", "sleep_mode", "approach", "gold_cost", "dc_mod",
+                "clue_source_id", "is_bonus_clue",
                 "_priority_slot", "clue_pair_ids", "is_phase2_choice",
                 "incursion_action", "incursion_id", "breach_id", "offering_item_name",
                 "trap_choice_kind", "is_anomaly_inquiry", "_npc_speak_choice",

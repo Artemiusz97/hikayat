@@ -473,7 +473,7 @@ def generate_band1_quest_and_rumor_fallbacks(
                 active_quests = db.get_session_quests(int(sess_id), status="Active") or []
             for q in active_quests[:3]:
                 q_title = str(q.get("title") or "").strip()
-                q_id = str(q.get("id") or q.get("quest_id") or "")
+                q_id = str(q.get("quest_id") or q.get("id") or "")
                 is_bounty = "bounty" in str(q.get("quest_type") or "").lower() or q_id.lower().startswith("bnt-")
                 if q_title:
                     lbl = (

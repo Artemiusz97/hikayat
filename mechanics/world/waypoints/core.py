@@ -19,7 +19,7 @@ from .matching import (
 
 
 
-def build_waypoint_prompt_block(session_id: int, current_location: str, destination_location: str = "") -> str:
+def build_waypoint_prompt_block(session_id: int, current_location: str, destination_location: str = "", session: Optional[dict] = None) -> str:
     """Builds the [ACTIVE QUEST WAYPOINTS] block for the LLM system prompt."""
     if session_id:
         try:
@@ -33,6 +33,31 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
             pass
     active_wps = db.get_all_session_active_waypoints(session_id)
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
+
+    pre_turn_res = session.get("_pre_turn_quest_res") if isinstance(session, dict) else {}
+    staged_advances = pre_turn_res.get("staged_advances") or {} if isinstance(pre_turn_res, dict) else {}
+
+    resolved_payoff_notices = []
+    if staged_advances:
+        filtered_wps = []
+        for wp in active_wps:
+            wp_qid = str(wp.get("quest_id") or "")
+            wp_so = wp.get("sub_obj_id")
+            adv_key = f"{wp_qid}:{wp_so}"
+            if adv_key in staged_advances:
+                adv = staged_advances[adv_key]
+                resolved_payoff_notices.append(
+                    f"  [QUEST BEAT RESOLVED — MANDATORY PAYOFF]: The prior stage for '{wp.get('quest_title', 'Quest')}' was completed this turn! "
+                    f"Narrate the breakthrough/discovery vividly and transition smoothly to the next objective."
+                )
+                nxt_wp = adv.get("next_waypoint")
+                if nxt_wp and not adv.get("all_stages_complete"):
+                    nxt_wp_merged = dict(wp)
+                    nxt_wp_merged.update(nxt_wp)
+                    filtered_wps.append(nxt_wp_merged)
+            else:
+                filtered_wps.append(wp)
+        active_wps = filtered_wps
 
     # --- Phone Appointments: inject meetup NPC presence ---
     appointment_lines = []
@@ -67,6 +92,9 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         return "\n".join(lines)
 
     lines.append("ACTIVE QUEST WAYPOINTS (Python-Enforced):")
+    if resolved_payoff_notices:
+        lines.extend(resolved_payoff_notices)
+        lines.append("")
 
 
     if story_quest and climax_loc:
@@ -92,16 +120,41 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         resource_collected = int(wp.get("resource_collected", 0))
 
         can_npc_match = can_waypoint_match_via_npc_presence(target_npc, wp.get("stage_key", ""), current_location, wp)
-        at_target = check_location_matches_waypoint(current_location, target_loc) or (
-            bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc)
-        )
+        from .matching import get_matching_clue_sources_for_location
+        from mechanics.world.locations.hierarchy import format_clean_location_prose
 
-        header = f"  [{quest_title}" + (" ★ Main Objective]" if sub_obj_id == 0 else (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]"))
+        clue_info = get_matching_clue_sources_for_location(
+            session_id,
+            wp.get("quest_id", ""),
+            sub_obj_id,
+            current_location,
+            waypoint=wp,
+            include_bonus=True,
+        )
+        matched_open_sources = clue_info.get("matching_open_sources") or []
+        matched_bonus_sources = clue_info.get("matching_bonus_sources") or []
+        if clue_info.get("is_clue_stage") or trigger == "key_clue":
+            at_target = bool(matched_open_sources) or bool(matched_bonus_sources)
+        else:
+            at_target = (
+                check_location_matches_waypoint(current_location, target_loc, session_id=session_id)
+                or (bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc))
+            )
+
+        header = f"  [{quest_title}" + (" Main Objective]" if sub_obj_id == 0 else (f" Sub-Obj #{sub_obj_id}]" if sub_obj_id is not None else "]"))
         lines.append(header)
         lines.append(f"    Stage: \"{label}\"")
-        if target_loc:
+        if clue_info.get("is_clue_stage") and (clue_info.get("open_sources") or []):
+            open_srcs = clue_info.get("open_sources") or []
+            src_desc = "; ".join(
+                f"{str(s.get('approach_hint') or 'Investigate')} ({format_clean_location_prose(str(s.get('location') or ''), include_zone=True)})"
+                for s in open_srcs[:3]
+            )
+            lines.append(f"    Key Clue Paths ({len(open_srcs)} open): {src_desc}")
+        elif target_loc:
+            clean_target_prose = format_clean_location_prose(target_loc, include_zone=True) or target_loc
             npc_part = f" | Contact: {target_npc}" if target_npc else ""
-            lines.append(f"    Target: {target_loc}{npc_part}")
+            lines.append(f"    Target: {clean_target_prose}{npc_part}")
         v_phases = wp.get("valid_time_phases") or []
         if v_phases:
             lines.append(f"    Valid Time Window: {', '.join(v_phases)}")
@@ -115,14 +168,21 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
         if at_target:
             if trigger == "arrival":
                 lines.append("    => ARRIVAL TRIGGER: Auto-completes. Narrate arrival scene and what player finds/meets.")
-            elif trigger in ("skill_check", "action", "talk_to_npc", "inspect_prop", "defeat_target", "resource_progress"):
+            elif trigger in ("skill_check", "action", "talk_to_npc", "inspect_prop", "defeat_target", "resource_progress", "key_clue"):
                 if resource_target > 0:
                     remaining = resource_target - resource_collected
                     lines.append(f"    => RESOURCE GATHER: {resource_collected}/{resource_target} collected. {remaining} more needed.")
                     lines.append("    => Skill check success tier determines resources found: crit=all, success=half.")
                 else:
-                    lines.append("    => ⭐ ACTIVE LOCAL QUEST OBJECTIVE AT CURRENT LOCATION:")
-                    lines.append(f"       You MUST include at least one dedicated choice in `next_choices` (marked with ⭐ or 🎯) allowing the player to directly interact with or progress this stage ('{label}').")
+                    lines.append("    => ACTIVE LOCAL QUEST OBJECTIVE AT CURRENT LOCATION:")
+                    if matched_open_sources:
+                        first_hint = str(matched_open_sources[0].get("approach_hint") or label)
+                        lines.append(f"       You MUST include at least one dedicated natural-sentence choice in `next_choices` (NO `[Main]`/`[Side]`/`[Story Quest]`/`[Bounty]` bracket prefixes and NO `Question X regarding ...`) allowing the player to investigate this clue source: '{first_hint}'.")
+                    elif matched_bonus_sources:
+                        b_hint = str(matched_bonus_sources[0].get("approach_hint") or label)
+                        lines.append(f"       Optional corroborating evidence available here: '{b_hint}'. Include a natural plain-sentence choice to examine it.")
+                    else:
+                        lines.append(f"       You MUST include at least one dedicated natural-sentence choice in `next_choices` (NO `[Main]`/`[Side]`/`[Story Quest]`/`[Bounty]` bracket prefixes and NO `Question X regarding ...`) allowing the player to directly progress this stage ('{label}').")
                     try:
                         import scenario_data
                         sess_chk = db.get_session(session_id) if session_id else None
@@ -343,5 +403,15 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
             tag = f"{icon} [Bounty] {quest_title}{stage_part}{npc_suffix}"
 
         _register_location_marker(target_loc, tag)
+        # For key_clue waypoints, mark all alternate open clue_sources locations on the map as well
+        if wp.get("completion_trigger") == "key_clue" and (sub_obj_id in (None, 0)):
+            dos_m = db.get_quest_dossier(session_id, wp.get("quest_id", ""))
+            for ms_m in ((dos_m or {}).get("climax_spec") or {}).get("main_stages") or []:
+                if int(ms_m.get("stage_index") or 0) == int(wp.get("stage_index") or 1):
+                    for src_m in (ms_m.get("clue_sources") or []):
+                        if isinstance(src_m, dict) and str(src_m.get("status") or "open").lower() == "open":
+                            s_loc_m = str(src_m.get("location") or "").strip()
+                            if s_loc_m:
+                                _register_location_marker(s_loc_m, tag)
 
     return markers

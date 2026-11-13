@@ -258,7 +258,29 @@
     "choose_campaign_fate": "Wähle das weitere Schicksal dieser Chronik:",
     "epilogue_resistance": "Widerstand der Gefallenen Welt anführen",
     "peak_scar": "Höhepunkt-Narbe",
-    "liberation_op": "Befreiungsoperation"
+    "liberation_op": "Befreiungsoperation",
+    "threat_clock": "Bedrohung",
+    "threat_paused": "Pausiert (Höhepunkt)",
+    "threat_dormant": "Ruhend bis Kapitelbeginn",
+    "threat_next": "Nächste Schwelle",
+    "threat_reinforced": "Verstärkung",
+    "threat_scar_pending": "Kapitel-Narbenrisiko",
+    "clue_sources": "Hinweisquellen",
+    "source_open": "Offen",
+    "source_burned": "Verbrannt",
+    "source_cold": "Kalt",
+    "source_claimed": "Gesichert",
+    "source_bonus": "Bonus-Spur"
+  },
+  "quest": {
+    "threat_clock": {
+      "consequences": {
+        "lead_cold": "Spur verloren ({{param}})",
+        "threatened_lost": "Bedrohtes Ziel verloren: {{param}}",
+        "alert_up": "Gegner-Alarmstufe +1 ({{param}})",
+        "reinforced": "Finale durch gegnerische Vorhut verstärkt"
+      }
+    }
   },
   "codex": {
     "title": "Welt-Kodex",

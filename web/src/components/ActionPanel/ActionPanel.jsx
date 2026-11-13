@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp, Smartphone, PenLine, X, Users, Loader2 } from 'lucide-react';
+import { apiCall } from '../../api/client';
 import TurnOutcomePanel from './TurnOutcomePanel';
 import { StatusEffectBadge } from '../Sidebar/CharacterSheet';
 import { getRelationshipTier } from '../Sidebar/CodexPanel';
@@ -16,6 +17,50 @@ const STAT_EMOJI = {
   ITEM: '🎒',
 };
 
+const LOCALIZED_QUEST_BRACKET_RE = /^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Main|Side|Optional[^\]\r\n]*)\]\s*)+/i;
+
+const cleanChoiceDisplayLabel = (choice, questIcon) => {
+  const rawDisplayLabel = String(choice?.label || choice?.text || '');
+  const hasQuestMeta = Boolean(questIcon || choice?.is_quest_action || choice?.is_story_quest || choice?.is_climax_action);
+  let stripped = rawDisplayLabel.replace(LOCALIZED_QUEST_BRACKET_RE, '');
+  if (hasQuestMeta) {
+    stripped = stripped.replace(/^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
+  }
+  return stripped.replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '').trim() || rawDisplayLabel;
+};
+
+const getChoiceQuestBadge = (questIcon, t) => {
+  if (questIcon === '⚡') {
+    return {
+      icon: '⚡',
+      label: t('quests.story_climax'),
+      className: 'bg-purple-500/25 border-purple-400/70 text-purple-200 shadow-[0_0_8px_rgba(168,85,247,0.3)]',
+    };
+  }
+  if (questIcon === '⭐') {
+    return {
+      icon: '⭐',
+      label: t('quests.story_quest'),
+      className: 'bg-amber-500/25 border-amber-400/80 text-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.3)]',
+    };
+  }
+  if (questIcon === '🎯') {
+    return {
+      icon: '🎯',
+      label: t('quests.bounty'),
+      className: 'bg-cyan-500/25 border-cyan-400/70 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.25)]',
+    };
+  }
+  if (questIcon === '💌') {
+    return {
+      icon: '💌',
+      label: t('quests.meetup'),
+      className: 'bg-pink-500/25 border-pink-400/70 text-pink-200',
+    };
+  }
+  return null;
+};
+
 const getChoiceQuestIcon = (choice) => {
   if (!choice || typeof choice !== 'object') return null;
   if (choice.quest_icon) return choice.quest_icon;
@@ -26,14 +71,19 @@ const getChoiceQuestIcon = (choice) => {
   const ctype = String(choice.contract_type || '').toLowerCase();
 
   // 1. Story Climax
-  if (choice.is_climax_action || ctype === 'climax' || rawLabel.includes('⚡') || rawL.includes('[story climax]')) {
+  if (
+    choice.is_climax_action ||
+    ctype === 'climax' ||
+    rawLabel.includes('⚡') ||
+    ['[story climax', '[höhepunkt der geschichte', '[kemuncak cerita', '[punkt kulminacyjny', '[剧情高潮'].some((k) => rawL.includes(k))
+  ) {
     return '⚡';
   }
 
   // 2. Story Quest Actions
   if (
     rawLabel.includes('⭐') ||
-    rawL.includes('[story quest]') ||
+    ['[story quest', '[hauptquest', '[misi utama', '[zadanie główne', '[主线任务'].some((k) => rawL.includes(k)) ||
     qid.includes('sq-') ||
     ctype.includes('story') ||
     choice.is_story_quest
@@ -46,7 +96,7 @@ const getChoiceQuestIcon = (choice) => {
     choice.is_quest_action ||
     ['sub_quest', 'bounty', 'side_bounty', 'waypoint', 'skill_check', 'arrival', 'resource_progress'].includes(ctype) ||
     rawLabel.includes('🎯') ||
-    rawL.includes('[bounty]') ||
+    ['[bounty', '[kopfgeld', '[ganjaran', '[zlecenie', '[悬赏'].some((k) => rawL.includes(k)) ||
     qid.includes('bnt-') ||
     qid.includes('qst-')
   ) {
@@ -61,7 +111,10 @@ const getChoiceQuestIcon = (choice) => {
   }
 
   // 4. Meetup / Phone appointment
-  if (rawLabel.includes('💌') || rawL.includes('[meetup]')) {
+  if (
+    rawLabel.includes('💌') ||
+    ['[meetup]', '[treffen]', '[pertemuan]', '[spotkanie]', '[碰头]', '[碰面]', '[会面]'].some((k) => rawL.includes(k))
+  ) {
     return '💌';
   }
 
@@ -313,7 +366,7 @@ const ActionPanel = ({
   );
   const inCombat = Boolean(session?.is_in_combat || livingEnemies.length > 0);
   const activeTargetObj =
-    livingEnemies.find((e) => e.name === selectedCombatTarget) || livingEnemies[0] || null;
+    livingEnemies.find((e) => e.name === selectedCombatTarget || (e.id && String(e.id) === String(selectedCombatTarget))) || livingEnemies[0] || null;
   const selectedTargetName = activeTargetObj?.name || selectedCombatTarget || null;
 
   const { available: merchantAvailable, label: merchantActionLabel } = detectMerchantAvailableClient(
@@ -434,6 +487,75 @@ const ActionPanel = ({
   };
 
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
+
+  const isGameOver = Boolean(session?.status === 'finished' || session?.is_game_over);
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState(null);
+
+  const handleReloadCheckpoint = async () => {
+    setReloading(true);
+    setReloadError(null);
+    try {
+      const uid = session?.character?.user_id || session?.host_user_id || session?.user_id;
+      if (!uid) {
+        setReloadError(t('game_over.no_user', 'User ID not identified.'));
+        return;
+      }
+      const savesRes = await apiCall(`/api/saves/${uid}`);
+      const saves = savesRes?.saves || [];
+      if (saves.length > 0) {
+        saves.sort((a, b) => (b.saved_at || 0) - (a.saved_at || 0));
+        const latestSlot = saves[0].slot_name;
+        await apiCall('/api/saves/load', {
+          method: 'POST',
+          body: JSON.stringify({ user_id: uid, slot_name: latestSlot }),
+        });
+        window.location.reload();
+      } else {
+        setReloadError(t('game_over.no_saves', 'No saved checkpoints found. Please return to dashboard.'));
+      }
+    } catch (err) {
+      setReloadError(err?.message || 'Failed to reload save');
+    } finally {
+      setReloading(false);
+    }
+  };
+
+  if (isGameOver) {
+    return (
+      <div className="shrink-0 w-full bg-black/95 backdrop-blur border-t-2 border-red-900/80 px-4 py-4 md:py-6 shadow-2xl z-20 text-center">
+        <div className="max-w-md mx-auto flex flex-col items-center gap-3">
+          <div className="text-xl sm:text-2xl md:text-3xl font-fantasy text-red-500 tracking-wider">
+            💀 {t('game_over.title', 'DEFEAT & GAME OVER')}
+          </div>
+          <p className="text-xs md:text-sm text-gray-300 font-serif italic">
+            {session?.epilogue || session?.extra?.epilogue || t('game_over.subtitle', 'The journey has met a grim end. Your courage remains etched in memory.')}
+          </p>
+          {reloadError && (
+            <div className="text-xs text-red-400 bg-red-950/60 px-3 py-1 rounded border border-red-800">
+              {reloadError}
+            </div>
+          )}
+          <div className="flex items-center gap-3 mt-2">
+            <button
+              onClick={handleReloadCheckpoint}
+              disabled={reloading}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-red-800 hover:bg-red-700 text-white font-medium text-xs md:text-sm transition-all shadow-lg hover:shadow-red-900/50 disabled:opacity-50"
+            >
+              {reloading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              <span>{t('game_over.reload_checkpoint', 'Reload Latest Checkpoint')}</span>
+            </button>
+            <button
+              onClick={() => { window.location.hash = ''; window.location.reload(); }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 font-medium text-xs md:text-sm transition-colors border border-gray-700"
+            >
+              <span>{t('game_over.return_dashboard', 'Return to Dashboard')}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="shrink-0 w-full bg-fantasy-panel/95 backdrop-blur border-t border-fantasy-border px-2.5 sm:px-4 md:px-5 py-1.5 sm:py-2 md:py-3 shadow-2xl z-20 pb-[max(0.4rem,env(safe-area-inset-bottom))]">
@@ -719,6 +841,10 @@ const ActionPanel = ({
                     {(choices || []).map((choice, idx) => {
                       const pct = choice.success_pct !== undefined ? choice.success_pct : choice.chance;
                       const mpCost = choice.mp_cost || 0;
+                      const questIcon = getChoiceQuestIcon(choice);
+                      const questBadge = getChoiceQuestBadge(questIcon, t);
+                      const cleanDisplayLabel = cleanChoiceDisplayLabel(choice, questIcon);
+                      const skillEmoji = getChoiceSkillEmoji(choice);
                       const choiceEmoji = getChoiceEmoji(choice);
                       const statName = String(choice.stat || 'FREE').toUpperCase();
                       const displayStat = statName === 'NONE' ? 'FREE' : statName;
@@ -743,12 +869,22 @@ const ActionPanel = ({
                               : 'bg-black/50 border-fantasy-border hover:border-fantasy-accent hover:bg-fantasy-accent/10'
                           }`}
                         >
-                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-fantasy-accent shrink-0">
-                            <span className="text-xs leading-none">{choiceEmoji}</span>
-                            <span>{displayStat}</span>
-                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {questBadge && (
+                              <span
+                                title={questBadge.label}
+                                className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9.5px] md:text-[10px] font-mono font-extrabold uppercase tracking-wider border ${questBadge.className}`}
+                              >
+                                <span className="text-xs leading-none">{questBadge.icon}</span>
+                              </span>
+                            )}
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[9.5px] md:text-[10px] font-mono font-bold uppercase text-fantasy-accent shrink-0">
+                              <span className="text-xs leading-none">{questBadge ? (skillEmoji || '✨') : choiceEmoji}</span>
+                              <span>{displayStat}</span>
+                            </span>
+                          </div>
                           <span className="flex-1 min-w-0 text-xs sm:text-[13px] md:text-sm font-medium text-gray-100 group-hover:text-white leading-snug">
-                            {choice.label || choice.text}
+                            {cleanDisplayLabel}
                           </span>
                           <div className="flex items-center gap-1 shrink-0">
                             {isPending && (
@@ -932,38 +1068,8 @@ const ActionPanel = ({
                     const rawStat = String(choice.stat || 'NONE').toUpperCase();
                     const isFreeAction = rawStat === 'NONE' || rawStat === 'FREE' || !rawStat;
 
-                    let questBadge = null;
-                    if (questIcon === '⚡') {
-                      questBadge = {
-                        icon: '⚡',
-                        label: t('quests.story_climax'),
-                        className: 'bg-purple-500/25 border-purple-400/70 text-purple-200 shadow-[0_0_8px_rgba(168,85,247,0.3)]',
-                      };
-                    } else if (questIcon === '⭐') {
-                      questBadge = {
-                        icon: '⭐',
-                        label: t('quests.story_quest'),
-                        className: 'bg-amber-500/25 border-amber-400/80 text-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.3)]',
-                      };
-                    } else if (questIcon === '🎯') {
-                      questBadge = {
-                        icon: '🎯',
-                        label: t('quests.bounty'),
-                        className: 'bg-cyan-500/25 border-cyan-400/70 text-cyan-200 shadow-[0_0_8px_rgba(6,182,212,0.25)]',
-                      };
-                    } else if (questIcon === '💌') {
-                      questBadge = {
-                        icon: '💌',
-                        label: t('quests.meetup'),
-                        className: 'bg-pink-500/25 border-pink-400/70 text-pink-200',
-                      };
-                    }
-
-                    const rawDisplayLabel = String(choice.label || choice.text || '');
-                    const cleanDisplayLabel = rawDisplayLabel
-                      .replace(/^(?:[⭐🎯⚡💌🔹\s]+|\s*\[(?:Story Quest|Story Climax|Bounty|Quest|Meetup)\]\s*)+/i, '')
-                      .replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '')
-                      .trim() || rawDisplayLabel;
+                    const questBadge = getChoiceQuestBadge(questIcon, t);
+                    const cleanDisplayLabel = cleanChoiceDisplayLabel(choice, questIcon);
 
                     const isPending = Boolean(
                       processing && pendingAction && (

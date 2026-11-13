@@ -30,6 +30,7 @@ from .deps import (
     JoinAdventureRequest,
     ActionRequest,
     ToggleStealthRequest,
+    ToggleNonLethalRequest,
     EndAdventureRequest,
     RetryAdventureRequest,
     RerollImageRequest,
@@ -446,6 +447,9 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 "target": enemy_name,
             }
             decks_by_target[enemy_name] = deck_entry
+            e_id = enemy.get("id") or enemy.get("enemy_id")
+            if e_id is not None:
+                decks_by_target[str(e_id)] = deck_entry
             if first_deck is None:
                 first_deck = deck_entry
 
@@ -911,6 +915,11 @@ async def resume_session_endpoint(req: ResumeSessionRequest, request: Request = 
     if char:
         await adb(db.set_character_active_session, char["id"], req.session_id)
 
+    try:
+        await adb(game_engine.heal_session_quests_on_load, req.session_id)
+    except Exception:
+        pass
+
     enriched = await adb(_enrich_session_for_client, dict(session_row), canonical_id)
     return {"success": True, "session": enriched}
 
@@ -1240,6 +1249,13 @@ async def start_adventure(req: StartAdventureRequest, request: Request = None):
                 dialogue_partner=partner_arg,
                 current_node_id=scene.get("current_node_id") or session.get("current_node_id"),
             )
+            try:
+                sq_ch1 = await adb(db.get_active_story_quest, session_id)
+                if sq_ch1 and sq_ch1.get("quest_id"):
+                    from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                    schedule_background_chapter_plan(session_id, str(sq_ch1["quest_id"]))
+            except Exception as _bg_plan_err:
+                logger.debug("Ch.1 background ChapterPlan schedule skipped: %s", _bg_plan_err)
             char_id = char_row["id"] if char_row else 0
             enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
             for npc in (npcs_arg or []):
@@ -1449,6 +1465,9 @@ async def execute_action(req: ActionRequest, request: Request = None):
         except (PermissionError, ValueError) as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+        if session.get("non_lethal_mode"):
+            action["is_non_lethal"] = True
+
         mode = session["mode"]
         try:
             safe_action = _serializable_action(action)
@@ -1656,6 +1675,39 @@ async def toggle_adventure_stealth(req: ToggleStealthRequest, request: Request =
         }
 
 
+@router.post("/api/adventure/toggle_non_lethal")
+async def toggle_adventure_non_lethal(req: ToggleNonLethalRequest, request: Request = None):
+    """Toggles persistent non-lethal combat mode ON/OFF for an active adventure session."""
+    await verify_session_participant(request, req.session_id, req.user_id)
+    async with distributed_session_lock(req.session_id):
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session = dict(session_row)
+        if session["status"] != "active":
+            raise HTTPException(status_code=400, detail="Session is not active")
+
+        cur_val = bool(session.get("non_lethal_mode", False))
+        new_val = req.active if req.active is not None else not cur_val
+        await adb(db.update_session, req.session_id, extra={"non_lethal_mode": new_val})
+        fresh = await adb(db.get_session, req.session_id)
+        fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
+
+        await manager.broadcast(req.session_id, {
+            "type": "SESSION_UPDATED",
+            "session": fresh,
+            "non_lethal_mode": new_val,
+        })
+
+        return {
+            "success": True,
+            "session_id": req.session_id,
+            "non_lethal_mode": new_val,
+            "session": fresh,
+        }
+
+
 @router.post("/api/adventure/end")
 async def end_adventure(req: EndAdventureRequest, request: Request = None):
     """Ends/finishes an active adventure session."""
@@ -1770,6 +1822,13 @@ async def retry_adventure_scene(req: RetryAdventureRequest, request: Request = N
                     current_node_id=init_node_id,
                     focal_point=scene.get("focal_point", ""),
                 )
+                try:
+                    sq_retry = await adb(db.get_active_story_quest, req.session_id)
+                    if sq_retry and sq_retry.get("quest_id"):
+                        from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                        schedule_background_chapter_plan(req.session_id, str(sq_retry["quest_id"]))
+                except Exception as _bg_retry_err:
+                    logger.debug("Ch.1 retry background ChapterPlan schedule skipped: %s", _bg_retry_err)
                 char_id = actor_char.get("id", 0) if isinstance(actor_char, dict) else 0
                 enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
                 for npc in (npcs_arg or []):

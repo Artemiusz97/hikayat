@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 from fastapi import WebSocket
 from pydantic import BaseModel, Field, field_validator
@@ -84,12 +85,16 @@ class ConnectionManager:
         if not conns:
             return
         safe_message = _to_json_safe(message)
-        for conn in list(conns):
-            try:
-                await conn["ws"].send_json(safe_message)
-            except Exception as e:
-                logger.error(f"Error broadcasting to user {conn['user_id']}: {e}")
-                self.disconnect(clean_sid, conn["ws"])
+        async def _safe_send(conn):
+            lock = conn.setdefault("lock", asyncio.Lock())
+            async with lock:
+                try:
+                    await conn["ws"].send_json(safe_message)
+                except Exception as e:
+                    logger.error(f"Error broadcasting to user {conn['user_id']}: {e}")
+                    self.disconnect(clean_sid, conn["ws"])
+
+        await asyncio.gather(*[_safe_send(c) for c in list(conns)], return_exceptions=True)
 
 
 manager = ConnectionManager()
@@ -493,6 +498,12 @@ class ActionRequest(BaseModel):
 
 
 class ToggleStealthRequest(BaseModel):
+    session_id: int
+    user_id: int
+    active: Optional[bool] = None
+
+
+class ToggleNonLethalRequest(BaseModel):
     session_id: int
     user_id: int
     active: Optional[bool] = None

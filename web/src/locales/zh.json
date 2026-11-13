@@ -258,7 +258,29 @@
     "choose_campaign_fate": "选择这段传奇的后续走向：",
     "epilogue_resistance": "率领沦陷世界抵抗军",
     "peak_scar": "高潮创痕",
-    "liberation_op": "光复行动"
+    "liberation_op": "光复行动",
+    "threat_clock": "威胁",
+    "threat_paused": "已暂停（决战）",
+    "threat_dormant": "章节未触发前暂不计时",
+    "threat_next": "下一阈值",
+    "threat_reinforced": "敌方增援",
+    "threat_scar_pending": "章节创痕风险",
+    "clue_sources": "线索途径",
+    "source_open": "可查探",
+    "source_burned": "已失手",
+    "source_cold": "已中断",
+    "source_claimed": "已获取",
+    "source_bonus": "额外线索"
+  },
+  "quest": {
+    "threat_clock": {
+      "consequences": {
+        "lead_cold": "线索已中断（{{param}}）",
+        "threatened_lost": "濒危目标失守：{{param}}",
+        "alert_up": "警戒等级提升 +1（{{param}}）",
+        "reinforced": "强敌先锋增援决战据点"
+      }
+    }
   },
   "codex": {
     "title": "世界图鉴",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import namegen
@@ -38,6 +39,15 @@ _TAPESTRY_SLIDE_HEADERS: Dict[str, Dict[str, str]] = {
     "factions": {"en": "Balance of Power", "pl": "Układ Sił", "ms": "Imbangan Kuasa", "zh": "派系格局", "de": "Machtgefüge"},
     "bonds": {"en": "Living Bonds & Scars", "pl": "Więzi i Blizny", "ms": "Ikatan & Parut", "zh": "羁绊与铭痕", "de": "Bande & Narben"},
     "title": {"en": "Earned Chronicle Title", "pl": "Zdobyty Tytuł Kroniki", "ms": "Gelaran Hikayat", "zh": "史诗称号", "de": "Chronik-Ehrentitel"},
+}
+
+_PLACEHOLDER_ACTOR_RE = re.compile(r"^(?:Envoy|Operative|Agent|Target|Contact|Informant)\s*#?\d+$", re.IGNORECASE)
+
+_SCENARIO_BACKUP_NAMES: Dict[str, List[str]] = {
+    "fantasy": ["Lady Morgana", "Lord Corvus", "Commander Malakor", "Inquisitor Theron"],
+    "cyberpunk": ["Vektor Zhao", "Rei Chen", "Cipher Tanaka", "Sloan Mercer"],
+    "sci-fi": ["Commander Thorne", "Nav-Officer Kaelen", "Operative Jora", "Archon Voss"],
+    "modern": ["Julian Cross", "Valerie Frost", "Marcus Reed", "Dominic Ward"],
 }
 
 
@@ -180,7 +190,7 @@ def _build_universal_chapters_blueprint(
                 "chapter": c_idx,
                 "phase": str(r_meta.get("phase") or ch_data.get("phase", "rising_action")),
                 "is_peak": is_peak,
-                "main_stages": 3 if is_peak else 2,
+                "main_stages": 4 if is_peak else 3,
                 "optional_min": int(r_meta.get("optional_min") or (2 if is_peak else 1)),
                 "optional_max": int(r_meta.get("optional_max") or (2 if c_idx == 11 else 3)),
                 "engine": "SOCIAL_BROKERAGE" if c_idx == 11 else eng_info["engine"],
@@ -191,6 +201,13 @@ def _build_universal_chapters_blueprint(
                 "featured_lieutenant": lt_lead if c_idx <= 6 else (lt_second if c_idx <= 9 else ""),
                 "has_final_bossfight": bool(c_idx == 10 and not is_non_combat),
                 "is_playable_epilogue": bool(c_idx == 11),
+                "draft_pitch": {
+                    "thematic_premise": base_title,
+                    "pacing_directive": ch_data.get("pacing_directive", ""),
+                    "assigned_lieutenant": lt_lead if c_idx <= 6 else (lt_second if c_idx <= 9 else ""),
+                    "climax_archetype": ch_data.get("archetype", eng_info["engine"].replace("_", " ").title()),
+                    "main_stage_count": 4 if is_peak else 3,
+                },
             }
         return out
 
@@ -258,7 +275,7 @@ def _build_universal_chapters_blueprint(
             "chapter": ch_idx,
             "phase": str(r_meta.get("phase") or phase),
             "is_peak": is_peak,
-            "main_stages": 3 if is_peak else 2,
+            "main_stages": 4 if is_peak else 3,
             "optional_min": int(r_meta.get("optional_min") or (2 if is_peak else 1)),
             "optional_max": int(r_meta.get("optional_max") or (2 if ch_idx == 11 else 3)),
             "engine": eng,
@@ -269,8 +286,128 @@ def _build_universal_chapters_blueprint(
             "featured_lieutenant": feat_lt,
             "has_final_bossfight": bool(ch_idx == 10 and not is_non_combat),
             "is_playable_epilogue": bool(ch_idx == 11),
+            "draft_pitch": {
+                "thematic_premise": subtitle,
+                "pacing_directive": directive,
+                "assigned_lieutenant": feat_lt,
+                "climax_archetype": eng.replace("_", " ").title(),
+                "main_stage_count": 4 if is_peak else 3,
+            },
         }
     return chapters
+
+
+def heal_campaign_spine_if_stale(
+    session_id: int,
+    spine: Dict[str, Any],
+    scen_key: str = "",
+    lang: str = "en",
+    conn: Any = None,
+    auto_commit: bool = True,
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    """
+    Idempotently inspects and heals a CampaignSpine:
+    - Replaces placeholder lieutenants (matching _PLACEHOLDER_ACTOR_RE) with real names.
+    - Returns (healed_spine, rename_map) where rename_map is {old_name: new_name}.
+    - Backfills missing draft_pitch and enforces main_stage_count = 4 if is_peak else 3.
+    """
+    if not isinstance(spine, dict):
+        return spine, {}
+
+    healed = dict(spine)
+    rename_map: Dict[str, str] = {}
+    mutated = False
+
+    eff_scen = str(scen_key or healed.get("scenario") or "fantasy")
+    backups = _SCENARIO_BACKUP_NAMES.get(eff_scen, _SCENARIO_BACKUP_NAMES["fantasy"])
+
+    # 1. Lieutenants Roster
+    lts = [dict(lt) for lt in (healed.get("lieutenants_roster") or [])]
+    for idx, lt in enumerate(lts):
+        nm = str(lt.get("name") or "").strip()
+        if _PLACEHOLDER_ACTOR_RE.search(nm):
+            g_str = str(lt.get("gender") or ("female" if idx % 2 == 1 else "male"))
+            try:
+                new_nm = namegen.generate_npc_name(scenario=eff_scen, gender=g_str)
+                if _PLACEHOLDER_ACTOR_RE.search(new_nm):
+                    new_nm = backups[idx % len(backups)]
+            except Exception:
+                new_nm = backups[idx % len(backups)]
+            lt["name"] = new_nm
+            rename_map[nm] = new_nm
+            mutated = True
+    healed["lieutenants_roster"] = lts
+
+    # 2. Mastermind Profile
+    mm = dict(healed.get("mastermind_profile") or {})
+    mm_name = str(mm.get("name") or "").strip()
+    if _PLACEHOLDER_ACTOR_RE.search(mm_name):
+        try:
+            new_mm = namegen.generate_npc_name(scenario=eff_scen, gender="male")
+            if _PLACEHOLDER_ACTOR_RE.search(new_mm):
+                new_mm = "Sovereign Vane"
+        except Exception:
+            new_mm = "Sovereign Vane"
+        mm["name"] = new_mm
+        rename_map[mm_name] = new_mm
+        healed["mastermind_profile"] = mm
+        mutated = True
+
+    # 3. Chapters Blueprint
+    bp = dict(healed.get("chapters_blueprint") or {})
+    if bp:
+        for ch_key, ch_data_raw in bp.items():
+            if not isinstance(ch_data_raw, dict):
+                continue
+            ch_data = dict(ch_data_raw)
+            c_idx = int(ch_data.get("chapter") or ch_key or 1)
+            is_peak = bool(c_idx in PEAK_CHAPTERS)
+            expected_stages = 4 if is_peak else 3
+            if ch_data.get("main_stages") != expected_stages:
+                ch_data["main_stages"] = expected_stages
+                mutated = True
+
+            feat_lt = ch_data.get("featured_lieutenant")
+            if isinstance(feat_lt, str) and feat_lt in rename_map:
+                ch_data["featured_lieutenant"] = rename_map[feat_lt]
+                mutated = True
+            elif isinstance(feat_lt, dict) and feat_lt.get("name") in rename_map:
+                feat_lt["name"] = rename_map[feat_lt["name"]]
+                ch_data["featured_lieutenant"] = feat_lt
+                mutated = True
+
+            dp_raw = ch_data.get("draft_pitch")
+            if not dp_raw or not isinstance(dp_raw, dict):
+                assigned_lt = str(ch_data.get("featured_lieutenant") or "")
+                if isinstance(ch_data.get("featured_lieutenant"), dict):
+                    assigned_lt = str(ch_data["featured_lieutenant"].get("name") or "")
+                ch_data["draft_pitch"] = {
+                    "thematic_premise": str(ch_data.get("title_template") or f"Chapter #{c_idx}"),
+                    "pacing_directive": str(ch_data.get("pacing_directive") or ""),
+                    "assigned_lieutenant": assigned_lt,
+                    "climax_archetype": str(ch_data.get("archetype") or "Confrontation"),
+                    "main_stage_count": expected_stages,
+                }
+                mutated = True
+            else:
+                dp = dict(dp_raw)
+                if dp.get("main_stage_count") != expected_stages:
+                    dp["main_stage_count"] = expected_stages
+                    mutated = True
+                assigned = str(dp.get("assigned_lieutenant") or "")
+                if assigned in rename_map:
+                    dp["assigned_lieutenant"] = rename_map[assigned]
+                    mutated = True
+                ch_data["draft_pitch"] = dp
+
+            bp[ch_key] = ch_data
+        healed["chapters_blueprint"] = bp
+
+    if mutated and session_id and auto_commit:
+        import db
+        db.upsert_campaign_spine(session_id, healed, conn=conn)
+
+    return healed, rename_map
 
 
 def compile_or_get_campaign_spine(
@@ -301,23 +438,27 @@ def compile_or_get_campaign_spine(
                 ea = existing.get("ending_axes") or _default_ending_axes()
                 patched = db.upsert_campaign_spine(session_id, eff_s, hidden_bible=hb, ending_axes=ea)
                 if patched:
-                    return patched
-            return existing
+                    existing = patched
+            healed, _ = heal_campaign_spine_if_stale(session_id, existing, scen_key=scen_key, lang=lang, auto_commit=False)
+            return healed
 
     sess = db.get_session(session_id) if session_id else {}
     sess = sess or {}
     eff_scen = str(scen_key or sess.get("scenario") or "fantasy")
     eff_lang = normalize_quest_locale(lang or sess.get("narration_language") or sess.get("language") or "en")
     is_non_combat = bool(scenario_data.is_non_combat_scenario(eff_scen))
+    backups = _SCENARIO_BACKUP_NAMES.get(eff_scen, _SCENARIO_BACKUP_NAMES["fantasy"])
 
     lieutenants: List[Dict[str, Any]] = []
     lt_roles = ("Enforcer", "Spymaster", "Quartermaster")
     for idx, role_lbl in enumerate(lt_roles):
         g_str = "female" if ((idx + int(session_id or 1)) % 2 == 1) else "male"
         try:
-            lt_name = namegen.generate_npc_name(scen_key=eff_scen, gender=g_str)
+            lt_name = namegen.generate_npc_name(scenario=eff_scen, gender=g_str)
+            if _PLACEHOLDER_ACTOR_RE.search(lt_name):
+                lt_name = backups[idx % len(backups)]
         except Exception:
-            lt_name = f"Envoy {idx + 1}"
+            lt_name = backups[idx % len(backups)]
         lieutenants.append(
             {
                 "key": f"lt_{session_id}_{idx + 1}",
@@ -336,9 +477,11 @@ def compile_or_get_campaign_spine(
     else:
         try:
             mm_name = namegen.generate_npc_name(
-                scen_key=eff_scen,
+                scenario=eff_scen,
                 gender="male" if (_seed_int(f"g:{session_id}") % 2 == 0) else "female",
             )
+            if _PLACEHOLDER_ACTOR_RE.search(mm_name):
+                mm_name = "Sovereign Vane"
         except Exception:
             mm_name = "Sovereign Vane"
 
@@ -424,7 +567,7 @@ def select_chapter_storylet(
 ) -> Dict[str, Any]:
     """
     State-filtered Storylet selector (`<5ms` deterministic):
-    Adapts the chapter's title, objective, engine, `main_stages` (`2` vs `3`), and optional bounds
+    Adapts the chapter's title, objective, engine, `main_stages` (`3` vs `4`), and optional bounds
     to accumulated `WorldScars`, recruited/slain Lieutenants, `Ch. 6` twists, and `Ch. 11` ending archetype.
     """
     import db
@@ -448,8 +591,41 @@ def select_chapter_storylet(
     storylets = storylets_cat.get("storylets") or {}
 
     hook_loc = str((hb.get("hook_binding") or {}).get("suggested_location") or "")
-    eff_venue = str(venue_name or (hook_loc if ch_idx == 1 else "") or "Central District").strip()
-    eff_zone = eff_venue.split("➔")[0].strip() if "➔" in eff_venue else eff_venue
+    eff_venue = str(venue_name or (hook_loc if ch_idx == 1 else "") or "").strip()
+    if not eff_venue and session_id:
+        try:
+            from mechanics.narrative.dossier_compiler import select_deconflicted_climax_location
+            eff_venue, _ = select_deconflicted_climax_location(
+                session_id, "", family_tier="story", objective_hint=f"Chapter {ch_idx}", scen_key=eff_scen
+            )
+        except Exception:
+            eff_venue = ""
+    if not eff_venue:
+        eff_venue = "Central District"
+
+    if "➔" in eff_venue:
+        parts = [p.strip() for p in eff_venue.split("➔") if p.strip()]
+        eff_zone = parts[0]
+        eff_venue = parts[-1]
+    else:
+        eff_zone = eff_venue
+        if session_id:
+            try:
+                node_id = db.resolve_node_id_from_location(session_id, eff_venue)
+                if node_id:
+                    ancestors = db.get_node_ancestors(session_id, node_id)
+                    root_node = ancestors[-1] if ancestors else None
+                    if root_node and root_node.get("name") and root_node["name"] != eff_venue:
+                        eff_zone = str(root_node["name"]).strip()
+            except Exception:
+                pass
+        if eff_zone == eff_venue:
+            if "school" in eff_scen or "academy" in eff_scen:
+                eff_zone = "Academic District" if "Academy" not in eff_venue else "Subterranean Grounds"
+            elif "anomalous" in eff_scen or "cyberpunk" in eff_scen:
+                eff_zone = "The Lower Wards" if "Lower" not in eff_venue else "Central Sector"
+            else:
+                eff_zone = "Outer Reaches"
 
     active_scars = 0
     if session_id:
@@ -532,7 +708,7 @@ def select_chapter_storylet(
         "storylet_id": storylet_id,
         "phase": str(rhythm.get("phase") or ch_bp.get("phase") or "rising_action"),
         "is_peak": is_peak,
-        "main_stages": 3 if is_peak else 2,
+        "main_stages": 4 if is_peak else 3,
         "optional_min": int(rhythm.get("optional_min") or (2 if is_peak else 1)),
         "optional_max": int(rhythm.get("optional_max") or (2 if ch_idx == 11 else 3)),
         "engine": eng,
@@ -880,10 +1056,13 @@ def mutate_spine_on_lieutenant_fate(
     departed["resolved_turn"] = int(turn_number)
 
     eff_scen = str(spine.get("scenario") or "fantasy")
+    backups = _SCENARIO_BACKUP_NAMES.get(eff_scen, _SCENARIO_BACKUP_NAMES["fantasy"])
     try:
-        succ_name = namegen.generate_npc_name(scen_key=eff_scen, gender=departed.get("gender") or "female")
+        succ_name = namegen.generate_npc_name(scenario=eff_scen, gender=departed.get("gender") or "female")
+        if _PLACEHOLDER_ACTOR_RE.search(succ_name):
+            succ_name = f"Vengeful {backups[0]}"
     except Exception:
-        succ_name = f"Vengeful {departed.get('role', 'envoy')}"
+        succ_name = f"Vengeful {backups[0]}"
 
     new_lts.append(
         {

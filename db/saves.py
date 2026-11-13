@@ -120,7 +120,9 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
         cleaned_inv = []
         for r in inv_rows:
             rd = dict(r)
-            rd.pop("id", None)
+            orig_id = rd.pop("id", None)
+            if orig_id is not None:
+                rd["_orig_inventory_id"] = orig_id
             cleaned_inv.append(rd)
 
         # Character adventure vitals & 3-axis resonance snapshot
@@ -151,6 +153,18 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                     extra_dict["world_ending_anomaly"] = namegen.generate_world_ending_anomaly_profile(hash_val=int(session_id or 1))
                     sess_dict["extra_json"] = json.dumps(extra_dict)
                     conn.execute("UPDATE sessions SET extra_json = ? WHERE id = ?", (sess_dict["extra_json"], session_id))
+        except Exception:
+            pass
+
+        # Sanitize mid-combat ephemeral constructs and summons before saving snapshot
+        try:
+            curr_npcs_raw = sess_dict.get("current_npcs_json") or "[]"
+            curr_npcs_list = json.loads(curr_npcs_raw) if isinstance(curr_npcs_raw, str) else list(curr_npcs_raw or [])
+            cleaned_npcs = [
+                n for n in curr_npcs_list
+                if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
+            ]
+            sess_dict["current_npcs_json"] = json.dumps(cleaned_npcs)
         except Exception:
             pass
 
@@ -260,6 +274,18 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         sess_data["updated_at"] = now
         sess_data["turn_order"] = json.dumps(to)
 
+        # Sanitize mid-combat ephemeral constructs and summons on load
+        try:
+            curr_npcs_raw = sess_data.get("current_npcs_json") or "[]"
+            curr_npcs_list = json.loads(curr_npcs_raw) if isinstance(curr_npcs_raw, str) else list(curr_npcs_raw or [])
+            cleaned_npcs = [
+                n for n in curr_npcs_list
+                if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
+            ]
+            sess_data["current_npcs_json"] = json.dumps(cleaned_npcs)
+        except Exception:
+            pass
+
         # Preserve origin session provenance for folklore codex turn-gating and strip legacy anomaly JSON keys
         from .dossiers import SESSION_ANOMALY_KEY_TO_RECORD_TYPE, sync_session_anomaly_records_from_extra
 
@@ -320,6 +346,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         valid_session_cols = {
             r["name"] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()
         }
+        sess_data.setdefault("combat_threat_ledger_json", "{}")
+        sess_data.setdefault("combat_boss_telegraph_json", "{}")
         sess_data = {k: v for k, v in sess_data.items() if k in valid_session_cols}
 
         # Make sure any dict/list fields are serialized
@@ -706,12 +734,12 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             if isinstance(obj, dict):
                 out = {}
                 for k, v in obj.items():
-                    if k == "clue_id" and v is not None:
+                    if k in ("clue_id", "synthesized_clue_id", "paired_with_clue_id") and v is not None:
                         try:
                             out[k] = clue_id_map.get(int(v), v)
                         except (TypeError, ValueError):
                             out[k] = v
-                    elif k == "paired_with":
+                    elif k in ("paired_with", "pairs_with"):
                         if isinstance(v, int):
                             out[k] = clue_id_map.get(v, v)
                         elif isinstance(v, str) and v.strip().isdigit():
@@ -768,7 +796,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 clue_g = _remap_nested_session_keys(_remap_nested_clue_ids(json.loads(qd_r["clue_graph_json"] or "[]")))
                 leads_g = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(json.loads(qd_r["leads_graph_json"] or "[]"))))
                 twist_s = _remap_nested_session_keys(_remap_nested_contact_ids(json.loads(qd_r["twist_spec_json"] or "{}")))
-                climax_s = _remap_nested_session_keys(_remap_nested_contact_ids(json.loads(qd_r["climax_spec_json"] or "{}")))
+                climax_s = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(json.loads(qd_r["climax_spec_json"] or "{}"))))
                 qd_events = json.loads(qd_r["state_events_json"] or "[]")
                 if isinstance(qd_events, list):
                     qd_events = _remap_nested_session_keys(_remap_nested_clue_ids(_remap_nested_contact_ids(qd_events)))
@@ -844,8 +872,10 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             "DELETE FROM inventory WHERE character_id = ? OR (character_id IS NULL AND user_id = ?)",
             (char_id, user_id),
         )
+        inv_id_map: dict[int, int] = {}
         for item in saved_inv:
             item_dict = dict(item)
+            orig_inv_id = item_dict.pop("_orig_inventory_id", None)
             item_dict["character_id"] = char_id
             item_dict["user_id"] = user_id
             linked_ckey = str(item_dict.get("linked_contract_key") or "").strip()
@@ -871,6 +901,11 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             c_names = ",".join(item_dict.keys())
             qmarks = ",".join("?" * len(item_dict))
             cur_inv = conn.execute(f"INSERT INTO inventory ({c_names}) VALUES ({qmarks})", list(item_dict.values()))
+            if orig_inv_id is not None and cur_inv.lastrowid:
+                try:
+                    inv_id_map[int(orig_inv_id)] = int(cur_inv.lastrowid)
+                except (TypeError, ValueError):
+                    pass
             if linked_ckey and cur_inv.lastrowid:
                 try:
                     conn.execute(
@@ -879,6 +914,34 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     )
                 except Exception:
                     pass
+
+        # Remap tangible_item MacGuffin inventory_id inside quest_dossiers
+        qd_rows = conn.execute(
+            "SELECT id, quest_id, tangible_item_json FROM quest_dossiers WHERE session_id = ?",
+            (new_session_id,),
+        ).fetchall()
+        for qd_row in qd_rows:
+            try:
+                t_item = json.loads(qd_row["tangible_item_json"] or "{}")
+                if isinstance(t_item, dict) and t_item.get("has_item"):
+                    old_inv_id = t_item.get("inventory_id")
+                    new_inv_id = inv_id_map.get(old_inv_id) if old_inv_id is not None else None
+                    if not new_inv_id:
+                        q_name = t_item.get("name")
+                        inv_match = conn.execute(
+                            "SELECT id FROM inventory WHERE (character_id = ? OR user_id = ?) AND name = ? ORDER BY id DESC LIMIT 1",
+                            (char_id, user_id, q_name),
+                        ).fetchone()
+                        if inv_match:
+                            new_inv_id = inv_match["id"]
+                    if new_inv_id:
+                        t_item["inventory_id"] = new_inv_id
+                        conn.execute(
+                            "UPDATE quest_dossiers SET tangible_item_json = ? WHERE id = ?",
+                            (json.dumps(t_item), qd_row["id"]),
+                        )
+            except Exception:
+                pass
 
         # Restore character vitals, 3-axis resonance, spell progress, and link active_session_id
         raw_status = char_state.get("status_effects", "[]")
@@ -921,6 +984,12 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         if is_anomalous_incursions_scenario(sess_data.get("scenario", "")):
             from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
             sync_equipped_anomalous_spells(user_id)
+    except Exception:
+        pass
+
+    try:
+        import game_engine
+        game_engine.heal_session_quests_on_load(new_session_id)
     except Exception:
         pass
 

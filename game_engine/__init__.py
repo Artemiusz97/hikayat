@@ -21,11 +21,15 @@ from .quest_lifecycle import (
     accept_bounty_contract,
     accept_bounty_contract_async,
     forfeit_side_bounty,
+    hot_swap_dossier_entities,
+    prewarm_chapter_ahead,
     build_universal_epilogue_choices,
     evaluate_skipped_threatened_optionals,
     resolve_chapter_transition,
     resolve_epilogue_choice,
     complete_remediation_bounty_if_linked,
+    heal_session_quests_on_load,
+    sync_dossier_main_stage_advance,
 )
 from .quest_turn_resolver import (
     is_approach_burned,
@@ -36,10 +40,12 @@ from .quest_turn_resolver import (
     resolve_quest_combat_outcome,
     evaluate_intimate_liaison_turn,
     handle_npc_death_or_recruitment_fallout,
+    resolve_clue_source_claim,
     resolve_post_turn_dossier_hooks,
 )
 from mechanics.narrative.bounty import generate_faction_bounty_board
 from .quest_agency import (
+    prune_completed_stage_choices,
     resolve_caseboard_deduction,
     resolve_suspect_accusation,
     acquire_quest_macguffin,

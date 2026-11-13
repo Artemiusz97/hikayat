@@ -10,6 +10,7 @@ import uuid
 import db
 import scenario_data
 from llm_client import call_llm_json
+from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
 
 log = logging.getLogger("hikayat.bounty")
 
@@ -657,7 +658,8 @@ def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str
                     candidates.append(loc_full)
         except Exception:
             pass
-    return candidates
+    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
+    return [c for c in candidates if not is_safe_sanctuary_location(c)]
 
 
 def _build_anomalous_fallback_bounties(
@@ -670,14 +672,16 @@ def _build_anomalous_fallback_bounties(
 ) -> list[dict]:
     """Builds 3 deterministic scenario-specific bounties for Anomalous Incursions with faction flavor bias and pre-generated AnomalyBlueprints."""
     from mechanics.world.anomaly_engine import generate_anomaly_blueprint
+    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
 
     sess = db.get_session(session_id) or {}
     scen_key = str(sess.get("scenario") or "anomalous_incursions")
     cur_min = int(sess.get("current_minute", 480) or 480)
 
-    cand_locs = [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c]
+    cand_locs = [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c and not is_safe_sanctuary_location(c)]
     if not cand_locs:
-        cand_locs = [default_loc or "Metropolitan Grid ➔ Civic Plaza"]
+        def_clean = default_loc.replace(" -> ", " ➔ ") if default_loc else ""
+        cand_locs = [def_clean] if (def_clean and not is_safe_sanctuary_location(def_clean)) else ["Metropolitan Grid ➔ Civic Plaza"]
 
     preferred_labels = ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(
         board_key, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["freelance_app"]
@@ -806,10 +810,16 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         # Clear stale unaccepted general bounties upon refresh so new ones replace them cleanly
         def _clear_stale_general_bounties():
             with db.get_conn() as conn:
-                conn.execute(
-                    "DELETE FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
+                stale_rows = conn.execute(
+                    "SELECT quest_id FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
                     (session_id,)
-                )
+                ).fetchall()
+                stale_qids = [r["quest_id"] for r in stale_rows if r and r["quest_id"]]
+                if stale_qids:
+                    q_ph = ",".join("?" for _ in stale_qids)
+                    conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
+                    conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
+                    conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                 conn.commit()
             try:
                 build_consequence_followup_bounty(session_id, session=session)
@@ -1268,10 +1278,16 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         # Clear stale unaccepted faction bounties for this faction upon refresh
         def _clear_stale_faction_bounties():
             with db.get_conn() as conn:
-                conn.execute(
-                    "DELETE FROM quests WHERE session_id=? AND status='Available' AND quest_notes LIKE ?",
+                stale_rows = conn.execute(
+                    "SELECT quest_id FROM quests WHERE session_id=? AND status='Available' AND quest_notes LIKE ?",
                     (session_id, f"faction:{faction_id}%")
-                )
+                ).fetchall()
+                stale_qids = [r["quest_id"] for r in stale_rows if r and r["quest_id"]]
+                if stale_qids:
+                    q_ph = ",".join("?" for _ in stale_qids)
+                    conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
+                    conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
+                    conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                 conn.commit()
         await db.adb(_clear_stale_faction_bounties)
 
@@ -1338,11 +1354,20 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 seed_offset=sum(ord(c) for c in str(faction_id or faction_name)),
             )
         else:
+            from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
+            from mechanics.world.locations import get_discovered_primary_locations
+            zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
+            all_disc = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
+            field_cands = [d for d in all_disc if d.strip().lower() != loc.strip().lower() and not is_safe_sanctuary_location(d)]
+            target_field_loc = field_cands[0] if field_cands else ("Wilds Outer Perimeter ➔ Outpost" if not is_safe_sanctuary_location(loc) else "Wilds Outer Perimeter ➔ Outpost")
+            field_short = format_clean_location_prose(target_field_loc, include_zone=False)
+            field_prose = format_clean_location_prose(target_field_loc, include_zone=True, preposition="in")
+
             bounties_raw = [
             {
                 "quest_type": "Faction Operation",
                 "title": f"Patrol for {faction_name}",
-                "objective": f"Conduct reconnaissance around the outskirts for {faction_name}.",
+                "objective": f"Conduct reconnaissance around the outskirts near {field_prose} for {faction_name}.",
                 "client_npc": f"{faction_name} Vanguard",
                 "client_location": loc,
                 "reward_xp": 120,
@@ -1350,7 +1375,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 "reward_item": "Faction Commendation",
                 "faction_rep_reward": 10,
                 "waypoints": [
-                    {"stage_index": 1, "stage_label": f"Report to {faction_name} Vanguard", "target_location": loc, "completion_trigger": "arrival"}
+                    {"stage_index": 1, "stage_label": f"Patrol the perimeter at {field_short}", "target_location": target_field_loc, "completion_trigger": "arrival"}
                 ]
             },
             {
@@ -1371,7 +1396,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             {
                 "quest_type": "Faction Subterfuge",
                 "title": f"Intelligence Gathering for {faction_name}",
-                "objective": f"Investigate rival movements near {loc_prose}.",
+                "objective": f"Investigate rival movements near {field_prose}.",
                 "client_npc": f"{faction_name} Spymaster",
                 "client_location": loc,
                 "reward_xp": 150,
@@ -1379,7 +1404,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 "reward_item": "Ciphered Scroll",
                 "faction_rep_reward": 15,
                 "waypoints": [
-                    {"stage_index": 1, "stage_label": f"Scout area near {loc_short}", "target_location": loc, "completion_trigger": "arrival"}
+                    {"stage_index": 1, "stage_label": f"Scout area near {field_short}", "target_location": target_field_loc, "completion_trigger": "arrival"}
                 ]
             }
         ]
@@ -1908,16 +1933,20 @@ def replenish_daily_bounties_deterministic(
 
     # 3. Deterministic Templates if still < 3
     from mechanics.world.locations import get_discovered_primary_locations
+    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
     zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
     discovered_locs = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
-    alt_locs = [dl for dl in discovered_locs if dl.strip().lower() != cur_loc.strip().lower()]
-    sec_loc = alt_locs[0] if alt_locs else cur_loc
+    alt_locs = [dl for dl in discovered_locs if dl.strip().lower() != cur_loc.strip().lower() and not is_safe_sanctuary_location(dl)]
+    default_field_loc = "Metropolitan Grid ➔ Civic Plaza" if scenario_data.is_anomalous_incursions_scenario(scen_key) else "Town Outskirts ➔ Wilderness Perimeter"
+    sec_loc = alt_locs[0] if alt_locs else (cur_loc if not is_safe_sanctuary_location(cur_loc) else default_field_loc)
     ter_loc = alt_locs[1] if len(alt_locs) >= 2 else sec_loc
 
     if scenario_data.is_anomalous_incursions_scenario(scen_key):
         from mechanics.narrative.blueprints import get_blueprint_for_archetype
         anom_loc_pool = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
-        anom_alt = [dl for dl in anom_loc_pool if dl.strip().lower() != cur_loc.strip().lower()] or alt_locs or [cur_loc]
+        anom_loc_pool = [c for c in anom_loc_pool if not is_safe_sanctuary_location(c)]
+        anom_fallback_loc = "Metropolitan Grid ➔ Civic Plaza" if is_safe_sanctuary_location(cur_loc) else cur_loc
+        anom_alt = [dl for dl in anom_loc_pool if dl.strip().lower() != cur_loc.strip().lower() and not is_safe_sanctuary_location(dl)] or alt_locs or [anom_fallback_loc]
         anom_cands = _build_anomalous_fallback_bounties(
             session_id=session_id,
             board_key="freelance_app",

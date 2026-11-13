@@ -163,6 +163,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     player_scandal_cooldown_until_day INTEGER DEFAULT 0,
     recent_witness_catches_json TEXT DEFAULT '[]',
     npc_gossip_shared_today_json TEXT DEFAULT '{}',
+    combat_threat_ledger_json TEXT NOT NULL DEFAULT '{}',
+    combat_boss_telegraph_json TEXT NOT NULL DEFAULT '{}',
     turn_count INTEGER NOT NULL DEFAULT 0,
     last_digested_turn INTEGER NOT NULL DEFAULT 0
 );
@@ -2102,6 +2104,17 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+SCHEMA_MIGRATIONS.append(
+    (
+        53,
+        "combat_evolution_phase3_v53",
+        [
+            "ALTER TABLE sessions ADD COLUMN combat_threat_ledger_json TEXT NOT NULL DEFAULT '{}'",
+            "ALTER TABLE sessions ADD COLUMN combat_boss_telegraph_json TEXT NOT NULL DEFAULT '{}'",
+        ],
+    )
+)
+
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
     """Executes pending versioned schema migrations deterministically and records applied versions."""
@@ -2206,6 +2219,11 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
             _migrate_main_quest_bounty_overhaul_v51(conn)
         except Exception as e:
             print(f"[migration 51] Warning: main quest & bounty overhaul backfill encountered: {e}")
+    if 53 in newly_applied:
+        try:
+            _migrate_combat_evolution_v53(conn)
+        except Exception as e:
+            print(f"[migration 53] Warning: combat evolution phase 3 backfill encountered: {e}")
 
     try:
         _strip_legacy_session_fk_constraints(conn)
@@ -2251,6 +2269,157 @@ def _migrate_main_quest_bounty_overhaul_v51(conn: sqlite3.Connection) -> int:
              AND (LOWER(quest_type) IN ('story quest', 'main quest') OR quest_id LIKE 'SQ-%')"""
     )
     return added
+
+
+def _migrate_combat_evolution_v53(conn: sqlite3.Connection) -> int:
+    """Idempotently normalizes status effects across characters, sessions, contacts,
+    and adventure saves to StatusEffectInstance schemas, and ensures combat threat
+    and telegraph columns are initialized."""
+    import json
+    from mechanics.combat.status_effects import normalize_status_effect
+
+    count = 0
+
+    # 1. Characters: normalize status_effects JSON
+    try:
+        char_rows = conn.execute("SELECT id, status_effects FROM characters").fetchall()
+        for r in char_rows:
+            cid = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+            raw_eff = r["status_effects"] if isinstance(r, sqlite3.Row) else r[1]
+            if not raw_eff:
+                continue
+            try:
+                parsed = json.loads(raw_eff) if isinstance(raw_eff, str) else raw_eff
+                if isinstance(parsed, list) and any(isinstance(x, str) for x in parsed):
+                    norm = [normalize_status_effect(x) for x in parsed]
+                    conn.execute("UPDATE characters SET status_effects = ? WHERE id = ?", (json.dumps(norm), cid))
+                    count += 1
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[migration 53] Warning normalizing characters: {e}")
+
+    # 2. Sessions: normalize enemies and companions
+    try:
+        sess_rows = conn.execute(
+            "SELECT id, nearby_enemies_json, party_npcs_json, temporary_companions_json FROM sessions"
+        ).fetchall()
+        for r in sess_rows:
+            sid = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+            enemies_raw = r["nearby_enemies_json"] if isinstance(r, sqlite3.Row) else r[1]
+            party_raw = r["party_npcs_json"] if isinstance(r, sqlite3.Row) else r[2]
+            temp_raw = r["temporary_companions_json"] if isinstance(r, sqlite3.Row) else r[3]
+
+            updated_fields = {}
+            for col_name, raw_val in [
+                ("nearby_enemies_json", enemies_raw),
+                ("party_npcs_json", party_raw),
+                ("temporary_companions_json", temp_raw),
+            ]:
+                if not raw_val:
+                    continue
+                try:
+                    entities = json.loads(raw_val) if isinstance(raw_val, str) else raw_val
+                    if isinstance(entities, list):
+                        changed = False
+                        for entity in entities:
+                            if isinstance(entity, dict) and "status_effects" in entity:
+                                cur = entity["status_effects"]
+                                if isinstance(cur, list) and any(isinstance(x, str) for x in cur):
+                                    entity["status_effects"] = [normalize_status_effect(x) for x in cur]
+                                    changed = True
+                        if changed:
+                            updated_fields[col_name] = json.dumps(entities)
+                except Exception:
+                    pass
+
+            if updated_fields:
+                sets = ", ".join(f"{k} = ?" for k in updated_fields.keys())
+                conn.execute(f"UPDATE sessions SET {sets} WHERE id = ?", (*updated_fields.values(), sid))
+                count += 1
+    except Exception as e:
+        print(f"[migration 53] Warning normalizing sessions: {e}")
+
+    # 3. Contacts: normalize basic_info_json['status_effects']
+    try:
+        contact_rows = conn.execute("SELECT id, basic_info_json FROM contacts").fetchall()
+        for r in contact_rows:
+            cid = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+            raw_b = r["basic_info_json"] if isinstance(r, sqlite3.Row) else r[1]
+            if not raw_b:
+                continue
+            try:
+                b_info = json.loads(raw_b) if isinstance(raw_b, str) else raw_b
+                if isinstance(b_info, dict) and "status_effects" in b_info:
+                    effs = b_info["status_effects"]
+                    if isinstance(effs, list) and any(isinstance(x, str) for x in effs):
+                        b_info["status_effects"] = [normalize_status_effect(x) for x in effs]
+                        conn.execute("UPDATE contacts SET basic_info_json = ? WHERE id = ?", (json.dumps(b_info), cid))
+                        count += 1
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[migration 53] Warning normalizing contacts: {e}")
+
+    # 4. Adventure saves: normalize snapshot_data JSON
+    try:
+        has_saves = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='adventure_saves'").fetchone()
+        if has_saves:
+            save_rows = conn.execute("SELECT id, snapshot_data FROM adventure_saves").fetchall()
+            for r in save_rows:
+                sv_id = r["id"] if isinstance(r, sqlite3.Row) else r[0]
+                snap_str = r["snapshot_data"] if isinstance(r, sqlite3.Row) else r[1]
+                if not snap_str:
+                    continue
+                try:
+                    snap = json.loads(snap_str) if isinstance(snap_str, str) else snap_str
+                    if isinstance(snap, dict):
+                        changed = False
+                        # Normalize characters in snapshot (supports list under "characters" or dict under "character_state")
+                        char_containers = []
+                        if isinstance(snap.get("characters"), list):
+                            char_containers.extend(snap["characters"])
+                        if isinstance(snap.get("character_state"), dict):
+                            char_containers.extend(snap["character_state"].values())
+                        for ch in char_containers:
+                            if isinstance(ch, dict) and "status_effects" in ch:
+                                cur = ch["status_effects"]
+                                if isinstance(cur, list) and any(isinstance(x, str) for x in cur):
+                                    ch["status_effects"] = [normalize_status_effect(x) for x in cur]
+                                    changed = True
+                        # Normalize session in snapshot
+                        sess = snap.get("session")
+                        if isinstance(sess, dict):
+                            if "combat_threat_ledger_json" not in sess:
+                                sess["combat_threat_ledger_json"] = "{}"
+                                changed = True
+                            if "combat_boss_telegraph_json" not in sess:
+                                sess["combat_boss_telegraph_json"] = "{}"
+                                changed = True
+                            for k in ("nearby_enemies_json", "party_npcs_json", "temporary_companions_json"):
+                                if k in sess:
+                                    raw_ent = sess[k]
+                                    ents = json.loads(raw_ent) if isinstance(raw_ent, str) else raw_ent
+                                    if isinstance(ents, list):
+                                        sub_changed = False
+                                        for ent in ents:
+                                            if isinstance(ent, dict) and "status_effects" in ent:
+                                                cur = ent["status_effects"]
+                                                if isinstance(cur, list) and any(isinstance(x, str) for x in cur):
+                                                    ent["status_effects"] = [normalize_status_effect(x) for x in cur]
+                                                    sub_changed = True
+                                        if sub_changed:
+                                            sess[k] = json.dumps(ents)
+                                            changed = True
+                        if changed:
+                            conn.execute("UPDATE adventure_saves SET snapshot_data = ? WHERE id = ?", (json.dumps(snap), sv_id))
+                            count += 1
+                except Exception:
+                    pass
+    except Exception as e:
+        print(f"[migration 53] Warning normalizing adventure_saves: {e}")
+
+    return count
 
 
 def _backfill_session_anomaly_records_v45(conn: sqlite3.Connection) -> None:
@@ -3321,12 +3490,19 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 if existing.get(field) in (None, "") and entry.get(field) not in (None, ""):
                     existing[field] = entry[field]
 
-            # Merge status_effects: union without duplicates
-            existing_se = set(existing.get("status_effects") or [])
+            # Merge status_effects: union without duplicates (handles dict or str)
+            existing_se_names = {
+                (x["name"].lower() if isinstance(x, dict) else str(x).split("[")[0].strip().lower())
+                for x in (existing.get("status_effects") or [])
+                if x
+            }
             for se in (entry.get("status_effects") or []):
-                if se not in existing_se:
+                if not se:
+                    continue
+                se_name = se["name"].lower() if isinstance(se, dict) else str(se).split("[")[0].strip().lower()
+                if se_name not in existing_se_names:
                     existing.setdefault("status_effects", []).append(se)
-                    existing_se.add(se)
+                    existing_se_names.add(se_name)
         else:
             seen[key] = len(deduped)
             deduped.append(entry)

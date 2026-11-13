@@ -7,7 +7,7 @@ from db import adb
 import game_engine
 from services.turn_service import TurnService
 from .embeds import *
-from .views.choices import ChoiceView, SyncChoiceView
+from .views.choices import ChoiceView, SyncChoiceView, GameOverView
 from .embeds import _apply_merchant_encounter_result, _format_items_gained, _format_items_gained_multi, _is_dialogue_partner, _safe_int, _get_choice_skill_emoji
 from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
 import logging
@@ -145,7 +145,8 @@ class GameLoopMixin:
                             if loot_text:
                                 embed.add_field(name="🎒 Loot", value=loot_text, inline=False)
                             await adb(db.finish_session, session_id)
-                            await self._safe_send(interaction, embed=embed)
+                            view = GameOverView(self, session_id, user_id)
+                            await self._safe_send(interaction, embed=embed, view=view)
                             return
 
                     outcome_embeds = build_outcome_embeds(
@@ -304,7 +305,8 @@ class GameLoopMixin:
                                                color=discord.Color.red())
                         embed.add_field(name="Results", value="\n\n".join(summaries))
                         await adb(db.finish_session, session_id)
-                        await self._safe_send(interaction, embed=embed)
+                        view = GameOverView(self, session_id, uid)
+                        await self._safe_send(interaction, embed=embed, view=view)
                         return
                 
                     outcome_embeds = build_outcome_embeds(
@@ -433,9 +435,10 @@ class GameLoopMixin:
             except Exception:
                 pick_to_store = pick
 
-            await adb(db.set_pending_pick, session_id, user_id, pick_to_store)
-            session = await adb(db.get_session, session_id)
-            waiting_on = [uid for uid in member_ids if str(uid) not in session["pending_picks"]]
+            async with distributed_session_lock(session_id):
+                await adb(db.set_pending_pick, session_id, user_id, pick_to_store)
+                session = await adb(db.get_session, session_id)
+                waiting_on = [uid for uid in member_ids if str(uid) not in session["pending_picks"]]
 
             if waiting_on:
                 mentions = ", ".join(f"<@{uid}>" for uid in waiting_on)
@@ -541,7 +544,8 @@ class GameLoopMixin:
                         if loot_text:
                             embed.add_field(name="🎒 Loot", value=loot_text, inline=False)
                         await adb(db.finish_session, session_id)
-                        await self._safe_send(interaction, embed=embed)
+                        view = GameOverView(self, session_id, member_ids[0] if member_ids else 0)
+                        await self._safe_send(interaction, embed=embed, view=view)
                         return
 
                     # Dominant tier = worst individual result (drives embed colour)

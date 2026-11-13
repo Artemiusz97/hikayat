@@ -215,6 +215,50 @@ def get_session_quest_dossiers(
         return _run(c)
 
 
+def get_prewarmed_quest_dossier(
+    session_id: int,
+    chapter: int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    def _run(c: sqlite3.Connection) -> dict | None:
+        rows = c.execute(
+            "SELECT * FROM quest_dossiers WHERE session_id = ? AND status_stage = 'prewarmed' ORDER BY id DESC",
+            (session_id,),
+        ).fetchall()
+        for r in rows:
+            dos = _enrich_dossier_dict(r)
+            if dos and int(dos.get("chapter") or (dos.get("climax_spec") or {}).get("chapter") or 0) == chapter:
+                return dos
+        return None
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
+
+
+def promote_prewarmed_dossier(
+    session_id: int,
+    quest_id: str,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict | None:
+    def _run(c: sqlite3.Connection) -> dict | None:
+        c.execute(
+            "UPDATE quest_dossiers SET status_stage = 'compiled', updated_at = ? WHERE session_id = ? AND quest_id = ?",
+            (time.time(), session_id, quest_id),
+        )
+        row = c.execute(
+            "SELECT * FROM quest_dossiers WHERE session_id = ? AND quest_id = ?",
+            (session_id, quest_id),
+        ).fetchone()
+        return _enrich_dossier_dict(row)
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
+
+
 def upsert_quest_dossier(
     session_id: int,
     quest_id_or_dict: str | dict = "",
@@ -473,6 +517,14 @@ def rollback_quest_dossiers_after_turn(
                     twist_spec = dict(d["twist_spec"] or {})
                     climax_spec = dict(d["climax_spec"] or {})
                     tangible_item = dict(d["tangible_item"] or {})
+                    raw_cg_r = d.get("clue_graph")
+                    if isinstance(raw_cg_r, dict):
+                        cg_items_r = raw_cg_r.get("nodes") if isinstance(raw_cg_r.get("nodes"), (list, tuple)) else list(raw_cg_r.values())
+                        clue_graph = [n for n in cg_items_r if isinstance(n, dict)]
+                    elif isinstance(raw_cg_r, (list, tuple)):
+                        clue_graph = list(raw_cg_r)
+                    else:
+                        clue_graph = []
                     outcome_tier = str(d.get("outcome_tier") or "")
 
                     for ev in reversed(future_events):
@@ -488,6 +540,8 @@ def rollback_quest_dossiers_after_turn(
                             burned_approaches = dict(prev_val or {})
                         elif k == "leads_graph":
                             leads_graph = list(prev_val or [])
+                        elif k == "clue_graph":
+                            clue_graph = list(prev_val or [])
                         elif k == "twist_spec":
                             twist_spec = dict(prev_val or {})
                         elif k == "climax_spec":
@@ -506,7 +560,8 @@ def rollback_quest_dossiers_after_turn(
                         """UPDATE quest_dossiers
                            SET alert_level = ?, rescue_shield_used = ?, engaged_flag = ?,
                                burned_approaches_json = ?, leads_graph_json = ?, twist_spec_json = ?,
-                               climax_spec_json = ?, tangible_item_json = ?, outcome_tier = ?, state_events_json = ?, updated_at = ?
+                               climax_spec_json = ?, tangible_item_json = ?, clue_graph_json = ?,
+                               outcome_tier = ?, state_events_json = ?, updated_at = ?
                            WHERE session_id = ? AND quest_id = ?""",
                         (
                             alert_level,
@@ -517,6 +572,7 @@ def rollback_quest_dossiers_after_turn(
                             json.dumps(twist_spec),
                             json.dumps(climax_spec),
                             json.dumps(tangible_item),
+                            json.dumps(clue_graph),
                             outcome_tier,
                             json.dumps(surviving_events),
                             now,

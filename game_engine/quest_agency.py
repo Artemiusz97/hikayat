@@ -13,9 +13,31 @@ from game_engine.quest_lifecycle import (
 )
 from mechanics.narrative.campaign_spine import update_campaign_ending_axes
 from mechanics.narrative.clues import evaluate_clue_deduction
+from mechanics.narrative.dossier_compiler import format_venue_display
 from mechanics.narrative.quest_engines import render_world_scar_spec
+from mechanics.narrative.threat_clock import (
+    get_threat_clock_view,
+    get_threat_threshold_text,
+)
 from mechanics.world.locations.access_gate import get_node_effective_access_info
 from mechanics.world.world_events.engine import spawn_quest_world_scar
+
+
+def _safe_int_eq(val_a: Any, val_b: Any) -> bool:
+    try:
+        return val_a is not None and val_b is not None and int(val_a) == int(val_b)
+    except (ValueError, TypeError):
+        return False
+
+
+def _normalize_clue_graph_list(raw_cg: Any) -> List[Dict[str, Any]]:
+    if isinstance(raw_cg, dict):
+        items = raw_cg.get("nodes") if isinstance(raw_cg.get("nodes"), (list, tuple)) else list(raw_cg.values())
+    elif isinstance(raw_cg, (list, tuple)):
+        items = raw_cg
+    else:
+        return []
+    return [n for n in items if isinstance(n, dict)]
 
 
 def _normalize_lead_target_key(waypoint_or_lead: Dict[str, Any]) -> str:
@@ -59,12 +81,12 @@ def resolve_caseboard_deduction(
                     uids_rec, str(bp_rec["codex_id"]), session_id=session_id
                 ):
                     dos_rec = db.get_quest_dossier(session_id, qid_rec)
-                    cg_rec = list((dos_rec or {}).get("clue_graph") or [])
+                    cg_rec = _normalize_clue_graph_list((dos_rec or {}).get("clue_graph"))
                     is_rh = any(
-                        (n.get("clue_id") and int(n["clue_id"]) == int(clue_a_id) and n.get("is_red_herring"))
+                        (n.get("clue_id") and _safe_int_eq(n["clue_id"], clue_a_id) and n.get("is_red_herring"))
                         for n in cg_rec
                     )
-                    if not is_rh and (not clue_b_id or int(clue_a_id) == int(clue_b_id)):
+                    if not is_rh and (not clue_b_id or _safe_int_eq(clue_a_id, clue_b_id)):
                         rev_rec = reveal_anomaly_dossier(session_id, quest_id=qid_rec)
                         bp_unm = rev_rec.get("blueprint") or bp_rec
                         canon_nm = str(bp_unm.get("canonical_name") or bp_unm.get("name") or "Known Folklore Entity")
@@ -133,15 +155,15 @@ def resolve_caseboard_deduction(
     )
 
     for dos in dossiers:
-        cg = list(dos.get("clue_graph") or [])
+        cg = _normalize_clue_graph_list(dos.get("clue_graph"))
         if not cg:
             continue
 
         def _match_node(clue_row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            cid_int = int(clue_row["id"])
+            raw_id = clue_row.get("id")
             c_title = str(clue_row.get("title") or "").strip().lower()
             for n in cg:
-                if n.get("clue_id") and int(n["clue_id"]) == cid_int:
+                if _safe_int_eq(n.get("clue_id"), raw_id):
                     return n
                 if str(n.get("title") or "").strip().lower() == c_title and c_title:
                     return n
@@ -158,18 +180,18 @@ def resolve_caseboard_deduction(
                     "detail_text": "Cross-referencing exposes one of these items as an uncorroborated plant. Genuine leads remain unconsumed.",
                     "xp_awarded": 0,
                 }
-            def _nodes_paired(na: Dict[str, Any], nb: Dict[str, Any], other_cid: int) -> bool:
-                pw_raw = na.get("paired_with")
+            def _nodes_paired(na: Dict[str, Any], nb: Dict[str, Any], other_cid: Any) -> bool:
+                pw_raw = na.get("paired_with") if na.get("paired_with") is not None else na.get("pairs_with")
                 pw_list = pw_raw if isinstance(pw_raw, list) else ([pw_raw] if pw_raw is not None else [])
                 pw_strs = {str(x).strip() for x in pw_list if x is not None and str(x).strip()}
                 cand_strs = {
                     str(nb.get("clue_key") or "").strip(),
                     str(nb.get("clue_id") or "").strip(),
-                    str(other_cid).strip(),
+                    str(other_cid or "").strip(),
                 } - {""}
                 return bool(pw_strs & cand_strs)
 
-            if node_a and node_b and (_nodes_paired(node_a, node_b, int(clue_b_id)) or _nodes_paired(node_b, node_a, int(clue_a_id))):
+            if node_a and node_b and (_nodes_paired(node_a, node_b, clue_b_id) or _nodes_paired(node_b, node_a, clue_a_id)):
                 qid = str(dos["quest_id"])
                 prev_climax = dict(dos.get("climax_spec") or {})
                 prev_twist = dict(dos.get("twist_spec") or {})
@@ -177,6 +199,13 @@ def resolve_caseboard_deduction(
                 twist = dict(prev_twist)
                 if node_a.get("unlocks_climax") or node_b.get("unlocks_climax"):
                     climax["is_unlocked"] = True
+                    m_stages = list(climax.get("main_stages") or [])
+                    for st_item in m_stages[:-1]:
+                        if isinstance(st_item, dict) and st_item.get("status") not in ("completed", "bypassed"):
+                            st_item["status"] = "bypassed"
+                    if m_stages and isinstance(m_stages[-1], dict):
+                        m_stages[-1]["status"] = "active"
+                    climax["main_stages"] = m_stages
                     db.unlock_climax_waypoint(
                         session_id,
                         qid,
@@ -191,7 +220,12 @@ def resolve_caseboard_deduction(
                     db.append_dossier_state_event(session_id, qid, eff_turn, "climax_spec", prev_climax, climax)
                 if twist != prev_twist:
                     db.append_dossier_state_event(session_id, qid, eff_turn, "twist_spec", prev_twist, twist)
-                db.upsert_quest_dossier(session_id, qid, climax_spec=climax, twist_spec=twist, engaged_flag=1)
+                saved_dos = db.upsert_quest_dossier(session_id, qid, climax_spec=climax, twist_spec=twist, engaged_flag=1)
+                if saved_dos:
+                    try:
+                        db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved_dos)
+                    except Exception:
+                        pass
                 unlocked_opts = []
                 try:
                     from game_engine.quest_turn_resolver import unlock_hidden_quest_optional
@@ -316,6 +350,65 @@ def resolve_suspect_accusation(
         new_alert = min(max_alert, prev_alert + 1)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "alert_level", prev_alert, new_alert)
         db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, alert_level=new_alert)
+
+        if new_alert >= max_alert:
+            is_story = bool(q.get("is_story_quest"))
+            uids = [int(user_id)] if user_id else (db.get_session_members(session_id) or [])
+            if not is_story:
+                fail_res = apply_quest_failure_consequences(
+                    session_id, q, uids, reason="alert_peaked_wrong_accusations", session=sess
+                )
+                venue = str(climax.get("location") or sess.get("current_location") or "Underground Den")
+                scar_ev = spawn_quest_world_scar(
+                    session_id=session_id,
+                    source_quest_id=quest_id,
+                    scar_spec=render_world_scar_spec(
+                        engine=str(dossier.get("engine") or "SOCIAL_BROKERAGE"), venue_name=venue
+                    ),
+                    location_name=venue,
+                    turn_number=eff_turn,
+                )
+                db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", "Active", "Failed")
+                db.append_dossier_state_event(
+                    session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "failure"
+                )
+                db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier="failure")
+                return {
+                    "success": True,
+                    "correct": False,
+                    "mode": "private",
+                    "quest_status": "Failed",
+                    "outcome_tier": "failure",
+                    "alert_level": new_alert,
+                    "max_alert": max_alert,
+                    "rapport_delta": -5,
+                    "world_scar": scar_ev,
+                    "failure_details": fail_res,
+                    "message": (
+                        f"{accused_clean} angrily denies the private accusation (-5 Rapport). Alert has peaked "
+                        f"({new_alert}/{max_alert})! The true culprit was tipped off and fled the district—investigation collapsed!"
+                    ),
+                }
+            else:
+                db.append_dossier_state_event(
+                    session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "pyrrhic"
+                )
+                db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier="pyrrhic")
+                return {
+                    "success": True,
+                    "correct": False,
+                    "mode": "private",
+                    "quest_status": "Active",
+                    "outcome_tier": "pyrrhic",
+                    "alert_level": new_alert,
+                    "max_alert": max_alert,
+                    "rapport_delta": -5,
+                    "message": (
+                        f"{accused_clean} denies the accusation (-5 Rapport). Alert has peaked ({new_alert}/{max_alert})! "
+                        f"The culprit has heavily fortified their position—the confrontation will be perilous!"
+                    ),
+                }
+
         return {
             "success": True,
             "correct": False,
@@ -426,9 +519,13 @@ def resolve_quest_turn_in_or_betrayal(
     disp = str(disposition or "deliver").strip().lower()
 
     if disp == "deliver":
-        if t_rules.get("mode") == "direct_client" and current_location:
+        eff_loc = (current_location or str(sess.get("current_location") or "")).strip()
+        if t_rules.get("mode") == "direct_client" and eff_loc:
             req_loc = str(q.get("client_location") or "").strip()
-            if req_loc and req_loc.lower() not in current_location.strip().lower() and current_location.strip().lower() not in req_loc.lower():
+            sess_npcs = [str(x).strip().lower() for x in (sess.get("current_npcs") or []) if x]
+            client_norm = client_npc.strip().lower() if client_npc else ""
+            client_present = bool(client_norm and any(client_norm in x or x in client_norm for x in sess_npcs))
+            if not client_present and req_loc and req_loc.lower() not in eff_loc.lower() and eff_loc.lower() not in req_loc.lower():
                 return {
                     "success": False,
                     "status_code": 400,
@@ -831,6 +928,7 @@ def redact_quest_for_fog_of_war(
                     st_c["text"] = st_c["stage_label"]
                     st_c["target_location"] = "Hidden Lair"
                     st_c["target_npc"] = ""
+                    st_c["clue_sources"] = []
                 else:
                     st_c["stage_label"] = sanitize_dossier_prose(str(st_c.get("stage_label") or st_c.get("text") or ""))
                     st_c["text"] = st_c["stage_label"]
@@ -880,6 +978,7 @@ def build_fog_of_war_quest_payload(
     quest: Dict[str, Any],
     dossier: Optional[Dict[str, Any]] = None,
     reveal_all: bool = False,
+    session: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Progressive Fog-of-War Serializer (Decision 10):
@@ -997,28 +1096,74 @@ def build_fog_of_war_quest_payload(
     main_objective: Optional[Dict[str, Any]] = None
     if has_structured:
         raw_main_stages = list(climax.get("main_stages") or [])
+        wp_status_by_idx = {}
+        if session_id:
+            try:
+                for wp_row in (db.get_quest_waypoints(session_id, qid, sub_obj_id=0) or []):
+                    wp_status_by_idx[int(wp_row.get("stage_index") or 1)] = str(wp_row.get("status") or "").lower()
+            except Exception:
+                pass
+
         fow_main_stages: List[Dict[str, Any]] = []
         for idx_ms, ms in enumerate(raw_main_stages):
+            st_idx = int(ms.get("stage_index", idx_ms + 1) or (idx_ms + 1))
+            live_wp_stat = wp_status_by_idx.get(st_idx)
             is_secret_climax = bool(ms.get("is_climax_stage") and not climax_unlocked and not reveal_all)
             ms_stat = str(ms.get("status") or "locked")
+            if live_wp_stat in ("completed", "bypassed"):
+                ms_stat = live_wp_stat
+            elif live_wp_stat == "active" and ms_stat == "locked" and (not is_secret_climax or climax_unlocked):
+                ms_stat = "active"
             ms_done = ms_stat.lower() in ("completed", "bypassed") or bool(ms.get("completed"))
             ms_lbl = (
                 "Uncover leads or Caseboard clues to expose the final confrontation"
                 if is_secret_climax
                 else sanitize_dossier_prose(str(ms.get("stage_label") or ms.get("label") or ""))
             )
-            fow_main_stages.append(
-                {
-                    "stage_index": int(ms.get("stage_index", idx_ms + 1) or (idx_ms + 1)),
-                    "stage_label": ms_lbl,
-                    "text": ms_lbl,
-                    "target_location": "Hidden Lair" if is_secret_climax else str(ms.get("target_location") or ""),
-                    "target_npc": "" if is_secret_climax else str(ms.get("target_npc") or ""),
-                    "status": ms_stat,
-                    "completed": ms_done,
-                    "bypassed": ms_stat.lower() == "bypassed",
-                }
-            )
+            sanitized_sources: List[Dict[str, Any]] = []
+            if not is_secret_climax and (ms_stat.lower() == "active" or ms_done or reveal_all):
+                for raw_src in (ms.get("clue_sources") or []):
+                    if not isinstance(raw_src, dict):
+                        continue
+                    src_stat = str(raw_src.get("status") or "open").lower()
+                    is_bonus = bool(raw_src.get("bonus"))
+                    if ms_done and not reveal_all and src_stat != "claimed" and not is_bonus:
+                        continue
+                    src_loc = str(raw_src.get("location") or "").strip()
+                    loc_disp = (
+                        format_venue_display(src_loc, style="badge")
+                        if src_loc and src_loc != "Hidden Lair"
+                        else src_loc
+                    )
+                    sanitized_sources.append(
+                        {
+                            "source_id": str(raw_src.get("source_id") or ""),
+                            "kind": str(raw_src.get("kind") or "item"),
+                            "location": src_loc,
+                            "location_display": loc_disp,
+                            "npc": str(raw_src.get("npc") or ""),
+                            "label": sanitize_dossier_prose(str(raw_src.get("label") or "")),
+                            "approach_hint": sanitize_dossier_prose(str(raw_src.get("approach_hint") or "")),
+                            "stat": str(raw_src.get("stat") or ""),
+                            "status": src_stat,
+                            "bonus": is_bonus,
+                        }
+                    )
+            stage_payload: Dict[str, Any] = {
+                "stage_index": int(ms.get("stage_index", idx_ms + 1) or (idx_ms + 1)),
+                "stage_label": ms_lbl,
+                "text": ms_lbl,
+                "target_location": "Hidden Lair" if is_secret_climax else str(ms.get("target_location") or ""),
+                "target_npc": "" if is_secret_climax else str(ms.get("target_npc") or ""),
+                "status": ms_stat,
+                "completed": ms_done,
+                "bypassed": ms_stat.lower() == "bypassed",
+                "completion_trigger": str(ms.get("completion_trigger") or "action"),
+                "clue_sources": sanitized_sources,
+            }
+            if (ms_done or reveal_all) and ms.get("key_clue"):
+                stage_payload["key_clue"] = sanitize_dossier_prose(str(ms.get("key_clue") or ""))
+            fow_main_stages.append(stage_payload)
         cur_stage_obj = next((s for s in fow_main_stages if not s["completed"]), fow_main_stages[-1] if fow_main_stages else None)
         all_main_done = bool(
             climax.get("completed")
@@ -1069,6 +1214,13 @@ def build_fog_of_war_quest_payload(
             if nm and (r_key == "client" or str(nm).strip().lower() in known_npcs) and nm not in suspect_pool:
                 suspect_pool.append(str(nm))
 
+    sess_for_tc = session if isinstance(session, dict) else ((db.get_session(session_id) or {}) if session_id else {})
+    lang_for_tc = (
+        str(sess_for_tc.get("narration_language") or sess_for_tc.get("language") or "en").strip().lower()
+        or "en"
+    )
+    threat_clock_view = get_threat_clock_view(dos, session=sess_for_tc, quest=quest, lang=lang_for_tc)
+
     return {
         "dossier_stage": "compiled",
         "has_structured_objectives": has_structured,
@@ -1078,6 +1230,7 @@ def build_fog_of_war_quest_payload(
         "danger_tier": int(dos.get("danger_tier") or 1),
         "alert_level": int(dos.get("alert_level") or 0),
         "max_alert": int(dos.get("max_alert") or 4),
+        "threat_clock": threat_clock_view,
         "engaged_flag": int(dos.get("engaged_flag") or 0),
         "rescue_shield_used": int(dos.get("rescue_shield_used") or 0),
         "outcome_tier": dos.get("outcome_tier") or "",
@@ -1151,19 +1304,39 @@ def build_fog_of_war_quest_prompt_block(
         if pacing:
             lines.append(f"[CAMPAIGN CHAPTER {cur_ch}{peak_tag} FOCUS]: {pacing}")
 
+    sess_obj = session if isinstance(session, dict) else ((db.get_session(session_id) or {}) if session_id else {})
+    lang_val = (
+        str(sess_obj.get("narration_language") or sess_obj.get("language") or "en").strip().lower()
+        or "en"
+    )
+
     for q in (db.get_session_quests(session_id, status="Active") or [])[:4]:
         dos = q.get("dossier")
         if not dos or dos.get("status_stage") != "compiled":
             continue
         if dos.get("engine") == "INTIMATE_LIAISON" and in_intimate_scene:
             continue
-        fow = build_fog_of_war_quest_payload(session_id, q, dossier=dos, reveal_all=False)
+        fow = build_fog_of_war_quest_payload(session_id, q, dossier=dos, reveal_all=False, session=sess_obj)
         if fow.get("has_structured_objectives") and fow.get("main_objective"):
             mo = fow["main_objective"]
-            cur_st_lbl = next(
-                (s["stage_label"] for s in (mo.get("stages") or []) if not s.get("completed")),
-                mo.get("title") or "Final resolution",
+            cur_st_obj = next((s for s in (mo.get("stages") or []) if not s.get("completed")), None)
+            cur_st_lbl = (
+                cur_st_obj.get("stage_label")
+                if isinstance(cur_st_obj, dict) and cur_st_obj.get("stage_label")
+                else (mo.get("title") or "Final resolution")
             )
+            open_src_hints: List[str] = []
+            if isinstance(cur_st_obj, dict):
+                for raw_src in (cur_st_obj.get("clue_sources") or []):
+                    if not isinstance(raw_src, dict) or str(raw_src.get("status") or "").lower() != "open":
+                        continue
+                    hint_txt = str(raw_src.get("approach_hint") or raw_src.get("label") or "").strip()
+                    prose_loc = format_venue_display(str(raw_src.get("location") or ""), style="prose")
+                    if hint_txt and prose_loc:
+                        open_src_hints.append(f"{hint_txt} ({prose_loc})")
+                    elif hint_txt:
+                        open_src_hints.append(hint_txt)
+            leads_part = f" | Open Clue Avenues: {'; '.join(open_src_hints[:3])}" if open_src_hints else ""
             disc_opts = [
                 f"{opt['title']} [{str(opt.get('role') or 'aid').upper()}]"
                 for opt in (fow.get("optional_objectives") or [])
@@ -1173,8 +1346,22 @@ def build_fog_of_war_quest_prompt_block(
             twist_note = f" | Uncovered Twist: {fow['twist']['summary']}" if (fow.get("twist") or {}).get("is_discovered") else ""
             lines.append(
                 f"- {sanitize_dossier_prose(q.get('title', 'Contract'))} "
-                f"(Main {mo.get('current_stage', 1)}/{mo.get('total_stages', 2)}: {cur_st_lbl}{opt_part}{twist_note})"
+                f"(Main {mo.get('current_stage', 1)}/{mo.get('total_stages', 2)}: {cur_st_lbl}{leads_part}{opt_part}{twist_note})"
             )
+            tc = fow.get("threat_clock")
+            if isinstance(tc, dict) and tc.get("enabled"):
+                filled = int(tc.get("filled") or 0)
+                max_seg = int(tc.get("max_segments") or 6)
+                if filled >= 2:
+                    hit_seg = 6 if filled >= 6 else (4 if filled >= 4 else 2)
+                    th_info = get_threat_threshold_text(hit_seg, lang_val)
+                    lines.append(
+                        f"  [THREAT CLOCK {filled}/{max_seg} — {th_info.get('title', '')}]: {th_info.get('directive', '')}"
+                    )
+                elif tc.get("engaged"):
+                    lines.append(
+                        f"  [THREAT CLOCK {filled}/{max_seg}: {tc.get('next_threshold_label', '')}]"
+                    )
         else:
             active_titles = [ld["title"] for ld in (fow.get("leads") or []) if ld.get("status") == "active"]
             lead_summary = "; ".join(active_titles[:2]) if active_titles else "Ready for final resolution"
@@ -1184,3 +1371,38 @@ def build_fog_of_war_quest_prompt_block(
             )
 
     return "\n".join(lines)
+
+
+def prune_completed_stage_choices(
+    choices: List[Dict[str, Any]],
+    waypoint_notices: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Prunes choices targeting waypoint stages marked completed in waypoint_notices."""
+    if not choices or not waypoint_notices:
+        return choices
+
+    completed_stages = set()
+    for wn in waypoint_notices:
+        if isinstance(wn, dict):
+            wq = str(wn.get("quest_id") or "")
+            raw_wso = wn.get("sub_obj_id")
+            wso = str(raw_wso) if raw_wso is not None else ""
+            wst = wn.get("stage_completed") if wn.get("stage_completed") is not None else wn.get("completed_stage_index")
+            if wst is not None:
+                completed_stages.add((wq, wso, int(wst)))
+
+    if not completed_stages:
+        return choices
+
+    pruned = []
+    for c in choices:
+        if isinstance(c, dict):
+            cq = str(c.get("quest_id") or "")
+            raw_cso = c.get("sub_obj_id")
+            cso = str(raw_cso) if raw_cso is not None else ""
+            cst = c.get("stage_index")
+            if cst is not None and (cq, cso, int(cst)) in completed_stages:
+                continue
+        pruned.append(c)
+    return pruned
+
