@@ -258,7 +258,29 @@
     "choose_campaign_fate": "Choose how this chronicle continues:",
     "epilogue_resistance": "Lead Fallen-World Resistance",
     "peak_scar": "Peak Scar",
-    "liberation_op": "Liberation Op"
+    "liberation_op": "Liberation Op",
+    "threat_clock": "Threat",
+    "threat_paused": "Paused (Climax)",
+    "threat_dormant": "Dormant until Chapter engaged",
+    "threat_next": "Next Threshold",
+    "threat_reinforced": "Reinforcements",
+    "threat_scar_pending": "Chapter Scar Risk",
+    "clue_sources": "Clue Avenues",
+    "source_open": "Open",
+    "source_burned": "Burned",
+    "source_cold": "Cold",
+    "source_claimed": "Claimed",
+    "source_bonus": "Bonus Lead"
+  },
+  "quest": {
+    "threat_clock": {
+      "consequences": {
+        "lead_cold": "Lead gone cold ({{param}})",
+        "threatened_lost": "Threatened objective lost: {{param}}",
+        "alert_up": "Opposition Alert +1 ({{param}})",
+        "reinforced": "Climax reinforced with enemy vanguard"
+      }
+    }
   },
   "codex": {
     "title": "World Codex",

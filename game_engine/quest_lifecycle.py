@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 import db
 from db import adb
 import llm_client
+import namegen
 import scenario_data
 import skill_check
 from mechanics.narrative.blueprints import get_max_campaign_chapters
@@ -81,6 +82,8 @@ def compile_campaign_spine_at_turn_zero(
         existing_dos = db.get_quest_dossier(session_id, sq_id)
         if not is_legacy_midchapter and (not existing_dos or existing_dos.get("status_stage") != "compiled"):
             ch1_bp = (spine.get("chapters_blueprint") or {}).get("1") or {}
+            feat_lt = ch1_bp.get("featured_lieutenant")
+            feat_lt_name = str(feat_lt.get("name") if isinstance(feat_lt, dict) else (feat_lt or ""))
             compile_quest_dossier(
                 session_id=session_id,
                 quest_id=sq_id,
@@ -90,6 +93,7 @@ def compile_campaign_spine_at_turn_zero(
                 family_tier="story",
                 chapter=int(db.get_session_chapter(session_id) or 1),
                 turn_number=0,
+                target_npc=feat_lt_name,
                 reward_gold=int(active_sq.get("reward_gold") or 70),
                 scen_key=eff_scen,
                 lang=eff_lang,
@@ -102,21 +106,29 @@ def seed_or_discover_dossier_clue(
     quest_id: str,
     clue_index: int = 0,
     source_location: str = "",
+    conn: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Materializes a predetermined clue from `dossier.clue_graph` into `session_clues`
     and records its integer `clue_id` back into `clue_graph` for deterministic pairing.
     """
-    dossier = db.get_quest_dossier(session_id, quest_id)
+    dossier = db.get_quest_dossier(session_id, quest_id, conn=conn)
     if not dossier:
         return None
-    clue_graph = list(dossier.get("clue_graph") or [])
+    raw_cg = dossier.get("clue_graph")
+    if isinstance(raw_cg, dict):
+        cg_items = raw_cg.get("nodes") if isinstance(raw_cg.get("nodes"), (list, tuple)) else list(raw_cg.values())
+    elif isinstance(raw_cg, (list, tuple)):
+        cg_items = raw_cg
+    else:
+        cg_items = []
+    clue_graph = [n for n in cg_items if isinstance(n, dict)]
     if not clue_graph or clue_index < 0 or clue_index >= len(clue_graph):
         return None
 
     node = dict(clue_graph[clue_index])
     if node.get("clue_id"):
-        existing_c = db.get_session_clue_by_id(int(node["clue_id"]))
+        existing_c = db.get_session_clue_by_id(int(node["clue_id"]), conn=conn)
         if existing_c:
             return existing_c
 
@@ -139,11 +151,12 @@ def seed_or_discover_dossier_clue(
         linked_npc=suspect_name,
         quest_id=quest_id,
         chapter=cur_ch,
+        conn=conn,
     )
     node["clue_id"] = int(clue_id)
     clue_graph[clue_index] = node
-    db.upsert_quest_dossier(session_id, quest_id, clue_graph=clue_graph)
-    return db.get_session_clue_by_id(int(clue_id))
+    db.upsert_quest_dossier(session_id, quest_id, clue_graph=clue_graph, conn=conn)
+    return db.get_session_clue_by_id(int(clue_id), conn=conn)
 
 
 def sync_waypoints_from_dossier(
@@ -164,7 +177,9 @@ def sync_waypoints_from_dossier(
         return db.get_quest_waypoints(session_id, quest_id, sub_obj_id=None) or []
 
     existing_wps = db.get_quest_waypoints(session_id, quest_id, sub_obj_id=None) or []
-    if existing_wps and not force_replace and len(existing_wps) >= 2:
+    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
+    has_sanctuary_wp = any(is_safe_sanctuary_location(w.get("target_location", "")) for w in existing_wps)
+    if existing_wps and not force_replace and len(existing_wps) >= 2 and not has_sanctuary_wp:
         return existing_wps
 
     climax_loc = str(climax.get("location") or "Central District")
@@ -211,6 +226,385 @@ def sync_waypoints_from_dossier(
 
     db.save_quest_waypoints(session_id, quest_id, waypoints, sub_obj_id=None)
     return db.get_quest_waypoints(session_id, quest_id, sub_obj_id=None) or waypoints
+
+
+def sync_dossier_main_stage_advance(
+    session_id: int,
+    quest_id: str,
+    completed_stage_idx: int,
+    cur_loc: str = "",
+    conn: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Atomically resolves Main Stage completion, unlocks Secret Climax (D2),
+    materializes non-duplicate clue nodes, and projects into quests/waypoints."""
+    def _run(c: Any) -> Dict[str, Any]:
+        dos = db.get_quest_dossier(session_id, quest_id, conn=c)
+        if not dos:
+            return {}
+
+        climax = dict(dos.get("climax_spec") or {})
+        main_stages = [dict(s) for s in (climax.get("main_stages") or [])]
+        if not main_stages:
+            return {}
+
+        gate_type = str(climax.get("gate_type") or climax.get("gate_mode") or "open").lower()
+        tot_stages = len(main_stages)
+        target_ms = next((m for m in main_stages if int(m.get("stage_index") or 1) == completed_stage_idx), None)
+        newly_completed = bool(
+            target_ms
+            and not bool(target_ms.get("completed"))
+            and str(target_ms.get("status") or "").lower() not in ("completed", "bypassed")
+            and not bool(target_ms.get("is_climax_stage"))
+        )
+
+        # D2 Dual-Path: Unlock Climax BEFORE setting next stage status
+        climax_unlocked = False
+        if completed_stage_idx >= tot_stages - 1 and gate_type == "secret":
+            climax["is_unlocked"] = True
+            climax["secret_lair_locked"] = False
+            climax_unlocked = True
+            db.unlock_climax_waypoint(
+                session_id, quest_id,
+                str(climax.get("location") or ""),
+                str(climax.get("true_culprit") or ""),
+                conn=c,
+            )
+
+        # Advance stages
+        for s in main_stages:
+            st_idx = int(s.get("stage_index") or 1)
+            if st_idx <= completed_stage_idx:
+                s["status"] = "completed"
+                s["completed"] = True
+            elif st_idx == completed_stage_idx + 1:
+                is_climax = bool(s.get("is_climax_stage") or st_idx == tot_stages)
+                if not is_climax or gate_type != "secret" or bool(climax.get("is_unlocked")):
+                    s["status"] = "active"
+                    s["completed"] = False
+                else:
+                    s["status"] = "locked"
+            else:
+                if not s.get("completed"):
+                    s["status"] = "locked"
+
+        climax["main_stages"] = main_stages
+
+        # Materialize clue for the completed stage without duplicate add_session_clue spam
+        if completed_stage_idx >= 1:
+            seed_or_discover_dossier_clue(session_id, quest_id, clue_index=completed_stage_idx - 1, source_location=cur_loc, conn=c)
+
+        saved = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, conn=c)
+        if newly_completed and completed_stage_idx >= 1:
+            try:
+                from mechanics.narrative.threat_clock import decrement_threat_clock
+                eff_t = int(db.get_effective_session_turn(session_id))
+                decrement_threat_clock(session_id, quest_id, delta=1, turn_number=eff_t, conn=c)
+                saved = db.get_quest_dossier(session_id, quest_id, conn=c) or saved
+            except Exception:
+                pass
+        if saved:
+            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved, conn=c)
+            res_dict = dict(saved)
+            res_dict["climax_unlocked"] = climax_unlocked
+            res_dict["completed_stage_idx"] = completed_stage_idx
+            res_dict["next_stage_idx"] = completed_stage_idx + 1
+            res_dict["total_stages"] = tot_stages
+            return res_dict
+
+        return {
+            "quest_id": quest_id,
+            "completed_stage_idx": completed_stage_idx,
+            "next_stage_idx": completed_stage_idx + 1,
+            "climax_unlocked": climax_unlocked,
+            "total_stages": tot_stages,
+        }
+
+    if conn is not None:
+        return _run(conn)
+    with db.UnitOfWork() as uow_c:
+        return _run(uow_c)
+
+
+def heal_session_quests_on_load(session_id: int) -> bool:
+    """Idempotently heals placeholder lieutenants, splices missing mid-stages,
+    repairs Optional titles, and converts active legacy clue-eligible stages (Q2)
+    without DDL changes or N+1 query storms."""
+    if not session_id:
+        return False
+    from mechanics.narrative.campaign_spine import heal_campaign_spine_if_stale, _PLACEHOLDER_ACTOR_RE
+    from mechanics.narrative.chapter_plan import build_chapter_plan_candidates, is_clue_based_quest
+    from mechanics.narrative.dossier_compiler import (
+        format_short_venue_display,
+        get_protected_quest_cast_names,
+        populate_stage_clue_sources,
+    )
+    from mechanics.narrative.threat_clock import build_initial_threat_clock
+
+    spine = db.get_campaign_spine(session_id)
+    active_dossiers = db.get_session_quest_dossiers(session_id, status_stage="compiled") or []
+    if not spine and not active_dossiers:
+        return False
+
+    healed_spine, rename_map = (
+        heal_campaign_spine_if_stale(session_id, spine, auto_commit=False)
+        if spine
+        else (None, {})
+    )
+    story_dos = next((d for d in active_dossiers if d.get("family_tier") == "story"), None)
+
+    needs_splice = False
+    needs_target_fix = False
+    needs_opt_fix = False
+    needs_clock_init = False
+    if story_dos:
+        cs_s = story_dos.get("climax_spec") or {}
+        ms = cs_s.get("main_stages") or []
+        climax_done = bool(cs_s.get("completed"))
+        needs_splice = (len(ms) < 3 and not climax_done)
+        protected_low = get_protected_quest_cast_names(session_id)
+        cur_tgt = str(story_dos.get("target_npc") or cs_s.get("true_culprit") or "").strip()
+        if cur_tgt.lower() in protected_low or _PLACEHOLDER_ACTOR_RE.search(cur_tgt):
+            needs_target_fix = True
+        climax_loc = str(cs_s.get("location") or "")
+        climax_short = format_short_venue_display(climax_loc)
+        for ld in (story_dos.get("leads_graph") or []):
+            if ld.get("target_location") == climax_loc or (climax_short and climax_short in str(ld.get("title") or ld.get("label") or "")):
+                needs_opt_fix = True
+        ch_num = int(cs_s.get("chapter") or 1)
+        if ch_num < 11 and not isinstance(cs_s.get("threat_clock"), dict):
+            needs_clock_init = True
+
+    # Q2: Check active stage ONLY of existing clue-eligible quests lacking >=3 clue_sources
+    dossiers_needing_q2: List[Dict[str, Any]] = []
+    for dos_cand in active_dossiers:
+        fam_c = str(dos_cand.get("family_tier") or "")
+        eng_c = str(dos_cand.get("engine") or "")
+        if not is_clue_based_quest(fam_c, eng_c):
+            continue
+        cs_c = dos_cand.get("climax_spec") or {}
+        if cs_c.get("completed"):
+            continue
+        for st_c in (cs_c.get("main_stages") or []):
+            if (
+                isinstance(st_c, dict)
+                and str(st_c.get("status") or "").lower() == "active"
+                and not st_c.get("completed")
+                and not st_c.get("is_climax_stage")
+            ):
+                srcs_c = [x for x in (st_c.get("clue_sources") or []) if isinstance(x, dict)]
+                if str(st_c.get("completion_trigger") or "") != "key_clue" or len(srcs_c) < 3:
+                    dossiers_needing_q2.append(dos_cand)
+                break
+
+    if (
+        not rename_map
+        and not needs_splice
+        and not needs_target_fix
+        and not needs_opt_fix
+        and not needs_clock_init
+        and not dossiers_needing_q2
+        and healed_spine == spine
+    ):
+        return False  # Fast early-return: 0 writes
+
+    with db.UnitOfWork() as conn:
+        if spine and healed_spine is not None and healed_spine != spine:
+            db.upsert_campaign_spine(session_id, healed_spine, conn=conn)
+
+        if rename_map:
+            for old_n, new_n in rename_map.items():
+                conn.execute(
+                    "UPDATE quests SET title=replace(title, ?, ?), objective=replace(objective, ?, ?) "
+                    "WHERE session_id=? AND (title LIKE ? OR objective LIKE ?)",
+                    (old_n, new_n, old_n, new_n, session_id, f"%{old_n}%", f"%{old_n}%")
+                )
+                conn.execute(
+                    "UPDATE quest_waypoints SET stage_label=replace(stage_label, ?, ?), target_npc=replace(target_npc, ?, ?) "
+                    "WHERE session_id=? AND (stage_label LIKE ? OR target_npc LIKE ?)",
+                    (old_n, new_n, old_n, new_n, session_id, f"%{old_n}%", f"%{old_n}%")
+                )
+                conn.execute(
+                    "UPDATE session_clues SET title=replace(title, ?, ?), lead_text=replace(lead_text, ?, ?), linked_npc=replace(linked_npc, ?, ?) "
+                    "WHERE session_id=? AND (title LIKE ? OR lead_text LIKE ? OR linked_npc LIKE ?)",
+                    (old_n, new_n, old_n, new_n, old_n, new_n, session_id, f"%{old_n}%", f"%{old_n}%", f"%{old_n}%")
+                )
+
+        if story_dos and healed_spine is not None and (rename_map or needs_splice or needs_target_fix or needs_opt_fix):
+            _heal_story_dossier_atomic(session_id, story_dos, healed_spine, rename_map, needs_splice, conn=conn)
+
+        # Q2: Initialize missing threat_clock and convert active stage ONLY for clue-eligible dossiers
+        sess_h = db.get_session(session_id) or {}
+        lang_h = normalize_quest_locale(sess_h.get("narration_language") or sess_h.get("language") or "en")
+        scen_h = str(sess_h.get("scenario") or "")
+        q2_ids = {str(d.get("quest_id") or "") for d in dossiers_needing_q2}
+        if needs_clock_init and story_dos and str(story_dos.get("quest_id") or "") not in q2_ids:
+            q2_ids.add(str(story_dos.get("quest_id") or ""))
+        for qid_q2 in sorted(x for x in q2_ids if x):
+            fresh_q2 = db.get_quest_dossier(session_id, qid_q2, conn=conn)
+            if not fresh_q2:
+                continue
+            clx_q2 = dict(fresh_q2.get("climax_spec") or {})
+            changed_q2 = False
+            if str(fresh_q2.get("family_tier") or "") == "story":
+                ch_q2 = int(clx_q2.get("chapter") or sess_h.get("chapter") or 1)
+                if ch_q2 < 11 and not isinstance(clx_q2.get("threat_clock"), dict):
+                    clx_q2["threat_clock"] = build_initial_threat_clock(
+                        chapter=ch_q2,
+                        endless_mode_unlocked=bool(sess_h.get("endless_mode_unlocked")),
+                    )
+                    changed_q2 = True
+            if is_clue_based_quest(str(fresh_q2.get("family_tier") or ""), str(fresh_q2.get("engine") or "")) and not clx_q2.get("completed"):
+                ms_q2 = [dict(s) for s in (clx_q2.get("main_stages") or []) if isinstance(s, dict)]
+                c_loc_q2 = str(clx_q2.get("location") or "")
+                cands_q2 = build_chapter_plan_candidates(session_id, fresh_q2, climax_location=c_loc_q2)
+                for idx_s, st_s in enumerate(ms_q2):
+                    if str(st_s.get("status") or "").lower() == "active" and not st_s.get("completed") and not st_s.get("is_climax_stage"):
+                        srcs_s = [x for x in (st_s.get("clue_sources") or []) if isinstance(x, dict)]
+                        if str(st_s.get("completion_trigger") or "") != "key_clue" or len(srcs_s) < 3:
+                            ms_q2[idx_s] = populate_stage_clue_sources(
+                                session_id,
+                                qid_q2,
+                                st_s,
+                                climax_loc=c_loc_q2,
+                                leads_graph=list(fresh_q2.get("leads_graph") or []),
+                                candidate_rooms=cands_q2.get("rooms"),
+                                candidate_npcs=cands_q2.get("npcs"),
+                                danger_tier=max(1, int(fresh_q2.get("danger_tier") or 1)),
+                                lang=lang_h,
+                                scen_key=scen_h,
+                            )
+                            changed_q2 = True
+                        break  # Convert ONLY the active stage; leave finished & locked stages untouched
+                if changed_q2:
+                    clx_q2["main_stages"] = ms_q2
+            if changed_q2:
+                saved_q2 = db.upsert_quest_dossier(session_id, qid_q2, climax_spec=clx_q2, conn=conn)
+                if saved_q2:
+                    db.sync_quest_projection_from_dossier(session_id, qid_q2, dossier=saved_q2, conn=conn)
+
+    return True
+
+
+def _heal_story_dossier_atomic(session_id: int, dos: dict, spine: dict, rename_map: dict, needs_splice: bool, conn=None):
+    from mechanics.narrative.dossier_compiler import format_short_venue_display, get_protected_quest_cast_names
+    from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
+    qid = str(dos["quest_id"])
+    climax = dict(dos.get("climax_spec") or {})
+    leads = [dict(l) for l in (dos.get("leads_graph") or [])]
+    cast = dict(dos.get("cast_bindings") or {})
+    main_stages = [dict(s) for s in (climax.get("main_stages") or [])]
+
+    # 1. Hot-swap protected or placeholder target
+    protected_low = get_protected_quest_cast_names(session_id)
+    cur_tgt = str(climax.get("true_culprit") or climax.get("target_npc") or dos.get("target_npc") or "")
+    if cur_tgt.lower() in protected_low or _PLACEHOLDER_ACTOR_RE.search(cur_tgt):
+        cur_ch = int(dos.get("chapter") or 1)
+        feat_lt = (spine.get("chapters_blueprint") or {}).get(str(cur_ch), {}).get("featured_lieutenant")
+        lt_name = str(feat_lt.get("name") if isinstance(feat_lt, dict) else (feat_lt or ""))
+        if not lt_name or lt_name.lower() in protected_low or _PLACEHOLDER_ACTOR_RE.search(lt_name):
+            active_lts = [lt for lt in (spine.get("lieutenants_roster") or []) if lt.get("status") == "active" and lt.get("name") and lt["name"].lower() not in protected_low and not _PLACEHOLDER_ACTOR_RE.search(lt["name"])]
+            lt_name = active_lts[0]["name"] if active_lts else "Hostile Commander"
+        climax["true_culprit"] = lt_name
+        climax["target_npc"] = lt_name
+        dos["target_npc"] = lt_name
+        if "target" in cast and isinstance(cast["target"], dict):
+            cast["target"]["name"] = lt_name
+
+    # Apply rename_map to cast
+    for r_k, r_v in cast.items():
+        if isinstance(r_v, dict) and r_v.get("name") in rename_map:
+            r_v["name"] = rename_map[r_v["name"]]
+
+    # 2. Smart Splice (D1): Insert missing stages so Story Quests always have 3 main stages
+    if needs_splice and len(main_stages) < 3:
+        st1 = dict(main_stages[0]) if main_stages else {"stage_index": 1, "status": "active", "completed": False}
+        st1["is_climax_stage"] = False
+        if len(main_stages) >= 2:
+            old_climax = dict(main_stages[1])
+        else:
+            old_climax = {
+                "stage_index": 3,
+                "stage_label": f"Confront {climax.get('true_culprit', 'the Mastermind')}",
+                "target_location": str(climax.get("location") or ""),
+                "target_npc": str(climax.get("true_culprit") or ""),
+                "completion_trigger": "combat",
+                "status": "locked",
+                "completed": False,
+                "is_climax_stage": True,
+            }
+        st1_done = bool(st1.get("completed") or str(st1.get("status") or "") in ("completed", "bypassed"))
+        climax_loc = str(old_climax.get("target_location") or climax.get("location") or "")
+        st1_loc = str(st1.get("target_location") or "")
+
+        def _run_splice_db(c_db):
+            node = c_db.execute(
+                "SELECT name FROM world_nodes WHERE session_id=? AND node_type='ROOM' AND name NOT IN (?, ?) LIMIT 1",
+                (session_id, st1_loc, climax_loc)
+            ).fetchone()
+            mid_val = str(node["name"] if node and isinstance(node, dict) else (node[0] if node else (leads[0].get("target_location") if leads else f"Relay Sub-Node of {format_short_venue_display(climax_loc)}")))
+            c_db.execute("DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index >= 2", (session_id, qid))
+            return mid_val
+
+        if conn is not None:
+            mid_loc = _run_splice_db(conn)
+        else:
+            with db.UnitOfWork() as uow_c:
+                mid_loc = _run_splice_db(uow_c)
+
+        new_st2 = {
+            "stage_index": 2,
+            "stage_label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
+            "label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
+            "target_location": mid_loc,
+            "target_npc": "",
+            "completion_trigger": "action",
+            "approaches": ["STR", "INT", "CHA"],
+            "status": "active" if st1_done else "locked",
+            "completed": False,
+            "is_climax_stage": False,
+            "beat_contract": {
+                "player_verb": f"Breach relay at {format_short_venue_display(mid_loc)}",
+                "reveal": f"Telemetry logs pinpoint headquarters at {format_short_venue_display(climax_loc)}",
+                "handover": "Relay access cipher",
+                "next_pointer": format_short_venue_display(climax_loc),
+                "is_dialogue_beat": False,
+            }
+        }
+        old_climax["stage_index"] = 3
+        old_climax["status"] = "locked"
+        old_climax["completed"] = False
+        if old_climax.get("target_npc") and cur_tgt in rename_map:
+            old_climax["target_npc"] = rename_map[cur_tgt]
+        elif old_climax.get("target_npc") and old_climax["target_npc"].lower() in protected_low:
+            old_climax["target_npc"] = climax.get("true_culprit")
+        climax["main_stages"] = [st1, new_st2, old_climax]
+        climax["main_stage_count"] = 3
+        if str(climax.get("gate_type") or "").lower() == "secret":
+            climax["is_unlocked"] = False
+
+    # 3. Repair Optionals that leaked climax_loc
+    climax_loc = str(climax.get("location") or "")
+    climax_short = format_short_venue_display(climax_loc)
+    for ld in leads:
+        lead_loc = str(ld.get("target_location") or "")
+        if lead_loc == climax_loc or not lead_loc:
+            lead_loc = str(ld.get("lead_loc") or "District Forward Post")
+            if lead_loc == climax_loc:
+                lead_loc = "District Forward Post"
+            ld["target_location"] = lead_loc
+        lead_short = format_short_venue_display(lead_loc)
+        for k in ("title", "label"):
+            if k in ld and ld[k]:
+                t = str(ld[k])
+                if climax_loc and climax_loc in t:
+                    t = t.replace(climax_loc, lead_short)
+                if climax_short and climax_short in t:
+                    t = t.replace(climax_short, lead_short)
+                ld[k] = t
+
+    saved = db.upsert_quest_dossier(session_id, qid, climax_spec=climax, leads_graph=leads, cast_bindings=cast, conn=conn)
+    if saved:
+        db.sync_quest_projection_from_dossier(session_id, qid, dossier=saved, conn=conn)
 
 
 async def enrich_dossier_with_utility_llm(
@@ -364,7 +758,7 @@ def accept_bounty_contract(
     dossier = compile_quest_dossier(
         session_id=session_id,
         quest_id=quest_id,
-        tag_or_archetype=str(quest.get("quest_type") or quest.get("engine") or quest.get("blueprint_id") or "Investigation"),
+        tag_or_archetype=str(quest.get("engine") or quest.get("quest_type") or quest.get("blueprint_id") or "Investigation"),
         title=str(quest.get("title") or ""),
         objective=str(quest.get("objective") or ""),
         family_tier=fam_tier,
@@ -452,9 +846,14 @@ async def accept_bounty_contract_async(
             haggle_advance,
             None,
         )
-        if res.get("success") and enrich_llm:
-            enriched_dos = await enrich_dossier_with_utility_llm(session_id, quest_id, res.get("dossier"))
-            res["dossier"] = enriched_dos
+        if res.get("success"):
+            dos_b = res.get("dossier") or {}
+            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
+            if is_clue_based_quest(str(dos_b.get("family_tier") or ""), str(dos_b.get("engine") or "")):
+                schedule_background_chapter_plan(session_id, quest_id)
+            elif enrich_llm:
+                enriched_dos = await enrich_dossier_with_utility_llm(session_id, quest_id, dos_b)
+                res["dossier"] = enriched_dos
         return res
 
 
@@ -716,6 +1115,242 @@ def evaluate_skipped_threatened_optionals(
     return fallout_events
 
 
+def hot_swap_dossier_entities(
+    session_id: int,
+    dossier: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Live Entity Continuity & Hot-Swap Patching (Option C):
+    Audits cast_bindings of a prewarmed dossier against live SQLite contacts/world state.
+    If a bound NPC (target, client, informant) died or became unavailable during Chapter N,
+    hot-swaps them with their designated role successor or dead-drop cipher fallback
+    without invalidating prewarmed stage structures or narrative flavor.
+    """
+    if not dossier or not isinstance(dossier, dict):
+        return dossier
+
+    qid = str(dossier.get("quest_id") or "")
+    cast = dict(dossier.get("cast_bindings") or {})
+    climax = dict(dossier.get("climax_spec") or {})
+    leads = [dict(l) for l in (dossier.get("leads_graph") or [])]
+    mutated = False
+
+    contacts = db.get_contacts(session_id) if session_id else []
+    contacts_by_name = {str(c.get("name") or "").lower(): c for c in contacts if isinstance(c, dict)}
+    contacts_by_id = {int(c.get("id")): c for c in contacts if isinstance(c, dict) and c.get("id") is not None}
+
+    spine = db.get_campaign_spine(session_id) if session_id else {}
+    lts = [lt for lt in (spine.get("lieutenants_roster") or []) if isinstance(lt, dict)]
+    dead_lts = {
+        str(lt.get("name") or "").strip().lower()
+        for lt in lts
+        if str(lt.get("status") or "").lower() in ("dead", "slain", "recruited", "executed")
+    }
+
+    def _is_npc_dead_or_hostile(cid: Any, name: str) -> bool:
+        n_low = str(name or "").strip().lower()
+        if n_low in dead_lts:
+            return True
+        c = None
+        if cid is not None:
+            try:
+                c = contacts_by_id.get(int(cid))
+            except (ValueError, TypeError):
+                pass
+        if not c and n_low:
+            c = contacts_by_name.get(n_low)
+        if not c:
+            return False
+        b_info = c.get("basic_info") if isinstance(c.get("basic_info"), dict) else {}
+        if str(c.get("status") or "").lower() == "dead" or str(b_info.get("status") or "").lower() == "dead":
+            return True
+        if c.get("is_alive") is False or b_info.get("is_alive") is False:
+            return True
+        if c.get("health") is not None and int(c.get("health", 1) or 0) <= 0:
+            return True
+        return False
+
+    # 1. Target hot-swap
+    tgt = dict(cast.get("target") or {})
+    tgt_name = str(tgt.get("name") or climax.get("target_npc") or "")
+    tgt_cid = tgt.get("contact_id")
+    if tgt_name and _is_npc_dead_or_hostile(tgt_cid, tgt_name):
+        spine = db.get_campaign_spine(session_id) if session_id else {}
+        lts = [lt for lt in (spine.get("lieutenants_roster") or []) if isinstance(lt, dict)]
+        alive_lts = [
+            str(lt.get("name"))
+            for lt in lts
+            if lt.get("name") and not _is_npc_dead_or_hostile(None, str(lt.get("name")))
+        ]
+        if alive_lts:
+            succ_name = alive_lts[0]
+        else:
+            scen = str((db.get_session(session_id) or {}).get("scenario") or "fantasy")
+            succ_name = namegen.generate_npc_name(scenario=scen)
+
+        tgt["name"] = succ_name
+        tgt["status"] = "alive"
+        tgt["successor_of"] = tgt_name
+        cast["target"] = tgt
+        climax["target_npc"] = succ_name
+        if isinstance(climax.get("boss_sheet"), dict):
+            climax["boss_sheet"]["name"] = succ_name
+        for ms in (climax.get("main_stages") or []):
+            if isinstance(ms, dict):
+                if ms.get("target_npc") == tgt_name:
+                    ms["target_npc"] = succ_name
+                if tgt_name in str(ms.get("label") or ""):
+                    ms["label"] = str(ms["label"]).replace(tgt_name, succ_name)
+        mutated = True
+
+    # 2. Informant hot-swap
+    inf = dict(cast.get("informant") or {})
+    inf_name = str(inf.get("name") or "")
+    inf_cid = inf.get("contact_id")
+    if inf_name and _is_npc_dead_or_hostile(inf_cid, inf_name):
+        inf["status"] = "dead"
+        inf["fallback_on_death"] = "lootable_cipher_or_room_search"
+        cast["informant"] = inf
+        for l in leads:
+            if l.get("informant_npc") == inf_name or inf_name in str(l.get("flavor_note") or ""):
+                l["informant_npc"] = ""
+                l["fallback_cipher"] = True
+                l["flavor_note"] = f"Recover {inf_name}'s hidden cipher drop or encrypted field journal."
+        mutated = True
+
+    # 3. Client hot-swap
+    cli = dict(cast.get("client") or {})
+    cli_name = str(cli.get("name") or "")
+    cli_cid = cli.get("contact_id")
+    if cli_name and _is_npc_dead_or_hostile(cli_cid, cli_name):
+        cli["status"] = "dead"
+        cli["fallback_on_death"] = "contract_void_or_successor"
+        scen = str((db.get_session(session_id) or {}).get("scenario") or "fantasy")
+        succ_cli = namegen.generate_npc_name(scenario=scen)
+        cli["name"] = succ_cli
+        cli["successor_of"] = cli_name
+        cast["client"] = cli
+        mutated = True
+
+    if mutated and qid:
+        dossier["cast_bindings"] = cast
+        dossier["climax_spec"] = climax
+        dossier["leads_graph"] = leads
+        db.upsert_quest_dossier(
+            session_id,
+            qid,
+            cast_bindings=cast,
+            climax_spec=climax,
+            leads_graph=leads,
+        )
+
+    return dossier
+
+
+_IN_FLIGHT_PREWARMS: set[tuple[int, int]] = set()
+
+
+async def prewarm_chapter_ahead(
+    session_id: int,
+    current_chapter: int,
+    target_chapter: int,
+) -> Optional[str]:
+    """
+    Asynchronous JIT Chapter N+1 Prewarming Worker (Option C):
+    Compiles the target chapter's Storylet + QuestDossier with status_stage='prewarmed'
+    during Chapter N, and asynchronously enriches it via the utility LLM.
+    Guarantees 0ms chapter transition without blocking the player's current turn.
+    """
+    from mechanics.system.concurrency import acquire_background_session_lock
+
+    pw_key = (int(session_id), int(target_chapter))
+    if not session_id or pw_key in _IN_FLIGHT_PREWARMS:
+        return None
+    _IN_FLIGHT_PREWARMS.add(pw_key)
+    try:
+        existing = await adb(db.get_prewarmed_quest_dossier, session_id, target_chapter)
+        if existing and existing.get("quest_id"):
+            return str(existing["quest_id"])
+
+        sess = await adb(db.get_session, session_id) or {"id": session_id}
+        scen_key = str(sess.get("scenario") or "fantasy")
+        lang = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
+        eff_turn = db.infer_session_turn(sess)
+
+        spine = await adb(compile_or_get_campaign_spine, session_id, scen_key=scen_key, lang=lang)
+        from mechanics.narrative.dossier_compiler import select_deconflicted_climax_location
+        cand_venue, _ = await adb(
+            select_deconflicted_climax_location,
+            session_id,
+            "",
+            family_tier="story",
+            objective_hint=f"Chapter {target_chapter}",
+            scen_key=scen_key,
+        )
+        storylet = await adb(select_chapter_storylet, session_id, target_chapter, spine=spine, lang=lang, venue_name=cand_venue)
+        ch_bp = (spine.get("chapters_blueprint") or {}).get(str(target_chapter)) or {}
+
+        pre_sq_id = f"SQ-PRE-{uuid.uuid4().hex[:8].upper()}"
+        pre_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{target_chapter}"))
+        pre_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
+        pre_obj = sanitize_dossier_prose(
+            str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
+        )
+
+        feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
+        mm_name = str((spine.get("mastermind_profile") or {}).get("name") or "")
+        target_for_ch = mm_name if target_chapter == 10 else feat_lt
+
+        # Serialize initial prewarm write against active turns / parallel prewarms
+        async with acquire_background_session_lock(session_id) as locked:
+            if not locked:
+                return None
+            existing_now = await adb(db.get_prewarmed_quest_dossier, session_id, target_chapter)
+            if existing_now and existing_now.get("quest_id"):
+                return str(existing_now["quest_id"])
+            if int(await adb(db.get_session_chapter, session_id) or 1) >= int(target_chapter):
+                return None
+            pre_dossier = await adb(
+                compile_quest_dossier,
+                session_id=session_id,
+                quest_id=pre_sq_id,
+                tag_or_archetype=pre_engine,
+                title=pre_title,
+                objective=pre_obj,
+                family_tier="story",
+                chapter=target_chapter,
+                turn_number=eff_turn,
+                target_npc=target_for_ch,
+                reward_gold=60 + (target_chapter * 10),
+                scen_key=scen_key,
+                lang=lang,
+                status_stage="prewarmed",
+            )
+
+        # Write strict validated AI ChapterPlan with 30s timeout & 1 repair retry (unlocked during LLM call)
+        try:
+            from mechanics.narrative.chapter_plan import (
+                apply_chapter_plan_to_dossier,
+                generate_chapter_plan_with_resilience,
+            )
+            plan = await generate_chapter_plan_with_resilience(session_id, pre_sq_id, pre_dossier, timeout_seconds=30.0)
+            if plan:
+                async with acquire_background_session_lock(session_id) as locked_apply:
+                    if locked_apply:
+                        cur = await adb(db.get_quest_dossier, session_id, pre_sq_id)
+                        if cur and str(cur.get("status_stage") or "") == "prewarmed":
+                            await adb(apply_chapter_plan_to_dossier, session_id, pre_sq_id, plan)
+        except Exception as _plan_err:
+            logger.debug("Prewarmed chapter AI ChapterPlan skipped (non-fatal): %s", _plan_err)
+
+        return pre_sq_id
+    except Exception as exc:
+        logger.warning("prewarm_chapter_ahead failed (non-fatal): %s", exc)
+        return None
+    finally:
+        _IN_FLIGHT_PREWARMS.discard(pw_key)
+
+
 def resolve_chapter_transition(
     session_id: int,
     quest: Dict[str, Any],
@@ -745,6 +1380,7 @@ def resolve_chapter_transition(
     max_ch = get_max_campaign_chapters(scen_key)
 
     spine = compile_or_get_campaign_spine(session_id, scen_key=scen_key, lang=lang)
+    mm_name = str((spine.get("mastermind_profile") or {}).get("name") or "")
     qid = str(quest.get("quest_id") or "")
     dossier = db.get_quest_dossier(session_id, qid) if qid else None
     quest_ch = int((dossier or {}).get("chapter") or quest.get("chapter") or 0)
@@ -836,7 +1472,9 @@ def resolve_chapter_transition(
     # 2. Chapters 1-10 Advance (Completed OR Fail-Forward, including Playable Fallen-World Ch. 11 on Ch. 10 Defeat!)
     world_scar_ev: Optional[Dict[str, Any]] = None
     is_ch10_fallen = bool(cur_ch == 10 and status == "Failed")
-    if status == "Failed":
+    threat_clk = dict(climax_spec.get("threat_clock") or {})
+    clock_scar_pending = bool(threat_clk.get("world_scar_pending"))
+    if status == "Failed" or clock_scar_pending:
         eng = str((dossier or {}).get("engine") or quest.get("engine") or "CRISIS_DEFENSE")
         venue = str(climax_spec.get("location") or sess.get("current_location") or "Central District")
         scar_tier = "peak" if cur_ch in (3, 6, 8, 9, 10) else "buildup"
@@ -846,7 +1484,9 @@ def resolve_chapter_transition(
         )
         scar_spec["scar_tier"] = scar_tier
         scar_spec["chapter_number"] = cur_ch
-        if cur_ch in (8, 9, 10):
+        if clock_scar_pending and status != "Failed":
+            scar_spec["threat_clock_overrun"] = True
+        if status == "Failed" and cur_ch in (8, 9, 10):
             scar_spec["lockdown"] = True
         world_scar_ev = spawn_quest_world_scar(
             session_id=session_id,
@@ -856,6 +1496,7 @@ def resolve_chapter_transition(
             turn_number=eff_turn,
             scar_tier=scar_tier,
         )
+    if status == "Failed":
         update_campaign_ending_axes(
             session_id=session_id,
             collateral_delta=2 if cur_ch in (3, 6, 8, 9, 10) else 1,
@@ -924,56 +1565,96 @@ def resolve_chapter_transition(
         extra={"_last_transition_quest_id": qid, "_last_transition_turn": eff_turn},
     )
 
-    spine_for_next = db.get_campaign_spine(session_id) or spine
-    storylet = select_chapter_storylet(session_id, next_ch, spine=spine_for_next, lang=lang)
-    ch_bp = (spine_for_next.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
+    # Option C Fast-Path: Consume prewarmed dossier if available
+    prewarmed = db.get_prewarmed_quest_dossier(session_id, next_ch)
+    if prewarmed and prewarmed.get("quest_id"):
+        pre_qid = str(prewarmed["quest_id"])
+        patched_dossier = hot_swap_dossier_entities(session_id, prewarmed)
+        db.promote_prewarmed_dossier(session_id, pre_qid)
 
-    next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-    next_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{next_ch}"))
-    next_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
-    next_obj = sanitize_dossier_prose(
-        str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
-    )
+        stub = dict(patched_dossier.get("pitch_stub") or {})
+        next_sq_id = pre_qid
+        next_title = sanitize_dossier_prose(str(stub.get("title") or f"Chapter #{next_ch}"))
+        next_engine = str(patched_dossier.get("engine") or "MYSTERY_CASE")
+        next_obj = sanitize_dossier_prose(str(stub.get("public_pitch") or "A new chapter unfolds..."))
 
-    next_quest = db.upsert_quest(
-        session_id=session_id,
-        quest_id=next_sq_id,
-        quest_type="Story Quest",
-        title=next_title,
-        objective=next_obj,
-        progress="0/1 Main Objective",
-        current_clues="",
-        status="Active",
-        reward_xp=250 + (next_ch * 30),
-        reward_gold=60 + (next_ch * 10),
-        is_story_quest=1,
-        clues_required=1,
-        sub_objectives=[],
-        deadline_day=None,
-        deadline_minute=None,
-        engine=next_engine,
-        dossier_stage="compiled",
-    )
+        next_quest = db.upsert_quest(
+            session_id=session_id,
+            quest_id=next_sq_id,
+            quest_type="Story Quest",
+            title=next_title,
+            objective=next_obj,
+            progress="0/1 Main Objective",
+            current_clues="",
+            status="Active",
+            reward_xp=250 + (next_ch * 30),
+            reward_gold=60 + (next_ch * 10),
+            is_story_quest=1,
+            clues_required=1,
+            sub_objectives=[],
+            deadline_day=None,
+            deadline_minute=None,
+            engine=next_engine,
+            dossier_stage="compiled",
+        )
+        db.sync_quest_projection_from_dossier(session_id, next_sq_id, dossier=patched_dossier)
+        next_dossier = patched_dossier
+        refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
+    else:
+        spine_for_next = db.get_campaign_spine(session_id) or spine
+        from mechanics.narrative.dossier_compiler import select_deconflicted_climax_location
+        cand_venue, _ = select_deconflicted_climax_location(
+            session_id, "", family_tier="story", objective_hint=f"Chapter {next_ch}", scen_key=scen_key
+        )
+        storylet = select_chapter_storylet(session_id, next_ch, spine=spine_for_next, lang=lang, venue_name=cand_venue)
+        ch_bp = (spine_for_next.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
 
-    feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
-    mm_name = str((spine_for_next.get("mastermind_profile") or {}).get("name") or "")
-    target_for_ch = mm_name if next_ch == 10 else feat_lt
+        next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+        next_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{next_ch}"))
+        next_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
+        next_obj = sanitize_dossier_prose(
+            str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
+        )
 
-    next_dossier = compile_quest_dossier(
-        session_id=session_id,
-        quest_id=next_sq_id,
-        tag_or_archetype=next_engine,
-        title=next_title,
-        objective=next_obj,
-        family_tier="story",
-        chapter=next_ch,
-        turn_number=eff_turn,
-        target_npc=target_for_ch,
-        reward_gold=60 + (next_ch * 10),
-        scen_key=scen_key,
-        lang=lang,
-    )
-    refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
+        next_quest = db.upsert_quest(
+            session_id=session_id,
+            quest_id=next_sq_id,
+            quest_type="Story Quest",
+            title=next_title,
+            objective=next_obj,
+            progress="0/1 Main Objective",
+            current_clues="",
+            status="Active",
+            reward_xp=250 + (next_ch * 30),
+            reward_gold=60 + (next_ch * 10),
+            is_story_quest=1,
+            clues_required=1,
+            sub_objectives=[],
+            deadline_day=None,
+            deadline_minute=None,
+            engine=next_engine,
+            dossier_stage="compiled",
+        )
+
+        feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
+        mm_name = str((spine_for_next.get("mastermind_profile") or {}).get("name") or "")
+        target_for_ch = mm_name if next_ch == 10 else feat_lt
+
+        next_dossier = compile_quest_dossier(
+            session_id=session_id,
+            quest_id=next_sq_id,
+            tag_or_archetype=next_engine,
+            title=next_title,
+            objective=next_obj,
+            family_tier="story",
+            chapter=next_ch,
+            turn_number=eff_turn,
+            target_npc=target_for_ch,
+            reward_gold=60 + (next_ch * 10),
+            scen_key=scen_key,
+            lang=lang,
+        )
+        refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
 
     res_payload: Dict[str, Any] = {
         "chapter": next_ch,
@@ -994,6 +1675,8 @@ def resolve_chapter_transition(
             "Instead of an abrupt Game Over, advance into Chapter 11 in a Fallen World where the party survives "
             "to salvage their inner circle and seed an underground resistance."
         )
+    if outcome is not None and isinstance(outcome, dict):
+        outcome["chapter_transition"] = res_payload
     return res_payload
 
 

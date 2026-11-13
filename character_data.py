@@ -889,22 +889,43 @@ ATTENDANCE_STATUS_TAGS = {
     "active partner", "bystander", "none", "null", "unknown"
 }
 
-def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 4) -> list[str]:
+def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 4) -> list:
     """Filters out bloated narrative status-effect logs and caps the list length.
 
-    Valid status effects are short RPG condition tags of 1-3 words (e.g. 'Bleeding',
-    'Stunned', 'Frightened', 'Shoulder laceration'). Anything longer is treated as
-    a narrative action log and discarded.
+    Supports both legacy string status tags (e.g. 'Bleeding [2 turns]') and structured
+    StatusEffectInstance dicts (e.g. {'name': 'Bleeding', 'remaining_duration': 2, ...}).
+    Valid status effects are short RPG condition tags of 1-3 words. Anything longer is treated
+    as a narrative action log and discarded.
 
     Args:
-        effects:   Raw list returned by the LLM.
+        effects:   Raw list returned by the LLM or combat pipeline.
         max_words: Maximum number of words allowed in a single status tag (default 3).
         max_count: Maximum number of active status effects to keep (default 4).
     """
     if not isinstance(effects, list):
         return []
-    cleaned = []
+    cleaned: list = []
     for eff in effects:
+        if isinstance(eff, dict):
+            name = str(eff.get("name", "")).strip()
+            if not name:
+                continue
+            if name.endswith('.') or ',' in name or name in ("[]", "{}", '""', "''"):
+                continue
+            if name.lower() in ATTENDANCE_STATUS_TAGS:
+                continue
+            base_s = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", name, flags=re.IGNORECASE).strip()
+            if len(base_s.split()) > max_words:
+                continue
+            # Deduplicate by name (case-insensitive)
+            if any(
+                (c.get("name", "").lower() if isinstance(c, dict) else c.lower()) == name.lower()
+                for c in cleaned
+            ):
+                continue
+            cleaned.append(eff)
+            continue
+
         if not isinstance(eff, str):
             continue
         s = eff.strip()
@@ -921,6 +942,10 @@ def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 
         if len(base_s.split()) > max_words:
             continue
         # Deduplicate (case-insensitive)
-        if s.lower() not in (c.lower() for c in cleaned):
-            cleaned.append(s)
+        if any(
+            (c.get("name", "").lower() if isinstance(c, dict) else c.lower()) == s.lower()
+            for c in cleaned
+        ):
+            continue
+        cleaned.append(s)
     return cleaned[:max_count]

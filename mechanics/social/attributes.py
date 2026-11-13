@@ -46,15 +46,40 @@ def calculate_combat_attributes(
             "is_non_combat": True
         }
 
-    # Normalize stat extraction supporting both 'str_' and 'STR' keys
-    str_ = character.get("str_", character.get("STR", cd.BASE_STAT_VALUE))
-    per_ = character.get("per_", character.get("PER", cd.BASE_STAT_VALUE))
-    end_ = character.get("end_", character.get("END", cd.BASE_STAT_VALUE))
-    cha = character.get("cha", character.get("CHA", cd.BASE_STAT_VALUE))
-    int_ = character.get("int_", character.get("INT", cd.BASE_STAT_VALUE))
-    agi = character.get("agi", character.get("AGI", cd.BASE_STAT_VALUE))
-    luk = character.get("luk", character.get("LUK", cd.BASE_STAT_VALUE))
-    level = character.get("level", 1)
+    # Normalize stat extraction supporting both top-level and nested stats dict, with safe type coercion
+    def _extract_stat(k_low: str, k_up: str, default: int = cd.BASE_STAT_VALUE) -> int:
+        nested = character.get("stats") if isinstance(character.get("stats"), dict) else {}
+        for src in (character, nested):
+            for k in (k_low, k_up):
+                val = src.get(k)
+                if val is not None:
+                    try:
+                        return int(val)
+                    except (ValueError, TypeError):
+                        pass
+        return default
+
+    str_ = _extract_stat("str_", "STR")
+    per_ = _extract_stat("per_", "PER")
+    end_ = _extract_stat("end_", "END")
+    cha = _extract_stat("cha", "CHA")
+    int_ = _extract_stat("int_", "INT")
+    agi = _extract_stat("agi", "AGI")
+    luk = _extract_stat("luk", "LUK")
+
+    def _extract_level(default: int = 1) -> int:
+        nested = character.get("stats") if isinstance(character.get("stats"), dict) else {}
+        for src in (character, nested):
+            for k in ("level", "tier", "agent_tier", "tier_rank"):
+                val = src.get(k)
+                if val is not None:
+                    try:
+                        return max(1, int(val))
+                    except (ValueError, TypeError):
+                        pass
+        return default
+
+    level = _extract_level()
 
     # 1. Base SPECIAL scaling
     base_atk = 10 + (str_ * 10) + (agi * 2)
@@ -370,7 +395,6 @@ def calculate_combat_attributes(
     base_macc = 60 + (effective_per * 4) + (agi * 2)
 
     # Recalculate ATK using multiplier (base from SPECIAL + level scaling + flat bonuses)
-    level = character.get("level", 1)
     level_bonus = max(0, (level - 1) * 2)
     base_strike_power = 10 + (str_ * 10) + (agi * 2) + level_bonus
     base_arcane_power = 10 + (int_ * 10) + (effective_per * 2) + level_bonus

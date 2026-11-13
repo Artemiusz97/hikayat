@@ -863,8 +863,41 @@ def _enrich_contact_record(
         res["club"] = ""
         if isinstance(res.get("basic_info"), dict):
             res["basic_info"]["club"] = ""
+        # Self-heal adult characters whose role was previously polluted with "Club Member"
+        cur_r = str(res.get("role") or (res.get("basic_info") or {}).get("role") or "").strip()
+        if cur_r.lower() in ("club member", "club officer", "club vice president", "club secretary", "club treasurer", "events coordinator"):
+            desc_str = str(res.get("description") or (res.get("basic_info") or {}).get("description") or "")
+            import re as _re_role
+            m_p = _re_role.search(r"\(([^)]{3,45})\)", desc_str)
+            healed_role = m_p.group(1).strip() if (m_p and not any(k in m_p.group(1).lower() for k in ("née", "nee", "formerly"))) else "Citizen"
+            res["role"] = healed_role
+            res["public_role"] = healed_role
+            if isinstance(res.get("basic_info"), dict):
+                res["basic_info"]["role"] = healed_role
+                res["basic_info"]["public_role"] = healed_role
+                res["basic_info"].pop("club_role", None)
+                if res.get("is_citizen") and not res.get("is_special_agent"):
+                    res["basic_info"].pop("faction", None)
+                    res.pop("faction", None)
+
+    # Faction affiliation is tracked separately from school club so student agents show both.
+    res["faction_affiliation"] = _resolve_faction_affiliation(res)
 
     return res
+
+
+def _resolve_faction_affiliation(res: dict) -> str:
+    """Returns the NPC's faction/agency affiliation, never echoing the school club as a faction."""
+    b_inf = res.get("basic_info") if isinstance(res.get("basic_info"), dict) else {}
+    # Unawakened mundane citizens who were accidentally assigned an anomalous syndicate by legacy club RNG should not display a faction
+    if res.get("is_citizen") and not res.get("is_special_agent") and str(b_inf.get("club_role") or "").lower().startswith("club "):
+        return ""
+    club_low = str(res.get("club") or b_inf.get("club") or "").strip().lower()
+    for cand in (res.get("faction_name"), b_inf.get("faction_name"), b_inf.get("faction"), res.get("faction"), b_inf.get("affiliation"), res.get("affiliation")):
+        val = str(cand or "").strip()
+        if val and val.lower() not in ("none", "unaffiliated", "unknown") and val.lower() != club_low:
+            return val
+    return ""
 
 
 @router.get("/api/contacts/{session_id}")
@@ -1428,6 +1461,7 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         resolve_session_location_tokens,
         clean_narrative_location_arrows,
         dedupe_location_stutter,
+        format_clean_location_badge,
     )
 
     def _clean_quest_dict(q: dict) -> None:
@@ -1499,6 +1533,18 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                         ms["text"] = ms["stage_label"]
                     if ms.get("target_location"):
                         ms["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, ms["target_location"], scen_key))
+                    if ms.get("key_clue"):
+                        ms["key_clue"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["key_clue"], scen_key))
+                    for src in (ms.get("clue_sources") or []):
+                        if isinstance(src, dict):
+                            if src.get("label"):
+                                src["label"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, src["label"], scen_key))
+                            if src.get("approach_hint"):
+                                src["approach_hint"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, src["approach_hint"], scen_key))
+                            if src.get("location") and src["location"] != "Hidden Lair":
+                                resolved_src_loc = dedupe_location_stutter(resolve_session_location_tokens(session_id, src["location"], scen_key))
+                                src["location"] = resolved_src_loc
+                                src["location_display"] = format_clean_location_badge(resolved_src_loc, include_zone=True)
         for opt_o in (q.get("optional_objectives") or []):
             if isinstance(opt_o, dict):
                 if opt_o.get("title"):
@@ -1577,10 +1623,10 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         try:
             from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility, parse_anomalous_quest_board_source
             from mechanics.social.factions import get_anomalous_faction_state
-            host_uid = session.get("host_user_id") if session else None
-            fac_st = get_anomalous_faction_state(session_id, user_id=host_uid)
+            target_uid = user_id or (session.get("host_user_id") if session else None)
+            fac_st = get_anomalous_faction_state(session_id, user_id=target_uid)
             for bq in available_bounties:
-                elig = evaluate_anomalous_bounty_eligibility(session_id, host_uid, bq, session=session, fac_state=fac_st)
+                elig = evaluate_anomalous_bounty_eligibility(session_id, target_uid, bq, session=session, fac_state=fac_st)
                 bq["board_source"] = elig.get("board_source") or parse_anomalous_quest_board_source(bq, session_id=session_id)
                 bq["anomalous_eligible"] = bool(elig.get("allowed", True))
                 bq["anomalous_lock_reason"] = str(elig.get("reason") or "")
@@ -1689,9 +1735,10 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
             bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
 
     payload = await adb(_build_quests_payload, session_id, req.user_id)
+    resp_bounties = bounties if req.faction_id and bounties else (payload.get("available_bounties") or [])
     return _serializable_action({
         "success": True,
-        "bounties": [dict(b) for b in (payload.get("available_bounties") or []) if b],
+        "bounties": [dict(b) for b in resp_bounties if b],
         **payload,
     })
 
@@ -1809,7 +1856,7 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
             pair_key = f"{min(int(req.clue_a_id), int(req.clue_b_id))}:{max(int(req.clue_a_id), int(req.clue_b_id))}"
             eff_clue_b_id = req.clue_b_id
 
-        cur_turn = len(session.get("history") or [])
+        cur_turn = int(db.infer_session_turn(session))
         attempts_map = dict(session.get("deduction_attempts_turn") or {})
         if attempts_map.get(pair_key) == cur_turn:
             raise HTTPException(

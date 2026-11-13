@@ -1029,6 +1029,22 @@ const CodexPanel = ({
                             Club: {formatTitle(basic.club || npc.club)}
                           </span>
                         )}
+                        {npc.faction_affiliation && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
+                            Faction: {formatTitle(npc.faction_affiliation)}
+                          </span>
+                        )}
+                        {(npc.age_group || basic.age_group) && (
+                          <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${
+                            String(npc.age_group || basic.age_group).toLowerCase() === 'teen'
+                              ? 'bg-amber-950/40 text-amber-300 border-amber-800/40'
+                              : 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40'
+                          }`}>
+                            {String(npc.age_group || basic.age_group).toLowerCase() === 'teen'
+                              ? (npc.is_student ? 'Teen · Student' : 'Teen')
+                              : 'Adult'}
+                          </span>
+                        )}
                         {(basic.race || npc.race) && (
                           <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
                             {formatRace(basic.race || npc.race)}

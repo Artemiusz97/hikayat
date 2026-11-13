@@ -174,6 +174,17 @@ QUEST_UI_LABELS = {
     "locked_out": "Locked Out",
     "fallen_world_epilogue": "Fallen World — Resistance Epilogue",
     "base_reward_note": "Base Completion Rewards",
+    "threat_clock": "Threat Clock",
+    "threat_paused": "Paused (Climax)",
+    "threat_dormant": "Dormant until Chapter engaged",
+    "threat_reinforced": "Reinforcements",
+    "threat_scar_pending": "Chapter Scar Risk",
+    "clue_sources": "Clue Avenues",
+    "source_open": "Open",
+    "source_burned": "Burned",
+    "source_cold": "Gone Cold",
+    "source_claimed": "Claimed",
+    "source_bonus": "Bonus Lead",
 }
 
 PACT_UI_LABELS = {

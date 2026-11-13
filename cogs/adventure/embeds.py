@@ -37,6 +37,10 @@ from mechanics.world.locations import is_location_engine_enabled, get_discovered
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 from localization import get_quest_ui_label
+try:
+    from mechanics.narrative.threat_clock import format_threat_consequence
+except ImportError:
+    format_threat_consequence = None  # type: ignore
 import unicodedata
 
 
@@ -387,7 +391,11 @@ def _strip_leading_emojis(text: str) -> str:
     if not text:
         return ""
     import re
-    cleaned = re.sub(r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9/: _\'\",-]+\]\s*)+', '', str(text)).strip()
+    cleaned = re.sub(
+        r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+-]+\]\s*)+',
+        '',
+        str(text),
+    ).strip()
     return cleaned if cleaned else str(text).strip()
 
 def _get_choice_quest_icon(choice: dict) -> str | None:
@@ -1412,10 +1420,30 @@ def _format_structured_quest_embed_fields(
                 stage_lines.append(f"⏭️ **Stage {s_idx} (`[Bypassed]`):** *{s_lbl}*")
             elif s_done:
                 stage_lines.append(f"☑️ **Stage {s_idx}:** *{s_lbl}*")
+                for b_src in (st.get("clue_sources") or []):
+                    if isinstance(b_src, dict) and b_src.get("bonus") and str(b_src.get("status") or "").lower() == "closed":
+                        b_loc = format_clean_location_badge(str(b_src.get("location") or ""))
+                        b_hint = clean_narrative_location_arrows(str(b_src.get("approach_hint") or b_src.get("label") or ""))
+                        stage_lines.append(
+                            f"   ↳ ⭐ `{get_quest_ui_label('source_bonus', lang)}` — *{b_hint}* (`{b_loc}`)"
+                        )
             elif s_stat == "active" or s_idx == cur_st:
                 loc_part = f"\n   ↳ 📍 `{s_loc}`" if s_loc else ""
                 npc_part = f" • 👤 `{s_npc}`" if s_npc else ""
                 stage_lines.append(f"📍 **Stage {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
+                clue_srcs = [s for s in (st.get("clue_sources") or []) if isinstance(s, dict)]
+                for c_src in clue_srcs[:4]:
+                    c_stat = str(c_src.get("status") or "open").lower()
+                    c_icon = "☑️" if c_stat == "claimed" else ("🔥" if c_stat == "burned" else ("❄️" if c_stat == "cold" else "🔎"))
+                    c_loc = format_clean_location_badge(str(c_src.get("location") or ""))
+                    c_hint = clean_narrative_location_arrows(str(c_src.get("approach_hint") or c_src.get("label") or ""))
+                    stat_key = f"source_{c_stat}" if c_stat in ("open", "burned", "cold", "claimed") else "source_open"
+                    stat_lbl = get_quest_ui_label(stat_key, lang)
+                    loc_sfx = f" (`{c_loc}`)" if c_loc else ""
+                    if c_stat in ("burned", "cold"):
+                        stage_lines.append(f"   ↳ {c_icon} ~~*{c_hint}*~~{loc_sfx} `[{stat_lbl}]`")
+                    else:
+                        stage_lines.append(f"   ↳ {c_icon} *{c_hint}*{loc_sfx}")
             else:
                 stage_lines.append(f"🔒 **Stage {s_idx}:** *{s_lbl}*")
 
@@ -1498,8 +1526,10 @@ def _format_fow_dossier_embed_fields(
 ) -> None:
     """Appends Fog-of-War Alert Meter, Multi-Approach Leads, Bypassed badges, and Uncovered Twist intel."""
     reveal_all = False
+    ui_lang = "en"
     try:
         sess = db.get_session(session_id) or {}
+        ui_lang = _resolve_session_ui_lang(session_id, sess)
         reveal_all = _resolve_reveal_all(session_id, sess)
         anom_src = raw_quest if isinstance(raw_quest, dict) else (quest or {})
         q_notes_raw = str(anom_src.get("quest_notes") or "")
@@ -1544,6 +1574,40 @@ def _format_fow_dossier_embed_fields(
         value=f"{pips} `{alert}/{max_alert}`{shield_badge}",
         inline=True,
     )
+
+    tc = fow.get("threat_clock")
+    if isinstance(tc, dict) and tc.get("enabled"):
+        tc_max = max(2, int(tc.get("max_segments") or 6))
+        tc_filled = min(tc_max, max(0, int(tc.get("filled") or 0)))
+        tc_pips = "🟧" * tc_filled + "⬜" * max(0, tc_max - tc_filled)
+        consequence_note = ""
+        last_ev = tc.get("last_consequence_event")
+        if isinstance(last_ev, dict) and callable(format_threat_consequence):
+            try:
+                consequence_note = format_threat_consequence(last_ev, lang=ui_lang)
+            except Exception:
+                consequence_note = ""
+        if not consequence_note:
+            consequence_note = str(tc.get("last_consequence_note") or "").strip()
+        raw_tc_note = consequence_note or str(tc.get("next_threshold_teaser") or "").strip()
+        tc_note = clean_narrative_location_arrows(raw_tc_note) if raw_tc_note else ""
+        tc_flags = []
+        if tc.get("paused"):
+            tc_flags.append(f"⏸️ {get_quest_ui_label('threat_paused', ui_lang)}")
+        if tc.get("engaged") is False:
+            tc_flags.append(f"💤 {get_quest_ui_label('threat_dormant', ui_lang)}")
+        if tc.get("reinforced"):
+            tc_flags.append(f"⚠️ {get_quest_ui_label('threat_reinforced', ui_lang)}")
+        if tc.get("world_scar_pending"):
+            tc_flags.append(f"🌑 {get_quest_ui_label('threat_scar_pending', ui_lang)}")
+        tc_extra = f"\n*{tc_note}*" if tc_note else ""
+        if tc_flags:
+            tc_extra += f"\n{' • '.join(tc_flags)}"
+        embed.add_field(
+            name=f"⏳ {get_quest_ui_label('threat_clock', ui_lang)}",
+            value=f"{tc_pips} `{tc_filled}/{tc_max}`{tc_extra}"[:1024],
+            inline=True,
+        )
 
     leads = fow.get("leads") or []
     if leads and not fow.get("has_structured_objectives"):
@@ -1992,7 +2056,7 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
 
             # 3. Contract Intel & Clues
             if clues:
-                embed.add_field(name="🔍 Bounty Intel & Notes", value=clues[:1024], inline=False)
+                embed.add_field(name="🔍 Bounty Intel & Notes", value=clean_narrative_location_arrows(clues)[:1024], inline=False)
 
             # 4. Rewards
             _format_fow_dossier_embed_fields(embed, session_id, target_bounty, raw_quest=raw_bounty)

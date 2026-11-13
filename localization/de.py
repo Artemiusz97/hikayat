@@ -189,6 +189,17 @@ QUEST_UI_LABELS = {
     "locked_out": "Gesperrt",
     "fallen_world_epilogue": "Gefallene Welt — Widerstands-Epilog",
     "base_reward_note": "Grundlegende Abschlussbelohnungen",
+    "threat_clock": "Bedrohungsuhr",
+    "threat_paused": "Pausiert (Höhepunkt)",
+    "threat_dormant": "Ruhend bis Kapitelbeginn",
+    "threat_reinforced": "Verstärkung",
+    "threat_scar_pending": "Kapitel-Narbenrisiko",
+    "clue_sources": "Hinweisquellen",
+    "source_open": "Offen",
+    "source_burned": "Verbrannt",
+    "source_cold": "Kalt",
+    "source_claimed": "Gesichert",
+    "source_bonus": "Bonus-Spur",
 }
 
 PACT_UI_LABELS = {

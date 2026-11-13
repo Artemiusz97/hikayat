@@ -357,6 +357,14 @@ def _extract_role_and_affiliation_from_text(
     if char_text and isinstance(char_text, str) and char_text.strip():
         extracted_role_phrases.append(char_text.strip())
 
+    # 0. Extract role from parenthetical in description if role is missing or generic (e.g. "Eline Vos (Dispatch Operator) encountered at...")
+    if char_text:
+        m_paren = re.search(rf"\b{re.escape(name_clean)}\s*\(([^)]{{3,45}})\)", char_text, flags=re.IGNORECASE)
+        if m_paren:
+            p_cand = m_paren.group(1).strip()
+            if p_cand and not any(k in p_cand.lower() for k in ("née", "nee", "formerly", "tier ", "freshman", "sophomore", "junior", "senior")):
+                out["role"] = p_cand
+
     # Search scene_narrative for clauses specifically anchored to this NPC's name
     if scene_narrative and isinstance(scene_narrative, str) and name_clean.lower() in scene_narrative.lower():
         # 1. Appositive after name: "Denise Yamada, the Student Council President, is..."
@@ -730,12 +738,18 @@ def _enrich_contact_basic_info(
         faculty_keywords = (
             "teacher", "faculty", "professor", "instructor", "principal", "vice-principal",
             "headmaster", "dean", "counselor", "nurse", "librarian", "custodian", "janitor",
-            "coach", "athletic director", "advisor", "parent", "father", "mother", "detective", "police", "officer", "vendor"
+            "coach", "athletic director", "advisor", "parent", "father", "mother", "detective", "police", "officer", "vendor",
+            "operator", "dispatch", "operative", "agent", "investigator", "director", "commander", "clerk", "receptionist", "bartender", "barista"
         )
         grade_lower = str(info.get("grade") or "").strip().lower()
+        age_grp_lower = str(info.get("age_group") or "").strip().lower()
+        srt_lower = str(info.get("social_role_type") or "").strip().lower()
         is_faculty_or_adult = (
             any(kw in role_lower for kw in faculty_keywords)
-            or grade_lower in ("faculty", "adult")
+            or grade_lower in ("faculty", "adult", "citizen", "staff", "operative")
+            or grade_lower.startswith("tier ")
+            or age_grp_lower == "adult"
+            or srt_lower in ("faculty_staff", "adult_service", "special_agent", "family_relative", "parent")
             or bool(info.get("is_adult_family"))
         )
 
@@ -765,7 +779,7 @@ def _enrich_contact_basic_info(
                         ).fetchall()
                         candidate_factions = [
                             fr["name"].strip() for fr in fac_rows
-                            if fr["name"] and not any(kw in fr["name"].lower() for kw in ("faculty", "staff", "board", "administration"))
+                            if fr["name"] and not any(kw in fr["name"].lower() for kw in ("faculty", "staff", "board", "administration", "directorate", "security group", "investigations", "congregation", "sealing order", "syndicate", "bureau", "agency"))
                         ]
                     except Exception:
                         candidate_factions = []

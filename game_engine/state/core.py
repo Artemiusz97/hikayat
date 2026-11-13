@@ -838,6 +838,16 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             except Exception as _fk_c_err:
                 log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
 
+        # Commit staged civilian permadeaths from combat outcome inside UnitOfWork (DEF-03)
+        if isinstance(outcome, dict) and outcome.get("slain_civilians") and session_id:
+            try:
+                from mechanics.social.anomalous_npc_tags import apply_civilian_permadeath
+                for sc in outcome["slain_civilians"]:
+                    if isinstance(sc, dict) and sc.get("name"):
+                        apply_civilian_permadeath(session_id, session, sc["name"], sc.get("killer", "Anomalous Entity"), defer_db=False)
+            except Exception as _sc_err:
+                log.warning("Failed committing staged civilian permadeath: %s", _sc_err)
+
         scen_key_curr = session.get("scenario", "fantasy") if session else "fantasy"
         game_engine._sanitize_outcome_person_names(outcome, session_id, scen_key_curr)
 
@@ -991,8 +1001,23 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             sess_updates = {}
             if "nearby_enemies" in outcome and outcome["nearby_enemies"] is not None:
                 sess_updates["nearby_enemies"] = outcome["nearby_enemies"]
+            if "party_npcs" in outcome and outcome["party_npcs"] is not None:
+                sess_updates["party_npcs"] = outcome["party_npcs"]
+            elif isinstance(session, dict) and "party_npcs" in session and session["party_npcs"] is not None:
+                sess_updates["party_npcs"] = session["party_npcs"]
             if "player_resonance_pips" in outcome and outcome["player_resonance_pips"] is not None:
                 sess_updates.setdefault("extra", {})["player_resonance_pips"] = outcome["player_resonance_pips"]
+            # Phase 3 Combat Evolution: Persist Threat Ledger & Boss Telegraph
+            if isinstance(session, dict):
+                if "combat_threat_ledger" in session and session["combat_threat_ledger"] is not None:
+                    sess_updates["combat_threat_ledger"] = session["combat_threat_ledger"]
+                if "combat_boss_telegraph" in session and session["combat_boss_telegraph"] is not None:
+                    sess_updates["combat_boss_telegraph"] = session["combat_boss_telegraph"]
+            if isinstance(outcome, dict):
+                if "combat_threat_ledger" in outcome and outcome["combat_threat_ledger"] is not None:
+                    sess_updates["combat_threat_ledger"] = outcome["combat_threat_ledger"]
+                if "combat_boss_telegraph" in outcome and outcome["combat_boss_telegraph"] is not None:
+                    sess_updates["combat_boss_telegraph"] = outcome["combat_boss_telegraph"]
             if outcome.get("_active_quest_encounter"):
                 sess_updates.setdefault("extra", {})["_active_quest_encounter"] = outcome["_active_quest_encounter"]
             elif "_active_quest_encounter" in outcome:

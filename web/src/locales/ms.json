@@ -258,7 +258,29 @@
     "choose_campaign_fate": "Pilih kesinambungan hikayat ini:",
     "epilogue_resistance": "Pimpin Penentangan Dunia Tumbang",
     "peak_scar": "Parut Kemuncak",
-    "liberation_op": "Operasi Pembebasan"
+    "liberation_op": "Operasi Pembebasan",
+    "threat_clock": "Ancaman",
+    "threat_paused": "Dijeda (Kemuncak)",
+    "threat_dormant": "Pegun sehingga bab dimulakan",
+    "threat_next": "Ambang Berikutnya",
+    "threat_reinforced": "Bala Bantuan",
+    "threat_scar_pending": "Risiko Parut Bab",
+    "clue_sources": "Sumber Petunjuk",
+    "source_open": "Terbuka",
+    "source_burned": "Hangus",
+    "source_cold": "Terputus",
+    "source_claimed": "Diperoleh",
+    "source_bonus": "Petunjuk Bonus"
+  },
+  "quest": {
+    "threat_clock": {
+      "consequences": {
+        "lead_cold": "Jejak membeku ({{param}})",
+        "threatened_lost": "Objektif terancam terlepas: {{param}}",
+        "alert_up": "Kewaspadaan Lawan +1 ({{param}})",
+        "reinforced": "Klimaks diperkukuh dengan barisan hadapan musuh"
+      }
+    }
   },
   "codex": {
     "title": "Kodeks Dunia",

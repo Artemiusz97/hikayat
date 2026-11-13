@@ -314,17 +314,28 @@ def can_waypoint_match_via_npc_presence(target_npc: str, stage_key: str = "", cu
     st_low = str(stage_key or (waypoint.get("stage_key") if waypoint else "") or "").lower()
     st_lbl_low = str((waypoint.get("stage_label") if waypoint else "") or "").lower()
     comp_trig = str((waypoint.get("completion_trigger") if waypoint else "") or "").lower()
-
-    if any(k in st_low for k in ("investigate", "explore", "slay", "combat", "scout", "breach", "clear", "neutralize", "gather_clues", "arrive", "travel", "reach")):
-        return False
     dialogue_verbs = (
         "talk", "report", "turn_in", "speak", "deliver", "rendezvous", "return to",
         "interrogate", "question", "convince", "persuade", "negotiate", "interview",
         "consult", "confront", "discuss", "brief", "debrief", "meet with", "present",
     )
-    if comp_trig == "arrival" and not any(k in st_low or k in st_lbl_low for k in dialogue_verbs):
+    has_dialogue_verb = any(k in st_low or k in st_lbl_low for k in dialogue_verbs)
+
+    if waypoint:
+        if waypoint.get("is_climax_stage") or str(waypoint.get("contract_type", "")).lower() == "climax":
+            return False
+        if (
+            waypoint.get("target_location")
+            and waypoint.get("follow_npc_schedule") == 0
+            and comp_trig != "key_clue"
+            and not has_dialogue_verb
+        ):
+            return False
+    if comp_trig != "key_clue" and any(k in st_low for k in ("investigate", "explore", "slay", "combat", "scout", "breach", "clear", "neutralize", "gather_clues", "arrive", "travel", "reach")):
         return False
-    if comp_trig in ("action_choice", "combat_victory", "skill_check", "inspect_prop", "resource_progress", "defeat_target") and not any(k in st_low or k in st_lbl_low for k in dialogue_verbs):
+    if comp_trig == "arrival" and not has_dialogue_verb:
+        return False
+    if comp_trig in ("action_choice", "combat_victory", "skill_check", "inspect_prop", "resource_progress", "defeat_target") and not has_dialogue_verb:
         return False
     return True
 
@@ -343,15 +354,30 @@ def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
         # Distinctive tokens only: must have length >= 4 and not be a generic organizational/occupational stopword
         t_distinctive = [w for w in t_clean.split() if len(w) >= 4 and w not in GENERIC_WAYPOINT_NPC_STOPWORDS]
 
+        def _whole_term_in(term: str, haystack: str) -> bool:
+            if not term or not haystack:
+                return False
+            if term.isascii():
+                return bool(re.search(rf"(?<![a-z0-9]){re.escape(term)}(?![a-z0-9])", haystack))
+            return term in haystack
+
         def _matches_npc(candidate_name: str) -> bool:
             c_low = candidate_name.strip().lower()
             if not c_low:
                 return False
-            # 1. Exact or whole-string containment
-            if t_clean == c_low or t_clean in c_low or c_low in t_clean:
+            # 1. Exact match always succeeds
+            if t_clean == c_low:
                 return True
-            # 2. Distinctive name matching (e.g. 'Astarion' or 'Vance' or 'Kurosawa')
-            if t_distinctive and any(w in c_low for w in t_distinctive):
+            # 2. Whole-term containment (guarded against short/generic role words matching longer targets)
+            if len(t_clean) >= 3 and _whole_term_in(t_clean, c_low):
+                return True
+            if len(c_low) >= 3 and c_low not in GENERIC_WAYPOINT_NPC_STOPWORDS:
+                c_tokens = [tok for tok in re.findall(r"[^\W_]+", c_low) if len(tok) >= 3]
+                if (c_tokens and any(tok not in GENERIC_WAYPOINT_NPC_STOPWORDS for tok in c_tokens)) or not c_low.isascii():
+                    if _whole_term_in(c_low, t_clean):
+                        return True
+            # 3. Distinctive name matching (e.g. 'Astarion' or 'Vance' or 'Kurosawa')
+            if t_distinctive and any(_whole_term_in(w, c_low) for w in t_distinctive):
                 return True
             return False
 
@@ -382,12 +408,124 @@ def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
 
 # ---------------------------------------------------------------- Waypoint Stage Triggers
 
+def get_matching_clue_sources_for_location(
+    session_id: int,
+    quest_id: str,
+    sub_obj_id: Optional[int],
+    current_location: str,
+    waypoint: Optional[dict] = None,
+    include_bonus: bool = True,
+    dossier: Optional[dict] = None,
+) -> dict:
+    """
+    Inspects dossier `main_stages[*].clue_sources` for a `"key_clue"` quest stage and returns
+    all open sources matching `current_location` (or active witness NPC presence), plus any
+    reachable unclaimed `bonus=True` corroborating sources on completed stages (E2).
+    """
+    result = {
+        "is_clue_stage": False,
+        "stage_index": int((waypoint or {}).get("stage_index") or 1),
+        "stage": None,
+        "open_sources": [],
+        "matching_open_sources": [],
+        "matching_bonus_sources": [],
+    }
+    if not session_id or not quest_id or (sub_obj_id not in (None, 0)):
+        return result
+    dos = dossier if dossier is not None else db.get_quest_dossier(session_id, quest_id)
+    if not dos:
+        return result
+    climax = dos.get("climax_spec") or {}
+    main_stages = [s for s in (climax.get("main_stages") or []) if isinstance(s, dict)]
+    if not main_stages:
+        return result
+
+    target_stage = None
+    wp_stage_idx = (waypoint or {}).get("stage_index")
+    if wp_stage_idx is not None:
+        target_stage = next((s for s in main_stages if int(s.get("stage_index") or 0) == int(wp_stage_idx)), None)
+    if target_stage is None:
+        target_stage = next((s for s in main_stages if str(s.get("status") or "").lower() == "active"), None)
+
+    def _split_loc_segments(loc_str: str) -> list[str]:
+        s = str(loc_str or "").strip()
+        for sep in ("\u2794", "->", ">", "|"):
+            if sep in s:
+                return [p.strip().lower() for p in s.split(sep) if p.strip()]
+        return [s.lower()] if s else []
+
+    def _src_matches_loc(src: dict) -> bool:
+        if str(src.get("kind") or "").lower() == "witness":
+            s_npc = str(src.get("npc_name") or "").strip()
+            if not s_npc:
+                return False
+            return bool(
+                can_waypoint_match_via_npc_presence(s_npc, current_location=current_location, waypoint=waypoint)
+                and is_waypoint_npc_present_in_scene(session_id, s_npc)
+            )
+        s_loc = str(src.get("location") or "").strip()
+        if s_loc and check_location_matches_waypoint(current_location, s_loc, session_id=session_id):
+            s_parts = _split_loc_segments(s_loc)
+            c_parts = _split_loc_segments(current_location)
+            if len(s_parts) >= 2:
+                src_leaf = s_parts[-1]
+                if src_leaf in ("main area", "area", "") and len(s_parts) >= 2:
+                    src_leaf = s_parts[-2]
+                if src_leaf in c_parts or (c_parts and c_parts[-1] == src_leaf):
+                    return True
+            else:
+                return True
+        return False
+
+    if target_stage and not target_stage.get("is_climax_stage"):
+        raw_sources = [s for s in (target_stage.get("clue_sources") or []) if isinstance(s, dict)]
+        trig = str(target_stage.get("completion_trigger") or (waypoint or {}).get("completion_trigger") or "")
+        if trig == "key_clue" or raw_sources:
+            result["is_clue_stage"] = True
+            result["stage_index"] = int(target_stage.get("stage_index") or result["stage_index"])
+            result["stage"] = target_stage
+            open_srcs = [s for s in raw_sources if str(s.get("status") or "open").lower() == "open"]
+            result["open_sources"] = open_srcs
+            result["matching_open_sources"] = [s for s in open_srcs if _src_matches_loc(s)]
+
+    if include_bonus:
+        for st in main_stages:
+            st_status = str(st.get("status") or "").lower()
+            if not (st.get("completed") or st_status in ("completed", "bypassed")):
+                continue
+            for src in (st.get("clue_sources") or []):
+                if not isinstance(src, dict):
+                    continue
+                if bool(src.get("bonus")) and str(src.get("status") or "").lower() != "claimed":
+                    if _src_matches_loc(src):
+                        b_copy = dict(src)
+                        b_copy["_stage_index"] = int(st.get("stage_index") or 1)
+                        b_copy["_stage_label"] = str(st.get("stage_label") or st.get("label") or "")
+                        b_copy["_key_clue"] = dict(st.get("key_clue") or {})
+                        result["matching_bonus_sources"].append(b_copy)
+
+    return result
+
+
 def try_advance_on_arrival(session_id: int, quest_id: str, sub_obj_id: Optional[int], current_location: str) -> Optional[dict]:
     """Called every turn. Advances 'arrival' trigger stages when player reaches target,
     reaches the target NPC's live scheduled location, or encounters the NPC in the scene."""
     waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
     if not waypoint:
         return None
+    # E1: Engage chapter Threat Clock if player arrives at Story Stage 1 (even on key_clue triggers)
+    if session_id and quest_id and (sub_obj_id in (None, 0)) and int(waypoint.get("stage_index") or 1) == 1:
+        t_loc_e1 = resolve_effective_waypoint_location(session_id, waypoint) or waypoint.get("target_location", "")
+        at_stage1 = bool(t_loc_e1 and check_location_matches_waypoint(current_location, t_loc_e1, session_id=session_id))
+        if not at_stage1 and str(waypoint.get("completion_trigger") or "") == "key_clue":
+            ci = get_matching_clue_sources_for_location(session_id, quest_id, sub_obj_id, current_location, waypoint=waypoint, include_bonus=False)
+            at_stage1 = bool(ci.get("matching_open_sources"))
+        if at_stage1:
+            try:
+                from mechanics.narrative.threat_clock import mark_chapter_clock_engaged
+                mark_chapter_clock_engaged(session_id, quest_id)
+            except Exception:
+                pass
     if waypoint.get("completion_trigger") != "arrival":
         return None
     # Spatial Graph & Hierarchy Matching
@@ -602,9 +740,79 @@ def does_action_target_waypoint(
         and str(quest_id).startswith(("MNR-", "RMR-"))
         and (str(action_quest_id) == str(quest_id))
     )
-    if waypoint.get("completion_trigger") not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action"):
+    if waypoint.get("completion_trigger") not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action", "key_clue"):
         if not is_rumor_inq_act:
             return None
+
+    # Key-Clue multi-source matching (active open clue_sources + E2 bonus corroborating sources)
+    if str(waypoint.get("completion_trigger") or "") == "key_clue" or (sub_obj_id in (None, 0)):
+        clue_info = get_matching_clue_sources_for_location(
+            session_id,
+            quest_id,
+            sub_obj_id,
+            current_location,
+            waypoint=waypoint,
+            include_bonus=True,
+        )
+        if clue_info.get("is_clue_stage") or clue_info.get("matching_bonus_sources"):
+            open_hits = clue_info.get("matching_open_sources") or []
+            if open_hits:
+                act_low = str(action_text or "").lower()
+                # Prefer source whose NPC or approach_hint words overlap action_text
+                picked = open_hits[0]
+                best_score = -1
+                for cand in open_hits:
+                    sc = 0
+                    c_npc = str(cand.get("npc_name") or "").lower().strip()
+                    if c_npc and any(tok in act_low for tok in c_npc.split() if len(tok) >= 3):
+                        sc += 3
+                    hint_words = [w for w in re.findall(r"\b[a-z]{4,}\b", str(cand.get("approach_hint") or "").lower()) if w not in ("from", "with", "into", "this", "that")]
+                    sc += sum(1 for w in hint_words if w in act_low)
+                    if sc > best_score:
+                        best_score = sc
+                        picked = cand
+                is_action_match = False
+                if is_quest_action:
+                    if action_quest_id and str(action_quest_id) != str(quest_id):
+                        is_action_match = False
+                    elif action_sub_obj_id is not None and sub_obj_id is not None and int(action_sub_obj_id) != int(sub_obj_id):
+                        is_action_match = False
+                    else:
+                        is_action_match = True
+                else:
+                    stage_lbl = str(waypoint.get("stage_label") or "")
+                    kc_title = str(((clue_info.get("stage") or {}).get("key_clue") or {}).get("title") or "")
+                    combined_hint = f"{stage_lbl} {picked.get('approach_hint', '')} {kc_title}".strip()
+                    p_npc = str(picked.get("npc_name") or "") if str(picked.get("kind") or "").lower() == "witness" else ""
+                    is_action_match = check_action_matches_waypoint(action_text, narrative, combined_hint, sub_obj_text, p_npc)
+                if is_action_match:
+                    wp_copy = dict(waypoint)
+                    wp_copy["_matched_clue_source_id"] = str(picked.get("source_id") or "")
+                    wp_copy["_matched_clue_source"] = dict(picked)
+                    wp_copy["_matched_clue_stage_index"] = int(clue_info.get("stage_index") or waypoint.get("stage_index") or 1)
+                    wp_copy["_is_bonus_clue"] = False
+                    return wp_copy
+            # Check E2 bonus corroborating source on a completed stage
+            bonus_hits = clue_info.get("matching_bonus_sources") or []
+            if bonus_hits:
+                b_pick = bonus_hits[0]
+                b_npc = str(b_pick.get("npc_name") or "") if str(b_pick.get("kind") or "").lower() == "witness" else ""
+                b_kc_title = str((b_pick.get("_key_clue") or {}).get("title") or "")
+                b_match = False
+                if is_quest_action and (not action_quest_id or str(action_quest_id) == str(quest_id)):
+                    if action_sub_obj_id is None or sub_obj_id is None or int(action_sub_obj_id) == int(sub_obj_id):
+                        b_match = True
+                elif check_action_matches_waypoint(action_text, narrative, f"{b_pick.get('approach_hint', '')} {b_kc_title} bonus corroborate", "", b_npc):
+                    b_match = True
+                if b_match:
+                    wp_copy = dict(waypoint)
+                    wp_copy["_matched_clue_source_id"] = str(b_pick.get("source_id") or "")
+                    wp_copy["_matched_clue_source"] = dict(b_pick)
+                    wp_copy["_matched_clue_stage_index"] = int(b_pick.get("_stage_index") or 1)
+                    wp_copy["_is_bonus_clue"] = True
+                    return wp_copy
+            if str(waypoint.get("completion_trigger") or "") == "key_clue":
+                return None
     target_node = waypoint.get("target_node_id")
     target_loc = resolve_effective_waypoint_location(session_id, waypoint)
     static_target_loc = waypoint.get("static_target_location") or waypoint.get("target_location", "")
@@ -680,6 +888,21 @@ def try_complete_on_skill_check(
     if not check_success:
         return None
 
+    if waypoint.get("_is_bonus_clue"):
+        return {
+            "quest_id": quest_id,
+            "sub_obj_id": sub_obj_id,
+            "stage_completed": None,
+            "stage_label": str((waypoint.get("_matched_clue_source") or {}).get("_stage_label") or waypoint.get("stage_label", "")),
+            "next_waypoint": db.get_active_waypoint(session_id, quest_id, sub_obj_id),
+            "all_stages_complete": False,
+            "trigger": "bonus_clue",
+            "is_bonus_clue": True,
+            "matched_clue_source_id": str(waypoint.get("_matched_clue_source_id") or ""),
+            "matched_clue_source": dict(waypoint.get("_matched_clue_source") or {}),
+            "matched_clue_stage_index": int(waypoint.get("_matched_clue_stage_index") or 1),
+        }
+
     resource_target = int(waypoint.get("resource_target", 0))
 
     if resource_target > 0:
@@ -716,6 +939,10 @@ def try_complete_on_skill_check(
         "all_stages_complete": stage_complete,
         "trigger": waypoint.get("completion_trigger", "skill_check"),
     }
+    if waypoint.get("_matched_clue_source_id"):
+        notice["matched_clue_source_id"] = str(waypoint.get("_matched_clue_source_id") or "")
+        notice["matched_clue_source"] = dict(waypoint.get("_matched_clue_source") or {})
+        notice["matched_clue_stage_index"] = int(waypoint.get("_matched_clue_stage_index") or waypoint["stage_index"])
 
     if resource_target > 0:
         notice["resource_collected"] = resource_target
@@ -750,26 +977,26 @@ def get_story_quest_climax_location(session_id: int, allow_premature: bool = Fal
     # All sub-objectives are done! Resolve the Climax Encounter location
     qid = story_quest.get("quest_id", "")
 
-    with db.get_conn() as conn:
-        # 1. Check if an explicit whole-quest / climax waypoint exists in DB
-        row = conn.execute(
-            "SELECT target_location FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status IN ('active', 'locked') LIMIT 1",
-            (session_id, qid)
-        ).fetchone()
-        if row and row["target_location"]:
-            return story_quest, row["target_location"]
+    # 1. Check if an explicit whole-quest / climax waypoint exists in DB
+    climax_wp_loc = db.get_quest_waypoint_target_location(session_id, qid, mode="climax_null_sub")
+    if climax_wp_loc:
+        return story_quest, climax_wp_loc
 
-        # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) qualifies
-        if allow_premature and not (sub_objs and db.is_quest_main_objectives_complete(sub_objs)):
-            return None, None
+    # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) qualifies
+    if allow_premature and not (sub_objs and db.is_quest_main_objectives_complete(sub_objs)):
+        return None, None
 
-        # 2. Check the target location of the highest sub_obj_id waypoint
-        row_sub = conn.execute(
-            "SELECT target_location FROM quest_waypoints WHERE session_id=? AND quest_id=? AND target_location IS NOT NULL AND target_location != '' ORDER BY CASE WHEN sub_obj_id = 0 THEN 0 ELSE 1 END ASC, sub_obj_id DESC, stage_index DESC LIMIT 1",
-            (session_id, qid)
-        ).fetchone()
-        if row_sub and row_sub["target_location"]:
-            return story_quest, row_sub["target_location"]
+    # 2. Check if the compiled quest dossier specifies a canonical climax location
+    dossier = db.get_quest_dossier(session_id, qid)
+    if dossier and isinstance(dossier, dict):
+        climax_loc = (dossier.get("climax_spec") or {}).get("location")
+        if climax_loc:
+            return story_quest, climax_loc
+
+    # 3. Check the target location of the highest sub_obj_id waypoint
+    highest_sub_loc = db.get_quest_waypoint_target_location(session_id, qid, mode="highest_sub")
+    if highest_sub_loc:
+        return story_quest, highest_sub_loc
 
     # 3. Check session's current location or seeded locations
     session = db.get_session(session_id)

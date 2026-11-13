@@ -58,6 +58,12 @@ _STUDENT_ROLE_EXCEPTIONS = (
 )
 
 
+def _is_agent_tier_grade(grade_low: str) -> bool:
+    """True for adult Special Agent rank grades ("Tier 2 (Junior Operative)", "Operative")."""
+    g = str(grade_low or "").strip().lower()
+    return g.startswith("tier ") or g == "operative"
+
+
 def is_school_scenario(scen_key: str = "") -> bool:
     """Checks whether the scenario key belongs to high school or academy settings."""
     try:
@@ -83,7 +89,8 @@ def derive_age_group(
     srt_clean = str(social_role_type or "").lower().strip()
     if srt_clean in ("faculty_staff", "adult_service", "family_relative", "parent", "special_agent", "folklore_villager"):
         g_probe = str(grade or "").lower().strip()
-        if srt_clean == "special_agent" and any(k in g_probe for k in _STUDENT_GRADES):
+        # Adult agent ranks like "Tier 2 (Junior Operative)" contain "junior"/"senior" but are NOT student grades.
+        if srt_clean == "special_agent" and not _is_agent_tier_grade(g_probe) and any(k in g_probe for k in _STUDENT_GRADES):
             return AGE_GROUP_TEEN
         return AGE_GROUP_ADULT
     if srt_clean in ("student_peer", "peer", "contemporary", "classmate"):
@@ -121,13 +128,15 @@ def normalize_standing(role: str = "", grade: str = "", scen_key: str = "high_sc
     Returns: 'Freshman' | 'Sophomore' | 'Junior' | 'Senior' | 'Faculty' | 'Staff' | 'Citizen' | 'Youth Peer' | ''
     """
     g_low = str(grade or "").strip().lower()
+    # Agent ranks must win before student-grade substring matching:
+    # "Tier 2 (Junior Operative)" is an adult rank, not the "Junior" school grade.
+    if _is_agent_tier_grade(g_low):
+        return str(grade).strip() or "Operative"
     for k, v in _STUDENT_GRADES.items():
         if k in g_low or f"grade {9 + list(_STUDENT_GRADES.keys()).index(k)}" in g_low:
             return v
     if "youth peer" in g_low:
         return "Youth Peer"
-    if g_low.startswith("tier ") or g_low == "operative":
-        return str(grade).strip() or "Operative"
 
     if not is_school_scenario(scen_key):
         return ""

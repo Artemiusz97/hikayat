@@ -855,7 +855,10 @@ def generate_person_name(
     player_gender: str = "",
     female_ratio: float | None = None,
     rng: Any = None,
+    **kwargs: Any,
 ) -> str:
+    if "scen_key" in kwargs and (scenario == "fantasy" or not scenario):
+        scenario = str(kwargs.pop("scen_key") or "fantasy")
     if rng is None:
         rng = random.Random(seed) if seed is not None else random
 
@@ -1180,8 +1183,9 @@ def generate_person_name_with_surname(
 
 
 def generate_npc_name(scenario: str = "fantasy", role: str = "", gender: str = "", **kwargs) -> str:
-    """Generates an NPC person name (alias to generate_person_name, tolerating role and kwargs)."""
-    return generate_person_name(scenario=scenario, gender=gender, **kwargs)
+    """Generates an NPC person name (alias to generate_person_name, tolerating role, scen_key and kwargs)."""
+    scen = str(kwargs.pop("scen_key", None) or scenario or "fantasy")
+    return generate_person_name(scenario=scen, gender=gender, **kwargs)
 
 
 def generate_role(scenario: str = "fantasy", hash_val: int = None) -> str:

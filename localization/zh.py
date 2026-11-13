@@ -184,6 +184,17 @@ QUEST_UI_LABELS = {
     "locked_out": "已封锁",
     "fallen_world_epilogue": "沦陷世界 — 抵抗军尾声",
     "base_reward_note": "基础达成奖励",
+    "threat_clock": "威胁时钟",
+    "threat_paused": "已暂停（决战）",
+    "threat_dormant": "章节未触发前暂不计时",
+    "threat_reinforced": "敌方增援",
+    "threat_scar_pending": "章节创痕风险",
+    "clue_sources": "线索途径",
+    "source_open": "可查探",
+    "source_burned": "已失手",
+    "source_cold": "已中断",
+    "source_claimed": "已获取",
+    "source_bonus": "额外线索",
 }
 
 PACT_UI_LABELS = {

@@ -91,6 +91,9 @@ BLUEPRINT_DEFINITIONS = {
 # -----------------------------------------------------------------------------
 ARCHETYPE_KEYWORD_TO_BLUEPRINT: dict[str, str] = {
     # ACQUISITION (Resource Run, Gathering, Alchemy, Crafting, Off-Campus Errand, Relic Discovery, Tech/Data Extraction, Scavenging, Salvage, Aphrodisiac Brewing, Supply)
+    "acquisition": "ACQUISITION",
+    "item delivery": "ACQUISITION",
+    "recovery": "ACQUISITION",
     "resource run": "ACQUISITION",
     "gathering": "ACQUISITION",
     "alchemy": "ACQUISITION",
@@ -274,10 +277,11 @@ GENERIC_ITEM_STOPWORDS = {
 # -----------------------------------------------------------------------------
 def get_blueprint_for_archetype(archetype: str, objective: str = "") -> str:
     """Deterministically maps any narrative archetype string to its canonical Blueprint ID."""
-    arch_clean = (archetype or "").lower().strip()
-    if arch_clean in BLUEPRINT_DEFINITIONS:
-        return arch_clean
+    arch_upper = (archetype or "").upper().strip()
+    if arch_upper in BLUEPRINT_DEFINITIONS:
+        return arch_upper
 
+    arch_clean = (archetype or "").lower().strip()
     # Longest keyword match first
     for kw in sorted(ARCHETYPE_KEYWORD_TO_BLUEPRINT.keys(), key=len, reverse=True):
         if kw in arch_clean:
@@ -285,9 +289,9 @@ def get_blueprint_for_archetype(archetype: str, objective: str = "") -> str:
 
     # Inspect objective verbs as fallback
     obj_clean = (objective or "").lower()
-    if any(v in obj_clean for v in ("deliver", "gather", "collect", "fetch", "retrieve", "harvest", "craft")):
+    if any(v in obj_clean for v in ("deliver", "gather", "collect", "fetch", "retrieve", "harvest", "craft", "recover", "hand over", "acquire", "obtain")):
         return "ACQUISITION"
-    if any(v in obj_clean for v in ("assassinate", "slay", "hunt", "eliminate", "execute", "target")):
+    if any(v in obj_clean for v in ("assassinate", "slay", "hunt", "eliminate", "execute", "target", "defeat")):
         return "NEUTRALIZATION"
     if any(v in obj_clean for v in ("infiltrate", "breach", "steal", "hack", "bypass", "slip into")):
         return "HEIST_INFILTRATION"

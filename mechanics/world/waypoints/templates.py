@@ -439,9 +439,12 @@ def ensure_multi_stage_waypoints(
         if len(distinct_locs) <= 1:
             validated[1]["target_location"] = secondary_loc
             if len(validated) >= 3:
-                if client_location and client_location != secondary_loc:
+                from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
+                is_safe_client = is_safe_sanctuary_location(client_location)
+                is_combat_or_check = validated[2].get("completion_trigger") in ("skill_check", "combat", "action")
+                if client_location and client_location != secondary_loc and not (is_safe_client and is_combat_or_check):
                     validated[2]["target_location"] = client_location
-                elif tertiary_loc and tertiary_loc != secondary_loc:
+                elif tertiary_loc and tertiary_loc != secondary_loc and not is_safe_sanctuary_location(tertiary_loc):
                     validated[2]["target_location"] = tertiary_loc
                 else:
                     validated[2]["target_location"] = default_loc
@@ -472,6 +475,11 @@ def ensure_multi_stage_waypoints(
         final_st["follow_npc_schedule"] = 1
         if client_location:
             final_st["target_location"] = client_location
+        final_st["completion_trigger"] = "arrival"
+        from mechanics.world.locations import format_clean_location_prose
+        c_short = format_clean_location_prose(client_location, include_zone=False) if client_location else "the client"
+        if not any(k in str(final_st.get("stage_label", "")).lower() for k in ("report", "deliver", "return", "hand in", "hand over", "collect reward", "inform")):
+            final_st["stage_label"] = f"Report back to {client_npc} at {c_short}"
 
     if required_item and validated:
         if bp_id == "ACQUISITION":

@@ -73,9 +73,13 @@ def create_contextual_story_quest_data(
             p_res = resolve_session_location_tokens(session_id, p, scen_key)
             avail_locs_list.append(f"{z_res} ➔ {p_res}")
 
-    if not loc:
-        if avail_locs_list:
-            loc = avail_locs_list[0]
+    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
+    danger_locs = [l for l in avail_locs_list if not is_safe_sanctuary_location(l)]
+    field_locs = danger_locs if danger_locs else avail_locs_list
+
+    if not loc or is_safe_sanctuary_location(loc):
+        if field_locs:
+            loc = field_locs[0]
         else:
             try:
                 from mechanics.world.locations.seeding import get_default_tiered_location
@@ -84,9 +88,9 @@ def create_contextual_story_quest_data(
             except Exception:
                 loc = "Ashford Academy" if is_school_scenario(scen_key) else "Central District"
 
-    loc1 = avail_locs_list[0] if len(avail_locs_list) > 0 else loc
-    loc2 = avail_locs_list[1] if len(avail_locs_list) > 1 else loc1
-    loc3 = avail_locs_list[2] if len(avail_locs_list) > 2 else (avail_locs_list[0] if avail_locs_list else loc)
+    loc1 = field_locs[0] if len(field_locs) > 0 else loc
+    loc2 = field_locs[1] if len(field_locs) > 1 else loc1
+    loc3 = field_locs[2] if len(field_locs) > 2 else (field_locs[0] if field_locs else loc)
     loc1_short = format_clean_location_prose(loc1, include_zone=False) or "the sector"
     loc2_short = format_clean_location_prose(loc2, include_zone=False) or loc1_short
     loc3_prose = format_clean_location_prose(loc3, include_zone=True, preposition="in") or loc1_short
@@ -142,7 +146,7 @@ def create_contextual_story_quest_data(
     archetype = str(storylet.get("engine") or "MYSTERY_CASE")
     objective = str(storylet.get("objective") or "Advance the chapter objective.")
     is_peak = bool(ch_clamped in PEAK_CHAPTERS)
-    main_stage_count = 3 if is_peak else 2
+    main_stage_count = 4 if is_peak else 3
     feat_lt = str(storylet.get("featured_lieutenant") or "the Vanguard Envoy")
     mm_name = str((spine.get("mastermind_profile") or {}).get("name") or feat_lt)
     target_npc = mm_name if ch_clamped == 10 else feat_lt
@@ -1519,7 +1523,7 @@ def consume_quest_delivery_item_if_needed(
         for item in matching:
             if consumed >= req_cnt:
                 break
-            if db.remove_item(uid, item["id"]):
+            if db.remove_item(uid, item["id"], force=True):
                 consumed += 1
 
     if sub_obj:
@@ -1862,6 +1866,19 @@ def apply_quest_failure_consequences(
     else:
         progress_note = "Failed (Target Alerted / Escaped)"
     db.fail_quest_and_waypoints(session_id, qid, resolution_approach=reason, progress_note=progress_note)
+    dos_fail = db.get_quest_dossier(session_id, qid)
+    if dos_fail:
+        try:
+            eff_turn_fail = int(db.infer_session_turn(session or db.get_session(session_id) or {}))
+            prev_status_f = str(quest.get("status") or "Active")
+            prev_tier_f = str(dos_fail.get("outcome_tier") or "")
+            if prev_status_f != "Failed":
+                db.append_dossier_state_event(session_id, qid, eff_turn_fail, "quest_status", prev_status_f, "Failed")
+            if prev_tier_f != "failure":
+                db.append_dossier_state_event(session_id, qid, eff_turn_fail, "outcome_tier", prev_tier_f, "failure")
+            db.upsert_quest_dossier(session_id, qid, engaged_flag=1, outcome_tier="failure")
+        except Exception:
+            pass
     if reason in ("entity_escaped", "killed_non_hostile_target"):
         try:
             from mechanics.world.anomalous_events import (
@@ -2139,6 +2156,19 @@ def check_and_expire_overdue_quests(
         is_expired = (curr_day > d_day) or (curr_day == d_day and curr_min >= d_min)
         if is_expired:
             db.expire_quest_and_waypoints(session_id, qid)
+            dos_exp = db.get_quest_dossier(session_id, qid)
+            if dos_exp:
+                try:
+                    eff_turn_exp = int(db.infer_session_turn(session or db.get_session(session_id) or {}))
+                    prev_status_e = str(q.get("status") or "Active")
+                    prev_tier_e = str(dos_exp.get("outcome_tier") or "")
+                    if prev_status_e != "Failed":
+                        db.append_dossier_state_event(session_id, qid, eff_turn_exp, "quest_status", prev_status_e, "Failed")
+                    if prev_tier_e != "failure":
+                        db.append_dossier_state_event(session_id, qid, eff_turn_exp, "outcome_tier", prev_tier_e, "failure")
+                    db.upsert_quest_dossier(session_id, qid, engaged_flag=1, outcome_tier="failure")
+                except Exception:
+                    pass
             client_npc = q.get("client_npc") or ""
             if client_npc:
                 try:
@@ -2371,6 +2401,7 @@ def _resolve_pre_turn_quests_impl(
     advanced_keys = []
     waypoint_notices = []
     completed_sub_quests = []
+    staged_advances = {}
 
     resolves_so_id = None
     if actions and isinstance(actions[0], dict):
@@ -2384,8 +2415,10 @@ def _resolve_pre_turn_quests_impl(
         if dm_dir:
             directives.append(dm_dir)
 
+        sub_objs = q.get("sub_objectives") or []
+        has_structured_main = bool(isinstance(sub_objs, list) and any(isinstance(so, dict) and so.get("id") == 0 for so in sub_objs))
         # 1. Check top-level quest waypoints (bounties / single-track quests)
-        active_wp = db.get_active_waypoint(session_id, qid, None)
+        active_wp = None if has_structured_main else db.get_active_waypoint(session_id, qid, None)
         if active_wp:
             trig = active_wp.get("completion_trigger") or "arrival"
             is_rumor_inquiry_on_this_quest = (
@@ -2441,7 +2474,7 @@ def _resolve_pre_turn_quests_impl(
                             directives.append(dm_dir2)
                     if res_adv.get("all_stages_complete") and not _should_defer_dossier_turn_in(session_id, q):
                         completed_quests.append(q)
-            elif trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target"):
+            elif trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "key_clue"):
                 wp_match = does_action_target_waypoint(
                     session_id=session_id,
                     quest_id=qid,
@@ -2505,13 +2538,50 @@ def _resolve_pre_turn_quests_impl(
                             action_sub_obj_id=action_sub_obj_id,
                         )
                         if res_adv:
+                            if res_adv.get("is_bonus_clue"):
+                                if persist_db and session_id:
+                                    try:
+                                        from game_engine.quest_turn_resolver import resolve_clue_source_claim
+                                        b_res = resolve_clue_source_claim(
+                                            session_id,
+                                            qid,
+                                            stage_index=int(res_adv.get("matched_clue_stage_index") or 1),
+                                            source_id=str(res_adv.get("matched_clue_source_id") or ""),
+                                            cur_loc=cur_loc,
+                                            is_bonus=True,
+                                        )
+                                        if b_res.get("directive"):
+                                            directives.append(b_res["directive"])
+                                    except Exception as _b_err:
+                                        logger.debug("Bonus clue claim failed: %s", _b_err)
+                                waypoint_notices.append(res_adv)
+                                continue
+                            if persist_db and session_id and (res_adv.get("trigger") == "key_clue" or res_adv.get("matched_clue_source_id")):
+                                try:
+                                    from game_engine.quest_turn_resolver import resolve_clue_source_claim
+                                    resolve_clue_source_claim(
+                                        session_id,
+                                        qid,
+                                        stage_index=int(res_adv.get("matched_clue_stage_index") or res_adv.get("stage_completed") or 1),
+                                        source_id=str(res_adv.get("matched_clue_source_id") or ""),
+                                        cur_loc=cur_loc,
+                                        is_bonus=False,
+                                    )
+                                except Exception as _kc_err:
+                                    logger.debug("Key clue claim sync failed: %s", _kc_err)
+                            elif persist_db and session_id and q.get("is_story_quest"):
+                                try:
+                                    from mechanics.narrative.threat_clock import mark_chapter_clock_engaged
+                                    mark_chapter_clock_engaged(session_id, qid)
+                                except Exception:
+                                    pass
                             advanced_stages.append({"quest_id": qid, "res": res_adv})
                             advanced_keys.append((qid, None))
                             waypoint_notices.append(res_adv)
                             appr_eff = apply_quest_approach_effects(
                                 session_id=session_id,
                                 quest=q,
-                                waypoint=active_wp,
+                                waypoint=wp_match or active_wp,
                                 approach=act_approach,
                                 gold_cost=act_gold_cost,
                                 party_user_ids=party_uids,
@@ -2537,13 +2607,28 @@ def _resolve_pre_turn_quests_impl(
                         strike_res = handle_failed_quest_skill_check(
                             session_id=session_id,
                             quest=q,
-                            waypoint=active_wp,
+                            waypoint=wp_match or active_wp,
                             check_result_tier=check_tier,
                             party_user_ids=party_uids,
                             session=session,
                         )
                         if strike_res and strike_res.get("directive"):
                             directives.append(strike_res["directive"])
+                        if strike_res and strike_res.get("stage_advanced"):
+                            advanced_keys.append((qid, None))
+                            comp_st = int(strike_res.get("completed_stage") or 1)
+                            nxt_wp = strike_res.get("next_waypoint") or {}
+                            nxt_st = int(strike_res.get("next_stage") or (comp_st + 1))
+                            staged_advances[f"{qid}:None"] = {
+                                "quest_id": qid,
+                                "sub_obj_id": None,
+                                "completed_stage": comp_st,
+                                "next_stage": nxt_st,
+                                "next_waypoint": nxt_wp,
+                                "fail_forward": True,
+                            }
+                            if strike_res.get("all_stages_complete") and not _should_defer_dossier_turn_in(session_id, q):
+                                completed_quests.append(q)
 
         # 2. Check sub-objective waypoints (Story Quests & multi-branch quests)
         sub_objs = q.get("sub_objectives") or []
@@ -2554,6 +2639,8 @@ def _resolve_pre_turn_quests_impl(
                     continue
                 so_id = so.get("id")
                 if so_id is None:
+                    continue
+                if (qid, so_id) in advanced_keys or (so_id == 0 and (qid, None) in advanced_keys):
                     continue
                 so_wp = db.get_active_waypoint(session_id, qid, so_id)
                 so_done = False
@@ -2594,7 +2681,7 @@ def _resolve_pre_turn_quests_impl(
                                 )
                             if res_so.get("all_stages_complete"):
                                 so_done = True
-                    elif so_trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target"):
+                    elif so_trig in ("skill_check", "action", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "key_clue"):
                         wp_match_so = does_action_target_waypoint(
                             session_id=session_id,
                             quest_id=qid,
@@ -2660,13 +2747,52 @@ def _resolve_pre_turn_quests_impl(
                                     action_sub_obj_id=action_sub_obj_id,
                                 )
                                 if res_so:
+                                    if res_so.get("is_bonus_clue"):
+                                        if persist_db and session_id:
+                                            try:
+                                                from game_engine.quest_turn_resolver import resolve_clue_source_claim
+                                                b_res_so = resolve_clue_source_claim(
+                                                    session_id,
+                                                    qid,
+                                                    stage_index=int(res_so.get("matched_clue_stage_index") or 1),
+                                                    source_id=str(res_so.get("matched_clue_source_id") or ""),
+                                                    cur_loc=cur_loc,
+                                                    is_bonus=True,
+                                                )
+                                                if b_res_so.get("directive"):
+                                                    directives.append(b_res_so["directive"])
+                                            except Exception as _b_so_err:
+                                                logger.debug("Sub-obj bonus clue claim failed: %s", _b_so_err)
+                                        waypoint_notices.append(res_so)
+                                        break
+                                    _kc_synced_here = False
+                                    if persist_db and session_id and (res_so.get("trigger") == "key_clue" or res_so.get("matched_clue_source_id")):
+                                        try:
+                                            from game_engine.quest_turn_resolver import resolve_clue_source_claim
+                                            resolve_clue_source_claim(
+                                                session_id,
+                                                qid,
+                                                stage_index=int(res_so.get("matched_clue_stage_index") or res_so.get("stage_completed") or 1),
+                                                source_id=str(res_so.get("matched_clue_source_id") or ""),
+                                                cur_loc=cur_loc,
+                                                is_bonus=False,
+                                            )
+                                            _kc_synced_here = True
+                                        except Exception as _kc_so_err:
+                                            logger.debug("Sub-obj key clue claim sync failed: %s", _kc_so_err)
+                                    elif persist_db and session_id and q.get("is_story_quest"):
+                                        try:
+                                            from mechanics.narrative.threat_clock import mark_chapter_clock_engaged
+                                            mark_chapter_clock_engaged(session_id, qid)
+                                        except Exception:
+                                            pass
                                     advanced_stages.append({"quest_id": qid, "sub_obj_id": so_id, "res": res_so})
                                     advanced_keys.append((qid, so_id))
                                     waypoint_notices.append(res_so)
                                     appr_eff = apply_quest_approach_effects(
                                         session_id=session_id,
                                         quest=q,
-                                        waypoint=so_wp,
+                                        waypoint=wp_match_so or so_wp,
                                         approach=act_approach,
                                         gold_cost=act_gold_cost,
                                         party_user_ids=party_uids,
@@ -2694,10 +2820,24 @@ def _resolve_pre_turn_quests_impl(
                                             f"advanced to Stage {nxt_st}/{tot_st}: '{nxt_lbl}'. "
                                             f"Narrate this skill check breakthrough vividly and set up the next hurdle."
                                         )
+                                        staged_advances[f"{qid}:{so_id}"] = {
+                                            "quest_id": qid,
+                                            "sub_obj_id": so_id,
+                                            "completed_stage": comp_st,
+                                            "next_stage": nxt_st,
+                                            "total_stages": tot_st,
+                                            "next_waypoint": nxt_wp,
+                                        }
                                         if persist_db and session_id:
                                             stg_arch = str(so.get("archetype") or q.get("quest_type") or "Objective").lower()
                                             stg_npc = str(nxt_wp.get("target_npc") or so.get("target_npc") or "")
-                                            if ("investigat" in stg_arch or "clue" in stg_arch) and comp_st == 2:
+                                            if so_id == 0 and not _kc_synced_here:
+                                                try:
+                                                    from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+                                                    sync_dossier_main_stage_advance(session_id, qid, comp_st)
+                                                except Exception as _sync_mid_err:
+                                                    logger.debug("Intermediate stage dossier sync failed: %s", _sync_mid_err)
+                                            elif so_id != 0 and ("investigat" in stg_arch or "clue" in stg_arch) and comp_st >= 1:
                                                 try:
                                                     from mechanics.narrative.clues import categorize_clue
                                                     c_lead = f"Evidence fragment uncovered during '{so.get('text', '')}'"
@@ -2724,7 +2864,7 @@ def _resolve_pre_turn_quests_impl(
                                 strike_res = handle_failed_quest_skill_check(
                                     session_id=session_id,
                                     quest=q,
-                                    waypoint=so_wp,
+                                    waypoint=wp_match_so or so_wp,
                                     check_result_tier=check_tier,
                                     party_user_ids=party_uids,
                                     sub_obj=so,
@@ -2734,6 +2874,31 @@ def _resolve_pre_turn_quests_impl(
                                     directives.append(strike_res["directive"])
                                 if strike_res and strike_res.get("status") == "dire_cost":
                                     so_done = True
+                                elif strike_res and strike_res.get("stage_advanced"):
+                                    advanced_keys.append((qid, so_id))
+                                    comp_st = int(strike_res.get("completed_stage") or 1)
+                                    nxt_wp = strike_res.get("next_waypoint") or {}
+                                    nxt_st = int(strike_res.get("next_stage") or (comp_st + 1))
+                                    staged_advances[f"{qid}:{so_id}"] = {
+                                        "quest_id": qid,
+                                        "sub_obj_id": so_id,
+                                        "completed_stage": comp_st,
+                                        "next_stage": nxt_st,
+                                        "next_waypoint": nxt_wp,
+                                        "fail_forward": True,
+                                    }
+                                    waypoint_notices.append({
+                                        "quest_id": qid,
+                                        "sub_obj_id": so_id,
+                                        "completed_stage_index": comp_st,
+                                        "stage_index": comp_st,
+                                        "status": "completed",
+                                        "next_stage": nxt_st,
+                                        "next_waypoint": nxt_wp,
+                                        "fail_forward": True,
+                                    })
+                                    if strike_res.get("all_stages_complete"):
+                                        so_done = True
 
                 if not so_done and resolves_so_id is not None and str(resolves_so_id) == str(so_id) and is_success:
                     so_done = True
@@ -2855,7 +3020,7 @@ def _resolve_pre_turn_quests_impl(
         if q.get("is_story_quest"):
             sq, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
             if sq and sq.get("quest_id") == qid:
-                if ("story climax" in act_low or "⚡" in action_str):
+                if ("story climax" in act_low or "⚡" in action_str or bool(fa.get("is_climax_action")) or int(fa.get("stage_index") or 0) == 99):
                     sub_objs_done = db.is_quest_main_objectives_complete(q.get("sub_objectives") or [])
                     if is_success:
                         # Auto-mark Main (non-optional) sub-objectives as cleared on successful climax; keep skipped/failed Optionals truthful!
@@ -3069,6 +3234,7 @@ def _resolve_pre_turn_quests_impl(
         "directives": directives,
         "chapter_climax": chapter_climax,
         "deduction_xp_bonus": deduction_xp_bonus,
+        "staged_advances": staged_advances,
     }
     session["_pre_turn_quest_res"] = res
     return res

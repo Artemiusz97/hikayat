@@ -1281,6 +1281,13 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                         if n:
                             waypoint_notices.append(n)
                             advanced_this_turn.add((qid, so_id))
+                            comp_st = int(n.get("completed_stage_index") or n.get("stage_completed") or 1)
+                            if so_id == 0 and comp_st >= 1:
+                                try:
+                                    from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+                                    sync_dossier_main_stage_advance(session_id, qid, comp_st)
+                                except Exception:
+                                    pass
                             break
   
     # Advance rendezvous appointments to 'arrived' when player reaches rendezvous location within active window
@@ -1425,6 +1432,13 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                         if n:
                                             waypoint_notices.append(n)
                                             advanced_this_turn.add((qid, so_id))
+                                            comp_st = int(n.get("completed_stage_index") or n.get("stage_completed") or 1)
+                                            if so_id == 0 and comp_st >= 1:
+                                                try:
+                                                    from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+                                                    sync_dossier_main_stage_advance(session_id, qid, comp_st)
+                                                except Exception:
+                                                    pass
                                             break
   
     if waypoint_notices:

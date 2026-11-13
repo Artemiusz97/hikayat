@@ -8,20 +8,20 @@ import db
 from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
-def get_clean_leaf_location(location_str: str) -> str:
+def get_clean_leaf_location(location_str: str, default: str = "Local Area") -> str:
     """Returns the concise 3rd tier sub-location name from a tiered location string."""
     if not location_str:
-        return "Local Area"
+        return default
     loc = str(location_str).strip()
+    if not loc:
+        return default
     if loc.startswith("{"):
         _, _, s = parse_tiered_location(loc)
-        return s
-    if "➔" in loc:
-        parts = [p.strip() for p in loc.split("➔") if p.strip()]
-        return parts[-1] if parts else loc
-    if "->" in loc:
-        parts = [p.strip() for p in loc.split("->") if p.strip()]
-        return parts[-1] if parts else loc
+        return s or default
+    for sep in ("➔", "->", "✖"):
+        if sep in loc:
+            parts = [p.strip() for p in loc.split(sep) if p.strip()]
+            return parts[-1] if parts else default
     return loc
 
 def get_zone_location_name(location_str: str) -> str:
@@ -123,38 +123,57 @@ def format_clean_location_prose(
     if len(parts) == 1:
         return parts[0]
 
+    zone = parts[0]
+    facility = parts[1]
     if len(parts) == 2:
-        zone, facility = parts[0], parts[1]
-        if facility.lower() == zone.lower() or zone.lower() in facility.lower():
-            return facility
-        if include_zone:
-            if preposition == "paren":
-                return f"{facility} ({zone})"
-            return f"{facility} {preposition} {zone}"
-        return facility
+        room = facility
+    else:
+        sub_room = parts[-1]
+        room = facility if sub_room.lower() == facility.lower() else sub_room
 
-    zone, facility, sub_room = parts[0], parts[1], parts[-1]
-    if sub_room.lower() == facility.lower():
-        if include_zone:
-            return f"{facility} ({zone})" if preposition == "paren" else f"{facility} {preposition} {zone}"
-        return facility
-    if include_zone:
-        if preposition == "paren":
-            return f"{sub_room} · {facility} ({zone})"
-        return f"{sub_room} at {facility} ({zone})"
-    return f"{sub_room} at {facility}"
+    distinct_zone = (
+        zone
+        if zone and room.lower() != zone.lower() and zone.lower() not in room.lower()
+        else ""
+    )
+
+    if not include_zone or not distinct_zone:
+        return room
+
+    if preposition == "paren":
+        return f"{room} · {distinct_zone}"
+
+    lead_room = room if room.lower().startswith("the ") else f"the {room}"
+    eff_prep = preposition or "in"
+    return f"{lead_room} {eff_prep} {distinct_zone}"
 
 
 def format_clean_location_badge(location_str: str, include_zone: bool = True) -> str:
-    """Formats a tiered location string with the primary facility first for UI badges (e.g. 'S.O.A.I. HQ (Sovereign-Core City Center)')."""
+    """Formats a tiered location string into 'Room · Zone' for compact UI badges."""
     if not location_str:
         return ""
     return format_clean_location_prose(location_str, include_zone=include_zone, preposition="paren")
 
 
-_PROSE_LOC_SEG_RE = r"[A-Z0-9][A-Za-z0-9.\-'’:]*(?:\s+(?:(?:of|the|&)\s+)?[A-Z0-9][A-Za-z0-9.\-'’:]*){0,7}"
+def format_venue_display(loc_path: str, style: str = "badge") -> str:
+    """Formats 'A -> B -> C' into 'Room (Zone)' (badge), 'Room' (short), or 'the Room in Zone' (prose)."""
+    if not loc_path:
+        return ""
+    if style == "short":
+        return format_clean_location_prose(loc_path, include_zone=False)
+    if style == "prose":
+        return format_clean_location_prose(loc_path, include_zone=True, preposition="in")
+    return format_clean_location_badge(loc_path, include_zone=True)
+
+
+def format_short_venue_display(loc_path: str) -> str:
+    """Formats 'A ➔ B ➔ C' into 'the Room in Zone' (or 'Room' if standalone leaf) for natural non-leaking prose."""
+    return format_venue_display(loc_path, style="prose")
+
+
+_PROSE_LOC_SEG_RE = r"[A-Z0-9\u00C0-\u024F\u1E00-\u1EFF\u4E00-\u9FFF][A-Za-z0-9\u00C0-\u024F\u1E00-\u1EFF\u4E00-\u9FFF.\-'’:]*(?:\s+(?:(?:of|the|&|in|der|die|das|des|dem|den|und|im|am|zur|zum|w|z|ze|we|na|do|od|di|ke|dari)\s+)?[A-Z0-9\u00C0-\u024F\u1E00-\u1EFF\u4E00-\u9FFF][A-Za-z0-9\u00C0-\u024F\u1E00-\u1EFF\u4E00-\u9FFF.\-'’:]*){0,7}"
 _PROSE_TIERED_ARROW_RE = re.compile(
-    rf"({_PROSE_LOC_SEG_RE})\s*(?:➔|->)\s*({_PROSE_LOC_SEG_RE})(?:\s*(?:➔|->)\s*({_PROSE_LOC_SEG_RE}))?"
+    rf"({_PROSE_LOC_SEG_RE})\s*(?:➔|->|✖)\s*({_PROSE_LOC_SEG_RE})(?:\s*(?:➔|->|✖)\s*({_PROSE_LOC_SEG_RE}))?"
 )
 
 
@@ -163,7 +182,7 @@ def clean_narrative_location_arrows(text: str, include_zone: bool = True, prepos
     if not text:
         return ""
     res = dedupe_location_stutter(str(text))
-    if "➔" not in res and "->" not in res:
+    if "➔" not in res and "->" not in res and "✖" not in res:
         return res
 
     def _repl(m: re.Match) -> str:

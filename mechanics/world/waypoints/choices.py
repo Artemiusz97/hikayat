@@ -108,15 +108,23 @@ def get_active_companion_for_waypoint(session_id: int | dict, wp: dict) -> dict 
 
 
 def generate_quest_action_choices(
-    session_id: int | dict, current_location: str = "", scen_key: str = "fantasy", char: dict = None
+    session_id: int | dict,
+    current_location: str = "",
+    scen_key: str = "fantasy",
+    char: dict = None,
+    dossier: Optional[dict] = None,
+    session: Optional[dict] = None,
+    session_time: Optional[tuple] = None,
 ) -> list[dict]:
     """
     Deterministically synthesizes dedicated Quest Action choices whenever the player is at the
     target location coordinates of an active waypoint stage or ready for a Story Quest Climax.
     Each choice is tagged with explicit quest metadata (quest_id, sub_obj_id, stage_index, is_quest_action=True).
     """
+    _sess_cache: Optional[dict] = session if isinstance(session, dict) else None
     if isinstance(session_id, dict):
         sess_dict = session_id
+        _sess_cache = sess_dict
         session_id = sess_dict.get("id") or 0
         if not current_location or isinstance(current_location, (list, tuple)):
             current_location = sess_dict.get("current_location", "")
@@ -145,17 +153,17 @@ def generate_quest_action_choices(
             req += 4  # Phase 5 A11: +4 DC penalty for premature confrontation
 
         if is_premature:
-            climax_label = f"⚡ [Story Climax - Premature Showdown] Confront the threat for '{sq_title}' without full evidence ({stat})"
+            climax_label = f"Confront the threat for '{sq_title}' without full evidence ({stat})"
         elif "high_school" in scen_key or "modern" in scen_key:
-            climax_label = f"⚡ [Story Climax] Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
+            climax_label = f"Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
         elif "cyberpunk" in scen_key or "scifi" in scen_key:
-            climax_label = f"⚡ [Story Climax] Execute the final operation and secure '{sq_title}' ({stat})"
+            climax_label = f"Execute the final operation and secure '{sq_title}' ({stat})"
         elif "postapoc" in scen_key:
-            climax_label = f"⚡ [Story Climax] Rally the survivors and overcome the crisis of '{sq_title}' ({stat})"
+            climax_label = f"Rally the survivors and overcome the crisis of '{sq_title}' ({stat})"
         elif "nsfw" in scen_key:
-            climax_label = f"⚡ [Story Climax] Take the decisive initiative and resolve '{sq_title}' ({stat})"
+            climax_label = f"Take the decisive initiative and resolve '{sq_title}' ({stat})"
         else:
-            climax_label = f"⚡ [Story Climax] Confront the threat and bring '{sq_title}' to a decisive resolution ({stat})"
+            climax_label = f"Confront the threat and bring '{sq_title}' to a decisive resolution ({stat})"
 
         quest_choices.append({
             "label": climax_label,
@@ -170,6 +178,7 @@ def generate_quest_action_choices(
             "sub_obj_id": None,
             "stage_index": 99,
             "is_quest_action": True,
+            "is_story_quest": True,
             "is_climax_action": True,
             "is_premature_climax": is_premature,
             "contract_type": "climax"
@@ -179,28 +188,94 @@ def generate_quest_action_choices(
     if not active_wps and not quest_choices:
         return []
 
+    _dossier_cache: dict[str, Any] = {}
+    if isinstance(dossier, dict) and dossier.get("quest_id"):
+        _dossier_cache[str(dossier["quest_id"])] = dossier
+    _wps_cache: dict[tuple, list] = {}
+    _char_cache: dict[Any, Any] = {}
+    _time_cache = (
+        session_time
+        if session_time is not None
+        else (db.get_session_time(session_id) if session_id else (1, 480, 0))
+    )
+
     for wp in active_wps:
         from .matching import (
             resolve_effective_waypoint_location,
             is_waypoint_npc_present_in_scene,
             resolve_waypoint_target_npc,
             can_waypoint_match_via_npc_presence,
+            get_matching_clue_sources_for_location,
         )
+        qid = wp.get("quest_id", "")
+        qid_key = str(qid or "")
+        if session_id and qid_key and qid_key not in _dossier_cache:
+            _dossier_cache[qid_key] = db.get_quest_dossier(session_id, qid_key)
+        _wp_dos = _dossier_cache.get(qid_key)
         target_loc = wp.get("target_location", "")
         target_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
-        eff_loc = resolve_effective_waypoint_location(session_id, wp) if session_id else target_loc
+        eff_loc = resolve_effective_waypoint_location(session_id, wp, session=_sess_cache, session_time=_time_cache) if session_id else target_loc
         static_loc = wp.get("static_target_location") or target_loc
         can_npc_match = can_waypoint_match_via_npc_presence(target_npc, wp.get("stage_key", ""), current_location, wp)
-        loc_matched = (
-            (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id))
-            or (static_loc and check_location_matches_waypoint(current_location, static_loc, session_id=session_id))
-            or (bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc))
+        clue_info = get_matching_clue_sources_for_location(
+            session_id,
+            qid,
+            wp.get("sub_obj_id"),
+            current_location,
+            waypoint=wp,
+            include_bonus=True,
+            dossier=_wp_dos,
         )
+        has_open_clue_here = bool(clue_info.get("matching_open_sources"))
+        has_bonus_clue_here = bool(clue_info.get("matching_bonus_sources"))
+        if clue_info.get("is_clue_stage") or str(wp.get("completion_trigger") or "") == "key_clue":
+            loc_matched = has_open_clue_here
+        else:
+            loc_matched = (
+                (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id))
+                or (static_loc and check_location_matches_waypoint(current_location, static_loc, session_id=session_id))
+                or (bool(target_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, target_npc))
+            )
+
+        # Emit E2 bonus corroborating clue choices even when active stage is in another room
+        if has_bonus_clue_here and len(quest_choices) < 3:
+            b_qid = wp.get("quest_id", "")
+            b_is_story = bool(wp.get("is_story_quest") or "SQ-" in str(b_qid) or "story" in str(b_qid).lower())
+            for bsrc in (clue_info.get("matching_bonus_sources") or []):
+                if len(quest_choices) >= 3:
+                    break
+                b_stat = str(bsrc.get("stat") or ("CHA" if bsrc.get("kind") == "witness" else "PER")).upper()
+                b_req = 3
+                if char and isinstance(char.get("stats"), dict):
+                    b_req = max(2, min(8, int(char["stats"].get(b_stat, 5)) - 1))
+                b_hint = str(bsrc.get("approach_hint") or f"Corroborate {(bsrc.get('_key_clue') or {}).get('title') or 'earlier lead'}").strip()
+                quest_choices.append({
+                    "label": f"{b_hint} ({b_stat})",
+                    "stat": b_stat,
+                    "requirement": b_req,
+                    "mp_cost": 0,
+                    "intent": "dialogue_init" if bsrc.get("kind") == "witness" else "investigate_clue",
+                    "sub_intent": "",
+                    "target_npc": str(bsrc.get("npc_name") or ""),
+                    "is_fallback": False,
+                    "quest_id": b_qid,
+                    "sub_obj_id": wp.get("sub_obj_id"),
+                    "stage_index": int(bsrc.get("_stage_index") or 1),
+                    "is_quest_action": True,
+                    "is_story_quest": b_is_story,
+                    "contract_type": "key_clue",
+                    "approach": str(bsrc.get("kind") or "record"),
+                    "clue_source_id": str(bsrc.get("source_id") or ""),
+                    "is_bonus_clue": True,
+                    "gold_cost": 0,
+                    "dc_mod": 0,
+                })
+
         if not loc_matched:
             continue
 
         trigger = wp.get("completion_trigger", "skill_check")
-        if trigger not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action"):
+        if trigger not in ("skill_check", "inspect_prop", "talk_to_npc", "resource_progress", "defeat_target", "action", "key_clue"):
             continue
 
         stage_label = wp.get("stage_label", "").strip()
@@ -215,7 +290,6 @@ def generate_quest_action_choices(
         prefix = "Story Quest" if is_story else "Bounty"
         icon = "⭐" if is_story else "🎯"
         bp_id = wp.get("blueprint_id") or ""
-        _wp_dos = db.get_quest_dossier(session_id, qid) if (session_id and qid) else None
         _wp_cs = (_wp_dos or {}).get("climax_spec") or {}
         _wp_opt_lead = next(
             (ld for ld in ((_wp_dos or {}).get("leads_graph") or []) if isinstance(ld, dict) and ld.get("is_optional") and int(ld.get("sub_obj_id") or -1) == int(sub_obj_id if sub_obj_id is not None else -2)),
@@ -228,7 +302,10 @@ def generate_quest_action_choices(
         reward_gold = int(wp.get("reward_gold") or 30)
 
         # Check total stages for this sub_obj or quest
-        all_wps = db.get_quest_waypoints(session_id, qid, sub_obj_id) or []
+        _wp_cache_key = (session_id, qid, sub_obj_id)
+        if _wp_cache_key not in _wps_cache:
+            _wps_cache[_wp_cache_key] = db.get_quest_waypoints(session_id, qid, sub_obj_id) or []
+        all_wps = _wps_cache[_wp_cache_key]
         total_stages = len(all_wps) or 1
 
         # Check player gold
@@ -237,10 +314,14 @@ def generate_quest_action_choices(
             player_gold = int(char["gold"])
         elif session_id:
             try:
-                sess_obj = db.get_session(session_id) if not isinstance(session_id, dict) else session_id
+                if _sess_cache is None:
+                    _sess_cache = db.get_session(session_id) if not isinstance(session_id, dict) else session_id
+                sess_obj = _sess_cache
                 h_uid = (sess_obj.get("turn_order") or [sess_obj.get("host_user_id")])[0] if sess_obj else None
                 if h_uid:
-                    h_char = db.get_character(h_uid)
+                    if h_uid not in _char_cache:
+                        _char_cache[h_uid] = db.get_character(h_uid)
+                    h_char = _char_cache.get(h_uid)
                     if h_char and isinstance(h_char.get("gold"), (int, float)):
                         player_gold = int(h_char["gold"])
             except Exception:
@@ -250,13 +331,13 @@ def generate_quest_action_choices(
         from .matching import get_waypoint_npc_schedule_info
         from mechanics.narrative.blueprints import evaluate_waypoint_time_window, is_purely_time_locked_stage
 
-        curr_day, curr_min, _ = db.get_session_time(session_id) if session_id else (1, 480, 0)
-        sched_info = get_waypoint_npc_schedule_info(session_id, wp) if session_id else {"is_off_duty": False}
+        curr_day, curr_min = _time_cache[0], _time_cache[1]
+        sched_info = get_waypoint_npc_schedule_info(session_id, wp, session=_sess_cache, session_time=_time_cache) if session_id else {"is_off_duty": False}
         if sched_info.get("is_off_duty"):
             wait_m = int(sched_info.get("wait_until_morning_minutes") or 480)
             wake_clk = sched_info.get("wake_clock") or "07:30"
             quest_choices.append({
-                "label": f"🌙 [{prefix}] [Off-Duty: Wait Until Morning] {target_npc} has retired for the night — wait until {wake_clk} to meet them",
+                "label": f"Wait until {wake_clk} to meet {target_npc} after their rest",
                 "stat": "FREE",
                 "requirement": 0,
                 "mp_cost": 0,
@@ -286,7 +367,7 @@ def generate_quest_action_choices(
             t_clock = time_eval["target_clock"]
             wait_m = int(time_eval["wait_minutes"] or 60)
             quest_choices.append({
-                "label": f"⏳ [{prefix}] [Wait Until {t_phase}] Stake out the area until {t_clock} ({t_phase})",
+                "label": f"Stake out the area until {t_clock} ({t_phase})",
                 "stat": "FREE",
                 "requirement": 0,
                 "mp_cost": 0,
@@ -344,8 +425,6 @@ def generate_quest_action_choices(
         clean_stage = stage_label[0].upper() + stage_label[1:] if len(stage_label) > 1 else stage_label
         if clean_stage.endswith("."):
             clean_stage = clean_stage[:-1]
-        if out_of_window_dc_penalty > 0:
-            clean_stage = f"[⚠️ Out of Window: +{out_of_window_dc_penalty} DC / High Alert] {clean_stage}"
 
         req_item = wp.get("required_item") or wp.get("quest_required_item") or ""
 
@@ -378,7 +457,7 @@ def generate_quest_action_choices(
 
         # Special Case: Guaranteed Stage 3 Turn-In after sparing the target
         if res_approach == "spared_deception" and stage_idx >= 3:
-            choice_label = f"{icon} [{prefix}] [Turn-In Forged Proof] Present the staged proof of elimination to {target_npc or 'your client'} (Auto-Success)"
+            choice_label = f"Present the staged proof of elimination to {target_npc or 'your client'} (Auto-Success)"
             quest_choices.append({
                 "label": choice_label,
                 "stat": "NONE",
@@ -402,39 +481,80 @@ def generate_quest_action_choices(
                 break
             continue
 
-        if req_item and (target_npc or any(k in stage_label.lower() for k in ("deliver", "return", "give", "hand", "turn in"))):
-            choice_label = f"{icon} [{prefix}] [Turn-In: {req_item}] {clean_stage} ({stat})"
-        elif target_npc and target_npc.lower() not in clean_stage.lower():
-            choice_label = f"{icon} [{prefix}] [Talk to {target_npc}] {clean_stage} ({stat})"
-        else:
-            choice_label = f"{icon} [{prefix}] {clean_stage} ({stat})"
-
         q_intent = "dialogue_init" if trigger == "talk_to_npc" else "investigate_clue"
-        quest_choices.append({
-            "label": choice_label,
-            "stat": stat,
-            "requirement": req,
-            "mp_cost": 0,
-            "intent": q_intent,
-            "sub_intent": "",
-            "target_npc": target_npc or "",
-            "is_fallback": False,
-            "quest_id": qid,
-            "sub_obj_id": sub_obj_id,
-            "stage_index": stage_idx,
-            "is_quest_action": True,
-            "is_story_quest": is_story,
-            "contract_type": trigger,
-            "approach": "direct",
-            "gold_cost": 0,
-            "dc_mod": out_of_window_dc_penalty,
-        })
+        if trigger == "key_clue" and clue_info.get("matching_open_sources"):
+            for ksrc in (clue_info.get("matching_open_sources") or []):
+                if len(quest_choices) >= 3:
+                    break
+                k_kind = str(ksrc.get("kind") or "record").lower()
+                q_intent = "dialogue_init" if k_kind == "witness" else "investigate_clue"
+                k_stat = str(ksrc.get("stat") or ("CHA" if k_kind == "witness" else "PER")).upper()
+                k_req = req
+                if char and isinstance(char.get("stats"), dict):
+                    k_req = max(2, min(8, int(char["stats"].get(k_stat, 5)) - 1))
+                if out_of_window_dc_penalty > 0:
+                    k_req = min(12, k_req + out_of_window_dc_penalty)
+                if _main_dc_adj != 0 or ksrc.get("dc_offset"):
+                    k_req = max(2, min(14, k_req + _main_dc_adj + int(ksrc.get("dc_offset") or 0)))
+                k_hint = str(ksrc.get("approach_hint") or clean_stage).strip().rstrip(".")
+                k_npc = str(ksrc.get("npc_name") or target_npc or "").strip() if k_kind == "witness" else ""
+                quest_choices.append({
+                    "label": f"{k_hint} ({k_stat})",
+                    "stat": k_stat,
+                    "requirement": k_req,
+                    "mp_cost": 0,
+                    "intent": "dialogue_init" if k_kind == "witness" else "investigate_clue",
+                    "sub_intent": "",
+                    "target_npc": k_npc,
+                    "is_fallback": False,
+                    "quest_id": qid,
+                    "sub_obj_id": sub_obj_id,
+                    "stage_index": stage_idx,
+                    "is_quest_action": True,
+                    "is_story_quest": is_story,
+                    "contract_type": "key_clue",
+                    "approach": k_kind,
+                    "clue_source_id": str(ksrc.get("source_id") or ""),
+                    "gold_cost": 0,
+                    "dc_mod": out_of_window_dc_penalty + int(ksrc.get("dc_offset") or 0),
+                })
+        else:
+            if req_item and (target_npc or any(k in stage_label.lower() for k in ("deliver", "return", "give", "hand", "turn in"))):
+                if req_item.lower() in clean_stage.lower():
+                    choice_label = f"{clean_stage} ({stat})"
+                else:
+                    choice_label = f"Deliver {req_item} to {target_npc or clean_stage} ({stat})"
+            elif target_npc and target_npc.lower() not in clean_stage.lower():
+                choice_label = f"Speak with {target_npc} about {clean_stage} ({stat})"
+            else:
+                choice_label = f"{clean_stage} ({stat})"
+
+            q_intent = "dialogue_init" if trigger == "talk_to_npc" else "investigate_clue"
+            quest_choices.append({
+                "label": choice_label,
+                "stat": stat,
+                "requirement": req,
+                "mp_cost": 0,
+                "intent": q_intent,
+                "sub_intent": "",
+                "target_npc": target_npc or "",
+                "is_fallback": False,
+                "quest_id": qid,
+                "sub_obj_id": sub_obj_id,
+                "stage_index": stage_idx,
+                "is_quest_action": True,
+                "is_story_quest": is_story,
+                "contract_type": trigger,
+                "approach": "direct",
+                "gold_cost": 0,
+                "dc_mod": out_of_window_dc_penalty,
+            })
 
         # Phase 4: Caseboard Deduction Breakthrough Shortcut Choice
         if len(quest_choices) < 3 and has_caseboard_breakthrough_for_waypoint(session_id, wp):
             target_disp = target_npc or "the target"
             quest_choices.append({
-                "label": f"⚡ [{prefix}] [Breakthrough Leverage] Confront {target_disp} with verified caseboard deductions (Auto-Success)",
+                "label": f"Confront {target_disp} with verified caseboard deductions (Auto-Success)",
                 "stat": "FREE",
                 "requirement": 0,
                 "mp_cost": 0,
@@ -462,12 +582,12 @@ def generate_quest_action_choices(
                 comp_name = assist_info["companion_name"]
                 if assist_info["is_role_match"]:
                     role_lbl = assist_info["matched_role_label"]
-                    comp_lbl = f"🤝 [{prefix}] [Companion Assist: {comp_name}] Leverage {comp_name}'s {role_lbl} expertise to bypass the challenge (Auto-Success)"
+                    comp_lbl = f"Ask {comp_name} to use their {role_lbl} expertise to bypass the challenge (Auto-Success)"
                     c_stat = "FREE"
                     c_req = 0
                     c_dc_mod = 0
                 else:
-                    comp_lbl = f"🤝 [{prefix}] [Companion Assist: {comp_name}] Have {comp_name} assist and cover you (-3 DC) ({stat})"
+                    comp_lbl = f"Have {comp_name} assist and cover you (-3 DC) ({stat})"
                     c_stat = stat
                     c_req = max(2, req - 3)
                     c_dc_mod = -3
@@ -518,7 +638,7 @@ def generate_quest_action_choices(
                 for ca in contrasting:
                     if len(quest_choices) >= 3:
                         break
-                    ca_lbl = f"{icon} [{prefix}] {ca['label']}"
+                    ca_lbl = str(ca['label']).strip()
                     if ca.get("approach") == "stealth_guile" and is_stealth_choice_locked_out(sess_wp, label=ca_lbl):
                         continue
                     ca_stat = ca.get("stat", "AGI")
@@ -768,16 +888,38 @@ def tag_and_enrich_quest_choices(
         is_waypoint_npc_present_in_scene,
         resolve_waypoint_target_npc,
         can_waypoint_match_via_npc_presence,
+        get_matching_clue_sources_for_location,
     )
     matching_wps = []
+    _dossier_cache: dict[str, Any] = {}
+    _sess_time = db.get_session_time(session_id) if session_id else None
     for wp in active_wps:
-        eff_loc = resolve_effective_waypoint_location(session_id, wp) if session_id else wp.get("target_location", "")
+        eff_loc = resolve_effective_waypoint_location(session_id, wp, session=session_row, session_time=_sess_time) if session_id else wp.get("target_location", "")
         t_npc = resolve_waypoint_target_npc(session_id, wp) or wp.get("target_npc", "")
         can_npc_match = can_waypoint_match_via_npc_presence(t_npc, wp.get("stage_key", ""), current_location, wp)
-        if (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id)) or (
-            bool(t_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, t_npc)
-        ):
-            matching_wps.append(wp)
+        wp_qid = str(wp.get("quest_id") or "")
+        if wp_qid and wp_qid not in _dossier_cache:
+            _dossier_cache[wp_qid] = db.get_quest_dossier(session_id, wp_qid) if session_id else None
+        clue_m = get_matching_clue_sources_for_location(
+            session_id,
+            wp_qid,
+            wp.get("sub_obj_id"),
+            current_location,
+            waypoint=wp,
+            include_bonus=True,
+            dossier=_dossier_cache.get(wp_qid),
+        )
+        if clue_m.get("is_clue_stage") or str(wp.get("completion_trigger") or "") == "key_clue":
+            wp_matches_loc = bool(clue_m.get("matching_open_sources") or clue_m.get("matching_bonus_sources"))
+        else:
+            wp_matches_loc = bool(
+                (eff_loc and check_location_matches_waypoint(current_location, eff_loc, session_id=session_id))
+                or (bool(t_npc) and can_npc_match and is_waypoint_npc_present_in_scene(session_id, t_npc))
+            )
+        if wp_matches_loc:
+            wp_tag_copy = dict(wp)
+            wp_tag_copy["_clue_match_info"] = clue_m
+            matching_wps.append(wp_tag_copy)
 
     if not matching_wps and not climax_ready_at_loc and not appts_at_loc:
         return _strip_unverified_quest_flags(choices)
@@ -867,10 +1009,15 @@ def tag_and_enrich_quest_choices(
                         req = max(4, min(10, int(char["stats"].get(c_stat, 5))))
                     best_climax_choice["requirement"] = req
 
-                raw_label = best_climax_choice.get("label", "")
-                if not raw_label.startswith("⚡ [Story Climax]") and not raw_label.startswith("[Story Climax]"):
-                    clean_lbl = re.sub(r"^\[.*?\]\s*", "", raw_label).strip()
-                    best_climax_choice["label"] = f"⚡ [Story Climax] {clean_lbl}"
+                raw_label = str(best_climax_choice.get("label", ""))
+                clean_lbl = re.sub(
+                    r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Main|Side|Optional[^\]\r\n]*|Story Quest(?:\s*\|[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*Premature Showdown)?|Quest|[^\]]+)\]\s*)+",
+                    "",
+                    raw_label,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if clean_lbl:
+                    best_climax_choice["label"] = clean_lbl
             else:
                 if not in_active_dialogue and allow_fallback:
                     fallback_choices = generate_quest_action_choices(session_id, current_location, scen_key=scen_key, char=char)
@@ -879,10 +1026,19 @@ def tag_and_enrich_quest_choices(
 
         for c in result_choices:
             if c.get("is_climax_action") or str(c.get("contract_type", "")).lower() == "climax":
-                raw_label = c.get("label", "")
-                if not raw_label.startswith("⚡ [Story Climax]") and not raw_label.startswith("[Story Climax]"):
-                    clean_lbl = re.sub(r"^\[.*?\]\s*", "", raw_label).strip()
-                    c["label"] = f"⚡ [Story Climax] {clean_lbl}"
+                c["is_story_quest"] = True
+                c["is_quest_action"] = True
+                c["_python_verified_quest"] = True
+                c["_server_stamped"] = True
+                raw_label = str(c.get("label", ""))
+                clean_lbl = re.sub(
+                    r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Main|Side|Optional[^\]\r\n]*|Story Quest(?:\s*\|[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*Premature Showdown)?|Quest|[^\]]+)\]\s*)+",
+                    "",
+                    raw_label,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if clean_lbl:
+                    c["label"] = clean_lbl
 
     scene_npcs = current_npcs if current_npcs is not None else (session_row.get("current_npcs", []) if session_row else [])
     present_names = {str((n.get("name") or n.get("npc_name")) if isinstance(n, dict) else n).strip().lower() for n in (scene_npcs or []) if n}
@@ -906,10 +1062,15 @@ def tag_and_enrich_quest_choices(
         for c in result_choices:
             if c.get("is_quest_action") and c.get("quest_id") == qid and c.get("_python_verified_quest"):
                 c["is_story_quest"] = is_story
-                raw_label = c.get("label", "")
-                if not raw_label.startswith(f"{icon} [{prefix}]") and not raw_label.startswith(f"[{prefix}]"):
-                    clean_lbl = re.sub(r"^(?:[⭐🎯⚡🔹\s]+|\s*\[[A-Za-z0-9/ _-]+\]\s*)+", "", raw_label).strip()
-                    c["label"] = f"{icon} [{prefix}] {clean_lbl}"
+                raw_label = str(c.get("label", ""))
+                clean_lbl = re.sub(
+                    r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Main|Side|Optional[^\]\r\n]*|Story Quest(?:\s*\|[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*Premature Showdown)?|Quest)\]\s*)+",
+                    "",
+                    raw_label,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if clean_lbl:
+                    c["label"] = clean_lbl
                 app = c.get("approach") or classify_choice_approach(raw_label)
                 c["approach"] = app
                 tagged_approaches.add(app)
@@ -933,12 +1094,13 @@ def tag_and_enrich_quest_choices(
             elif dp_name and not (target_npc in dp_name or dp_name in target_npc or any(tok in dp_name for tok in npc_tokens)):
                 is_dp_match = False
 
-        is_npc_present = True
-        if target_npc and present_names:
+        if target_npc:
             is_npc_present = any(
                 target_npc in pn or any(tok in pn for tok in npc_tokens)
                 for pn in present_names
-            )
+            ) if present_names else False
+        else:
+            is_npc_present = True
 
         # Extract sub_obj_text from sub_objectives_json if not directly present on wp
         sub_obj_text = str(wp.get("sub_obj_text") or "").strip()
@@ -975,6 +1137,30 @@ def tag_and_enrich_quest_choices(
             w for w in re.findall(r"\w{4,}", str(wp.get("quest_title", "")).lower())
             if w not in ignore_words
         }
+
+        b_contract = wp.get("beat_contract") or {}
+        if not b_contract and session_id and qid:
+            try:
+                _dos_tmp = db.get_quest_dossier(session_id, qid)
+                if _dos_tmp:
+                    for _ms in ((_dos_tmp.get("climax_spec") or {}).get("main_stages") or []):
+                        if int(_ms.get("stage_index") or 0) == stage_idx and _ms.get("beat_contract"):
+                            b_contract = _ms["beat_contract"]
+                            break
+            except Exception:
+                pass
+
+        if b_contract:
+            c_text = f"{b_contract.get('player_verb', '')} {b_contract.get('reveal', '')} {b_contract.get('handover', '')}".lower()
+            stage_words.update(w for w in re.findall(r"\w{4,}", c_text) if w not in ignore_words)
+
+        clue_m = wp.get("_clue_match_info") or {}
+        for msrc in (clue_m.get("matching_open_sources") or []) + (clue_m.get("matching_bonus_sources") or []):
+            m_txt = f"{msrc.get('approach_hint', '')} {msrc.get('npc_name', '')}".lower()
+            stage_words.update(w for w in re.findall(r"\w{4,}", m_txt) if w not in ignore_words)
+            for tok in str(msrc.get("npc_name") or "").lower().split():
+                if len(tok) >= 3:
+                    npc_tokens.add(tok)
 
         stage_stems = _extract_word_stems(stage_words)
         sub_stems = _extract_word_stems(sub_words | title_words)
@@ -1029,6 +1215,12 @@ def tag_and_enrich_quest_choices(
 
             has_substantive_match = substantive_matches >= 1
 
+            if in_active_dialogue and is_dp_match and not has_substantive_match:
+                if any(w in lbl for w in ("ask", "question", "inquire", "confront", "press", "discuss", "demand", "show", "bribe", "negotiate", "tell", "explain", "clue", "ledger", "mission")):
+                    substantive_matches += 1
+                    has_substantive_match = True
+                    score += 2.0
+
             if in_active_dialogue and not has_substantive_match:
                 continue
 
@@ -1068,11 +1260,15 @@ def tag_and_enrich_quest_choices(
             if cand_app == "breakthrough_leverage":
                 cand_choice["breakthrough_leveraged"] = True
 
-            raw_label = cand_choice.get("label", "")
-            if not any(raw_label.startswith(p) for p in (f"{icon} [{prefix}]", f"[{prefix}]", f"⚡ [{prefix}]", f"🤝 [{prefix}]")):
-                clean_lbl = re.sub(r"^\[.*?\]\s*", "", raw_label).strip()
-                prefix_icon = "⚡" if cand_app == "breakthrough_leverage" else ("🤝" if cand_app == "companion_assist" else icon)
-                cand_choice["label"] = f"{prefix_icon} [{prefix}] {clean_lbl}"
+            raw_label = str(cand_choice.get("label", ""))
+            clean_lbl = re.sub(
+                r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Main|Side|Optional[^\]\r\n]*|Story Quest(?:\s*\|[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*Premature Showdown)?|Quest|Breakthrough Leverage|Companion Assist:[^\]\r\n]*|Turn-In[^\]\r\n]*)\]\s*)+",
+                "",
+                raw_label,
+                flags=re.IGNORECASE,
+            ).strip()
+            if clean_lbl:
+                cand_choice["label"] = clean_lbl
 
             lbl_low = str(cand_choice.get("label", "")).lower()
             if cand_app in ("counter_offer", "buyout_bribe", "wait_for_window", "wait_until_morning", "breakthrough_leverage") or (cand_app == "companion_assist" and cand_choice.get("stat") == "FREE"):
@@ -1143,25 +1339,34 @@ def tag_and_enrich_quest_choices(
                         fb["_python_verified_quest"] = True
                         result_choices.insert(0, fb)
                         tagged_approaches.add(fb.get("approach", "direct"))
-            elif in_active_dialogue and target_npc:
-                tgt_disp = target_npc.title()
-                c_lbl = f"{icon} [{prefix}] Discuss the task with {tgt_disp}: {stage_label}"
-                in_dialogue_bounty_choice = {
-                    "label": c_lbl[:190],
-                    "stat": "CHA",
-                    "requirement": 6,
-                    "mp_cost": 0,
-                    "is_quest_action": True,
-                    "is_story_quest": is_story,
-                    "_python_verified_quest": True,
-                    "quest_id": qid,
-                    "sub_obj_id": sub_obj_id,
-                    "stage_index": stage_idx,
-                    "contract_type": trigger,
-                    "approach": "direct",
-                }
-                result_choices.insert(0, in_dialogue_bounty_choice)
-                tagged_approaches.add("direct")
+            elif in_active_dialogue and target_npc and allow_fallback:
+                is_physical = bool(trigger in ("inspect_prop", "defeat_target", "combat_victory") or any(kw in stage_label.lower() for kw in ("inspect physical", "traces", "search site", "breach the outer")))
+                if not is_physical:
+                    tgt_disp = target_npc.title()
+                    verb = (b_contract.get("player_verb") or "").strip()
+                    if verb:
+                        c_lbl = verb
+                    else:
+                        clean_stg = re.sub(r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[[^\]]+\]\s*)+", "", stage_label).strip() or stage_label
+                        c_lbl = f"Speak with {tgt_disp} — {clean_stg}" if tgt_disp.lower() not in clean_stg.lower() else clean_stg
+                    if not any(c_lbl.lower() in str(rc.get("label", "")).lower() for rc in result_choices if isinstance(rc, dict)):
+                        in_dialogue_bounty_choice = {
+                            "label": c_lbl[:190],
+                            "stat": "CHA",
+                            "requirement": 6,
+                            "mp_cost": 0,
+                            "is_quest_action": True,
+                            "is_story_quest": is_story,
+                            "_python_verified_quest": True,
+                            "_server_stamped": True,
+                            "quest_id": qid,
+                            "sub_obj_id": sub_obj_id,
+                            "stage_index": stage_idx,
+                            "contract_type": trigger,
+                            "approach": "direct",
+                        }
+                        result_choices.insert(0, in_dialogue_bounty_choice)
+                        tagged_approaches.add("direct")
 
         # Guarantee at least 2 contrasting approaches at Stage >= 2 if in open exploration and choice budget permits
         elif stage_idx >= 2 and len(tagged_approaches) < 2 and not in_active_dialogue and allow_fallback and len(result_choices) < 5:

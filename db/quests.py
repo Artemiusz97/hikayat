@@ -12,7 +12,12 @@ from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
-from .dossiers import _enrich_dossier_dict, get_quest_dossier
+from .dossiers import (
+    _enrich_dossier_dict,
+    get_quest_dossier,
+    get_prewarmed_quest_dossier,
+    promote_prewarmed_dossier,
+)
 
 _TRANSIENT_SUB_OBJ_KEYS = {
     "waypoints",
@@ -429,6 +434,67 @@ def _enrich_quest_dict(
 
     return d
 
+def get_minimal_story_quest(
+    session_id: int,
+    quest_id: Optional[str] = None,
+    *,
+    conn: Any = None,
+) -> Optional[dict]:
+    """Lightweight quest header lookup matching active story quest criteria without N+1 joins."""
+    def _query(c: Any) -> Optional[dict]:
+        if quest_id:
+            row = c.execute(
+                "SELECT quest_id, title, status, is_story_quest, engine, quest_type FROM quests WHERE session_id=? AND quest_id=? LIMIT 1",
+                (session_id, quest_id),
+            ).fetchone()
+        else:
+            row = c.execute(
+                """SELECT quest_id, title, status, is_story_quest, engine, quest_type
+                   FROM quests
+                   WHERE session_id=? AND LOWER(status)='active'
+                     AND (is_story_quest=1 OR LOWER(quest_type) IN ('story quest', 'main quest'))
+                   ORDER BY (CASE WHEN sub_objectives_json IS NOT NULL AND sub_objectives_json != '[]' AND sub_objectives_json != '' THEN 1 ELSE 0 END) DESC, updated_at DESC
+                   LIMIT 1""",
+                (session_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    if conn is not None:
+        return _query(conn)
+    with get_conn() as c:
+        return _query(c)
+
+
+def get_quest_waypoint_target_location(
+    session_id: int,
+    quest_id: str,
+    *,
+    mode: str = "climax_null_sub",
+    conn: Any = None,
+) -> Optional[str]:
+    """Looks up target_location from quest_waypoints cleanly in the DB persistence layer."""
+    def _query(c: Any) -> Optional[str]:
+        if mode == "highest_sub":
+            row = c.execute(
+                """SELECT target_location FROM quest_waypoints
+                   WHERE session_id=? AND quest_id=? AND target_location IS NOT NULL AND target_location != ''
+                   ORDER BY CASE WHEN sub_obj_id = 0 THEN 0 ELSE 1 END ASC, sub_obj_id DESC, stage_index DESC LIMIT 1""",
+                (session_id, quest_id),
+            ).fetchone()
+        else:
+            row = c.execute(
+                """SELECT target_location FROM quest_waypoints
+                   WHERE session_id=? AND quest_id=? AND sub_obj_id IS NULL AND status IN ('active', 'locked') LIMIT 1""",
+                (session_id, quest_id),
+            ).fetchone()
+        return str(row["target_location"]) if (row and row["target_location"]) else None
+
+    if conn is not None:
+        return _query(conn)
+    with get_conn() as c:
+        return _query(c)
+
+
 def get_active_story_quest(session_id: int) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
@@ -785,6 +851,21 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
             (time.time(), session_id, quest_id)
         )
 
+    dos_cl = get_quest_dossier(session_id, quest_id)
+    if dos_cl:
+        try:
+            eff_turn_cl = int(db.infer_session_turn(db.get_session(session_id) or {}))
+            prev_status_cl = str(quest.get("status") or "Active")
+            prev_tier_cl = str(dos_cl.get("outcome_tier") or "")
+            eff_tier_cl = prev_tier_cl or "clean_success"
+            if prev_status_cl != "Completed":
+                db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "quest_status", prev_status_cl, "Completed")
+            if not prev_tier_cl:
+                db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "outcome_tier", prev_tier_cl, eff_tier_cl)
+            db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier=eff_tier_cl)
+        except Exception:
+            pass
+
     return {
         "claimed": True,
         "title": quest["title"],
@@ -814,6 +895,7 @@ def add_session_clue(
     is_verified: int = 0,
     deduction_parents: list = None,
     turn_created: int | None = None,
+    conn: Optional[sqlite3.Connection] = None,
 ) -> int:
     """Inserts a new structured evidence record into session_clues with deduplication check."""
     if not title or not lead_text:
@@ -826,15 +908,16 @@ def add_session_clue(
     parents_json = json.dumps(deduction_parents) if isinstance(deduction_parents, list) else "[]"
     now = time.time()
 
-    with get_conn() as conn:
+    def _execute(c: sqlite3.Connection) -> int:
+        nonlocal turn_created
         if turn_created is None:
             try:
-                s_row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+                s_row = c.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
                 turn_created = int(db.infer_session_turn(dict(s_row))) if s_row else 1
             except Exception:
                 turn_created = 1
 
-        rows = conn.execute(
+        rows = c.execute(
             "SELECT * FROM session_clues WHERE session_id=? ORDER BY created_at ASC, id ASC",
             (session_id,)
         ).fetchall()
@@ -848,7 +931,7 @@ def add_session_clue(
             if l_clean_low in r_lead_low or r_lead_low in l_clean_low:
                 return r["id"]
 
-        cur = conn.execute(
+        cur = c.execute(
             """INSERT INTO session_clues
                (session_id, quest_id, chapter, title, lead_text, category, source_location, linked_npc, is_verified, deduction_parents_json, turn_created, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -860,7 +943,7 @@ def add_session_clue(
         # Cap active unconsumed leads at 20 by auto-archiving (is_consumed=1) oldest completed-chapter
         # or circumstantial/side-bounty clues first; NEVER evict active Story Quest clues or Breakthroughs.
         try:
-            all_rows = conn.execute(
+            all_rows = c.execute(
                 "SELECT * FROM session_clues WHERE session_id=? ORDER BY created_at ASC, id ASC",
                 (session_id,),
             ).fetchall()
@@ -882,7 +965,7 @@ def add_session_clue(
                 active_unconsumed.append(rd)
 
             if len(active_unconsumed) > 20:
-                sq_rows = conn.execute(
+                sq_rows = c.execute(
                     "SELECT quest_id FROM quests WHERE session_id=? AND status='Active' AND is_story_quest=1",
                     (session_id,),
                 ).fetchall()
@@ -903,7 +986,7 @@ def add_session_clue(
                 )
                 overflow = len(active_unconsumed) - 20
                 for target_rd in evictable[:overflow]:
-                    conn.execute(
+                    c.execute(
                         "UPDATE session_clues SET is_consumed=1, updated_at=? WHERE id=?",
                         (now, target_rd["id"]),
                     )
@@ -911,6 +994,11 @@ def add_session_clue(
             pass
 
         return new_id
+
+    if conn is not None:
+        return _execute(conn)
+    with get_conn() as local_conn:
+        return _execute(local_conn)
 
 def get_session_clues(
     session_id: int,
@@ -956,10 +1044,10 @@ def get_session_clues(
             results.append(d)
         return results
 
-def get_session_clue_by_id(clue_id: int) -> dict | None:
+def get_session_clue_by_id(clue_id: int, conn: Optional[sqlite3.Connection] = None) -> dict | None:
     """Fetches a single evidence record by ID."""
-    with get_conn() as conn:
-        row = conn.execute("SELECT * FROM session_clues WHERE id=?", (clue_id,)).fetchone()
+    def _execute(c: sqlite3.Connection):
+        row = c.execute("SELECT * FROM session_clues WHERE id=?", (clue_id,)).fetchone()
         if not row:
             return None
         d = dict(row)
@@ -970,7 +1058,7 @@ def get_session_clue_by_id(clue_id: int) -> dict | None:
             
         # Check if this clue was consumed by any other deduction
         consumed = False
-        all_parents_rows = conn.execute("SELECT deduction_parents_json FROM session_clues WHERE session_id=?", (d["session_id"],)).fetchall()
+        all_parents_rows = c.execute("SELECT deduction_parents_json FROM session_clues WHERE session_id=?", (d["session_id"],)).fetchall()
         for pr in all_parents_rows:
             try:
                 p_list = json.loads(pr[0] or "[]")
@@ -981,6 +1069,11 @@ def get_session_clue_by_id(clue_id: int) -> dict | None:
                 pass
         d["is_consumed"] = bool(d.get("is_consumed")) or consumed
         return d
+
+    if conn is not None:
+        return _execute(conn)
+    with get_conn() as local_conn:
+        return _execute(local_conn)
 
 def verify_session_clue(clue_id: int) -> bool:
     """Marks an evidence record as verified."""
@@ -1337,38 +1430,66 @@ def advance_waypoint(session_id: int, quest_id: str, stage_index: int, sub_obj_i
         return dict(next_row) if next_row else None
 
 
+def _loc_leaf_norm(loc_text: str) -> str:
+    raw = str(loc_text or "").strip()
+    if not raw:
+        return ""
+    if "➔" in raw:
+        raw = raw.split("➔")[-1].strip()
+    elif "->" in raw:
+        raw = raw.split("->")[-1].strip()
+    elif "·" in raw:
+        raw = raw.split("·")[0].strip()
+    elif " in " in raw.lower():
+        raw = raw[: raw.lower().rfind(" in ")].strip()
+    if raw.lower().startswith("the "):
+        raw = raw[4:].strip()
+    return raw.lower()
+
+
 def unlock_climax_waypoint(
     session_id: int,
     quest_id: str,
     climax_loc: str = "",
     target_npc: str = "",
+    conn: Any = None,
 ) -> int:
     """Promotes a 'locked' climax/Main stage in quest_waypoints to 'active' when climax_spec['is_unlocked'] becomes True."""
     now = time.time()
-    with get_conn() as conn:
+
+    def _run(c: Any) -> int:
+        rows = c.execute(
+            """SELECT id, stage_index, sub_obj_id, target_location
+               FROM quest_waypoints
+               WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id=0) AND status='locked'
+               ORDER BY CASE WHEN sub_obj_id IS NULL THEN 0 ELSE 1 END ASC, stage_index DESC""",
+            (session_id, quest_id),
+        ).fetchall()
+        if not rows:
+            return 0
         row = None
         if climax_loc:
-            row = conn.execute(
-                """SELECT id, stage_index FROM quest_waypoints
-                   WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id=0) AND status='locked'
-                     AND (target_location=? OR ? LIKE '%' || target_location || '%')
-                   ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC LIMIT 1""",
-                (session_id, quest_id, climax_loc, climax_loc),
-            ).fetchone()
-        if not row:
-            row = conn.execute(
-                """SELECT id, stage_index FROM quest_waypoints
-                   WHERE session_id=? AND quest_id=? AND (sub_obj_id IS NULL OR sub_obj_id=0) AND status='locked'
-                   ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC LIMIT 1""",
-                (session_id, quest_id),
-            ).fetchone()
-        if row:
-            conn.execute(
-                "UPDATE quest_waypoints SET status='active', target_npc=CASE WHEN target_npc='' OR target_npc IS NULL THEN ? ELSE target_npc END, updated_at=? WHERE id=?",
-                (target_npc or "", now, row["id"]),
-            )
-            return 1
-        return 0
+            c_low = str(climax_loc).strip().lower()
+            c_leaf = _loc_leaf_norm(climax_loc)
+            for cand in rows:
+                t_raw = str(cand["target_location"] or "").strip()
+                t_low = t_raw.lower()
+                t_leaf = _loc_leaf_norm(t_raw)
+                if (t_low and (t_low == c_low or t_low in c_low)) or (c_leaf and t_leaf and c_leaf == t_leaf):
+                    row = cand
+                    break
+        if row is None:
+            row = rows[0]
+        c.execute(
+            "UPDATE quest_waypoints SET status='active', target_npc=CASE WHEN target_npc='' OR target_npc IS NULL THEN ? ELSE target_npc END, updated_at=? WHERE id=?",
+            (target_npc or "", now, row["id"]),
+        )
+        return 1
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
 
 
 promote_locked_quest_waypoints = unlock_climax_waypoint
@@ -1581,11 +1702,17 @@ def sync_quest_projection_from_dossier(
         resolved_main_stages: list[dict] = []
         for idx_zero, st in enumerate(main_stages):
             st_idx = int(st.get("stage_index") or (idx_zero + 1))
+            existing_wp = c.execute(
+                "SELECT id, status FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index=?",
+                (session_id, quest_id, st_idx),
+            ).fetchone()
+            wp_is_done = bool(existing_wp and not is_rollback and existing_wp["status"] in ("completed", "bypassed"))
             raw_st_status = str(st.get("status") or "").lower()
-            if climax_done or raw_st_status in ("completed", "bypassed"):
-                eff_st_status = "completed"
-            elif secret_gate_unlocked and st_idx == len(main_stages):
+            if climax_done or raw_st_status in ("completed", "bypassed") or wp_is_done:
+                eff_st_status = "completed" if (climax_done or raw_st_status == "completed" or wp_is_done) else "bypassed"
+            elif secret_gate_unlocked and st_idx == len(main_stages) and all(s.get("status") in ("completed", "bypassed") for s in resolved_main_stages):
                 eff_st_status = "active"
+                active_assigned = True
             elif not active_assigned:
                 active_assigned = True
                 is_secret_gate_stage = bool(
@@ -1602,12 +1729,13 @@ def sync_quest_projection_from_dossier(
             st_label = str(st.get("stage_label") or st.get("label") or climax_spec.get("label") or f"Stage {st_idx}")
             st_trig = str(st.get("completion_trigger") or "action")
             st_appr = json.dumps(list(st.get("approaches") or climax_spec.get("approaches") or []))
-            follow_sched = int(bool(st.get("follow_npc_schedule", bool(st_npc))))
+            is_climax_or_lair = bool(st_idx == len(main_stages) or st.get("is_climax_stage") or str(climax_spec.get("location") or "") == st_loc)
+            is_phys_inspect = bool(st_trig == "inspect_prop" or any(kw in st_label.lower() for kw in ("inspect physical", "traces", "search site")))
+            if is_climax_or_lair or is_phys_inspect:
+                follow_sched = 0
+            else:
+                follow_sched = int(bool(st.get("follow_npc_schedule", bool(st_npc))))
 
-            existing_wp = c.execute(
-                "SELECT id, status FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index=?",
-                (session_id, quest_id, st_idx),
-            ).fetchone()
             if existing_wp:
                 if not is_rollback and existing_wp["status"] in ("completed", "bypassed"):
                     eff_st_status = existing_wp["status"]
@@ -1674,7 +1802,8 @@ def sync_quest_projection_from_dossier(
             opt_npc = str(ld.get("target_npc") or "")
             opt_label = str(ld.get("label") or f"Optional Lead {idx_opt}")
             opt_appr = json.dumps(list(ld.get("approaches") or []))
-            opt_follow = int(bool(ld.get("follow_npc_schedule", bool(opt_npc))))
+            is_phys_opt = bool(ld.get("completion_trigger") == "inspect_prop" or any(kw in opt_label.lower() for kw in ("inspect physical", "traces", "search site")))
+            opt_follow = 0 if is_phys_opt else int(bool(ld.get("follow_npc_schedule", bool(opt_npc))))
 
             if ld_status == "completed":
                 wp_status = "completed"

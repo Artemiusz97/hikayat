@@ -1095,6 +1095,7 @@ def apply_civilian_permadeath(
     session: Optional[Dict[str, Any]],
     npc_name: Any,
     killer_name: str = "anomalous entity",
+    defer_db: bool = False,
 ) -> Dict[str, Any]:
     """
     Executes permanent death for a friendly Civilian slain by a hostile Anomalous Entity
@@ -1102,6 +1103,7 @@ def apply_civilian_permadeath(
     1. Marks `deceased: True` and `status_effects: ["Deceased"]` in `contacts` (preserving memorial record).
     2. Updates `lorebook` (`person`) status/description with permanent death record.
     3. Removes the slain Civilian from `session["current_npcs"]` and `db.update_session_npcs`.
+    When `defer_db=True`, database commits are deferred until turn outcome application succeeds.
     """
     if isinstance(npc_name, dict):
         if classify_anomalous_npc_tag(npc_name, session_id=session_id) == TAG_SPECIAL_AGENT:
@@ -1114,7 +1116,7 @@ def apply_civilian_permadeath(
     if not clean_name:
         return {"deceased": False, "permadeath": False}
 
-    if session_id:
+    if session_id and not defer_db:
         try:
             with db.get_conn() as conn:
                 rows = conn.execute(
@@ -1151,6 +1153,7 @@ def apply_civilian_permadeath(
                 name=clean_name,
                 description=prev_desc,
                 disposition="dead",
+                status="deceased",
             )
         except Exception:
             pass
@@ -1162,7 +1165,12 @@ def apply_civilian_permadeath(
             if (str(n.get("name") or "") if isinstance(n, dict) else str(n)).strip().lower() != clean_name.lower()
         ]
         session["current_npcs"] = filtered
-        if session_id:
+        if "party_npcs" in session and isinstance(session["party_npcs"], list):
+            session["party_npcs"] = [
+                n for n in session["party_npcs"]
+                if (str(n.get("name") or "") if isinstance(n, dict) else str(n)).strip().lower() != clean_name.lower()
+            ]
+        if session_id and not defer_db:
             try:
                 db.update_session_npcs(session_id, filtered)
             except Exception:

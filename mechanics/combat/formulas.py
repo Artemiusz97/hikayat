@@ -2,7 +2,7 @@ from __future__ import annotations
 """
 Combat formulas, DC calculation, damage modifiers, and status effect logic.
 """
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List, Tuple, Union
 import random
 import re
 
@@ -177,38 +177,19 @@ def get_elemental_multiplier(
 
 
 
-def try_inflict_status(target: dict, target_attrs: dict, status_str: str, combat_log: Optional[list] = None) -> bool:
-    """
-    Inflicts a status effect on the target, checking for defensive gear tag immunities
+def try_inflict_status(
+    target: dict,
+    target_attrs: dict,
+    status_str: Union[str, dict],
+    combat_log: Optional[list] = None
+) -> bool:
+    """Inflicts a status effect on the target, checking for defensive gear tag immunities
     (e.g. Hazmat / gas_mask repelling toxic, corrosive, acid, poison, or radiation hazards).
+    Supports both legacy strings and structured StatusEffectInstance dicts with stacking rules.
     Returns True if applied, False if repelled.
     """
-    status_lower = status_str.lower()
-    target_tags = set(target_attrs.get("tags", [])) | set(target_attrs.get("gear_tags", []))
-    for eff in target.get("status_effects", []):
-        if isinstance(eff, str):
-            for part in eff.lower().split():
-                target_tags.add(part)
-                
-    is_toxic = any(k in status_lower for k in ("poison", "toxic", "acid", "corros", "gas", "suffocat", "chemical", "radiation", "fallout"))
-    if is_toxic:
-        hazmat_active = any(t in target_tags for t in ("hazmat", "gas_mask", "gas_immune", "environmental_isolation", "sealed_environment"))
-        if hazmat_active:
-            target_name = target.get("name", "The target")
-            if combat_log is not None:
-                combat_log.append(f"🛡️ **{target_name}**'s sealed Hazmat gear repelled the toxic hazard (*{status_str.split('[')[0].strip()}*)!")
-            return False
-    cur_eff = target.get("status_effects")
-    if isinstance(cur_eff, str):
-        try:
-            import json
-            target["status_effects"] = json.loads(cur_eff) if cur_eff.strip().startswith("[") else ([cur_eff] if cur_eff.strip() else [])
-        except Exception:
-            target["status_effects"] = [cur_eff] if cur_eff.strip() else []
-    elif not isinstance(cur_eff, list):
-        target["status_effects"] = []
-    target["status_effects"].append(status_str)
-    return True
+    from .status_effects import apply_status_effect
+    return apply_status_effect(target, status_str, target_attrs=target_attrs, combat_log=combat_log)
 
 
 def calculate_tactical_damage(
@@ -233,6 +214,8 @@ def calculate_tactical_damage(
     """
     if tier in ("crit_fail", "fail", "failure"):
         return {"damage": 0, "base_damage": 0, "blocked": False, "hit": False, "matchup_mult": 1.0, "details": "Miss"}
+
+    attacker_level = int(attacker_level or 1)
 
     atk = attacker_attrs.get("atk", 22)
     matk = attacker_attrs.get("matk", 22)
@@ -544,86 +527,13 @@ def calculate_turn_damage(action: dict, player_stats: dict, monster_stats: dict)
     return max(0, enemy_damage), max(0, player_damage)
 
 def tick_status_timers(entity: dict) -> dict:
-    """
-    Hybrid Status Effect Timer System & DoT Lifecycle.
-    Decrements turn timers on any status effect tagged as "<effect> [N turns]".
-    Applies DoT damage (Burn, Poison, Bleed) and removes effects when timer reaches 0.
+    """Hybrid Status Effect Timer System & DoT Lifecycle.
+    Decrements turn timers on any status effect (both StatusEffectInstance dicts and '<effect> [N turns]' strings).
+    Applies DoT damage (Burn, Poison, Bleed) with intensity stacking and removes effects when timer reaches 0.
     Attaches timers to new un-timed effects (default 2 turns).
     Mutates entity['status_effects'] in-place and returns it.
     """
-    import re
-    raw = entity.get("status_effects")
-    if not raw:
-        return entity
-
-    if isinstance(raw, str):
-        try:
-            import json
-            effects = json.loads(raw)
-        except Exception:
-            effects = [raw]
-    else:
-        effects = list(raw)
-
-    new_effects = []
-    total_dot = 0
-    for effect in effects:
-        if not isinstance(effect, str) or not effect.strip():
-            continue
-        effect = effect.strip()
-
-        # Apply DoT damage
-        eff_lower = effect.lower()
-        if "burn" in eff_lower or "ignite" in eff_lower:
-            total_dot += 8
-        elif "poison" in eff_lower or "venom" in eff_lower:
-            total_dot += 10
-        elif "bleed" in eff_lower:
-            total_dot += 6
-
-        # Social / Intimate / Clock status tags that must NOT be managed by combat turn tick:
-        # 1. Aroused is managed exclusively by intimate excitement decay and physical state reducer
-        if "aroused" in eff_lower:
-            new_effects.append(effect)
-            continue
-
-        # 2. Minute-based tags (Refractory Recovery [X min], Satisfied [X min], etc.)
-        if re.search(r"\[\d+\s*(?:min|m)\]", effect, re.IGNORECASE) or any(k in eff_lower for k in ("refractory", "satisfied")):
-            new_effects.append(effect)
-            continue
-
-        # Check if timer tag already exists: "Stunned [2 turns]"
-        match = re.search(r"\s*\[(\d+)\s*turns?\]$", effect, re.IGNORECASE)
-        if match:
-            turns = int(match.group(1)) - 1
-            base = effect[:match.start()].strip()
-            if turns > 0:
-                new_effects.append(f"{base} [{turns} turn{'s' if turns != 1 else ''}]")
-            # If turns == 0: effect expired, drop it
-        else:
-            # Non-combat or persistent condition checks: do not attach turn timers to social/exploration traits
-            if any(k in eff_lower for k in (
-                "sensitive", "flustered", "breathless", "exhausted", "recovering",
-                "rested", "drunk", "full", "smitten", "heartbroken"
-            )):
-                new_effects.append(effect)
-            else:
-                # New combat effect without timer - attach default 2-turn timer
-                new_effects.append(f"{effect} [2 turns]")
-
-    if total_dot > 0:
-        temp = entity.get("temp_hp", 0)
-        actual = total_dot
-        if temp > 0:
-            if temp >= total_dot:
-                entity["temp_hp"] = temp - total_dot
-                actual = 0
-            else:
-                actual = total_dot - temp
-                entity["temp_hp"] = 0
-        entity["hp"] = max(0, entity.get("hp", 0) - actual)
-
-    entity["status_effects"] = new_effects
-    return entity
+    from .status_effects import tick_status_instance_timers
+    return tick_status_instance_timers(entity)
 
 

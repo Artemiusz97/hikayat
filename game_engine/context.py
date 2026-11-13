@@ -1042,7 +1042,8 @@ def _scene_context_text(session_id: int, current_location: str,
 
 
 def _quest_board_parts(session_id: int, current_location: str,
-                       destination_location: str = "") -> tuple[str, str]:
+                       destination_location: str = "",
+                       session: dict = None) -> tuple[str, str]:
     """(waypoints_block, caseboard_block) - each trimmed by its own budget key.
 
     These used to sit at the tail of KNOWN WORLD, where the "lore" trim silently
@@ -1050,7 +1051,7 @@ def _quest_board_parts(session_id: int, current_location: str,
     """
     from mechanics.world.waypoints import build_waypoint_prompt_block
     from mechanics.narrative.clues import format_caseboard_prompt_context
-    wp_block = build_waypoint_prompt_block(session_id, current_location or "", destination_location=destination_location) or ""
+    wp_block = build_waypoint_prompt_block(session_id, current_location or "", destination_location=destination_location, session=session) or ""
     caseboard_ctx = format_caseboard_prompt_context(session_id) or ""
     return wp_block, caseboard_ctx
 

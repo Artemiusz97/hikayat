@@ -192,6 +192,17 @@ QUEST_UI_LABELS = {
     "locked_out": "Terkunci",
     "fallen_world_epilogue": "Dunia Tumbang — Epilog Penentangan",
     "base_reward_note": "Ganjaran Asas Penyiapan",
+    "threat_clock": "Jam Ancaman",
+    "threat_paused": "Dijeda (Kemuncak)",
+    "threat_dormant": "Pegun sehingga bab dimulakan",
+    "threat_reinforced": "Bala Bantuan",
+    "threat_scar_pending": "Risiko Parut Bab",
+    "clue_sources": "Sumber Petunjuk",
+    "source_open": "Terbuka",
+    "source_burned": "Hangus",
+    "source_cold": "Terputus",
+    "source_claimed": "Diperoleh",
+    "source_bonus": "Petunjuk Bonus",
 }
 
 PACT_UI_LABELS = {
