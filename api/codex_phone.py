@@ -71,6 +71,7 @@ from mechanics.social.factions import (
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label
 from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
+from mechanics.combat.loadouts import build_combatant_stat_sheet, compute_companion_vitals, ensure_combatant_loadout
 from mechanics.world.world_events.engine import build_client_world_pulse_payload
 from .deps import (
     manager,
@@ -286,12 +287,15 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     char_level = max(1, int(char_row.get("level", 1) or 1)) if char_row else 1
     rec_cost = get_recruitment_cost(score, level=char_level)
     char_gold = int(char_row.get("gold", 0) or 0) if char_row else 0
-    extra_companion_fields = {}
-
-    comp_hp = 45
-    comp_max_hp = 45
-    comp_mp = 25
-    comp_max_mp = 25
+    role_label = str(basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion")
+    comp_stats = build_combatant_stat_sheet(char_level, role_label, role_tier="companion")
+    comp_max_hp, comp_max_mp = compute_companion_vitals(char_level, comp_stats, is_civilian=False)
+    comp_hp = comp_max_hp
+    comp_mp = comp_max_mp
+    extra_companion_fields = {
+        "level": char_level,
+        "stats": comp_stats,
+    }
 
     if scenario_data.is_anomalous_incursions_scenario(scen_key):
         from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
@@ -299,9 +303,9 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         if not eval_res.get("allowed"):
             raise HTTPException(status_code=400, detail=eval_res.get("reason") or f"Cannot recruit {npc_name}.")
         rec_cost = int(eval_res.get("cost", 0) or 0)
-        comp_hp = int(eval_res.get("hp", 130) or 130)
+        comp_hp = int(eval_res.get("hp", comp_max_hp) or comp_max_hp)
         comp_max_hp = int(eval_res.get("max_hp", comp_hp) or comp_hp)
-        comp_mp = int(eval_res.get("mp", 60) or 60)
+        comp_mp = int(eval_res.get("mp", comp_max_mp) or comp_max_mp)
         comp_max_mp = int(eval_res.get("max_mp", comp_mp) or comp_mp)
         extra_companion_fields = {
             "anomalous_npc_tag": "special_agent",
@@ -313,7 +317,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
             "faction_name": eval_res.get("faction_name", ""),
             "innate_abilities": eval_res.get("innate_abilities", []),
             "level": eval_res.get("level", char_level),
-            "stats": eval_res.get("stats", {}),
+            "stats": eval_res.get("stats") or comp_stats,
             "weapon_profile": eval_res.get("weapon_profile", {}),
         }
 
@@ -328,7 +332,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
         "npc_id": (matched_contact or {}).get("npc_id") or npc_name.lower().replace(" ", "_"),
-        "role": extra_companion_fields.get("agent_class") or basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion",
+        "role": extra_companion_fields.get("agent_class") or role_label or "Companion",
         "hp": comp_hp,
         "max_hp": comp_max_hp,
         "mp": comp_mp,
@@ -336,6 +340,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         "relationship_score": score,
         **extra_companion_fields,
     }
+    ensure_combatant_loadout(npc_payload, scenario_key=scen_key)
     added = await adb(db.add_session_party_npc, req.session_id, npc_payload)
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
@@ -1534,7 +1539,23 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                     if ms.get("target_location"):
                         ms["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, ms["target_location"], scen_key))
                     if ms.get("key_clue"):
-                        ms["key_clue"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["key_clue"], scen_key))
+                        if isinstance(ms["key_clue"], dict):
+                            raw_kc = ms["key_clue"]
+                            kc_t = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, str(raw_kc.get("title") or ""), scen_key))
+                            kc_l = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, str(raw_kc.get("lead_text") or ""), scen_key))
+                            ms["key_clue"] = f"{kc_t} — {kc_l}" if (kc_t and kc_l and kc_l.lower() != kc_t.lower()) else (kc_t or kc_l)
+                            ms["key_clue_meta"] = {"title": kc_t, "lead_text": kc_l, "clue_id": str(raw_kc.get("clue_id") or "")}
+                        else:
+                            ms["key_clue"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["key_clue"], scen_key))
+                    if isinstance(ms.get("key_clue_meta"), dict):
+                        if ms["key_clue_meta"].get("title"):
+                            ms["key_clue_meta"]["title"] = clean_narrative_location_arrows(
+                                resolve_session_location_tokens(session_id, str(ms["key_clue_meta"]["title"]), scen_key)
+                            )
+                        if ms["key_clue_meta"].get("lead_text"):
+                            ms["key_clue_meta"]["lead_text"] = clean_narrative_location_arrows(
+                                resolve_session_location_tokens(session_id, str(ms["key_clue_meta"]["lead_text"]), scen_key)
+                            )
                     for src in (ms.get("clue_sources") or []):
                         if isinstance(src, dict):
                             if src.get("label"):
@@ -1617,6 +1638,52 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         except Exception:
             pass
     clues = [dict(c) for c in db.get_session_clues(session_id) if c]
+    if clues:
+        cg_by_clue_id: dict[int, dict] = {}
+        cg_by_title: dict[str, dict] = {}
+        for _dos_c in (db.get_session_quest_dossiers(session_id) or []):
+            _d_qid = str(_dos_c.get("quest_id") or "").strip()
+            for _cn in (_dos_c.get("clue_graph") or []):
+                if not isinstance(_cn, dict):
+                    continue
+                _node_meta = {
+                    "clue_tier": "corroborating"
+                    if (bool(_cn.get("is_red_herring")) or str(_cn.get("clue_tier") or "").strip().lower() == "red_herring")
+                    else (
+                        str(_cn.get("clue_tier") or "").strip().lower()
+                        if str(_cn.get("clue_tier") or "").strip().lower() in ("key_clue", "corroborating")
+                        else "corroborating"
+                    ),
+                    "corroboration_group": str(_cn.get("corroboration_group") or _cn.get("quest_id") or _d_qid).strip(),
+                }
+                _raw_cid = _cn.get("clue_id")
+                try:
+                    if _raw_cid is not None and not isinstance(_raw_cid, bool):
+                        cg_by_clue_id[int(_raw_cid)] = _node_meta
+                except (TypeError, ValueError):
+                    pass
+                _n_title = str(_cn.get("title") or "").strip().lower()
+                if _n_title:
+                    cg_by_title.setdefault(f"{_d_qid}::{_n_title}", _node_meta)
+                    cg_by_title.setdefault(f"::{_n_title}", _node_meta)
+        for c in clues:
+            try:
+                _cid_int = int(c["id"]) if c.get("id") is not None else None
+            except (TypeError, ValueError):
+                _cid_int = None
+            _c_qid = str(c.get("quest_id") or "").strip()
+            _c_title = str(c.get("title") or "").strip().lower()
+            _meta = (
+                (cg_by_clue_id.get(_cid_int) if _cid_int is not None else None)
+                or cg_by_title.get(f"{_c_qid}::{_c_title}")
+                or cg_by_title.get(f"::{_c_title}")
+            )
+            if _meta:
+                c["clue_tier"] = _meta["clue_tier"]
+                if _meta["corroboration_group"]:
+                    c["corroboration_group"] = _meta["corroboration_group"]
+            elif c.get("clue_tier") == "red_herring":
+                c["clue_tier"] = "corroborating"
     available_bounties = [q for q in quests if q.get("status") == "Available"]
     import scenario_data as _sd_qp
     if _sd_qp.is_anomalous_incursions_scenario(scen_key):
@@ -1873,6 +1940,9 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
         "success": True,
         "is_valid": bool(ded_res.get("is_valid")),
         "is_red_herring": bool(ded_res.get("is_red_herring")),
+        "partial_corroboration": bool(ded_res.get("partial_corroboration")),
+        "shortcut_unlocked": bool(ded_res.get("shortcut_unlocked")),
+        "threat_clock_paused": bool(ded_res.get("threat_clock_paused")),
         "title": ded_res.get("title") or "",
         "detail_text": ded_res.get("detail_text") or "",
         "xp_awarded": int(ded_res.get("xp_awarded") or 0),

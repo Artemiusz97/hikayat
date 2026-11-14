@@ -91,7 +91,15 @@
     "resolved": "已结算",
     "waiting_party": "等待队友行动...",
     "locked_in": "已就绪",
-    "submitting": "结算回合中..."
+    "submitting": "结算回合中...",
+    "charging_skill": "蓄力中",
+    "stagger_label": "失衡度",
+    "stagger_breaking": "即将破防！",
+    "aggro_label": "仇恨",
+    "taunted_label": "被嘲讽",
+    "companion_kit": "战斗技能组",
+    "kit_ready": "就绪",
+    "kit_cd": "冷却"
   },
   "inventory": {
     "all": "全部物品",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 合成重大突破",
     "deduce_single_clue": "🔮 单一线索推理",
     "main_objective": "核心主目标",
+    "primary_operation": "核心行动",
     "peak_chapter": "高潮大场面",
     "aid_secured": "支援已生效",
     "bypass_active": "捷径已开启",
@@ -270,7 +279,13 @@
     "source_burned": "已失手",
     "source_cold": "已中断",
     "source_claimed": "已获取",
-    "source_bonus": "额外线索"
+    "source_bonus": "额外线索",
+    "corroboration_confirmed": "线索已印证",
+    "partial_corroboration_hint": "两项关键线索相互印证。请将其中一项与支线或额外线索配对，即可触发重大突破。",
+    "clue_tier_key": "关键线索",
+    "clue_tier_corroborating": "佐证线索",
+    "off_hours_trace": "非营业时间勘查 (+2 DC)",
+    "threat_pushed_back": "威胁已延缓 (-1)"
   },
   "quest": {
     "threat_clock": {

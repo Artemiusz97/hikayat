@@ -824,6 +824,8 @@ def execute_pact_ritual_action(
     tier: int = 1,
     use_credits: bool = True,
     lang: str = "en",
+    patron_override: Optional[Dict[str, Any]] = None,
+    discovery_channel: str = "",
 ) -> Dict[str, Any]:
     """
     Executes `sign`, `upgrade`, `feed`, or `sever` deterministically and returns
@@ -853,17 +855,64 @@ def execute_pact_ritual_action(
     if act == "sign":
         avail = get_available_patrons_for_context(sess, char, uid, lang=lang)
         matched_offer = next((o for o in avail["patrons"] if o["patron_id"] == pid), None)
+        has_override = isinstance(patron_override, dict) and str(patron_override.get("patron_id") or "").strip() == pid
+        if matched_offer is None and has_override:
+            if not is_patron_allowed_in_scenario(patron_override, scen_key):
+                raise ValueError("That Patron is not allowed in this scenario.")
+            active_pacts = db.get_player_active_pacts(sid, uid)
+            ch_key = str(discovery_channel or "direct").strip()
+            surr_nm = (
+                str(patron_override.get("canonical_name") or patron_override.get("name") or "").strip()
+                if ch_key == "boss_surrender"
+                else ""
+            )
+            matched_offer = _annotate_patron_for_player(
+                sid,
+                uid,
+                char,
+                patron_override,
+                active_pacts,
+                channel=ch_key,
+                channel_label=ch_key.replace("_", " ").title(),
+                is_deaths_door=(ch_key == "deaths_door"),
+                surrender_enemy_name=surr_nm,
+            )
         if not matched_offer:
             raise ValueError("That Patron is not reachable through any active channel at your current location.")
         if not matched_offer.get("can_sign"):
             raise ValueError(str(matched_offer.get("blocked_reason") or "Cannot sign contract."))
 
-        patron = get_patron_by_id(pid, scenario_or_key=scen_key, lang=lang, contained_records=contained_records)
+        patron: Optional[Dict[str, Any]] = None
+        if has_override:
+            patron = dict(patron_override)
+        elif matched_offer.get("channel") == "boss_surrender" and matched_offer.get("surrender_enemy_name"):
+            surr_target_low = str(matched_offer.get("surrender_enemy_name") or "").strip().lower()
+            for enem in (sess.get("nearby_enemies") or []):
+                if isinstance(enem, dict) and str(enem.get("name") or "").strip().lower() == surr_target_low:
+                    bp = enem.get("anomaly_blueprint") if isinstance(enem.get("anomaly_blueprint"), dict) else {}
+                    cid = str(enem.get("codex_id") or bp.get("codex_id") or "").strip()
+                    if cid:
+                        patron = synthesize_folklore_patron(cid, scenario_or_key=scen_key, lang=lang)
+                    else:
+                        rec_src = {
+                            "anomaly_id": enem.get("incursion_id") or enem.get("name"),
+                            "name": enem.get("name"),
+                            "primary_element": enem.get("primary_element") or bp.get("primary_element") or "aether",
+                            "archetype": enem.get("archetype") or "catalyst",
+                            "sapience": "sapient",
+                            "form": enem.get("form") or bp.get("form") or "default",
+                            "threat_tier": enem.get("tier_rank") or 3,
+                            "taboo": enem.get("taboo") or bp.get("taboo") or {},
+                        }
+                        patron = synthesize_procedural_sapient_patron(rec_src, scenario_or_key=scen_key, lang=lang)
+                    break
+        if not patron:
+            patron = get_patron_by_id(pid, scenario_or_key=scen_key, lang=lang, contained_records=contained_records)
         if not patron:
             raise ValueError("Patron definition could not be resolved.")
 
         is_dd = bool(matched_offer.get("is_deaths_door_offer"))
-        extra_meta = {"discovery_channel": matched_offer.get("channel", "")}
+        extra_meta = {"discovery_channel": str(discovery_channel or matched_offer.get("channel") or "")}
         signed = db.sign_entity_contract(
             sid,
             uid,

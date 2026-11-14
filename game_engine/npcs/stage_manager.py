@@ -1441,6 +1441,97 @@ def compute_pre_turn_stage(
                 except Exception:
                     pass
 
+    # Active Quest Witness Staging (D3): daytime non-private rooms stage open/bonus witnesses; off-hours leaves traces
+    if sess_id and effective_location and not access_gate_info.get("gated"):
+        try:
+            from mechanics.world.waypoints.matching import check_location_matches_waypoint
+
+            wit_curr_min = int(session.get("current_minute", 480) or 480)
+            wit_is_daytime = 420 <= (wit_curr_min % 1440) < 1320
+            wit_dest_nid = (
+                effective_node_id
+                or session.get("current_node_id")
+                or db.resolve_node_id_from_location(sess_id, effective_location)
+            )
+            wit_priv_dest = False
+            if wit_dest_nid:
+                wit_node_obj = db.get_world_node(sess_id, wit_dest_nid)
+                if wit_node_obj and str(wit_node_obj.get("privacy_level") or "").lower() in ("private", "restricted", "discreet"):
+                    wit_priv_dest = True
+            if not wit_priv_dest:
+                eff_low = str(effective_location or "").lower()
+                if any(pk in eff_low for pk in ("bedroom", "dorm room", "private suite", "private quarters")):
+                    wit_priv_dest = True
+
+            if not wit_is_daytime:
+                keep_wit_names = (
+                    {str(p).strip().lower() for p in (new_partners or []) if p}
+                    | {_get_npc_name(c).strip().lower() for c in (traveling_companions or []) if _get_npc_name(c)}
+                )
+                filtered_wit_npcs = []
+                for sn in stage_npcs:
+                    sn_low = _get_npc_name(sn).strip().lower()
+                    if isinstance(sn, dict) and sn.get("quest_witness") and sn_low not in keep_wit_names:
+                        seen_stage_names.discard(sn_low)
+                        continue
+                    filtered_wit_npcs.append(sn)
+                stage_npcs = filtered_wit_npcs
+            elif not wit_priv_dest:
+                active_qs = db.get_session_quests(sess_id, status="Active") or []
+                active_qids = {str(aq.get("quest_id") or "") for aq in active_qs if aq.get("quest_id")}
+                if active_qids:
+                    eff_parts = [p.strip().lower() for p in re.split(r"\s*(?:➔|->|✖)\s*", str(effective_location)) if p.strip()]
+                    cand_lookup: dict[str, dict] = {}
+                    for cand in (_get_stage_contacts() + _get_stage_roster()):
+                        if isinstance(cand, dict):
+                            cnm = str(cand.get("name") or "").strip().lower()
+                            if cnm and cnm not in cand_lookup:
+                                cand_lookup[cnm] = cand
+
+                    for dos in (db.get_session_quest_dossiers(sess_id) or []):
+                        if str(dos.get("quest_id") or "") not in active_qids:
+                            continue
+                        clx = dos.get("climax_spec") or {}
+                        for st in (clx.get("main_stages") or []):
+                            if not isinstance(st, dict) or st.get("is_climax_stage"):
+                                continue
+                            st_status = str(st.get("status") or "").lower()
+                            st_done = bool(st.get("completed") or st_status in ("completed", "bypassed"))
+                            st_active = (st_status == "active") or (not st_done and st_status != "locked")
+                            for src in (st.get("clue_sources") or []):
+                                if not isinstance(src, dict) or str(src.get("kind") or "").lower() != "witness":
+                                    continue
+                                src_status = str(src.get("status") or "open").lower()
+                                eligible = (st_active and src_status == "open") or (st_done and bool(src.get("bonus")) and src_status != "claimed")
+                                if not eligible:
+                                    continue
+                                w_npc = str(src.get("npc_name") or "").strip()
+                                w_loc = str(src.get("location") or "").strip()
+                                if not w_npc or not w_loc or w_npc.lower() in seen_stage_names:
+                                    continue
+                                if not check_location_matches_waypoint(effective_location, w_loc, session_id=sess_id):
+                                    continue
+                                s_parts = [p.strip().lower() for p in re.split(r"\s*(?:➔|->|✖)\s*", w_loc) if p.strip()]
+                                if len(s_parts) >= 2:
+                                    s_leaf = s_parts[-2] if s_parts[-1] in ("main area", "area", "") else s_parts[-1]
+                                    if s_leaf not in eff_parts and (not eff_parts or eff_parts[-1] != s_leaf):
+                                        continue
+                                base_c = cand_lookup.get(w_npc.lower()) or {}
+                                w_role = base_c.get("role") or (base_c.get("basic_info") or {}).get("role") or "Witness"
+                                w_grade = base_c.get("grade") or (base_c.get("basic_info") or {}).get("grade") or ""
+                                _add_stage_npc({
+                                    "name": w_npc,
+                                    "role": w_role,
+                                    "grade": w_grade,
+                                    "status_effects": ["Present"],
+                                    "stage_role": "room_bystander",
+                                    "attention_ring": "ring_2_attentive_peer",
+                                    "is_quest_target": True,
+                                    "quest_witness": True,
+                                })
+        except Exception:
+            pass
+
     # Folklore Villages: Non-Spoiler Roster Seeding, Sanctuary Non-Aggression Pact, Leyline Check & Stage Hydration
     import scenario_data as _fk_scen_data
     if sess_id and (

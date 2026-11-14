@@ -1277,6 +1277,35 @@ class DossierEnrichment(DictAccessibleModel):
     twist_summary: str = ""
     climax_hook: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_enrichment_aliases(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, dict):
+            return {}
+        d = dict(data)
+        if not d.get("public_pitch"):
+            d["public_pitch"] = d.get("pitch") or d.get("summary") or d.get("description") or ""
+        if not d.get("objective_flavor"):
+            d["objective_flavor"] = d.get("objective") or d.get("goal") or ""
+        if not d.get("main_stage_labels"):
+            d["main_stage_labels"] = d.get("stages") or d.get("stage_labels") or d.get("main_stages") or []
+        if not d.get("twist_summary"):
+            d["twist_summary"] = d.get("twist") or ""
+        if not d.get("climax_hook"):
+            d["climax_hook"] = d.get("climax") or ""
+        raw_leads = d.get("leads") or []
+        if isinstance(raw_leads, list) and raw_leads:
+            if not d.get("lead_titles"):
+                d["lead_titles"] = [str(x.get("title") or "") for x in raw_leads if isinstance(x, dict) and x.get("title")]
+            if not d.get("lead_descriptions"):
+                d["lead_descriptions"] = [
+                    str(x.get("description") or x.get("lead_text") or x.get("text") or "")
+                    for x in raw_leads if isinstance(x, dict) and (x.get("description") or x.get("lead_text") or x.get("text"))
+                ]
+        return d
+
     @field_validator("title", "public_pitch", "objective_flavor", "twist_summary", "climax_hook", mode="before")
     @classmethod
     def _coerce_str(cls, v: Any) -> str:
@@ -1488,6 +1517,18 @@ class ChapterPlanBeatContract(DictAccessibleModel):
     handover: str = ""
     next_pointer: str = ""
 
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_beat_contract_input(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, str):
+            s = data.replace("\x00", "").strip()
+            return {"player_verb": s[:240]} if s else {}
+        if not isinstance(data, dict):
+            return {}
+        return dict(data)
+
     @field_validator("player_verb", "reveal", "handover", "next_pointer", mode="before")
     @classmethod
     def coerce_beat_str(cls, v: Any) -> str:
@@ -1501,6 +1542,46 @@ class ChapterPlanKeyClue(DictAccessibleModel):
     title: str = ""
     lead_text: str = ""
     category: str = "document"
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_key_clue_input(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, (dict, str)) or data is None:
+            return {}
+        if isinstance(data, str):
+            s = data.replace("\x00", "").strip()
+            if not s:
+                return {}
+            return {
+                "title": s[:80].strip(),
+                "lead_text": f"Evidence related to {s}.",
+            }
+        d = dict(data)
+        title = d.get("title")
+        if title is None or not str(title).strip() or isinstance(title, (dict, list)):
+            for syn in ("name", "clue", "clue_title", "label", "item"):
+                v = d.get(syn)
+                if v is not None and not isinstance(v, (dict, list)) and str(v).strip():
+                    title = v
+                    break
+        lead_text = d.get("lead_text")
+        if lead_text is None or not str(lead_text).strip() or isinstance(lead_text, (dict, list)):
+            for syn in ("description", "summary", "details", "text", "clue_text"):
+                v = d.get(syn)
+                if v is not None and not isinstance(v, (dict, list)) and str(v).strip():
+                    lead_text = v
+                    break
+        title_str = str(title).replace("\x00", "").strip() if title is not None and not isinstance(title, (dict, list)) else ""
+        lead_str = str(lead_text).replace("\x00", "").strip() if lead_text is not None and not isinstance(lead_text, (dict, list)) else ""
+        if title_str and not lead_str:
+            lead_str = f"Evidence confirming {title_str}."
+        elif lead_str and not title_str:
+            title_str = lead_str[:60].strip()
+        d["title"] = title_str
+        d["lead_text"] = lead_str
+        return d
 
     @field_validator("title", "lead_text", mode="before")
     @classmethod
@@ -1525,6 +1606,20 @@ class ChapterPlanClueSource(DictAccessibleModel):
     approach_hint: str = ""
     stat: str = "PER"
     dc_offset: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_source_aliases(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, dict):
+            return {}
+        d = dict(data)
+        d["location"] = d.get("location") or d.get("room") or d.get("venue") or d.get("place") or ""
+        d["npc_name"] = d.get("npc_name") or d.get("witness") or d.get("npc") or d.get("character")
+        d["approach_hint"] = d.get("approach_hint") or d.get("hint") or d.get("action") or d.get("investigation") or ""
+        d["kind"] = d.get("kind") or d.get("type") or ("witness" if d.get("npc_name") else "record")
+        return d
 
     @field_validator("source_id", "location", "approach_hint", mode="before")
     @classmethod
@@ -1571,6 +1666,24 @@ class ChapterPlanStage(DictAccessibleModel):
     key_clue: ChapterPlanKeyClue = Field(default_factory=ChapterPlanKeyClue)
     clue_sources: List[ChapterPlanClueSource] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_stage_aliases(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, str):
+            return {"stage_label": data.strip()}
+        if not isinstance(data, dict):
+            return {}
+        d = dict(data)
+        if not d.get("stage_label"):
+            d["stage_label"] = d.get("label") or d.get("description") or d.get("text") or d.get("title") or d.get("name") or ""
+        if "stage_index" not in d and ("stage" in d or "index" in d):
+            d["stage_index"] = d.get("stage") or d.get("index") or 1
+        if "clue_sources" not in d:
+            d["clue_sources"] = d.get("sources") or d.get("clues") or d.get("investigations") or []
+        return d
+
     @field_validator("stage_index", mode="before")
     @classmethod
     def coerce_stage_idx(cls, v: Any) -> int:
@@ -1594,14 +1707,14 @@ class ChapterPlanStage(DictAccessibleModel):
     @field_validator("beat_contract", mode="before")
     @classmethod
     def coerce_beat_contract(cls, v: Any) -> Any:
-        if isinstance(v, dict):
+        if isinstance(v, (dict, str, BaseModel)):
             return v
         return {}
 
     @field_validator("key_clue", mode="before")
     @classmethod
     def coerce_key_clue(cls, v: Any) -> Any:
-        if isinstance(v, dict):
+        if isinstance(v, (dict, str, BaseModel)):
             return v
         return {}
 
@@ -1621,6 +1734,20 @@ class ChapterPlan(DictAccessibleModel):
     stages: List[ChapterPlanStage] = Field(default_factory=list)
     optional_hooks: List[str] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_plan_aliases(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if not isinstance(data, dict):
+            return {}
+        d = dict(data)
+        if not d.get("title"):
+            d["title"] = d.get("quest_title") or d.get("plan_title") or d.get("name") or ""
+        if not d.get("objective"):
+            d["objective"] = d.get("goal") or d.get("main_objective") or d.get("quest_objective") or d.get("summary") or d.get("description") or ""
+        return d
+
     @field_validator("title", "objective", "climax_location", mode="before")
     @classmethod
     def coerce_plan_str(cls, v: Any) -> str:
@@ -1633,7 +1760,13 @@ class ChapterPlan(DictAccessibleModel):
     def coerce_stages(cls, v: Any) -> List[Any]:
         if not isinstance(v, list):
             return []
-        return [s for s in v if isinstance(s, (dict, BaseModel))]
+        out = []
+        for idx, s in enumerate(v):
+            if isinstance(s, (dict, BaseModel)):
+                out.append(s)
+            elif isinstance(s, str) and s.strip():
+                out.append({"stage_index": idx + 1, "stage_label": s.strip()})
+        return out
 
     @field_validator("optional_hooks", mode="before")
     @classmethod

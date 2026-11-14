@@ -1,6 +1,6 @@
-# Hikayat (v2.11.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v2.12.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-2.11.0-blue.svg)](releases/CHANGELOG-v2.11.0.md)
+[![Version](https://img.shields.io/badge/version-2.12.0-blue.svg)](releases/CHANGELOG-v2.12.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 

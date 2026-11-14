@@ -277,7 +277,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 </span>
               </div>
               <p className={`text-[11px] leading-snug ${isMainDone ? 'text-gray-400 line-through' : 'text-gray-100 font-semibold'}`}>
-                {cleanProseLocations(mainObj.title || mainObj.text || questObj?.objective)}
+                {cleanProseLocations(
+                  mainObj.title && (questObj?.is_story_quest || questObj?.quest_type === 'Story Quest' || mainObj.title !== questObj?.objective)
+                    ? mainObj.title
+                    : (mainObj.text && (questObj?.is_story_quest || questObj?.quest_type === 'Story Quest' || mainObj.text !== questObj?.objective)
+                        ? mainObj.text
+                        : t('quests.primary_operation', 'Primary Operation'))
+                )}
               </p>
             </div>
           </div>
@@ -353,17 +359,24 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             </span>
                           )}
                         </div>
-                        <span
-                          className={`text-[9px] px-1.5 py-0.2 rounded border shrink-0 font-mono ${
-                            isBurnedOrCold
-                              ? 'bg-neutral-900/70 text-gray-500 border-gray-700/40'
-                              : isClaimed
-                                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/40'
-                                : 'bg-amber-950/50 text-amber-200 border-amber-600/40'
-                          }`}
-                        >
-                          {badgeLabel}
-                        </span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {src.off_hours_fallback && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded border shrink-0 font-mono bg-orange-950/60 text-orange-200 border-orange-600/40">
+                              🕵️ {t('quests.off_hours_trace', 'Off-Hours Trace (+2 DC)')}
+                            </span>
+                          )}
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded border shrink-0 font-mono ${
+                              isBurnedOrCold
+                                ? 'bg-neutral-900/70 text-gray-500 border-gray-700/40'
+                                : isClaimed
+                                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/40'
+                                  : 'bg-amber-950/50 text-amber-200 border-amber-600/40'
+                            }`}
+                          >
+                            {badgeLabel}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -457,9 +470,16 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   }`}
                 >
                   <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                    <span className={`text-[9px] px-1.5 py-0.2 rounded border uppercase font-bold ${getOptionalRoleStyle(roleKey)}`}>
-                      {cleanProseLocations(opt.badge || t(`quests.optional_role_${roleKey}`, `Optional — ${roleKey}`))}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[9px] px-1.5 py-0.2 rounded border uppercase font-bold ${getOptionalRoleStyle(roleKey)}`}>
+                        {cleanProseLocations(opt.badge || t(`quests.optional_role_${roleKey}`, `Optional — ${roleKey}`))}
+                      </span>
+                      {(roleKey === 'aid' || roleKey === 'bypass') && !isFailed && !isLockedOut && (
+                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-teal-950/60 text-teal-300 border border-teal-700/50">
+                          ⏪ -1 {t('quests.threat_clock', 'Threat')}
+                        </span>
+                      )}
+                    </div>
 
                     {isDone && (
                       <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/70 text-emerald-300 border border-emerald-700/50">
@@ -601,7 +621,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 ))}
               </div>
             </div>
-            {(threatClock.paused || threatClock.engaged === false || threatClock.next_threshold_teaser || threatClock.last_consequence_note || threatClock.last_consequence_event || threatClock.reinforced || threatClock.world_scar_pending) && (
+            {(threatClock.paused || threatClock.pushed_back || threatClock.engaged === false || threatClock.next_threshold_teaser || threatClock.last_consequence_note || threatClock.last_consequence_event || threatClock.reinforced || threatClock.world_scar_pending) && (
               <div className="flex items-center justify-between gap-1.5 flex-wrap text-[9px] text-gray-300">
                 <span className="text-orange-200/85">
                   {cleanProseLocations(
@@ -633,6 +653,11 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   {threatClock.paused && (
                     <span className="px-1 py-0.2 rounded bg-sky-950/70 text-sky-300 border border-sky-700/50 font-mono">
                       ⏸️ {t('quests.threat_paused', 'Paused (Climax)')}
+                    </span>
+                  )}
+                  {threatClock.pushed_back && (
+                    <span className="px-1 py-0.2 rounded bg-teal-950/70 text-teal-300 border border-teal-700/50 font-mono">
+                      ⏪ {t('quests.threat_pushed_back', 'Threat Delayed (-1)')}
                     </span>
                   )}
                   {threatClock.engaged === false && (
@@ -781,13 +806,21 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
     try {
       const res = await deduceClues(clueAId, clueBId || null);
       if (res?.is_valid) {
-        setFeedback({
-          type: 'ok',
-          title: `⚡ ${res.title || 'Breakthrough Synthesized!'} (+${res.xp_awarded || 50} XP)`,
-          text: res.detail_text,
-        });
-        setClueAId('');
-        setClueBId('');
+        if (res.partial_corroboration) {
+          setFeedback({
+            type: 'info',
+            title: `🔎 ${res.title || t('quests.corroboration_confirmed', 'Trail Corroborated')}`,
+            text: res.detail_text || t('quests.partial_corroboration_hint', 'Both Key Clues align. Pair one with an Optional or Bonus Lead to unlock the Breakthrough.'),
+          });
+        } else {
+          setFeedback({
+            type: 'ok',
+            title: `⚡ ${res.title || 'Breakthrough Synthesized!'} (+${res.xp_awarded || 50} XP)`,
+            text: res.detail_text,
+          });
+          setClueAId('');
+          setClueBId('');
+        }
         if (onRefreshCharacter) onRefreshCharacter();
       } else {
         setFeedback({
@@ -912,7 +945,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             ? 'bg-red-950/60 border-red-800/60 text-red-200'
             : feedback.type === 'warn'
               ? 'bg-amber-950/60 border-amber-700/60 text-amber-200'
-              : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-200'
+              : feedback.type === 'info'
+                ? 'bg-sky-950/60 border-sky-700/60 text-sky-200'
+                : 'bg-emerald-950/60 border-emerald-700/60 text-emerald-200'
         }`}>
           <div className="flex items-center justify-between">
             <span className="font-bold">{feedback.title || (feedback.type === 'error' ? 'Alert' : 'Update')}</span>
@@ -1101,7 +1136,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   {/* Expanded Full Details */}
                   {isStoryExpanded && (
                     <div className="space-y-2.5 pt-1 border-t border-fantasy-border/30">
-                      {activeStoryQuest.objective && (
+                      {!hasStructuredStory && activeStoryQuest.objective && (
                         <p className="text-xs text-gray-300 leading-relaxed bg-black/40 p-2.5 rounded border border-fantasy-border/50">
                           {cleanProseLocations(activeStoryQuest.objective)}
                         </p>
@@ -1762,6 +1797,16 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             <span className={`text-[9px] px-1.5 py-0.5 rounded border font-bold uppercase ${cat.color}`}>
                               {cat.icon} {t(`quests.clue_types.${catKey}`, cat.label)}
                             </span>
+                            {isObj && c.clue_tier === 'key_clue' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-600/50 font-bold uppercase">
+                                🔑 {t('quests.clue_tier_key', 'Key Clue')}
+                              </span>
+                            )}
+                            {isObj && c.clue_tier === 'corroborating' && c.category !== 'deduction' && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-300 border border-cyan-600/50 font-bold uppercase">
+                                🧩 {t('quests.clue_tier_corroborating', 'Corroborating')}
+                              </span>
+                            )}
                             {isVerified && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 font-bold uppercase">
                                 ✓ Verified

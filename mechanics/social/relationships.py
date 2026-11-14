@@ -96,19 +96,22 @@ def is_contact_eligible(
     role_low_chk = str(role or "").strip().lower()
     if any(k in role_low_chk for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
         return False
+    import scenario_data
     if session_id and name:
         try:
             import db as _db_rel
             sess_chk = _db_rel.get_session(int(session_id))
             if isinstance(sess_chk, dict):
-                from mechanics.world.anomalous_events import (
-                    is_anomalous_scene_entity,
-                    _resolve_active_non_hostile_anomaly_context,
-                )
-                if is_anomalous_scene_entity(name, session=sess_chk):
-                    return False
-                if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
-                    return False
+                eff_scen = str(sess_chk.get("scenario") or scenario or "fantasy")
+                if scenario_data.is_anomalous_incursions_scenario(eff_scen):
+                    from mechanics.world.anomalous_events import (
+                        is_anomalous_scene_entity,
+                        _resolve_active_non_hostile_anomaly_context,
+                    )
+                    if is_anomalous_scene_entity(name, session=sess_chk):
+                        return False
+                    if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
+                        return False
         except Exception:
             pass
 
@@ -116,7 +119,6 @@ def is_contact_eligible(
     if namegen.is_collective_entity_name(name) or namegen.is_generic_role_name(name):
         return False
 
-    import scenario_data
     if scenario_data.is_anomalous_high_school_scenario(scenario):
         from mechanics.social.roster_tags import derive_age_group, is_anomalous_high_school_contact_eligible
         from mechanics.social.origin_mode import is_student_operative

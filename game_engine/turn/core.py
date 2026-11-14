@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .generation import get_narrative_requirements, log
 from .constants import *
+from db import adb
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.narrative.intent import *
@@ -904,7 +905,20 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     mode = "combat" if (is_in_combat(session) and not _skip_precompute_for_incursion) else "narrative"
     precomputed = None
     if mode == "combat":
-        precomputed = precompute_combat_turn(session, party, actions)
+        preloaded_eq: dict[int, dict] = {}
+        for _p_entry in (party or []):
+            _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+            if isinstance(_p_char, dict) and _p_char.get("user_id"):
+                _p_uid = int(_p_char["user_id"])
+                if _p_uid not in preloaded_eq:
+                    preloaded_eq[_p_uid] = await adb(db.get_equipment, _p_uid) or {}
+        if isinstance(session, dict):
+            session["_preloaded_equipment_by_uid"] = preloaded_eq
+        try:
+            precomputed = await adb(precompute_combat_turn, session, party, actions)
+        finally:
+            if isinstance(session, dict):
+                session.pop("_preloaded_equipment_by_uid", None)
 
     from mechanics.system.memory.budget import DynamicTokenBudget
     budget = DynamicTokenBudget.from_session(session, party, actions)
@@ -1138,11 +1152,26 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 _c_loc = str(_climax.get("location") or "").strip().lower()
                 _c_target = str(_climax.get("target_npc") or "").strip().lower()
                 _talking_to_target = bool(_c_target) and any(_c_target in p or p in _c_target for p in _pre_turn_dialogue_partners)
+                _has_incomplete_main = any(
+                    isinstance(_ms, dict)
+                    and not _ms.get("is_climax_stage")
+                    and str(_ms.get("status") or "").lower() not in ("completed", "bypassed")
+                    for _ms in (_climax.get("main_stages") or [])
+                )
+                _boss_raw_cur = _climax.get("boss_sheet") if isinstance(_climax.get("boss_sheet"), dict) else {}
+                _already_rushed_climax = bool(_boss_raw_cur.get("rushed_un_nerfed"))
+                _is_rush_action = any(
+                    bool(a.get("rush_climax")) and str(a.get("quest_id") or "") == _qid
+                    for a in _act_dicts
+                )
+                if _has_incomplete_main and not _is_rush_action and not _already_rushed_climax:
+                    continue
                 _climax_escalated = bool(
                     not _climax.get("boss_escalation_only")
                     or _climax.get("escalated")
                     or _climax.get("ambush_unlocked")
                     or _hostile_action
+                    or _is_rush_action
                 )
                 if (
                     _climax.get("is_unlocked")
@@ -1153,6 +1182,17 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     and _c_loc
                     and (_c_loc in _enc_loc_low or _enc_loc_low in _c_loc)
                 ):
+                    if _is_rush_action:
+                        try:
+                            from game_engine.quest_turn_resolver import evaluate_nonlinear_leads_and_climax_gate as _eval_rush
+                            _eval_rush(int(session["id"]), _qid, rush_climax=True)
+                            _qd_rushed = db.get_quest_dossier(int(session["id"]), _qid)
+                            if _qd_rushed and isinstance(_qd_rushed.get("climax_spec"), dict):
+                                _climax = _qd_rushed["climax_spec"]
+                        except (NameError, UnboundLocalError, ImportError):
+                            raise
+                        except Exception as _rush_exc:
+                            log.warning("Climax rush evaluation failed for %s: %s", _qid, _rush_exc, exc_info=True)
                     _boss_unit = dict(_climax["boss_sheet"])
                     try:
                         from mechanics.narrative.dossier_compiler import hydrate_boss_sheet_from_quest_blueprint
@@ -1848,7 +1888,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         result = game_engine.sync_hostile_entities(result, session)
 
         if precomputed is not None:
-            result = reconcile_combat_results(session, result, precomputed, party=party)
+            result = await adb(reconcile_combat_results, session, result, precomputed, party=party)
         if _pre_turn_incursion_notice:
             result["_combat_resolved_notice"] = (
                 f"{_pre_turn_incursion_notice}\n{result['_combat_resolved_notice']}".strip()
@@ -1891,7 +1931,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
                 if monster.get("status_effects"):
 
-                    tick_status_timers(monster)
+                    _is_non_lethal_dot = bool(
+                        isinstance(session, dict)
+                        and (session.get("non_lethal_combat") or session.get("non_lethal_mode"))
+                    )
+                    tick_status_timers(monster, non_lethal_mode=_is_non_lethal_dot)
 
                 if monster.get("hp", 1) <= 0:
                     # DoT kills must honour the 2-Stage Vessel Tether exactly like direct damage:
@@ -1930,6 +1974,16 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         session["nearby_enemies"] = surviving_hostiles
 
         if dot_dead and isinstance(result, dict):
+            from mechanics.combat import prune_dead_combat_state
+            prune_dead_combat_state(session, surviving_hostiles, llm_outcome=result)
+            result["nearby_enemies"] = surviving_hostiles
+            if not surviving_hostiles and isinstance(session, dict) and isinstance(session.get("party_npcs"), list):
+                result["party_npcs"] = session["party_npcs"]
+                if session.get("id"):
+                    try:
+                        await adb(db.set_session_party_npcs, int(session["id"]), session["party_npcs"])
+                    except Exception:
+                        pass
             dot_confiscated = False
             dot_killed_non_hostile = [
                 d for d in dot_dead_dicts if isinstance(d, dict) and d.get("requires_non_lethal_subdue")

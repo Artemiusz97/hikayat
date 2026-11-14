@@ -1926,6 +1926,42 @@ def validate_canon_dialogue_invariants(
     return violations
 
 
+_INTERNAL_TAG_BLOCK_RE = re.compile(
+    r"\[(?P<tag>ITEM_JSON|GEAR_JSON|SPELLBOOK_JSON|AUDITOR_NOTE)\][\s\S]*?\[/(?P=tag)\]",
+    re.IGNORECASE,
+)
+_INTERNAL_TAG_ORPHAN_RE = re.compile(
+    r"\[(?:ITEM_JSON|GEAR_JSON|SPELLBOOK_JSON|AUDITOR_NOTE)\][^\r\n]*|\[/(?:ITEM_JSON|GEAR_JSON|SPELLBOOK_JSON|AUDITOR_NOTE)\]",
+    re.IGNORECASE,
+)
+_PAREN_STAT_LEAK_RE = re.compile(
+    r"\(\s*(?:[^()\r\n]*?\b(?:HP|MP)\s*:\s*-?\d+\s*/\s*\d+[^()\r\n]*|DC\s*:?\s*-?\d+[^()\r\n]*)\)",
+    re.IGNORECASE,
+)
+_BRACKET_STAT_LEAK_RE = re.compile(
+    r"\[\s*(?:[^\[\]\r\n]*?\b(?:HP|MP)\s*:\s*-?\d+\s*/\s*\d+[^\[\]\r\n]*|DC\s*:?\s*-?\d+[^\[\]\r\n]*)\]",
+    re.IGNORECASE,
+)
+_UNCLOSED_DC_LEAK_RE = re.compile(r"\(\s*DC\s*:?\s*-?\d+\b", re.IGNORECASE)
+_INLINE_VITALS_LEAK_RE = re.compile(r"\b(?:HP|MP)\s*:\s*-?\d+\s*/\s*\d+\b", re.IGNORECASE)
+
+
+def sanitize_internal_tags_and_raw_stats(text: str) -> str:
+    """Strip leaked internal JSON/audit tags and raw HP/MP/DC tokens from player-facing text."""
+    if not text or not isinstance(text, str):
+        return text
+    cleaned = _INTERNAL_TAG_BLOCK_RE.sub(" ", text)
+    cleaned = _INTERNAL_TAG_ORPHAN_RE.sub(" ", cleaned)
+    cleaned = _PAREN_STAT_LEAK_RE.sub(" ", cleaned)
+    cleaned = _BRACKET_STAT_LEAK_RE.sub(" ", cleaned)
+    cleaned = _UNCLOSED_DC_LEAK_RE.sub(" ", cleaned)
+    cleaned = _INLINE_VITALS_LEAK_RE.sub(" ", cleaned)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([.,;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]+(\r?\n)", r"\1", cleaned)
+    return cleaned.strip()
+
+
 def sanitize_narrator_prose(
     result: dict,
     session: dict | None = None,
@@ -1968,6 +2004,7 @@ def sanitize_narrator_prose(
     def _clean_field(text: str, is_next: bool) -> str:
         if not text or not isinstance(text, str):
             return text
+        text = sanitize_internal_tags_and_raw_stats(text)
         text = sanitize_comparative_cliches(text)
         text = sanitize_meta_objective_leaks(text)
         text = sanitize_auditor_meta_leaks(text)
@@ -1988,6 +2025,9 @@ def sanitize_narrator_prose(
             text, session=sess, result=result, actions=actions, party=party
         )
         return text
+
+    if result.get("scene_title") and isinstance(result["scene_title"], str):
+        result["scene_title"] = sanitize_internal_tags_and_raw_stats(result["scene_title"])
 
     if result.get("outcome_narrative"):
         result["outcome_narrative"] = _clean_field(result["outcome_narrative"], is_next=False)

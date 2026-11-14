@@ -799,10 +799,15 @@ def derive_combat_attributes(
     })
 
 
-def calculate_combat_attributes(character: dict, equipped_items: list | None = None, scenario: str | None = None) -> dict:
+def calculate_combat_attributes(
+    character: dict,
+    equipped_items: list | None = None,
+    scenario: str | None = None,
+    allow_non_combat: bool = False,
+) -> dict:
     """Convenience alias delegating to mechanics.social.attributes.calculate_combat_attributes."""
     from mechanics.social.attributes import calculate_combat_attributes as _calc
-    return _calc(character, equipped_items, scenario=scenario)
+    return _calc(character, equipped_items, scenario=scenario, allow_non_combat=allow_non_combat)
 
 
 def generate_equipment(scenario: str = "fantasy", slot: str = "Weapon", tier: int | None = None, archetype: str | None = None, name: str | None = None) -> dict:
@@ -915,7 +920,7 @@ def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 
             if name.lower() in ATTENDANCE_STATUS_TAGS:
                 continue
             base_s = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", name, flags=re.IGNORECASE).strip()
-            if len(base_s.split()) > max_words:
+            if len([w for w in base_s.split() if w != "/"]) > max_words:
                 continue
             # Deduplicate by name (case-insensitive)
             if any(
@@ -939,7 +944,7 @@ def sanitize_status_effects(effects: list, max_words: int = 3, max_count: int = 
             continue
         # Reject entries with more than max_words words (ignoring [N turns] or [N min] duration brackets)
         base_s = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", s, flags=re.IGNORECASE).strip()
-        if len(base_s.split()) > max_words:
+        if len([w for w in base_s.split() if w != "/"]) > max_words:
             continue
         # Deduplicate (case-insensitive)
         if any(

@@ -3704,8 +3704,8 @@ def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = 
     import time
 
     close_all_connections()
+    gc.collect()
     if is_temp and not keep:
-        gc.collect()
         for ext in ["", "-wal", "-shm", "-journal"]:
             f_path = target_path + ext if ext else target_path
             if os.path.exists(f_path):

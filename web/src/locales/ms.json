@@ -91,7 +91,15 @@
     "resolved": "Diselesaikan",
     "waiting_party": "Menunggu ahli kumpulan...",
     "locked_in": "Terkunci",
-    "submitting": "Menyelesaikan giliran..."
+    "submitting": "Menyelesaikan giliran...",
+    "charging_skill": "MENGEJUT",
+    "stagger_label": "Goyahan",
+    "stagger_breaking": "Hampir Pecah!",
+    "aggro_label": "Sasaran",
+    "taunted_label": "Terpancing",
+    "companion_kit": "Kit Tempur",
+    "kit_ready": "Sedia",
+    "kit_cd": "Tempoh"
   },
   "inventory": {
     "all": "Semua",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Sintesis Penemuan Penting",
     "deduce_single_clue": "🔮 Deduksi dengan Petunjuk Tunggal",
     "main_objective": "Objektif Utama",
+    "primary_operation": "Operasi Utama",
     "peak_chapter": "Kemuncak Bab",
     "aid_secured": "Bantuan Aktif",
     "bypass_active": "Pintasan Aktif",
@@ -270,7 +279,13 @@
     "source_burned": "Hangus",
     "source_cold": "Terputus",
     "source_claimed": "Diperoleh",
-    "source_bonus": "Petunjuk Bonus"
+    "source_bonus": "Petunjuk Bonus",
+    "corroboration_confirmed": "Jejak Disahkan",
+    "partial_corroboration_hint": "Kedua-dua Petunjuk Utama sepadan. Gandingkan salah satu dengan Petunjuk Pilihan atau Bonus untuk mencetuskan Terobosan.",
+    "clue_tier_key": "Petunjuk Utama",
+    "clue_tier_corroborating": "Penyokong",
+    "off_hours_trace": "Jejak Luar Waktu (+2 DC)",
+    "threat_pushed_back": "Ancaman Ditunda (-1)"
   },
   "quest": {
     "threat_clock": {

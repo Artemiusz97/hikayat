@@ -283,7 +283,7 @@ def resolve_waypoint_target_npc(session_id: int, wp: dict) -> str:
                     if npc_name and len(npc_name) >= 3 and npc_name.lower() in stage_low:
                         return npc_name
 
-        contacts = db.get_contacts(session_id) or []
+        contacts = db.get_contacts(session_id, resolve_relations=False, ensure_scene=False) or []
         for c in contacts:
             c_name = str(c.get("name") or "").strip()
             if c_name and len(c_name) >= 3 and c_name.lower() in stage_low:
@@ -340,13 +340,17 @@ def can_waypoint_match_via_npc_presence(target_npc: str, stage_key: str = "", cu
     return True
 
 
-def is_waypoint_npc_present_in_scene(session_id: int, target_npc: str) -> bool:
+def is_waypoint_npc_present_in_scene(
+    session_id: int,
+    target_npc: str,
+    session: Optional[dict] = None,
+) -> bool:
     """Returns True if target_npc is physically present at the player's current scene or active dialogue."""
     if not session_id or not target_npc or not str(target_npc).strip():
         return False
 
     try:
-        session = db.get_session(session_id)
+        session = session if session is not None else db.get_session(session_id)
         if not session:
             return False
 
@@ -454,16 +458,7 @@ def get_matching_clue_sources_for_location(
                 return [p.strip().lower() for p in s.split(sep) if p.strip()]
         return [s.lower()] if s else []
 
-    def _src_matches_loc(src: dict) -> bool:
-        if str(src.get("kind") or "").lower() == "witness":
-            s_npc = str(src.get("npc_name") or "").strip()
-            if not s_npc:
-                return False
-            return bool(
-                can_waypoint_match_via_npc_presence(s_npc, current_location=current_location, waypoint=waypoint)
-                and is_waypoint_npc_present_in_scene(session_id, s_npc)
-            )
-        s_loc = str(src.get("location") or "").strip()
+    def _src_location_matches(s_loc: str) -> bool:
         if s_loc and check_location_matches_waypoint(current_location, s_loc, session_id=session_id):
             s_parts = _split_loc_segments(s_loc)
             c_parts = _split_loc_segments(current_location)
@@ -477,6 +472,27 @@ def get_matching_clue_sources_for_location(
                 return True
         return False
 
+    def _match_source_copy(src: dict) -> Optional[dict]:
+        if not isinstance(src, dict):
+            return None
+        s_loc = str(src.get("location") or "").strip()
+        if str(src.get("kind") or "").lower() == "witness":
+            s_npc = str(src.get("npc_name") or "").strip()
+            if (
+                s_npc
+                and can_waypoint_match_via_npc_presence(s_npc, current_location=current_location, waypoint=waypoint)
+                and is_waypoint_npc_present_in_scene(session_id, s_npc)
+            ):
+                return dict(src)
+            if _src_location_matches(s_loc):
+                s_copy = dict(src)
+                s_copy["off_hours_fallback"] = True
+                return s_copy
+            return None
+        if _src_location_matches(s_loc):
+            return dict(src)
+        return None
+
     if target_stage and not target_stage.get("is_climax_stage"):
         raw_sources = [s for s in (target_stage.get("clue_sources") or []) if isinstance(s, dict)]
         trig = str(target_stage.get("completion_trigger") or (waypoint or {}).get("completion_trigger") or "")
@@ -486,7 +502,9 @@ def get_matching_clue_sources_for_location(
             result["stage"] = target_stage
             open_srcs = [s for s in raw_sources if str(s.get("status") or "open").lower() == "open"]
             result["open_sources"] = open_srcs
-            result["matching_open_sources"] = [s for s in open_srcs if _src_matches_loc(s)]
+            result["matching_open_sources"] = [
+                m for s in open_srcs if (m := _match_source_copy(s)) is not None
+            ]
 
     if include_bonus:
         for st in main_stages:
@@ -497,8 +515,8 @@ def get_matching_clue_sources_for_location(
                 if not isinstance(src, dict):
                     continue
                 if bool(src.get("bonus")) and str(src.get("status") or "").lower() != "claimed":
-                    if _src_matches_loc(src):
-                        b_copy = dict(src)
+                    b_copy = _match_source_copy(src)
+                    if b_copy is not None:
                         b_copy["_stage_index"] = int(st.get("stage_index") or 1)
                         b_copy["_stage_label"] = str(st.get("stage_label") or st.get("label") or "")
                         b_copy["_key_clue"] = dict(st.get("key_clue") or {})
@@ -982,12 +1000,25 @@ def get_story_quest_climax_location(session_id: int, allow_premature: bool = Fal
     if climax_wp_loc:
         return story_quest, climax_wp_loc
 
-    # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) qualifies
+    # Check compiled QuestDossier gate rules BEFORE premature gate refusal
+    dossier = db.get_quest_dossier(session_id, qid)
+    if dossier and isinstance(dossier, dict):
+        story_quest["dossier"] = dossier
+        cs_dos = dossier.get("climax_spec") or {}
+        climax_loc_dos = str(cs_dos.get("location") or "").strip()
+        if str(dossier.get("status_stage") or "") == "compiled" and climax_loc_dos:
+            gate_mode = str(cs_dos.get("gate_type") or cs_dos.get("gate_mode") or "open").lower()
+            is_unlocked = bool(cs_dos.get("is_unlocked"))
+            if allow_premature and gate_mode == "secret" and not is_unlocked and not (sub_objs and db.is_quest_main_objectives_complete(sub_objs)):
+                return None, None
+            if gate_mode == "open" and is_unlocked:
+                return story_quest, climax_loc_dos
+
+    # Phase 5 A11: For premature confrontation, only an explicit showdown venue (sub_obj_id IS NULL) or open compiled Climax qualifies
     if allow_premature and not (sub_objs and db.is_quest_main_objectives_complete(sub_objs)):
         return None, None
 
     # 2. Check if the compiled quest dossier specifies a canonical climax location
-    dossier = db.get_quest_dossier(session_id, qid)
     if dossier and isinstance(dossier, dict):
         climax_loc = (dossier.get("climax_spec") or {}).get("location")
         if climax_loc:

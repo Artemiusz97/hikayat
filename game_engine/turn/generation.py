@@ -578,10 +578,15 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         if not (res_deep.get("scene_title") or "").strip():
             fallback_title = suggested_loc.split("➔")[-1].strip() if suggested_loc else "A New Beginning"
             res_deep["scene_title"] = fallback_title
+        else:
+            res_deep["scene_title"] = game_engine.sanitize_internal_tags_and_raw_stats(res_deep["scene_title"])
 
-        res_deep["narrative"] = game_engine.sanitize_comparative_cliches(narrative)
+        clean_open = game_engine.sanitize_internal_tags_and_raw_stats(narrative)
+        clean_open = game_engine.sanitize_comparative_cliches(clean_open)
+        clean_open = game_engine.sanitize_meta_objective_leaks(clean_open)
+        clean_open = game_engine.sanitize_auditor_meta_leaks(clean_open)
         res_deep["narrative"] = game_engine.sanitize_npc_pronoun_consistency(
-            res_deep["narrative"], session=session, result=res_deep, party=party
+            clean_open, session=session, result=res_deep, party=party
         )
 
         # Reconcile NPCs present in the opening scene from rosters and audit

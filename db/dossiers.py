@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import sqlite3
@@ -52,6 +53,49 @@ def _enrich_spine_dict(row: sqlite3.Row | dict | None) -> dict | None:
     return d
 
 
+def normalize_clue_graph_nodes(clue_graph: Any, quest_id: str = "") -> list[dict[str, Any]]:
+    """Ensure every clue_graph node carries normalized `corroboration_group` and `clue_tier` metadata."""
+    if isinstance(clue_graph, dict):
+        raw_nodes = (
+            clue_graph.get("nodes")
+            if isinstance(clue_graph.get("nodes"), (list, tuple))
+            else list(clue_graph.values())
+        )
+    elif isinstance(clue_graph, (list, tuple)):
+        raw_nodes = list(clue_graph)
+    else:
+        return []
+
+    out: list[dict[str, Any]] = []
+    q_str = str(quest_id or "")
+    for item in raw_nodes:
+        if not isinstance(item, dict):
+            continue
+        node = dict(item)
+        if not str(node.get("corroboration_group") or "").strip():
+            node["corroboration_group"] = str(node.get("quest_id") or q_str)
+        existing_tier = str(node.get("clue_tier") or "").strip().lower()
+        if bool(node.get("is_red_herring")):
+            node["clue_tier"] = "red_herring"
+        elif existing_tier in ("red_herring", "key_clue", "corroborating"):
+            node["clue_tier"] = existing_tier
+        else:
+            ck = str(node.get("clue_key") or node.get("key_clue_id") or "").upper()
+            is_opt_or_bonus = (
+                bool(node.get("is_optional"))
+                or bool(node.get("is_bonus"))
+                or "BONUS" in ck
+                or "_CLUE_" in ck
+                or "_OPTIONAL" in ck
+            )
+            if ("-KC-" in ck or ck.startswith("KC-") or bool(node.get("is_key_clue"))) and not is_opt_or_bonus:
+                node["clue_tier"] = "key_clue"
+            else:
+                node["clue_tier"] = "corroborating"
+        out.append(node)
+    return out
+
+
 def _enrich_dossier_dict(row: sqlite3.Row | dict | None) -> dict | None:
     if not row:
         return None
@@ -60,7 +104,10 @@ def _enrich_dossier_dict(row: sqlite3.Row | dict | None) -> dict | None:
     d["pitch_card"] = d["pitch_stub"]
     d["cast_bindings"] = _deserialize_json_field(d.get("cast_bindings_json"), {})
     d["leads_graph"] = _deserialize_json_field(d.get("leads_graph_json"), [])
-    d["clue_graph"] = _deserialize_json_field(d.get("clue_graph_json"), [])
+    d["clue_graph"] = normalize_clue_graph_nodes(
+        _deserialize_json_field(d.get("clue_graph_json"), []),
+        str(d.get("quest_id") or ""),
+    )
     d["climax_spec"] = _deserialize_json_field(d.get("climax_spec_json"), {})
     d["twist_spec"] = _deserialize_json_field(d.get("twist_spec_json"), {})
     d["tangible_item"] = _deserialize_json_field(d.get("tangible_item_json"), {})
@@ -259,12 +306,183 @@ def promote_prewarmed_dossier(
         return _run(c)
 
 
+_TRACKED_DOSSIER_STATE_FIELDS = (
+    "alert_level",
+    "rescue_shield_used",
+    "engaged_flag",
+    "burned_approaches",
+    "leads_graph",
+    "clue_graph",
+    "climax_spec",
+    "twist_spec",
+    "tangible_item",
+    "outcome_tier",
+)
+
+
+def _merge_dedup_state_event(
+    events: list[dict[str, Any]],
+    turn: int,
+    kind: str,
+    prev: Any,
+    next_: Any,
+) -> list[dict[str, Any]]:
+    """Insert or coalesce a `(turn, kind)` event, keeping initial `prev` and dropping no-ops."""
+    t_int = int(turn)
+    k_str = str(kind)
+    out = [dict(e) for e in (events or []) if isinstance(e, dict)]
+    for idx in range(len(out) - 1, -1, -1):
+        ev = out[idx]
+        if int(ev.get("turn", -1)) == t_int and str(ev.get("kind") or "") == k_str:
+            orig_prev = ev.get("prev")
+            if orig_prev == next_:
+                del out[idx]
+            else:
+                out[idx] = {
+                    "turn": t_int,
+                    "kind": k_str,
+                    "prev": orig_prev,
+                    "next": copy.deepcopy(next_),
+                }
+            return out
+    if prev != next_:
+        out.append(
+            {
+                "turn": t_int,
+                "kind": k_str,
+                "prev": copy.deepcopy(prev),
+                "next": copy.deepcopy(next_),
+            }
+        )
+    return out
+
+
+def _rebase_climax_snapshot(snap: Any, new_climax: Any) -> Any:
+    if not isinstance(snap, dict) or not isinstance(new_climax, dict):
+        return snap
+    out = copy.deepcopy(snap)
+    for top_key in ("main_objective_text", "title", "objective"):
+        if new_climax.get(top_key):
+            out[top_key] = new_climax[top_key]
+    new_stages = {
+        int(s.get("stage_index", idx + 1)): s
+        for idx, s in enumerate(new_climax.get("main_stages") or [])
+        if isinstance(s, dict)
+    }
+    snap_stages = out.get("main_stages")
+    if isinstance(snap_stages, list):
+        for idx, st in enumerate(snap_stages):
+            if not isinstance(st, dict):
+                continue
+            s_idx = int(st.get("stage_index", idx + 1))
+            src_st = new_stages.get(s_idx)
+            if not src_st or st.get("completed") or str(st.get("status") or "").lower() == "completed":
+                continue
+            for field in (
+                "stage_label",
+                "label",
+                "beat_contract",
+                "target_location",
+                "target_npc",
+                "key_clue",
+                "clue_sources",
+            ):
+                if field in src_st and src_st[field] is not None:
+                    st[field] = copy.deepcopy(src_st[field])
+    return out
+
+
+def _rebase_clue_graph_snapshot(snap: Any, new_cg: Any) -> Any:
+    if not isinstance(snap, list) or not isinstance(new_cg, list):
+        return snap
+    out: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    for idx, raw in enumerate(new_cg):
+        if isinstance(raw, dict):
+            ck = str(raw.get("clue_key") or raw.get("clue_id") or idx)
+            by_key[ck] = raw
+    seen: set[str] = set()
+    for idx, raw in enumerate(snap):
+        if not isinstance(raw, dict):
+            continue
+        node = copy.deepcopy(raw)
+        ck = str(node.get("clue_key") or node.get("clue_id") or idx)
+        seen.add(ck)
+        src = by_key.get(ck)
+        if src:
+            for field in (
+                "title",
+                "lead_text",
+                "description",
+                "location",
+                "clue_tier",
+                "corroboration_group",
+                "stage_index",
+                "is_optional",
+                "is_red_herring",
+            ):
+                if field in src and src[field] is not None:
+                    node[field] = copy.deepcopy(src[field])
+        out.append(node)
+    for idx, raw in enumerate(new_cg):
+        if not isinstance(raw, dict):
+            continue
+        ck = str(raw.get("clue_key") or raw.get("clue_id") or idx)
+        if ck not in seen:
+            add_node = copy.deepcopy(raw)
+            add_node["discovered"] = False
+            add_node["checked"] = False
+            out.append(add_node)
+    return out
+
+
+def _rebase_leads_graph_snapshot(snap: Any, new_lg: Any) -> Any:
+    if not isinstance(snap, list) or not isinstance(new_lg, list):
+        return snap
+    out: list[dict[str, Any]] = []
+    by_key: dict[str, dict[str, Any]] = {}
+    for idx, raw in enumerate(new_lg):
+        if isinstance(raw, dict):
+            lk = str(raw.get("lead_id") or raw.get("hook_id") or raw.get("id") or idx)
+            by_key[lk] = raw
+    seen: set[str] = set()
+    for idx, raw in enumerate(snap):
+        if not isinstance(raw, dict):
+            continue
+        lead = copy.deepcopy(raw)
+        lk = str(lead.get("lead_id") or lead.get("hook_id") or lead.get("id") or idx)
+        seen.add(lk)
+        src = by_key.get(lk)
+        if (
+            src
+            and not lead.get("engaged")
+            and not lead.get("completed")
+            and str(lead.get("status") or "").lower() not in ("completed", "resolved", "failed")
+        ):
+            for k, v in src.items():
+                if k not in ("engaged", "completed", "status", "checked"):
+                    lead[k] = copy.deepcopy(v)
+        out.append(lead)
+    for idx, raw in enumerate(new_lg):
+        if not isinstance(raw, dict):
+            continue
+        lk = str(raw.get("lead_id") or raw.get("hook_id") or raw.get("id") or idx)
+        if lk not in seen:
+            out.append(copy.deepcopy(raw))
+    return out
+
+
 def upsert_quest_dossier(
     session_id: int,
     quest_id_or_dict: str | dict = "",
     engine: Optional[str] = None,
     family_tier: Optional[str] = None,
     conn: Optional[sqlite3.Connection] = None,
+    *,
+    auto_state_events: bool = True,
+    turn_number: Optional[int] = None,
+    is_baseline_enrichment: bool = False,
+    sync_projection: bool = False,
     **kwargs: Any,
 ) -> dict | None:
     now = time.time()
@@ -318,8 +536,86 @@ def upsert_quest_dossier(
         rescue_shield_used = int(bool(_pick("rescue_shield_used", "", existing.get("rescue_shield_used", 0))))
         engaged_flag = int(bool(_pick("engaged_flag", "", existing.get("engaged_flag", 0))))
         burned_approaches = _pick("burned_approaches", "burned_approaches_json", existing.get("burned_approaches", {}))
-        state_events = _pick("state_events", "state_events_json", existing.get("state_events", []))
+        state_events_raw = _pick("state_events", "state_events_json", existing.get("state_events", []))
+        state_events = (
+            list(state_events_raw)
+            if isinstance(state_events_raw, (list, tuple))
+            else _deserialize_json_field(state_events_raw, [])
+        )
         outcome_tier = str(_pick("outcome_tier", "", existing.get("outcome_tier", "")) or "")
+        if isinstance(clue_graph, (list, tuple, dict)):
+            clue_graph = normalize_clue_graph_nodes(clue_graph, str(qid))
+
+        explicit_state_events = (
+            ("state_events" in kwargs and kwargs["state_events"] is not None)
+            or ("state_events_json" in kwargs and kwargs["state_events_json"] is not None)
+            or ("state_events" in src and src["state_events"] is not None)
+            or ("state_events_json" in src and src["state_events_json"] is not None)
+        )
+        if existing:
+            if is_baseline_enrichment:
+                rebased_events: list[dict[str, Any]] = []
+                for ev in state_events:
+                    if not isinstance(ev, dict):
+                        continue
+                    ev_copy = dict(ev)
+                    ek = str(ev_copy.get("kind") or "")
+                    if ek == "climax_spec":
+                        ev_copy["prev"] = _rebase_climax_snapshot(ev_copy.get("prev"), climax_spec)
+                        ev_copy["next"] = _rebase_climax_snapshot(ev_copy.get("next"), climax_spec)
+                    elif ek == "clue_graph":
+                        ev_copy["prev"] = _rebase_clue_graph_snapshot(ev_copy.get("prev"), clue_graph)
+                        ev_copy["next"] = _rebase_clue_graph_snapshot(ev_copy.get("next"), clue_graph)
+                    elif ek == "leads_graph":
+                        ev_copy["prev"] = _rebase_leads_graph_snapshot(ev_copy.get("prev"), leads_graph)
+                        ev_copy["next"] = _rebase_leads_graph_snapshot(ev_copy.get("next"), leads_graph)
+                    rebased_events.append(ev_copy)
+                state_events = rebased_events
+            elif (
+                auto_state_events
+                and not explicit_state_events
+                and str(existing.get("status_stage") or "") == "compiled"
+                and status_stage == "compiled"
+            ):
+                eff_turn = (
+                    int(turn_number)
+                    if turn_number is not None
+                    else int(get_effective_session_turn(session_id, conn=c))
+                )
+                new_values = {
+                    "alert_level": alert_level,
+                    "rescue_shield_used": rescue_shield_used,
+                    "engaged_flag": engaged_flag,
+                    "burned_approaches": burned_approaches,
+                    "leads_graph": leads_graph,
+                    "clue_graph": clue_graph,
+                    "climax_spec": climax_spec,
+                    "twist_spec": twist_spec,
+                    "tangible_item": tangible_item,
+                    "outcome_tier": outcome_tier,
+                }
+                for fk in _TRACKED_DOSSIER_STATE_FIELDS:
+                    old_v = existing.get(fk)
+                    new_v = new_values[fk]
+                    if fk in ("alert_level", "rescue_shield_used", "engaged_flag"):
+                        old_v = int(old_v or 0)
+                    elif fk == "outcome_tier":
+                        old_v = str(old_v or "")
+                    if old_v == new_v:
+                        continue
+                    if turn_number is None:
+                        same_kind = [
+                            e for e in state_events if isinstance(e, dict) and str(e.get("kind") or "") == fk
+                        ]
+                        last_turn_val = same_kind[-1].get("turn") if same_kind else None
+                        if (
+                            same_kind
+                            and int(last_turn_val if last_turn_val is not None else -1) == eff_turn
+                            and same_kind[-1].get("prev") == old_v
+                            and same_kind[-1].get("next") == new_v
+                        ):
+                            continue
+                    state_events = _merge_dedup_state_event(state_events, eff_turn, fk, old_v, new_v)
 
         c.execute(
             """INSERT INTO quest_dossiers (
@@ -383,7 +679,12 @@ def upsert_quest_dossier(
                 now,
             ),
         )
-        return get_quest_dossier(session_id, str(qid), conn=c)
+        saved = get_quest_dossier(session_id, str(qid), conn=c)
+        if sync_projection and saved is not None:
+            from .quests import sync_quest_projection_from_dossier
+
+            sync_quest_projection_from_dossier(session_id, str(qid), dossier=saved, conn=c)
+        return saved
 
     if conn is not None:
         return _run(conn)
@@ -401,7 +702,6 @@ def append_dossier_state_event(
     conn: Optional[sqlite3.Connection] = None,
 ) -> None:
     now = time.time()
-    event_entry = {"turn": int(turn), "kind": kind, "prev": prev, "next": next_}
 
     def _run(c: sqlite3.Connection) -> None:
         row = c.execute(
@@ -411,7 +711,7 @@ def append_dossier_state_event(
         if not row:
             return
         events = _deserialize_json_field(row["state_events_json"], [])
-        events.append(event_entry)
+        events = _merge_dedup_state_event(events, int(turn), kind, prev, next_)
         c.execute(
             "UPDATE quest_dossiers SET state_events_json = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
             (json.dumps(events), now, session_id, quest_id),
@@ -476,12 +776,22 @@ def rollback_quest_dossiers_after_turn(
             qid = d["quest_id"]
             compiled_turn = int(d.get("compiled_at_turn") or 0)
 
-            if compiled_turn > t_num:
-                fam = str(d.get("family_tier") or "bounty").lower()
+            fam = str(d.get("family_tier") or "bounty").lower()
+            climax_cur = d.get("climax_spec") or {}
+            pitch_cur = d.get("pitch_stub") or {}
+            chap_num = int(
+                climax_cur.get("chapter")
+                or pitch_cur.get("chapter")
+                or 1
+            )
+            is_ch1_story = fam == "story" and chap_num <= 1
+
+            if compiled_turn > t_num and not is_ch1_story:
                 if fam in ("rumor", "minor", "dispatch", "story"):
                     c.execute("DELETE FROM quest_dossiers WHERE session_id = ? AND quest_id = ?", (session_id, qid))
                     c.execute("DELETE FROM quests WHERE session_id = ? AND quest_id = ?", (session_id, qid))
                     c.execute("DELETE FROM quest_waypoints WHERE session_id = ? AND quest_id = ?", (session_id, qid))
+                    c.execute("DELETE FROM session_clues WHERE session_id = ? AND quest_id = ?", (session_id, qid))
                     dossiers_rolled += 1
                 else:
                     c.execute(

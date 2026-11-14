@@ -653,8 +653,8 @@ def hydrate_boss_sheet_from_quest_blueprint(boss_sheet: Dict[str, Any], quest_ro
             base_enemy=dict(boss_sheet),
         )
         if isinstance(hydrated, dict):
-            # Keep the dossier's party-scaled / Chapter-10 scar-buffed vitals
-            for keep_k in ("max_hp", "hp", "world_scar_buffs"):
+            # Keep the dossier's party-scaled / Chapter-10 scar-buffed / rushed vitals
+            for keep_k in ("max_hp", "hp", "dt", "rushed_un_nerfed", "world_scar_buffs"):
                 if keep_k in boss_sheet:
                     hydrated[keep_k] = boss_sheet[keep_k]
             return hydrated
@@ -775,6 +775,68 @@ def _build_intimate_liaison_spec(
             "scandal_scar_on_fail": True,
         },
     }
+
+
+def build_off_hours_trace_prose(
+    room_name: str,
+    npc_name: str = "",
+    lang: str = "en",
+) -> Dict[str, str]:
+    """Builds 5-locale off-hours physical-trace fallback prose using 'Room · District' formatting (zero arrows)."""
+    from mechanics.world.locations.hierarchy import format_clean_location_badge
+
+    eff_lang = normalize_quest_locale(lang)
+    place = format_clean_location_badge(str(room_name or "").strip(), include_zone=True) or str(room_name or "the area").strip()
+    npc = str(npc_name or "").strip()
+
+    if npc:
+        templates = {
+            "en": (
+                f"Inspect {place} for traces left by {npc}",
+                f"Search {place} for physical traces {npc} left behind while away",
+            ),
+            "pl": (
+                f"Zbadaj {place} w poszukiwaniu śladów po {npc}",
+                f"Przeszukaj {place}, aby odnaleźć fizyczne ślady pozostawione przez {npc}",
+            ),
+            "ms": (
+                f"Periksa {place} untuk mengesan jejak peninggalan {npc}",
+                f"Selidik kesan fizikal yang ditinggalkan oleh {npc} di {place}",
+            ),
+            "zh": (
+                f"勘察{place}中{npc}留下的痕迹",
+                f"在{place}搜寻{npc}离开前遗留的物理痕迹",
+            ),
+            "de": (
+                f"{place} nach Spuren von {npc} untersuchen",
+                f"{place} nach physischen Spuren durchsuchen, die {npc} hinterlassen hat",
+            ),
+        }
+    else:
+        templates = {
+            "en": (
+                f"Inspect {place} for lingering physical traces",
+                f"Search {place} for physical traces left behind in the quiet hours",
+            ),
+            "pl": (
+                f"Zbadaj {place} w poszukiwaniu ukrytych śladów",
+                f"Przeszukaj {place}, aby odnaleźć pozostawione ślady fizyczne",
+            ),
+            "ms": (
+                f"Periksa {place} untuk mengesan petunjuk fizikal",
+                f"Selidik kesan fizikal yang tertinggal di {place}",
+            ),
+            "zh": (
+                f"勘察{place}残留的物理痕迹",
+                f"在{place}搜寻夜深后残留的物理线索痕迹",
+            ),
+            "de": (
+                f"{place} nach physischen Spuren absuchen",
+                f"{place} nach zurückgelassenen physischen Hinweisen durchsuchen",
+            ),
+        }
+    lbl, hint = templates.get(eff_lang, templates["en"])
+    return {"label": lbl, "approach_hint": hint}
 
 
 def populate_stage_clue_sources(
@@ -1017,6 +1079,107 @@ def populate_stage_clue_sources(
     return st
 
 
+_SPLICE_STAGE_TEXT: Dict[str, Dict[str, str]] = {
+    "en": {
+        "stage_label": "Follow the secondary lead in {badge}",
+        "player_verb": "Investigate secondary records in {badge}",
+        "reveal": "Corroborating findings point directly toward {climax_badge}",
+        "handover": "Field cipher logs",
+        "fallback_loc": "{climax_badge} Annex",
+    },
+    "pl": {
+        "stage_label": "Podążaj za tropem pomocniczym w: {badge}",
+        "player_verb": "Zbadaj poszlaki w: {badge}",
+        "reveal": "Zebrane dowody wskazują bezpośrednio na {climax_badge}",
+        "handover": "Szyfrowane rejestry",
+        "fallback_loc": "{climax_badge} — aneks",
+    },
+    "ms": {
+        "stage_label": "Jejaki petunjuk sampingan di {badge}",
+        "player_verb": "Periksa catatan dan kesan di {badge}",
+        "reveal": "Bukti sokongan menunjuk tepat ke arah {climax_badge}",
+        "handover": "Rekod sifir lapangan",
+        "fallback_loc": "Bahagian Tambahan {climax_badge}",
+    },
+    "zh": {
+        "stage_label": "追查{badge}的旁证线索",
+        "player_verb": "排查{badge}的记录与痕迹",
+        "reveal": "佐证情报直指{climax_badge}",
+        "handover": "外勤密文记录",
+        "fallback_loc": "{climax_badge}侧翼",
+    },
+    "de": {
+        "stage_label": "Verfolge die Nebenspur in {badge}",
+        "player_verb": "Untersuche Unterlagen in {badge}",
+        "reveal": "Die Indizien weisen direkt auf {climax_badge} hin",
+        "handover": "Chiffrierte Einsatzberichte",
+        "fallback_loc": "Nebentrakt von {climax_badge}",
+    },
+}
+
+
+def build_spliced_mid_stage(
+    session_id: int,
+    *,
+    st1_loc: str = "",
+    climax_loc: str = "",
+    leads: Optional[List[Dict[str, Any]]] = None,
+    st1_done: bool = False,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """Builds a localized, full-path Stage 2 midpoint stage shared by dossier repair and atomic healing."""
+    from mechanics.narrative.chapter_plan import _canon_loc_leaf, build_chapter_plan_candidates
+    from mechanics.world.locations.hierarchy import format_clean_location_badge
+
+    eff_lang = normalize_quest_locale(lang)
+    t_map = _SPLICE_STAGE_TEXT.get(eff_lang, _SPLICE_STAGE_TEXT["en"])
+    st1_leaf = _canon_loc_leaf(st1_loc)
+    climax_leaf = _canon_loc_leaf(climax_loc)
+    mid_loc = ""
+    if session_id:
+        cands = build_chapter_plan_candidates(
+            session_id,
+            {"climax_spec": {"location": climax_loc}},
+            climax_location=climax_loc,
+        )
+        for cand_r in cands.get("rooms") or []:
+            r_leaf = _canon_loc_leaf(cand_r)
+            if r_leaf and r_leaf != st1_leaf and r_leaf != climax_leaf:
+                mid_loc = str(cand_r)
+                break
+    if not mid_loc and leads:
+        for ld in leads:
+            cand_l = str(ld.get("target_location") or "").strip()
+            l_leaf = _canon_loc_leaf(cand_l)
+            if cand_l and l_leaf != climax_leaf and l_leaf != st1_leaf:
+                mid_loc = cand_l
+                break
+    climax_badge = format_clean_location_badge(climax_loc, include_zone=True) or format_short_venue_display(climax_loc) or climax_loc
+    if not mid_loc:
+        mid_loc = t_map["fallback_loc"].format(climax_badge=climax_badge)
+    badge = format_clean_location_badge(mid_loc, include_zone=True) or format_short_venue_display(mid_loc) or mid_loc
+    stage_lbl = t_map["stage_label"].format(badge=badge)
+    return {
+        "stage_index": 2,
+        "stage_label": stage_lbl,
+        "label": stage_lbl,
+        "target_location": mid_loc,
+        "target_npc": "",
+        "completion_trigger": "action",
+        "approaches": ["STR", "INT", "CHA"],
+        "status": "active" if st1_done else "locked",
+        "completed": False,
+        "is_climax_stage": False,
+        "beat_contract": {
+            "player_verb": t_map["player_verb"].format(badge=badge),
+            "reveal": t_map["reveal"].format(climax_badge=climax_badge),
+            "handover": t_map["handover"],
+            "next_pointer": climax_badge,
+            "is_dialogue_beat": False,
+        },
+    }
+
+
 def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dict[str, Any]:
     """
     Validates and repairs a QuestDossier before persistence:
@@ -1029,15 +1192,17 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
     if not isinstance(dossier, dict):
         return {}
 
+    import db
     from mechanics.narrative.campaign_spine import _SCENARIO_BACKUP_NAMES
     dos = dict(dossier)
     qid = str(dos.get("quest_id") or "")
     family_tier = str(dos.get("family_tier") or "bounty")
     scen_key = str(dos.get("scenario") or "fantasy")
+    sess: Dict[str, Any] = {}
     if session_id:
-        import db
         sess = db.get_session(session_id) or {}
         scen_key = str(sess.get("scenario") or scen_key or "fantasy")
+    eff_lang_rep = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
     backups = _SCENARIO_BACKUP_NAMES.get(scen_key, _SCENARIO_BACKUP_NAMES["fantasy"])
 
     climax = dict(dos.get("climax_spec") or {})
@@ -1058,7 +1223,6 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
         avoid = set(protected_low)
         if session_id:
             try:
-                import db
                 p_char = db.get_session_player_character(session_id)
                 if p_char and p_char.get("name"):
                     avoid.add(str(p_char["name"]).strip().lower())
@@ -1091,42 +1255,15 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
         st1 = dict(main_stages[0]) if main_stages else {"stage_index": 1, "status": "active", "label": "Initial investigation"}
         old_climax = dict(main_stages[-1]) if len(main_stages) >= 2 else {"stage_index": 2, "status": "locked", "label": "Confrontation", "target_location": climax_loc, "is_climax_stage": True}
         st1_loc = str(st1.get("target_location") or "")
-        mid_loc = ""
-        if session_id:
-            try:
-                import db
-                with db.get_conn() as _conn:
-                    node = _conn.execute(
-                        "SELECT name FROM world_nodes WHERE session_id=? AND node_type='ROOM' AND name NOT IN (?, ?) LIMIT 1",
-                        (session_id, st1_loc, climax_loc),
-                    ).fetchone()
-                    if node and node[0]:
-                        mid_loc = str(node[0])
-            except Exception:
-                pass
-        if not mid_loc:
-            mid_loc = str(leads[0].get("target_location") if leads else f"Relay Sub-Node of {format_short_venue_display(climax_loc)}")
-
         st1_done = bool(st1.get("completed") or str(st1.get("status") or "").lower() in ("completed", "bypassed"))
-        new_st2 = {
-            "stage_index": 2,
-            "stage_label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
-            "label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
-            "target_location": mid_loc,
-            "target_npc": "",
-            "completion_trigger": "action",
-            "approaches": ["STR", "INT", "CHA"],
-            "status": "active" if st1_done else "locked",
-            "completed": False,
-            "is_climax_stage": False,
-            "beat_contract": {
-                "player_verb": f"Breach relay at {format_short_venue_display(mid_loc)}",
-                "reveal": f"Telemetry logs pinpoint headquarters at {format_short_venue_display(climax_loc)}",
-                "handover": "Relay access cipher",
-                "next_pointer": format_short_venue_display(climax_loc),
-                "is_dialogue_beat": False,
-            },
-        }
+        new_st2 = build_spliced_mid_stage(
+            session_id,
+            st1_loc=st1_loc,
+            climax_loc=climax_loc,
+            leads=leads,
+            st1_done=st1_done,
+            lang=eff_lang_rep,
+        )
         old_climax["stage_index"] = 3
         old_climax["status"] = "locked"
         old_climax["completed"] = False
@@ -1172,17 +1309,14 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
     # 5. Clue-Based Stage Sources & Threat Clock Repair
     from mechanics.narrative.chapter_plan import build_chapter_plan_candidates, is_clue_based_quest
     from mechanics.narrative.threat_clock import build_initial_threat_clock
-    import db as _db_rep
 
     eff_engine = str(dos.get("engine") or "")
-    sess_rep = _db_rep.get_session(session_id) or {} if session_id else {}
-    eff_lang_rep = normalize_quest_locale(sess_rep.get("narration_language") or sess_rep.get("language") or "en")
-    eff_scen_rep = str(sess_rep.get("scenario") or "")
+    eff_scen_rep = str(sess.get("scenario") or scen_key or "")
     eff_danger_rep = max(1, int(dos.get("danger_tier") or 1))
     if family_tier == "story" and not isinstance(climax.get("threat_clock"), dict):
         climax["threat_clock"] = build_initial_threat_clock(
-            chapter=int(climax.get("chapter") or sess_rep.get("chapter") or 1),
-            endless_mode_unlocked=bool(sess_rep.get("endless_mode_unlocked")),
+            chapter=int(climax.get("chapter") or sess.get("chapter") or 1),
+            endless_mode_unlocked=bool(sess.get("endless_mode_unlocked")),
         )
     if is_clue_based_quest(family_tier, eff_engine) and not climax.get("completed"):
         cands_rep = build_chapter_plan_candidates(session_id, dos, climax_location=climax_loc)
@@ -1548,6 +1682,8 @@ def compile_quest_dossier(
     clue_graph = [
         {
             "clue_key": f"{quest_id}_clue_1",
+            "corroboration_group": quest_id,
+            "clue_tier": "corroborating",
             "clue_id": None,
             "title": f" Ledger Trace at {climax_loc.split('➔')[-1].strip()}",
             "lead_text": f"Physical evidence tying recent activity at {climax_loc} to {true_culprit}.",
@@ -1559,6 +1695,8 @@ def compile_quest_dossier(
         },
         {
             "clue_key": f"{quest_id}_clue_2",
+            "corroboration_group": quest_id,
+            "clue_tier": "corroborating",
             "clue_id": None,
             "title": f"Testimony from {eff_informant}",
             "lead_text": f"Corroborating witness account implicating {true_culprit}.",
@@ -1570,6 +1708,8 @@ def compile_quest_dossier(
         },
         {
             "clue_key": f"{quest_id}_red_herring",
+            "corroboration_group": quest_id,
+            "clue_tier": "red_herring",
             "clue_id": None,
             "title": f"Planted Token near {innocent_suspect}",
             "lead_text": f"Superficial clue pointing toward {innocent_suspect}, lacking corroboration.",
@@ -1612,10 +1752,22 @@ def compile_quest_dossier(
     gate_mode = str(eng_info["climax_gate_mode"])
     origin_loc = str(stub.get("origin_location") or (existing_q or {}).get("client_location") or sess.get("current_location") or climax_loc)
     custom_stg_lbls: list[str] = []
-    if existing_q and isinstance(existing_q.get("sub_objectives"), list):
-        for so in existing_q["sub_objectives"]:
-            if isinstance(so, dict) and so.get("text"):
-                custom_stg_lbls.append(str(so["text"]).strip())
+    raw_stages: list = []
+    if existing_q and isinstance(existing_q, dict):
+        if isinstance(existing_q.get("stages"), list):
+            raw_stages = existing_q["stages"]
+        elif isinstance(existing_q.get("main_objective"), dict) and isinstance(existing_q["main_objective"].get("stages"), list):
+            raw_stages = existing_q["main_objective"]["stages"]
+        elif isinstance(existing_q.get("sub_waypoints"), dict):
+            raw_stages = existing_q["sub_waypoints"].get(0) or existing_q["sub_waypoints"].get("0") or []
+        elif isinstance(existing_q.get("sub_waypoints"), list):
+            raw_stages = existing_q["sub_waypoints"]
+    if isinstance(raw_stages, list):
+        for st in raw_stages:
+            if isinstance(st, dict):
+                lbl = str(st.get("stage_label") or st.get("text") or "").strip()
+                if lbl and lbl != eff_obj and len(lbl) <= 120:
+                    custom_stg_lbls.append(lbl)
     main_stages = _build_main_objective_stages(
         engine=engine,
         family_tier=eff_family,

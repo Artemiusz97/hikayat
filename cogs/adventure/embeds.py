@@ -36,6 +36,7 @@ from mechanics.social.persona import normalize_appearance
 from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
+from mechanics.combat.status_effects import format_status_badge
 from localization import get_quest_ui_label
 try:
     from mechanics.narrative.threat_clock import format_threat_consequence
@@ -100,6 +101,39 @@ def _parse_status_effects(raw) -> list:
     except (TypeError, ValueError):
         return []
 
+def _format_status_list_for_embed(raw_statuses: list) -> list[str]:
+    items: list[str] = []
+    for s in (raw_statuses or []):
+        if not s:
+            continue
+        badge = format_status_badge(s, include_duration=True).strip()
+        if badge.startswith("[") and badge.endswith("]"):
+            badge = badge[1:-1].strip()
+        if badge:
+            items.append(badge)
+    return items
+
+
+def _format_companion_kit_summary(entity: dict) -> str:
+    loadout = entity.get("combat_loadout")
+    if not isinstance(loadout, list) or not loadout:
+        return ""
+    cooldowns = entity.get("skill_cooldowns") if isinstance(entity.get("skill_cooldowns"), dict) else {}
+    parts: list[str] = []
+    for sk in loadout[:3]:
+        if isinstance(sk, dict):
+            sk_name = str(sk.get("name") or sk.get("id") or "Skill").strip()
+            sk_id = str(sk.get("id") or "").strip()
+        elif isinstance(sk, str) and sk.strip():
+            sk_name = sk.strip()
+            sk_id = sk_name
+        else:
+            continue
+        cd = int(cooldowns.get(sk_id, 0) or 0) if sk_id else 0
+        parts.append(f"{sk_name} [CD: {cd}t]" if cd > 0 else sk_name)
+    return f"Kit: [{', '.join(parts)}]" if parts else ""
+
+
 def _party_vitals_text(session: dict) -> str:
     """Renders the tracker: Lvl, Name, HP/MaxHP, MP/MaxMP, and
     active status effects for every human player and recruited party companion."""
@@ -112,7 +146,7 @@ def _party_vitals_text(session: dict) -> str:
         if session.get("mode") != "sync" and uid == db.current_turn_user_id(session):
             marker = "▶️ "
         status = _parse_status_effects(char.get("status_effects"))
-        status_items = [str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s]
+        status_items = _format_status_list_for_embed(status)
         st = session.get("stealth_state") or {}
         has_vanished_buff = any("Hidden in Shadows" in s for s in status_items)
         from mechanics.stealth import is_actor_combat_vanished, is_actor_hidden
@@ -138,11 +172,16 @@ def _party_vitals_text(session: dict) -> str:
                 mp = npc.get("mp", 10)
                 max_mp = npc.get("max_mp", mp)
                 status = _parse_status_effects(npc.get("status_effects"))
-                status_text = ", ".join(str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s) if status else "None"
+                status_items = _format_status_list_for_embed(status)
+                status_text = ", ".join(status_items) if status_items else "None"
                 role_tag = f" ({npc['role']})" if npc.get("role") else ""
                 sa_tag = " `[⚡ Special Agent]`" if npc.get("anomalous_npc_tag") == "special_agent" else ""
-                lines.append(f"🤝 Lvl {lvl} **{npc['name']}**{sa_tag}{role_tag} — ❤️ {hp}/{max_hp} | "
-                             f"💙 {mp}/{max_mp} | Status: {status_text}")
+                arch = str(npc.get("combat_archetype") or npc.get("archetype") or "").strip()
+                arch_tag = f" `[{arch}]`" if arch else ""
+                kit_summary = _format_companion_kit_summary(npc)
+                kit_tag = f" | {kit_summary}" if kit_summary else ""
+                lines.append(f"🤝 Lvl {lvl} **{npc['name']}**{sa_tag}{arch_tag}{role_tag} — ❤️ {hp}/{max_hp} | "
+                             f"💙 {mp}/{max_mp} | Status: {status_text}{kit_tag}")
 
     return _truncate_field_value("\n".join(lines), 1024)
 
@@ -321,7 +360,7 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
     intent = entity.get("intent")
     intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if intent else ""
 
-    status_items = [str(s.get("name", s)) if isinstance(s, dict) else str(s) for s in status if s]
+    status_items = _format_status_list_for_embed(status)
     if mood and str(mood).strip() and str(mood).strip() not in status_items:
         status_items.append(str(mood).strip())
 
@@ -361,8 +400,37 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
                 q_sk = q_act_emb.get("skill_name") or q_act_emb.get("name")
                 if q_sk:
                     line += f" | ⚡ *Primed: {q_sk}*"
+        aggro_target = str(entity.get("aggro_target_name") or "").strip()
+        if aggro_target and hp is not None:
+            if entity.get("aggro_mode") == "taunted":
+                line += f" | 🔒 **Taunted: {aggro_target}**"
+            else:
+                line += f" | 🎯 *Aggro: {aggro_target}*"
+        if entity.get("_is_party_npc"):
+            kit_summary = _format_companion_kit_summary(entity)
+            if kit_summary:
+                line += f" | {kit_summary}"
         status_text = ", ".join(status_items) if status_items else "None"
         line += f" | Status: {status_text}"
+        telegraph = entity.get("telegraphed_skill")
+        if isinstance(telegraph, dict) and telegraph and hp is not None:
+            sk_name = str(
+                telegraph.get("skill_name")
+                or telegraph.get("telegraphed_label")
+                or telegraph.get("name")
+                or "Signature Attack"
+            ).strip()
+            raw_pct = entity.get("stagger_pct")
+            if raw_pct is None:
+                thr = max(1, int(telegraph.get("interrupt_threshold", 1) or 1))
+                acc = max(0, int(telegraph.get("accumulated_interrupt_damage", 0) or 0))
+                s_pct = max(0, min(100, int(round((acc / float(thr)) * 100))))
+            else:
+                s_pct = max(0, min(100, int(raw_pct or 0)))
+            filled = max(0, min(5, round(s_pct / 20)))
+            bar = ("█" * filled) + ("░" * (5 - filled))
+            state_lbl = "Breaking!" if s_pct >= 65 else "Charging"
+            line += f"\n   ↳ ⚠️ **CHARGING: {sk_name}** [Stagger {bar} {s_pct}% — {state_lbl}]"
         line += intent_line
         return line
     else:
@@ -1594,6 +1662,8 @@ def _format_fow_dossier_embed_fields(
         tc_flags = []
         if tc.get("paused"):
             tc_flags.append(f"⏸️ {get_quest_ui_label('threat_paused', ui_lang)}")
+        if tc.get("pushed_back"):
+            tc_flags.append(f"⏪ {get_quest_ui_label('threat_pushed_back', ui_lang)}")
         if tc.get("engaged") is False:
             tc_flags.append(f"💤 {get_quest_ui_label('threat_dormant', ui_lang)}")
         if tc.get("reinforced"):
@@ -1833,6 +1903,21 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
             )
 
         # Legacy Waypoint / Stage Compass Quick-Tracker for in-progress stage
+        legacy_stage_total = 3
+        if sub_objs:
+            sq_qid_leg = str(active_sq.get("quest_id") or "")
+            if sq_qid_leg:
+                try:
+                    dos_leg = db.get_quest_dossier(session_id, sq_qid_leg) or {}
+                    ms_leg = (dos_leg.get("climax_spec") or {}).get("main_stages") or []
+                    if ms_leg:
+                        legacy_stage_total = len(ms_leg)
+                    else:
+                        wps_leg = db.get_quest_waypoints(session_id, sq_qid_leg, sub_obj_id=0) or []
+                        if wps_leg:
+                            legacy_stage_total = len(wps_leg)
+                except Exception:
+                    pass
         active_wp_lead = None
         if sub_objs and not all_so_done:
             for so in sub_objs:
@@ -1851,7 +1936,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
             s_loc = format_clean_location_badge(active_wp_lead.get("target_location", ""))
             embed.add_field(
                 name="📍 Current Waypoint Lead",
-                value=f"**Stage {s_idx}/3:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
+                value=f"**Stage {s_idx}/{legacy_stage_total}:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
                 inline=False
             )
 
@@ -1873,7 +1958,7 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
                             s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
                             s_loc = format_clean_location_badge(wp.get("target_location", ""))
                             loc_display = f" ➔ 📍 `{s_loc}`" if s_loc else ""
-                            line += f"\n   ↳ *Stage {s_idx}/3: {s_lbl}{loc_display}*"
+                            line += f"\n   ↳ *Stage {s_idx}/{legacy_stage_total}: {s_lbl}{loc_display}*"
                     except Exception:
                         pass
                 sub_lines.append(line)
@@ -2102,7 +2187,15 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
         if len(obj) > 200:
             obj = obj[:197].rstrip() + "..."
         opt_count = len(b.get("optional_objectives") or [])
-        struct_tag = f" • `1 Main + {opt_count} Optional`" if b.get("has_structured_objectives") else ""
+        mo_b = b.get("main_objective") or {}
+        if b.get("has_structured_objectives") and isinstance(mo_b, dict) and mo_b.get("total_stages"):
+            total_b_st = max(1, int(mo_b.get("total_stages") or 2))
+            cur_b_st = min(total_b_st, max(1, int(mo_b.get("current_stage") or 1)))
+            struct_tag = f" • `Stage {cur_b_st}/{total_b_st} + {opt_count} Optional`"
+        elif b.get("has_structured_objectives"):
+            struct_tag = f" • `1 Main + {opt_count} Optional`"
+        else:
+            struct_tag = ""
 
         embed.add_field(
             name=f"{idx}. {icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]",

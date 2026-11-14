@@ -2,11 +2,8 @@ from __future__ import annotations
 """
 Post-LLM combat reconciliation, defeat routing, loot distribution, and session state cleanup.
 """
-import json
 import logging
-import random
-import re
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import db
 import scenario_data
@@ -25,43 +22,16 @@ from .sparring import (
     make_sparring_monster,
     call_faction_reinforcements,
 )
-from .status_effects import (
-    apply_status_effect,
-    tick_status_instance_timers,
-    format_status_badge,
-    normalize_status_effect,
+from .status_effects import normalize_status_effect
+from .post_combat import (
+    cleanup_anomalous_combat_session_state,
+    decay_round_threat,
+    finalize_post_combat_state,
+    prune_dead_combat_state,
 )
 from .types import CombatantState, StatusEffectInstance, get_combatant_stat
 
 logger = logging.getLogger(__name__)
-
-
-def decay_round_threat(
-    threat_ledger: Dict[str, Any],
-    downed_actor_ids: Set[str],
-) -> None:
-    """Applies 25% exponential round decay to threat scores and instantly drops downed actors to zero threat."""
-    matrix = threat_ledger.get("threat_matrix", threat_ledger)
-    if isinstance(matrix, dict):
-        for eid in list(matrix.keys()):
-            if not isinstance(matrix[eid], dict):
-                continue
-            for aid in list(matrix[eid].keys()):
-                if aid in downed_actor_ids:
-                    matrix[eid][aid] = 0.0
-                else:
-                    matrix[eid][aid] = round(matrix[eid][aid] * 0.75, 2)
-
-    taunts = threat_ledger.get("sticky_taunts")
-    if isinstance(taunts, dict):
-        for eid in list(taunts.keys()):
-            t_info = taunts[eid]
-            if isinstance(t_info, dict):
-                rem = int(t_info.get("remaining_turns", 1)) - 1
-                if rem <= 0 or str(t_info.get("target_id")) in downed_actor_ids:
-                    taunts.pop(eid, None)
-                else:
-                    t_info["remaining_turns"] = rem
 
 def _enemy_has_unsealed_tether(enemy: dict) -> bool:
     """True when an anomaly is still anchored by an unsealed Vessel Tether (no Vault capture until sealed)."""
@@ -125,8 +95,7 @@ def _record_non_incursion_anomaly_kills(session: dict, party: Optional[list], de
                         cooldown_days=int(bp.get("cooldown_days") or 4),
                     )
         except Exception as rec_err:  # noqa: BLE001 - codex bookkeeping must never break combat reconciliation
-            import logging
-            logging.getLogger(__name__).warning("Folklore codex kill record failed for %s: %s", d.get("name"), rec_err)
+            logger.warning("Folklore codex kill record failed for %s: %s", d.get("name"), rec_err)
 
 
 def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict, party: list = None) -> dict:
@@ -233,7 +202,6 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
     if parley_contained and isinstance(session, dict) and session.get("id"):
         suppress_non_hostile_loot = True
         try:
-            import db
             from mechanics.world.anomalous_events import (
                 _complete_or_advance_linked_quest_containment,
                 record_contained_anomaly_to_vault_log,
@@ -306,7 +274,6 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
             pass
 
     if isinstance(session, dict):
-        import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
             try:
                 from mechanics.narrative.bounty import should_confiscate_anomalous_combat_loot
@@ -639,13 +606,20 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
 
     player_heal_by_name = precomputed.get("player_heal_by_name", {})
     player_mp_change_by_name = precomputed.get("player_mp_change_by_name", {})
-    all_participant_names = set(list(player_damage_by_name.keys()) + list(player_heal_by_name.keys()) + list(player_mp_change_by_name.keys()))
+    player_status_sync_by_name = precomputed.get("player_status_sync_by_name", {})
+    all_participant_names = set(
+        list(player_damage_by_name.keys())
+        + list(player_heal_by_name.keys())
+        + list(player_mp_change_by_name.keys())
+        + list(player_status_sync_by_name.keys())
+    )
 
     for p_name in all_participant_names:
         p_dmg = player_damage_by_name.get(p_name, 0)
         p_heal = player_heal_by_name.get(p_name, 0)
         net_hp = p_heal - p_dmg
         p_mp_delta = player_mp_change_by_name.get(p_name, 0)
+        synced_statuses = list(player_status_sync_by_name.get(p_name) or [])
 
         items_consumed = precomputed.get("items_consumed", []) if p_name.lower() == acting_char_name.lower() else []
         found = False
@@ -658,303 +632,42 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                 co["xp_change"] = co.get("xp_change", 0) + total_xp_gain
                 if items_consumed:
                     co.setdefault("items_lost", []).extend(items_consumed)
+                if synced_statuses:
+                    existing_st = co.setdefault("status_effects", [])
+                    seen_names = {normalize_status_effect(s)["name"].strip().lower() for s in existing_st}
+                    for st_entry in synced_statuses:
+                        st_low = normalize_status_effect(st_entry)["name"].strip().lower()
+                        if st_low and st_low not in seen_names:
+                            existing_st.append(st_entry)
+                            seen_names.add(st_low)
                 found = True
                 break
-        if not found and (net_hp != 0 or p_mp_delta != 0 or total_xp_gain > 0 or total_gold_gain != 0 or items_consumed):
-            llm_outcome["character_outcomes"].append({
+        if not found and (net_hp != 0 or p_mp_delta != 0 or total_xp_gain > 0 or total_gold_gain != 0 or items_consumed or synced_statuses):
+            co_new: Dict[str, Any] = {
                 "name": p_name,
                 "hp_change": net_hp,
                 "mp_change": p_mp_delta,
                 "gold_change": total_gold_gain,
                 "xp_change": total_xp_gain,
-                "items_lost": list(items_consumed) if items_consumed else []
-            })
+                "items_lost": list(items_consumed) if items_consumed else [],
+            }
+            if synced_statuses:
+                co_new["status_effects"] = list(synced_statuses)
+            llm_outcome["character_outcomes"].append(co_new)
         if total_xp_gain > 0:
             _auth_xp_map = llm_outcome.setdefault("_auth_combat_xp", {})
             _auth_xp_map[p_name.lower()] = int(_auth_xp_map.get(p_name.lower(), 0) or 0) + int(total_xp_gain)
 
-    session_id = session.get("id", 0) if session else 0
-    import db
-    party_npcs = db.get_session_party_npcs(session_id) if session_id else []
-
-    # If combat victory and player is downed with companions standing, auto-revive at 1 HP
-    if not enemies and (party_npcs or (party and len(party) > 1)):
-        for co in llm_outcome.get("character_outcomes", []):
-            if isinstance(co, dict):
-                p_char = next((char for char, _ in (party or []) if char.get("name", "").lower() == co.get("name", "").lower()), None)
-                if p_char:
-                    p_hp = int(p_char.get("hp") if p_char.get("hp") is not None else 10)
-                    projected_hp = p_hp + int(co.get("hp_change", 0) or 0)
-                    if projected_hp <= 0:
-                        co["hp_change"] = 1 - p_hp
-                        co["status_effects"] = ["Exhausted / Recovering"]
-                        llm_outcome["_combat_resolved_notice"] = (str(llm_outcome.get("_combat_resolved_notice", "")) + "\n🩹 Your companion tended to your wounds — revived with **1 HP**!").strip()
-
-    # If hostiles remain and all party players + companions are downed -> Complete Party Defeat Recovery
-    if enemies and party:
-        all_downed = True
-        for p_entry in party:
-            char = p_entry[0] if isinstance(p_entry, (tuple, list)) and len(p_entry) > 0 else (p_entry if isinstance(p_entry, dict) else {})
-            c_name = char.get("name", "").lower()
-            matching_co = next((co for co in llm_outcome.get("character_outcomes", []) if isinstance(co, dict) and co.get("name", "").lower() == c_name), None)
-            c_hp = int(char.get("hp") if char.get("hp") is not None else 10)
-            c_proj_hp = c_hp + (int(matching_co.get("hp_change", 0) or 0) if matching_co else 0)
-            if c_proj_hp > 0:
-                all_downed = False
-                break
-        if all_downed and party_npcs:
-            for npc in party_npcs:
-                if int(npc.get("hp") or 0) > 0:
-                    all_downed = False
-                    break
-
-        import scenario_data as _sd_comb
-        is_anom_defeat = bool(isinstance(session, dict) and _sd_comb.is_anomalous_incursions_scenario(session.get("scenario", "")))
-        if all_downed and is_anom_defeat:
-            session["nearby_enemies"] = []
-            llm_outcome["nearby_enemies"] = []
-            lead_char = party[0][0] if (party and party[0] and isinstance(party[0][0], dict)) else {}
-            lead_uid = lead_char.get("user_id") or (session.get("host_user_id") if isinstance(session, dict) else 0)
-            from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
-            ext = resolve_anomalous_emergency_extraction(int(session_id or 0), int(lead_uid or 0), apply_vitals_to_db=False)
-            session["current_location"] = ext["destination_location"]
-            session["current_node_id"] = ext["destination_node_id"]
-            session["current_day"] = ext.get("new_day", session.get("current_day", 1))
-            session["current_minute"] = ext.get("new_minute", session.get("current_minute", 480))
-            llm_outcome["location"] = ext["destination_location"]
-            llm_outcome["current_node_id"] = ext["destination_node_id"]
-            llm_outcome["_anomalous_extracted"] = True
-            llm_outcome["_authorized_gold_spend"] = int(ext.get("fee_paid", 0) or 0)
-
-            for idx_p, (char, _) in enumerate(party):
-                uid = char.get("user_id")
-                max_hp = int(char.get("max_hp") or 30)
-                max_mp = int(char.get("max_mp") or 15)
-                revive_hp = max(1, max_hp // 2)
-                revive_mp = max(1, max_mp // 2)
-                cur_hp = int(char.get("hp") or 0)
-                cur_mp = int(char.get("mp") or 0)
-                fee_delta = -int(ext.get("fee_paid", 0)) if idx_p == 0 else 0
-                matching_co = next((co for co in llm_outcome.get("character_outcomes", []) if isinstance(co, dict) and co.get("name", "").lower() == char.get("name", "").lower()), None)
-                if matching_co:
-                    matching_co["hp_change"] = revive_hp - cur_hp
-                    matching_co["mp_change"] = max(0, revive_mp - cur_mp)
-                    matching_co["gold_change"] = matching_co.get("gold_change", 0) + fee_delta
-                    matching_co["status_effects"] = ["Stabilized / Triage Recovery"]
-                else:
-                    llm_outcome.setdefault("character_outcomes", []).append({
-                        "name": char.get("name", "Operative"),
-                        "hp_change": revive_hp - cur_hp,
-                        "mp_change": max(0, revive_mp - cur_mp),
-                        "gold_change": fee_delta,
-                        "status_effects": ["Stabilized / Triage Recovery"],
-                    })
-                if uid:
-                    db.set_status_effects(uid, ["Stabilized / Triage Recovery"])
-
-            if party_npcs:
-                updated_npcs = []
-                for c in party_npcs:
-                    c["hp"] = max(1, c.get("max_hp", 20) // 2)
-                    c["status_effects"] = ["Stabilized / Triage Recovery"]
-                    updated_npcs.append(c)
-                db.set_session_party_npcs(session_id, updated_npcs)
-                session["current_npcs"] = updated_npcs
-
-            llm_outcome["_party_defeated_notice"] = ext["narrative"]
-            llm_outcome["next_choices"] = [
-                {"label": "Check medical telemetry and stabilize your psychic resonance", "stat": "END", "requirement": 4, "mp_cost": 0},
-                {"label": "Review field logs and inspect your tactical loadout", "stat": "PER", "requirement": 4, "mp_cost": 0},
-                {"label": "Debrief with triage staff before redeploying to the breach", "stat": "CHA", "requirement": 4, "mp_cost": 0},
-            ]
-            llm_outcome["choices"] = llm_outcome["next_choices"]
-        elif all_downed:
-            is_climax = any(
-                e.get("is_boss") or e.get("tier_rank", 1) >= 5 or (isinstance(session, dict) and session.get("is_climax_encounter"))
-                for e in (session.get("nearby_enemies") or session.get("_pre_combat_enemies") or [])
-            )
-            if is_climax:
-                session["status"] = "finished"
-                llm_outcome["is_game_over"] = True
-                llm_outcome["_party_defeated_notice"] = "💀 **The Party Has Fallen!** Slain in climax battle."
-                llm_outcome["next_choices"] = []
-                llm_outcome["choices"] = []
-            else:
-                session["nearby_enemies"] = []
-                llm_outcome["nearby_enemies"] = []
-
-                for p_entry in party:
-                    char = p_entry[0] if isinstance(p_entry, (tuple, list)) and len(p_entry) > 0 else (p_entry if isinstance(p_entry, dict) else {})
-                    uid = char.get("user_id")
-                    max_hp = int(char.get("max_hp") or 30)
-                    revive_hp = max(1, max_hp // 2)
-                    cur_hp = int(char.get("hp") or 0)
-                    matching_co = next((co for co in llm_outcome.get("character_outcomes", []) if isinstance(co, dict) and co.get("name", "").lower() == char.get("name", "").lower()), None)
-                    if matching_co:
-                        matching_co["hp_change"] = revive_hp - cur_hp
-                        matching_co["status_effects"] = ["Exhausted / Recovering"]
-                    else:
-                        llm_outcome.setdefault("character_outcomes", []).append({
-                            "name": char.get("name", "Hero"),
-                            "hp_change": revive_hp - cur_hp,
-                            "mp_change": 0,
-                            "gold_change": 0,
-                            "status_effects": ["Exhausted / Recovering"]
-                        })
-                    if uid:
-                        db.set_status_effects(uid, ["Exhausted / Recovering"])
-
-                if party_npcs:
-                    updated_npcs = []
-                    for c in party_npcs:
-                        c["hp"] = max(1, c.get("max_hp", 20) // 2)
-                        c["status_effects"] = ["Exhausted / Recovering"]
-                        updated_npcs.append(c)
-                    db.set_session_party_npcs(session_id, updated_npcs)
-                    session["current_npcs"] = updated_npcs
-
-                llm_outcome["_party_defeated_notice"] = "💀 **Party Defeated!** You were overwhelmed and fell in battle, but were recovered to safety. You awaken stabilized, nursing your injuries."
-                llm_outcome["next_choices"] = [
-                    {"label": "Rest and recuperate from your injuries", "stat": "END", "requirement": 4, "mp_cost": 0},
-                    {"label": "Assess your surroundings and check equipment", "stat": "PER", "requirement": 4, "mp_cost": 0},
-                    {"label": "Consult with companions about what happened", "stat": "CHA", "requirement": 4, "mp_cost": 0}
-                ]
-                llm_outcome["choices"] = llm_outcome["next_choices"]
-
-    # Scale companion levels when party gains XP
-    if not enemies and total_xp_gain > 0 and party_npcs and party and party[0]:
-        import scenario_data as _sd_lvl
-        is_anom_lvl = bool(isinstance(session, dict) and _sd_lvl.is_anomalous_incursions_scenario(session.get("scenario", "")))
-        p_lvl = party[0][0].get("level", 1)
-        updated_npcs = []
-        for c in party_npcs:
-            c_lvl = max(c.get("level", 1), p_lvl)
-            c["level"] = c_lvl
-            if is_anom_lvl and c.get("anomalous_npc_tag") == "special_agent":
-                from mechanics.social.anomalous_npc_tags import compute_special_agent_combat_stats
-                scaled_st = compute_special_agent_combat_stats(
-                    agent_tier=int(c.get("agent_tier", 1) or 1),
-                    player_level=c_lvl,
-                    agent_class=str(c.get("agent_class") or ""),
-                    faction_id=str(c.get("faction_id") or ""),
-                    is_party_companion=True,
-                    seed_str=f"{session_id}:{str(c.get('name') or '').lower()}",
-                )
-                c["max_hp"] = scaled_st["max_hp"]
-                c["max_mp"] = scaled_st["max_mp"]
-                c["stats"] = scaled_st["stats"]
-            else:
-                c["max_hp"] = 15 + c_lvl * 3
-                c["max_mp"] = 10 + c_lvl * 2
-            c["hp"] = min(c.get("hp", c["max_hp"]), c["max_hp"])
-            c["mp"] = min(c.get("mp", c["max_mp"]), c["max_mp"])
-            updated_npcs.append(c)
-        db.set_session_party_npcs(session_id, updated_npcs)
-
-
-    # Dynamic Threat Ledger Round Decay & Persistence
-    try:
-        if not enemies:
-            session["combat_threat_ledger"] = {}
-            session["combat_boss_telegraph"] = {}
-            llm_outcome["combat_threat_ledger"] = {}
-            llm_outcome["combat_boss_telegraph"] = {}
-            cleanup_anomalous_combat_session_state(session)
-        else:
-            # Prune dead enemies from threat matrix and boss telegraphs
-            dead_eids: Set[str] = set()
-            for d in (dead_enemies or []):
-                if isinstance(d, dict):
-                    for k in ("id", "name"):
-                        v = d.get(k)
-                        if v:
-                            dead_eids.add(str(v))
-                elif d:
-                    dead_eids.add(str(d))
-            for d in (dead_enemy_dicts_rec or []):
-                if isinstance(d, dict):
-                    for k in ("id", "name"):
-                        v = d.get(k)
-                        if v:
-                            dead_eids.add(str(v))
-
-            raw_telegraph = session.get("combat_boss_telegraph")
-            if isinstance(raw_telegraph, dict):
-                for eid in list(raw_telegraph.keys()):
-                    if eid in dead_eids:
-                        raw_telegraph.pop(eid, None)
-                session["combat_boss_telegraph"] = raw_telegraph
-                llm_outcome["combat_boss_telegraph"] = raw_telegraph
-
-            raw_ledger = session.get("combat_threat_ledger")
-            if isinstance(raw_ledger, dict):
-                matrix = raw_ledger.get("threat_matrix", raw_ledger)
-                if isinstance(matrix, dict):
-                    for eid in list(matrix.keys()):
-                        if eid in dead_eids:
-                            matrix.pop(eid, None)
-                sticky = raw_ledger.get("sticky_taunts")
-                if isinstance(sticky, dict):
-                    for eid in list(sticky.keys()):
-                        if eid in dead_eids:
-                            sticky.pop(eid, None)
-
-                # Gather downed actor IDs across players, party companions, and temporary allies
-                downed_ids: Set[str] = set()
-
-                def _cand_actor_keys(a: Dict[str, Any]) -> Set[str]:
-                    keys = set()
-                    for k in ("name", "id", "user_id", "npc_id"):
-                        val = a.get(k)
-                        if val is not None:
-                            s_val = str(val).strip()
-                            if s_val and s_val.lower() != "none":
-                                keys.add(s_val)
-                    return keys
-
-                for p in (party or []):
-                    p_obj = p[0] if isinstance(p, (tuple, list)) else p
-                    if isinstance(p_obj, dict):
-                        p_hp = p_obj.get("hp")
-                        if p_hp is not None and int(p_hp) <= 0:
-                            downed_ids.update(_cand_actor_keys(p_obj))
-                for npc in (session.get("party_npcs") or []):
-                    if isinstance(npc, dict):
-                        n_hp = npc.get("hp")
-                        if n_hp is not None and int(n_hp) <= 0:
-                            downed_ids.update(_cand_actor_keys(npc))
-                for comp in (session.get("temporary_companions") or []):
-                    if isinstance(comp, dict):
-                        c_hp = comp.get("hp")
-                        if c_hp is not None and int(c_hp) <= 0:
-                            downed_ids.update(_cand_actor_keys(comp))
-                decay_round_threat(raw_ledger, downed_ids)
-                session["combat_threat_ledger"] = raw_ledger
-                llm_outcome["combat_threat_ledger"] = raw_ledger
-    except Exception as _th_err:
-        logger.debug("Threat decay failed: %s", _th_err)
-
+    finalize_post_combat_state(
+        session=session,
+        llm_outcome=llm_outcome,
+        enemies=enemies,
+        party=party,
+        total_xp_gain=total_xp_gain,
+        dead_enemies=dead_enemies,
+        dead_enemy_dicts_rec=dead_enemy_dicts_rec,
+    )
     return llm_outcome
-
-
-def cleanup_anomalous_combat_session_state(session: dict) -> None:
-    """Purges autonomous constructs, summons, resonance pips, and vanished stealth states when combat ends or is subdued."""
-    if not isinstance(session, dict):
-        return
-    session["_active_constructs"] = []
-    session.pop("_construct_initialized_this_combat", None)
-    session["player_resonance_pips"] = {}
-    session["combat_threat_ledger"] = {}
-    session["combat_boss_telegraph"] = {}
-    session["current_npcs"] = [
-        n for n in session.get("current_npcs", [])
-        if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
-    ]
-    try:
-        from mechanics.stealth.core import clear_all_combat_vanished
-        clear_all_combat_vanished(session)
-    except Exception:
-        pass
 
 
 

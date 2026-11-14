@@ -4,17 +4,25 @@ import copy
 import json
 import logging
 import asyncio
+import os
+import random
 import re
-from typing import Dict, List, Any, Optional, Tuple
+import tempfile
+import time
+from typing import Dict, List, Any, Optional, Tuple, Callable
 import httpx
 from openai import APIError as OpenAIAPIError
 from pydantic import BaseModel, ConfigDict, Field
+import character_data as cd
 import db
 from db import adb
 import game_engine
+import llm_client
 import scenario_data
 from character_data import XP_REWARDS
 from mechanics.combat.merchant import apply_merchant_encounter_result
+from mechanics.social.relationships import is_contact_eligible
+from services import crash_capture
 
 log = logging.getLogger(__name__)
 logger = log
@@ -55,6 +63,384 @@ class TurnResponse(BaseModel):
 
 
 class TurnService:
+    @staticmethod
+    async def start_adventure(
+        user_id: int,
+        *,
+        character_id: Optional[int] = None,
+        scenario: Optional[str] = None,
+        tags: Optional[Any] = None,
+        mode: str = "solo",
+        capacity: Optional[int] = None,
+        slot: Optional[int] = 1,
+        char_class: Optional[str] = None,
+        class_description: Optional[str] = None,
+        weapon_name: Optional[str] = None,
+        weapon_description: Optional[str] = None,
+        starter_loadout: Optional[Dict[str, Any]] = None,
+        starter_loadout_builder: Optional[Callable[..., Any]] = None,
+        starting_faction: Optional[str] = None,
+        origin_mode: Optional[str] = None,
+        student_grade: Optional[str] = None,
+        attribute: Optional[str] = None,
+        combat_archetype: Optional[str] = None,
+        ability_medium: Optional[str] = None,
+        stats_override: Optional[Dict[str, Optional[int]]] = None,
+        appearance: Optional[Dict[str, Any]] = None,
+        breast_size: Optional[str] = None,
+        penis_size: Optional[str] = None,
+        asset_texture: Optional[str] = None,
+        schedule_chapter_plan: bool = True,
+    ) -> Dict[str, Any]:
+        """Shared headless new-adventure embarkation pipeline used by HTTP API and playthrough sweeps."""
+        canonical_id = await adb(db.resolve_canonical_user_id, user_id)
+        char = None
+        if character_id is not None:
+            char = await adb(db.get_character_by_id, int(character_id))
+            if not char:
+                raise LookupError("Character not found. Create a character first!")
+            if int(char.get("user_id") or 0) != int(canonical_id):
+                raise PermissionError("Forbidden: character belongs to another user.")
+            if not char.get("is_active"):
+                switched = await adb(db.switch_character, canonical_id, int(char["id"]))
+                if switched:
+                    char = switched
+        if not char:
+            char = await adb(db.get_character, canonical_id)
+        if not char:
+            raise LookupError("Character not found. Create a character first!")
+
+        prev_active_sid = char.get("active_session_id")
+        target_slot = slot if slot and 1 <= int(slot) <= 6 else 1
+        existing_in_slot = await adb(db.get_character_session_in_slot, char["id"], target_slot)
+        if existing_in_slot:
+            if prev_active_sid == existing_in_slot["id"]:
+                prev_active_sid = None
+            await adb(db.finish_session, existing_in_slot["id"])
+
+        eff_mode = (mode or "solo").lower()
+        if eff_mode == "multi":
+            eff_mode = "turn"
+        if eff_mode not in ["solo", "turn", "sync"]:
+            eff_mode = "solo"
+
+        user_settings = await adb(db.get_user_settings, canonical_id)
+        verbosity = user_settings.get("verbosity", "vivid")
+        dialogue_mode = user_settings.get("dialogue_mode", "balanced")
+        image_gen_enabled = user_settings.get("image_gen_enabled", 0)
+        choices_style = user_settings.get("choices_style", "dropdown")
+        result_display = user_settings.get("result_display", "detailed")
+        show_percentages = user_settings.get("show_percentages", 1)
+        language = user_settings.get("narration_language") or user_settings.get("language", "en")
+        narration_language = language
+
+        raw_scen = scenario or (char.get("scenario") if isinstance(char, dict) else None)
+        scenario_key = scenario_data.resolve_scenario_key(raw_scen)
+        if tags:
+            from scenario_data import resolve_scenario_or_custom_key
+            scenario_key = resolve_scenario_or_custom_key(tags)
+
+        await adb(db.reset_character_for_new_adventure, canonical_id, scenario_key, False)
+
+        is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scenario_key)
+        is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scenario_key)
+        char_app = char.get("appearance") or {}
+        if isinstance(char_app, str):
+            try:
+                char_app = json.loads(char_app)
+            except Exception:
+                char_app = {}
+        eff_origin = (origin_mode or char_app.get("origin_mode") or "").lower()
+        eff_student_grade = student_grade or char_app.get("student_grade") or "Sophomore"
+        if is_anom_hs and (eff_origin == "student" or (starting_faction or "").strip() in ("student_freelancer", "student")):
+            chosen_starting_faction = "student_freelancer"
+        else:
+            chosen_starting_faction = (starting_faction or "public_agency").strip() if is_anomalous_scen else ""
+
+        if is_anomalous_scen:
+            scen_templates = await adb(cd.get_class_templates, scenario_key, chosen_starting_faction) or {}
+        else:
+            scen_templates = await adb(cd.get_class_templates, scenario_key) or {}
+        safe_default_class = (
+            (next(iter(scen_templates.keys())) if scen_templates else "Public Safety Field Hunter")
+            if is_anomalous_scen
+            else (
+                "Student"
+                if scenario_data.is_school_scenario(scenario_key)
+                else (next(iter(scen_templates.keys())) if scen_templates else "Adventurer")
+            )
+        )
+        existing_char_class = char.get("char_class")
+        if char_class:
+            eff_char_class = char_class
+        elif not class_description and (not existing_char_class or existing_char_class not in scen_templates):
+            eff_char_class = safe_default_class
+        else:
+            eff_char_class = existing_char_class or safe_default_class
+
+        if eff_char_class:
+            if isinstance(starter_loadout, dict) and len(starter_loadout) > 0 and callable(starter_loadout_builder):
+                eff_loadout = await adb(
+                    starter_loadout_builder,
+                    starter_loadout,
+                    scenario_key,
+                    eff_char_class,
+                    char.get("gender", "Male"),
+                    char.get("race", "Human"),
+                    chosen_starting_faction,
+                )
+            else:
+                eff_loadout = None
+            if not eff_loadout:
+                eff_loadout = await adb(
+                    cd.generate_starter_equipment_loadout,
+                    scenario_key,
+                    eff_char_class,
+                    char.get("gender", "Male"),
+                    char.get("race", "Human"),
+                    weapon_name or "",
+                    3,
+                    chosen_starting_faction,
+                )
+            eff_starting_items = await adb(
+                cd.get_starting_items,
+                scenario_key,
+                eff_char_class,
+                chosen_starting_faction,
+            )
+            await adb(
+                db.apply_adventure_loadout,
+                canonical_id,
+                scenario_key,
+                eff_char_class,
+                class_description or "",
+                weapon_name or "",
+                weapon_description or "",
+                eff_loadout,
+                eff_starting_items,
+                attribute,
+                combat_archetype,
+                ability_medium,
+            )
+
+        if (
+            stats_override
+            and any(v is not None for v in stats_override.values())
+            and str(user_settings.get("debug_stat_mode") or "off").lower() == "off"
+        ):
+            def _fetch_raw_char_stats(cid: int) -> dict:
+                with db.get_conn() as conn:
+                    r = conn.execute(
+                        "SELECT str_, per_, end_, cha, int_, agi, luk FROM characters WHERE id=?",
+                        (int(cid),),
+                    ).fetchone()
+                    return dict(r) if r else {}
+
+            raw_stats_row = await adb(_fetch_raw_char_stats, char["id"])
+            raw_defaults = {
+                "str": int(raw_stats_row.get("str_") or cd.BASE_STAT_VALUE),
+                "per": int(raw_stats_row.get("per_") or cd.BASE_STAT_VALUE),
+                "end": int(raw_stats_row.get("end_") or cd.BASE_STAT_VALUE),
+                "cha": int(raw_stats_row.get("cha") or cd.BASE_STAT_VALUE),
+                "int": int(raw_stats_row.get("int_") or cd.BASE_STAT_VALUE),
+                "agi": int(raw_stats_row.get("agi") or cd.BASE_STAT_VALUE),
+                "luk": int(raw_stats_row.get("luk") or cd.BASE_STAT_VALUE),
+            }
+            stats = {
+                k: int(stats_override[k]) if stats_override.get(k) is not None else raw_defaults[k]
+                for k in ("str", "per", "end", "cha", "int", "agi", "luk")
+            }
+            for sv in stats.values():
+                if sv < cd.BASE_STAT_VALUE or sv > cd.MAX_STAT_VALUE:
+                    raise ValueError(
+                        f"Each stat must be between {cd.BASE_STAT_VALUE} and {cd.MAX_STAT_VALUE}."
+                    )
+            base_budget = len(cd.STATS) * cd.BASE_STAT_VALUE + cd.POINT_BUY_POOL
+            allowed_budget = max(base_budget, sum(raw_defaults.values()))
+            if sum(stats.values()) > allowed_budget:
+                raise ValueError("Stat allocation exceeds maximum allowed points!")
+            if hasattr(db, "update_character_stats"):
+                await adb(db.update_character_stats, canonical_id, stats)
+
+        app_update = dict(appearance or {})
+        if scenario_data.is_nsfw_scenario(scenario_key):
+            if breast_size is not None:
+                app_update["breast_size"] = breast_size
+            if penis_size is not None:
+                app_update["penis_size"] = penis_size
+            if asset_texture is not None:
+                app_update["asset_texture"] = asset_texture
+        else:
+            for anatomy_key in ("breast_size", "penis_size", "asset_texture"):
+                app_update.pop(anatomy_key, None)
+        if app_update:
+            await adb(db.update_character_appearance, char["id"], app_update)
+
+        default_cap = 1 if eff_mode == "solo" else max(2, capacity or 4)
+        session_id = await adb(
+            db.create_session,
+            mode=eff_mode,
+            capacity=default_cap if eff_mode != "solo" else (capacity or 1),
+            host_user_id=canonical_id,
+            scenario=scenario_key,
+            verbosity=verbosity,
+            dialogue_mode=dialogue_mode,
+            image_gen_enabled=image_gen_enabled,
+            choices_style=choices_style,
+            result_display=result_display,
+            show_percentages=show_percentages,
+            language=language,
+            narration_language=narration_language,
+            character_id=char["id"],
+            slot=target_slot,
+        )
+
+        await adb(db.add_session_member, session_id, canonical_id)
+        await adb(db.set_session_active, session_id, [canonical_id])
+
+        if is_anomalous_scen:
+            from mechanics.world.anomalous_events import bootstrap_anomalous_session
+            await adb(
+                bootstrap_anomalous_session,
+                session_id,
+                scenario_key,
+                canonical_id,
+                chosen_starting_faction,
+                char.get("name", ""),
+                eff_origin,
+                eff_student_grade,
+            )
+
+        char_row = await adb(db.get_character, canonical_id, settings=user_settings)
+        inv = await adb(db.get_inventory, canonical_id, char=char_row) if char_row else []
+        party = [(dict(char_row), inv)] if char_row else []
+        session_row = await adb(db.get_session, session_id)
+        session = dict(session_row)
+
+        from mechanics.social.factions import ensure_session_factions_seeded
+        await adb(ensure_session_factions_seeded, session_id, scenario_key)
+        from mechanics.world.world_forge.seeder import forge_world_state
+        await forge_world_state(session, party)
+
+        try:
+            scene = await game_engine.generate_opening_scene(session, party)
+            await adb(game_engine.apply_quest_update, session_id, scene)
+            if isinstance(scene, dict) and "merchant_encounter" in scene:
+                await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
+            raw_choices, narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
+                scene, session=session
+            )
+            _open_partners = (
+                [partner_arg]
+                if isinstance(partner_arg, str) and partner_arg.strip()
+                else (list(partner_arg) if isinstance(partner_arg, list) else [])
+            )
+            raw_choices = await adb(
+                game_engine.build_hybrid_turn_choices,
+                raw_choices,
+                session=session,
+                party=party,
+                result={
+                    **(scene if isinstance(scene, dict) else {}),
+                    "location": scene.get("location") or session.get("current_location") or "",
+                    "npcs_present": npcs_arg,
+                    "dialogue_partners": _open_partners,
+                },
+            )
+            await adb(
+                db.save_session_scene,
+                session_id,
+                scene_title,
+                narrative,
+                raw_choices,
+                [],
+                location=scene.get("location") or session.get("current_location"),
+                nearby_enemies=scene.get("nearby_enemies"),
+                current_npcs=npcs_arg,
+                dialogue_partner=partner_arg,
+                current_node_id=scene.get("current_node_id") or session.get("current_node_id"),
+            )
+            if schedule_chapter_plan:
+                try:
+                    sq_ch1 = await adb(db.get_active_story_quest, session_id)
+                    if sq_ch1 and sq_ch1.get("quest_id"):
+                        from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                        schedule_background_chapter_plan(session_id, str(sq_ch1["quest_id"]))
+                except Exception as _bg_plan_err:
+                    log.debug("Ch.1 background ChapterPlan schedule skipped: %s", _bg_plan_err)
+            char_id = char_row["id"] if char_row else 0
+            enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
+            for npc in (npcs_arg or []):
+                n_name = game_engine._get_npc_name(npc)
+                if n_name and n_name.lower() not in enemy_names:
+                    b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
+                    if isinstance(npc, dict):
+                        if "role" in npc and not b_info.get("role"):
+                            b_info["role"] = npc.get("role", "")
+                        if "description" in npc and not b_info.get("description"):
+                            b_info["description"] = npc.get("description", "")
+                    if not b_info.get("location"):
+                        b_info["location"] = scene.get("location") or session.get("current_location", "")
+                    b_info["met_in_person"] = True
+                    if is_contact_eligible(
+                        name=n_name,
+                        role=b_info.get("role", ""),
+                        description=b_info.get("description", ""),
+                        scenario=scenario_key,
+                        session_id=session_id,
+                    ):
+                        await adb(
+                            db.upsert_contact,
+                            session_id=session_id,
+                            character_id=char_id,
+                            npc_id=n_name,
+                            name=n_name,
+                            basic_info=b_info,
+                            delta_score=0,
+                            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
+                            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                        )
+                    else:
+                        m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+                        if not m_val and isinstance(b_info, dict):
+                            m_val = b_info.get("mannerisms", "")
+                        await adb(
+                            db.upsert_lorebook_entity,
+                            session_id=session_id,
+                            entity_type="person",
+                            name=n_name,
+                            description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                            traits=npc.get("traits") if isinstance(npc, dict) else [],
+                            mannerisms=m_val,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                        )
+        except Exception as e:
+            log.error("Error generating opening scene: %s", e)
+            try:
+                await adb(db.delete_session, session_id)
+                if prev_active_sid:
+                    prev_sess = await adb(db.get_session, prev_active_sid)
+                    if prev_sess and prev_sess.get("status") in ("active", "waiting"):
+                        await adb(db.set_character_active_session, char["id"], prev_active_sid)
+            except Exception as cleanup_err:
+                logger.warning("Failed pruning aborted Turn-0 session %s: %s", session_id, cleanup_err)
+            raise RuntimeError(f"Failed to generate scene: {str(e)}") from e
+
+        updated_session = await adb(db.get_session, session_id)
+        return {
+            "session_id": session_id,
+            "session": updated_session,
+            "scene": scene,
+            "character": char_row,
+            "canonical_user_id": canonical_id,
+            "scenario_key": scenario_key,
+        }
+
     @staticmethod
     async def _finalize_and_save_scene(
         session_id: int,
@@ -1369,6 +1755,8 @@ class TurnService:
             "is_quest_action": bool(chosen.get("is_quest_action", False)),
             "is_story_quest": bool(chosen.get("is_story_quest", False)),
             "is_climax_action": bool(chosen.get("is_climax_action", False)),
+            "rush_climax": bool(chosen.get("rush_climax", False)),
+            "off_hours_fallback": bool(chosen.get("off_hours_fallback", False)),
             "clue_source_id": str(chosen.get("clue_source_id") or ""),
             "is_bonus_clue": bool(chosen.get("is_bonus_clue", False)),
             "breakthrough_leveraged": bool(chosen.get("breakthrough_leveraged", False)),
@@ -1410,6 +1798,169 @@ class TurnService:
 
     @staticmethod
     async def resolve_action(
+        session_id: int,
+        user_id: int,
+        action: Dict[str, Any],
+        mode: str = "solo",
+        stream_callback=None,
+        actions: Optional[List[Dict[str, Any]]] = None,
+    ) -> TurnResponse:
+        """
+        Unifies the turn resolution process across Discord and Web API using non-blocking DB access.
+        """
+        if os.environ.get("HIKAYAT_CRASH_CAPTURE", "").strip() == "1" and not crash_capture.is_in_crash_capture():
+            return await TurnService._resolve_action_with_crash_capture(
+                session_id=session_id,
+                user_id=user_id,
+                action=action,
+                mode=mode,
+                stream_callback=stream_callback,
+                actions=actions,
+            )
+        return await TurnService._resolve_action_inner(
+            session_id=session_id,
+            user_id=user_id,
+            action=action,
+            mode=mode,
+            stream_callback=stream_callback,
+            actions=actions,
+        )
+
+    @staticmethod
+    async def _resolve_action_with_crash_capture(
+        *,
+        session_id: int,
+        user_id: int,
+        action: Dict[str, Any],
+        mode: str = "solo",
+        stream_callback=None,
+        actions: Optional[List[Dict[str, Any]]] = None,
+    ) -> TurnResponse:
+        """Captures pre-turn SQLite snapshot and LLM tape when `HIKAYAT_CRASH_CAPTURE=1`."""
+        sess_meta = await adb(db.get_session, session_id) or {}
+        scenario_val = str(sess_meta.get("scenario") or "fantasy")
+        turn_num = int(sess_meta.get("turn_count") or 0) + 1
+        action_copy = copy.deepcopy(action)
+        actions_copy = copy.deepcopy(actions) if actions is not None else None
+        rng_state_json = crash_capture.encode_rng_state(random.getstate())
+
+        tf = tempfile.NamedTemporaryFile(prefix="hikayat_preturn_", suffix=".db", delete=False)
+        pre_db_path = tf.name
+        tf.close()
+        try:
+            await adb(crash_capture.snapshot_sqlite_to_file, db.DB_PATH, pre_db_path, read_only=True)
+        except Exception as snap_err:
+            log.warning("Crash-capture pre-turn snapshot failed: %s", snap_err)
+
+        strict_mod = crash_capture.load_optional_strict_mode()
+        strict_ctx = (
+            strict_mod.capture()
+            if (strict_mod is not None and callable(getattr(strict_mod, "level", None)) and strict_mod.level() > 0)
+            else None
+        )
+        bundle_dir_env = os.environ.get("HIKAYAT_CRASH_DIR", "").strip() or None
+
+        try:
+            with crash_capture.crash_capture_scope(), llm_client.record_llm_tape() as tape:
+                if strict_ctx is not None:
+                    with strict_ctx as hits:
+                        try:
+                            resp = await TurnService._resolve_action_inner(
+                                session_id=session_id,
+                                user_id=user_id,
+                                action=action,
+                                mode=mode,
+                                stream_callback=stream_callback,
+                                actions=actions,
+                            )
+                        except BaseException as exc:
+                            if not (isinstance(exc, ValueError) and str(exc) == "waiting_for_party"):
+                                try:
+                                    crash_capture.write_crash_bundle(
+                                        bundle_root=bundle_dir_env,
+                                        scenario=scenario_val,
+                                        session_id=session_id,
+                                        user_id=user_id,
+                                        turn_number=turn_num,
+                                        seed=None,
+                                        stage="resolve_action",
+                                        mode=mode,
+                                        action=action_copy,
+                                        actions=actions_copy,
+                                        rng_state_json=rng_state_json,
+                                        llm_tape=tape,
+                                        strict_hits=list(hits),
+                                        exc=exc,
+                                        pre_turn_db_source=pre_db_path,
+                                    )
+                                except Exception as write_err:
+                                    log.warning("Failed writing crash bundle: %s", write_err)
+                            raise
+                        if hits:
+                            try:
+                                crash_capture.write_crash_bundle(
+                                    bundle_root=bundle_dir_env,
+                                    scenario=scenario_val,
+                                    session_id=session_id,
+                                    user_id=user_id,
+                                    turn_number=turn_num,
+                                    seed=None,
+                                    stage="resolve_action",
+                                    mode=mode,
+                                    action=action_copy,
+                                    actions=actions_copy,
+                                    rng_state_json=rng_state_json,
+                                    llm_tape=tape,
+                                    strict_hits=list(hits),
+                                    exc=None,
+                                    error_summary=f"Swallowed strict-mode error(s): {len(hits)}",
+                                    pre_turn_db_source=pre_db_path,
+                                )
+                            except Exception as write_err:
+                                log.warning("Failed writing strict-mode crash bundle: %s", write_err)
+                        return resp
+                else:
+                    try:
+                        return await TurnService._resolve_action_inner(
+                            session_id=session_id,
+                            user_id=user_id,
+                            action=action,
+                            mode=mode,
+                            stream_callback=stream_callback,
+                            actions=actions,
+                        )
+                    except BaseException as exc:
+                        if not (isinstance(exc, ValueError) and str(exc) == "waiting_for_party"):
+                            try:
+                                crash_capture.write_crash_bundle(
+                                    bundle_root=bundle_dir_env,
+                                    scenario=scenario_val,
+                                    session_id=session_id,
+                                    user_id=user_id,
+                                    turn_number=turn_num,
+                                    seed=None,
+                                    stage="resolve_action",
+                                    mode=mode,
+                                    action=action_copy,
+                                    actions=actions_copy,
+                                    rng_state_json=rng_state_json,
+                                    llm_tape=tape,
+                                    strict_hits=[],
+                                    exc=exc,
+                                    pre_turn_db_source=pre_db_path,
+                                )
+                            except Exception as write_err:
+                                log.warning("Failed writing crash bundle: %s", write_err)
+                        raise
+        finally:
+            if os.path.exists(pre_db_path):
+                try:
+                    os.unlink(pre_db_path)
+                except OSError:
+                    pass
+
+    @staticmethod
+    async def _resolve_action_inner(
         session_id: int,
         user_id: int,
         action: Dict[str, Any],
@@ -1631,6 +2182,17 @@ class TurnService:
         }
         pre_turn_dialogue_partner = session.get("dialogue_partner")
 
+        pre_turn_char_status_effects: Dict[int, list] = {}
+        for _p_entry in (party or []):
+            _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+            if isinstance(_p_char, dict) and _p_char.get("user_id"):
+                try:
+                    pre_turn_char_status_effects[int(_p_char["user_id"])] = copy.deepcopy(
+                        list(_p_char.get("status_effects") or [])
+                    )
+                except Exception:
+                    pass
+
         snapshot = {
             "turn_id": turn_id,
             "status": "pending",
@@ -1651,6 +2213,7 @@ class TurnService:
                 "enemies": copy.deepcopy(list(session.get("nearby_enemies") or [])),
                 "combat_threat_ledger": copy.deepcopy(session.get("combat_threat_ledger") or {}),
                 "combat_boss_telegraph": copy.deepcopy(session.get("combat_boss_telegraph") or {}),
+                "char_status_effects": {str(k): copy.deepcopy(v) for k, v in pre_turn_char_status_effects.items()},
                 "daily_incursions": copy.deepcopy(pre_turn_daily_incursions_snapshot),
                 "stealth_state": prev_st_rollback,
                 "player_resonance_pips": (
@@ -1675,11 +2238,23 @@ class TurnService:
                 session["_world_events_snapshot"] = {}
 
         pre_turn_nearby_enemies_snapshot = copy.deepcopy(list(session.get("nearby_enemies") or []))
+        pre_turn_had_threat_ledger = isinstance(session, dict) and "combat_threat_ledger" in session
+        pre_turn_had_boss_telegraph = isinstance(session, dict) and "combat_boss_telegraph" in session
 
         async def _rollback_turn_failure(err: BaseException) -> None:
             if isinstance(session, dict):
                 session.pop("_target_turn", None)
                 session.pop("_pre_turn_quest_res", None)
+                session["nearby_enemies"] = copy.deepcopy(pre_turn_nearby_enemies_snapshot)
+                session["current_npcs"] = copy.deepcopy(snapshot["pre_turn"]["npcs"])
+                if pre_turn_had_threat_ledger:
+                    session["combat_threat_ledger"] = copy.deepcopy(snapshot["pre_turn"]["combat_threat_ledger"])
+                else:
+                    session.pop("combat_threat_ledger", None)
+                if pre_turn_had_boss_telegraph:
+                    session["combat_boss_telegraph"] = copy.deepcopy(snapshot["pre_turn"]["combat_boss_telegraph"])
+                else:
+                    session.pop("combat_boss_telegraph", None)
             try:
                 await adb(db.rollback_session_normalized_state_after_turn, session_id, pre_turn_count_val)
             except Exception as _rb_norm_err:
@@ -1689,6 +2264,8 @@ class TurnService:
                     "nearby_enemies": pre_turn_nearby_enemies_snapshot,
                     "current_npcs": snapshot["pre_turn"]["npcs"],
                     "dialogue_partner": pre_turn_dialogue_partner,
+                    "combat_threat_ledger": copy.deepcopy(snapshot["pre_turn"]["combat_threat_ledger"]),
+                    "combat_boss_telegraph": copy.deepcopy(snapshot["pre_turn"]["combat_boss_telegraph"]),
                 }
                 if "party_npcs" in snapshot["pre_turn"]:
                     rollback_kwargs["party_npcs"] = snapshot["pre_turn"]["party_npcs"]
@@ -1698,6 +2275,15 @@ class TurnService:
                             session["party_npcs"] = copy.deepcopy(snapshot["pre_turn"]["party_npcs"])
                     except Exception as _rb_comp_err:
                         log.warning("party_npcs rollback failed for session %s: %s", session_id, _rb_comp_err)
+                for _rb_uid, _rb_effs in pre_turn_char_status_effects.items():
+                    try:
+                        await adb(db.set_status_effects, int(_rb_uid), copy.deepcopy(_rb_effs))
+                    except Exception as _rb_st_err:
+                        log.warning("status_effects rollback failed for user %s: %s", _rb_uid, _rb_st_err)
+                    for _p_entry in (party or []):
+                        _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+                        if isinstance(_p_char, dict) and _p_char.get("user_id") and int(_p_char["user_id"]) == int(_rb_uid):
+                            _p_char["status_effects"] = copy.deepcopy(_rb_effs)
                 if prev_st_rollback is not None:
                     rollback_kwargs["stealth_state"] = prev_st_rollback
                 if sync_picks_rollback_json is not None:
@@ -1735,7 +2321,10 @@ class TurnService:
             if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
                 outcome["stealth_state"] = session.get("stealth_state")
         except BaseException as e:
-            await _rollback_turn_failure(e)
+            try:
+                await asyncio.shield(_rollback_turn_failure(e))
+            except asyncio.CancelledError:
+                pass
             raise e
 
         if isinstance(outcome, dict):
@@ -1745,7 +2334,10 @@ class TurnService:
         try:
             items_gained = await adb(game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions)
         except BaseException as e:
-            await _rollback_turn_failure(e)
+            try:
+                await asyncio.shield(_rollback_turn_failure(e))
+            except asyncio.CancelledError:
+                pass
             raise e
         finally:
             if isinstance(outcome, dict):
@@ -2341,18 +2933,13 @@ class TurnService:
         raw_retry_choices = merged_outcome.get("next_choices") or merged_outcome.get("choices") or []
         if raw_retry_choices and hasattr(game_engine, "build_hybrid_turn_choices"):
             try:
+                retry_party = [(dict(new_char), [])] if isinstance(new_char, dict) and new_char else None
                 rebuilt_choices = await adb(
                     game_engine.build_hybrid_turn_choices,
                     raw_retry_choices,
-                    scenario=fresh_session.get("scenario", "fantasy"),
-                    location=merged_outcome.get("location") or fresh_session.get("current_location", ""),
-                    char=new_char,
-                    dialogue_partner=merged_outcome.get("dialogue_partners")
-                    if "dialogue_partners" in merged_outcome
-                    else merged_outcome.get("dialogue_partner"),
-                    current_npcs=merged_outcome.get("npcs_present") or fresh_session.get("current_npcs", []),
-                    session_id=session_id,
                     session=fresh_session,
+                    party=retry_party,
+                    result=merged_outcome,
                 )
                 if rebuilt_choices:
                     merged_outcome["next_choices"] = rebuilt_choices

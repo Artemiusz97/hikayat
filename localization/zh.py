@@ -188,6 +188,7 @@ QUEST_UI_LABELS = {
     "threat_paused": "已暂停（决战）",
     "threat_dormant": "章节未触发前暂不计时",
     "threat_reinforced": "敌方增援",
+    "threat_pushed_back": "威胁已延缓 (-1)",
     "threat_scar_pending": "章节创痕风险",
     "clue_sources": "线索途径",
     "source_open": "可查探",

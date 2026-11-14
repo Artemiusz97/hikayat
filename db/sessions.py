@@ -227,8 +227,13 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
                         combat_boss_telegraph: dict = None):
     clean_narrative = _to_str(narrative)
     if clean_narrative:
-        from game_engine.keywords import sanitize_meta_objective_leaks
-        clean_narrative = sanitize_meta_objective_leaks(clean_narrative)
+        from game_engine.keywords import (
+            sanitize_internal_tags_and_raw_stats,
+            sanitize_meta_objective_leaks,
+        )
+        clean_narrative = sanitize_meta_objective_leaks(
+            sanitize_internal_tags_and_raw_stats(clean_narrative)
+        )
 
     fields = {
         "scene_title": _to_str(scene_title),

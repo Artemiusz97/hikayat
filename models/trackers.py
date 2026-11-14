@@ -14,6 +14,14 @@ class DictAccessibleModel(BaseModel):
     def get(self, item: str, default: Any = None) -> Any:
         return getattr(self, item, default)
 
+    def __contains__(self, item: Any) -> bool:
+        if not isinstance(item, str):
+            return False
+        if item in self.__class__.model_fields:
+            return True
+        extra = getattr(self, "__pydantic_extra__", None)
+        return extra is not None and item in extra
+
 
 class Appearance(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
@@ -37,6 +45,30 @@ class Appearance(DictAccessibleModel):
     fetishes: Optional[str] = None
     intercourse_experience: Optional[str] = None
     oral_experience: Optional[str] = None
+
+def _coerce_status_effects_list(v: Any) -> List[Union[str, Dict[str, Any]]]:
+    """Coerces None, scalar, or mixed str/dict status payloads into clean items."""
+    if not v:
+        return []
+    if isinstance(v, (str, dict)):
+        items = [v]
+    elif isinstance(v, (list, tuple, set)):
+        items = list(v)
+    else:
+        return []
+    cleaned: List[Union[str, Dict[str, Any]]] = []
+    for item in items:
+        if item is None:
+            continue
+        if isinstance(item, str):
+            s = item.strip()
+            if s:
+                cleaned.append(s)
+        elif isinstance(item, dict):
+            if str(item.get("name", "")).strip():
+                cleaned.append(item)
+    return cleaned
+
 
 class TrackerEntity(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
@@ -65,9 +97,14 @@ class TrackerEntity(DictAccessibleModel):
     hp: Optional[int] = Field(default=None)
     max_hp: Optional[int] = Field(default=None)
     mp: Optional[int] = Field(default=None)
-    status_effects: List[str] = Field(default_factory=list, description="Short condition or mood tags (e.g. Bleeding, Stunned, Flustered, Angry, Scared, Aroused, Calm)")
+    status_effects: List[Union[str, Dict[str, Any]]] = Field(default_factory=list, description="Short condition or mood tags (e.g. Bleeding, Stunned, Flustered, Angry, Scared, Aroused, Calm)")
     mood: Optional[str] = Field(default=None, description="Current emotional mood or state (e.g. Angry, Confused, Scared, Flustered, Aroused, Calm, Neutral)")
     descriptor: Optional[str] = Field(default=None, description="Short physical descriptor matching how the prose first describes this person (e.g. 'man in a disheveled investigator's coat')")
+
+    @field_validator("status_effects", mode="before")
+    @classmethod
+    def validate_status_effects(cls, v: Any) -> List[Union[str, Dict[str, Any]]]:
+        return _coerce_status_effects_list(v)
 
     @field_validator("descriptor", mode="before")
     @classmethod
@@ -122,7 +159,12 @@ class CharacterOutcome(DictAccessibleModel):
     gold_change: int = Field(default=0)
     items_gained: List[str] = Field(default_factory=list)
     items_lost: List[str] = Field(default_factory=list)
-    status_effects: List[str] = Field(default_factory=list, description="Short condition tags")
+    status_effects: List[Union[str, Dict[str, Any]]] = Field(default_factory=list, description="Short condition tags")
+
+    @field_validator("status_effects", mode="before")
+    @classmethod
+    def validate_status_effects(cls, v: Any) -> List[Union[str, Dict[str, Any]]]:
+        return _coerce_status_effects_list(v)
 
     @field_validator("hp_change", "temp_hp_change", "mp_change", "gold_change", mode="before")
     @classmethod

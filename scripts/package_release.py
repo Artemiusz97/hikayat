@@ -29,7 +29,8 @@ EXCLUDE_DIRS = {
     'venv', 'env', 'ENV', '.venv',
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
-    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', '_norton_', 'reports'
+    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', '_norton_', 'reports',
+    'crash_reports', 'htmlcov'
 }
 
 EXCLUDE_EXTS = {
@@ -42,8 +43,8 @@ EXCLUDE_EXACT_FILES = {
     '.env', '.DS_Store', 'Thumbs.db',
     'pytest.ini', 'run_tests.bat', 'requirements-dev.txt',
     'AGENTS.md', 'GEMINI.md', '.testmondata',
-    'run_tests.py', 'package_release.py',
-    'static_check.py', 'static_baseline.json',
+    'run_tests.py', 'package_release.py', 'playthrough_bot.py',
+    'static_check.py', 'static_baseline.json', '.coverage',
 }
 
 

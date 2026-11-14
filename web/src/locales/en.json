@@ -91,7 +91,15 @@
     "resolved": "Resolved",
     "waiting_party": "Waiting for party members...",
     "locked_in": "Locked In",
-    "submitting": "Resolving turn..."
+    "submitting": "Resolving turn...",
+    "charging_skill": "CHARGING",
+    "stagger_label": "Stagger",
+    "stagger_breaking": "Breaking!",
+    "aggro_label": "Aggro",
+    "taunted_label": "Taunted",
+    "companion_kit": "Combat Kit",
+    "kit_ready": "Ready",
+    "kit_cd": "CD"
   },
   "inventory": {
     "all": "All Items",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Synthesize Breakthrough",
     "deduce_single_clue": "🔮 Deduce with Single Clue",
     "main_objective": "Main Objective",
+    "primary_operation": "Primary Operation",
     "peak_chapter": "Peak Set-Piece",
     "aid_secured": "Aid Active",
     "bypass_active": "Shortcut Active",
@@ -270,7 +279,13 @@
     "source_burned": "Burned",
     "source_cold": "Cold",
     "source_claimed": "Claimed",
-    "source_bonus": "Bonus Lead"
+    "source_bonus": "Bonus Lead",
+    "corroboration_confirmed": "Trail Corroborated",
+    "partial_corroboration_hint": "Both Key Clues align. Pair one with an Optional or Bonus Lead to unlock the Breakthrough.",
+    "clue_tier_key": "Key Clue",
+    "clue_tier_corroborating": "Corroborating",
+    "off_hours_trace": "Off-Hours Trace (+2 DC)",
+    "threat_pushed_back": "Threat Delayed (-1)"
   },
   "quest": {
     "threat_clock": {

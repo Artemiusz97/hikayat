@@ -11,6 +11,7 @@ import re
 from typing import Any, Mapping
 
 import db
+import scenario_data
 
 from .realty_catalog import (
     ALL_STATIC_RESIDENTIAL_FACILITY_IDS,
@@ -258,7 +259,10 @@ def is_excluded_from_random_incursions(
                 # Anomalous seed zones live in data/locations_seed.json (the old `seeds_anomalous`
                 # module no longer exists, so this lookup previously failed silently every call).
                 from .seeds import get_scenario_seed_data
+                _known_scenarios = scenario_data.load_scenarios()
                 for _anom_scen in ("anomalous_incursions", "anomalous_high_school", "urban_anomalies"):
+                    if _anom_scen not in _known_scenarios:
+                        continue
                     for z in (get_scenario_seed_data(_anom_scen) or {}).get("zones", []):
                         for fac in z.get("primary_locations", []):
                             if isinstance(fac, dict) and fac.get("id") in ALL_STATIC_RESIDENTIAL_FACILITY_IDS and fac.get("name"):

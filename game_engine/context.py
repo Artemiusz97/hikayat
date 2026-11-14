@@ -1,7 +1,43 @@
 from __future__ import annotations
 import json
+from typing import Any
 import game_engine
 from .core import *
+
+
+def _coerce_status_labels(raw_status: Any) -> list[str]:
+    """Normalize status_effects entries (strings, dicts, or JSON lists) into prompt-safe labels."""
+    if isinstance(raw_status, str):
+        stripped = raw_status.strip()
+        if not stripped:
+            return []
+        try:
+            raw_status = json.loads(stripped)
+        except Exception:
+            raw_status = [stripped]
+    if isinstance(raw_status, dict):
+        items = [raw_status]
+    elif isinstance(raw_status, (list, tuple, set)):
+        items = list(raw_status)
+    else:
+        return []
+    labels: list[str] = []
+    for entry in items:
+        if not entry:
+            continue
+        if isinstance(entry, dict):
+            label = (
+                entry.get("name")
+                or entry.get("condition")
+                or entry.get("tag")
+                or entry.get("label")
+                or entry
+            )
+            labels.append(str(label))
+        else:
+            labels.append(str(entry))
+    return [lbl for lbl in labels if lbl]
+
 
 def _character_sheet_text(char: dict, inventory: list) -> str:
     equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
@@ -88,15 +124,8 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
             b_desc += f" ({tex})"
         anatomy_line = f"Anatomy: Breasts: {b_desc}. (STRICTLY FEMALE: Has NO phallus. NEVER describe her having a penis.)"
 
-    raw_status = char.get("status_effects")
-    if isinstance(raw_status, str):
-        try:
-            parsed_status = json.loads(raw_status)
-        except Exception:
-            parsed_status = []
-    else:
-        parsed_status = raw_status or []
-    status_str = ", ".join(parsed_status) if parsed_status else "None"
+    status_labels = _coerce_status_labels(char.get("status_effects"))
+    status_str = ", ".join(status_labels) if status_labels else "None"
 
     str_val = char.get("str_", 5)
     hp_line = f"HP: {char.get('hp', 70)}/{char.get('max_hp', 70)}"
@@ -190,7 +219,7 @@ def _describe_tracked_entity(entity) -> str:
 
     status = entity.get("status_effects") or []
     if status:
-        clean_status = [str(s.get("name") or s.get("condition") or s.get("tag") or s) if isinstance(s, dict) else str(s) for s in status if s]
+        clean_status = _coerce_status_labels(status)
         if clean_status:
             bits.append("status: " + ", ".join(clean_status))
 

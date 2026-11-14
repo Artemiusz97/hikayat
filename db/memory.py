@@ -50,6 +50,9 @@ def add_commitment(
             promisee=target_entity or "player",
             description=description.strip(),
             commitment_type=commitment_type or "promise",
+            scheduled_day=merged_meta.get("scheduled_day"),
+            start_minute=merged_meta.get("start_minute"),
+            title=str(merged_meta.get("title") or ""),
             turn_created=turn_number,
             metadata=merged_meta,
         )
@@ -57,8 +60,8 @@ def add_commitment(
             if merged_meta.get("raw_target_entity"):
                 res["target_entity"] = merged_meta["raw_target_entity"]
             return res
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("add_commitment create_promise delegation failed: %s", exc)
 
     commitment_type = commitment_type.lower().strip()
     if commitment_type not in VALID_COMMITMENT_TYPES:

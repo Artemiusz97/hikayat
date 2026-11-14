@@ -105,6 +105,11 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
                   </span>
                 )
               )}
+              {isNpc && (member.combat_archetype || member.archetype) && (
+                <span className="text-[9px] px-1.5 py-0.2 bg-indigo-950/70 text-indigo-200 rounded font-bold uppercase border border-indigo-700/50">
+                  {member.combat_archetype || member.archetype}
+                </span>
+              )}
               {member.clothing_status && (
                 <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                   {member.clothing_status}
@@ -148,6 +153,36 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
           {statusList.map((eff, i) => (
             <StatusEffectBadge key={i} effect={eff} />
           ))}
+        </div>
+      )}
+
+      {/* Companion 3-Slot Archetype Kit & Cooldowns */}
+      {isNpc && Array.isArray(member.combat_loadout) && member.combat_loadout.length > 0 && (
+        <div className="mt-1.5 pt-1 border-t border-fantasy-border/20">
+          <div className="text-[9px] uppercase tracking-wider text-gray-400 font-semibold mb-1">
+            {t('combat.companion_kit', 'Combat Kit')}
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {member.combat_loadout.slice(0, 3).map((sk, idx) => {
+              const skObj = typeof sk === 'object' && sk !== null ? sk : { id: String(sk), name: String(sk), slot: idx + 1 };
+              const skName = skObj.name || skObj.id || `Skill ${idx + 1}`;
+              const cdVal = Number(member.skill_cooldowns?.[skObj.id] || 0);
+              const slotNum = Number(skObj.slot || idx + 1);
+              const slotIcon = slotNum === 1 ? '⚔️' : slotNum === 2 ? '🛡️' : '✨';
+              return (
+                <span
+                  key={`${skObj.id || skName}-${idx}`}
+                  className={`text-[9px] px-1.5 py-0.5 rounded border font-mono ${
+                    cdVal > 0
+                      ? 'bg-neutral-900/80 text-gray-400 border-neutral-700/70'
+                      : 'bg-indigo-950/60 text-indigo-200 border-indigo-700/50'
+                  }`}
+                >
+                  {slotIcon} {skName}{cdVal > 0 ? ` [${t('combat.kit_cd', 'CD')}: ${cdVal}t]` : ''}
+                </span>
+              );
+            })}
+          </div>
         </div>
       )}
 

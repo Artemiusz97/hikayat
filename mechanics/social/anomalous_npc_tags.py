@@ -183,7 +183,7 @@ def classify_anomalous_npc_tag(
             elif session_id:
                 c_rec = db.get_contact(session_id, name)
                 if not isinstance(c_rec, dict):
-                    for cand in (db.get_contacts(session_id) or []):
+                    for cand in (db.get_contacts(session_id, resolve_relations=False, ensure_scene=False) or []):
                         if isinstance(cand, dict) and str(cand.get("name") or "").strip().lower() == name.lower():
                             c_rec = cand
                             break

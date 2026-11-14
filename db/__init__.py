@@ -22,6 +22,7 @@ from .dossiers import (
     get_user_folklore_codex,
     get_users_folklore_codex_batch,
     hydrate_session_anomaly_records,
+    normalize_clue_graph_nodes,
     persist_anomalous_quest_containment,
     promote_prewarmed_dossier,
     record_folklore_codex_progress,
@@ -99,7 +100,8 @@ from .quests import (
     update_quest_anomaly_blueprint,
 )
 from .social import (
-    _active_resolving_contacts,
+    _get_ensuring_scene_set,
+    _get_resolving_contacts_set,
     _parse_faction_row,
     backfill_exempt_and_legacy_contact_discoveries,
     canon_social_npc_id,

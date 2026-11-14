@@ -107,6 +107,99 @@ def get_active_companion_for_waypoint(session_id: int | dict, wp: dict) -> dict 
 
 
 
+def _char_stat_val(char_obj: Optional[dict], stat_name: str) -> Optional[int]:
+    """Reads a character stat cleanly from either enriched `stats` dict or flat DB column."""
+    if not isinstance(char_obj, dict) or not stat_name:
+        return None
+    st_key = str(stat_name).strip().upper()
+    stats_map = char_obj.get("stats")
+    if isinstance(stats_map, dict) and st_key in stats_map and stats_map.get(st_key) is not None:
+        return int(stats_map[st_key])
+    col_key = getattr(db, "STAT_COLUMN", {}).get(st_key)
+    raw = char_obj.get(col_key) if col_key else None
+    if raw is None and st_key in char_obj:
+        raw = char_obj.get(st_key)
+    if raw is None and st_key.lower() in char_obj:
+        raw = char_obj.get(st_key.lower())
+    return int(raw) if raw is not None else None
+
+
+def _build_clue_source_choice(
+    src: dict,
+    char: Optional[dict],
+    current_location: str,
+    lang: str,
+    quest_id: Any,
+    sub_obj_id: Any,
+    stage_index: int,
+    is_story: bool,
+    *,
+    is_bonus: bool = False,
+    fallback_hint: str = "",
+    default_req: int = 3,
+    target_npc: str = "",
+    out_of_window_dc_penalty: int = 0,
+    main_dc_adj: int = 0,
+) -> dict:
+    """Build a standardized `key_clue` quest action choice dict for either open or bonus clue sources."""
+    off_hours = bool(src.get("off_hours_fallback"))
+    raw_kind = str(src.get("kind") or "record")
+    kind = raw_kind.lower()
+    intent = "investigate_clue" if (off_hours or kind != "witness") else "dialogue_init"
+    stat = "PER" if off_hours else str(src.get("stat") or ("CHA" if kind == "witness" else "PER")).upper()
+    stat_val = _char_stat_val(char, stat)
+    src_req = max(2, min(8, stat_val - 1)) if stat_val is not None else default_req
+    dc_offset = int(src.get("dc_offset") or 0)
+    if not is_bonus:
+        if out_of_window_dc_penalty > 0:
+            src_req = min(12, src_req + out_of_window_dc_penalty)
+        if main_dc_adj != 0 or src.get("dc_offset"):
+            src_req = max(2, min(14, src_req + main_dc_adj + dc_offset))
+    if off_hours:
+        from mechanics.narrative.dossier_compiler import build_off_hours_trace_prose
+        npc_for_prose = str(src.get("npc_name") or ("" if is_bonus else target_npc) or "")
+        prose = build_off_hours_trace_prose(
+            src.get("location") or current_location,
+            npc_name=npc_for_prose,
+            lang=lang,
+        )
+        hint = prose["label"]
+        src_req = min(16, int(src_req) + 2)
+        choice_npc = ""
+    elif is_bonus:
+        hint = str(src.get("approach_hint") or fallback_hint).strip()
+        choice_npc = str(src.get("npc_name") or "")
+    else:
+        hint = str(src.get("approach_hint") or fallback_hint).strip().rstrip(".")
+        choice_npc = str(src.get("npc_name") or target_npc or "").strip() if kind == "witness" else ""
+    choice = {
+        "label": f"{hint} ({stat})",
+        "stat": stat,
+        "requirement": src_req,
+        "mp_cost": 0,
+        "intent": intent,
+        "sub_intent": "",
+        "target_npc": choice_npc,
+        "is_fallback": False,
+        "quest_id": quest_id,
+        "sub_obj_id": sub_obj_id,
+        "stage_index": stage_index,
+        "is_quest_action": True,
+        "is_story_quest": is_story,
+        "contract_type": "key_clue",
+        "approach": "trace" if off_hours else (raw_kind if is_bonus else kind),
+        "clue_source_id": str(src.get("source_id") or ""),
+        "off_hours_fallback": off_hours,
+        "_server_stamped": True,
+        "_python_verified_quest": True,
+        "gold_cost": 0,
+        "dc_mod": (2 if off_hours else 0) if is_bonus else (out_of_window_dc_penalty + dc_offset + (2 if off_hours else 0)),
+    }
+    if is_bonus:
+        choice["is_bonus_clue"] = True
+    return choice
+
+
 def generate_quest_action_choices(
     session_id: int | dict,
     current_location: str = "",
@@ -140,20 +233,43 @@ def generate_quest_action_choices(
     story_quest, climax_loc = get_story_quest_climax_location(session_id, allow_premature=True)
     if story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc):
         sq_title = story_quest.get("title", "Story Quest")
+        sq_qid = str(story_quest.get("quest_id") or "")
         sub_objs = story_quest.get("sub_objectives", []) or []
-        is_premature = bool(sub_objs and not db.is_quest_main_objectives_complete(sub_objs))
+        _sq_dos = (
+            story_quest.get("dossier")
+            or (dossier if isinstance(dossier, dict) and str(dossier.get("quest_id") or "") == sq_qid else None)
+            or (db.get_quest_dossier(session_id, sq_qid) if sq_qid else None)
+            or {}
+        )
+        _sq_cs = (_sq_dos.get("climax_spec") or {}) if isinstance(_sq_dos, dict) else {}
+        _has_incomplete_ms = any(
+            isinstance(ms, dict)
+            and not ms.get("is_climax_stage")
+            and str(ms.get("status") or "").lower() not in ("completed", "bypassed")
+            for ms in (_sq_cs.get("main_stages") or [])
+        )
+        is_premature = bool((sub_objs and not db.is_quest_main_objectives_complete(sub_objs)) or _has_incomplete_ms)
         stat = "CHA" if "high_school" in scen_key or "modern" in scen_key else ("INT" if "sci" in scen_key else "STR")
         req = 6
         if char and isinstance(char.get("stats"), dict):
             c_stat = int(char["stats"].get(stat, 5))
             req = max(4, min(10, c_stat))
-        _sq_cs = ((story_quest.get("dossier") or {}).get("climax_spec") or {})
         req = max(2, min(14, req - int(_sq_cs.get("aid_dc_reduction") or 0) + int(_sq_cs.get("alert_dc_bonus") or 0)))
         if is_premature:
             req += 4  # Phase 5 A11: +4 DC penalty for premature confrontation
 
         if is_premature:
-            climax_label = f"Confront the threat for '{sq_title}' without full evidence ({stat})"
+            if _sess_cache is None and session_id:
+                _sess_cache = db.get_session(session_id) or {}
+            raw_lang = str((_sess_cache or {}).get("narration_language") or (_sess_cache or {}).get("language") or "en").strip().lower()[:2]
+            _rush_labels = {
+                "en": f"Confront the threat for '{sq_title}' without full evidence ({stat})",
+                "pl": f"Staw czoła zagrożeniu w '{sq_title}' bez pełnych dowodów ({stat})",
+                "ms": f"Hadapi ancaman '{sq_title}' secara langsung tanpa bukti penuh ({stat})",
+                "zh": f"在证据不全时直面「{sq_title}」的威胁 ({stat})",
+                "de": f"Bedrohung für '{sq_title}' ohne volle Beweise direkt stellen ({stat})",
+            }
+            climax_label = _rush_labels.get(raw_lang, _rush_labels["en"])
         elif "high_school" in scen_key or "modern" in scen_key:
             climax_label = f"Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
         elif "cyberpunk" in scen_key or "scifi" in scen_key:
@@ -174,13 +290,16 @@ def generate_quest_action_choices(
             "sub_intent": "",
             "target_npc": "",
             "is_fallback": False,
-            "quest_id": story_quest.get("quest_id"),
+            "quest_id": sq_qid,
             "sub_obj_id": None,
             "stage_index": 99,
             "is_quest_action": True,
             "is_story_quest": True,
             "is_climax_action": True,
             "is_premature_climax": is_premature,
+            "rush_climax": is_premature,
+            "_server_stamped": True,
+            "_python_verified_quest": True,
             "contract_type": "climax"
         })
 
@@ -241,35 +360,26 @@ def generate_quest_action_choices(
         if has_bonus_clue_here and len(quest_choices) < 3:
             b_qid = wp.get("quest_id", "")
             b_is_story = bool(wp.get("is_story_quest") or "SQ-" in str(b_qid) or "story" in str(b_qid).lower())
+            if _sess_cache is None and session_id:
+                _sess_cache = db.get_session(session_id) or {}
+            b_eff_lang = str((_sess_cache or {}).get("narration_language") or (_sess_cache or {}).get("language") or "en")
             for bsrc in (clue_info.get("matching_bonus_sources") or []):
                 if len(quest_choices) >= 3:
                     break
-                b_stat = str(bsrc.get("stat") or ("CHA" if bsrc.get("kind") == "witness" else "PER")).upper()
-                b_req = 3
-                if char and isinstance(char.get("stats"), dict):
-                    b_req = max(2, min(8, int(char["stats"].get(b_stat, 5)) - 1))
-                b_hint = str(bsrc.get("approach_hint") or f"Corroborate {(bsrc.get('_key_clue') or {}).get('title') or 'earlier lead'}").strip()
-                quest_choices.append({
-                    "label": f"{b_hint} ({b_stat})",
-                    "stat": b_stat,
-                    "requirement": b_req,
-                    "mp_cost": 0,
-                    "intent": "dialogue_init" if bsrc.get("kind") == "witness" else "investigate_clue",
-                    "sub_intent": "",
-                    "target_npc": str(bsrc.get("npc_name") or ""),
-                    "is_fallback": False,
-                    "quest_id": b_qid,
-                    "sub_obj_id": wp.get("sub_obj_id"),
-                    "stage_index": int(bsrc.get("_stage_index") or 1),
-                    "is_quest_action": True,
-                    "is_story_quest": b_is_story,
-                    "contract_type": "key_clue",
-                    "approach": str(bsrc.get("kind") or "record"),
-                    "clue_source_id": str(bsrc.get("source_id") or ""),
-                    "is_bonus_clue": True,
-                    "gold_cost": 0,
-                    "dc_mod": 0,
-                })
+                quest_choices.append(
+                    _build_clue_source_choice(
+                        bsrc,
+                        char,
+                        current_location,
+                        b_eff_lang,
+                        b_qid,
+                        wp.get("sub_obj_id"),
+                        int(bsrc.get("_stage_index") or 1),
+                        b_is_story,
+                        is_bonus=True,
+                        fallback_hint=f"Corroborate {(bsrc.get('_key_clue') or {}).get('title') or 'earlier lead'}",
+                    )
+                )
 
         if not loc_matched:
             continue
@@ -483,41 +593,30 @@ def generate_quest_action_choices(
 
         q_intent = "dialogue_init" if trigger == "talk_to_npc" else "investigate_clue"
         if trigger == "key_clue" and clue_info.get("matching_open_sources"):
+            if _sess_cache is None and session_id:
+                _sess_cache = db.get_session(session_id) or {}
+            k_eff_lang = str((_sess_cache or {}).get("narration_language") or (_sess_cache or {}).get("language") or "en")
             for ksrc in (clue_info.get("matching_open_sources") or []):
                 if len(quest_choices) >= 3:
                     break
-                k_kind = str(ksrc.get("kind") or "record").lower()
-                q_intent = "dialogue_init" if k_kind == "witness" else "investigate_clue"
-                k_stat = str(ksrc.get("stat") or ("CHA" if k_kind == "witness" else "PER")).upper()
-                k_req = req
-                if char and isinstance(char.get("stats"), dict):
-                    k_req = max(2, min(8, int(char["stats"].get(k_stat, 5)) - 1))
-                if out_of_window_dc_penalty > 0:
-                    k_req = min(12, k_req + out_of_window_dc_penalty)
-                if _main_dc_adj != 0 or ksrc.get("dc_offset"):
-                    k_req = max(2, min(14, k_req + _main_dc_adj + int(ksrc.get("dc_offset") or 0)))
-                k_hint = str(ksrc.get("approach_hint") or clean_stage).strip().rstrip(".")
-                k_npc = str(ksrc.get("npc_name") or target_npc or "").strip() if k_kind == "witness" else ""
-                quest_choices.append({
-                    "label": f"{k_hint} ({k_stat})",
-                    "stat": k_stat,
-                    "requirement": k_req,
-                    "mp_cost": 0,
-                    "intent": "dialogue_init" if k_kind == "witness" else "investigate_clue",
-                    "sub_intent": "",
-                    "target_npc": k_npc,
-                    "is_fallback": False,
-                    "quest_id": qid,
-                    "sub_obj_id": sub_obj_id,
-                    "stage_index": stage_idx,
-                    "is_quest_action": True,
-                    "is_story_quest": is_story,
-                    "contract_type": "key_clue",
-                    "approach": k_kind,
-                    "clue_source_id": str(ksrc.get("source_id") or ""),
-                    "gold_cost": 0,
-                    "dc_mod": out_of_window_dc_penalty + int(ksrc.get("dc_offset") or 0),
-                })
+                quest_choices.append(
+                    _build_clue_source_choice(
+                        ksrc,
+                        char,
+                        current_location,
+                        k_eff_lang,
+                        qid,
+                        sub_obj_id,
+                        stage_idx,
+                        is_story,
+                        is_bonus=False,
+                        fallback_hint=clean_stage,
+                        default_req=req,
+                        target_npc=target_npc,
+                        out_of_window_dc_penalty=out_of_window_dc_penalty,
+                        main_dc_adj=_main_dc_adj,
+                    )
+                )
         else:
             if req_item and (target_npc or any(k in stage_label.lower() for k in ("deliver", "return", "give", "hand", "turn in"))):
                 if req_item.lower() in clean_stage.lower():
@@ -852,6 +951,17 @@ def tag_and_enrich_quest_choices(
     active_wps = db.get_all_session_active_waypoints(session_id)
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
     climax_ready_at_loc = bool(story_quest and climax_loc and check_location_matches_waypoint(current_location, climax_loc, session_id=session_id))
+    rush_story_quest, rush_climax_loc = (
+        (story_quest, climax_loc)
+        if climax_ready_at_loc
+        else get_story_quest_climax_location(session_id, allow_premature=True)
+    )
+    premature_rush_at_loc = bool(
+        not climax_ready_at_loc
+        and rush_story_quest
+        and rush_climax_loc
+        and check_location_matches_waypoint(current_location, rush_climax_loc, session_id=session_id)
+    )
 
     # Detect if characters are in active 1-on-1 or group dialogue
     from mechanics.world.mobility import get_session_dialogue_partners
@@ -879,7 +989,7 @@ def tag_and_enrich_quest_choices(
     except Exception:
         pass
 
-    if not active_wps and not climax_ready_at_loc and not appts_at_loc:
+    if not active_wps and not climax_ready_at_loc and not premature_rush_at_loc and not appts_at_loc:
         return _strip_unverified_quest_flags(choices)
 
     # Find active waypoints matching current location or NPC presence
@@ -921,7 +1031,7 @@ def tag_and_enrich_quest_choices(
             wp_tag_copy["_clue_match_info"] = clue_m
             matching_wps.append(wp_tag_copy)
 
-    if not matching_wps and not climax_ready_at_loc and not appts_at_loc:
+    if not matching_wps and not climax_ready_at_loc and not premature_rush_at_loc and not appts_at_loc:
         return _strip_unverified_quest_flags(choices)
 
     result_choices = []
@@ -1039,6 +1149,27 @@ def tag_and_enrich_quest_choices(
                 ).strip()
                 if clean_lbl:
                     c["label"] = clean_lbl
+    elif premature_rush_at_loc and rush_story_quest:
+        rush_sq_id = str(rush_story_quest.get("quest_id") or "")
+        for c in result_choices:
+            if (
+                c.get("rush_climax")
+                and c.get("is_climax_action")
+                and str(c.get("quest_id") or "") == rush_sq_id
+                and (c.get("_server_stamped") or c.get("_python_verified_quest"))
+            ):
+                c["is_story_quest"] = True
+                c["is_quest_action"] = True
+                c["_python_verified_quest"] = True
+                c["_server_stamped"] = True
+                c["rush_climax"] = True
+                c["is_premature_climax"] = True
+            elif c.get("rush_climax") or c.get("is_climax_action"):
+                c["_python_verified_quest"] = False
+    else:
+        for c in result_choices:
+            if c.get("rush_climax") or c.get("is_climax_action"):
+                c["_python_verified_quest"] = False
 
     scene_npcs = current_npcs if current_npcs is not None else (session_row.get("current_npcs", []) if session_row else [])
     present_names = {str((n.get("name") or n.get("npc_name")) if isinstance(n, dict) else n).strip().lower() for n in (scene_npcs or []) if n}

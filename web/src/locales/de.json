@@ -91,7 +91,15 @@
     "resolved": "Abgeschlossen",
     "waiting_party": "Warte auf Gruppenmitglieder...",
     "locked_in": "Eingeloggt",
-    "submitting": "Runde wird berechnet..."
+    "submitting": "Runde wird berechnet...",
+    "charging_skill": "LÄDT AUF",
+    "stagger_label": "Taumel",
+    "stagger_breaking": "Kurz vor Bruch!",
+    "aggro_label": "Aggro",
+    "taunted_label": "Provoziert",
+    "companion_kit": "Kampf-Kit",
+    "kit_ready": "Bereit",
+    "kit_cd": "Abklingzeit"
   },
   "inventory": {
     "all": "Alle Gegenstände",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Durchbruch synthetisieren",
     "deduce_single_clue": "🔮 Mit einzelnem Hinweis deduzieren",
     "main_objective": "Hauptziel",
+    "primary_operation": "Hauptoperation",
     "peak_chapter": "Höhepunkt-Kapitel",
     "aid_secured": "Unterstützung Aktiv",
     "bypass_active": "Abkürzung Aktiv",
@@ -270,7 +279,13 @@
     "source_burned": "Verbrannt",
     "source_cold": "Kalt",
     "source_claimed": "Gesichert",
-    "source_bonus": "Bonus-Spur"
+    "source_bonus": "Bonus-Spur",
+    "corroboration_confirmed": "Spur Bestätigt",
+    "partial_corroboration_hint": "Beide Schlüsselhinweise passen zusammen. Kombiniere einen mit einer Optionalen oder Bonus-Spur für den Durchbruch.",
+    "clue_tier_key": "Schlüsselhinweis",
+    "clue_tier_corroborating": "Stützend",
+    "off_hours_trace": "Spurensuche Außerhalb (+2 SG)",
+    "threat_pushed_back": "Bedrohung Verzögert (-1)"
   },
   "quest": {
     "threat_clock": {

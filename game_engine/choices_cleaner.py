@@ -325,10 +325,10 @@ def deduplicate_redundant_choices(
                 winner = dict(existing)
                 loser = cand
             # Preserve verified quest / target metadata if winner lacked it
-            for k_meta in ("target_npc", "quest_id", "sub_obj_id", "stage_index", "contract_type"):
+            for k_meta in ("target_npc", "quest_id", "sub_obj_id", "stage_index", "contract_type", "clue_source_id"):
                 if not winner.get(k_meta) and loser.get(k_meta):
                     winner[k_meta] = loser[k_meta]
-            for k_bool in ("is_quest_action", "is_story_quest", "is_climax_action", "_python_verified_quest", "_priority_slot"):
+            for k_bool in ("is_quest_action", "is_story_quest", "is_climax_action", "is_premature_climax", "rush_climax", "off_hours_fallback", "is_bonus_clue", "_python_verified_quest", "_server_stamped", "_priority_slot"):
                 if loser.get(k_bool) and not winner.get(k_bool):
                     winner[k_bool] = True
             deduped[matched_idx] = winner
@@ -664,6 +664,14 @@ def is_exempt_free_action(choice: dict, in_dialogue_mode: bool = False, context 
     return False
 
 
+def _sanitize_choice_labels(choices: list) -> list:
+    """Strip any leaked internal tags or raw HP/MP/DC tokens from final choice labels."""
+    for ch in choices:
+        if isinstance(ch, dict) and isinstance(ch.get("label"), str) and ch["label"]:
+            ch["label"] = game_engine.sanitize_internal_tags_and_raw_stats(ch["label"]).strip()[:190] or ch["label"]
+    return choices
+
+
 def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: str = "", char: dict = None, dialogue_partner: str = None, current_npcs: list = None, session_id: int = None, departed_npcs: list = None) -> list:
     from scenario_data import is_mechanic_enabled, is_non_combat_scenario, has_tag
     is_non_combat = (
@@ -685,7 +693,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
     if isinstance(choices, list):
         for c in choices[:25]:
             if isinstance(c, str):
-                label_str = str(c).strip()
+                label_str = game_engine.sanitize_internal_tags_and_raw_stats(str(c).strip()).strip()
                 if not label_str or is_malformed_choice_label(label_str):
                     continue
                 stat, req_v = infer_choice_stat_and_dc(label_str, char=char)
@@ -705,7 +713,11 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 continue
 
             raw_label = c.get("label") or c.get("text") or c.get("action")
-            label_str = str(raw_label).strip() if raw_label is not None else ""
+            label_str = (
+                game_engine.sanitize_internal_tags_and_raw_stats(str(raw_label).strip()).strip()
+                if raw_label is not None
+                else ""
+            )
             if not label_str or is_malformed_choice_label(label_str):
                 continue
             label_lower = label_str.lower()
@@ -792,6 +804,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     _strip_leading_emojis(label_str),
                     flags=re.IGNORECASE,
                 ).strip() or _strip_leading_emojis(label_str)
+            clean_label_str = game_engine.sanitize_internal_tags_and_raw_stats(clean_label_str).strip()
             if not clean_label_str or clean_label_str.lower() in ("act", "action", "choice", "none", "null") or is_malformed_choice_label(clean_label_str):
                 clean_label_str = getattr(cls, 'STAT_FALLBACK_LABELS', DEFAULT_STAT_FALLBACK_LABELS).get(stat, 'Take action')
             elif is_party_recruit:
@@ -866,11 +879,20 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             else:
                 _verified_quest = False
 
+            _has_legit_mp_mechanic = bool(
+                c.get("spell_id")
+                or c.get("is_covert_ability")
+                or _is_server_stamped
+                or c.get("_deterministic_supplement")
+                or c.get("incursion_action")
+            )
+            safe_mp_cost = max(0, min(250, mp_cost)) if _has_legit_mp_mechanic else 0
+
             entry_dict = {
                 "label": clean_label_str[:190],
                 "stat": stat,
                 "requirement": max(0, min(20, requirement)),
-                "mp_cost": max(0, mp_cost),
+                "mp_cost": safe_mp_cost,
                 "gold_spent": max(0, _safe_int(c.get("gold_spent", c.get("gold_cost", 0)), default=0) or 0),
                 "triggers_loot_roll": bool(c.get("triggers_loot_roll", False)),
                 "is_fallback": bool(c.get("is_fallback", False)),
@@ -879,6 +901,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "is_quest_action": _verified_quest,
                 "is_climax_action": bool(c.get("is_climax_action", False) and _verified_quest),
                 "is_premature_climax": bool(c.get("is_premature_climax", False) and _verified_quest),
+                "rush_climax": bool(c.get("rush_climax", False) and (_verified_quest or _is_server_stamped or not session_id)),
+                "off_hours_fallback": bool(c.get("off_hours_fallback", False) and (_verified_quest or _is_server_stamped or not session_id)),
                 "is_story_quest": bool(c.get("is_story_quest", False) and _verified_quest),
                 "breakthrough_leveraged": bool(c.get("breakthrough_leveraged", False)) if (_is_server_stamped or _verified_quest or not session_id) else False,
                 "intent": early_intent,
@@ -2625,7 +2649,7 @@ def build_hybrid_turn_choices(
     )
 
     if in_active_intimate_turn:
-        return cleaned[:5]
+        return _sanitize_choice_labels(cleaned[:5])
 
     # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint in live session
     if session_id and eff_loc and not any(isinstance(c, dict) and c.get("is_quest_action") for c in cleaned):
@@ -2975,4 +2999,4 @@ def build_hybrid_turn_choices(
         from mechanics.social.conversation_choices import pin_dialogue_exit_last
         merged_choices = pin_dialogue_exit_last(merged_choices, new_partners, max_total=8)
 
-    return merged_choices
+    return _sanitize_choice_labels(merged_choices)

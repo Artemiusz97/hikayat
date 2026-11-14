@@ -196,6 +196,7 @@ QUEST_UI_LABELS = {
     "threat_paused": "Wstrzymany (Kulminacja)",
     "threat_dormant": "Uśpiony do rozpoczęcia rozdziału",
     "threat_reinforced": "Posiłki Wroga",
+    "threat_pushed_back": "Zagrożenie Opóźnione (-1)",
     "threat_scar_pending": "Ryzyko Blizny Rozdziału",
     "clue_sources": "Tropy i Źródła",
     "source_open": "Otwarty",

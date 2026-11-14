@@ -340,6 +340,9 @@ def create_promise(
     deadline_day: Optional[int] = None,
     deadline_minute: Optional[int] = None,
     deadline_turn: Optional[int] = None,
+    scheduled_day: Optional[int] = None,
+    start_minute: Optional[int] = None,
+    title: str = "",
     metadata: Optional[Dict[str, Any]] = None,
     turn_created: int = 0
 ) -> Dict[str, Any]:
@@ -366,13 +369,23 @@ def create_promise(
     promiser_canon = _canon_key(promiser) or "player"
     c_key = f"promise_{session_id}_{clean_target}_{int(now)}_{uuid.uuid4().hex[:6]}"
     disp_target = raw_target.replace("_", " ").title() if "_" in raw_target else raw_target
-    title = f"Promise to {disp_target}" if raw_target else "Pledge"
+    title_val = str(title or meta.get("title") or "").strip() or (f"Promise to {disp_target}" if raw_target else "Pledge")
 
     participants = [
         {"person_key": promiser_canon, "role": "promiser", "status": "active"},
         {"person_key": clean_target, "name": disp_target or clean_target, "role": "promisee", "status": "pending"}
     ]
-    sched_day_val = max(1, int(deadline_day or 1)) if has_time_deadline else None
+    explicit_sched_day = scheduled_day if scheduled_day is not None else meta.get("scheduled_day")
+    if explicit_sched_day is not None:
+        sched_day_val: Optional[int] = max(1, int(explicit_sched_day))
+    else:
+        sched_day_val = max(1, int(deadline_day or 1)) if has_time_deadline else None
+    end_day_val = max(1, int(deadline_day or sched_day_val or 1)) if (has_time_deadline or sched_day_val is not None) else None
+    explicit_start_min = start_minute if start_minute is not None else meta.get("start_minute")
+    if explicit_start_min is not None:
+        start_min_val = max(0, int(explicit_start_min))
+    else:
+        start_min_val = max(0, int(deadline_minute or 0)) if deadline_minute is not None else 0
     end_min_val = max(0, int(deadline_minute if deadline_minute is not None else 1439)) if has_time_deadline else 1439
 
     with get_conn() as conn:
@@ -386,11 +399,11 @@ def create_promise(
             ) VALUES (?, ?, ?, ?, ?, ?, '', '', ?, ?, ?, ?, ?, 'active', 'in_person', ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, c_key, c_type, promiser_canon, clean_target,
-                json.dumps(participants), sched_day_val, sched_day_val,
-                max(0, int(deadline_minute or 0)) if deadline_minute is not None else 0,
+                json.dumps(participants), sched_day_val, end_day_val,
+                start_min_val,
                 end_min_val,
                 deadline_turn, 1 if meta.get("is_confidential") or subtype == "secret" else 0,
-                title, description.strip(), json.dumps(meta), turn_created, now, now
+                title_val, description.strip(), json.dumps(meta), turn_created, now, now
             )
         )
         row_id = cur.lastrowid

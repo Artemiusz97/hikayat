@@ -1,6 +1,7 @@
 import db
 import asyncio
 import json
+import threading
 import time
 import hashlib
 import random
@@ -1646,124 +1647,131 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
 def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
     """Ensure all non-hostile present scene NPCs are registered as contacts in this session."""
-    sess = db.get_session(session_id)
-    if not sess:
+    ensuring_set = _get_ensuring_scene_set()
+    if session_id in ensuring_set:
         return
-    current_npcs = sess.get("current_npcs") or []
-    if not current_npcs:
-        return
+    ensuring_set.add(session_id)
+    try:
+        sess = db.get_session(session_id)
+        if not sess:
+            return
+        current_npcs = sess.get("current_npcs") or []
+        if not current_npcs:
+            return
 
-    scen_key = sess.get("scenario", "fantasy")
-    import scenario_data
-    if not (scenario_data.is_mechanic_enabled(scen_key, "contact_list") or scenario_data.is_mechanic_enabled(scen_key, "relationship_meter")):
-        return
+        scen_key = sess.get("scenario", "fantasy")
+        import scenario_data
+        if not (scenario_data.is_mechanic_enabled(scen_key, "contact_list") or scenario_data.is_mechanic_enabled(scen_key, "relationship_meter")):
+            return
 
-    import game_engine
-    present_lower_names = {
-        game_engine._get_npc_name(npc).lower()
-        for npc in current_npcs
-        if game_engine._get_npc_name(npc)
-    }
-    with get_conn() as conn:
-        existing_rows = conn.execute(
-            "SELECT id, npc_id, name, basic_info_json FROM contacts WHERE session_id=?",
-            (session_id,),
-        ).fetchall()
-        existing_names = {str(r["name"]).strip().lower() for r in existing_rows if r["name"]}
-        existing_ids = {str(r["npc_id"]).strip().lower() for r in existing_rows if r["npc_id"]}
-        for r in existing_rows:
-            r_name = str(r["name"] or "").strip().lower()
-            r_id = str(r["npc_id"] or "").strip().lower()
-            if r_name in present_lower_names or r_id in present_lower_names:
-                try:
-                    b_existing = json.loads(r["basic_info_json"] or "{}")
-                    if isinstance(b_existing, dict) and (not b_existing.get("met_in_person") or b_existing.get("offscreen_ripple_only")):
-                        b_existing["met_in_person"] = True
-                        b_existing.pop("offscreen_ripple_only", None)
-                        conn.execute(
-                            "UPDATE contacts SET basic_info_json=? WHERE id=?",
-                            (json.dumps(b_existing), r["id"]),
-                        )
-                except Exception:
-                    pass
+        import game_engine
+        present_lower_names = {
+            game_engine._get_npc_name(npc).lower()
+            for npc in current_npcs
+            if game_engine._get_npc_name(npc)
+        }
+        with get_conn() as conn:
+            existing_rows = conn.execute(
+                "SELECT id, npc_id, name, basic_info_json FROM contacts WHERE session_id=?",
+                (session_id,),
+            ).fetchall()
+            existing_names = {str(r["name"]).strip().lower() for r in existing_rows if r["name"]}
+            existing_ids = {str(r["npc_id"]).strip().lower() for r in existing_rows if r["npc_id"]}
+            for r in existing_rows:
+                r_name = str(r["name"] or "").strip().lower()
+                r_id = str(r["npc_id"] or "").strip().lower()
+                if r_name in present_lower_names or r_id in present_lower_names:
+                    try:
+                        b_existing = json.loads(r["basic_info_json"] or "{}")
+                        if isinstance(b_existing, dict) and (not b_existing.get("met_in_person") or b_existing.get("offscreen_ripple_only")):
+                            b_existing["met_in_person"] = True
+                            b_existing.pop("offscreen_ripple_only", None)
+                            conn.execute(
+                                "UPDATE contacts SET basic_info_json=? WHERE id=?",
+                                (json.dumps(b_existing), r["id"]),
+                            )
+                    except Exception:
+                        pass
 
-    unadded = []
-    for npc in current_npcs:
-        n_name = game_engine._get_npc_name(npc)
-        if n_name and (n_name.lower() not in existing_names and n_name.lower() not in existing_ids):
-            unadded.append(npc)
+        unadded = []
+        for npc in current_npcs:
+            n_name = game_engine._get_npc_name(npc)
+            if n_name and (n_name.lower() not in existing_names and n_name.lower() not in existing_ids):
+                unadded.append(npc)
 
-    if not unadded:
-        return
+        if not unadded:
+            return
 
-    enemies = sess.get("nearby_enemies", [])
-    enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
+        enemies = sess.get("nearby_enemies", [])
+        enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
 
-    party_char_names = set()
-    if character_id:
-        c = db.get_character_by_id(character_id) or db.get_character(character_id)
-        if c and c.get("name"):
-            party_char_names.add(str(c["name"]).strip().lower())
-    for uid in (sess.get("turn_order") or []):
-        tc = db.get_character(uid)
-        if tc and tc.get("name"):
-            party_char_names.add(str(tc["name"]).strip().lower())
+        party_char_names = set()
+        if character_id:
+            c = db.get_character_by_id(character_id) or db.get_character(character_id)
+            if c and c.get("name"):
+                party_char_names.add(str(c["name"]).strip().lower())
+        for uid in (sess.get("turn_order") or []):
+            tc = db.get_character(uid)
+            if tc and tc.get("name"):
+                party_char_names.add(str(tc["name"]).strip().lower())
 
-    import namegen
-    from mechanics.world.mobility import get_session_dialogue_partners
-    dialogue_partners = {p.lower() for p in get_session_dialogue_partners(sess)}
+        import namegen
+        from mechanics.world.mobility import get_session_dialogue_partners
+        dialogue_partners = {p.lower() for p in get_session_dialogue_partners(sess)}
 
-    scene_narrative = str(sess.get("narrative") or "")
-    for npc in unadded:
-        n_name = game_engine._get_npc_name(npc)
-        if not n_name or n_name.lower() in enemy_names or n_name.lower() in party_char_names:
-            continue
-
-        # A1: If an NPC parent from an existing household appears in-scene, promote them to a Contact
-        try:
-            import mechanics.social.genealogy as genealogy
-            promoted_parent = genealogy.maybe_promote_scene_parent(session_id, n_name)
-            if promoted_parent:
+        scene_narrative = str(sess.get("narrative") or "")
+        for npc in unadded:
+            n_name = game_engine._get_npc_name(npc)
+            if not n_name or n_name.lower() in enemy_names or n_name.lower() in party_char_names:
                 continue
-        except Exception:
-            pass
 
-        n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
-        n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
+            # A1: If an NPC parent from an existing household appears in-scene, promote them to a Contact
+            try:
+                import mechanics.social.genealogy as genealogy
+                promoted_parent = genealogy.maybe_promote_scene_parent(session_id, n_name)
+                if promoted_parent:
+                    continue
+            except Exception:
+                pass
 
-        # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
-        import mechanics.social.relationships as relationships
-        if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
-            continue
+            n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
+            n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
 
-        # Do not auto-add pure generic ambient crowd (e.g. "Drunken Patron", "Town Guard") unless spoken to or friendly
-        disp = str(npc.get("disposition", "")).lower() if isinstance(npc, dict) else ""
-        is_dialogue = (n_name.lower() in dialogue_partners) or any(dp in n_name.lower() or n_name.lower() in dp for dp in dialogue_partners)
-        if namegen.is_generic_role_name(n_name) and not is_dialogue and disp not in ("friendly", "companion", "ally"):
-            continue
+            # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
+            import mechanics.social.relationships as relationships
+            if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
+                continue
 
-        b_info = {"met_in_person": True}
-        if isinstance(npc, dict):
-            for k in ("role", "occupation", "description", "faction", "club", "club_role", "grade", "clique", "age", "mannerisms", "motivation", "disposition"):
-                val = npc.get(k)
-                if not _is_empty_info_val(val):
-                    b_info[k] = val
+            # Do not auto-add pure generic ambient crowd (e.g. "Drunken Patron", "Town Guard") unless spoken to or friendly
+            disp = str(npc.get("disposition", "")).lower() if isinstance(npc, dict) else ""
+            is_dialogue = (n_name.lower() in dialogue_partners) or any(dp in n_name.lower() or n_name.lower() in dp for dp in dialogue_partners)
+            if namegen.is_generic_role_name(n_name) and not is_dialogue and disp not in ("friendly", "companion", "ally"):
+                continue
 
-        upsert_contact(
-            session_id=session_id,
-            character_id=character_id,
-            npc_id=n_name,
-            name=n_name,
-            basic_info=b_info if b_info else None,
-            delta_score=0,
-            track=None,
-            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
-            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
-            race=npc.get("race", "") if isinstance(npc, dict) else "",
-            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
-            narrative_text=scene_narrative
-        )
+            b_info = {"met_in_person": True}
+            if isinstance(npc, dict):
+                for k in ("role", "occupation", "description", "faction", "club", "club_role", "grade", "clique", "age", "mannerisms", "motivation", "disposition"):
+                    val = npc.get(k)
+                    if not _is_empty_info_val(val):
+                        b_info[k] = val
+
+            upsert_contact(
+                session_id=session_id,
+                character_id=character_id,
+                npc_id=n_name,
+                name=n_name,
+                basic_info=b_info if b_info else None,
+                delta_score=0,
+                track=None,
+                new_traits=npc.get("traits") if isinstance(npc, dict) else None,
+                new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
+                race=npc.get("race", "") if isinstance(npc, dict) else "",
+                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                narrative_text=scene_narrative
+            )
+    finally:
+        ensuring_set.discard(session_id)
 
 def _apply_contact_household_residence(session_id: int, d: dict, hh: dict, scen_key: str) -> None:
     rel = d.get("relations") if isinstance(d.get("relations"), dict) else {}
@@ -1795,8 +1803,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
     import mechanics.social.persona as persona
     import namegen
 
-    # Guard against recursive relation resolution
-    if session_id in _active_resolving_contacts:
+    # Guard against recursive relation / scene-contact resolution
+    if session_id in _get_resolving_contacts_set() or session_id in _get_ensuring_scene_set():
         resolve_relations = False
         ensure_scene = False
 
@@ -2098,7 +2106,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                     _apply_contact_household_residence(session_id, d, hh, scen_key)
                     d["household_id"] = hh["id"]
             elif not d.get("relations") or not d["relations"].get("family"):
-                _active_resolving_contacts.add(session_id)
+                resolving_set = _get_resolving_contacts_set()
+                resolving_set.add(session_id)
                 try:
                     import mechanics.social.genealogy as genealogy
                     d["relations"] = genealogy.ensure_contact_relations(d, session_id=session_id, scenario=scen_key)
@@ -2109,7 +2118,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                         except Exception:
                             pass
                 finally:
-                    _active_resolving_contacts.discard(session_id)
+                    resolving_set.discard(session_id)
 
     return contacts
 
@@ -3669,7 +3678,23 @@ def mark_school_character_hydrated(session_id: int, npc_id: str) -> bool:
     return True
 
 
-_active_resolving_contacts = set()
+_contact_reentrancy = threading.local()
+
+
+def _get_resolving_contacts_set() -> set[int]:
+    s = getattr(_contact_reentrancy, "resolving", None)
+    if s is None:
+        s = set()
+        _contact_reentrancy.resolving = s
+    return s
+
+
+def _get_ensuring_scene_set() -> set[int]:
+    s = getattr(_contact_reentrancy, "ensuring", None)
+    if s is None:
+        s = set()
+        _contact_reentrancy.ensuring = s
+    return s
 
 
 def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> dict:

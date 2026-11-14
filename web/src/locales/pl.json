@@ -91,7 +91,15 @@
     "resolved": "Rozwiązane",
     "waiting_party": "Oczekiwanie na członków drużyny...",
     "locked_in": "Zatwierdzone",
-    "submitting": "Rozpatrywanie tury..."
+    "submitting": "Rozpatrywanie tury...",
+    "charging_skill": "ŁADOWANIE",
+    "stagger_label": "Zachwianie",
+    "stagger_breaking": "Przełamanie!",
+    "aggro_label": "Agresja",
+    "taunted_label": "Sprowokowany",
+    "companion_kit": "Zestaw Bojowy",
+    "kit_ready": "Gotowe",
+    "kit_cd": "Odnowienie"
   },
   "inventory": {
     "all": "Wszystkie",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Zsyntetyzuj przełom",
     "deduce_single_clue": "🔮 Dedykuj z jednej poszlaki",
     "main_objective": "Cel Główny",
+    "primary_operation": "Główna Operacja",
     "peak_chapter": "Kulminacja",
     "aid_secured": "Wsparcie Aktywne",
     "bypass_active": "Skrót Aktywny",
@@ -270,7 +279,13 @@
     "source_burned": "Spalony",
     "source_cold": "Wygasł",
     "source_claimed": "Zdobyty",
-    "source_bonus": "Dodatkowy Trop"
+    "source_bonus": "Dodatkowy Trop",
+    "corroboration_confirmed": "Trop Potwierdzony",
+    "partial_corroboration_hint": "Oba Kluczowe Tropy pasują do siebie. Połącz jeden z Tropem Opcjonalnym lub Dodatkowym, aby odkryć Przełom.",
+    "clue_tier_key": "Kluczowy Trop",
+    "clue_tier_corroborating": "Potwierdzający",
+    "off_hours_trace": "Ślad Poza Godzinami (+2 ST)",
+    "threat_pushed_back": "Zagrożenie Opóźnione (-1)"
   },
   "quest": {
     "threat_clock": {

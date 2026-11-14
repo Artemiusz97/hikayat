@@ -367,19 +367,20 @@ def get_archetype_starting_location(
 
     if archetype == "in_media_res":
 
-        candidates = hazard_candidates or [(z, p, s) for (z, p, s, h) in seeded_triples if not h] or seeded_triples
+        candidates = hazard_candidates or [(z, p, s) for (z, p, s, h) in seeded_triples if not h] or [(z, p, s) for (z, p, s, _) in seeded_triples]
 
     elif archetype == "delve_threshold":
 
-        candidates = delve_candidates or [(z, p, s) for (z, p, s, h) in seeded_triples if not h] or seeded_triples
+        candidates = delve_candidates or [(z, p, s) for (z, p, s, h) in seeded_triples if not h] or [(z, p, s) for (z, p, s, _) in seeded_triples]
 
     else:
 
-        candidates = hub_candidates or seeded_triples
+        candidates = hub_candidates or [(z, p, s) for (z, p, s, _) in seeded_triples]
 
 
 
-    cz, cp, cs = random.choice(candidates)
+    chosen = random.choice(candidates)
+    cz, cp, cs = chosen[0], chosen[1], chosen[2]
     from .hierarchy import resolve_session_location_tokens
     return (
         resolve_session_location_tokens(session_id, cz, scenario_key, char_name),

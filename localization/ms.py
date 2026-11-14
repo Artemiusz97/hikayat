@@ -196,6 +196,7 @@ QUEST_UI_LABELS = {
     "threat_paused": "Dijeda (Kemuncak)",
     "threat_dormant": "Pegun sehingga bab dimulakan",
     "threat_reinforced": "Bala Bantuan",
+    "threat_pushed_back": "Ancaman Ditunda (-1)",
     "threat_scar_pending": "Risiko Parut Bab",
     "clue_sources": "Sumber Petunjuk",
     "source_open": "Terbuka",

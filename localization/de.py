@@ -193,6 +193,7 @@ QUEST_UI_LABELS = {
     "threat_paused": "Pausiert (Höhepunkt)",
     "threat_dormant": "Ruhend bis Kapitelbeginn",
     "threat_reinforced": "Verstärkung",
+    "threat_pushed_back": "Bedrohung Verzögert (-1)",
     "threat_scar_pending": "Kapitel-Narbenrisiko",
     "clue_sources": "Hinweisquellen",
     "source_open": "Offen",

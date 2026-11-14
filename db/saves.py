@@ -477,7 +477,11 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 continue
             for r in rows:
                 orig_cm_id = r.get("_orig_commitment_id") if tbl == "commitments_ledger" else None
-                orig_cl_id = r.get("_orig_clue_id") if tbl == "session_clues" else None
+                orig_cl_id = (
+                    (r.get("_orig_clue_id") if r.get("_orig_clue_id") is not None else r.get("id"))
+                    if tbl == "session_clues"
+                    else None
+                )
                 row_dict = {k: v for k, v in dict(r).items() if not str(k).startswith("_orig_")}
                 row_dict["session_id"] = new_session_id
                 if tbl in _char_scoped_social_tables:
@@ -734,12 +738,12 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             if isinstance(obj, dict):
                 out = {}
                 for k, v in obj.items():
-                    if k in ("clue_id", "synthesized_clue_id", "paired_with_clue_id") and v is not None:
+                    if k in ("clue_id", "synthesized_clue_id", "paired_with_clue_id", "clue_a_id", "clue_b_id") and v is not None:
                         try:
                             out[k] = clue_id_map.get(int(v), v)
                         except (TypeError, ValueError):
                             out[k] = v
-                    elif k in ("paired_with", "pairs_with"):
+                    elif k in ("paired_with", "pairs_with", "consumed_clue_ids"):
                         if isinstance(v, int):
                             out[k] = clue_id_map.get(v, v)
                         elif isinstance(v, str) and v.strip().isdigit():

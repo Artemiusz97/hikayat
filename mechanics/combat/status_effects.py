@@ -6,6 +6,7 @@ non-stacking hard crowd-control guardrails, defensive gear immunities, and turn 
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -57,7 +58,12 @@ def normalize_status_effect(
         Structured StatusEffectInstance conforming to canonical schema.
     """
     if isinstance(raw, dict):
-        name = str(raw.get("name", "")).strip() or "Unknown"
+        raw_name = str(raw.get("name", "")).strip() or "Unknown"
+        metadata = dict(raw.get("metadata") or {})
+        if "[" in raw_name:
+            metadata.setdefault("raw_tag", raw_name)
+        clean_dict_name = re.sub(r"\s*\[.*?\]", "", raw_name).strip()
+        name = clean_dict_name or raw_name
         category = raw.get("category", "combat")
         duration_type = raw.get("duration_type", "turns")
         rem_raw = raw.get("remaining_duration")
@@ -75,7 +81,6 @@ def normalize_status_effect(
         potency = float(pot_raw) if pot_raw is not None else 0.0
 
         src = str(raw.get("source") or source or "").strip()
-        metadata = dict(raw.get("metadata") or {})
 
         # Auto-compute potency if not explicitly set for DoTs
         if potency == 0.0:
@@ -146,8 +151,10 @@ def normalize_status_effect(
                 max_duration = int(default_dur)
             break
 
-    # Stagger metadata
+    # Stagger metadata & bracket modifier preservation for attribute parsing
     metadata: Dict[str, Any] = {}
+    if "[" in raw_str:
+        metadata["raw_tag"] = raw_str
     if "stagger" in eff_lower:
         metadata["stagger_vulnerable"] = True
         metadata["damage_taken_mult"] = 1.25
@@ -164,6 +171,42 @@ def normalize_status_effect(
         source=source,
         metadata=metadata,
     )
+
+
+def normalize_status_list(effects: Any, source: str = "") -> List[StatusEffectInstance]:
+    """Converts a raw status container (list, JSON str, dict, or mixed) into clean StatusEffectInstance items."""
+    if not effects:
+        return []
+    raw_items: List[Any]
+    if isinstance(effects, str):
+        s = effects.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                raw_items = parsed if isinstance(parsed, list) else [parsed]
+            except Exception:
+                raw_items = [s]
+        else:
+            raw_items = [s]
+    elif isinstance(effects, dict):
+        raw_items = [effects]
+    elif isinstance(effects, (list, tuple, set)):
+        raw_items = list(effects)
+    else:
+        return []
+
+    normalized: List[StatusEffectInstance] = []
+    for item in raw_items:
+        if item is None:
+            continue
+        if isinstance(item, str) and not item.strip():
+            continue
+        if isinstance(item, dict) and not str(item.get("name", "")).strip():
+            continue
+        normalized.append(normalize_status_effect(item, source=source))
+    return normalized
 
 
 def apply_status_effect(
@@ -251,7 +294,10 @@ def apply_status_effect(
     return True
 
 
-def tick_status_instance_timers(entity: Dict[str, Any]) -> Dict[str, Any]:
+def tick_status_instance_timers(
+    entity: Dict[str, Any],
+    non_lethal_mode: bool = False,
+) -> Dict[str, Any]:
     """Ticks turn timers on active status effects and applies DoT damage.
 
     Calculates DoT damage based on potency and intensity stacks:
@@ -259,7 +305,8 @@ def tick_status_instance_timers(entity: Dict[str, Any]) -> Dict[str, Any]:
       - 2 stacks: 1.5x potency
       - 3 stacks: 2.0x potency
 
-    Damage is deducted from temp_hp first, then hp (clamped at 0).
+    Damage is deducted from temp_hp first, then hp (clamped at 0, or 1 HP when
+    non_lethal_mode, sparring, or requires_non_lethal_subdue is active).
     Combat turn timers decrement by 1. Effects reaching 0 turns are expired.
     Non-combat, minute-based, and permanent conditions are preserved.
 
@@ -272,7 +319,6 @@ def tick_status_instance_timers(entity: Dict[str, Any]) -> Dict[str, Any]:
 
     if isinstance(raw_effects, str):
         try:
-            import json
             effects = json.loads(raw_effects) if raw_effects.strip().startswith("[") else [raw_effects]
         except Exception:
             effects = [raw_effects]
@@ -356,40 +402,76 @@ def tick_status_instance_timers(entity: Dict[str, Any]) -> Dict[str, Any]:
                 actual = dmg_int - temp
                 entity["temp_hp"] = 0
         cur_hp = int(entity.get("hp") or 0)
-        entity["hp"] = max(0, cur_hp - actual)
+        requires_dot_mercy = bool(
+            non_lethal_mode
+            or entity.get("sparring")
+            or entity.get("is_subdued_ready")
+            or entity.get("is_subdued")
+            or entity.get("requires_non_lethal_subdue")
+        )
+        if requires_dot_mercy and cur_hp > 0:
+            new_hp = max(1, cur_hp - actual)
+            entity["hp"] = new_hp
+            if new_hp == 1 and (cur_hp - actual) < 1:
+                entity["is_subdued_ready"] = True
+        else:
+            entity["hp"] = max(0, cur_hp - actual)
 
     entity["status_effects"] = new_effects
     return entity
 
 
-def format_status_badge(effect: Union[str, Dict[str, Any], StatusEffectInstance]) -> str:
+def format_status_badge(
+    effect: Union[str, Dict[str, Any], StatusEffectInstance],
+    include_duration: bool = False,
+) -> str:
     """Formats a player-facing status badge string without raw numerical stat leakage."""
     inst = normalize_status_effect(effect)
     clean_name = re.sub(r"\s*\[.*?\]", "", inst["name"]).strip() or inst["name"]
     stacks = inst.get("intensity_stacks", 1)
     stack_suffix = f" x{stacks}" if stacks > 1 else ""
-    return f"[{clean_name}{stack_suffix}]"
+    dur_suffix = ""
+    if include_duration and inst.get("duration_type") == "turns":
+        rem = int(inst.get("remaining_duration", 0) or 0)
+        if rem > 0:
+            dur_suffix = f" ({rem}t)"
+    elif include_duration and inst.get("duration_type") == "minutes":
+        rem = int(inst.get("remaining_duration", 0) or 0)
+        if rem > 0:
+            dur_suffix = f" ({rem}m)"
+    return f"[{clean_name}{stack_suffix}{dur_suffix}]"
 
 
 def get_status_stat_modifiers(entity: Dict[str, Any]) -> Dict[str, float]:
-    """Calculates active stat and damage multipliers from status effects."""
-    mods = {
+    """Calculates active stat, damage, and accuracy modifiers from status effects."""
+    mods: Dict[str, float] = {
         "damage_taken_mult": 1.0,
         "damage_dealt_mult": 1.0,
         "accuracy_mult": 1.0,
+        "accuracy_bonus": 0.0,
     }
     effects = entity.get("status_effects", [])
     if not isinstance(effects, list):
         return mods
 
     for eff in effects:
+        if eff is None or (isinstance(eff, str) and not eff.strip()):
+            continue
         inst = normalize_status_effect(eff)
         name_lower = inst["name"].lower()
         if "stagger" in name_lower:
             mods["damage_taken_mult"] *= 1.25
         if "weakened" in name_lower or "enfeebled" in name_lower:
             mods["damage_dealt_mult"] *= 0.8
+        if "demoralized" in name_lower:
+            mods["damage_dealt_mult"] *= 0.85
+        if "enraged" in name_lower:
+            mods["damage_dealt_mult"] *= 1.30
         if "blinded" in name_lower:
             mods["accuracy_mult"] *= 0.6
+        if "weakpoint analyzed" in name_lower:
+            mods["accuracy_bonus"] += 15.0
+        if "swarmed" in name_lower:
+            mods["accuracy_bonus"] -= 10.0
 
     return mods

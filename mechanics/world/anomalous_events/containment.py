@@ -464,6 +464,8 @@ def resolve_anomalous_combat_containment(
                 "sign",
                 patron_id=surr_patron["patron_id"],
                 tier=1,
+                patron_override=surr_patron,
+                discovery_channel="boss_surrender",
             )
         except ValueError as sign_err:
             return {

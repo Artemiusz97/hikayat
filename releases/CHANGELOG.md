@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.12.0** | 2026-11-14 | Minor | Combat Submodule Extraction, Boss Telegraph Sanitization, Crash Replay & LLM Tapes, Shielded Rollback & Web/Bot Parity. |
 | **v2.11.0** | 2026-11-13 | Minor | Modular Combat Engine Decomposition, Chapter Plan & Clue Progression, 6-Segment Threat Clock, Quest Agency Overhaul, and 5-Language Parity. |
 | **v2.10.0** | 2026-11-10 | Minor | Flow-Sensitive Static Bug Gate, Deterministic Social State Snapshots, Privacy Nudge Hierarchy, Contract Indexing & Packaging Hardening. |
 | **v2.9.0** | 2026-11-10 | Minor | Entity Contracts & Pacts, Realty & Property Ownership, Folklore Veil Settlements, Social Pacing Engine, and Security Layer. |
@@ -50,6 +51,20 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.12.0] - 2026-11-14
+
+#### Added & Enhanced
+- **Combat Phase Submodule Extraction (`mechanics/combat/`)**:
+  - Decomposed turn logic into `player_turn.py`, `player_spells.py`, `ally_turn.py`, `loadouts.py`, `enemy_turn.py`, `enemy_profiles.py`, `targeting.py`, and `post_combat.py`.
+- **Boss Telegraph Sanitization & Stagger Meter (`api/adventure.py`)**:
+  - Scrubbed raw `interrupt_threshold` and `accumulated_interrupt_damage` from enemy/boss payloads while computing qualitative `stagger_pct` progress bars.
+- **Deterministic Crash Capture & LLM Tape Replay (`services/crash_capture.py`, `llm_client.py`)**:
+  - Added ContextVar-scoped `use_llm_handler` and `record_llm_tape` plus opt-in pre-turn SQLite crash bundles with automatic local path scrubbing.
+- **Cancellation-Shielded Rollback (`services/turn_service.py`)**:
+  - Wrapped turn rollback in `asyncio.shield` and extended recovery to `combat_threat_ledger`, `combat_boss_telegraph`, `party_npcs`, and character `status_effects`.
+- **Web, Discord & 5-Language Parity**:
+  - Updated `PartyWidget.jsx`, `CharacterSheet.jsx`, `QuestLogPanel.jsx`, `StoryFeed.jsx`, and compiled production assets (`index-BAcdG7_s.js`, `index-h3KvT_y1.css`).
 
 ### [v2.11.0] - 2026-11-13
 
