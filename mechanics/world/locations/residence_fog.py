@@ -34,16 +34,6 @@ _UNLOCK_REL_TIERS: FrozenSet[str] = frozenset({
     "spouse",
     "family",
 })
-_EXPLICIT_HH_ROLES: FrozenSet[str] = frozenset({
-    "spouse",
-    "partner",
-    "parent",
-    "child",
-    "sibling",
-    "guardian",
-    "cohabitant",
-    "roommate",
-})
 
 
 def _slugify_res(text: str) -> str:
@@ -163,32 +153,29 @@ def can_materialize_npc_residence(
     basic = npc_dict.get("basic_info") if isinstance(npc_dict.get("basic_info"), Mapping) else {}
     db_basic = db_row.get("basic_info") if isinstance(db_row, Mapping) and isinstance(db_row.get("basic_info"), Mapping) else {}
     c_basic = contact_row.get("basic_info") if isinstance(contact_row, Mapping) and isinstance(contact_row.get("basic_info"), Mapping) else {}
+    has_db_record = (db_row is not None) or (contact_row is not None)
 
-    # 1. Explicit persisted unlock flag: DB truth is authoritative over stale caller dicts after rollback
+    # 1. Explicit persisted unlock flag: DB truth is strictly authoritative over stale caller dicts
     if db_row is not None:
         if bool(db_row.get("residence_unlocked")):
             return True
-    elif contact_row is not None and "residence_unlocked" in c_basic:
+    elif contact_row is not None:
         if bool(c_basic.get("residence_unlocked")):
             return True
     else:
         if bool(npc_dict.get("residence_unlocked") or basic.get("residence_unlocked")):
             return True
 
-    # 2. Cohabiting partner / explicit household cohabitant / family
+    # 2. Explicit cohabitation or verified player-household membership (never trust bare SQL household_role)
     for src in (npc_dict, basic, db_row or {}, db_basic, c_basic):
         if isinstance(src, Mapping) and (src.get("cohabiting") or src.get("cohabiting_family")):
             return True
     if _is_player_household_cohabitant(sess_id, contact_row, db_row):
         return True
-    for src in (npc_dict, basic, db_row or {}, db_basic, c_basic):
-        if isinstance(src, Mapping):
-            hh_role = str(src.get("household_role") or "").strip().lower()
-            if hh_role in _EXPLICIT_HH_ROLES:
-                return True
 
-    # 3. Romantic partner / Friend-tier relationship (>= 100) without early break masking DB scores
-    for src in (db_row or {}, db_basic, c_basic, npc_dict, basic):
+    # 3. Romantic partner / Friend-tier relationship (>= 100): DB truth authoritative when present
+    tier_sources = (db_row or {}, db_basic, contact_row or {}, c_basic) if has_db_record else (npc_dict, basic)
+    for src in tier_sources:
         if isinstance(src, Mapping) and (src.get("is_romantic") or src.get("romantic_partner")):
             return True
         if isinstance(src, Mapping):
@@ -196,14 +183,13 @@ def can_materialize_npc_residence(
             if tier_norm in _UNLOCK_REL_TIERS or tier_norm.startswith("mutual_attraction"):
                 return True
 
+    raw_score_candidates = (
+        ((db_row or {}).get("affinity_score"), (contact_row or {}).get("relationship_score"))
+        if has_db_record
+        else (npc_dict.get("affinity_score"), npc_dict.get("relationship_score"), basic.get("affinity_score"))
+    )
     all_scores: List[int] = []
-    for raw_score in (
-        (db_row or {}).get("affinity_score"),
-        (contact_row or {}).get("relationship_score"),
-        npc_dict.get("affinity_score"),
-        npc_dict.get("relationship_score"),
-        basic.get("affinity_score"),
-    ):
+    for raw_score in raw_score_candidates:
         parsed = _parse_int_score(raw_score)
         if parsed is not None:
             all_scores.append(parsed)

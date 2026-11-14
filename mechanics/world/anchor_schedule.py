@@ -237,10 +237,15 @@ def _merge_roster_context(
                 if field in db_row and db_row[field] not in (None, ""):
                     eff[field] = db_row[field]
 
-        # DB row is authoritative for lifecycle status & residence unlock state (prevents stale dict rollback bypass)
-        db_status = str(db_row.get("staff_status") or "active").strip().lower()
-        if db_status != "active" or not eff.get("staff_status"):
-            eff["staff_status"] = db_status
+        # DB row is strictly authoritative over stale caller dicts (prevents stale dict rollback bypass)
+        db_status = str(db_row.get("staff_status") or "active").strip().lower() or "active"
+        eff["staff_status"] = db_status
+        eff_basic["staff_status"] = db_status
+        if "affinity_score" in db_row:
+            eff["affinity_score"] = db_row.get("affinity_score")
+            eff_basic["affinity_score"] = db_row.get("affinity_score")
+        if "tier_status" in db_row:
+            eff["tier_status"] = db_row.get("tier_status")
         unlocked_db = bool(db_row.get("residence_unlocked"))
         db_home = str(db_row.get("home_node_id") or "").strip()
         eff["residence_unlocked"] = unlocked_db
@@ -250,6 +255,13 @@ def _merge_roster_context(
             eff_basic["home_node_id"] = db_home
         else:
             eff_basic.pop("home_node_id", None)
+        for stale_key in ("is_romantic", "romantic_partner", "relationship_tier"):
+            if stale_key in db_basic:
+                eff_basic[stale_key] = db_basic[stale_key]
+                eff[stale_key] = db_basic[stale_key]
+            else:
+                eff_basic.pop(stale_key, None)
+                eff.pop(stale_key, None)
 
     eff["basic_info"] = eff_basic
     return eff, db_row
