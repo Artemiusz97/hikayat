@@ -7,13 +7,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Tuple
 
 import db
-from .locations.residences import (
+from .locations.residence_fog import (
     SHARED_ABSTRACT_RESIDENCE_NODE,
     can_materialize_npc_residence,
 )
+from .schedule_blocks import get_detailed_npc_time_phase, get_time_block_key
 from .world_schedule import is_weekend
 
 
@@ -62,33 +63,89 @@ SHIFT_PROFILES: Dict[str, Dict[str, Any]] = {
     },
 }
 
-_SHIFT_ALIASES: Dict[str, str] = {
-    "roaming": "roaming_merchant",
+_SHIFT_ALIASES: Dict[str, str] = {"roaming": "roaming_merchant"}
+
+_ANCHOR_ORIGINS: FrozenSet[str] = frozenset({
+    "venue_seed",
+    "role_slot_fill",
+    "roaming_merchant",
+    "replacement_hire",
+    "quest_seed",
+})
+
+_BLOCK_ORDER: Tuple[str, ...] = (
+    "morning",
+    "lunch",
+    "afternoon",
+    "evening",
+    "night",
+    "commute",
+    "class_afternoon",
+    "extracurricular",
+)
+
+_STATIC_BLOCK_ROLES: Dict[str, Dict[str, str]] = {
+    "day": {
+        "commute": "home",
+        "morning": "work",
+        "lunch": "work",
+        "class_afternoon": "work",
+        "afternoon": "work",
+        "extracurricular": "work",
+        "evening": "hangout",
+        "night": "home",
+    },
+    "evening": {
+        "commute": "home",
+        "morning": "hangout",
+        "lunch": "hangout",
+        "class_afternoon": "work",
+        "afternoon": "work",
+        "extracurricular": "work",
+        "evening": "work",
+        "night": "home",
+    },
+    "night": {
+        "commute": "home",
+        "morning": "home",
+        "lunch": "home",
+        "class_afternoon": "home",
+        "afternoon": "hangout",
+        "extracurricular": "hangout",
+        "evening": "work",
+        "night": "work",
+    },
+    "student": {
+        "commute": "work",
+        "morning": "work",
+        "lunch": "work",
+        "class_afternoon": "work",
+        "afternoon": "hangout",
+        "extracurricular": "hangout",
+        "evening": "hangout",
+        "night": "home",
+    },
+    "rotating": {
+        "commute": "work",
+        "morning": "work",
+        "lunch": "hangout",
+        "class_afternoon": "hangout",
+        "afternoon": "hangout",
+        "extracurricular": "work",
+        "evening": "work",
+        "night": "home",
+    },
+    "roaming_merchant": {
+        "commute": "work",
+        "morning": "work",
+        "lunch": "work",
+        "class_afternoon": "work",
+        "afternoon": "work",
+        "extracurricular": "work",
+        "evening": "work",
+        "night": "home",
+    },
 }
-
-_ANCHOR_ORIGINS = frozenset({"venue_seed", "role_slot_fill", "roaming_merchant", "companion_seed"})
-
-_BLOCK_ORDER: Tuple[str, ...] = ("morning", "lunch", "afternoon", "evening", "night")
-_BLOCK_DEFAULT_MINUTE: Dict[str, int] = {
-    "morning": 540,
-    "lunch": 750,
-    "afternoon": 900,
-    "evening": 1140,
-    "night": 1350,
-}
-
-
-def _minute_to_block(minute: int) -> str:
-    m = int(minute) % 1440
-    if 480 <= m < 720:
-        return "morning"
-    if 720 <= m < 840:
-        return "lunch"
-    if 840 <= m < 1080:
-        return "afternoon"
-    if 1080 <= m < 1260:
-        return "evening"
-    return "night"
 
 
 def _in_windows(minute: int, windows: List[Tuple[int, int]]) -> bool:
@@ -180,14 +237,19 @@ def _merge_roster_context(
                 if field in db_row and db_row[field] not in (None, ""):
                     eff[field] = db_row[field]
 
-        # DB row is authoritative for lifecycle status & residence unlock state
+        # DB row is authoritative for lifecycle status & residence unlock state (prevents stale dict rollback bypass)
         db_status = str(db_row.get("staff_status") or "active").strip().lower()
         if db_status != "active" or not eff.get("staff_status"):
             eff["staff_status"] = db_status
-        if "residence_unlocked" in db_row:
-            eff["residence_unlocked"] = bool(db_row.get("residence_unlocked"))
-        if db_row.get("home_node_id"):
-            eff["home_node_id"] = str(db_row.get("home_node_id") or "").strip()
+        unlocked_db = bool(db_row.get("residence_unlocked"))
+        db_home = str(db_row.get("home_node_id") or "").strip()
+        eff["residence_unlocked"] = unlocked_db
+        eff_basic["residence_unlocked"] = unlocked_db
+        eff["home_node_id"] = db_home
+        if db_home:
+            eff_basic["home_node_id"] = db_home
+        else:
+            eff_basic.pop("home_node_id", None)
 
     eff["basic_info"] = eff_basic
     return eff, db_row
@@ -226,10 +288,7 @@ def _is_anchor_npc(eff: Mapping[str, Any], db_row: Optional[Dict[str, Any]]) -> 
         return True
     if use_anchor or route:
         return True
-    if eff.get("workplace_node_id") or eff.get("hangout_node_id") or _is_24h_station(eff):
-        return True
-    raw_shift = str(eff.get("shift_profile") or basic.get("shift_profile") or "").strip().lower()
-    return raw_shift in SHIFT_PROFILES or raw_shift in _SHIFT_ALIASES
+    return bool(eff.get("workplace_node_id") or eff.get("hangout_node_id") or _is_24h_station(eff))
 
 
 def _resolve_active_work_node(eff: Mapping[str, Any], current_day: int, seed_key: str) -> str:
@@ -253,6 +312,36 @@ def _is_rest_or_off_day(eff: Mapping[str, Any], profile: Mapping[str, Any], curr
     return False
 
 
+def _resolve_home_node(
+    eff: Mapping[str, Any],
+    session_id: Optional[int],
+    scen_key: str,
+    seed_key: str,
+) -> str:
+    basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    raw_home = str(eff.get("home_node_id") or basic.get("home_node_id") or "").strip()
+    if not can_materialize_npc_residence(session_id, eff):
+        return SHARED_ABSTRACT_RESIDENCE_NODE
+    if raw_home and raw_home != SHARED_ABSTRACT_RESIDENCE_NODE:
+        return raw_home
+    if session_id:
+        try:
+            from .locations.residences import is_adult_special_agent_contact, resolve_agent_residence_blueprint
+
+            if is_adult_special_agent_contact(eff) or bool(eff.get("is_special_agent") or eff.get("is_student_agent")):
+                bp = resolve_agent_residence_blueprint(int(session_id), eff, scen_key=scen_key)
+                bed_nid = str(bp.get("bedroom_node_id") or "").strip()
+                if bed_nid:
+                    return bed_nid
+            nodes = {n["node_id"]: n for n in db.get_session_world_nodes(int(session_id))}
+            for cand in (f"sub_npc_res_{seed_key}", f"fac_npc_res_{seed_key}"):
+                if cand in nodes:
+                    return cand
+        except Exception:
+            pass
+    return SHARED_ABSTRACT_RESIDENCE_NODE
+
+
 def resolve_anchor_schedule_nodes(
     npc: Mapping[str, Any],
     current_day: int = 1,
@@ -261,10 +350,10 @@ def resolve_anchor_schedule_nodes(
     current_minute: Optional[int] = None,
 ) -> Optional[Dict[str, str]]:
     """
-    Resolves canonical 5-block anchor-node schedule ({morning, lunch, afternoon, evening, night})
-    for world-roster NPCs, returning None for legacy High School / Folklore / Anomalous NPCs.
+    Resolves canonical 8-block anchor-node schedule (morning, lunch, afternoon, evening,
+    night, commute, class_afternoon, extracurricular) for world-roster NPCs, returning
+    None for legacy High School / Folklore / Anomalous NPCs.
     """
-    _ = scen_key  # Reserved for future scenario calendar overrides
     if not isinstance(npc, Mapping):
         return None
 
@@ -275,48 +364,53 @@ def resolve_anchor_schedule_nodes(
     basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
     seed_key = _canonical_seed_key(eff)
     route = _parse_roaming_route(eff.get("roaming_route") or basic.get("roaming_route"))
-    shift_key = _normalize_shift_profile(
-        eff.get("shift_profile") or basic.get("shift_profile"),
-        has_route=bool(route),
-    )
+    shift_key = _normalize_shift_profile(eff.get("shift_profile") or basic.get("shift_profile"), has_route=bool(route))
     profile = SHIFT_PROFILES[shift_key]
 
     work_node = _resolve_active_work_node(eff, current_day, seed_key)
     hangout_node = str(eff.get("hangout_node_id") or basic.get("hangout_node_id") or "").strip()
-    raw_home = str(eff.get("home_node_id") or basic.get("home_node_id") or "").strip()
+    home_node = _resolve_home_node(eff, session_id, scen_key, seed_key)
 
-    if raw_home and raw_home != SHARED_ABSTRACT_RESIDENCE_NODE and can_materialize_npc_residence(session_id, eff):
-        home_node = raw_home
-    else:
-        home_node = SHARED_ABSTRACT_RESIDENCE_NODE
+    # Inactive staff take precedence over 24h station duty
+    if _is_inactive_staff(eff):
+        return {block: home_node for block in _BLOCK_ORDER}
 
     if _is_24h_station(eff) and work_node:
         return {block: work_node for block in _BLOCK_ORDER}
 
-    if _is_inactive_staff(eff):
-        return {block: home_node for block in _BLOCK_ORDER}
-
     off_day = _is_rest_or_off_day(eff, profile, current_day, seed_key)
-    override_block = _minute_to_block(current_minute) if current_minute is not None else ""
     fallback_hangout = hangout_node or (work_node if shift_key == "roaming_merchant" else home_node)
+
+    roles = dict(_STATIC_BLOCK_ROLES[shift_key])
+    if off_day:
+        for blk, r in list(roles.items()):
+            if r == "work":
+                roles[blk] = "hangout"
+
+    if current_minute is not None:
+        safe_min = int(current_minute) % 1440
+        phase_key = get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)
+        canon_key = get_time_block_key(safe_min)
+        if not off_day and _in_windows(safe_min, profile["work_windows"]):
+            role_now = "work"
+        elif _in_windows(safe_min, profile["hangout_windows"]) or (
+            off_day and not _in_windows(safe_min, profile["sleep_windows"])
+        ):
+            role_now = "hangout"
+        else:
+            role_now = "home"
+        roles[phase_key] = role_now
+        roles[canon_key] = role_now
 
     schedule: Dict[str, str] = {}
     for block in _BLOCK_ORDER:
-        eval_min = (
-            int(current_minute) % 1440
-            if current_minute is not None and block == override_block
-            else _BLOCK_DEFAULT_MINUTE[block]
-        )
-        if _in_windows(eval_min, profile["work_windows"]):
-            if off_day:
-                schedule[block] = fallback_hangout or home_node
-            else:
-                schedule[block] = work_node or fallback_hangout or home_node
-        elif _in_windows(eval_min, profile["hangout_windows"]):
+        role_b = roles[block]
+        if role_b == "work":
+            schedule[block] = work_node or fallback_hangout or home_node
+        elif role_b == "hangout":
             schedule[block] = fallback_hangout or home_node
         else:
             schedule[block] = home_node
-
     return schedule
 
 
@@ -344,10 +438,7 @@ def is_npc_on_active_shift(
     basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
     seed_key = _canonical_seed_key(eff)
     route = _parse_roaming_route(eff.get("roaming_route") or basic.get("roaming_route"))
-    shift_key = _normalize_shift_profile(
-        eff.get("shift_profile") or basic.get("shift_profile"),
-        has_route=bool(route),
-    )
+    shift_key = _normalize_shift_profile(eff.get("shift_profile") or basic.get("shift_profile"), has_route=bool(route))
     profile = SHIFT_PROFILES[shift_key]
     work_node = _resolve_active_work_node(eff, current_day, seed_key)
     if not work_node:
