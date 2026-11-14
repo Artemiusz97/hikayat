@@ -24,6 +24,9 @@ from .world_schedule import (
 )
 
 from .npc_schedule import (
+    SHIFT_PROFILES,
+    resolve_anchor_schedule_nodes,
+    is_npc_on_active_shift,
     SCHEDULE_TIME_BLOCKS,
     BLOCK_BOUNDARIES,
     get_time_block_key,
@@ -54,6 +57,9 @@ __all__ = [
     "get_world_schedule_state",
     "evaluate_world_schedule_node_access",
     # NPC Schedule
+    "SHIFT_PROFILES",
+    "resolve_anchor_schedule_nodes",
+    "is_npc_on_active_shift",
     "SCHEDULE_TIME_BLOCKS",
     "BLOCK_BOUNDARIES",
     "get_time_block_key",

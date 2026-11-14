@@ -13,6 +13,9 @@ from .world_schedule import (
     evaluate_world_schedule_node_access,
 )
 from .npc_schedule import (
+    SHIFT_PROFILES,
+    resolve_anchor_schedule_nodes,
+    is_npc_on_active_shift,
     get_npc_schedule,
     get_npc_scheduled_location,
     get_npc_schedule_node_ids,
@@ -35,6 +38,9 @@ __all__ = [
     "is_campus_node_or_location",
     "get_world_schedule_state",
     "evaluate_world_schedule_node_access",
+    "SHIFT_PROFILES",
+    "resolve_anchor_schedule_nodes",
+    "is_npc_on_active_shift",
     "get_npc_schedule",
     "get_npc_scheduled_location",
     "get_npc_schedule_node_ids",
