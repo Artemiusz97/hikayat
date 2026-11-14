@@ -580,6 +580,33 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                                 )
                             except Exception:
                                 pass
+                elif tbl == "world_roster":
+                    raw_wr_id = str(row_dict.get("npc_id") or row_dict.get("name") or "").strip().lower()
+                    clean_wr_id = re.sub(r"[^a-z0-9]+", "_", raw_wr_id).strip("_")
+                    if clean_wr_id:
+                        row_dict["npc_id"] = clean_wr_id
+                    try:
+                        row_dict["affinity_score"] = max(-100, min(300, int(row_dict.get("affinity_score") or 0)))
+                    except (TypeError, ValueError):
+                        row_dict["affinity_score"] = 0
+                    for _wr_col, _wr_default in (
+                        ("roaming_route_json", "[]"),
+                        ("traits_json", "[]"),
+                        ("discovered_slots_json", "{}"),
+                        ("basic_info_json", "{}"),
+                        ("appearance_json", "{}"),
+                        ("turn_snapshots_json", "{}"),
+                    ):
+                        _wr_val = row_dict.get(_wr_col)
+                        if _wr_val is None:
+                            row_dict[_wr_col] = _wr_default
+                        elif isinstance(_wr_val, (dict, list)):
+                            row_dict[_wr_col] = json.dumps(_wr_val)
+                        elif isinstance(_wr_val, str):
+                            try:
+                                json.loads(_wr_val)
+                            except (json.JSONDecodeError, TypeError, ValueError):
+                                row_dict[_wr_col] = _wr_default
                 row_dict = {k: (json.dumps(v) if isinstance(v, (dict, list)) else v) for k, v in row_dict.items() if k in t_valid and k != "id"}
                 if not row_dict:
                     continue

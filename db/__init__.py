@@ -163,3 +163,20 @@ from .contracts import (
     upgrade_entity_contract_tier,
     upsert_user_patron_compendium,
 )
+from .roster import *
+from .roster import (
+    ALLOWED_ROSTER_ORIGINS,
+    ALLOWED_ROSTER_TIERS,
+    ALLOWED_SHIFT_PROFILES,
+    ALLOWED_STAFF_STATUSES,
+    WORLD_ROSTER_V54_DDL,
+    get_world_roster,
+    get_world_roster_npc,
+    mark_world_roster_staff_status,
+    promote_world_roster_to_contact,
+    record_discovered_schedule_slot,
+    record_world_roster_interaction,
+    rollback_world_roster_after_turn,
+    set_world_roster_residence_unlocked,
+    upsert_world_roster_npc,
+)

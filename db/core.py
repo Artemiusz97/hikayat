@@ -1031,6 +1031,43 @@ CREATE TABLE IF NOT EXISTS user_patron_compendium (
 );
 CREATE INDEX IF NOT EXISTS idx_user_patron_comp_uid ON user_patron_compendium(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_patron_comp_codex ON user_patron_compendium(user_id, codex_id);
+
+CREATE TABLE IF NOT EXISTS world_roster (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    npc_id                  TEXT NOT NULL,
+    name                    TEXT NOT NULL,
+    gender                  TEXT NOT NULL DEFAULT '',
+    race                    TEXT NOT NULL DEFAULT 'human',
+    role                    TEXT NOT NULL DEFAULT '',
+    origin                  TEXT NOT NULL DEFAULT 'venue_seed',
+    tier_status             TEXT NOT NULL DEFAULT 'seeded',
+    affinity_score          INTEGER NOT NULL DEFAULT 0,
+    met_in_person           INTEGER NOT NULL DEFAULT 0,
+    first_met_turn          INTEGER DEFAULT NULL,
+    workplace_node_id       TEXT NOT NULL DEFAULT '',
+    home_node_id            TEXT NOT NULL DEFAULT '',
+    hangout_node_id         TEXT NOT NULL DEFAULT '',
+    roaming_route_json      TEXT NOT NULL DEFAULT '[]',
+    shift_profile           TEXT NOT NULL DEFAULT 'day',
+    staff_status            TEXT NOT NULL DEFAULT 'active',
+    staff_status_day        INTEGER NOT NULL DEFAULT 0,
+    is_unique_proprietor    INTEGER NOT NULL DEFAULT 0,
+    residence_unlocked      INTEGER NOT NULL DEFAULT 0,
+    residence_unlock_reason TEXT NOT NULL DEFAULT '',
+    discovered_slots_json   TEXT NOT NULL DEFAULT '{}',
+    basic_info_json         TEXT NOT NULL DEFAULT '{}',
+    appearance_json         TEXT NOT NULL DEFAULT '{}',
+    traits_json             TEXT NOT NULL DEFAULT '[]',
+    turn_snapshots_json     TEXT NOT NULL DEFAULT '{}',
+    turn_created            INTEGER NOT NULL DEFAULT 0,
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, npc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_world_roster_sess_tier ON world_roster(session_id, tier_status);
+CREATE INDEX IF NOT EXISTS idx_world_roster_workplace ON world_roster(session_id, workplace_node_id, staff_status);
 """
 
 
@@ -2112,6 +2149,16 @@ SCHEMA_MIGRATIONS.append(
             "ALTER TABLE sessions ADD COLUMN combat_threat_ledger_json TEXT NOT NULL DEFAULT '{}'",
             "ALTER TABLE sessions ADD COLUMN combat_boss_telegraph_json TEXT NOT NULL DEFAULT '{}'",
         ],
+    )
+)
+
+from .roster import WORLD_ROSTER_V54_DDL as _WORLD_ROSTER_V54_DDL
+
+SCHEMA_MIGRATIONS.append(
+    (
+        54,
+        "world_roster_closed_world_v54",
+        list(_WORLD_ROSTER_V54_DDL),
     )
 )
 
@@ -3518,7 +3565,8 @@ SESSION_CHILD_TABLES = (
     "campaign_spines", "quest_dossiers", "session_anomaly_records", "player_properties",
     "npc_social_composure", "character_social_daily", "social_topic_states",
     "contact_dossier_discoveries", "social_turn_snapshots",
-    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots"
+    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots",
+    "world_roster"
 )
 
 STAT_COLUMN = {"STR": "str_", "PER": "per_", "END": "end_", "CHA": "cha",
