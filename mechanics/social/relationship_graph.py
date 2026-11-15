@@ -565,8 +565,11 @@ def form_tie(
         if existing:
             tie_id = existing["id"]
             snapped_meta = _snapshot_tie_row_metadata(existing, turn)
-            merged_meta = dict(metadata or {})
-            merged_meta["_turn_snapshots"] = snapped_meta["_turn_snapshots"]
+            merged_meta = dict(snapped_meta)
+            if isinstance(metadata, dict) and metadata:
+                for mk, mv in metadata.items():
+                    if mk != "_turn_snapshots":
+                        merged_meta[mk] = mv
             c.execute(
                 """UPDATE social_ties
                    SET closeness = ?, visibility = ?, origin = ?, metadata_json = ?, updated_at = ?

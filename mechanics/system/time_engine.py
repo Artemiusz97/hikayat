@@ -536,7 +536,8 @@ def run_boundary_autonomy_and_epistemic_tick(
     epistemic_res: Dict[str, Any] = {}
     with db.UnitOfWork() as conn:
         for top in deltas.get("tie_ops") or []:
-            if top.get("op") == "nudge":
+            t_op = top.get("op")
+            if t_op == "nudge":
                 rg.record_tie_nudge(
                     sid,
                     str(top.get("person_a") or ""),
@@ -544,6 +545,31 @@ def run_boundary_autonomy_and_epistemic_tick(
                     str(top.get("axis") or ""),
                     float(top.get("delta") or 0.0),
                     turn=int(top.get("turn") or turn_no),
+                    conn=conn,
+                )
+            elif t_op == "evolve_tie":
+                ttype = str(top.get("tie_type") or "friend")
+                rg.form_tie(
+                    sid,
+                    str(top.get("person_a") or ""),
+                    str(top.get("person_b") or ""),
+                    ttype,
+                    closeness=int(top.get("closeness") or 50),
+                    visibility=top.get("visibility"),
+                    turn=int(top.get("turn") or turn_no),
+                    origin="autonomy_evolution",
+                    supersede=ttype in ("dating", "best_friend"),
+                    materialize=False,
+                    conn=conn,
+                )
+            elif t_op == "breakup":
+                rg.end_all_romantic_ties(
+                    sid,
+                    str(top.get("person_a") or ""),
+                    str(top.get("person_b") or ""),
+                    turn=int(top.get("turn") or turn_no),
+                    reason=str(top.get("reason") or "breakup"),
+                    materialize=False,
                     conn=conn,
                 )
         r_muts = deltas.get("roster_mutations") or []
@@ -564,6 +590,26 @@ def run_boundary_autonomy_and_epistemic_tick(
             contacts=contacts,
             conn=conn,
         )
+
+    raw_gossip = deltas.get("gossip_posts") or []
+    if raw_gossip:
+        try:
+            formatted_posts = [
+                {
+                    "author_name": str(gp.get("author_name") or "Campus Pulse"),
+                    "author_handle": str(gp.get("author_handle") or "@campuspulse"),
+                    "content": str(gp.get("summary") or gp.get("content") or "").strip(),
+                    "tag": str(gp.get("tag") or "#Gossip"),
+                    "clue_hook": str(gp.get("clue_hook") or ""),
+                    "time_ago": str(gp.get("time_ago") or "Just now"),
+                }
+                for gp in raw_gossip
+                if isinstance(gp, dict) and (gp.get("summary") or gp.get("content"))
+            ]
+            if formatted_posts:
+                db.save_gossip_feed(sid, formatted_posts)
+        except Exception as _gp_err:
+            log.debug("Autonomy gossip feed write skipped for session %s: %s", sid, _gp_err)
 
     for ping in deltas.get("dm_pings") or []:
         try:

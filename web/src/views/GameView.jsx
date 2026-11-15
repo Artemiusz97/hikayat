@@ -357,6 +357,7 @@ const GameView = ({
               setWorldMapModalOpen(true);
             }}
             onSelectContact={handleSelectContact}
+            onQuickAction={handleAction}
           />
         );
       case 'hero':
@@ -606,6 +607,7 @@ const GameView = ({
             session={session}
             onOpenWorldMap={openWorldMap}
             onSelectContact={handleSelectContact}
+            onQuickAction={handleAction}
           />
         </aside>
       )}

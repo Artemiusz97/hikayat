@@ -1071,6 +1071,63 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     mode="combat",
                 )
                 outcome["_b17_neutralized"] = True
+            elif session_id and actions:
+                _wipe_targets: list[str] = []
+                _wipe_mode = ""
+                for _act in actions:
+                    if not isinstance(_act, dict):
+                        continue
+                    _st_a = str(_act.get("stat") or "NONE").upper()
+                    if not is_check_success(_act.get("check"), default_if_none=(_st_a in ("NONE", "FREE"))):
+                        continue
+                    _sp_id = str(_act.get("spell_id") or "").strip().lower()
+                    _sub_i = str(_act.get("sub_intent") or "").strip().lower()
+                    _lbl_a = str(_act.get("label") or _act.get("action") or "").strip().lower()
+                    _pact_meta = _act.get("_pact_cast_meta") if isinstance(_act.get("_pact_cast_meta"), dict) else {}
+                    _is_pact = bool(_act.get("is_pact_skill") or _sp_id.startswith("pact_") or _pact_meta.get("patron_id"))
+                    _patron_suppresses = False
+                    if _is_pact and _pact_meta.get("patron_id"):
+                        try:
+                            from mechanics.pacts import get_patron_by_id
+                            _pat_obj = get_patron_by_id(str(_pact_meta["patron_id"]), scenario_or_key=scen_key)
+                            _patron_suppresses = bool(((_pat_obj or {}).get("field_utility") or {}).get("suppresses_witness_heat"))
+                        except Exception:
+                            _patron_suppresses = False
+                    _is_skill_wipe = (
+                        _sub_i in ("memory_wipe", "patron_suppress_rumor", "scrub_witness")
+                        or any(
+                            tok in _sp_id or tok in _lbl_a
+                            for tok in (
+                                "obliviate", "memory_wipe", "wipe_memory", "mind_wipe", "memory_burn",
+                                "neural_wipe", "scrub_witness", "forensic_erasure", "lye_fog",
+                                "suppress_rumor", "erase witness", "wipe witness",
+                            )
+                        )
+                    )
+                    if not (_patron_suppresses or _is_skill_wipe):
+                        continue
+                    _wipe_mode = "pact" if (_is_pact or _patron_suppresses or _sub_i == "patron_suppress_rumor") else "skill"
+                    _tgt_w = str(_act.get("target_npc") or "").strip().lower().replace(" ", "_")
+                    if _tgt_w:
+                        _wipe_targets.append(_tgt_w)
+                    else:
+                        for _sn in (session.get("npcs") or []):
+                            if isinstance(_sn, dict):
+                                _sk = str(_sn.get("person_key") or _sn.get("npc_id") or _sn.get("name") or "").strip().lower().replace(" ", "_")
+                                if _sk:
+                                    _wipe_targets.append(_sk)
+                if _wipe_targets:
+                    from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                    neutralize_witnesses_from_combat_or_skill(
+                        session_id,
+                        defeated_npcs=[],
+                        killed_npcs=list(dict.fromkeys(_wipe_targets)),
+                        present_witnesses=[],
+                        turn=int(session.get("turn_count") or 0),
+                        location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                        mode=_wipe_mode or "skill",
+                    )
+                    outcome["_b17_neutralized"] = True
         if outcome.get("epistemic_signal"):
             from mechanics.social.epistemic_engine import resolve_fenced_epistemic_signal
             _uid = int(session.get("user_id") or 0)

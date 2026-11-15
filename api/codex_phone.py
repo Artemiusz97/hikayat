@@ -863,6 +863,8 @@ def _preload_fog_of_war_context(
     roster_rows: list[dict[str, Any]] = []
     primary_property: dict[str, Any] | None = None
     person_ties: list[dict[str, Any]] = []
+    active_ties_by_person: dict[str, list[dict[str, Any]]] = {}
+    active_events: list[dict[str, Any]] = []
     eff_contacts: list[dict[str, Any]] = list(preloaded_contacts or []) if preloaded_contacts is not None else []
     eff_party_npcs: list[dict[str, Any]] = list(preloaded_party_npcs or []) if preloaded_party_npcs is not None else []
     player_last_name = ""
@@ -892,12 +894,37 @@ def _preload_fog_of_war_context(
         except (sqlite3.Error, AttributeError, TypeError, ValueError):
             primary_property = None
         try:
-            if hasattr(rg, "get_person_ties"):
-                person_ties = rg.get_person_ties(sid, "player") or []
-            elif hasattr(rg, "get_ties"):
-                person_ties = rg.get_ties(sid, "player") or []
+            with db.get_conn() as conn_ties:
+                t_rows = conn_ties.execute(
+                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
+                    (sid,),
+                ).fetchall()
+            for tr in t_rows:
+                td = dict(tr)
+                pa = str(td.get("person_a_key") or "").strip().lower()
+                pb = str(td.get("person_b_key") or "").strip().lower()
+                if pa:
+                    active_ties_by_person.setdefault(pa, []).append(td)
+                if pb and pb != pa:
+                    active_ties_by_person.setdefault(pb, []).append(td)
+                if pa == "player" or pb == "player" or pa.startswith("player:") or pb.startswith("player:"):
+                    person_ties.append(td)
         except (sqlite3.Error, AttributeError, TypeError, ValueError):
-            person_ties = []
+            active_ties_by_person = {}
+            try:
+                if hasattr(rg, "get_person_ties"):
+                    person_ties = rg.get_person_ties(sid, "player") or []
+                elif hasattr(rg, "get_ties"):
+                    person_ties = rg.get_ties(sid, "player") or []
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                person_ties = []
+        try:
+            active_events = [
+                ev for ev in (db.get_world_events(sid, entity_type="macro_event") or [])
+                if isinstance(ev, dict)
+            ]
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            active_events = []
         if preloaded_contacts is None:
             try:
                 eff_contacts = mechanics.social.relationships.safe_get_contacts(
@@ -940,6 +967,26 @@ def _preload_fog_of_war_context(
     roster_by_key, roster_by_name_low = _index_npc_records(roster_rows)
     contacts_by_key, contacts_by_name_low = _index_npc_records(eff_contacts)
 
+    current_day: int | None = None
+    current_minute: int | None = None
+    if isinstance(eff_session, dict):
+        if eff_session.get("current_day") is not None:
+            current_day = int(eff_session.get("current_day") or 1)
+        if eff_session.get("current_minute") is not None:
+            current_minute = int(eff_session.get("current_minute"))
+    elif sid:
+        try:
+            db_day, db_min, _ = db.get_session_time(sid)
+            current_day = int(db_day or 1)
+            current_minute = int(db_min) if db_min is not None else None
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            pass
+    player_home_node_id = str(
+        (primary_property or {}).get("node_id")
+        or (eff_session.get("player_home_node_id") if isinstance(eff_session, dict) else "")
+        or ""
+    ).strip()
+
     return {
         "character_id": cid,
         "lang": str(lang or "en"),
@@ -957,6 +1004,11 @@ def _preload_fog_of_war_context(
         "contacts_by_key": contacts_by_key,
         "contacts_by_name_low": contacts_by_name_low,
         "person_ties": person_ties,
+        "active_ties_by_person": active_ties_by_person,
+        "active_events": active_events,
+        "current_day": current_day,
+        "current_minute": current_minute,
+        "player_home_node_id": player_home_node_id,
         "player_last_name": player_last_name,
         "household_cache": {},
         "party_npcs": eff_party_npcs,
@@ -1129,6 +1181,12 @@ def _enrich_contact_record(
             character_id=fow_char_id,
             preloaded=True,
             fow_schedule_revealed=bool(res.get("schedule_revealed")),
+            current_day=fow_context.get("current_day"),
+            current_minute=fow_context.get("current_minute"),
+            active_ties_by_person=fow_context.get("active_ties_by_person"),
+            roster_by_key=fow_context.get("roster_by_key"),
+            active_events=fow_context.get("active_events") or (),
+            player_home_node_id=str(fow_context.get("player_home_node_id") or ""),
         )
     else:
         known_routine = build_known_routine_payload(

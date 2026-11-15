@@ -1080,6 +1080,9 @@ def _resolve_discord_masked_dossier(
     if sess_id <= 0 and isinstance(c_in.get("known_routine"), dict):
         routine = dict(c_in["known_routine"])
     else:
+        sess_row = db.get_session(sess_id) if sess_id > 0 else None
+        s_day = int(sess_row.get("current_day") or 1) if isinstance(sess_row, dict) else None
+        s_min = int(sess_row.get("current_minute")) if (isinstance(sess_row, dict) and sess_row.get("current_minute") is not None) else None
         routine = build_known_routine_payload(
             enriched,
             session_id=sess_id,
@@ -1088,6 +1091,8 @@ def _resolve_discord_masked_dossier(
             debug_reveal_all=reveal_debug,
             character_id=int(c_in.get("character_id") or 0),
             fow_schedule_revealed=bool(enriched.get("schedule_revealed")),
+            current_day=s_day,
+            current_minute=s_min,
         )
     apply_known_routine_to_contact(enriched, routine, lang=ui_lang)
     return enriched, reveal_debug, ui_lang

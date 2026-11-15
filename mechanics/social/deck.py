@@ -425,6 +425,146 @@ def deal_social_deck_seeds(
             if seed_pool:
                 break
 
+    # 3b. D6 Mutual-Friend Tie Gossip & D9 Social Sandbox Seeds (Wingman / Mediate / Rivalry / Win Over)
+    if sid and clean_partners:
+        try:
+            from mechanics.social import relationship_graph as _deck_rg
+            from mechanics.world.npc_autonomy import is_npc_romance_shielded as _deck_is_shielded
+        except Exception:
+            _deck_rg = None
+            _deck_is_shielded = None
+
+        if _deck_rg is not None:
+            g_partner = clean_partners[rot_hash % len(clean_partners)]
+            p_canon = db.canon_social_npc_id(g_partner)
+            p_score = int((contacts_by_canon.get(p_canon) or {}).get("relationship_score") or 0)
+            p_comp = composure_by_canon.get(p_canon)
+            p_contact = contacts_by_canon.get(p_canon)
+            dc_mod_fb = _compute_npc_dc_modifiers(p_contact, p_comp, "friendly_situational")
+            ties_for_partner = _deck_rg.get_ties(sid, p_canon) or []
+            tie_gossip_added = False
+            sandbox_added = False
+
+            for _t in ties_for_partner:
+                if str(_t.get("status") or "active").lower() != "active":
+                    continue
+                pa = str(_t.get("person_a_key") or "").strip().lower()
+                pb = str(_t.get("person_b_key") or "").strip().lower()
+                other_key = pb if pa == p_canon else pa
+                if not other_key or other_key in ("player", p_canon):
+                    continue
+                ttype = str(_t.get("tie_type") or "").strip().lower()
+                tvis = str(_t.get("visibility") or "public").strip().lower()
+                if tvis not in ("public", "rumored") and ttype not in ("friend", "best_friend", "rival", "enemy", "dating", "engaged", "married"):
+                    continue
+                other_disp = other_key.replace("_", " ").title()
+
+                if not tie_gossip_added:
+                    tg_id = f"friendly_situational:tie_gossip_{other_key}"
+                    if pacing.is_topic_available(
+                        sid, char_id, g_partner, tg_id, category="friendly_situational",
+                        current_day=cur_day, current_minute=cur_min, venue_leaf=venue_leaf,
+                        relationship_score=p_score, preloaded_states=topics_by_canon.get(p_canon),
+                    ):
+                        seed_pool.append({
+                            "topic_id": tg_id,
+                            "category": "friendly_situational",
+                            "subkind": "tie_gossip",
+                            "subject_npc": other_key,
+                            "stat": "CHA",
+                            "dc": _clamp_dc(4 + dc_mod_fb),
+                            "target_npc": g_partner,
+                            "is_direct_reply": False,
+                            "prompt_cue": f"Bring up mutual chatter about {g_partner} and {other_disp} and ask how things stand between them",
+                        })
+                        tie_gossip_added = True
+
+                if not sandbox_added:
+                    sub_intent = ""
+                    sb_cat = "friendly_situational"
+                    sb_cue = ""
+                    if ttype in ("rival", "enemy"):
+                        sub_intent = "mediate_feud" if (rot_hash % 2 == 0) else "stir_rivalry"
+                        sb_cue = (
+                            f"Smooth over the friction between {g_partner} and {other_disp}"
+                            if sub_intent == "mediate_feud"
+                            else f"Subtly stoke {g_partner}'s rivalry against {other_disp}"
+                        )
+                    elif ttype in ("dating", "engaged", "married"):
+                        shielded = bool(_deck_is_shielded and _deck_is_shielded(
+                            p_canon,
+                            contacts=(p_contact,) if p_contact else (),
+                            player_ties=ties_for_partner,
+                            npc_row=npc_by_low.get(g_partner.lower()),
+                        ))
+                        if not shielded and p_score >= 40 and _npc_allows_flirt(g_partner, npc_by_low.get(g_partner.lower()), p_contact, scen_key):
+                            sub_intent = "win_over_partner"
+                            sb_cat = "flirt_chemistry"
+                            sb_cue = f"Test whether {g_partner}'s heart is drifting away from {other_disp}"
+                    elif ttype in ("acquaintance", "friend", "crush", "secret_crush"):
+                        sub_intent = "wingman_matchmake"
+                        sb_cue = f"Play wingman for {g_partner} and put in a warm word about {other_disp}"
+
+                    if sub_intent:
+                        sb_id = f"{sb_cat}:sandbox_{sub_intent}_{other_key}"
+                        if pacing.is_topic_available(
+                            sid, char_id, g_partner, sb_id, category=sb_cat,
+                            current_day=cur_day, current_minute=cur_min, venue_leaf=venue_leaf,
+                            relationship_score=p_score, preloaded_states=topics_by_canon.get(p_canon),
+                        ):
+                            seed_pool.append({
+                                "topic_id": sb_id,
+                                "category": sb_cat,
+                                "intent": "social_sandbox",
+                                "sub_intent": sub_intent,
+                                "subject_npc": other_key,
+                                "stat": "CHA",
+                                "dc": _clamp_dc(6 + _compute_npc_dc_modifiers(p_contact, p_comp, sb_cat)),
+                                "target_npc": g_partner,
+                                "is_direct_reply": False,
+                                "prompt_cue": sb_cue,
+                            })
+                            sandbox_added = True
+                if tie_gossip_added and sandbox_added:
+                    break
+
+            # 3c. B6 Symmetric NPC Secret Leverage / Discretion Seeds
+            try:
+                ep_mat = db.preload_epistemic_matrix(sid, actor_keys=["player"])
+            except Exception:
+                ep_mat = {}
+            player_held = (ep_mat.get("by_holder") or {}).get("player") or {}
+            facts_by_key = ep_mat.get("facts_by_key") or {}
+            for _fk, _kr in player_held.items():
+                if str(_kr.get("containment_state") or "active") not in ("active", "spotted_window"):
+                    continue
+                _fact = facts_by_key.get(_fk) or {}
+                if str(_fact.get("status") or "active") != "active":
+                    continue
+                if str(_fact.get("category") or "") != "npc_secret":
+                    continue
+                _culp = str(_fact.get("culprit_actor_key") or "").strip().lower()
+                _subj = str(_fact.get("subject_actor_key") or "").strip().lower()
+                if p_canon in (_culp, _subj):
+                    ep_sub = "use_leverage" if p_canon == _culp else "warn_target"
+                    seed_pool.append({
+                        "topic_id": f"epistemic_containment:{ep_sub}_{_fk}",
+                        "category": "friendly_situational",
+                        "intent": "epistemic_containment",
+                        "sub_intent": ep_sub,
+                        "fact_key": _fk,
+                        "stat": "CHA",
+                        "dc": _clamp_dc((6 if ep_sub == "use_leverage" else 5) + dc_mod_fb),
+                        "target_npc": g_partner,
+                        "is_direct_reply": False,
+                        "prompt_cue": (
+                            f"Quietly bring up what you know about {g_partner}'s secret and negotiate discretion"
+                            if ep_sub == "use_leverage"
+                            else f"Quietly warn {g_partner} about the secret you uncovered concerning them"
+                        ),
+                    })
+                    break
+
     # 4. Build candidates across the 6 Sims-style categories, round-robin across present partners
     for cat_idx, cat_def in enumerate(CATEGORY_TEMPLATES):
         cat_name = str(cat_def["category"])

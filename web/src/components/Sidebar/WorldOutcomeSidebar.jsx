@@ -225,6 +225,7 @@ const WorldOutcomeSidebar = ({
   session,
   onOpenWorldMap,
   onSelectContact,
+  onQuickAction,
   isMobileDrawer = false,
 }) => {
   const { t } = useTranslation();
@@ -572,16 +573,40 @@ const WorldOutcomeSidebar = ({
                         </div>
                       )}
 
-                      {/* Row 3.5: Activity Tag & Server-Gated Revealed Telltale */}
-                      {(npc?.activity_tag || (npc?.telltale_revealed && npc?.visible_tell_text)) && (
-                        <div className="flex flex-wrap gap-1 pt-1 border-t border-fantasy-border/20 text-[10px]">
-                          {npc?.activity_tag && (
+                      {/* Row 3.5: Activity Tag, Epistemic Badge, Join Button & Revealed Telltale */}
+                      {(npc?.activity_tag || npc?.epistemic_tag || (npc?.telltale_revealed && npc?.visible_tell_text) || (npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function')) && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-fantasy-border/20 text-[10px]">
+                          {npc?.activity_tag && (() => {
+                            const actMode = String(npc?.activity_mode || '').toLowerCase();
+                            const actToneClass =
+                              actMode === 'joined'
+                                ? 'bg-emerald-950/70 border-emerald-500/45 text-emerald-200'
+                                : actMode === 'waiting'
+                                  ? 'bg-sky-950/70 border-sky-500/45 text-sky-200'
+                                  : actMode === 'packing_up'
+                                    ? 'bg-slate-900/75 border-slate-500/40 text-slate-300'
+                                    : 'bg-fantasy-950/60 border-fantasy-border/40 text-amber-200/90';
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${actToneClass}`}
+                                title={t('scene.activity_prefix', 'Doing')}
+                              >
+                                <span aria-hidden="true">🎯</span>
+                                <span>{npc.activity_tag}</span>
+                              </span>
+                            );
+                          })()}
+                          {npc?.epistemic_tag && (
                             <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-fantasy-950/60 border border-fantasy-border/40 text-amber-200/90"
-                              title={t('scene.activity_prefix', 'Doing')}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/75 border border-rose-500/50 text-rose-200 font-semibold"
+                              title={t('scene.epistemic_watch', 'Epistemic Watch')}
                             >
-                              <span aria-hidden="true">🎯</span>
-                              <span>{npc.activity_tag}</span>
+                              <span aria-hidden="true">⚠️</span>
+                              <span>
+                                {npc.epistemic_tag === 'spotted_you'
+                                  ? t('scene.spotted_you_badge', 'Spotted You!')
+                                  : npc.epistemic_tag}
+                              </span>
                             </span>
                           )}
                           {npc?.telltale_revealed && npc?.visible_tell_text && (
@@ -592,6 +617,27 @@ const WorldOutcomeSidebar = ({
                               <span aria-hidden="true">👁️</span>
                               <span>{npc.visible_tell_text}</span>
                             </span>
+                          )}
+                          {npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onQuickAction({
+                                  intent: 'join_activity',
+                                  direct_choice: {
+                                    intent: 'join_activity',
+                                    target_npc: npc.name || npc.npc_id || '',
+                                    activity_key: npc?.join_activity_seed?.activity_key || npc?.activity_key || '',
+                                    label: `${t('scene.join_activity_btn', 'Join Activity')}: ${npc.name || ''}`.trim(),
+                                  },
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-900/50 hover:bg-amber-800/70 border border-amber-500/50 text-amber-100 font-semibold transition-colors cursor-pointer"
+                            >
+                              <span aria-hidden="true">🤝</span>
+                              <span>{t('scene.join_activity_btn', 'Join Activity')}</span>
+                            </button>
                           )}
                         </div>
                       )}
@@ -630,17 +676,23 @@ const WorldOutcomeSidebar = ({
           return null;
         }
         const riskClass =
-          risk === 'high'
-            ? 'bg-red-950/80 border-red-500/50 text-red-200'
-            : risk === 'medium'
-              ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
-              : 'bg-yellow-950/70 border-yellow-600/40 text-yellow-200';
+          risk === 'critical'
+            ? 'bg-red-950/90 border-red-400/70 text-red-100 font-semibold'
+            : risk === 'high'
+              ? 'bg-red-950/80 border-red-500/50 text-red-200'
+              : risk === 'moderate' || risk === 'medium'
+                ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+                : 'bg-yellow-950/70 border-yellow-600/40 text-yellow-200';
         const riskLabel =
-          risk === 'high'
-            ? t('scene.leak_risk_high', 'Leak Risk: High')
-            : risk === 'medium'
-              ? t('scene.leak_risk_medium', 'Leak Risk: Medium')
-              : t('scene.leak_risk_low', 'Leak Risk: Low');
+          risk === 'critical'
+            ? t('scene.leak_risk_critical', 'Leak Risk: Critical')
+            : risk === 'high'
+              ? t('scene.leak_risk_high', 'Leak Risk: High')
+              : risk === 'moderate'
+                ? t('scene.leak_risk_moderate', 'Leak Risk: Moderate')
+                : risk === 'medium'
+                  ? t('scene.leak_risk_medium', 'Leak Risk: Medium')
+                  : t('scene.leak_risk_low', 'Leak Risk: Low');
         return (
           <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/50 space-y-1.5 text-[11px] shrink-0">
             <div className="flex items-center justify-between gap-2">

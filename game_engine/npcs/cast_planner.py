@@ -198,9 +198,27 @@ def plan_pre_turn(
     from mechanics.combat import is_in_combat as _check_combat
     if is_combat or _check_combat(session) or stealth_active:
         current_partners = []
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
 
     # 2. Movement / Location transition
     old_loc = session.get("current_location", "")
+    curr_node_now = str((stage_info.get("effective_node_id") if stage_info else None) or session.get("current_node_id") or "")
+    joined_node_prev = str(session.get("_joined_activity_node_id") or "")
+    moved_via_action = any(
+        isinstance(a, dict)
+        and str(a.get("intent") or "").strip().lower() in ("move_location", "movement", "travel", "fast_travel")
+        and (
+            (a.get("target_location") and str(a["target_location"]).strip() != str(old_loc or "").strip())
+            or (a.get("target_node_id") and str(a["target_node_id"]).strip() != curr_node_now)
+        )
+        for a in (actions or ())
+    )
+    if (new_loc and new_loc != old_loc) or moved_via_action or (joined_node_prev and curr_node_now and joined_node_prev != curr_node_now):
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
     if new_loc and new_loc != old_loc:
         retained_partners = []
         if not stealth_active:
@@ -302,6 +320,9 @@ def plan_pre_turn(
     )
     if has_exit_action:
         has_exited_convo = True
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
         for p in current_partners:
             p_clean = p.strip()
             p_low = p_clean.lower()
@@ -421,6 +442,19 @@ def plan_pre_turn(
                             idle_turns[n_low] = 0
                             disengaged_at_turn.pop(n_low, None)
                             logger.info("[CastPlanner] Player initiated dialogue with '%s'", n_name)
+                            if intent_cat == "join_activity":
+                                a_chk = a.get("check")
+                                join_ok = True if a_chk is None else bool(
+                                    a_chk.succeeded if hasattr(a_chk, "succeeded") and a_chk.succeeded is not None
+                                    else (a_chk.get("succeeded", True) if isinstance(a_chk, dict) else True)
+                                )
+                                if join_ok:
+                                    session["joined_activity_npc"] = n_name
+                                    existing_joined = list(session.get("joined_activity_partners") or [])
+                                    if n_name not in existing_joined:
+                                        existing_joined.append(n_name)
+                                    session["joined_activity_partners"] = existing_joined
+                                    session["_joined_activity_node_id"] = str(effective_node_id or session.get("current_node_id") or "")
                             # D4: 3-way group conversation auto-join when engaging a paired NPC openly
                             paired_raw = str(n.get("paired_with") or "").strip() if isinstance(n, dict) else ""
                             if paired_raw and not is_private_pull:

@@ -278,6 +278,55 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
         except Exception as _ep_err:
             log.warning("Failed committing epistemic containment action: %s", _ep_err)
 
+    # D9 Social Sandbox actions (wingman_matchmake, mediate_feud, stir_rivalry, win_over_partner)
+    _sandbox_sub_set = {"wingman_matchmake", "mediate_feud", "stir_rivalry", "win_over_partner"}
+    if session_id and actions:
+        try:
+            from mechanics.social import relationship_graph as _rg_sb
+            from mechanics.world.npc_autonomy import is_npc_romance_shielded as _sb_is_shielded
+            _sb_turn = int(
+                (outcome.get("_target_turn") if isinstance(outcome, dict) else 0)
+                or (session.get("turn_count") if isinstance(session, dict) else 0)
+                or 1
+            )
+            for _sa in actions:
+                if not isinstance(_sa, dict):
+                    continue
+                _sb_sub = str(_sa.get("sub_intent") or "").strip().lower()
+                if _sb_sub not in _sandbox_sub_set:
+                    continue
+                _sb_st = str(_sa.get("stat") or "NONE").upper()
+                if not is_check_success(_sa.get("check"), default_if_none=(_sb_st in ("NONE", "FREE"))):
+                    continue
+                _tgt_raw = str(_sa.get("target_npc") or "").strip()
+                _subj_raw = str(_sa.get("subject_npc") or _sa.get("other_npc") or "").strip()
+                _tgt_k = _rg_sb.canonical_person_key(_tgt_raw) if _tgt_raw else ""
+                _subj_k = _rg_sb.canonical_person_key(_subj_raw) if _subj_raw else ""
+                if not _tgt_k or not _subj_k or _tgt_k == _subj_k:
+                    continue
+                _pair_ties = _rg_sb.get_ties(session_id, _tgt_k) or []
+                if _sb_sub == "wingman_matchmake":
+                    _rg_sb.record_tie_nudge(session_id, _tgt_k, _subj_k, "affection", 0.8, turn=_sb_turn)
+                elif _sb_sub == "mediate_feud":
+                    _rg_sb.record_tie_nudge(session_id, _tgt_k, _subj_k, "rivalry", -0.8, turn=_sb_turn)
+                    _rg_sb.record_tie_nudge(session_id, _tgt_k, _subj_k, "friendship", 0.6, turn=_sb_turn)
+                elif _sb_sub == "stir_rivalry":
+                    _rg_sb.record_tie_nudge(session_id, _tgt_k, _subj_k, "rivalry", 0.9, turn=_sb_turn)
+                elif _sb_sub == "win_over_partner":
+                    _sb_contacts = db.get_contacts(session_id) or ()
+                    if _sb_is_shielded(_tgt_k, contacts=_sb_contacts, player_ties=_pair_ties):
+                        continue
+                    _rg_sb.record_tie_nudge(session_id, _tgt_k, _subj_k, "rivalry", 0.7, turn=_sb_turn)
+                    db.upsert_contact(
+                        session_id=session_id,
+                        npc_id=_tgt_k,
+                        name=_tgt_raw,
+                        character_id=first_char_id,
+                        delta_score=4,
+                    )
+        except Exception as _sb_err:
+            log.warning("Failed committing social sandbox action: %s", _sb_err)
+
     # Process Party Companion / Social Escort Recruitment & Dismissal
     from scenario_data import is_mechanic_enabled
     from mechanics.narrative.intent import (

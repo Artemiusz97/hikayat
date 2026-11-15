@@ -890,6 +890,31 @@ def evaluate_discreet_couple_encounter(
                 turn=int(session.get("turn_count") or 0),
                 materialize=True,
             )
+            affair_fact_key = f"npc_affair:{actor_a_key}:{actor_b_key}"
+            affair_turn = int(session.get("turn_count") or 0)
+            db.upsert_epistemic_fact(
+                sess_id,
+                affair_fact_key,
+                category="npc_secret",
+                culprit_actor_key=actor_a_key,
+                subject_actor_key=betrayed_key,
+                location_node_id=str(session.get("current_node_id") or ""),
+                summary=f"Caught {actor_a_name} and {actor_b_name} in a secret affair behind {betrayed_name}'s back.",
+                severity=2,
+                status="active",
+                turn=affair_turn,
+            )
+            db.upsert_epistemic_knowledge(
+                sess_id,
+                affair_fact_key,
+                "player",
+                confidence="firsthand",
+                containment_state="active",
+                source_actor_key=actor_a_key,
+                acquisition_channel="witness",
+                player_aware=1,
+                turn=affair_turn,
+            )
         else:
             is_affair = False
 
@@ -1057,6 +1082,7 @@ def resolve_discreet_couple_action(
 
     if action_key == "affair_promise_discretion":
         if succeeded and sess_id:
+            turn_now = int(session.get("turn_count") or 0)
             for k, nm in ((a_key, a_name), (b_key, b_name)):
                 try:
                     db.upsert_contact(sess_id, k, nm, character_id=char_id, delta_score=8)
@@ -1064,6 +1090,18 @@ def resolve_discreet_couple_action(
                         db.upsert_contact(sess_id, k, nm, character_id=0, delta_score=8)
                 except Exception:
                     pass
+            try:
+                db.upsert_epistemic_knowledge(
+                    sess_id,
+                    f"npc_affair:{a_key}:{b_key}",
+                    "player",
+                    containment_state="hushed",
+                    metadata={"hushed_ally": True, "actors": [a_key, b_key]},
+                    player_aware=1,
+                    turn=turn_now,
+                )
+            except Exception:
+                pass
             try:
                 from db.memory import add_commitment
                 curr_day, curr_min, _ = db.get_session_time(sess_id)
@@ -1101,6 +1139,27 @@ def resolve_discreet_couple_action(
             turn_now = int(session.get("turn_count") or 0)
             rg.end_tie(sess_id, a_key, betrayed_key, rg.TIETYPE_DATING, turn=turn_now, reason="exposed_affair", materialize=True)
             rg.end_tie(sess_id, a_key, b_key, rg.TIETYPE_AFFAIR, turn=turn_now, reason="exposed_affair", materialize=True)
+            try:
+                db.upsert_epistemic_fact(
+                    sess_id,
+                    f"npc_affair:{a_key}:{b_key}",
+                    status="exposed_public",
+                    turn=turn_now,
+                )
+                if betrayed_key:
+                    db.upsert_epistemic_knowledge(
+                        sess_id,
+                        f"npc_affair:{a_key}:{b_key}",
+                        betrayed_key,
+                        confidence="hard_proof",
+                        containment_state="active",
+                        source_actor_key="player",
+                        acquisition_channel="exposed",
+                        player_aware=1,
+                        turn=turn_now,
+                    )
+            except Exception:
+                pass
             try:
                 db.upsert_contact(sess_id, betrayed_key, betrayed_name, character_id=char_id, delta_score=10)
                 db.upsert_contact(sess_id, a_key, a_name, character_id=char_id, delta_score=-15)

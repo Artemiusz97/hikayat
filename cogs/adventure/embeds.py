@@ -360,9 +360,20 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
     intent = entity.get("intent")
     intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if intent else ""
     act_tag = str(entity.get("activity_tag") or "").strip()
-    act_badge = f" | 🎯 *{act_tag}*" if act_tag else ""
+    act_mode = str(entity.get("activity_mode") or "").strip().lower()
+    act_badge = f" | 🎯 *{act_tag}*{' (Joined)' if act_mode == 'joined' else ''}" if act_tag else ""
+    ep_tag = str(entity.get("epistemic_tag") or "").strip().lower()
+    ep_badge_map = {
+        "spotted_you": " | 👀 *Spotted You*",
+        "hushed": " | 🤫 *Hushed*",
+        "alibi_prepped": " | 🎭 *Alibi*",
+        "co_conspirator": " | 🤝 *Co-Conspirator*",
+    }
+    ep_badge = ep_badge_map.get(ep_tag, "")
     tell_txt = str(entity.get("visible_tell_text") or "").strip() if bool(entity.get("telltale_revealed")) else ""
     tell_line = f"\n   ↳ 👁️ *Tell: {tell_txt}*" if tell_txt else ""
+    if ep_badge:
+        act_badge += ep_badge
 
     status_items = _format_status_list_for_embed(status)
     if mood and str(mood).strip() and str(mood).strip() not in status_items:
@@ -1070,7 +1081,7 @@ def _format_epistemic_watch_text(session: dict) -> str:
         return ""
     lines = []
     if leak_risk != "none":
-        risk_icon = {"high": "🔴", "medium": "🟠", "low": "🟡"}.get(leak_risk, "🟡")
+        risk_icon = {"critical": "🔴", "high": "🔴", "moderate": "🟠", "medium": "🟠", "low": "🟡"}.get(leak_risk, "🟡")
         lines.append(f"{risk_icon} **Leak Risk:** `{leak_risk.upper()}`")
     if spotted:
         names = ", ".join(

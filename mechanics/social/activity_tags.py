@@ -356,6 +356,10 @@ def resolve_actor_activity_bundle(
             "sdxl_pose_tags": (),
             "join_activity_seed": None,
             "telltale_spotted": False,
+            "activity_mode": "combat_suppressed",
+            "activity_is_telltale": False,
+            "telltale_revealed": False,
+            "visible_tell_text": "",
         }
 
     genre = _resolve_genre_bucket(scen_key)
@@ -423,6 +427,21 @@ def resolve_actor_activity_bundle(
             "activity_tag": localize_activity_key(effective_key, l_code),
         }
 
+    if is_dialogue_partner and is_joined_activity:
+        activity_mode = "joined"
+    elif is_dialogue_partner:
+        activity_mode = "talking"
+    elif telltale_spotted:
+        activity_mode = "telltale"
+    elif effective_key == "packing_up":
+        activity_mode = "packing_up"
+    elif rv in ("waiting", "checking_time", "late"):
+        activity_mode = "waiting"
+    else:
+        activity_mode = "bystander"
+
+    visible_tell_text = localize_activity_key(telltale_key, l_code) if telltale_spotted else ""
+
     return {
         "activity_key": "talking" if (is_dialogue_partner and not is_joined_activity) else effective_key,
         "activity_tag": display_tag,
@@ -431,6 +450,10 @@ def resolve_actor_activity_bundle(
         "sdxl_pose_tags": poses,
         "join_activity_seed": join_seed,
         "telltale_spotted": telltale_spotted,
+        "activity_mode": activity_mode,
+        "activity_is_telltale": bool(telltale_spotted),
+        "telltale_revealed": bool(telltale_spotted),
+        "visible_tell_text": visible_tell_text,
     }
 
 

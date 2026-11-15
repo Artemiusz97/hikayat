@@ -22,9 +22,13 @@ from mechanics.world.locations.residence_fog import (
     SHARED_ABSTRACT_RESIDENCE_NODE,
     can_materialize_npc_residence,
 )
+from mechanics.world.locations.residences import is_npc_active_spare_key_holder
 from mechanics.world.npc_autonomy import resolve_autonomy_node_override
 from mechanics.world.npc_schedule import get_npc_scheduled_node_id
-from mechanics.world.presence_doorbell import check_doorbell_etiquette
+from mechanics.world.presence_doorbell import (
+    check_doorbell_etiquette,
+    is_verified_household_cohabitant,
+)
 from mechanics.world.presence_graph import (
     format_node_display_label,
     is_deceased_or_arrested,
@@ -182,9 +186,21 @@ def _resolve_tier2_rendezvous(ctx: _PresenceContext) -> None:
         if not location_targets_node(r_nid, r_loc, ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id, ctx.loc_cache):
             continue
 
+        remaining_to_end = a_end - abs_now
+        elapsed_since_start = abs_now - a_start
+        rv_state = (
+            "checking_time"
+            if (remaining_to_end <= 30 or (rc.get("start_minute") is not None and elapsed_since_start >= 30))
+            else "waiting"
+        )
         for npc_id_val, disp_name in cands:
             ctx.tier2_aliases.update({disp_name.lower(), slugify_key(disp_name), npc_id_val.lower()})
-            ctx.stage({"npc_id": npc_id_val, "name": disp_name}, 2, "commitment")
+            ctx.stage(
+                {"npc_id": npc_id_val, "name": disp_name},
+                2,
+                "commitment",
+                extra={"rendezvous_state": rv_state},
+            )
 
 
 def _collect_tier3_candidate_waypoints(ctx: _PresenceContext) -> list[dict[str, Any]]:
@@ -348,11 +364,83 @@ def _resolve_tier4_doorbell(ctx: _PresenceContext) -> None:
     if not ctx.eff_node_id or ctx.eff_node_id == SHARED_ABSTRACT_RESIDENCE_NODE:
         return
     override_pin_aliases = ctx.tier2_aliases | ctx.tier3_crisis_aliases
+    is_player_res = bool(
+        ctx.prop_at_node is not None
+        or (ctx.player_home_node_id and residence_matches_node(ctx.player_home_node_id, ctx.eff_node_id, ctx.nodes_by_id))
+    )
 
     for r_row, c_row, merged_npc, aliases in ctx.unified_records:
         if aliases & ctx.casualty_keys:
             continue
         npc_home = str(merged_npc.get("home_node_id") or parse_dict(merged_npc.get("basic_info")).get("home_node_id") or "").strip()
+        if is_player_res and not residence_matches_node(npc_home, ctx.eff_node_id, ctx.nodes_by_id):
+            if any(ak in ctx.staged_by_key for ak in aliases) or (aliases & ctx.active_dialogue_partners):
+                continue
+            ov_drop = resolve_autonomy_node_override(
+                merged_npc,
+                session_id=ctx.sid,
+                day=ctx.safe_day,
+                block=ctx.block_key,
+                scen_key=ctx.scen_key,
+                active_ties_by_person=ctx.active_ties_by_person,
+                roster_by_key=ctx.roster_by_key,
+                active_events=ctx.active_events,
+                has_active_rendezvous_or_quest=bool(aliases & override_pin_aliases),
+                player_home_node_id=ctx.player_home_node_id or ctx.eff_node_id,
+            )
+            a_map_d, _ = ctx.get_anchor_eval(merged_npc, force_anchor=True)
+            sched_d = str((a_map_d or {}).get(ctx.block_key) or "").strip()
+            wants_dropby = bool(
+                (isinstance(ov_drop, Mapping) and (ov_drop.get("is_dropby") or residence_matches_node(str(ov_drop.get("node_id") or ""), ctx.eff_node_id, ctx.nodes_by_id)))
+                or (not ov_drop and sched_d and residence_matches_node(sched_d, ctx.eff_node_id, ctx.nodes_by_id))
+            )
+            if not wants_dropby:
+                continue
+            has_key = bool(
+                (ctx.combined_spare_keys and ctx.sid > 0 and is_npc_active_spare_key_holder(ctx.sid, merged_npc, ctx.combined_spare_keys, contacts=ctx.contacts, person_ties=ctx.person_ties))
+                or is_verified_household_cohabitant(ctx.sid, merged_npc, c_row, ctx.household_cache, ctx.player_hh_id, ctx.player_last_name)
+            )
+            npc_disp = str(merged_npc.get("name") or "").strip()
+            if has_key:
+                ctx.doorbell_events.append({
+                    "applicable": True,
+                    "npc_name": npc_disp,
+                    "doorbell_status": "spare_key_entry",
+                    "entry_mode": "spare_key_entry",
+                    "allowed": True,
+                    "should_block_sleep": False,
+                    "override_reason": "spare_key",
+                    "home_node_id": ctx.eff_node_id,
+                })
+                ctx.stage(
+                    merged_npc,
+                    4,
+                    "doorbell_answered",
+                    extra={"doorbell_status": "spare_key_entry", "entry_mode": "spare_key_entry"},
+                )
+            else:
+                ctx.doorbell_events.append({
+                    "applicable": True,
+                    "npc_name": npc_disp,
+                    "doorbell_status": "npc_ringing_player_door",
+                    "entry_mode": "doorbell_ringing",
+                    "allowed": False,
+                    "should_block_sleep": False,
+                    "reason": "player_doorbell_ringing",
+                    "home_node_id": ctx.eff_node_id,
+                })
+                ctx.stage(
+                    merged_npc,
+                    4,
+                    "doorbell_ringing",
+                    extra={
+                        "doorbell_status": "npc_ringing_player_door",
+                        "entry_mode": "threshold_doorbell",
+                        "at_threshold": True,
+                        "stage_role": "threshold_visitor",
+                    },
+                )
+            continue
         if not residence_matches_node(npc_home, ctx.eff_node_id, ctx.nodes_by_id):
             continue
 
@@ -528,6 +616,11 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
             has_active_rendezvous_or_quest=bool(aliases & protected_aliases),
             player_home_node_id=ctx.player_home_node_id,
         )
+        # D10: Do not allow autonomy friend-visiting to crowd an active Tier 2 rendezvous NPC.
+        if isinstance(ov, Mapping):
+            vis_low = str(ov.get("visiting_npc") or "").strip().lower()
+            if vis_low and vis_low in ctx.tier2_aliases:
+                ov = None
         eff_work_match = bool(
             not ov
             and on_shift
@@ -652,6 +745,8 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
                 pa = str(t.get("person_a_key") or "").strip().lower()
                 pb = str(t.get("person_b_key") or "").strip().lower()
                 other_k = pb if pa == ak else pa
+                if not other_k or other_k in ctx.tier2_aliases:
+                    continue
                 j = by_alias.get(other_k)
                 if j is not None and j != i and j not in paired_idx:
                     partner_j = j
@@ -743,14 +838,27 @@ def resolve_node_presence(
     in_erotic = bool(ctx.session_dict.get("in_erotic_scene"))
     node_type_val = str((ctx.target_node or {}).get("node_type") or "")
     joined_partner_low = str(ctx.session_dict.get("joined_activity_npc") or "").strip().lower()
+    joined_partners_set: set[str] = {joined_partner_low} if joined_partner_low else set()
+    for jp in (ctx.session_dict.get("joined_activity_partners") or ()):
+        jp_s = str(jp or "").strip().lower()
+        if jp_s:
+            joined_partners_set.add(jp_s)
 
     for npc_entry in present_list:
         n_low = str(npc_entry.get("name") or "").strip().lower()
+        nid_low = str(npc_entry.get("npc_id") or "").strip().lower()
         is_dp = bool(
             n_low in ctx.active_dialogue_partners
-            or str(npc_entry.get("npc_id") or "").strip().lower() in ctx.active_dialogue_partners
+            or nid_low in ctx.active_dialogue_partners
         )
-        rv_state = "waiting" if int(npc_entry.get("presence_tier") or 5) == 2 else ""
+        rv_state = str(
+            npc_entry.get("rendezvous_state")
+            or (
+                "waiting"
+                if (int(npc_entry.get("presence_tier") or 5) == 2 or npc_entry.get("doorbell_status") == "npc_ringing_player_door")
+                else ""
+            )
+        ).strip().lower()
         bundle = resolve_actor_activity_bundle(
             npc_entry,
             location=ctx.eff_loc or str((ctx.target_node or {}).get("name") or ""),
@@ -759,7 +867,7 @@ def resolve_node_presence(
             time_block=ctx.block_key,
             stage_role=str(npc_entry.get("stage_role") or "room_bystander"),
             is_dialogue_partner=is_dp,
-            is_joined_activity=bool(joined_partner_low and joined_partner_low == n_low),
+            is_joined_activity=bool((n_low and n_low in joined_partners_set) or (nid_low and nid_low in joined_partners_set)),
             is_combat=in_combat,
             is_erotic=in_erotic,
             paired_with=str(npc_entry.get("paired_with") or ""),

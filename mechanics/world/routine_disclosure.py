@@ -449,6 +449,13 @@ _OVERLAY_REASON_LOCALES: dict[str, dict[str, str]] = {
         "de": "Bei Freunden",
         "zh": "在朋友家做客",
     },
+    "friend_outing_with": {
+        "en": "Out w/ {friend}",
+        "pl": "Na mieście z {friend}",
+        "ms": "Keluar dgn {friend}",
+        "de": "Unterwegs mit {friend}",
+        "zh": "与{friend}外出",
+    },
     "player_dropby": {
         "en": "Dropping by",
         "pl": "Wpada z wizytą",
@@ -728,6 +735,17 @@ def build_known_routine_payload(
                 else:
                     target[block] = masked_slot
 
+    all_fog_labels = set(RESIDENTIAL_FOG_LABELS.values())
+    fog_label = get_residential_fog_label(eff_lang)
+    slot_tags: Dict[str, Dict[str, str]] = {"weekday": {}, "weekend": {}}
+    if not residence_unlocked:
+        for dk_tag, target_map in (("weekday", weekday_blocks), ("weekend", weekend_blocks)):
+            for blk_tag in ROUTINE_BLOCKS:
+                blk_val = str(target_map.get(blk_tag) or "").strip()
+                if blk_val == fog_label or _is_residential_label(blk_val, fog_labels=all_fog_labels):
+                    slot_tags[dk_tag][blk_tag] = "res_fog"
+
+    eff_player_home = str(player_home_node_id or (primary_property or {}).get("node_id") or "").strip()
     current_day_override: dict[str, Any] | None = None
     if full_schedule_unlocked and current_day is not None:
         safe_cd = max(1, int(current_day))
@@ -736,6 +754,8 @@ def build_known_routine_payload(
         ov_probe = dict(exempt_probe)
         ov_probe["workplace_node_id"] = workplace_node_id
         ov_probe["home_node_id"] = real_home
+        ov_probe["affinity_score"] = affinity
+        ov_probe["relationship_score"] = affinity
         ov = resolve_autonomy_node_override(
             ov_probe,
             session_id=int(sid or 0),
@@ -745,24 +765,96 @@ def build_known_routine_payload(
             active_ties_by_person=active_ties_by_person,
             roster_by_key=roster_by_key,
             active_events=active_events,
-            player_home_node_id=player_home_node_id,
+            player_home_node_id=eff_player_home,
         )
         if isinstance(ov, Mapping) and cur_block in ROUTINE_BLOCKS:
             reason_k = str(ov.get("reason") or "friend_outing").strip().lower()
-            loc_map = _OVERLAY_REASON_LOCALES.get(reason_k) or _OVERLAY_REASON_LOCALES["friend_outing"]
-            ov_label = loc_map.get(eff_lang) or loc_map.get("en") or str(ov.get("visit_label") or "At a friend's place")
+            target_nid = str(ov.get("node_id") or "").strip()
+            friend_name = str(ov.get("visiting_npc") or "").strip()
+            target_node_obj = eff_nodes.get(target_nid) if (target_nid and isinstance(eff_nodes, Mapping)) else None
+            t_meta = (
+                target_node_obj.get("metadata")
+                if (isinstance(target_node_obj, Mapping) and isinstance(target_node_obj.get("metadata"), Mapping))
+                else {}
+            )
+            is_target_res = bool(
+                target_nid
+                and target_nid != eff_player_home
+                and (
+                    _is_residential_node_id(target_nid, real_home=real_home, workplace_node_id=workplace_node_id)
+                    or (
+                        isinstance(target_node_obj, Mapping)
+                        and (
+                            str(target_node_obj.get("node_type") or "").strip().upper() == "RESIDENCE"
+                            or bool(t_meta.get("is_npc_residence"))
+                        )
+                    )
+                )
+            )
+            host_unlocked = False
+            if is_target_res:
+                if debug_reveal_all:
+                    host_unlocked = True
+                elif target_nid == real_home:
+                    host_unlocked = bool(residence_unlocked)
+                else:
+                    host_row: Mapping[str, Any] | None = None
+                    if isinstance(roster_by_key, Mapping):
+                        for r_cand in roster_by_key.values():
+                            if not isinstance(r_cand, Mapping):
+                                continue
+                            r_home_cand = str(
+                                r_cand.get("home_node_id")
+                                or _parse_mapping_field(r_cand.get("basic_info")).get("home_node_id")
+                                or ""
+                            ).strip()
+                            if r_home_cand and r_home_cand == target_nid:
+                                host_row = r_cand
+                                break
+                    if host_row is not None:
+                        host_unlocked = bool(
+                            can_materialize_npc_residence(
+                                sid,
+                                host_row,
+                                roster_row=host_row,
+                                primary_property=primary_property,
+                                contacts=contacts if contacts is not None else [],
+                                person_ties=person_ties if person_ties is not None else [],
+                                household_cache=household_cache,
+                                player_last_name=player_last_name if player_last_name is not None else "",
+                            )
+                        )
+            slot_tag = ""
+            if is_target_res and not host_unlocked:
+                loc_map = _OVERLAY_REASON_LOCALES["friend_outing"]
+                ov_label = loc_map.get(eff_lang) or loc_map.get("en") or "At a friend's place"
+                slot_tag = "friend_home"
+            elif bool(ov.get("is_outing")) and friend_name:
+                w_map = _OVERLAY_REASON_LOCALES["friend_outing_with"]
+                tmpl = w_map.get(eff_lang) or w_map.get("en") or "Out w/ {friend}"
+                ov_label = tmpl.format(friend=friend_name)
+                slot_tag = "outing"
+            else:
+                loc_map = _OVERLAY_REASON_LOCALES.get(reason_k) or _OVERLAY_REASON_LOCALES["friend_outing"]
+                ov_label = loc_map.get(eff_lang) or loc_map.get("en") or str(ov.get("visit_label") or "At a friend's place")
+                if bool(ov.get("is_outing")):
+                    slot_tag = "outing"
+
             target_blocks = weekend_blocks if cur_dk == "weekend" else weekday_blocks
             cur_slot_val = str(target_blocks.get(cur_block) or "").strip()
-            if cur_slot_val and cur_slot_val not in (masked_slot, "???"):
+            if cur_slot_val and cur_slot_val not in (masked_slot, "???", fog_label):
                 target_blocks[cur_block] = f"{cur_slot_val} ({ov_label})"
             else:
                 target_blocks[cur_block] = ov_label
+            if slot_tag:
+                slot_tags[cur_dk][cur_block] = slot_tag
             current_day_override = {
                 "day": safe_cd,
                 "day_kind": cur_dk,
                 "block": cur_block,
                 "reason": reason_k,
                 "label": ov_label,
+                "slot_tag": slot_tag,
             }
 
     discovered_count = sum(
@@ -775,6 +867,7 @@ def build_known_routine_payload(
     return {
         "weekday": weekday_blocks,
         "weekend": weekend_blocks,
+        "slot_tags": slot_tags,
         "full_schedule_unlocked": full_schedule_unlocked,
         "has_anchor_schedule": has_anchor_schedule,
         "residence_unlocked": residence_unlocked,

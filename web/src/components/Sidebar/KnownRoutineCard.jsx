@@ -114,6 +114,11 @@ const KnownRoutineCard = ({ npc, t }) => {
           <span aria-hidden="true">📌</span>
           <span className="font-semibold shrink-0">{t('social.routine_override_today', "Today's Override")}:</span>
           <span className="truncate">{routine.current_day_override.label}</span>
+          {routine.current_day_override.slot_tag && (
+            <span className="ml-auto px-1.5 py-0.5 rounded bg-amber-900/50 border border-amber-500/40 text-[9px] uppercase font-mono shrink-0">
+              {routine.current_day_override.slot_tag}
+            </span>
+          )}
         </div>
       )}
 
@@ -122,6 +127,7 @@ const KnownRoutineCard = ({ npc, t }) => {
           const rawVal = slotsMap[key] || maskedPlaceholder;
           const masked = isMaskedSlotValue(rawVal, maskedPlaceholder);
           const resFog = !masked && isResidentialFogValue(rawVal);
+          const slotTag = !masked ? routine?.slot_tags?.[key] : null;
           return (
             <div
               key={key}
@@ -130,6 +136,11 @@ const KnownRoutineCard = ({ npc, t }) => {
               <span className="text-[11px] text-gray-400 font-medium shrink-0 flex items-center gap-1">
                 <span aria-hidden="true">{icon}</span>
                 <span>{t(`social.routine_blocks.${key}`, fallback)}</span>
+                {slotTag && (
+                  <span className="px-1 py-0.2 rounded bg-fantasy-900/70 border border-fantasy-border/40 text-[9px] uppercase font-mono text-amber-300/90">
+                    {slotTag}
+                  </span>
+                )}
               </span>
               {masked ? (
                 <span className="font-mono text-[11px] text-gray-500 italic text-right">

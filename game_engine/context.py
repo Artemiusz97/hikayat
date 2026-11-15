@@ -325,6 +325,38 @@ def _history_text(
     from mechanics.system.memory.digest import RAW_HISTORY_LIMIT
     sections: list[str] = []
 
+    if session_id is not None and (present_npcs is None or not current_location):
+        sess_row = None
+        try:
+            sess_row = db.get_session(int(session_id))
+        except Exception:
+            sess_row = None
+        if isinstance(sess_row, dict):
+            if present_npcs is None:
+                raw_curr = sess_row.get("current_npcs") or sess_row.get("npcs") or []
+                norm_present: list[str] = []
+                for n in (raw_curr if isinstance(raw_curr, (list, tuple)) else ()):
+                    if isinstance(n, dict):
+                        lbl_n = str(n.get("name") or n.get("person_key") or n.get("npc_id") or "").strip()
+                        if lbl_n:
+                            norm_present.append(lbl_n)
+                    elif isinstance(n, str) and n.strip():
+                        norm_present.append(n.strip())
+                present_npcs = norm_present
+            if not current_location:
+                current_location = str(sess_row.get("current_location") or "")
+
+    if present_npcs:
+        coerced_present: list[str] = []
+        for pn in present_npcs:
+            if isinstance(pn, dict):
+                lbl_pn = str(pn.get("name") or pn.get("person_key") or pn.get("npc_id") or "").strip()
+                if lbl_pn:
+                    coerced_present.append(lbl_pn)
+            elif str(pn or "").strip():
+                coerced_present.append(str(pn).strip())
+        present_npcs = coerced_present
+
     # ---------- Tier 2: Chapter Digest ----------
     if session_id is not None:
         try:
@@ -356,6 +388,7 @@ def _history_text(
     def _format_hist_item(item, is_latest: bool = True) -> str:
         return _format_history_prompt_entry(item, is_latest=is_latest)
 
+    displayed_entries: list[Any] = []
     if budget:
         # Dynamic Token Budgeting - Sliding Window
         max_hist_chars = budget.chars_for("history")
@@ -373,12 +406,15 @@ def _history_text(
                 if current_len + len(line) > max_hist_chars and recent:
                     break
                 recent.append(line)
+                displayed_entries.append(h)
                 current_len += len(line)
             recent.reverse()
+            displayed_entries.reverse()
     else:
         if history:
             valid_history = [h for h in history if h]
             sliced = valid_history[-RAW_HISTORY_LIMIT:]
+            displayed_entries = list(sliced)
             total_items = len(sliced)
             recent = [
                 f"- {game_engine.sanitize_comparative_cliches(formatted)}"
@@ -393,6 +429,77 @@ def _history_text(
         tier1_lines = "\n".join(recent)
         if budget:
             tier1_lines = budget.trim_keep_tail(tier1_lines, "history")
+        if present_npcs and displayed_entries:
+            cur_loc_norm = str(current_location or "").strip().lower()
+            ep_mat: dict[str, Any] = {}
+            if session_id is not None:
+                try:
+                    ep_mat = db.preload_epistemic_matrix(int(session_id)) or {}
+                except Exception:
+                    ep_mat = {}
+            present_norm = [
+                (str(pn).strip(), str(pn).strip().lower(), str(pn).strip().lower().replace(" ", "_"))
+                for pn in present_npcs
+                if str(pn or "").strip()
+            ]
+            unwitnessed_names: list[str] = []
+            for _pdisp, _plow, _pkey in present_norm:
+                saw_offscreen_turn = False
+                for _he in displayed_entries:
+                    if not isinstance(_he, dict):
+                        continue
+                    _h_loc = str(_he.get("location") or _he.get("location_name") or "").strip().lower()
+                    _h_wit = _he.get("witnessed_by")
+                    if isinstance(_h_wit, str) and _h_wit.strip():
+                        try:
+                            _parsed_wit = json.loads(_h_wit)
+                            _h_wit = _parsed_wit if isinstance(_parsed_wit, list) else ([_parsed_wit] if _parsed_wit else [])
+                        except Exception:
+                            _h_wit = [_h_wit.strip()]
+                    _h_npcs_raw = _he.get("witnesses") or _h_wit or _he.get("npcs_present") or _he.get("npcs") or []
+                    _h_npcs = {
+                        str(x.get("name") if isinstance(x, dict) else x).strip().lower()
+                        for x in (_h_npcs_raw if isinstance(_h_npcs_raw, (list, tuple, set)) else ())
+                        if x
+                    } | {
+                        str(x.get("person_key") or x.get("npc_id") or "").strip().lower()
+                        for x in (_h_npcs_raw if isinstance(_h_npcs_raw, (list, tuple, set)) else ())
+                        if isinstance(x, dict)
+                    }
+                    if (
+                        (_h_loc and cur_loc_norm and _h_loc != cur_loc_norm)
+                        or (_h_npcs and _plow not in _h_npcs and _pkey not in _h_npcs)
+                        or ("witnessed_by" in _he and not _h_npcs)
+                    ):
+                        saw_offscreen_turn = True
+                        break
+                if not saw_offscreen_turn and ep_mat:
+                    _facts_map = ep_mat.get("facts_by_key") or {}
+                    _by_fact = ep_mat.get("by_fact") or {}
+                    for _fkey, _fobj in _facts_map.items():
+                        if not isinstance(_fobj, dict):
+                            continue
+                        if str(_fobj.get("status") or "active") in ("decayed", "resolved", "exposed_public"):
+                            continue
+                        _holders_map = _by_fact.get(_fkey) or {}
+                        _knows_pkey = (
+                            isinstance(_holders_map.get(_pkey), dict)
+                            and str(_holders_map[_pkey].get("containment_state") or "active") not in ("wiped", "decayed")
+                        )
+                        _knows_plow = (
+                            isinstance(_holders_map.get(_plow), dict)
+                            and str(_holders_map[_plow].get("containment_state") or "active") not in ("wiped", "decayed")
+                        )
+                        if not (_knows_pkey or _knows_plow):
+                            saw_offscreen_turn = True
+                            break
+                if saw_offscreen_turn:
+                    unwitnessed_names.append(_pdisp)
+            if unwitnessed_names:
+                tier1_lines += (
+                    f"\n[EPISTEMIC GUARD — UNWITNESSED BY: {', '.join(unwitnessed_names)}] "
+                    "Off-screen turns above occurred out of their sight; never reveal or imply they witnessed them unless listed in their known facts."
+                )
         if sections:
             sections.append("[RECENT TURNS (last session moments)]:\n" + tier1_lines)
         else:
@@ -407,6 +514,52 @@ def _history_text(
             if active_commits:
                 c_lines = []
                 for c in active_commits:
+                    c_meta = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
+                    if not c_meta and isinstance(c.get("metadata_json"), str) and c["metadata_json"].strip():
+                        try:
+                            _parsed_cm = json.loads(c["metadata_json"])
+                            if isinstance(_parsed_cm, dict):
+                                c_meta = _parsed_cm
+                        except Exception:
+                            c_meta = {}
+                    is_conf = bool(c.get("is_confidential") or c_meta.get("is_confidential"))
+                    if is_conf and present_npcs:
+                        allowed_actors = {"player", "you", "party", ""}
+                        for _ak in (c.get("source_entity"), c.get("target_entity")):
+                            if _ak:
+                                _akl = str(_ak).strip().lower()
+                                allowed_actors.add(_akl)
+                                allowed_actors.add(_akl.replace(" ", "_"))
+                                allowed_actors.add(_akl.replace("_", " "))
+                        raw_parts = c.get("participants") or c_meta.get("participants") or ()
+                        if not raw_parts and isinstance(c.get("participants_json"), str) and c["participants_json"].strip():
+                            try:
+                                _parsed_pj = json.loads(c["participants_json"])
+                                if isinstance(_parsed_pj, (list, tuple)):
+                                    raw_parts = _parsed_pj
+                            except Exception:
+                                raw_parts = ()
+                        for _pk in raw_parts:
+                            if isinstance(_pk, dict):
+                                for _pf in (_pk.get("npc_id"), _pk.get("person_key"), _pk.get("name")):
+                                    if _pf:
+                                        _pkl = str(_pf).strip().lower()
+                                        allowed_actors.add(_pkl)
+                                        allowed_actors.add(_pkl.replace(" ", "_"))
+                                        allowed_actors.add(_pkl.replace("_", " "))
+                            elif _pk:
+                                _pkl = str(_pk).strip().lower()
+                                allowed_actors.add(_pkl)
+                                allowed_actors.add(_pkl.replace(" ", "_"))
+                                allowed_actors.add(_pkl.replace("_", " "))
+                        outsider_present = any(
+                            str(_pn or "").strip().lower() not in allowed_actors
+                            and str(_pn or "").strip().lower().replace(" ", "_") not in allowed_actors
+                            for _pn in present_npcs
+                            if str(_pn or "").strip()
+                        )
+                        if outsider_present:
+                            continue
                     src = c.get("source_entity", "player")
                     tgt = c.get("target_entity", "")
                     ctype = c.get("commitment_type", "promise").upper()

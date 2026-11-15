@@ -226,6 +226,48 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     current_day, current_minute, _ = db.get_session_time(session_id)
     daily_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
 
+    # D10: Detect active pending_hangout_ping reply/decline before intent classification & quota checks
+    active_ping = basic.get("pending_hangout_ping") if isinstance(basic, dict) else None
+    if not isinstance(active_ping, dict) or not active_ping:
+        try:
+            _roster_ping_row = db.get_world_roster_npc(session_id, clean_npc_id or npc_id)
+            if isinstance(_roster_ping_row, dict):
+                _roster_bi = _roster_ping_row.get("basic_info") or {}
+                if isinstance(_roster_bi, dict) and isinstance(_roster_bi.get("pending_hangout_ping"), dict):
+                    active_ping = _roster_bi.get("pending_hangout_ping")
+        except Exception:
+            active_ping = None
+    if isinstance(active_ping, dict) and active_ping.get("expires_day") is not None:
+        try:
+            if int(current_day) > int(active_ping["expires_day"]):
+                active_ping = None
+        except Exception:
+            pass
+    _norm_msg_words = "".join(ch if (ch.isalnum() or ch == "'") else " " for ch in msg_lower).split()
+    _norm_msg_set = set(_norm_msg_words)
+    _norm_msg_joined = " ".join(_norm_msg_words)
+    _norm_msg_plain = _norm_msg_joined.replace("'", "")
+    _is_ping_refusal = bool(
+        (_norm_msg_set & {"no", "busy", "can't", "cant", "pass"})
+        or any(ph in _norm_msg_plain for ph in ("not now", "rain check", "maybe later"))
+    )
+    _is_ping_affirm = bool(
+        intent == "meetup"
+        or (_norm_msg_set & {"yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "omw"})
+        or any(
+            ph in _norm_msg_plain
+            for ph in (
+                "sounds good", "on my way", "be right there", "lets hang",
+                "hang out", "im in", "see you", "meet you", "count me in",
+            )
+        )
+    )
+    _has_active_ping = isinstance(active_ping, dict) and bool(active_ping)
+    is_autonomy_ping_reply = bool(_has_active_ping and _is_ping_affirm and not _is_ping_refusal)
+    is_autonomy_ping_decline = bool(_has_active_ping and _is_ping_refusal)
+    if is_autonomy_ping_reply:
+        intent = "meetup"
+
     # Auto-classify intent for custom or generic chat messages
     if intent in ("custom", "chat"):
         if is_meetup_reschedule_request(user_message):
@@ -269,7 +311,9 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         if daily_limits["flirt"]["used"] >= 3:
             is_over_limit = True
     elif intent_category == "meetup":
-        if existing_appointment:
+        if is_autonomy_ping_reply:
+            pass
+        elif existing_appointment:
             if is_reschedule_request and daily_limits["meetup"].get("relocations_used", 0) >= 2:
                 is_over_limit = True
         elif daily_limits["meetup"]["status"] == "failed":
@@ -360,6 +404,14 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     user_settings = db.get_settings(player_char.get("user_id", 0))
     check_mode = user_settings.get("debug_check_mode", "off") if user_settings else "off"
     check_result = resolve_check(stat_val, req, luck=player_char.get("luk", 3), check_mode=check_mode)
+    if is_autonomy_ping_reply:
+        check_result = CheckResult(
+            chance=100,
+            roll=0.0,
+            tier="success",
+            tier_label="Success",
+            succeeded=True,
+        )
 
     is_prude = any(k in str(erotic_open).lower() for k in ("prude", "modest"))
     is_shameless = any(k in str(erotic_open).lower() for k in ("shameless", "lewd"))
@@ -896,6 +948,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     if dm_gate.get("max_affinity_delta") is not None and affinity_delta > int(dm_gate["max_affinity_delta"]):
         affinity_delta = int(dm_gate["max_affinity_delta"])
+    if is_autonomy_ping_decline:
+        affinity_delta = max(0, affinity_delta)
 
     resolved_rendezvous, intent = resolve_rendezvous_location(
         session_id=session_id,
@@ -916,13 +970,164 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # Save messages to SQLite
     await db.adb(db.save_phone_message, session_id, npc_id, sender="player", message=user_message, intent=intent)
     await db.adb(db.save_phone_message, session_id, npc_id, sender="npc", message=reply_text, intent=intent)
-    if check_result.succeeded and (is_intimate or intent in ("flirt", "nsfw_photo", "spicy_ask", "spicy_send", "confess")):
-        dm_turn_idx = max(1, len((session or {}).get("history") or []))
-        proof_ref = f"dm:{clean_npc_id}:{dm_turn_idx}"
+    dm_turn_idx = max(1, len((session or {}).get("history") or []))
+    proof_ref = f"dm:{clean_npc_id}:{dm_turn_idx}"
+    _dm_trust_delta = 0
+
+    # B12: Bitter rival screenshot/DM receipt (mints/upgrades hard_proof regardless of check outcome)
+    is_bitter_rival = score <= -25
+    if not is_bitter_rival:
+        try:
+            from mechanics.social import relationship_graph as _rg_dm
+            _rival_ties = await db.adb(_rg_dm.get_ties, session_id, clean_npc_id or contact_name) or []
+            for _rt in _rival_ties:
+                if str(_rt.get("status") or "active").lower() != "active":
+                    continue
+                if str(_rt.get("tie_type") or "").strip().lower() not in ("rival", "enemy"):
+                    continue
+                _rpa = str(_rt.get("person_a_key") or "").strip().lower()
+                _rpb = str(_rt.get("person_b_key") or "").strip().lower()
+                if _rg_dm.is_player_person_key(_rpa) or _rg_dm.is_player_person_key(_rpb):
+                    is_bitter_rival = True
+                    break
+        except Exception:
+            pass
+
+    _incrim_kws = (
+        "secret", "stole", "steal", "affair", "cheating", "bribe",
+        "confess", "killed", "broke in", "love you",
+    )
+    is_incriminating_dm = bool(
+        is_intimate
+        or intent in ("flirt", "nsfw_photo", "nsfw_video", "spicy_ask", "spicy_send", "send_spicy", "ask_spicy", "nsfw_send", "confess")
+        or any(_kw in msg_lower for _kw in _incrim_kws)
+    )
+    if is_bitter_rival and is_incriminating_dm:
+        _rival_fkey = ""
+        for _kf in epistemic_ctx.get("known_facts") or []:
+            if str(_kf.get("category") or "") in ("affair", "romance", "secret_romance", "intimate", "confession", "secret", "crime"):
+                _rival_fkey = str(_kf.get("fact_key") or "")
+                break
+        if not _rival_fkey and (epistemic_ctx.get("known_facts") or []):
+            _rival_fkey = str((epistemic_ctx.get("known_facts") or [])[0].get("fact_key") or "")
+        if not _rival_fkey:
+            _rival_fkey = f"dm_receipt:{clean_npc_id}:{dm_turn_idx}"
+        await db.adb(
+            db.upsert_epistemic_fact,
+            session_id,
+            _rival_fkey,
+            category="affair" if (is_intimate or is_romantic or intent == "flirt") else "secret",
+            culprit_actor_key="player",
+            subject_actor_key=clean_npc_id,
+            summary=f"Incriminating DM receipt kept by {contact_name}",
+            proof_artifact_ref=proof_ref,
+            severity=2,
+            heat_score=65,
+            decay_day_last_ticked=current_day,
+            status="active",
+            turn=dm_turn_idx,
+        )
+        await db.adb(
+            db.upsert_epistemic_knowledge,
+            session_id,
+            _rival_fkey,
+            clean_npc_id,
+            confidence="hard_proof",
+            containment_state="active",
+            source_actor_key="player",
+            acquisition_channel="dm",
+            hop_count=0,
+            player_aware=1,
+            metadata={"screenshot_risk": True},
+            turn=dm_turn_idx,
+        )
+    elif check_result.succeeded and (is_intimate or intent in ("flirt", "nsfw_photo", "spicy_ask", "spicy_send", "confess")):
         for kf in epistemic_ctx.get("known_facts") or []:
             if str(kf.get("category") or "") in ("affair", "romance", "secret_romance", "intimate", "confession"):
                 await db.adb(db.upsert_epistemic_fact, session_id, kf["fact_key"], proof_artifact_ref=proof_ref, turn=dm_turn_idx)
                 break
+
+    # B12: Remote DM epistemic containment (hush / discretion / alibi / proof sharing)
+    _contain_phrases = (
+        "keep this quiet", "stay quiet", "don't tell", "dont tell", "do not tell",
+        "alibi", "between us", "hush", "cover for me", "keep my secret", "swear not to tell",
+    )
+    is_dm_containment = bool(
+        intent in ("epistemic_containment", "hush", "alibi")
+        or any(_cph in msg_lower for _cph in _contain_phrases)
+    )
+    if is_dm_containment:
+        if intent == "alibi" or "alibi" in msg_lower or "cover for me" in msg_lower:
+            _dm_subtype = "deny"
+        elif "bribe" in msg_lower or "pay you" in msg_lower:
+            _dm_subtype = "hush_bribe"
+        elif "proof" in msg_lower or "evidence" in msg_lower:
+            _dm_subtype = "present_proof"
+        else:
+            _dm_subtype = "discretion_request"
+
+        _dm_fact_key = ""
+        for _kf in epistemic_ctx.get("known_facts") or []:
+            if str(_kf.get("containment_state") or "active") in ("spotted_window", "active"):
+                _dm_fact_key = str(_kf.get("fact_key") or "")
+                break
+        if not _dm_fact_key and (epistemic_ctx.get("known_facts") or []):
+            _dm_fact_key = str((epistemic_ctx.get("known_facts") or [])[0].get("fact_key") or "")
+        if not _dm_fact_key:
+            try:
+                _holder_rows = await db.adb(db.get_epistemic_knowledge_rows, session_id, holder_actor_key=clean_npc_id) or []
+                for _hr in _holder_rows:
+                    if str(_hr.get("containment_state") or "active") in ("spotted_window", "active"):
+                        _dm_fact_key = str(_hr.get("fact_key") or "")
+                        break
+                if not _dm_fact_key:
+                    for _hr in _holder_rows:
+                        if str(_hr.get("containment_state") or "active") not in ("wiped", "incapacitated"):
+                            _dm_fact_key = str(_hr.get("fact_key") or "")
+                            break
+            except Exception:
+                _dm_fact_key = ""
+        if _dm_fact_key:
+            try:
+                from mechanics.social.epistemic_engine import resolve_containment_or_epistemic_action as _resolve_dm_ep
+                _dm_ep_res = await db.adb(
+                    _resolve_dm_ep,
+                    session_id,
+                    session,
+                    _dm_subtype,
+                    _dm_fact_key,
+                    clean_npc_id,
+                    check_result,
+                    dm_turn_idx,
+                    alibi_claim=user_message if _dm_subtype == "deny" else "",
+                    proof_artifact_ref=proof_ref if _dm_subtype == "present_proof" else "",
+                )
+                if isinstance(_dm_ep_res, dict):
+                    _dm_trust_delta = int(_dm_ep_res.get("trust_delta") or 0)
+                    affinity_delta += _dm_trust_delta
+            except Exception as _dm_ep_err:
+                log.warning(f"[phone] Remote DM epistemic containment failed: {_dm_ep_err}")
+
+    # D10: Fall back autonomy ping rendezvous to ping node/current location & clear ping after response
+    if is_autonomy_ping_reply and intent == "meetup" and not resolved_rendezvous:
+        _ping_node_id = str((active_ping or {}).get("node_id") or "").strip()
+        if _ping_node_id:
+            try:
+                _ping_node = await db.adb(db.get_world_node, session_id, _ping_node_id)
+            except Exception:
+                _ping_node = None
+            if isinstance(_ping_node, dict):
+                _pn_primary = str(_ping_node.get("primary_name") or _ping_node.get("name") or "").strip()
+                _pn_sub = str(_ping_node.get("sub_name") or "").strip()
+                if _pn_primary:
+                    resolved_rendezvous = f"{_pn_primary}" + (f" ({_pn_sub})" if _pn_sub else "")
+        if not resolved_rendezvous:
+            resolved_rendezvous = str(
+                (active_ping or {}).get("location_name")
+                or (active_ping or {}).get("node_name")
+                or current_loc
+                or ""
+            ).strip()
 
     # Persist meetup appointment so the NPC appears at the rendezvous location
     if resolved_rendezvous and intent == "meetup":
@@ -945,6 +1150,17 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 new_memory=meet_mem
             )
             log.info(f"[phone] Appointment saved: {contact_name} @ {resolved_rendezvous} for session {session_id}")
+
+    if is_autonomy_ping_reply or is_autonomy_ping_decline:
+        try:
+            await db.adb(
+                db.apply_world_roster_autonomy_mutations,
+                session_id,
+                [{"npc_id": clean_npc_id or npc_id, "clear_pending_hangout_ping": True}],
+                turn_number=dm_turn_idx,
+            )
+        except Exception as _ping_clr_err:
+            log.warning(f"[phone] Failed to clear pending_hangout_ping for {npc_id}: {_ping_clr_err}")
 
     # Record memorable flirtation milestone
     if intent == "flirt" and check_result.succeeded and affinity_delta >= 2:
@@ -1018,9 +1234,13 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             )
 
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
-    if affinity_delta != 0:
+    if affinity_delta != 0 or _dm_trust_delta != 0:
         if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-            new_score = clamp_score(score + affinity_delta)
+            if affinity_delta != 0:
+                new_score = clamp_score(score + affinity_delta)
+                await db.adb(db.update_contact_score, session_id, npc_id, new_score, character_id=player_char.get("id", 0))
+        elif _dm_trust_delta != 0:
+            new_score = clamp_score(score + _dm_trust_delta)
             await db.adb(db.update_contact_score, session_id, npc_id, new_score, character_id=player_char.get("id", 0))
         else:
             log.info(f"[phone] Skipping affinity update for ineligible contact '{contact_name}' (role: {role}).")
@@ -1044,7 +1264,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             current_day=current_day,
         )
 
-    if intent_category:
+    if intent_category and not (is_autonomy_ping_reply and intent_category == "meetup"):
         meta = {}
         if intent_category == "flirt":
             existing_hist = list(daily_limits["flirt"].get("history", []))

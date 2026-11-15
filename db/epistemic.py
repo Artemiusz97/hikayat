@@ -556,13 +556,6 @@ def downgrade_or_upgrade_proof_ref(
                             conn=c,
                         )
             elif action == "destroy_or_steal":
-                meta = _capture_turn_snapshot(cur_f.get("metadata") or {}, _fact_snapshot_payload(cur_f), t_num)
-                c.execute(
-                    """UPDATE epistemic_facts
-                       SET proof_artifact_ref = '', metadata_json = ?, turn_updated = ?, updated_at = ?
-                       WHERE id = ?""",
-                    (json.dumps(meta), t_num, now, cur_f["id"]),
-                )
                 clauses = ["session_id = ?", "fact_key = ?", "confidence = 'hard_proof'"]
                 params: list[Any] = [sid, fkey]
                 if hkey:
@@ -578,6 +571,21 @@ def downgrade_or_upgrade_proof_ref(
                         confidence="firsthand",
                         turn=t_num,
                         conn=c,
+                    )
+                rem_hard = int(
+                    c.execute(
+                        "SELECT COUNT(*) FROM epistemic_knowledge WHERE session_id = ? AND fact_key = ? AND confidence = 'hard_proof'",
+                        (sid, fkey),
+                    ).fetchone()[0]
+                    or 0
+                )
+                if not hkey or rem_hard == 0:
+                    meta = _capture_turn_snapshot(cur_f.get("metadata") or {}, _fact_snapshot_payload(cur_f), t_num)
+                    c.execute(
+                        """UPDATE epistemic_facts
+                           SET proof_artifact_ref = '', metadata_json = ?, turn_updated = ?, updated_at = ?
+                           WHERE id = ?""",
+                        (json.dumps(meta), t_num, now, cur_f["id"]),
                     )
         return affected
 
@@ -783,11 +791,13 @@ def build_player_fog_of_war_summary(
         if fact_status in ("decayed", "resolved"):
             continue
         culprit = str(fact.get("culprit_actor_key") or "player").lower()
+        fact_cat = str(fact.get("category") or "").lower()
+        is_player_deed = culprit in ("player", "unknown", "") and fact_cat != "npc_secret"
         holder = str(kr.get("holder_actor_key") or "").lower()
         p_aware = int(bool(kr.get("player_aware")))
         cont_state = str(kr.get("containment_state") or "active")
 
-        if holder == "player" and culprit != "player":
+        if holder == "player" and not is_player_deed:
             held_npc_secrets.append(
                 {
                     "fact_key": fk,
@@ -807,7 +817,7 @@ def build_player_fog_of_war_summary(
         if p_aware != 1 or holder == "player":
             continue
 
-        if fact_status == "exposed_public" and culprit == "player":
+        if fact_status == "exposed_public" and is_player_deed:
             exposed_public = True
 
         if kr.get("alibi_claim"):
@@ -821,10 +831,11 @@ def build_player_fog_of_war_summary(
                 }
             )
 
-        if culprit == "player" and cont_state not in ("wiped", "decayed"):
+        if is_player_deed and cont_state not in ("wiped", "decayed"):
             entry = {
                 "fact_key": fk,
                 "category": str(fact.get("category") or "secret"),
+                "culprit_actor_key": culprit or "player",
                 "holder_actor_key": holder,
                 "confidence": str(kr.get("confidence") or "rumor"),
                 "containment_state": cont_state,

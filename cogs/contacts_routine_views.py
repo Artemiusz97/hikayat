@@ -253,6 +253,8 @@ def preload_discord_social_context(
     nodes_by_id: Dict[str, dict] = {}
     primary_property: Optional[dict] = None
     person_ties: List[dict] = []
+    active_ties_by_person: Dict[str, List[dict]] = {}
+    active_events: List[dict] = []
     party_npcs: List[dict] = []
     discoveries_by_npc: Dict[str, List[dict]] = {}
     party_npc_keys: Set[str] = set()
@@ -276,12 +278,37 @@ def preload_discord_social_context(
         except _NON_TRIVIAL_PRELOAD_ERRORS:
             primary_property = None
         try:
-            if hasattr(rg, "get_person_ties"):
-                person_ties = list(rg.get_person_ties(sid, "player") or [])
-            elif hasattr(rg, "get_ties"):
-                person_ties = list(rg.get_ties(sid, "player") or [])
+            with db.get_conn() as conn_ties:
+                t_rows = conn_ties.execute(
+                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
+                    (sid,),
+                ).fetchall()
+            for tr in t_rows:
+                td = dict(tr)
+                pa = str(td.get("person_a_key") or "").strip().lower()
+                pb = str(td.get("person_b_key") or "").strip().lower()
+                if pa:
+                    active_ties_by_person.setdefault(pa, []).append(td)
+                if pb and pb != pa:
+                    active_ties_by_person.setdefault(pb, []).append(td)
+                if pa == "player" or pb == "player" or pa.startswith("player:") or pb.startswith("player:"):
+                    person_ties.append(td)
         except _NON_TRIVIAL_PRELOAD_ERRORS:
-            person_ties = []
+            active_ties_by_person = {}
+            try:
+                if hasattr(rg, "get_person_ties"):
+                    person_ties = list(rg.get_person_ties(sid, "player") or [])
+                elif hasattr(rg, "get_ties"):
+                    person_ties = list(rg.get_ties(sid, "player") or [])
+            except _NON_TRIVIAL_PRELOAD_ERRORS:
+                person_ties = []
+        try:
+            active_events = [
+                dict(ev) for ev in (db.get_world_events(sid, entity_type="macro_event") or [])
+                if isinstance(ev, Mapping)
+            ]
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            active_events = []
         try:
             if preloaded_party_npcs is not None:
                 party_npcs = list(preloaded_party_npcs)
@@ -338,6 +365,26 @@ def preload_discord_social_context(
         if isinstance(p, Mapping) and p.get("name")
     }
 
+    current_day: Optional[int] = None
+    current_minute: Optional[int] = None
+    if isinstance(session_row, Mapping):
+        if session_row.get("current_day") is not None:
+            current_day = int(session_row.get("current_day") or 1)
+        if session_row.get("current_minute") is not None:
+            current_minute = int(session_row.get("current_minute"))
+    elif sid:
+        try:
+            db_day, db_min, _ = db.get_session_time(sid)
+            current_day = int(db_day or 1)
+            current_minute = int(db_min) if db_min is not None else None
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            pass
+    player_home_node_id = str(
+        (primary_property or {}).get("node_id")
+        or (session_row.get("player_home_node_id") if isinstance(session_row, Mapping) else "")
+        or ""
+    ).strip()
+
     return {
         "session_id": sid,
         "character_id": cid,
@@ -351,6 +398,11 @@ def preload_discord_social_context(
         "nodes_by_id": nodes_by_id,
         "primary_property": primary_property,
         "person_ties": person_ties,
+        "active_ties_by_person": active_ties_by_person,
+        "active_events": active_events,
+        "current_day": current_day,
+        "current_minute": current_minute,
+        "player_home_node_id": player_home_node_id,
         "party_npcs": party_npcs,
         "party_names": party_names,
         "discoveries_by_npc": discoveries_by_npc,
@@ -473,6 +525,12 @@ def enrich_discord_npc_with_routine(
         character_id=cid,
         preloaded=True,
         fow_schedule_revealed=bool(enriched.get("schedule_revealed")),
+        current_day=fow_context.get("current_day"),
+        current_minute=fow_context.get("current_minute"),
+        active_ties_by_person=fow_context.get("active_ties_by_person"),
+        roster_by_key=fow_context.get("roster_by_key"),
+        active_events=fow_context.get("active_events") or (),
+        player_home_node_id=str(fow_context.get("player_home_node_id") or ""),
     )
     apply_known_routine_to_contact(enriched, routine, lang=ui_lang)
 

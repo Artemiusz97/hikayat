@@ -736,6 +736,93 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     return profiles
 
 
+def _collect_nearby_roster_witness_candidates(
+    session_id: int,
+    curr_node_id: str,
+    exclude_lowers: set[str],
+) -> list[dict]:
+    """
+    Collects 0-1 real nearby roster/contact NPCs (never synthetic 'Passerby Student')
+    for discreet 0.08 vs public 0.35 witness rolls when the stage candidate pool is empty.
+    """
+    if not session_id:
+        return []
+    sid = int(session_id)
+    node_norm = str(curr_node_id or "").strip().lower()
+    matched: list[dict] = []
+    fallback_peers: list[dict] = []
+    fallback_staff: list[dict] = []
+
+    def _is_valid_cand(row: dict) -> bool:
+        if not isinstance(row, dict):
+            return False
+        if _is_blocked_or_deceased_contact(row):
+            return False
+        st = str(row.get("staff_status") or "active").strip().lower()
+        if st in ("deceased", "wiped", "removed"):
+            return False
+        nm = str(row.get("name") or "").strip()
+        if not nm:
+            return False
+        aliases = {
+            nm.lower(),
+            str(row.get("person_key") or "").strip().lower(),
+            str(row.get("npc_id") or "").strip().lower(),
+        }
+        return not bool(aliases & exclude_lowers)
+
+    def _is_staff_cand(row: dict) -> bool:
+        bi = row.get("basic_info") if isinstance(row.get("basic_info"), dict) else {}
+        grade_low = str(row.get("grade") or bi.get("grade") or "").strip().lower()
+        role_low = str(row.get("role") or bi.get("role") or "").strip().lower()
+        if "faculty" in grade_low:
+            return True
+        return any(tok in role_low for tok in ("teacher", "principal", "nurse", "dean", "counselor"))
+
+    try:
+        wr = db.get_world_roster(sid) or []
+    except Exception:
+        wr = []
+    for r in wr:
+        if not _is_valid_cand(r):
+            continue
+        r_nodes = {
+            str(r.get("home_node_id") or "").strip().lower(),
+            str(r.get("workplace_node_id") or "").strip().lower(),
+            str(r.get("hangout_node_id") or "").strip().lower(),
+        }
+        if node_norm and node_norm in r_nodes:
+            matched.append(r)
+        elif _is_staff_cand(r):
+            fallback_staff.append(r)
+        else:
+            fallback_peers.append(r)
+
+    if not matched and not fallback_peers and not fallback_staff:
+        try:
+            sr = db.get_school_roster(sid) or []
+        except Exception:
+            sr = []
+        for r in sr:
+            if not _is_valid_cand(r):
+                continue
+            if _is_staff_cand(r):
+                fallback_staff.append(r)
+            else:
+                fallback_peers.append(r)
+
+    if not matched and not fallback_peers and not fallback_staff:
+        for c in _safe_get_contacts(sid):
+            if not _is_valid_cand(c):
+                continue
+            if _is_staff_cand(c):
+                fallback_staff.append(c)
+            else:
+                fallback_peers.append(c)
+
+    return matched[:1] or fallback_peers[:1] or fallback_staff[:1]
+
+
 def evaluate_pre_turn_witness_detection(
     session: dict,
     actions: list,
@@ -855,7 +942,24 @@ def evaluate_pre_turn_witness_detection(
     detected_events: list[dict] = []
     active_spots: list[dict] = []
 
-    if session_id and candidate_pool:
+    exclude_lowers = {"player"}
+    if player_name:
+        exclude_lowers.add(player_name.strip().lower())
+    if target_npc and not is_public_exposure:
+        exclude_lowers.add(target_npc.strip().lower())
+    for _cand in candidate_pool:
+        for _cf in ("name", "person_key", "npc_id"):
+            _cv = str(_cand.get(_cf) or "").strip().lower()
+            if _cv:
+                exclude_lowers.add(_cv)
+
+    nearby_pool = _collect_nearby_roster_witness_candidates(
+        int(session_id or 0),
+        curr_node_id,
+        exclude_lowers,
+    ) if (session_id and not candidate_pool) else []
+
+    if session_id and (candidate_pool or nearby_pool):
         from mechanics.social.epistemic_engine import detect_scene_witnesses
         act_ctx = {
             "intent": "stealth_covert" if is_illicit else ("intimate_act" if is_romantic_or_intimate else "general_action"),
@@ -866,7 +970,7 @@ def evaluate_pre_turn_witness_detection(
             "is_crime": is_illicit,
             "is_secret_deed": True,
             "is_private_venue": bool(is_discreet_spot),
-            "force_spotted": bool(is_public_exposure or not is_discreet_spot),
+            "force_spotted": bool(is_public_exposure or (bool(candidate_pool) and not is_discreet_spot)),
             "turn": len(session.get("history") or []) + 1,
             "dialogue_partners": [],
             "actor_garments": session.get("actor_garments"),
@@ -875,7 +979,7 @@ def evaluate_pre_turn_witness_detection(
             int(session_id),
             session,
             candidate_pool,
-            [],
+            nearby_pool,
             act_ctx,
             random,
             turn=act_ctx["turn"],
@@ -889,13 +993,21 @@ def evaluate_pre_turn_witness_detection(
             first_ev = active_spots[0]
             culprit_unknown = (str(first_ev.get("culprit_actor_key") or "") == "unknown")
             hkey = str(first_ev["holder_actor_key"]).strip().lower()
+            combined_pool = list(candidate_pool) + list(nearby_pool)
             matched_obj = next(
-                (n for n in candidate_pool if str(n.get("person_key") or n.get("npc_id") or n.get("name") or "").strip().lower() == hkey),
+                (
+                    n for n in combined_pool
+                    if hkey in {
+                        str(n.get(f) or "").strip().lower()
+                        for f in ("person_key", "npc_id", "npc_key", "name")
+                    }
+                ),
                 None,
             )
             witness_name = str((matched_obj or {}).get("name") or first_ev["holder_actor_key"]).strip()
-    elif candidate_pool and is_public_exposure:
-        witness_name = str(candidate_pool[0].get("name") or "").strip()
+    elif (candidate_pool or nearby_pool) and is_public_exposure:
+        fallback_obj = (candidate_pool or nearby_pool)[0]
+        witness_name = str(fallback_obj.get("name") or "").strip()
 
     if not witness_name:
         return {"witness_spotted": False}
