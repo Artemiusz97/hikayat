@@ -11,7 +11,7 @@ import scenario_data
 from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
 from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.social.relationships import can_player_dm_contact
+from mechanics.social.relationships import can_player_dm_contact, safe_get_contacts
 
 from .embeds import (
     build_media_gallery_embed,
@@ -153,7 +153,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
     async def _open_contacts(self, interaction: discord.Interaction):
         char = await db.adb(db.get_character, self.user_id)
-        contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0), ensure_scene=False)) if char else []
+        contacts = (await db.adb(safe_get_contacts, self.session_id, char.get("id", 0), ensure_scene=False)) if char else []
         session = await db.adb(db.get_session, self.session_id)
         party_npcs = await db.adb(db.get_session_party_npcs, self.session_id) if self.session_id else []
         party_names = {
@@ -188,7 +188,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
     async def _open_dms(self, interaction: discord.Interaction):
         def _load_dms():
             ch = db.get_character(self.user_id)
-            cts = db.get_contacts(self.session_id, character_id=ch.get("id", 0), ensure_scene=False) if ch else []
+            cts = safe_get_contacts(self.session_id, ch.get("id", 0), ensure_scene=False) if ch else []
             sess = db.get_session(self.session_id)
             p_npcs = db.get_session_party_npcs(self.session_id)
             return ch, cts, sess, p_npcs
@@ -795,7 +795,7 @@ class SocialProfileView(PhoneOwnerRestrictedView):
     async def _open_dm_with_contact(self, interaction: discord.Interaction):
         def _prep_dm():
             ch = db.get_character(self.user_id)
-            cts = db.get_contacts(self.session_id, character_id=ch.get("id", 0), ensure_scene=False) if ch else []
+            cts = safe_get_contacts(self.session_id, ch.get("id", 0), ensure_scene=False) if ch else []
             ct = db.get_contact(self.session_id, self.profile["npc_id"], character_id=ch.get("id", 0)) if ch else None
             if not ct:
                 return None, [], None, None

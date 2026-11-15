@@ -1,6 +1,7 @@
 from .constants import *
 from mechanics.world.locations import *
 from mechanics.social.persona import *
+from mechanics.social.relationships import safe_get_contacts
 from game_engine.turn_context import TurnContext
 import json
 import logging
@@ -261,7 +262,7 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                 import db
                 try:
                     roster = db.get_school_roster(session["id"]) or []
-                    contacts = db.get_contacts(session["id"], ensure_scene=False) or []
+                    contacts = safe_get_contacts(session["id"], ensure_scene=False)
                     w_roster = db.get_world_roster(session["id"], include_legacy_rosters=False) or []
                     cand_names: list[str] = []
                     seen_cands: set[str] = set()

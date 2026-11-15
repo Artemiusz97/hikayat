@@ -31,6 +31,7 @@ from mechanics.world.mobility import (
     is_solo_travel_intent,
     ACCOMPANIED_TRAVEL_PHRASES,
 )
+from mechanics.social.relationships import safe_get_contacts
 from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
 
 logger = logging.getLogger("hikayat.game_engine.npcs.cast_planner")
@@ -612,7 +613,7 @@ def apply_cast_events(
     known_npcs_by_low: Dict[str, dict] = {}
     if sess_id:
         try:
-            for c_rec in (db.get_contacts(sess_id, ensure_scene=False) or []):
+            for c_rec in safe_get_contacts(sess_id, ensure_scene=False):
                 cn = str(c_rec.get("name") or "").strip()
                 if cn:
                     known_npcs_by_low[cn.lower()] = c_rec

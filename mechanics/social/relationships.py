@@ -5,6 +5,7 @@ Modular Relationship Engine for Hikayat.
 Handles -100 to +100 relationship score calculations, tier lookup across genres,
 platonic vs romantic track branching, progressive trait disclosure, and skill check modifiers.
 """
+import inspect
 import json
 import math
 import re
@@ -2430,6 +2431,56 @@ def enrich_contact_dossier(
             romantic_npc_keys=romantic_npc_keys,
         )
     return c
+
+
+def safe_get_contacts(
+    session_id: int,
+    character_id: int | None = None,
+    *,
+    resolve_relations: bool | None = None,
+    ensure_scene: bool | None = False,
+) -> list[dict]:
+    """Read contacts safely across full db.get_contacts and 1/2-arg test mocks."""
+    import db
+
+    sid = int(session_id or 0)
+    if sid <= 0:
+        return []
+    fn = db.get_contacts
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        params = {}
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    has_varpos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params.values())
+    kwargs: dict[str, Any] = {}
+    if ensure_scene is not None and (has_varkw or "ensure_scene" in params):
+        kwargs["ensure_scene"] = ensure_scene
+    if resolve_relations is not None and (has_varkw or "resolve_relations" in params):
+        kwargs["resolve_relations"] = resolve_relations
+
+    pos_params = [
+        p for p in params.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    supports_char_id = (
+        character_id is not None
+        and (has_varpos or len(pos_params) >= 2 or "character_id" in params)
+    )
+    try:
+        if supports_char_id:
+            if "character_id" in params or has_varkw:
+                return fn(sid, character_id=character_id, **kwargs) or []
+            return fn(sid, character_id, **kwargs) or []
+        return fn(sid, **kwargs) or []
+    except TypeError:
+        try:
+            if character_id is not None:
+                return fn(sid, character_id) or []
+        except TypeError:
+            pass
+        return fn(sid) or []
+
 
 
 

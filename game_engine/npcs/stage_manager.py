@@ -32,6 +32,7 @@ from mechanics.narrative.intent import (
     IntentContext,
 )
 from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+from mechanics.social.relationships import safe_get_contacts
 from mechanics.world.schedules import get_time_block_key
 
 log = logging.getLogger(__name__)
@@ -487,7 +488,7 @@ def _spawn_canonical_role_npc_pre_turn(
 
             fac_chars = db.get_school_characters_by_facility(sess_id, effective_location, limit=10) if hasattr(db, "get_school_characters_by_facility") else []
             roster_chars = db.get_school_roster(sess_id) if hasattr(db, "get_school_roster") else []
-            all_contacts = db.get_contacts(sess_id, ensure_scene=False) or []
+            all_contacts = safe_get_contacts(sess_id, ensure_scene=False)
             eff_low = str(effective_location or "").lower()
             local_contacts = [
                 c for c in all_contacts
@@ -770,7 +771,7 @@ def compute_pre_turn_stage(
                 cached_stage_contacts = ctx.contacts
             elif sess_id and hasattr(db, "get_contacts"):
                 try:
-                    cached_stage_contacts = db.get_contacts(sess_id, ensure_scene=False) or []
+                    cached_stage_contacts = safe_get_contacts(sess_id, ensure_scene=False)
                 except Exception:
                     cached_stage_contacts = []
             else:
@@ -2844,7 +2845,7 @@ def resolve_post_turn_stage_delta(
     # 3. Inspect newcomers in raw_npcs_present
     if contacts is None and session and session.get("id"):
         try:
-            contacts = db.get_contacts(session["id"], ensure_scene=False)
+            contacts = safe_get_contacts(session["id"], ensure_scene=False)
         except Exception:
             contacts = []
     contacts = contacts or []

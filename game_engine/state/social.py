@@ -2548,7 +2548,7 @@ def resolve_pre_turn_social_and_disclosures(
             _fulfill_kws = ("fulfill", "keep promise", "kept promise", "repay", "pay back", "deliver", "hand over", "return the", "honor pact")
             _break_kws = ("break promise", "broke promise", "betray", "refuse to pay", "expose secret", "spill secret", "tell secret", "renounce pact")
             is_unverified_custom = bool(first_action.get("is_custom") or first_action.get("source") == "custom")
-            turn_num_pre = len(session.get("history") or []) + 1
+            turn_num_pre = _resolve_current_turn_1based(session)
             player_uid_pre = int(player_char.get("user_id") or session.get("host_user_id") or 0)
             player_gold_pre = int(player_char.get("gold") or 0)
             player_inv_names: set[str] | None = None
@@ -2706,7 +2706,7 @@ def resolve_pre_turn_social_and_disclosures(
                             for cm in active_commits
                         )
                         if not already_exists:
-                            turn_num = len(session.get("history") or [])
+                            turn_num = _resolve_current_turn_1based(session)
                             cm_kwargs = {
                                 "session_id": session_id,
                                 "source_entity": "player",

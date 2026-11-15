@@ -6,6 +6,7 @@ import random
 import game_engine
 from game_engine.core import *
 from game_engine.core import _get_npc_name, _norm_dialogue_name
+from mechanics.social.relationships import safe_get_contacts
 
 from .dialogue_tracking import (
     DIALOGUE_STALL_VERBS,
@@ -247,7 +248,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
     old_npcs = list(session.get("current_npcs") or [])
 
-    known_contacts = db.get_contacts(session["id"], ensure_scene=False) if session.get("id") else []
+    known_contacts = safe_get_contacts(session["id"], ensure_scene=False) if session.get("id") else []
     known_contact_names_low = {
         str(kc.get("name") or "").strip().lower()
         for kc in (known_contacts or [])

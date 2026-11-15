@@ -23,6 +23,7 @@ from .relationships import (
     is_contact_eligible,
     is_promoted_family_or_cohabitant,
     is_unlocked_contact,
+    safe_get_contacts,
     should_promote_roster_npc_to_contact,
 )
 from .folklore_roster import (
@@ -71,6 +72,7 @@ __all__ = [
     "is_contact_eligible",
     "is_promoted_family_or_cohabitant",
     "is_unlocked_contact",
+    "safe_get_contacts",
     "should_promote_roster_npc_to_contact",
     "befriend_folklore_villager",
     "commit_staged_folklore_ops",

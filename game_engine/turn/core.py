@@ -5,6 +5,7 @@ from .constants import *
 from db import adb
 from mechanics.world.locations import *
 from mechanics.social.persona import *
+from mechanics.social.relationships import safe_get_contacts
 from mechanics.narrative.intent import *
 from .dialogue import _build_dialogue_prompt_block, _compute_dialogue_intent
 from .prompts import _build_quest_and_bounty_directives, _build_player_actions_text, _build_history_context
@@ -2629,7 +2630,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                             window_appts.append(r)
 
                 if window_appts:
-                    contacts_now = db.get_contacts(session["id"], ensure_scene=False) or []
+                    contacts_now = safe_get_contacts(session["id"], ensure_scene=False)
                     contact_by_key = {}
                     for kc in contacts_now:
                         k_nm = str(kc.get("name") or "").strip()

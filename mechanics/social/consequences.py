@@ -15,6 +15,7 @@ from typing import Any
 
 import db
 from mechanics.social import locales, pacing
+from mechanics.social.relationships import safe_get_contacts
 import mechanics.social.persona as persona
 import mechanics.social.relationship_graph as rg
 
@@ -264,7 +265,7 @@ def evaluate_social_turn_consequences(
     if session_id:
         try:
             canon_target = db.canon_social_npc_id(npc_name)
-            for c_row in db.get_contacts(session_id, character_id=int(character_id or 0), ensure_scene=False):
+            for c_row in safe_get_contacts(session_id, character_id=int(character_id or 0), ensure_scene=False):
                 if db.canon_social_npc_id(c_row.get("npc_id") or c_row.get("name") or "") == canon_target:
                     contact_obj = c_row
                     break

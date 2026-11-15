@@ -16,6 +16,7 @@ import namegen
 import scenario_data
 from db.roster_adapters import slugify_npc_id
 from mechanics.world.anchor_schedule import is_npc_on_active_shift
+from mechanics.social.relationships import safe_get_contacts
 from mechanics.world.locations import is_school_scenario, location_has_merchant_shop
 from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
 from mechanics.world.schedule_blocks import get_time_block_key
@@ -74,7 +75,7 @@ def _collect_taken_names_and_ids(session_id: int) -> tuple[set[str], set[str]]:
     taken_ids: set[str] = set()
     if int(session_id or 0) <= 0:
         return taken_names, taken_ids
-    for row in (db.get_contacts(session_id, ensure_scene=False) or []) + (db.get_world_roster(session_id, include_legacy_rosters=False) or []):
+    for row in safe_get_contacts(session_id, ensure_scene=False) + (db.get_world_roster(session_id, include_legacy_rosters=False) or []):
         rname = str(row.get("name") or "").strip().lower()
         rid = str(row.get("npc_id") or "").strip().lower()
         if rname:

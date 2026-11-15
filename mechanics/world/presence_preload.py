@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 import db
 import scenario_data
+from mechanics.social.relationships import safe_get_contacts
 from mechanics.system.commitments_engine import get_active_commitments
 from mechanics.world.anchor_schedule import (
     is_npc_on_active_shift,
@@ -343,7 +344,7 @@ def preload_presence_context(
         if is_staffable_facility:
             ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
             ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
-        contacts = (db.get_contacts(sid, ensure_scene=False) or []) if sid > 0 else []
+        contacts = safe_get_contacts(sid, ensure_scene=False) if sid > 0 else []
         roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
     elif sid > 0:
         # Read-only pre-turn stage preview: seed inside a rolled-back SAVEPOINT and defer
@@ -366,7 +367,7 @@ def preload_presence_context(
                 if is_staffable_facility:
                     ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
                     ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
-                contacts = db.get_contacts(sid, ensure_scene=False) or []
+                contacts = safe_get_contacts(sid, ensure_scene=False)
                 roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
                 if is_staffable_facility:
                     new_rows = [
@@ -381,7 +382,7 @@ def preload_presence_context(
                             "current_day": safe_day,
                             "turn_number": eff_turn,
                         })
-                    if any(str(r.get("origin") or "").lower() == "merchant" for r in new_rows):
+                    if any(str(r.get("origin") or "").lower() in ("roaming_merchant", "merchant") for r in new_rows):
                         staged_roster_ops.setdefault("roaming_merchants", []).append({
                             "scen_key": eff_scen,
                             "turn_number": eff_turn,
