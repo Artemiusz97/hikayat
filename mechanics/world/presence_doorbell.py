@@ -139,6 +139,7 @@ def check_doorbell_etiquette(
     player_household_id: int | None = None,
     player_last_name: str = "",
     player_last_name_loaded: bool = False,
+    autonomy_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Evaluate Tier 4 doorbell etiquette when approaching an NPC's unlocked concrete residence.
@@ -304,13 +305,37 @@ def check_doorbell_etiquette(
                 or ""
             ).strip()
 
+    if isinstance(autonomy_override, Mapping) and autonomy_override.get("node_id"):
+        ov_nid = str(autonomy_override["node_id"]).strip()
+        if residence_matches_node(ov_nid, tgt_nid, local_nodes) and autonomy_override.get("is_dropby"):
+            return _result(
+                applicable=True,
+                doorbell_status="visitor_dropby",
+                allowed=True,
+                reason=str(autonomy_override.get("visit_label") or "Dropping by"),
+                home_node_id=home_nid,
+                override_reason="dropby",
+            )
+        if not residence_matches_node(ov_nid, tgt_nid, local_nodes):
+            return _result(
+                applicable=True,
+                doorbell_status="not_home",
+                allowed=False,
+                reason=str(autonomy_override.get("visit_label") or autonomy_override.get("reason") or "scheduled_elsewhere"),
+                home_node_id=home_nid,
+                override_reason=str(autonomy_override.get("reason") or ""),
+            )
+
     is_home_now = bool(eff_sched_nid and residence_matches_node(eff_sched_nid, tgt_nid, local_nodes))
     if not is_home_now:
+        not_home_reason = "scheduled_elsewhere"
+        if isinstance(autonomy_override, Mapping) and (autonomy_override.get("visit_label") or autonomy_override.get("reason")):
+            not_home_reason = str(autonomy_override.get("visit_label") or autonomy_override.get("reason"))
         return _result(
             applicable=True,
             doorbell_status="not_home",
             allowed=False,
-            reason="scheduled_elsewhere",
+            reason=not_home_reason,
             home_node_id=home_nid,
         )
 

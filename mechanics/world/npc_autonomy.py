@@ -6,7 +6,6 @@ import hashlib
 import json
 from typing import Any, Mapping, Sequence
 
-from mechanics.system.phone.embeds import scenario_has_smartphone
 from mechanics.world.schedule_blocks import get_time_block_key
 from mechanics.world.world_events.modifiers import is_node_locked_by_event
 
@@ -427,6 +426,8 @@ def compute_boundary_autonomy_deltas(
         shield_cache[pk] = is_npc_romance_shielded(
             pk, contacts=contacts, party_keys=party_keys, player_ties=player_ties, npc_row=r,
         )
+
+    from mechanics.system.phone.embeds import scenario_has_smartphone
 
     has_phone = bool(scenario_has_smartphone(scen_key))
     pair_day_seen: set[tuple[int, str, str]] = set()

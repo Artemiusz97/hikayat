@@ -822,14 +822,16 @@ def evaluate_pre_turn_witness_detection(
     if any(k in loc_low for k in ("bedroom", "private bath", "dorm room", "personal quarters", "safehouse")):
         return {"witness_spotted": False, "private": True}
 
-    # Candidate witness extraction
+    # Candidate witness extraction (real world_roster / scene NPCs ONLY — B3/B13/B14 zero phantom bystanders)
     stage_npcs = session.get("pre_turn_stage_npcs") or session.get("current_stage_npcs") or session.get("current_npcs") or []
-    candidate_witnesses = []
+    candidate_pool = []
     for n in stage_npcs:
-        n_name = (n.get("name") if isinstance(n, dict) else str(n)).strip()
+        if not isinstance(n, dict):
+            continue
+        n_name = str(n.get("name") or "").strip()
         is_partner_in_act = (n_name.lower() == target_npc.lower()) and not is_public_exposure
         if n_name and not is_partner_in_act and n_name.lower() != player_name.lower():
-            candidate_witnesses.append(n_name)
+            candidate_pool.append(n)
 
     if is_public_exposure:
         event_kind = "scandal" if exposure_type in ("fully_naked", "bottomless") else "indecency"
@@ -849,36 +851,69 @@ def evaluate_pre_turn_witness_detection(
 
     is_discreet_spot = is_discreet_venue(loc_display, curr_node_id, session_id=session_id)
     witness_name = None
-    if candidate_witnesses:
-        witness_name = candidate_witnesses[0]
-    elif is_public_exposure:
-        witness_name = "Shocked Bystander"
-    elif is_discreet_spot:
-        # 8% passerby thrill risk in secluded `is_discreet` spots
-        if random.random() < 0.08:
-            witness_name = "Passerby Student"
-    elif any(k in loc_low for k in (
-        "hallway", "corridor", "courtyard", "cafeteria", "plaza", "city square",
-        "street", "quad", "library", "park", "campus", "classroom", "beach", "pier", "lookout",
-    )):
-        # 35% passerby chance in open public areas
-        if random.random() < 0.35:
-            witness_name = "Passerby Student"
+    culprit_unknown = False
+    detected_events: list[dict] = []
+
+    if session_id and candidate_pool:
+        from mechanics.social.epistemic_engine import detect_scene_witnesses
+        act_ctx = {
+            "intent": "stealth_covert" if is_illicit else ("intimate_act" if is_romantic_or_intimate else "general_action"),
+            "category": "crime" if is_illicit else ("affair" if event_kind == "secret_affair" else "secret"),
+            "location_node_id": curr_node_id or loc_display,
+            "summary": action_str or f"Observed {event_kind} scene at {loc_display}",
+            "is_illicit": bool(event_kind == "secret_affair" or is_illicit),
+            "is_crime": is_illicit,
+            "is_secret_deed": True,
+            "is_private_venue": bool(is_discreet_spot),
+            "force_spotted": bool(is_public_exposure),
+            "turn": len(session.get("history") or []) + 1,
+            "dialogue_partners": [target_npc] if target_npc and not is_illicit else [],
+            "actor_garments": session.get("actor_garments"),
+        }
+        detected_events = detect_scene_witnesses(
+            int(session_id),
+            session,
+            candidate_pool,
+            [],
+            act_ctx,
+            random,
+            turn=act_ctx["turn"],
+        )
+        active_spots = [
+            ev for ev in detected_events
+            if ev.get("containment_state") not in ("co_conspirator", "hushed", "wiped", "incapacitated")
+            and ev.get("holder_actor_key")
+        ]
+        if active_spots:
+            first_ev = active_spots[0]
+            culprit_unknown = (str(first_ev.get("culprit_actor_key") or "") == "unknown")
+            hkey = str(first_ev["holder_actor_key"]).strip().lower()
+            matched_obj = next(
+                (n for n in candidate_pool if str(n.get("person_key") or n.get("npc_id") or n.get("name") or "").strip().lower() == hkey),
+                None,
+            )
+            witness_name = str((matched_obj or {}).get("name") or first_ev["holder_actor_key"]).strip()
+    elif candidate_pool and is_public_exposure:
+        witness_name = str(candidate_pool[0].get("name") or "").strip()
 
     if not witness_name:
         return {"witness_spotted": False}
 
-    post = queue_witness_gossip_post(
-        session_id=session_id,
-        witness_name=witness_name,
-        player_name=player_name,
-        partner_name=target_npc or "Someone",
-        location_display=loc_display,
-        event_kind=event_kind,
-    )
+    # B3: Respect spotted_window — do NOT broadcast #SecretAffair feed gossip if still inside containment window or culprit masked
+    post = None
+    uncontained_exists = any(ev.get("containment_state") == "active" for ev in detected_events) if detected_events else bool(is_public_exposure)
+    if uncontained_exists and not culprit_unknown:
+        post = queue_witness_gossip_post(
+            session_id=session_id,
+            witness_name=witness_name,
+            player_name=player_name,
+            partner_name=target_npc or "Someone",
+            location_display=loc_display,
+            event_kind=event_kind,
+        )
 
     affair_confrontation_triggered = False
-    if event_kind == "secret_affair" and session_id:
+    if event_kind == "secret_affair" and session_id and uncontained_exists and not culprit_unknown:
         try:
             import mechanics.social.relationship_graph as rg
             prim_partner = rg.get_current_partner(session_id, "player")

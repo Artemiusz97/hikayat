@@ -116,6 +116,11 @@ class _PresenceContext:
     player_hh_id: int | None
     player_last_name: str
     active_dialogue_partners: set[str]
+    all_social_ties: list[dict[str, Any]] = field(default_factory=list)
+    active_ties_by_person: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    epistemic_matrix: dict[str, Any] = field(default_factory=dict)
+    player_home_node_id: str = ""
+    tier5_overflow_count: int = 0
     household_cache: dict[int, dict[str, Any] | None] = field(default_factory=dict)
     anchor_cache: dict[str, tuple[dict[str, str] | None, tuple[bool, str]]] = field(default_factory=dict)
     staged_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -456,12 +461,40 @@ def preload_presence_context(
         combined_spare_keys.update(node_state_map["spare_keys"])
 
     person_ties: list[Mapping[str, Any]] | None = None
+    all_social_ties: list[dict[str, Any]] = []
+    active_ties_by_person: dict[str, list[dict[str, Any]]] = {}
+    epistemic_matrix: dict[str, Any] = {}
     if sid > 0:
         try:
-            import mechanics.social.relationship_graph as rg
-            person_ties = rg.get_person_ties(sid, "player") if hasattr(rg, "get_person_ties") else []
+            with db.get_conn() as c_ties:
+                t_rows = c_ties.execute(
+                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
+                    (sid,),
+                ).fetchall()
+            all_social_ties = [dict(tr) for tr in t_rows]
+            player_tie_list: list[Mapping[str, Any]] = []
+            for t_dict in all_social_ties:
+                pa = str(t_dict.get("person_a_key") or "").strip().lower()
+                pb = str(t_dict.get("person_b_key") or "").strip().lower()
+                if pa:
+                    active_ties_by_person.setdefault(pa, []).append(t_dict)
+                if pb and pb != pa:
+                    active_ties_by_person.setdefault(pb, []).append(t_dict)
+                if pa == "player" or pb == "player" or pa.startswith("player:") or pb.startswith("player:"):
+                    player_tie_list.append(t_dict)
+            person_ties = player_tie_list
         except Exception:
             person_ties = []
+        try:
+            epistemic_matrix = db.preload_epistemic_matrix(sid) or {}
+        except Exception:
+            epistemic_matrix = {}
+
+    player_home_node_id = str(
+        (prim_prop or {}).get("node_id")
+        or session_dict.get("player_home_node_id")
+        or ""
+    ).strip()
 
     active_wps = (db.get_all_session_active_waypoints(sid, resolve_schedule=False) or []) if sid > 0 else []
     active_commitments = (get_active_commitments(sid, commitment_type="rendezvous", limit=50) or []) if sid > 0 else []
@@ -521,6 +554,10 @@ def preload_presence_context(
         player_hh_id=player_hh_id,
         player_last_name=player_last_name,
         active_dialogue_partners=active_dp,
+        all_social_ties=all_social_ties,
+        active_ties_by_person=active_ties_by_person,
+        epistemic_matrix=epistemic_matrix,
+        player_home_node_id=player_home_node_id,
         staged_roster_ops=staged_roster_ops,
     )
 

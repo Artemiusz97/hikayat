@@ -724,6 +724,7 @@ def compute_pre_turn_stage(
             "pending_roster_ops": {},
             "doorbell_events": [],
             "crowd_flavor": "",
+            "epistemic_matrix": {},
             "effective_node_id": None,
             "focal_point": None,
         }
@@ -758,6 +759,7 @@ def compute_pre_turn_stage(
     pending_roster_ops: dict = {}
     doorbell_events: list[dict] = []
     crowd_flavor: str = ""
+    epistemic_matrix: dict = {}
 
     cached_stage_contacts: Optional[list] = None
     cached_stage_roster: Optional[list] = None
@@ -1528,12 +1530,14 @@ def compute_pre_turn_stage(
         include_tier5: bool = True,
         target_nid: Optional[str] = None,
     ) -> set[str]:
-        nonlocal doorbell_events, crowd_flavor, has_exited_convo, has_confidential_rendezvous
+        nonlocal doorbell_events, crowd_flavor, epistemic_matrix, has_exited_convo, has_confidential_rendezvous
         blocked_keys: set[str] = set()
         if not isinstance(pres_res, dict):
             return blocked_keys
         doorbell_events = list(pres_res.get("doorbell_events") or [])
         crowd_flavor = str(pres_res.get("crowd_flavor") or "")
+        if isinstance(pres_res.get("epistemic_matrix"), dict) and pres_res.get("epistemic_matrix"):
+            epistemic_matrix = dict(pres_res["epistemic_matrix"])
         for dbell in doorbell_events:
             if not isinstance(dbell, dict):
                 continue
@@ -2492,12 +2496,11 @@ def compute_pre_turn_stage(
                 "[STAGE DIRECTION — PRIVATE RENDEZVOUS]: Confidential 1-on-1 meetup. Party companions step aside and wait in the outer antechamber."
             )
 
-    # Tier 6 Ambient Crowd Flavor Directive (only when no named NPCs are physically staged)
-    if crowd_flavor and not stage_npcs and not access_gate_info.get("gated"):
+    # Tier 6 Ambient Crowd Flavor Directive (unnamed venue crowd or Tier 5 overflow crowd per F2)
+    if crowd_flavor and not access_gate_info.get("gated"):
         crowd_dir = (
             f"[AMBIENT CROWD FLAVOR — UNNAMED BACKGROUND ONLY]: {crowd_flavor} "
-            "Background figures are unnamed atmosphere only — keep new_entities=[], npcs_present=[], and cast_events=[] "
-            "(do NOT invent or name any individual bystander)."
+            "Background figures beyond the named scene cast are unnamed atmosphere only — do NOT invent or name unrepresented individuals."
         )
         if crowd_dir not in stage_directives:
             stage_directives.append(crowd_dir)
@@ -2529,6 +2532,7 @@ def compute_pre_turn_stage(
         "pending_roster_ops": pending_roster_ops,
         "doorbell_events": doorbell_events,
         "crowd_flavor": crowd_flavor,
+        "epistemic_matrix": epistemic_matrix,
     }
     if isinstance(session, dict):
         session["pre_turn_stage_npcs"] = list(stage_npcs)

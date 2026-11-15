@@ -21,11 +21,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import db
 from mechanics.social import locales
 from mechanics.social.consequences import is_contact_exempt_from_fog_of_war
+from mechanics.world.npc_autonomy import resolve_autonomy_node_override
+from mechanics.world.schedule_blocks import get_time_block_key
 from mechanics.world.anchor_schedule import (
     is_npc_on_active_shift,
     resolve_anchor_schedule_nodes,
@@ -439,6 +441,38 @@ def _has_closed_world_anchor_schedule(
     return False
 
 
+_OVERLAY_REASON_LOCALES: dict[str, dict[str, str]] = {
+    "friend_outing": {
+        "en": "At a friend's place",
+        "pl": "U znajomego",
+        "ms": "Di rumah kawan",
+        "de": "Bei Freunden",
+        "zh": "在朋友家做客",
+    },
+    "player_dropby": {
+        "en": "Dropping by",
+        "pl": "Wpada z wizytą",
+        "ms": "Singgah sebentar",
+        "de": "Schaut kurz vorbei",
+        "zh": "顺路来访",
+    },
+    "crisis_redirect": {
+        "en": "Sheltering",
+        "pl": "W schronieniu",
+        "ms": "Berteduh",
+        "de": "In Sicherheit",
+        "zh": "避险中",
+    },
+    "truancy": {
+        "en": "Skipping Class",
+        "pl": "Na wagarach",
+        "ms": "Ponteng Kelas",
+        "de": "Schwänzt",
+        "zh": "翘课中",
+    },
+}
+
+
 def build_known_routine_payload(
     npc: Mapping[str, Any],
     *,
@@ -461,6 +495,12 @@ def build_known_routine_payload(
     character_id: int = 0,
     preloaded: bool = False,
     fow_schedule_revealed: Optional[bool] = None,
+    current_day: int | None = None,
+    current_minute: int | None = None,
+    active_ties_by_person: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    roster_by_key: Mapping[str, Mapping[str, Any]] | None = None,
+    active_events: Sequence[Mapping[str, Any]] = (),
+    player_home_node_id: str = "",
 ) -> dict[str, Any]:
     """
     Computes an NPC's progressive 5-block Weekday/Weekend routine payload with
@@ -688,6 +728,43 @@ def build_known_routine_payload(
                 else:
                     target[block] = masked_slot
 
+    current_day_override: dict[str, Any] | None = None
+    if full_schedule_unlocked and current_day is not None:
+        safe_cd = max(1, int(current_day))
+        cur_block = get_time_block_key(int(current_minute or 600) % 1440)
+        cur_dk = "weekend" if safe_cd % 7 in (6, 0) else "weekday"
+        ov_probe = dict(exempt_probe)
+        ov_probe["workplace_node_id"] = workplace_node_id
+        ov_probe["home_node_id"] = real_home
+        ov = resolve_autonomy_node_override(
+            ov_probe,
+            session_id=int(sid or 0),
+            day=safe_cd,
+            block=cur_block,
+            scen_key=scen_key,
+            active_ties_by_person=active_ties_by_person,
+            roster_by_key=roster_by_key,
+            active_events=active_events,
+            player_home_node_id=player_home_node_id,
+        )
+        if isinstance(ov, Mapping) and cur_block in ROUTINE_BLOCKS:
+            reason_k = str(ov.get("reason") or "friend_outing").strip().lower()
+            loc_map = _OVERLAY_REASON_LOCALES.get(reason_k) or _OVERLAY_REASON_LOCALES["friend_outing"]
+            ov_label = loc_map.get(eff_lang) or loc_map.get("en") or str(ov.get("visit_label") or "At a friend's place")
+            target_blocks = weekend_blocks if cur_dk == "weekend" else weekday_blocks
+            cur_slot_val = str(target_blocks.get(cur_block) or "").strip()
+            if cur_slot_val and cur_slot_val not in (masked_slot, "???"):
+                target_blocks[cur_block] = f"{cur_slot_val} ({ov_label})"
+            else:
+                target_blocks[cur_block] = ov_label
+            current_day_override = {
+                "day": safe_cd,
+                "day_kind": cur_dk,
+                "block": cur_block,
+                "reason": reason_k,
+                "label": ov_label,
+            }
+
     discovered_count = sum(
         1
         for dk_map in (weekday_blocks, weekend_blocks)
@@ -703,6 +780,7 @@ def build_known_routine_payload(
         "residence_unlocked": residence_unlocked,
         "discovered_count": discovered_count,
         "shift_profile": raw_shift,
+        "current_day_override": current_day_override,
     }
 
 

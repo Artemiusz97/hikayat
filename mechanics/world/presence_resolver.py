@@ -16,11 +16,13 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 import db
+from mechanics.social.activity_tags import resolve_actor_activity_bundle
 from mechanics.world.anchor_schedule import resolve_anchor_schedule_nodes
 from mechanics.world.locations.residence_fog import (
     SHARED_ABSTRACT_RESIDENCE_NODE,
     can_materialize_npc_residence,
 )
+from mechanics.world.npc_autonomy import resolve_autonomy_node_override
 from mechanics.world.npc_schedule import get_npc_scheduled_node_id
 from mechanics.world.presence_doorbell import check_doorbell_etiquette
 from mechanics.world.presence_graph import (
@@ -54,6 +56,42 @@ _CRISIS_KEYWORDS: tuple[str, ...] = (
     "crisis", "ambush", "emergency", "under siege", "attack", "assault", "rescue",
 )
 _ARRIVED_GRACE_MINUTES = 120
+MAX_TIER5_BYSTANDERS = 5
+_PAIR_TIE_TYPES: frozenset[str] = frozenset({"dating", "engaged", "married", "affair", "best_friend", "friend"})
+
+
+def _minutes_to_next_bell(safe_min: int, block_key: str) -> int:
+    m = int(safe_min or 0) % 1440
+    ends = {"morning": 720, "lunch": 780, "afternoon": 1020, "evening": 1200}
+    b = str(block_key or "afternoon").lower()
+    if b in ends:
+        return max(0, ends[b] - m)
+    return (360 - m) if m < 360 else (1440 - m + 360)
+
+
+def _extract_max_party_per(session_dict: Mapping[str, Any], present_list: list[dict[str, Any]]) -> int:
+    best = 10
+    for key in ("player_stats", "stats"):
+        s_map = session_dict.get(key)
+        if isinstance(s_map, Mapping):
+            raw = s_map.get("per") if s_map.get("per") is not None else s_map.get("PER")
+            if raw is None:
+                raw = s_map.get("perception")
+            if raw is not None:
+                try:
+                    best = max(best, int(raw))
+                except (TypeError, ValueError):
+                    pass
+    for npc in present_list:
+        if npc.get("presence_tier") == 1 or npc.get("in_party"):
+            st = npc.get("stats") if isinstance(npc.get("stats"), Mapping) else {}
+            raw = npc.get("per") or st.get("per") or st.get("PER") or st.get("perception")
+            if raw is not None:
+                try:
+                    best = max(best, int(raw))
+                except (TypeError, ValueError):
+                    pass
+    return best
 
 
 def _compute_commitment_abs_window(row: Mapping[str, Any]) -> tuple[int, int, int]:
@@ -460,9 +498,11 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         return
     display_loc = format_node_display_label(ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id)
     day_kind = "weekend" if is_weekend(ctx.safe_day) else "weekday"
+    protected_aliases = ctx.tier2_aliases | ctx.tier3_crisis_aliases
+    candidates: list[dict[str, Any]] = []
 
     # Track 5A: Closed-world non-legacy `world_roster`
-    for r_row, _, merged_npc, aliases in ctx.unified_records:
+    for r_row, c_row, merged_npc, aliases in ctx.unified_records:
         if r_row is None:
             continue
         origin_val = str(r_row.get("origin") or "").strip().lower()
@@ -474,8 +514,23 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
 
         a_map, (on_shift, work_nid) = ctx.get_anchor_eval(merged_npc, force_anchor=True)
         sched_nid = str((a_map or {}).get(ctx.block_key) or "").strip()
-        work_match = bool(
-            on_shift
+
+        # F4: Evaluate ephemeral current-day D1/D3/D14 autonomy override cleanly without mutating anchor schedule
+        ov = resolve_autonomy_node_override(
+            merged_npc,
+            session_id=ctx.sid,
+            day=ctx.safe_day,
+            block=ctx.block_key,
+            scen_key=ctx.scen_key,
+            active_ties_by_person=ctx.active_ties_by_person,
+            roster_by_key=ctx.roster_by_key,
+            active_events=ctx.active_events,
+            has_active_rendezvous_or_quest=bool(aliases & protected_aliases),
+            player_home_node_id=ctx.player_home_node_id,
+        )
+        eff_work_match = bool(
+            not ov
+            and on_shift
             and schedule_matches_node(
                 work_nid,
                 ctx.eff_node_id,
@@ -485,20 +540,35 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
                 resident_home_ids=ctx.resident_home_ids,
             )
         )
+        eff_sched_nid = str(ov["node_id"]) if isinstance(ov, Mapping) and ov.get("node_id") else sched_nid
         sched_match = schedule_matches_node(
-            sched_nid,
+            eff_sched_nid,
             ctx.eff_node_id,
             ctx.eff_loc,
             ctx.nodes_by_id,
             prop_at_node=ctx.prop_at_node,
             resident_home_ids=ctx.resident_home_ids,
         )
-        if not (work_match or sched_match):
+        if not (eff_work_match or sched_match):
             continue
 
-        staged = ctx.stage(merged_npc, 5, "schedule")
-        if staged is not None:
-            _record_discovery_if_needed(ctx, r_row, day_kind, display_loc)
+        aff_val = int((c_row or {}).get("relationship_score") or (c_row or {}).get("affinity") or merged_npc.get("affinity") or 0)
+        is_dropby = bool(isinstance(ov, Mapping) and ov.get("is_dropby"))
+        extra_meta: dict[str, Any] = {}
+        if isinstance(ov, Mapping):
+            extra_meta["autonomy_reason"] = str(ov.get("reason") or "")
+            if ov.get("visit_label"):
+                extra_meta["autonomy_visit_label"] = str(ov["visit_label"])
+            if is_dropby:
+                extra_meta["is_autonomy_dropby"] = True
+        candidates.append({
+            "npc": merged_npc,
+            "r_row": r_row,
+            "priority": (0 if is_dropby else 1, -aff_val),
+            "extra": extra_meta,
+            "aliases": aliases,
+            "key": str(r_row.get("person_key") or r_row.get("npc_id") or merged_npc.get("name") or "").strip().lower(),
+        })
 
     # Track 5B: Materialized `legacy_adapter` rows + unlinked contacts + raw legacy pools (Ruling 6)
     legacy_candidates: list[tuple[dict[str, Any], dict[str, Any] | None, set[str]]] = []
@@ -551,15 +621,79 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         ):
             continue
 
-        staged = ctx.stage(leg_npc, 5, "schedule")
-        if staged is not None and linked_r_row is not None:
-            _record_discovery_if_needed(ctx, linked_r_row, day_kind, display_loc)
+        candidates.append({
+            "npc": leg_npc,
+            "r_row": linked_r_row,
+            "priority": (2, 0),
+            "extra": {},
+            "aliases": aliases,
+            "key": str((linked_r_row or {}).get("person_key") or leg_npc.get("npc_id") or leg_npc.get("name") or "").strip().lower(),
+        })
+
+    # F2: Group active tie pairs atomically before admitting up to MAX_TIER5_BYSTANDERS = 5
+    candidates.sort(key=lambda c: c["priority"])
+    by_alias: dict[str, int] = {}
+    for idx, c in enumerate(candidates):
+        for ak in c["aliases"] | {c["key"]}:
+            if ak:
+                by_alias[ak] = idx
+
+    paired_idx: set[int] = set()
+    units: list[list[int]] = []
+    for i, c in enumerate(candidates):
+        if i in paired_idx:
+            continue
+        partner_j: int | None = None
+        for ak in (c["aliases"] | {c["key"]}):
+            for t in ctx.active_ties_by_person.get(ak, ()):
+                ttype = str(t.get("tie_type") or "").strip().lower()
+                if ttype not in _PAIR_TIE_TYPES:
+                    continue
+                pa = str(t.get("person_a_key") or "").strip().lower()
+                pb = str(t.get("person_b_key") or "").strip().lower()
+                other_k = pb if pa == ak else pa
+                j = by_alias.get(other_k)
+                if j is not None and j != i and j not in paired_idx:
+                    partner_j = j
+                    break
+            if partner_j is not None:
+                break
+
+        if partner_j is not None:
+            paired_idx.update((i, partner_j))
+            name_i = str(c["npc"].get("name") or "")
+            name_j = str(candidates[partner_j]["npc"].get("name") or "")
+            if name_j:
+                c["extra"]["paired_with"] = name_j
+            if name_i:
+                candidates[partner_j]["extra"]["paired_with"] = name_i
+            units.append([i, partner_j])
+        else:
+            paired_idx.add(i)
+            units.append([i])
+
+    admitted = 0
+    overflow = 0
+    for unit in units:
+        if admitted + len(unit) > MAX_TIER5_BYSTANDERS:
+            overflow += len(unit)
+            continue
+        for idx in unit:
+            c = candidates[idx]
+            staged = ctx.stage(c["npc"], 5, "schedule", extra=c["extra"])
+            if staged is not None:
+                admitted += 1
+                if c["r_row"] is not None:
+                    _record_discovery_if_needed(ctx, c["r_row"], day_kind, display_loc)
+    ctx.tier5_overflow_count += overflow
 
 
 def _resolve_tier6_crowd(ctx: _PresenceContext, present_list: list[dict[str, Any]]) -> str:
-    if present_list or (not ctx.eff_node_id and not ctx.eff_loc):
+    if not ctx.eff_node_id and not ctx.eff_loc:
         return ""
     if is_private_home_or_wilderness(ctx.target_node, ctx.eff_node_id, ctx.eff_loc, ctx.prop_at_node):
+        return ""
+    if present_list and int(getattr(ctx, "tier5_overflow_count", 0) or 0) <= 0:
         return ""
     return format_venue_crowd_flavor(ctx.eff_node_id, ctx.eff_loc, ctx.scen_key, ctx.safe_min)
 
@@ -602,6 +736,42 @@ def resolve_node_presence(
     _resolve_tier5_schedules(ctx)
 
     present_list = [ctx.staged_by_key[k] for k in ctx.staged_order]
+    lang_code = str(ctx.session_dict.get("language") or "en").strip().lower()
+    max_per = _extract_max_party_per(ctx.session_dict, present_list)
+    mins_left = _minutes_to_next_bell(ctx.safe_min, ctx.block_key)
+    in_combat = bool(ctx.session_dict.get("in_combat"))
+    in_erotic = bool(ctx.session_dict.get("in_erotic_scene"))
+    node_type_val = str((ctx.target_node or {}).get("node_type") or "")
+    joined_partner_low = str(ctx.session_dict.get("joined_activity_npc") or "").strip().lower()
+
+    for npc_entry in present_list:
+        n_low = str(npc_entry.get("name") or "").strip().lower()
+        is_dp = bool(
+            n_low in ctx.active_dialogue_partners
+            or str(npc_entry.get("npc_id") or "").strip().lower() in ctx.active_dialogue_partners
+        )
+        rv_state = "waiting" if int(npc_entry.get("presence_tier") or 5) == 2 else ""
+        bundle = resolve_actor_activity_bundle(
+            npc_entry,
+            location=ctx.eff_loc or str((ctx.target_node or {}).get("name") or ""),
+            node_type=node_type_val,
+            scen_key=ctx.scen_key,
+            time_block=ctx.block_key,
+            stage_role=str(npc_entry.get("stage_role") or "room_bystander"),
+            is_dialogue_partner=is_dp,
+            is_joined_activity=bool(joined_partner_low and joined_partner_low == n_low),
+            is_combat=in_combat,
+            is_erotic=in_erotic,
+            paired_with=str(npc_entry.get("paired_with") or ""),
+            rendezvous_state=rv_state,
+            minutes_to_bell=mins_left,
+            max_party_per=max_per,
+            lang=lang_code,
+            session_id=ctx.sid,
+            day=ctx.safe_day,
+        )
+        npc_entry.update(bundle)
+
     crowd_flavor = _resolve_tier6_crowd(ctx, present_list)
     return {
         "node_id": ctx.eff_node_id,
@@ -612,10 +782,12 @@ def resolve_node_presence(
         "crowd_flavor": crowd_flavor,
         "time_block": ctx.block_key,
         "staged_roster_ops": dict(ctx.staged_roster_ops),
+        "epistemic_matrix": dict(ctx.epistemic_matrix),
     }
 
 
 __all__ = [
+    "MAX_TIER5_BYSTANDERS",
     "resolve_node_presence",
     "check_doorbell_etiquette",
     "is_node_descendant_in_memory",

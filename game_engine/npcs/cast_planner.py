@@ -370,8 +370,21 @@ def plan_pre_turn(
     if not has_exited_convo and not stealth_active:
         import namegen
         social_intents = {
-            "dialogue_init", "social_invite", "romantic_confession", "gift_offer",
-            "disclosure_inquiry", "affection_touch", "party_recruit"
+            "dialogue_init", "social_invite", "join_activity", "romantic_confession",
+            "gift_offer", "disclosure_inquiry", "affection_touch", "party_recruit",
+            "epistemic_containment",
+        }
+        is_private_pull = any(
+            isinstance(a, dict) and (
+                a.get("is_confidential")
+                or any(tok in str(a.get("label") or a.get("text") or "").lower() for tok in ("alone", "in private", "pull aside", "whisper"))
+            )
+            for a in actions
+        )
+        npcs_by_low = {
+            game_engine._get_npc_name(n).strip().lower(): n
+            for n in current_npcs
+            if game_engine._get_npc_name(n).strip()
         }
         for a in actions:
             if isinstance(a, dict):
@@ -408,6 +421,17 @@ def plan_pre_turn(
                             idle_turns[n_low] = 0
                             disengaged_at_turn.pop(n_low, None)
                             logger.info("[CastPlanner] Player initiated dialogue with '%s'", n_name)
+                            # D4: 3-way group conversation auto-join when engaging a paired NPC openly
+                            paired_raw = str(n.get("paired_with") or "").strip() if isinstance(n, dict) else ""
+                            if paired_raw and not is_private_pull:
+                                p_low = paired_raw.lower()
+                                p_obj = npcs_by_low.get(p_low)
+                                if p_obj is not None:
+                                    p_canon = game_engine._get_npc_name(p_obj).strip()
+                                    if p_canon and p_canon not in current_partners:
+                                        current_partners.append(p_canon)
+                                    idle_turns[p_canon.lower()] = 0
+                                    disengaged_at_turn.pop(p_canon.lower(), None)
 
     # 7. Idle Turn Counter (3 non-involving turns -> automatic disengagement)
     if not has_exited_convo and current_partners:
