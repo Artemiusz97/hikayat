@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v2.13.0** | 2026-11-15 | Minor | Closed-World NPC Engine (`world_roster`), Anchor-Node Schedules, Residential Fog-of-War, 6-Tier Presence Resolver, Progressive Routine Disclosure & Contacts/Acquaintances UI. |
 | **v2.12.0** | 2026-11-14 | Minor | Combat Submodule Extraction, Boss Telegraph Sanitization, Crash Replay & LLM Tapes, Shielded Rollback & Web/Bot Parity. |
 | **v2.11.0** | 2026-11-13 | Minor | Modular Combat Engine Decomposition, Chapter Plan & Clue Progression, 6-Segment Threat Clock, Quest Agency Overhaul, and 5-Language Parity. |
 | **v2.10.0** | 2026-11-10 | Minor | Flow-Sensitive Static Bug Gate, Deterministic Social State Snapshots, Privacy Nudge Hierarchy, Contract Indexing & Packaging Hardening. |
@@ -51,6 +52,22 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v2.13.0] - 2026-11-15
+
+#### Added & Enhanced
+- **Normalized Closed-World Roster & Lifecycle (`db/roster.py`, `db/roster_adapters.py`)**:
+  - Added SQLite `world_roster` persistence, turn-indexed rollback snapshots, legacy roster adaptation, and atomic `seeded -> acquaintance -> promoted` progression synced with save/load slots (`db/saves.py`) and session lifecycle (`db/sessions.py`, `db/core.py`).
+- **Anchor-Node Schedules & Residential Fog-of-War (`mechanics/world/anchor_schedule.py`, `mechanics/world/locations/residence_fog.py`)**:
+  - Deterministic shift profiles (`day`, `evening`, `night`, `student`, `rotating`, `roaming_merchant`), rest-day rules, and `zone_residential_abstract` masking until concrete homes are unlocked by invitation, Friend-tier affinity, quest lead, tailing, family, or cohabitation.
+- **Lazy Venue Seeder, Roamers & Staff-Bound Shops (`mechanics/world/venue_seeder.py`, `venue_templates.py`, `api/inventory_merchant.py`)**:
+  - Seed-deterministic staff and rotating roamer population per venue, slot-fill matching, and merchant shop availability gated strictly by on-duty roster/contact staff.
+- **Unified 6-Tier Presence Resolver & Doorbell Etiquette (`mechanics/world/presence_resolver.py`, `presence_preload.py`, `presence_graph.py`, `presence_doorbell.py`)**:
+  - O(1)-preloaded turn resolution ordering Party -> Commitments -> Quest Pins -> Doorbell -> Active Schedules -> Crowd Flavor, eliminating travel-to-meet bypasses and N+1 waypoint queries.
+- **Closed-World Turn Pipeline, 3-Step Promotion & DM Gate (`game_engine/npcs/stage_manager.py`, `cast_planner.py`, `turn/core.py`, `services/turn_service.py`)**:
+  - Enforced closed-world stage plans, post-narration cast contract enforcement (`cast_contract.py`), 3-step NPC promotion, and phone DM contact gating.
+- **Progressive Schedule Disclosure & Omnichannel Contacts | Acquaintances UI (`mechanics/world/routine_disclosure.py`, `api/codex_phone.py`, `cogs/contacts_routine_views.py`, `web/`)**:
+  - Slot-by-slot discovery masking (`???` below affinity threshold), O(1) read-only contacts/acquaintances hydration, Discord routine embeds, React `AcquaintancesView.jsx` + `KnownRoutineCard.jsx`, and 5-language UI parity (`en`, `pl`, `ms`, `de`, `zh`).
 
 ### [v2.12.0] - 2026-11-14
 
