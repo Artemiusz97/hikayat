@@ -393,7 +393,7 @@ class WorldCodexView(discord.ui.View):
             if not char_name or char_name == "Hero":
                 char = await adb(db.get_character, self.user_id)
                 char_name = char.get("name", "Hero") if char else "Player"
-            c_embed = build_contact_list_embed(self.contacts, self.scenario_key, char_name)
+            c_embed = build_contact_list_embed(self.contacts, self.scenario_key, char_name, fow_context=self.fow_context)
             c_view = ContactView(
                 self.contacts, self.scenario_key, self.user_id,
                 session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
@@ -695,7 +695,7 @@ class ContactView(discord.ui.View):
                 async def _on_back_list(inter: discord.Interaction):
                     char = await adb(db.get_character, user_id)
                     char_name = char.get("name", "Hero") if char else self.char_name
-                    list_embed = build_contact_list_embed(contacts, scenario_key, char_name)
+                    list_embed = build_contact_list_embed(contacts, scenario_key, char_name, fow_context=self.fow_context)
                     list_view = self._clone_view(active_contact=None, mode="contacts")
                     await inter.response.edit_message(embed=list_embed, view=list_view)
                 back_list_btn.callback = _on_back_list
@@ -824,7 +824,7 @@ class ContactView(discord.ui.View):
             active_contact=None,
             active_acquaintance=None,
         )
-        embed = build_contact_list_embed(self.contacts, self.scenario_key, self.char_name)
+        embed = build_contact_list_embed(self.contacts, self.scenario_key, self.char_name, fow_context=self.fow_context)
         await interaction.response.edit_message(embed=embed, view=new_view)
 
     async def _on_acq_prev(self, interaction: discord.Interaction):
@@ -1256,7 +1256,12 @@ def build_world_codex_embed(session_id: int, scenario_key: str, char_name: str, 
     return embed, total_pages, unique_persons
 
 
-def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name: str) -> discord.Embed:
+def build_contact_list_embed(
+    contacts: list[dict],
+    scenario_key: str,
+    char_name: str,
+    fow_context: dict | None = None,
+) -> discord.Embed:
     icon, title = get_scenario_contact_title(scenario_key)
     embed = discord.Embed(
         title=f"{icon} {title}",
@@ -1300,7 +1305,14 @@ def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name:
         if _sd_cl.is_anomalous_incursions_scenario(scenario_key):
             try:
                 from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
-                c_tag = classify_anomalous_npc_tag(c, session_id=int(c.get("session_id") or 0), scen_key=scenario_key)
+                c_tag = classify_anomalous_npc_tag(
+                    c,
+                    session_id=int(c.get("session_id") or (fow_context or {}).get("session_id") or 0),
+                    scen_key=scenario_key,
+                    read_only=bool(fow_context),
+                    preloaded_agent_roster=(fow_context or {}).get("anomalous_agent_roster"),
+                    preloaded_session=(fow_context or {}).get("session"),
+                )
                 anom_list_badge = " [⚡ Special Agent]" if c_tag == "special_agent" else " [👤 Civilian]"
                 if (c.get("basic_info") or {}).get("deceased"):
                     anom_list_badge += " [💀 Deceased]"
@@ -1459,8 +1471,11 @@ def build_contact_detail_embed(
             anom_source = enriched_c if enriched_c.get("anomalous_npc_tag") else contact
             anom_prof = hydrate_anomalous_npc_profile(
                 anom_source,
-                session_id=(0 if fow_context is not None else sess_id_cd),
+                session_id=sess_id_cd,
                 scen_key=scenario_key,
+                read_only=bool(fow_context),
+                preloaded_agent_roster=(fow_context or {}).get("anomalous_agent_roster"),
+                preloaded_session=(fow_context or {}).get("session"),
             )
             is_dec_cd = bool(basic.get("deceased") or contact.get("deceased"))
             if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
@@ -1922,7 +1937,7 @@ class ContactsCog(commands.Cog):
             filter_unlocked_fn=filter_unlocked_contacts,
             preloaded_session=session,
         )
-        embed = build_contact_list_embed(unlocked_contacts, scenario_key, character["name"])
+        embed = build_contact_list_embed(unlocked_contacts, scenario_key, character["name"], fow_context=fow_context)
         view = ContactView(
             unlocked_contacts,
             scenario_key,

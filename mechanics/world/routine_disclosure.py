@@ -419,6 +419,13 @@ def _has_closed_world_anchor_schedule(
         r_origin = str(eff_roster.get("origin") or "").strip().lower()
         if r_origin not in ("", "legacy_adapter"):
             return True
+        if r_origin == "legacy_adapter":
+            return bool(
+                r_basic.get("use_anchor_schedule")
+                or eff_roster.get("use_anchor_schedule")
+                or eff_roster.get("roaming_route")
+                or r_basic.get("roaming_route")
+            )
         if bool(r_basic.get("use_anchor_schedule") or eff_roster.get("use_anchor_schedule")):
             return True
         for k in ("workplace_node_id", "home_node_id", "hangout_node_id", "roaming_route"):

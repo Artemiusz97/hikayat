@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import random
 import sqlite3
-from typing import Any
+from typing import Any, Mapping
 
 import db
 import namegen
@@ -65,8 +65,8 @@ def _derive_seed_int(seed_material: str) -> int:
     return int(hashlib.sha256(seed_material.encode("utf-8")).hexdigest()[:16], 16)
 
 
-def _get_session_seed(session: dict[str, Any] | None, session_id: int) -> str:
-    sess = session if isinstance(session, dict) else (db.get_session(session_id) if session_id > 0 else None)
+def _get_session_seed(session: Mapping[str, Any] | None, session_id: int) -> str:
+    sess = session if isinstance(session, Mapping) else (db.get_session(session_id) if session_id > 0 else None)
     return str((sess or {}).get("world_seed") or (sess or {}).get("rng_seed") or session_id)
 
 
@@ -221,6 +221,7 @@ def ensure_venue_staff_seeded(
     scen_key: str = "fantasy",
     current_day: int = 1,
     turn_number: int = 0,
+    session: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Lazily and deterministically seed 1–4 named venue staff for a staffable world node.
@@ -234,7 +235,7 @@ def ensure_venue_staff_seeded(
         return []
 
     node = db.get_world_node(sid, nid)
-    session = db.get_session(sid) or {}
+    session = dict(session) if isinstance(session, Mapping) else (db.get_session(sid) or {})
     eff_scen = str(scen_key or session.get("scenario") or "fantasy").strip() or "fantasy"
     if not is_node_staffable(node, scen_key=eff_scen):
         return []
@@ -311,6 +312,7 @@ def ensure_roaming_merchants_seeded(
     session_id: int,
     scen_key: str = "fantasy",
     turn_number: int = 0,
+    session: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Deterministically seed 1–2 `roaming_merchant` NPCs across valid commercial hubs/trade stops.
@@ -321,7 +323,7 @@ def ensure_roaming_merchants_seeded(
     if sid <= 0:
         return []
 
-    session = db.get_session(sid) or {}
+    session = dict(session) if isinstance(session, Mapping) else (db.get_session(sid) or {})
     eff_scen = str(scen_key or session.get("scenario") or "fantasy").strip() or "fantasy"
     if is_school_scenario(eff_scen) or not scenario_data.is_mechanic_enabled(eff_scen, "merchant_encounters"):
         return []
@@ -560,10 +562,15 @@ def _resolve_shop_context(
     scen_key: str,
     current_day: int | None,
     current_minute: int | None,
+    session: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str, str, int, int, str, dict[str, Any] | None]:
-    session = db.get_session(session_id) if session_id > 0 else None
-    eff_scen = str(scen_key or (session or {}).get("scenario") or "fantasy").strip() or "fantasy"
-    eff_loc = str(location_str or (session or {}).get("current_location") or "").strip()
+    eff_session: dict[str, Any] | None = (
+        dict(session)
+        if isinstance(session, Mapping)
+        else (db.get_session(session_id) if session_id > 0 else None)
+    )
+    eff_scen = str(scen_key or (eff_session or {}).get("scenario") or "fantasy").strip() or "fantasy"
+    eff_loc = str(location_str or (eff_session or {}).get("current_location") or "").strip()
 
     if current_day is None or current_minute is None:
         db_day, db_min, _ = db.get_session_time(session_id) if session_id > 0 else (1, 480, 0)
@@ -577,8 +584,8 @@ def _resolve_shop_context(
     if not resolved_node_id and session_id > 0:
         if eff_loc:
             resolved_node_id = str(db.resolve_node_id_from_location(session_id, eff_loc, prefer_facility=True) or "").strip()
-        if not resolved_node_id and session and (not location_str or eff_loc == str(session.get("current_location") or "").strip()):
-            resolved_node_id = str(session.get("current_node_id") or "").strip()
+        if not resolved_node_id and eff_session and (not location_str or eff_loc == str(eff_session.get("current_location") or "").strip()):
+            resolved_node_id = str(eff_session.get("current_node_id") or "").strip()
         if resolved_node_id:
             node = db.get_world_node(session_id, resolved_node_id)
             if node and str(node.get("node_type") or "").upper() == "ROOM" and node.get("parent_id"):
@@ -586,7 +593,7 @@ def _resolve_shop_context(
                 if parent and str(parent.get("node_type") or "").upper() == "FACILITY" and is_node_staffable(parent, eff_scen):
                     node, resolved_node_id = parent, str(parent["node_id"])
 
-    return session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node
+    return eff_session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node
 
 
 def _find_matching_active_roamer(
@@ -635,7 +642,7 @@ def _evaluate_facility_staff(
     turn_number: int,
 ) -> tuple[dict[str, Any] | None, bool]:
     """Evaluate venue-seeded staff, casualties, and D+3 replacements; returns (decision_or_None, has_relevant_staff)."""
-    ensure_venue_staff_seeded(sid, resolved_node_id, scen_key=eff_scen, current_day=eff_day, turn_number=turn_number)
+    ensure_venue_staff_seeded(sid, resolved_node_id, scen_key=eff_scen, current_day=eff_day, turn_number=turn_number, session=session)
     workplace_staff = db.get_world_roster(sid, workplace_node_id=resolved_node_id, include_legacy_rosters=False) or []
 
     node_meta = parse_node_state(node)
@@ -702,6 +709,7 @@ def evaluate_shop_staff_availability(
     current_day: int | None = None,
     current_minute: int | None = None,
     turn_number: int = 0,
+    session: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Evaluate closed-world shop availability using staff shift schedules, casualties, roamers,
@@ -711,8 +719,8 @@ def evaluate_shop_staff_availability(
     if is_phone_shop:
         return _availability_result(available=True, reason="phone_shop", reason_message="Express E-Shop delivery is available around the clock.", facility_node_id=str(facility_node_id or ""))
 
-    session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node = _resolve_shop_context(
-        sid, location_str, facility_node_id, scen_key, current_day, current_minute
+    eff_session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node = _resolve_shop_context(
+        sid, location_str, facility_node_id, scen_key, current_day, current_minute, session=session
     )
     eff_loc_name = str((node or {}).get("name") or eff_loc or "").strip()
     has_shop_keyword = bool(
@@ -729,18 +737,18 @@ def evaluate_shop_staff_availability(
 
     world_nodes = db.get_session_world_nodes(sid) if sid > 0 else []
     if not world_nodes:
-        merch_state = (session or {}).get("merchant") if isinstance((session or {}).get("merchant"), dict) else {}
+        merch_state = (eff_session or {}).get("merchant") if isinstance((eff_session or {}).get("merchant"), dict) else {}
         if has_shop_keyword or merch_state.get("is_faction_quartermaster") or (not eff_loc.strip() and bool(merch_state.get("available"))):
             return _availability_result(available=True, reason="legacy_no_graph", reason_message="A shop counter is open for trade.", facility_node_id=resolved_node_id)
         return _availability_result(available=False, reason="no_merchant", reason_message="No open shopkeeper or traveling merchant is stationed here.", facility_node_id=resolved_node_id)
 
-    ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=turn_number)
+    ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=turn_number, session=eff_session)
     m_type = str(merchant_type or "").strip()
     has_relevant_staff = False
 
     if resolved_node_id and node and is_node_staffable(node, scen_key=eff_scen):
         decision, has_relevant_staff = _evaluate_facility_staff(
-            sid=sid, resolved_node_id=resolved_node_id, node=node, session=session,
+            sid=sid, resolved_node_id=resolved_node_id, node=node, session=eff_session,
             has_shop_keyword=has_shop_keyword, m_type=m_type, eff_scen=eff_scen,
             eff_day=eff_day, eff_min=eff_min, turn_number=turn_number,
         )

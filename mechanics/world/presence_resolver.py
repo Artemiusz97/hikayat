@@ -28,7 +28,9 @@ from mechanics.world.presence_graph import (
     is_deceased_or_arrested,
     is_node_descendant_in_memory,
     is_private_home_or_wilderness,
+    is_private_residence_node,
     location_targets_node,
+    merge_npc_records,
     npc_aliases,
     parse_dict,
     residence_matches_node,
@@ -263,6 +265,42 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
             wp_node = eff_sched_nid
 
         if not location_targets_node(wp_node, wp_loc, ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id, ctx.loc_cache):
+            continue
+        target_priv = str((ctx.target_node or {}).get("privacy_level") or "").strip().lower()
+        loc_label_low = f"{ctx.eff_loc or ''} {(ctx.target_node or {}).get('name') or ''}".lower()
+        is_private_room = bool(
+            ctx.prop_at_node is not None
+            or target_priv in ("private", "restricted", "discreet")
+            or is_private_residence_node(ctx.target_node, ctx.eff_node_id)
+            or (
+                target_priv != "public"
+                and any(k in loc_label_low for k in ("bedroom", "dorm room", "private suite", "private quarters"))
+            )
+        )
+        if is_private_room:
+            is_own_unlocked_res = False
+            if r_row is not None or c_row is not None:
+                merged_npc = merge_npc_records(r_row, c_row)
+                npc_home = str(
+                    merged_npc.get("home_node_id")
+                    or parse_dict(merged_npc.get("basic_info")).get("home_node_id")
+                    or ""
+                ).strip()
+                if npc_home and ctx.eff_node_id and residence_matches_node(npc_home, ctx.eff_node_id, ctx.nodes_by_id):
+                    is_own_unlocked_res = can_materialize_npc_residence(
+                        ctx.sid if ctx.sid > 0 else None,
+                        merged_npc,
+                        roster_row=r_row,
+                        contact_row=c_row,
+                        primary_property=ctx.prim_prop,
+                        contacts=ctx.contacts,
+                        person_ties=ctx.person_ties,
+                        household_cache=ctx.household_cache,
+                        player_last_name=ctx.player_last_name,
+                    )
+            if not is_own_unlocked_res:
+                continue
+        if r_row is None and c_row is None and not (420 <= (int(ctx.safe_min) % 1440) < 1320):
             continue
         if not sched_info.get("is_off_duty"):
             ctx.stage({"name": t_npc, "npc_id": (c_row or r_row or {}).get("npc_id") or slugify_key(t_npc)}, 3, "quest_pin")

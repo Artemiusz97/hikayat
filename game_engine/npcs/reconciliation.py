@@ -1536,6 +1536,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
             scenario_key=scen_key,
             excluded_names=excluded_for_stage,
             skip_prose_departures=True,
+            staged_names=staged_names,
         )
     except Exception:
         pass

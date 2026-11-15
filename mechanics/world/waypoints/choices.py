@@ -465,14 +465,15 @@ def generate_quest_action_choices(
                 "gold_cost": 0,
                 "wait_minutes": wait_m,
             })
-            if len(quest_choices) >= 3:
-                break
-            continue
+            if not (trigger == "key_clue" and clue_info.get("matching_open_sources")):
+                if len(quest_choices) >= 3:
+                    break
+                continue
 
         v_phases = wp.get("valid_time_phases") or []
         time_eval = evaluate_waypoint_time_window(curr_min, v_phases)
         out_of_window_dc_penalty = 0
-        if v_phases and not time_eval["is_valid"]:
+        if not sched_info.get("is_off_duty") and v_phases and not time_eval["is_valid"]:
             t_phase = time_eval["target_phase"]
             t_clock = time_eval["target_clock"]
             wait_m = int(time_eval["wait_minutes"] or 60)

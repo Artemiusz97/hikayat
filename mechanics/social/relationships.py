@@ -166,10 +166,26 @@ def is_contact_eligible(
             except Exception:
                 pass
 
+        _ar_pre = None
+        if isinstance(preloaded_session, dict):
+            _raw_ar = preloaded_session.get("anomalous_agent_roster") or (
+                preloaded_session.get("extra", {}).get("anomalous_agent_roster")
+                if isinstance(preloaded_session.get("extra"), dict)
+                else None
+            )
+            if isinstance(_raw_ar, list):
+                _ar_pre = [a for a in _raw_ar if isinstance(a, dict)]
         npc_is_agent = bool(
             probe_ent.get("is_special_agent")
             or (probe_ent.get("basic_info") or {}).get("is_special_agent")
-            or classify_anomalous_npc_tag(probe_ent, session_id=(0 if skip_session_lookup else int(session_id or 0)), scen_key=scenario) == TAG_SPECIAL_AGENT
+            or classify_anomalous_npc_tag(
+                probe_ent,
+                session_id=int(session_id or 0),
+                scen_key=scenario,
+                read_only=skip_session_lookup,
+                preloaded_agent_roster=_ar_pre,
+                preloaded_session=preloaded_session,
+            ) == TAG_SPECIAL_AGENT
         )
         npc_age_grp = str(age_group or "").strip().lower()
         if npc_age_grp not in ("teen", "adult"):

@@ -3724,6 +3724,9 @@ def set_db_path(new_path: str):
     config.DB_PATH = new_path
 
 
+_ISOLATED_PREV_DB_PATHS: dict[str, str] = {}
+
+
 def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikayat_sim_") -> tuple[str, bool]:
     """Switches the active database to an isolated database for simulation/testing.
     Returns:
@@ -3731,6 +3734,7 @@ def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikay
     """
     import tempfile
 
+    prev_path = str(getattr(db, "DB_PATH", "") or DB_PATH or "")
     if explicit_path:
         target_path = explicit_path
         is_temp = False
@@ -3739,6 +3743,9 @@ def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikay
         target_path = tf.name
         tf.close()
         is_temp = True
+
+    if is_temp and prev_path and prev_path != target_path:
+        _ISOLATED_PREV_DB_PATHS[target_path] = prev_path
 
     set_db_path(target_path)
     init_db()
@@ -3751,7 +3758,12 @@ def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = 
     import gc
     import time
 
-    close_all_connections()
+    prev_path = _ISOLATED_PREV_DB_PATHS.pop(target_path, None)
+    active_path = str(getattr(db, "DB_PATH", "") or DB_PATH or "")
+    if is_temp and not keep and prev_path and active_path == target_path:
+        set_db_path(prev_path)
+    else:
+        close_all_connections()
     gc.collect()
     if is_temp and not keep:
         for ext in ["", "-wal", "-shm", "-journal"]:

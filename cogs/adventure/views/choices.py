@@ -128,6 +128,7 @@ def _preload_choice_view_data(
                 current_day=sess.get("current_day"),
                 current_minute=sess.get("current_minute"),
                 turn_number=int(sess.get("turn_count") or 0),
+                session=sess,
             )
 
     contacts: list | None = None
@@ -528,6 +529,7 @@ class ChoiceView(SessionRestrictedView):
                     current_day=session.get("current_day"),
                     current_minute=session.get("current_minute"),
                     turn_number=int(session.get("turn_count") or 0),
+                    session=session,
                 )
                 if preloaded_shop_availability is _UNSET
                 else preloaded_shop_availability
@@ -1304,6 +1306,7 @@ class SyncChoiceView(SessionRestrictedView):
                     current_day=session.get("current_day"),
                     current_minute=session.get("current_minute"),
                     turn_number=int(session.get("turn_count") or 0),
+                    session=session,
                 )
                 if preloaded_shop_availability is _UNSET
                 else preloaded_shop_availability

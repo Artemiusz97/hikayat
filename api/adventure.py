@@ -178,6 +178,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 current_day=session.get("current_day"),
                 current_minute=session.get("current_minute"),
                 turn_number=int(session.get("turn_count") or 0),
+                session=session,
             )
             if shop_avail.get("staff_npc"):
                 staff_keeper_name = str(shop_avail["staff_npc"].get("name") or "").strip()

@@ -391,13 +391,10 @@ def _spawn_canonical_role_npc_pre_turn(
         sess_nid = session.get("current_node_id") if isinstance(session, dict) else None
         fac_nid, fac_node, _ = _resolve_facility_node_for_stage(sess_id, sess_nid, effective_location)
 
-    if sess_id and (fac_nid or strict_facility or has_spatial_graph):
+    if sess_id and fac_nid:
         try:
             from mechanics.world import ensure_venue_staff_seeded, slot_fill_custom_action_role
             from mechanics.world.venue_templates import is_node_staffable
-
-            if not fac_nid:
-                return {}
 
             sp_name = "sp_preturn_role_fill"
             ctx_mgr = db.UnitOfWork() if not persist_db else nullcontext(None)
@@ -422,38 +419,39 @@ def _spawn_canonical_role_npc_pre_turn(
                         if not persist_db and uow_conn is not None:
                             uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
                             uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                        return {}
-
-                    npc_dict = _build_npc_dict_from_roster(slot_row)
-                    lore_desc = f"{npc_dict['name']} ({npc_dict['role']}) encountered at {effective_location}."
-                    db.upsert_lorebook_entity(
-                        session_id=int(sess_id),
-                        entity_type="person",
-                        name=npc_dict["name"],
-                        description=lore_desc,
-                        disposition="neutral",
-                        gender=npc_dict["gender"],
-                        appearance=npc_dict["appearance"],
-                        traits=npc_dict["unlocked_traits"],
-                    )
-                    if not persist_db and uow_conn is not None:
-                        if isinstance(staged_ops, dict):
-                            staged_ops.setdefault("role_slot_fills", []).append({
-                                "facility_node_id": fac_nid,
-                                "role_title": clean_role,
-                                "scen_key": scen_key,
-                                "current_day": eff_day,
-                                "current_minute": eff_min,
-                                "turn_number": eff_turn,
-                                "name": npc_dict["name"],
-                                "lorebook_description": lore_desc,
-                                "gender": npc_dict["gender"],
-                                "appearance": npc_dict["appearance"],
-                                "traits": npc_dict["unlocked_traits"],
-                            })
-                        uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                        uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                    return npc_dict
+                        if strict_facility:
+                            return {}
+                    else:
+                        npc_dict = _build_npc_dict_from_roster(slot_row)
+                        lore_desc = f"{npc_dict['name']} ({npc_dict['role']}) encountered at {effective_location}."
+                        db.upsert_lorebook_entity(
+                            session_id=int(sess_id),
+                            entity_type="person",
+                            name=npc_dict["name"],
+                            description=lore_desc,
+                            disposition="neutral",
+                            gender=npc_dict["gender"],
+                            appearance=npc_dict["appearance"],
+                            traits=npc_dict["unlocked_traits"],
+                        )
+                        if not persist_db and uow_conn is not None:
+                            if isinstance(staged_ops, dict):
+                                staged_ops.setdefault("role_slot_fills", []).append({
+                                    "facility_node_id": fac_nid,
+                                    "role_title": clean_role,
+                                    "scen_key": scen_key,
+                                    "current_day": eff_day,
+                                    "current_minute": eff_min,
+                                    "turn_number": eff_turn,
+                                    "name": npc_dict["name"],
+                                    "lorebook_description": lore_desc,
+                                    "gender": npc_dict["gender"],
+                                    "appearance": npc_dict["appearance"],
+                                    "traits": npc_dict["unlocked_traits"],
+                                })
+                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        return npc_dict
                 except Exception:
                     if not persist_db and uow_conn is not None:
                         try:
@@ -464,7 +462,7 @@ def _spawn_canonical_role_npc_pre_turn(
                     raise
         except Exception as _sf_err:
             log.debug("Closed-world slot-fill skipped (%s): %s", clean_role, _sf_err)
-            if strict_facility or has_spatial_graph:
+            if strict_facility:
                 return {}
 
     if strict_facility:
@@ -2714,6 +2712,7 @@ def resolve_post_turn_stage_delta(
     scenario_key: str = "",
     excluded_names: set = None,
     skip_prose_departures: bool = False,
+    staged_names: set | list | None = None,
 ) -> list:
     """
     Resolves the post-turn physical stage roster by applying stateful deltas:
@@ -2895,6 +2894,7 @@ def resolve_post_turn_stage_delta(
                             appt_names_lower.add(str(r[k]).strip().lower())
         except Exception:
             pass
+    staged_names_low: set[str] = {str(s).strip().lower() for s in (staged_names or ()) if str(s).strip()}
 
     for cand in (raw_npcs_present or []):
         cand_name = _get_npc_name(cand)
@@ -2945,7 +2945,14 @@ def resolve_post_turn_stage_delta(
                 matched_contact = c_matches[0]
 
         if closed_world_active:
-            is_allowed_closed = (c_low in party_names_lower) or (c_low in appt_names_lower)
+            first_tok = c_low.split()[0] if c_low.split() else ""
+            is_allowed_closed = (
+                (c_low in party_names_lower)
+                or (c_low in appt_names_lower)
+                or (c_low in staged_names_low)
+                or (len(first_tok) >= 3 and first_tok in staged_names_low)
+                or bool(c_toks & staged_names_low)
+            )
             if not is_allowed_closed and actions and session and (matched_contact is not None or c_low in pre_move_names_lower):
                 try:
                     from mechanics.world.mobility import has_narrative_continuity_bridge

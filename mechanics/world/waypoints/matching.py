@@ -79,9 +79,13 @@ def is_hostile_or_lair_waypoint(wp: dict) -> bool:
     """Returns True if the waypoint represents a hostile boss/outlaw/monster hideout stage."""
     bp = str(wp.get("blueprint_id") or "").upper()
     lbl = str(wp.get("stage_label") or "").lower()
+    trig = str(wp.get("completion_trigger") or "").strip().lower()
+    is_climax = bool(wp.get("is_climax_stage") or wp.get("is_climax"))
     target_npc = str(wp.get("target_npc") or "").strip().lower()
     client_npc = str(wp.get("client_npc") or "").strip().lower()
     if client_npc and target_npc == client_npc:
+        return False
+    if trig == "key_clue" and not is_climax:
         return False
     if any(w in lbl for w in ("turn in", "deliver", "report to", "return to", "hand over")):
         return False
