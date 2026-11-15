@@ -17,6 +17,56 @@ def _safe_get_contacts(session_id: int, character_id: int = 0, resolve_relations
         return db.get_contacts(session_id, character_id=character_id) or []
 
 
+def _parse_contact_binfo(contact: dict | None) -> dict:
+    if not isinstance(contact, dict):
+        return {}
+    raw = contact.get("basic_info")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _is_blocked_or_deceased_contact(contact: dict | None) -> bool:
+    if not isinstance(contact, dict):
+        return False
+    from mechanics.social.relationships import is_contact_blocked
+    b_info = _parse_contact_binfo(contact)
+    return bool(is_contact_blocked(contact) or contact.get("deceased") or b_info.get("deceased"))
+
+
+def _is_peerpulse_or_dm_connected(
+    contact: dict | None,
+    party_names: set[str] | None = None,
+    *,
+    scenario: str = "",
+) -> bool:
+    """
+    True when a contact is connected for Step-3 DMs/PeerPulse (can_player_dm_contact)
+    or holds explicit DM/PeerPulse provenance. Step-2 promoted contacts without
+    contact info remain False so PeerPulse stays available.
+    """
+    if not isinstance(contact, dict) or _is_blocked_or_deceased_contact(contact):
+        return False
+    from mechanics.social.relationships import can_player_dm_contact
+    b_info = _parse_contact_binfo(contact)
+    eff_scen = str(scenario or contact.get("scenario") or b_info.get("scenario") or "")
+    if can_player_dm_contact(contact, party_names, scenario=eff_scen):
+        return True
+    return bool(
+        int(contact.get("relationship_score", 0) or 0) >= 100
+        or b_info.get("added_via_peerpulse")
+        or b_info.get("exchanged_contact")
+        or b_info.get("unlocked_via_friendship")
+        or b_info.get("has_contact_info") is True
+    )
+
+
 def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict) -> dict:
     """Calculates mutual contacts, shared clubs, and sibling connections with a target NPC."""
     char = db.get_character(user_id)
@@ -219,13 +269,24 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
         )
 
     contact_npc_id = str(target_rec.get("npc_id") or name).strip().lower().replace(" ", "_").replace(".", "")
-    existing_contact = db.get_contact(session_id, contact_npc_id, character_id=char.get("id", 0)) if char else None
+    existing_contact = (
+        (
+            db.get_contact(session_id, contact_npc_id, character_id=char.get("id", 0))
+            or db.get_contact(session_id, name, character_id=char.get("id", 0))
+        )
+        if char
+        else None
+    )
 
-    # Determine whether they are already an unlocked friend in smartphone Line/DMs
-    from mechanics.social.relationships import is_unlocked_contact
+    # Gate PeerPulse "already connected" on Step-3 DM/PeerPulse readiness, never Step-2 affinity promotion alone.
     party_npcs = db.get_session_party_npcs(session_id)
-    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    is_connected = bool(existing_contact and is_unlocked_contact(existing_contact, party_names))
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+    is_blocked_or_dead = _is_blocked_or_deceased_contact(existing_contact)
+    is_connected = bool(
+        existing_contact
+        and not is_blocked_or_dead
+        and _is_peerpulse_or_dm_connected(existing_contact, party_names, scenario=scen_key)
+    )
 
     # Check cooldown (keyed strictly by npc_id or exact canonical full name to prevent shared-surname / honorific collisions)
     state = db.get_phone_social_state(session_id) or {}
@@ -282,7 +343,9 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
         "personality": desc,
         "is_eligible": is_eligible,
         "is_faculty": not is_eligible,
-        "is_already_contact": is_connected,
+        "is_already_contact": bool(is_connected),
+        "can_dm": bool(is_connected),
+        "is_blocked_or_deceased": bool(is_blocked_or_dead),
         "cooldown_turns_left": turns_left,
         "on_cooldown": on_cooldown,
         "npc_id": contact_npc_id,
@@ -307,7 +370,30 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
             "message": "🔒 **Account Restricted:** Faculty, staff, and adult town accounts cannot be added to student friend circles under Academy digital policy."
         }
 
-    if profile.get("is_already_contact"):
+    existing_live = (
+        (
+            db.get_contact(session_id, npc_id, character_id=char.get("id", 0))
+            or db.get_contact(session_id, name, character_id=char.get("id", 0))
+        )
+        if char
+        else None
+    )
+    if profile.get("is_blocked_or_deceased") or (existing_live and _is_blocked_or_deceased_contact(existing_live)):
+        return {
+            "accepted": False,
+            "error": "blocked_or_deceased",
+            "message": f"🔒 **Unavailable:** {name} cannot receive friend requests right now.",
+        }
+
+    party_npcs = db.get_session_party_npcs(session_id) or []
+    party_names = {str(p.get("name", "")).strip().lower() for p in party_npcs if isinstance(p, dict)}
+    scen_k = str((session or {}).get("scenario") or "")
+    live_connected = bool(
+        existing_live
+        and _is_peerpulse_or_dm_connected(existing_live, party_names, scenario=scen_k)
+    )
+    prof_connected = bool(profile.get("is_already_contact") and profile.get("can_dm", True))
+    if live_connected or prof_connected:
         return {
             "accepted": True,
             "already_friend": True,
@@ -391,8 +477,8 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         eff_char_id = char.get("id", 0) if char else 0
         eff_turn_1b = max(1, int(turn_count or 0) + 1)
         wr_row = (
-            db.get_world_roster_npc(session_id, npc_id, include_legacy_rosters=False)
-            or db.get_world_roster_npc(session_id, name, include_legacy_rosters=False)
+            db.get_world_roster_npc(session_id, npc_id, include_legacy_rosters=True)
+            or db.get_world_roster_npc(session_id, name, include_legacy_rosters=True)
         )
         if "school" in scen_key or "high_school" in scen_key:
             from mechanics.social.school_roster import hydrate_school_character
@@ -475,6 +561,7 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                     track="platonic"
                 )
         profile["is_already_contact"] = True
+        profile["can_dm"] = True
         return {
             "accepted": True,
             "check": check,
@@ -514,11 +601,17 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
     """Discovers an un-contacted student peer or dynamically generates a new one."""
     char = db.get_character(user_id)
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
-    contact_ids = {c["npc_id"].lower() for c in contacts}
-
-    roster = db.get_school_roster(session_id)
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "high_school_drama") if session else "high_school_drama"
+    party_npcs = db.get_session_party_npcs(session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+    contact_ids = {
+        str(c.get("npc_id") or "").lower()
+        for c in contacts
+        if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key) or _is_blocked_or_deceased_contact(c)
+    }
+
+    roster = db.get_school_roster(session_id)
     import scenario_data
     from mechanics import relationships
     if scenario_data.is_anomalous_high_school_scenario(scen_key):
@@ -567,14 +660,19 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     - Characters who are already unlocked contacts (relationship_score >= 100 or contact_added).
     """
     session = db.get_session(session_id) or {}
+    scen_key = str(session.get("scenario") or "")
     char = db.get_character(user_id)
     char_name = str(char.get("name", "")).strip().lower() if char else ""
     party_npcs = db.get_session_party_npcs(session_id)
-    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
 
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
-    from mechanics.social.relationships import is_unlocked_contact
-    unlocked_contact_names = {c["name"].lower().strip() for c in contacts if is_unlocked_contact(c, party_names)}
+    unlocked_contact_names = {
+        str(c.get("name") or "").lower().strip()
+        for c in contacts
+        if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key)
+        or _is_blocked_or_deceased_contact(c)
+    }
 
     seen_names = set(unlocked_contact_names)
     if char_name:
@@ -629,7 +727,7 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     profiles = []
     for name in suggested_names:
         prof = lookup_social_profile(session_id, user_id, name)
-        if prof and prof.get("is_eligible") and not prof.get("is_faculty"):
+        if prof and prof.get("is_eligible") and not prof.get("is_faculty") and not prof.get("is_blocked_or_deceased"):
             if not prof.get("is_already_contact"):
                 profiles.append(prof)
         if len(profiles) >= limit:

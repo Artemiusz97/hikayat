@@ -1215,13 +1215,26 @@ def _parse_contact_relations(contact: dict) -> dict:
     return {}
 
 
+def is_promoted_family_or_cohabitant(contact: dict, b_info: dict | None = None) -> bool:
+    """Public check for promoted family / household cohabitant exemptions."""
+    if not isinstance(contact, dict):
+        return False
+    eff_b_info = b_info if isinstance(b_info, dict) else _parse_contact_basic_info(contact)
+    return _is_promoted_family_or_cohabitant(contact, eff_b_info)
+
+
 def _is_promoted_family_or_cohabitant(contact: dict, b_info: dict) -> bool:
     promo_reason = str(contact.get("promotion_reason") or b_info.get("promotion_reason") or "").strip().lower()
     if promo_reason == "family":
         return True
-    # Note: contacts.household_role defaults to 'child' in SQLite, so never treat bare 'child' as promoted family.
-    hh_role = str(contact.get("household_role") or b_info.get("household_role") or "").strip().lower()
-    if hh_role in ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife"):
+    # Note: contacts.household_role defaults to 'child' in SQLite, so never treat bare 'child' as promoted family,
+    # and check basic_info.household_role even when the DB column defaulted to 'child'.
+    _promoted_hh_roles = ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife")
+    hh_roles = {
+        str(contact.get("household_role") or "").strip().lower(),
+        str(b_info.get("household_role") or "").strip().lower(),
+    }
+    if hh_roles & set(_promoted_hh_roles):
         return True
     if b_info.get("is_adult_family") or b_info.get("cohabiting_family") is True:
         return True

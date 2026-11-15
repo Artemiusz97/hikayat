@@ -2817,7 +2817,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 fk_ops_copy["is_retry"] = True
             result["_staged_folklore_ops"] = fk_ops_copy
         if stage_info.get("pending_roster_ops"):
-            result["_staged_roster_ops"] = dict(stage_info["pending_roster_ops"])
+            from game_engine.npcs.stage_manager import _merge_staged_roster_ops
+            _merge_staged_roster_ops(
+                result.setdefault("_staged_roster_ops", {}),
+                stage_info["pending_roster_ops"],
+            )
 
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list

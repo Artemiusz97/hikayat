@@ -21,6 +21,7 @@ from .relationships import (
     can_player_dm_contact,
     is_contact_blocked,
     is_contact_eligible,
+    is_promoted_family_or_cohabitant,
     is_unlocked_contact,
     should_promote_roster_npc_to_contact,
 )
@@ -68,6 +69,7 @@ __all__ = [
     "can_player_dm_contact",
     "is_contact_blocked",
     "is_contact_eligible",
+    "is_promoted_family_or_cohabitant",
     "is_unlocked_contact",
     "should_promote_roster_npc_to_contact",
     "befriend_folklore_villager",

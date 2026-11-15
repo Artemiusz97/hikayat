@@ -841,8 +841,31 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_roster_ops"), dict) and session_id:
             try:
                 _r_ops = outcome["_staged_roster_ops"]
-                from mechanics.world import ensure_venue_staff_seeded, slot_fill_custom_action_role
+                from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
                 from mechanics.world.venue_templates import is_node_staffable
+
+                for _vs in (_r_ops.get("venue_seeds") or []):
+                    if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
+                        continue
+                    _vs_nid = str(_vs["facility_node_id"])
+                    _vs_node = db.get_world_node(session_id, _vs_nid)
+                    _vs_scen = str(_vs.get("scen_key") or "fantasy")
+                    if isinstance(_vs_node, dict) and is_node_staffable(_vs_node, scen_key=_vs_scen):
+                        ensure_venue_staff_seeded(
+                            session_id,
+                            _vs_nid,
+                            scen_key=_vs_scen,
+                            current_day=int(_vs.get("current_day") or 1),
+                            turn_number=int(_vs.get("turn_number") or 1),
+                        )
+                for _rm in (_r_ops.get("roaming_merchants") or []):
+                    if not isinstance(_rm, dict):
+                        continue
+                    ensure_roaming_merchants_seeded(
+                        session_id,
+                        scen_key=str(_rm.get("scen_key") or "fantasy"),
+                        turn_number=int(_rm.get("turn_number") or 1),
+                    )
 
                 for _sf in (_r_ops.get("role_slot_fills") or []):
                     if not isinstance(_sf, dict) or not _sf.get("facility_node_id"):

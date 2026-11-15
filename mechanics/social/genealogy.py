@@ -1511,7 +1511,12 @@ def get_or_create_household(
         residence_location=residence_location
     )
 
-    _link_contact_to_household(session_id, contact, hh_id)
+    preserved_role = (
+        str(contact.get("household_role") or "").strip()
+        or str((contact.get("basic_info") or {}).get("household_role") or "").strip()
+        or "child"
+    )
+    _link_contact_to_household(session_id, contact, hh_id, household_role=preserved_role)
 
     # Link any unlinked sibling contacts in the session to this newly created household
     for other_c in session_contacts:

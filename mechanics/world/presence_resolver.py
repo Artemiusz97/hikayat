@@ -538,6 +538,7 @@ def resolve_node_presence(
     session: dict[str, Any] | None = None,
     turn_number: int = 1,
     record_discovery: bool = True,
+    persist_db: bool = True,
 ) -> dict[str, Any]:
     """
     Authoritative 6-tier pre-turn presence resolver for a target world node/location.
@@ -553,7 +554,8 @@ def resolve_node_presence(
         scen_key=scen_key,
         session=session,
         turn_number=turn_number,
-        record_discovery=record_discovery,
+        record_discovery=bool(record_discovery and persist_db),
+        persist_db=persist_db,
     )
     _resolve_tier1_party(ctx, party_names)
     _resolve_tier2_rendezvous(ctx)
@@ -571,6 +573,7 @@ def resolve_node_presence(
         "doorbell_events": ctx.doorbell_events,
         "crowd_flavor": crowd_flavor,
         "time_block": ctx.block_key,
+        "staged_roster_ops": dict(ctx.staged_roster_ops),
     }
 
 

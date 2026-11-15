@@ -455,6 +455,8 @@ class TurnService:
                             in_party=in_party,
                             is_family=is_family,
                             has_quest_link=bool(b_info.get("has_quest_link")),
+                            scenario=scenario_key,
+                            session_id=session_id,
                         )
                         if qualifies:
                             await adb(

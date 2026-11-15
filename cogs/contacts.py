@@ -1,6 +1,8 @@
 """
 Discord Cog for viewing and managing NPC contacts & relationship meters.
 """
+from __future__ import annotations
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -52,7 +54,7 @@ def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenar
 
 class ContactSelect(discord.ui.Select):
     def __init__(self, page_contacts: list[dict], all_contacts: list[dict], scenario_key: str, page: int = 0, total_pages: int = 1,
-                 session_id: int = 0, cog = None, from_phone: bool = False):
+                 session_id: int = 0, cog = None, from_phone: bool = False, party_names: set[str] | None = None):
         options = []
         for c in page_contacts:
             name = c.get("name", "Unknown NPC")
@@ -83,6 +85,7 @@ class ContactSelect(discord.ui.Select):
         self.session_id = session_id
         self.cog = cog
         self.from_phone = from_phone
+        self.party_names = party_names
 
     async def callback(self, interaction: discord.Interaction):
         npc_id = self.values[0]
@@ -95,7 +98,8 @@ class ContactSelect(discord.ui.Select):
         new_view = ContactView(
             self.all_contacts, self.scenario_key, interaction.user.id,
             active_contact=contact, page=self.page,
-            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
+            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
+            party_names=self.party_names,
         )
         await interaction.response.edit_message(embed=embed, view=new_view)
 
@@ -328,7 +332,8 @@ class WorldCodexView(discord.ui.View):
 class ContactView(discord.ui.View):
     def __init__(self, contacts: list[dict], scenario_key: str, user_id: int,
                  active_contact: dict = None, page: int = 0,
-                 session_id: int = 0, cog = None, from_phone: bool = False):
+                 session_id: int = 0, cog = None, from_phone: bool = False,
+                 party_names: set[str] | None = None):
         super().__init__(timeout=180)
         self.user_id = user_id
         self.contacts = contacts
@@ -338,6 +343,18 @@ class ContactView(discord.ui.View):
         self.session_id = session_id
         self.cog = cog
         self.from_phone = from_phone
+        if party_names is None and from_phone and session_id:
+            party_rows = db.get_session_party_npcs(session_id) or []
+            party_names = {
+                str(p.get("name") or "").strip().lower()
+                for p in party_rows
+                if str(p.get("name") or "").strip()
+            }
+        self.party_names: set[str] | None = (
+            {str(p).strip().lower() for p in party_names if str(p).strip()}
+            if party_names is not None
+            else None
+        )
         self.page_size = 25
         self.total_pages = max(1, (len(contacts) + self.page_size - 1) // self.page_size)
 
@@ -348,7 +365,7 @@ class ContactView(discord.ui.View):
         if contacts:
             self.add_item(ContactSelect(
                 page_contacts, contacts, scenario_key, page=self.page, total_pages=self.total_pages,
-                session_id=session_id, cog=cog, from_phone=from_phone
+                session_id=session_id, cog=cog, from_phone=from_phone, party_names=self.party_names,
             ))
         if active_contact:
             self.add_item(RelationsButton(
@@ -376,7 +393,7 @@ class ContactView(discord.ui.View):
         if from_phone and session_id:
             phone_row = 2
             if active_contact:
-                _dm_allowed = can_player_dm_contact(active_contact, scenario=scenario_key)
+                _dm_allowed = can_player_dm_contact(active_contact, party_names=self.party_names, scenario=scenario_key)
                 contact_short = active_contact.get("name", "Contact")[:15]
                 text_btn = discord.ui.Button(
                     label=f"Text {contact_short}" if _dm_allowed else f"Text {contact_short} (No #)",
@@ -412,7 +429,8 @@ class ContactView(discord.ui.View):
                     list_view = ContactView(
                         contacts, scenario_key, user_id,
                         active_contact=None, page=self.page,
-                        session_id=session_id, cog=cog, from_phone=True
+                        session_id=session_id, cog=cog, from_phone=True,
+                        party_names=self.party_names,
                     )
                     await inter.response.edit_message(embed=list_embed, view=list_view)
                 back_list_btn.callback = _on_back_list
@@ -450,7 +468,8 @@ class ContactView(discord.ui.View):
         new_view = ContactView(
             self.contacts, self.scenario_key, self.user_id,
             active_contact=self.active_contact, page=new_page,
-            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
+            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
+            party_names=self.party_names,
         )
         start = new_view.page * new_view.page_size
         embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
@@ -461,7 +480,8 @@ class ContactView(discord.ui.View):
         new_view = ContactView(
             self.contacts, self.scenario_key, self.user_id,
             active_contact=self.active_contact, page=new_page,
-            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone
+            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
+            party_names=self.party_names,
         )
         start = new_view.page * new_view.page_size
         embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
@@ -1461,7 +1481,7 @@ class ContactsCog(commands.Cog):
         party_names = {p.get("name", "").lower() for p in (party_npcs or [])}
         unlocked_contacts = filter_unlocked_contacts(contacts, party_names, scenario_key)
         embed = build_contact_list_embed(unlocked_contacts, scenario_key, character["name"])
-        view = ContactView(unlocked_contacts, scenario_key, interaction.user.id, session_id=session_id, cog=self)
+        view = ContactView(unlocked_contacts, scenario_key, interaction.user.id, session_id=session_id, cog=self, party_names=party_names)
 
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 

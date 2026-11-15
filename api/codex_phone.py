@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel
+import inspect
 import json
 import time
 
@@ -36,6 +37,30 @@ async def _verify_missing_session_codex_auth(request: Request | None, user_id: i
             await verify_user_access(request, valid_uid)
         elif not tok or extract_verified_token_uid(tok) is None:
             raise HTTPException(status_code=401, detail="user_id and actor token are required.")
+
+
+async def _get_contacts_ro(session_id: int, character_id: int | None = None) -> list[dict[str, Any]]:
+    """Read-only db.get_contacts wrapper compatible with 1-arg test monkeypatches."""
+    try:
+        params = inspect.signature(db.get_contacts).parameters
+    except (TypeError, ValueError):
+        params = {}
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    has_varpos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params.values())
+    supports_ensure = has_varkw or "ensure_scene" in params
+    pos_count = sum(
+        1 for p in params.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+    if character_id is not None and (has_varpos or pos_count >= 2 or "character_id" in params):
+        if supports_ensure:
+            return await adb(db.get_contacts, session_id, character_id, ensure_scene=False) or []
+        return await adb(db.get_contacts, session_id, character_id) or []
+    if supports_ensure:
+        return await adb(db.get_contacts, session_id, ensure_scene=False) or []
+    return await adb(db.get_contacts, session_id) or []
+
+
 from mechanics.system.phone import (
     scenario_has_smartphone,
     get_phone_branding,
@@ -462,7 +487,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
 
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
-    contacts = await adb(db.get_contacts, session_id, ensure_scene=False) or []
+    contacts = await _get_contacts_ro(session_id)
     school_roster = await adb(db.get_school_roster, session_id) or []
     dir_by_name = {str(d.get("name", "")).strip().lower(): d for d in school_roster if d.get("name")}
 
@@ -927,9 +952,9 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
         await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
+    contacts = await _get_contacts_ro(session_id, char_id)
     if not contacts and lookup_uid and char_id != lookup_uid:
-        contacts = await adb(db.get_contacts, session_id, lookup_uid, ensure_scene=False)
+        contacts = await _get_contacts_ro(session_id, lookup_uid)
     from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_unlocked_contact
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
@@ -2049,9 +2074,9 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
         await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
+    contacts = await _get_contacts_ro(session_id, char_id)
     if not contacts and char_id != user_id:
-        contacts = await adb(db.get_contacts, session_id, user_id, ensure_scene=False)
+        contacts = await _get_contacts_ro(session_id, user_id)
     social_state = await adb(get_social_state_summary, session_id, session)
 
     digital_media = []
@@ -2258,7 +2283,7 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
     res = await adb(resolve_social_friend_request, dict(session), req.user_id, dict(req.profile))
     char_row = await adb(db.get_character, req.user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
+    contacts = await _get_contacts_ro(session_id, char_id)
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
     from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_contact_blocked, is_unlocked_contact
@@ -2365,7 +2390,7 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
         contact = await adb(db.get_contact, session_id, npc_id, character_id=player_char.get("id", 0))
         if not contact:
             # Try matching against all contacts in session
-            all_contacts = await adb(db.get_contacts, session_id, canonical_id, ensure_scene=False)
+            all_contacts = await _get_contacts_ro(session_id, canonical_id)
             for c in all_contacts:
                 if c.get("npc_id") == npc_id or c.get("name", "").lower().replace(" ", "_") == npc_id.lower():
                     contact = dict(c)
@@ -2394,13 +2419,28 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
                 "session_id": session_id,
             }
 
-        from mechanics.social.relationships import can_player_dm_contact, is_contact_blocked, is_contact_eligible
+        from mechanics.social.relationships import (
+            can_player_dm_contact,
+            is_contact_blocked,
+            is_contact_eligible,
+            is_promoted_family_or_cohabitant,
+        )
         scen_key = str(session.get("scenario") or "")
-        if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
-            raise HTTPException(
-                status_code=403,
-                detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
-            )
+        party_npcs_dm = await adb(db.get_session_party_npcs, session_id)
+        party_names_dm = {
+            str(p.get("name", "")).strip().lower()
+            for p in (party_npcs_dm or [])
+            if isinstance(p, dict) and p.get("name")
+        }
+        c_name_dm = str(contact.get("name") or "").strip().lower()
+        in_party_dm = bool(c_name_dm and c_name_dm in party_names_dm)
+        is_family_dm = is_promoted_family_or_cohabitant(contact)
+        if not is_family_dm and not in_party_dm:
+            if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
+                )
         if isinstance(contact, dict) and (
             contact.get("is_dispatch_channel")
             or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
@@ -2424,8 +2464,6 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
                 detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
             )
 
-        party_npcs_dm = await adb(db.get_session_party_npcs, session_id)
-        party_names_dm = {str(p.get("name", "")).strip().lower() for p in (party_npcs_dm or []) if isinstance(p, dict)}
         if not can_player_dm_contact(contact, party_names=party_names_dm, scenario=scen_key):
             raise HTTPException(
                 status_code=403,
@@ -2479,7 +2517,7 @@ async def cancel_session_commitment(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Commitment not found or already resolved")
 
-    contacts = await adb(db.get_contacts, session_id, ensure_scene=False) or []
+    contacts = await _get_contacts_ro(session_id)
     active_commitments = await adb(db.get_active_commitments, session_id)
     pending_appts = await adb(db.get_phone_appointments, session_id, status="pending")
     arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")

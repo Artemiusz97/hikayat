@@ -123,6 +123,7 @@ class _PresenceContext:
     tier2_aliases: set[str] = field(default_factory=set)
     tier3_crisis_aliases: set[str] = field(default_factory=set)
     doorbell_events: list[dict[str, Any]] = field(default_factory=list)
+    staged_roster_ops: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     unified_records: list[tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any], set[str]]] = field(
         default_factory=list
     )
@@ -297,6 +298,7 @@ def preload_presence_context(
     session: dict[str, Any] | None,
     turn_number: int,
     record_discovery: bool,
+    persist_db: bool = True,
 ) -> _PresenceContext:
     """Single-pass preloader fetching all session state before Tiers 1–6 evaluate."""
     sid = int(session_id or 0)
@@ -326,20 +328,73 @@ def preload_presence_context(
     if not eff_node_id and eff_loc and nodes_by_id:
         eff_node_id = resolve_node_id_in_memory(eff_loc, nodes_by_id, prefer_facility=True, cache=loc_cache)
 
+    eff_record_discovery = bool(record_discovery and persist_db)
+    staged_roster_ops: dict[str, list[dict[str, Any]]] = {}
     target_node = nodes_by_id.get(eff_node_id)
-    if (
+    is_staffable_facility = bool(
         sid > 0
         and eff_node_id
         and eff_node_id != SHARED_ABSTRACT_RESIDENCE_NODE
         and isinstance(target_node, dict)
         and str(target_node.get("node_type") or "").upper() == "FACILITY"
         and is_node_staffable(target_node, scen_key=eff_scen)
-    ):
-        ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
-        ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
-
-    contacts = (db.get_contacts(sid, ensure_scene=False) or []) if sid > 0 else []
-    roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
+    )
+    if persist_db:
+        if is_staffable_facility:
+            ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
+            ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
+        contacts = (db.get_contacts(sid, ensure_scene=False) or []) if sid > 0 else []
+        roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
+    elif sid > 0:
+        # Read-only pre-turn stage preview: seed inside a rolled-back SAVEPOINT and defer
+        # persistent world_roster inserts until UnitOfWork commit in apply_outcome.
+        contacts = []
+        roster_rows = []
+        with db.UnitOfWork() as uow_conn:
+            sp_name = "sp_presence_preload"
+            uow_conn.execute(f"SAVEPOINT {sp_name}")
+            try:
+                pre_keys = (
+                    {
+                        str(r.get("npc_id") or "").strip().lower()
+                        for r in (db.get_world_roster(sid, include_legacy_rosters=False) or [])
+                        if isinstance(r, dict) and r.get("npc_id")
+                    }
+                    if is_staffable_facility
+                    else set()
+                )
+                if is_staffable_facility:
+                    ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
+                    ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
+                contacts = db.get_contacts(sid, ensure_scene=False) or []
+                roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
+                if is_staffable_facility:
+                    new_rows = [
+                        r for r in roster_rows
+                        if isinstance(r, dict)
+                        and str(r.get("npc_id") or "").strip().lower() not in pre_keys
+                    ]
+                    if any(str(r.get("origin") or "").lower() == "venue_seed" for r in new_rows):
+                        staged_roster_ops.setdefault("venue_seeds", []).append({
+                            "facility_node_id": eff_node_id,
+                            "scen_key": eff_scen,
+                            "current_day": safe_day,
+                            "turn_number": eff_turn,
+                        })
+                    if any(str(r.get("origin") or "").lower() == "merchant" for r in new_rows):
+                        staged_roster_ops.setdefault("roaming_merchants", []).append({
+                            "scen_key": eff_scen,
+                            "turn_number": eff_turn,
+                        })
+            finally:
+                try:
+                    uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                    uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                except Exception:
+                    pass
+    else:
+        contacts = []
+        roster_rows = []
 
     contacts_by_key: dict[str, dict[str, Any]] = {}
     contacts_by_name: dict[str, dict[str, Any]] = {}
@@ -437,7 +492,7 @@ def preload_presence_context(
         block_key=block_key,
         eff_node_id=eff_node_id,
         eff_loc=eff_loc,
-        record_discovery=record_discovery,
+        record_discovery=eff_record_discovery,
         nodes_by_id=nodes_by_id,
         loc_cache=loc_cache,
         target_node=target_node,
@@ -465,6 +520,7 @@ def preload_presence_context(
         player_hh_id=player_hh_id,
         player_last_name=player_last_name,
         active_dialogue_partners=active_dp,
+        staged_roster_ops=staged_roster_ops,
     )
 
     seen_unified: set[str] = set()

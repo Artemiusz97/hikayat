@@ -669,19 +669,30 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                     explicit_role_req = bool(
                         act_role_toks
                         and action_text_low
-                        and any(tok in action_text_low for tok in act_role_toks)
+                        and any(re.search(rf"\b{re.escape(tok)}\b", action_text_low) for tok in act_role_toks)
                     )
                     if (not closed_world_active) or explicit_role_req:
                         try:
-                            from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
+                            from game_engine.npcs.stage_manager import (
+                                _merge_staged_roster_ops,
+                                _spawn_canonical_role_npc_pre_turn,
+                            )
+                            staged_role_ops: dict = {}
                             sp_npc = _spawn_canonical_role_npc_pre_turn(
                                 session,
                                 act_name,
                                 new_loc,
+                                persist_db=False,
                                 strict_facility=closed_world_active,
+                                staged_ops=staged_role_ops,
                             )
                             if sp_npc and sp_npc.get("name"):
                                 new_npcs.append(sp_npc)
+                                if staged_role_ops and isinstance(result, dict):
+                                    _merge_staged_roster_ops(
+                                        result.setdefault("_staged_roster_ops", {}),
+                                        staged_role_ops,
+                                    )
                         except Exception:
                             pass
 
@@ -1467,7 +1478,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
         sync_contact_locations(final_npcs, new_loc, session["id"])
 
         try:
-            from mechanics.social.school_roster import hydrate_school_character
             from mechanics.social.genealogy import maybe_promote_scene_parent
 
             dir_roster = db.get_school_roster(session["id"])
@@ -1475,8 +1485,28 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
             for fn in final_npcs:
                 raw_fn_nm = game_engine._get_npc_name(fn)
                 fn_nm = raw_fn_nm.lower()
-                if fn_nm in dir_map:
-                    hydrate_school_character(session["id"], dir_map[fn_nm])
+                # Enrich in-memory scene presence metadata only; do not prematurely hydrate into contacts
+                # or mark school_directory hydrated before apply_outcome evaluates promotion thresholds.
+                if fn_nm in dir_map and isinstance(fn, dict):
+                    d_rec = dir_map[fn_nm]
+                    for src_k, dst_k in (
+                        ("role", "role"),
+                        ("grade", "grade"),
+                        ("club", "club"),
+                        ("clique", "clique"),
+                        ("primary_facility", "primary_facility"),
+                        ("secondary_facility", "secondary_facility"),
+                        ("sibling_name", "sibling_name"),
+                        ("speech_style", "speech_style"),
+                        ("mannerisms", "mannerisms"),
+                        ("race", "race"),
+                        ("gender", "gender"),
+                        ("personality_summary", "description"),
+                        ("appearance", "appearance"),
+                        ("traits", "traits"),
+                    ):
+                        if d_rec.get(src_k) and not fn.get(dst_k):
+                            fn[dst_k] = d_rec[src_k]
                 if raw_fn_nm:
                     maybe_promote_scene_parent(session["id"], raw_fn_nm)
         except Exception:

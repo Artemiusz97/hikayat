@@ -155,6 +155,12 @@ class PhoneMainView(PhoneOwnerRestrictedView):
         char = await db.adb(db.get_character, self.user_id)
         contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0), ensure_scene=False)) if char else []
         session = await db.adb(db.get_session, self.session_id)
+        party_npcs = await db.adb(db.get_session_party_npcs, self.session_id) if self.session_id else []
+        party_names = {
+            str(p.get("name", "")).strip().lower()
+            for p in (party_npcs or [])
+            if isinstance(p, dict) and p.get("name")
+        }
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
 
@@ -168,7 +174,15 @@ class PhoneMainView(PhoneOwnerRestrictedView):
         from cogs.contacts import build_contact_list_embed, ContactView
         char_name = char.get("name", "Hero") if char else "Player"
         embed = build_contact_list_embed(contacts, scen_key, char_name)
-        view = ContactView(contacts, scen_key, self.user_id, session_id=self.session_id, cog=self.cog, from_phone=True)
+        view = ContactView(
+            contacts,
+            scen_key,
+            self.user_id,
+            session_id=self.session_id,
+            cog=self.cog,
+            from_phone=True,
+            party_names=party_names,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_dms(self, interaction: discord.Interaction):
@@ -689,7 +703,10 @@ class SocialProfileView(PhoneOwnerRestrictedView):
         self.profile = profile
         self.posts = posts
 
-        if not profile.get("is_faculty") and not profile.get("is_already_contact"):
+        is_blocked_or_dead = bool(profile.get("is_blocked_or_deceased"))
+        is_dm_ready = bool(profile.get("is_already_contact") and profile.get("can_dm", True))
+
+        if not profile.get("is_faculty") and not is_blocked_or_dead and not is_dm_ready:
             cooldown = profile.get("cooldown_turns_left", 0)
             is_cd = bool(profile.get("on_cooldown") or cooldown > 0)
             if is_cd:
@@ -709,7 +726,7 @@ class SocialProfileView(PhoneOwnerRestrictedView):
                 )
                 req_btn.callback = self._send_request
             self.add_item(req_btn)
-        elif profile.get("is_already_contact"):
+        elif is_dm_ready and not is_blocked_or_dead:
             dm_btn = discord.ui.Button(
                 label="Send Direct Message",
                 emoji="💬",
