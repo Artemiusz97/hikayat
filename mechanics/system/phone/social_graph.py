@@ -853,6 +853,7 @@ def evaluate_pre_turn_witness_detection(
     witness_name = None
     culprit_unknown = False
     detected_events: list[dict] = []
+    active_spots: list[dict] = []
 
     if session_id and candidate_pool:
         from mechanics.social.epistemic_engine import detect_scene_witnesses
@@ -865,9 +866,9 @@ def evaluate_pre_turn_witness_detection(
             "is_crime": is_illicit,
             "is_secret_deed": True,
             "is_private_venue": bool(is_discreet_spot),
-            "force_spotted": bool(is_public_exposure),
+            "force_spotted": bool(is_public_exposure or not is_discreet_spot),
             "turn": len(session.get("history") or []) + 1,
-            "dialogue_partners": [target_npc] if target_npc and not is_illicit else [],
+            "dialogue_partners": [],
             "actor_garments": session.get("actor_garments"),
         }
         detected_events = detect_scene_witnesses(
@@ -901,7 +902,7 @@ def evaluate_pre_turn_witness_detection(
 
     # B3: Respect spotted_window — do NOT broadcast #SecretAffair feed gossip if still inside containment window or culprit masked
     post = None
-    uncontained_exists = any(ev.get("containment_state") == "active" for ev in detected_events) if detected_events else bool(is_public_exposure)
+    uncontained_exists = bool(active_spots) if detected_events else bool(is_public_exposure)
     if uncontained_exists and not culprit_unknown:
         post = queue_witness_gossip_post(
             session_id=session_id,
