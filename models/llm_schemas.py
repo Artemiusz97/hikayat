@@ -14,7 +14,8 @@ _VALID_STATS = {"STR", "PER", "END", "CHA", "INT", "AGI", "LUK", "ITEM", "NONE",
 _VALID_INTENTS = {
     "romantic_confession", "intimate_act", "affection_touch", "disclosure_inquiry",
     "gift_offer", "media_capture", "phone_comm", "phone_contact_exchange",
-    "dialogue_exit", "social_invite", "party_recruit", "merchant_trade",
+    "dialogue_exit", "social_invite", "join_activity", "epistemic_containment",
+    "party_recruit", "merchant_trade",
     "inspect_board", "area_scout", "investigate_clue", "rest_sleep",
     "stealth_covert", "movement", "appointment_meetup", "dialogue_init",
     "general_action"
@@ -25,7 +26,9 @@ _VALID_SUB_INTENTS = {
     "oral_give", "oral_receive", "oral_mutual", "intercourse",
     "anal_give", "anal_receive", "anal_mutual", "aftercare", "redress", "date", "confession",
     "lockpick", "pickpocket", "gamble", "use_item", "deduce_clues", "explore",
-    "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee"
+    "hide", "eavesdrop", "combat_attack", "combat_magic", "combat_tactic", "combat_flee",
+    "hush_bribe", "threaten_silence", "confide", "deny", "present_proof", "destroy_proof",
+    "discretion_request", "use_leverage", "warn_target",
 }
 
 
@@ -586,6 +589,87 @@ class CosmeticActorPose(BaseModel):
         return s if s else None
 
 
+_EPISTEMIC_SIGNAL_KINDS = frozenset({
+    "secret_revealed",
+    "confession",
+    "threat",
+    "accusation",
+    "alibi_stated",
+    "alibi_challenged",
+    "proof_shown",
+})
+_EPISTEMIC_SIGNAL_CONFIDENCE = frozenset({"suspect", "rumor", "firsthand", "hard_proof"})
+
+
+class EpistemicSignal(DictAccessibleModel):
+    """Structured narrative epistemic signal emitted by the narrator (validated server-side via B15)."""
+
+    model_config = ConfigDict(extra="ignore")
+    kind: str = Field(default="secret_revealed")
+    target_npc: str = Field(default="")
+    fact_key: str = Field(default="")
+    confidence: str = Field(default="rumor")
+    proof_ref: str = Field(default="")
+    summary: str = Field(default="")
+    category: str = Field(default="social_secret")
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def coerce_kind(cls, v: Any) -> str:
+        s = str(v or "").strip().lower()
+        if s in _EPISTEMIC_SIGNAL_KINDS:
+            return s
+        aliases = {
+            "secret": "secret_revealed",
+            "rumor": "secret_revealed",
+            "confide": "confession",
+            "alibi": "alibi_stated",
+            "proof": "proof_shown",
+        }
+        return aliases.get(s, "secret_revealed")
+
+    @field_validator("confidence", mode="before")
+    @classmethod
+    def coerce_confidence(cls, v: Any) -> str:
+        s = str(v or "").strip().lower()
+        return s if s in _EPISTEMIC_SIGNAL_CONFIDENCE else "rumor"
+
+    @field_validator("target_npc", "fact_key", "proof_ref", "summary", "category", mode="before")
+    @classmethod
+    def coerce_signal_str(cls, v: Any) -> str:
+        if v is None:
+            return ""
+        s = str(v).replace("\x00", "").strip()
+        if s.lower() in ("none", "null", "undefined", "n/a"):
+            return ""
+        return s[:240]
+
+
+def _filter_valid_epistemic_signals_list(v: Any) -> List[Any]:
+    if not v or v == "":
+        return []
+    items = [v] if isinstance(v, (dict, BaseModel)) else (v if isinstance(v, list) else [])
+    cleaned: List[Any] = []
+    for item in items:
+        if isinstance(item, EpistemicSignal):
+            if item.target_npc or item.fact_key or item.summary or item.proof_ref:
+                cleaned.append(item)
+        elif isinstance(item, BaseModel):
+            raw = item.model_dump()
+            if raw.get("target_npc") or raw.get("fact_key") or raw.get("summary") or raw.get("proof_ref"):
+                cleaned.append(raw)
+        elif isinstance(item, dict):
+            has_payload = any(
+                str(item.get(k) or "").strip() not in ("", "none", "null", "undefined")
+                for k in ("target_npc", "fact_key", "summary", "proof_ref")
+            )
+            if has_payload:
+                cleaned.append(item)
+        if len(cleaned) >= 3:
+            break
+    return cleaned
+
+
 class DeterministicTurnNarration(DictAccessibleModel):
     """Prose-first narrator schema for deterministic-first exploration, social, and intimate turns."""
     model_config = ConfigDict(extra="allow")
@@ -597,11 +681,17 @@ class DeterministicTurnNarration(DictAccessibleModel):
     episodic_memory: Optional[str] = Field(default=None)
     image_prompt: Optional[str] = Field(default=None)
     cast_events: List[CastEvent] = Field(default_factory=list)
+    epistemic_signal: List[EpistemicSignal] = Field(default_factory=list)
 
     @field_validator("cast_events", mode="before")
     @classmethod
     def coerce_cast_events(cls, v: Any) -> List[Any]:
         return _filter_valid_cast_events_list(v)
+
+    @field_validator("epistemic_signal", mode="before")
+    @classmethod
+    def coerce_epistemic_signal(cls, v: Any) -> List[Any]:
+        return _filter_valid_epistemic_signals_list(v)
 
     @field_validator("outcome_narrative", "next_narrative", "scene_title", mode="before")
     @classmethod
