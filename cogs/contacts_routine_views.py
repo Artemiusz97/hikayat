@@ -25,8 +25,8 @@ from mechanics.social.relationships import (
 )
 from mechanics.world.routine_disclosure import (
     ROUTINE_BLOCKS,
+    apply_known_routine_to_contact,
     build_known_routine_payload,
-    format_known_routine_summary,
 )
 from scenario_data import is_anomalous_incursions_scenario
 
@@ -309,6 +309,15 @@ def preload_discord_social_context(
         except _NON_TRIVIAL_PRELOAD_ERRORS:
             faction_state = None
 
+    anomalous_agent_roster: Optional[List[dict]] = None
+    if session_row is not None:
+        raw_ar = session_row.get("anomalous_agent_roster") or (
+            session_row.get("extra", {}).get("anomalous_agent_roster")
+            if isinstance(session_row.get("extra"), Mapping)
+            else None
+        )
+        anomalous_agent_roster = [a for a in raw_ar if isinstance(a, dict)] if isinstance(raw_ar, list) else []
+
     c_by_key, c_by_name, r_by_key, r_by_name = _index_contacts_and_roster(contacts, roster_rows)
     party_names = {
         str(p.get("name") or "").strip().lower()
@@ -336,6 +345,7 @@ def preload_discord_social_context(
         "kin_npc_keys": kin_npc_keys,
         "romantic_npc_keys": romantic_npc_keys,
         "faction_state": faction_state,
+        "anomalous_agent_roster": anomalous_agent_roster,
         "household_cache": {},
         "contacts_by_key": c_by_key,
         "contacts_by_name": c_by_name,
@@ -411,6 +421,8 @@ def enrich_discord_npc_with_routine(
         read_only=True,
         preloaded_party_npcs=fow_context.get("party_npcs"),
         preloaded_faction_state=fow_context.get("faction_state"),
+        preloaded_agent_roster=fow_context.get("anomalous_agent_roster"),
+        preloaded_session=fow_context.get("session"),
     )
 
     roster_row = (
@@ -447,14 +459,9 @@ def enrich_discord_npc_with_routine(
         discovered_dossier_rows=disc_rows,
         character_id=cid,
         preloaded=True,
+        fow_schedule_revealed=bool(enriched.get("schedule_revealed")),
     )
-    summary_text = format_known_routine_summary(routine, lang=ui_lang)
-    enriched["known_routine"] = routine
-    if summary_text:
-        enriched["known_schedule"] = summary_text
-    enriched["schedule_revealed"] = bool(
-        routine.get("full_schedule_unlocked") or int(routine.get("discovered_count") or 0) > 0
-    )
+    apply_known_routine_to_contact(enriched, routine, lang=ui_lang)
 
     party_names = fow_context.get("party_names") or set()
     if is_acquaintance:

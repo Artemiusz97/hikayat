@@ -80,8 +80,8 @@ from cogs.contacts_routine_views import (
     load_discord_contacts_and_acquaintances,
 )
 from mechanics.world.routine_disclosure import (
+    apply_known_routine_to_contact,
     build_known_routine_payload,
-    format_known_routine_summary,
 )
 
 
@@ -657,7 +657,13 @@ class ContactView(discord.ui.View):
         if from_phone and session_id:
             phone_row = 2
             if active_contact:
-                _dm_allowed = can_player_dm_contact(active_contact, party_names=self.party_names, scenario=scenario_key)
+                _dm_allowed = can_player_dm_contact(
+                    active_contact,
+                    party_names=self.party_names,
+                    scenario=scenario_key,
+                    preloaded_session=(self.fow_context or {}).get("session"),
+                    skip_session_lookup=bool(self.fow_context),
+                )
                 contact_short = active_contact.get("name", "Contact")[:15]
                 text_btn = discord.ui.Button(
                     label=f"Text {contact_short}" if _dm_allowed else f"Text {contact_short} (No #)",
@@ -1081,14 +1087,9 @@ def _resolve_discord_masked_dossier(
             lang=ui_lang,
             debug_reveal_all=reveal_debug,
             character_id=int(c_in.get("character_id") or 0),
+            fow_schedule_revealed=bool(enriched.get("schedule_revealed")),
         )
-    enriched["known_routine"] = routine
-    summary = format_known_routine_summary(routine, lang=ui_lang)
-    if summary:
-        enriched["known_schedule"] = summary
-    enriched["schedule_revealed"] = bool(
-        routine.get("full_schedule_unlocked") or int(routine.get("discovered_count") or 0) > 0
-    )
+    apply_known_routine_to_contact(enriched, routine, lang=ui_lang)
     return enriched, reveal_debug, ui_lang
 
 

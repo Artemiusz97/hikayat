@@ -408,6 +408,30 @@ def _resolve_full_day_blocks(
     return out
 
 
+def _has_closed_world_anchor_schedule(
+    npc_map: Mapping[str, Any],
+    npc_basic: Mapping[str, Any],
+    eff_roster: Optional[Mapping[str, Any]],
+    r_basic: Mapping[str, Any],
+) -> bool:
+    """Returns True when an NPC uses closed-world anchor scheduling rather than legacy free-text schedules."""
+    if eff_roster is not None:
+        r_origin = str(eff_roster.get("origin") or "").strip().lower()
+        if r_origin not in ("", "legacy_adapter"):
+            return True
+        if bool(r_basic.get("use_anchor_schedule") or eff_roster.get("use_anchor_schedule")):
+            return True
+        for k in ("workplace_node_id", "home_node_id", "hangout_node_id", "roaming_route"):
+            if eff_roster.get(k) or r_basic.get(k):
+                return True
+    if bool(npc_basic.get("use_anchor_schedule") or npc_map.get("use_anchor_schedule")):
+        return True
+    for k in ("workplace_node_id", "home_node_id", "hangout_node_id", "roaming_route"):
+        if npc_map.get(k) or npc_basic.get(k):
+            return True
+    return False
+
+
 def build_known_routine_payload(
     npc: Mapping[str, Any],
     *,
@@ -429,6 +453,7 @@ def build_known_routine_payload(
     discovered_dossier_rows: list[Mapping[str, Any]] | None = None,
     character_id: int = 0,
     preloaded: bool = False,
+    fow_schedule_revealed: Optional[bool] = None,
 ) -> dict[str, Any]:
     """
     Computes an NPC's progressive 5-block Weekday/Weekend routine payload with
@@ -510,13 +535,26 @@ def build_known_routine_payload(
         romantic_npc_keys=romantic_npc_keys,
     )
 
+    has_anchor_schedule = _has_closed_world_anchor_schedule(npc_map, npc_basic, eff_roster, r_basic)
+
     schedule_wildcard = False
     for d_row in (eff_disc or []):
         if isinstance(d_row, Mapping) and str(d_row.get("fact_category") or "").strip().lower() == "schedule":
             schedule_wildcard = True
             break
 
-    full_schedule_unlocked = bool(debug_reveal_all or affinity >= 40 or exempt_basic or schedule_wildcard)
+    if has_anchor_schedule:
+        full_schedule_unlocked = bool(
+            debug_reveal_all or affinity >= 40 or exempt_basic or schedule_wildcard or bool(fow_schedule_revealed)
+        )
+    elif fow_schedule_revealed is not None:
+        full_schedule_unlocked = bool(
+            debug_reveal_all or exempt_basic or schedule_wildcard or fow_schedule_revealed
+        )
+    elif sid is not None:
+        full_schedule_unlocked = bool(debug_reveal_all or exempt_basic or schedule_wildcard)
+    else:
+        full_schedule_unlocked = bool(debug_reveal_all or affinity >= 40 or exempt_basic or schedule_wildcard)
 
     if debug_reveal_all:
         residence_unlocked = True
@@ -654,6 +692,7 @@ def build_known_routine_payload(
         "weekday": weekday_blocks,
         "weekend": weekend_blocks,
         "full_schedule_unlocked": full_schedule_unlocked,
+        "has_anchor_schedule": has_anchor_schedule,
         "residence_unlocked": residence_unlocked,
         "discovered_count": discovered_count,
         "shift_profile": raw_shift,
@@ -702,3 +741,91 @@ def format_known_routine_summary(routine: Mapping[str, Any], *, lang: str = "en"
         parts = [f"{blk_labels[b]}: {_clean_cell(dk_map.get(b))}" for b in ROUTINE_BLOCKS]
         lines.append(f"{title}: " + " | ".join(parts))
     return "\n".join(lines)
+
+
+def apply_known_routine_to_contact(
+    contact: Dict[str, Any],
+    known_routine: Mapping[str, Any],
+    *,
+    lang: str = "en",
+) -> Dict[str, Any]:
+    """Attaches `known_routine` and syncs schedule fields while preserving revealed legacy text."""
+    eff_lang = locales.normalize_social_lang(lang)
+    masked_sched = locales.get_masked_placeholder("schedule", lang=eff_lang)
+    routine_dict = dict(known_routine) if isinstance(known_routine, Mapping) else {}
+    contact["known_routine"] = routine_dict
+    routine_summary = format_known_routine_summary(routine_dict, lang=eff_lang)
+    has_anchor = bool(routine_dict.get("has_anchor_schedule"))
+
+    def _has_authored(val: Any) -> bool:
+        s = str(val or "").strip()
+        return bool(s and s != masked_sched and "???" not in s)
+
+    b_cur = contact.get("basic_info") if isinstance(contact.get("basic_info"), dict) else {}
+
+    if has_anchor:
+        if routine_dict.get("full_schedule_unlocked"):
+            contact["schedule_revealed"] = True
+            contact["known_schedule"] = routine_summary
+            if "schedule_summary" in contact or contact.get("schedule_summary") is not None:
+                contact["schedule_summary"] = routine_summary
+        else:
+            contact["schedule_revealed"] = False
+            eff_val = routine_summary if int(routine_dict.get("discovered_count") or 0) > 0 else masked_sched
+            contact["known_schedule"] = eff_val
+            if "schedule_summary" in contact or contact.get("schedule_summary") is not None:
+                contact["schedule_summary"] = eff_val
+    else:
+        if routine_dict.get("full_schedule_unlocked") or contact.get("schedule_revealed"):
+            authored = next(
+                (
+                    str(c_val).strip()
+                    for c_val in (
+                        contact.get("known_schedule"),
+                        contact.get("schedule_summary"),
+                        b_cur.get("known_schedule"),
+                        b_cur.get("schedule_summary"),
+                    )
+                    if _has_authored(c_val)
+                ),
+                "",
+            )
+            contact["schedule_revealed"] = True
+            if authored:
+                if not _has_authored(contact.get("known_schedule")):
+                    contact["known_schedule"] = authored
+                if (
+                    "schedule_summary" in contact or contact.get("schedule_summary") is not None
+                ) and not _has_authored(contact.get("schedule_summary")):
+                    contact["schedule_summary"] = authored
+            else:
+                contact["known_schedule"] = routine_summary
+                if "schedule_summary" in contact or contact.get("schedule_summary") is not None:
+                    contact["schedule_summary"] = routine_summary
+        else:
+            contact["schedule_revealed"] = False
+            eff_val = routine_summary if int(routine_dict.get("discovered_count") or 0) > 0 else masked_sched
+            contact["known_schedule"] = eff_val
+            if "schedule_summary" in contact or contact.get("schedule_summary") is not None:
+                contact["schedule_summary"] = eff_val
+
+    if isinstance(contact.get("basic_info"), dict) and (
+        "known_schedule" in contact["basic_info"] or "schedule_summary" in contact["basic_info"]
+    ):
+        contact["basic_info"] = dict(contact["basic_info"])
+        if has_anchor or not contact["schedule_revealed"]:
+            if "known_schedule" in contact["basic_info"]:
+                contact["basic_info"]["known_schedule"] = contact["known_schedule"]
+            if "schedule_summary" in contact["basic_info"]:
+                contact["basic_info"]["schedule_summary"] = (
+                    contact.get("schedule_summary")
+                    if ("schedule_summary" in contact and contact["schedule_summary"] is not None)
+                    else contact["known_schedule"]
+                )
+        else:
+            if "known_schedule" in contact["basic_info"] and not _has_authored(contact["basic_info"]["known_schedule"]):
+                contact["basic_info"]["known_schedule"] = contact["known_schedule"]
+            if "schedule_summary" in contact["basic_info"] and not _has_authored(contact["basic_info"]["schedule_summary"]):
+                contact["basic_info"]["schedule_summary"] = contact.get("schedule_summary") or contact["known_schedule"]
+
+    return contact

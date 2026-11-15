@@ -1831,6 +1831,8 @@ def enrich_contact_dossier(
     read_only: bool = False,
     preloaded_party_npcs: list[dict] | None = None,
     preloaded_faction_state: dict | None = None,
+    preloaded_agent_roster: list[dict] | None = None,
+    preloaded_session: dict | None = None,
 ) -> dict:
     """Shared deterministic NPC Contact Dossier enrichment for both Web Codex/Phone and Discord embeds."""
     import mechanics.social.persona
@@ -2317,10 +2319,13 @@ def enrich_contact_dossier(
                     pass
             anom_prof = hydrate_anomalous_npc_profile(
                 c,
-                session_id=(0 if read_only else session_id),
+                session_id=session_id,
                 scen_key=scen_key,
                 player_level=comp_level,
                 is_party_companion=in_party_companion,
+                read_only=read_only,
+                preloaded_agent_roster=preloaded_agent_roster,
+                preloaded_session=preloaded_session,
             )
             c_binfo_mut = dict(c.get("basic_info") or {})
             c_binfo_mut["anomalous_npc_tag"] = anom_prof["anomalous_npc_tag"]

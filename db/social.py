@@ -533,7 +533,8 @@ def _enrich_contact_basic_info(
     name: str,
     basic_info: dict | None,
     scenario: str = "",
-    narrative_text: str = ""
+    narrative_text: str = "",
+    preloaded_enrichment: dict | None = None,
 ) -> dict:
     """Hydrates missing contact basic_info fields (role, faction, club, club_role, grade,
     clique, description, mannerisms, motivation) by cross-referencing school_directory,
@@ -549,23 +550,46 @@ def _enrich_contact_basic_info(
 
     # 1. Cross-reference school_directory
     try:
-        sd_row = conn.execute(
-            """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race, gender
-               FROM school_directory
-               WHERE session_id=? AND (lower(name)=? OR npc_id=?)
-               LIMIT 1""",
-            (session_id, name_low, npc_slug)
-        ).fetchone()
-        if not sd_row and " " not in name_clean:
-            cand_rows = conn.execute(
+        sd_row = None
+        if preloaded_enrichment is not None:
+            sd_row = (
+                (preloaded_enrichment.get("school_by_name") or {}).get(name_low)
+                or (preloaded_enrichment.get("school_by_id") or {}).get(npc_slug)
+            )
+            if not sd_row and " " not in name_clean:
+                cand_rows = []
+                for sr in (preloaded_enrichment.get("school_rows") or []):
+                    s_name = str(sr["name"] or "").strip().lower()
+                    s_nid = str(sr["npc_id"] or "").strip().lower()
+                    if (
+                        s_name.startswith(f"{name_low} ")
+                        or s_name.endswith(f" {name_low}")
+                        or s_nid.startswith(f"{npc_slug}_")
+                        or s_nid.endswith(f"_{npc_slug}")
+                    ):
+                        cand_rows.append(sr)
+                        if len(cand_rows) >= 2:
+                            break
+                if len(cand_rows) == 1:
+                    sd_row = cand_rows[0]
+        else:
+            sd_row = conn.execute(
                 """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race, gender
                    FROM school_directory
-                   WHERE session_id=? AND (lower(name) LIKE ? OR lower(name) LIKE ? OR npc_id LIKE ? OR npc_id LIKE ?)
-                   LIMIT 2""",
-                (session_id, f"{name_low} %", f"% {name_low}", f"{npc_slug}_%", f"%_{npc_slug}")
-            ).fetchall()
-            if len(cand_rows) == 1:
-                sd_row = cand_rows[0]
+                   WHERE session_id=? AND (lower(name)=? OR npc_id=?)
+                   LIMIT 1""",
+                (session_id, name_low, npc_slug)
+            ).fetchone()
+            if not sd_row and " " not in name_clean:
+                cand_rows = conn.execute(
+                    """SELECT role, grade, club, clique, primary_facility, secondary_facility, personality_summary, race, gender
+                       FROM school_directory
+                       WHERE session_id=? AND (lower(name) LIKE ? OR lower(name) LIKE ? OR npc_id LIKE ? OR npc_id LIKE ?)
+                       LIMIT 2""",
+                    (session_id, f"{name_low} %", f"% {name_low}", f"{npc_slug}_%", f"%_{npc_slug}")
+                ).fetchall()
+                if len(cand_rows) == 1:
+                    sd_row = cand_rows[0]
         if sd_row:
             if _is_empty_info_val(info.get("role")) and not _is_empty_info_val(sd_row["role"]):
                 info["role"] = sd_row["role"].strip()
@@ -596,36 +620,56 @@ def _enrich_contact_basic_info(
 
     # 1b. Cross-reference anomalous_agent_roster
     try:
-        ar_row = conn.execute(
-            """SELECT gender, race, rank_title, agent_class, faction_name
-               FROM anomalous_agent_roster
-               WHERE session_id=? AND (lower(name)=? OR npc_id=?)
-               LIMIT 1""",
-            (session_id, name_low, npc_slug)
-        ).fetchone()
+        if preloaded_enrichment is not None:
+            ar_map = preloaded_enrichment.get("anomalous_roster_by_key") or {}
+            ar_row = ar_map.get(name_low) or ar_map.get(npc_slug)
+        else:
+            ar_row = conn.execute(
+                """SELECT gender, race, rank_title, agent_class, faction_name
+                   FROM anomalous_agent_roster
+                   WHERE session_id=? AND (lower(name)=? OR npc_id=?)
+                   LIMIT 1""",
+                (session_id, name_low, npc_slug)
+            ).fetchone()
         if ar_row:
-            if not _is_empty_info_val(ar_row["race"]):
-                info["race"] = ar_row["race"].strip()
-                info["_canonical_race"] = ar_row["race"].strip()
-            if not _is_empty_info_val(ar_row["gender"]):
-                info["gender"] = ar_row["gender"].strip().lower()
-                info["_canonical_gender"] = ar_row["gender"].strip().lower()
-            if _is_empty_info_val(info.get("role")) and not _is_empty_info_val(ar_row["agent_class"]):
-                info["role"] = ar_row["agent_class"].strip()
-            if _is_empty_info_val(info.get("faction")) and not _is_empty_info_val(ar_row["faction_name"]):
-                info["faction"] = ar_row["faction_name"].strip()
+            if isinstance(ar_row, dict):
+                ar_race = ar_row.get("race")
+                ar_gender = ar_row.get("gender")
+                ar_cls = ar_row.get("agent_class")
+                ar_fac = ar_row.get("faction_name")
+            else:
+                ar_race = ar_row["race"]
+                ar_gender = ar_row["gender"]
+                ar_cls = ar_row["agent_class"]
+                ar_fac = ar_row["faction_name"]
+            if not _is_empty_info_val(ar_race):
+                info["race"] = ar_race.strip()
+                info["_canonical_race"] = ar_race.strip()
+            if not _is_empty_info_val(ar_gender):
+                info["gender"] = ar_gender.strip().lower()
+                info["_canonical_gender"] = ar_gender.strip().lower()
+            if _is_empty_info_val(info.get("role")) and not _is_empty_info_val(ar_cls):
+                info["role"] = ar_cls.strip()
+            if _is_empty_info_val(info.get("faction")) and not _is_empty_info_val(ar_fac):
+                info["faction"] = ar_fac.strip()
     except Exception:
         pass
 
     # 2. Cross-reference factions leadership_roster_json
     try:
-        fac_rows = conn.execute(
-            "SELECT name, leadership_roster_json FROM factions WHERE session_id=?",
-            (session_id,)
-        ).fetchall()
-        for fr in fac_rows:
-            fac_name = (fr["name"] or "").strip()
-            roster = json.loads(fr["leadership_roster_json"] or "[]")
+        if preloaded_enrichment is not None:
+            fac_entries = preloaded_enrichment.get("factions") or []
+        else:
+            fac_rows = conn.execute(
+                "SELECT name, leadership_roster_json FROM factions WHERE session_id=?",
+                (session_id,)
+            ).fetchall()
+            fac_entries = []
+            for fr in fac_rows:
+                fac_name = (fr["name"] or "").strip()
+                roster = json.loads(fr["leadership_roster_json"] or "[]")
+                fac_entries.append((fac_name, roster))
+        for fac_name, roster in fac_entries:
             if not isinstance(roster, list):
                 continue
             for member in roster:
@@ -658,13 +702,16 @@ def _enrich_contact_basic_info(
     # 3. Cross-reference lorebook
     lb_row = None
     try:
-        lb_row = conn.execute(
-            """SELECT id, description, faction, motivation, mannerisms, race
-               FROM lorebook
-               WHERE session_id=? AND lower(name)=? AND lower(entity_type) IN ('person', 'npc', 'character')
-               LIMIT 1""",
-            (session_id, name_low)
-        ).fetchone()
+        if preloaded_enrichment is not None:
+            lb_row = (preloaded_enrichment.get("lorebook_by_name") or {}).get(name_low)
+        else:
+            lb_row = conn.execute(
+                """SELECT id, description, faction, motivation, mannerisms, race
+                   FROM lorebook
+                   WHERE session_id=? AND lower(name)=? AND lower(entity_type) IN ('person', 'npc', 'character')
+                   LIMIT 1""",
+                (session_id, name_low)
+            ).fetchone()
         if lb_row:
             if _is_empty_info_val(info.get("description")) and not _is_empty_info_val(lb_row["description"]):
                 info["description"] = lb_row["description"].strip()
@@ -688,7 +735,7 @@ def _enrich_contact_basic_info(
         or ("school" in (scenario or "").lower() and _is_empty_info_val(info.get("grade")))
     )
     scene_narr = narrative_text or ""
-    if needs_narrative and not scene_narr:
+    if needs_narrative and not scene_narr and not (preloaded_enrichment and preloaded_enrichment.get("narrative_loaded")):
         try:
             s_row = conn.execute("SELECT narrative, scenario FROM sessions WHERE id=?", (session_id,)).fetchone()
             if s_row:
@@ -774,13 +821,17 @@ def _enrich_contact_basic_info(
                 # 75% rate
                 if club_rng.random() < 0.75:
                     try:
-                        fac_rows = conn.execute(
-                            "SELECT name FROM factions WHERE session_id=?",
-                            (session_id,)
-                        ).fetchall()
+                        if preloaded_enrichment is not None:
+                            fac_names = preloaded_enrichment.get("faction_names") or []
+                        else:
+                            fac_rows = conn.execute(
+                                "SELECT name FROM factions WHERE session_id=?",
+                                (session_id,)
+                            ).fetchall()
+                            fac_names = [fr["name"].strip() for fr in fac_rows if fr["name"]]
                         candidate_factions = [
-                            fr["name"].strip() for fr in fac_rows
-                            if fr["name"] and not any(kw in fr["name"].lower() for kw in ("faculty", "staff", "board", "administration", "directorate", "security group", "investigations", "congregation", "sealing order", "syndicate", "bureau", "agency"))
+                            fname for fname in fac_names
+                            if fname and not any(kw in fname.lower() for kw in ("faculty", "staff", "board", "administration", "directorate", "security group", "investigations", "congregation", "sealing order", "syndicate", "bureau", "agency"))
                         ]
                     except Exception:
                         candidate_factions = []
@@ -823,8 +874,8 @@ def _enrich_contact_basic_info(
                 else:
                     info["standing"] = "Member"
 
-    # 5. Backfill lorebook if lorebook row exists with empty description/faction
-    if lb_row and (not _is_empty_info_val(info.get("description")) or not _is_empty_info_val(info.get("faction"))):
+    # 5. Backfill lorebook if lorebook row exists with empty description/faction (skip during read-only batch calls)
+    if preloaded_enrichment is None and lb_row and (not _is_empty_info_val(info.get("description")) or not _is_empty_info_val(info.get("faction"))):
         try:
             lb_desc = info.get("description") or lb_row["description"] or ""
             lb_fac = info.get("faction") or info.get("club") or lb_row["faction"] or ""
@@ -1784,13 +1835,106 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
 
         scen_key = "fantasy"
         scene_narrative = ""
+        anomalous_roster_by_key: dict[str, dict] = {}
         try:
-            s_row = conn.execute("SELECT scenario, narrative FROM sessions WHERE id=?", (session_id,)).fetchone()
+            s_row = conn.execute(
+                "SELECT scenario, narrative, extra_json FROM sessions WHERE id=?",
+                (session_id,),
+            ).fetchone()
             if s_row:
                 scen_key = s_row["scenario"] or "fantasy"
                 scene_narrative = s_row["narrative"] or ""
+                if s_row["extra_json"]:
+                    try:
+                        extra_data = json.loads(s_row["extra_json"]) or {}
+                    except Exception:
+                        extra_data = {}
+                    raw_ar = (
+                        extra_data.get("anomalous_agent_roster")
+                        if isinstance(extra_data, dict)
+                        else None
+                    )
+                    if isinstance(raw_ar, list):
+                        for ar in raw_ar:
+                            if not isinstance(ar, dict):
+                                continue
+                            ar_name = str(ar.get("name") or "").strip().lower()
+                            ar_nid = str(ar.get("npc_id") or "").strip().lower()
+                            if ar_name and ar_name not in anomalous_roster_by_key:
+                                anomalous_roster_by_key[ar_name] = ar
+                            if ar_nid and ar_nid not in anomalous_roster_by_key:
+                                anomalous_roster_by_key[ar_nid] = ar
         except Exception:
             pass
+
+        # Batch-load school_directory, factions, and lorebook once per get_contacts() call (O(1) enrichment)
+        school_rows_cache: list = []
+        school_by_name: dict[str, object] = {}
+        school_by_id: dict[str, object] = {}
+        factions_cache: list[tuple[str, list]] = []
+        faction_names_cache: list[str] = []
+        lorebook_by_name: dict[str, object] = {}
+        if rows:
+            try:
+                school_rows_cache = conn.execute(
+                    """SELECT role, grade, club, clique, primary_facility, secondary_facility,
+                              personality_summary, race, gender, name, npc_id
+                       FROM school_directory
+                       WHERE session_id=?""",
+                    (session_id,),
+                ).fetchall()
+                for sr in school_rows_cache:
+                    s_name = str(sr["name"] or "").strip().lower()
+                    s_nid = str(sr["npc_id"] or "").strip().lower()
+                    if s_name and s_name not in school_by_name:
+                        school_by_name[s_name] = sr
+                    if s_nid and s_nid not in school_by_id:
+                        school_by_id[s_nid] = sr
+            except Exception:
+                school_rows_cache = []
+            try:
+                fac_rows = conn.execute(
+                    "SELECT name, leadership_roster_json FROM factions WHERE session_id=?",
+                    (session_id,),
+                ).fetchall()
+                for fr in fac_rows:
+                    fac_name = (fr["name"] or "").strip()
+                    if fac_name:
+                        faction_names_cache.append(fac_name)
+                    try:
+                        parsed_roster = json.loads(fr["leadership_roster_json"] or "[]")
+                    except Exception:
+                        parsed_roster = []
+                    if not isinstance(parsed_roster, list):
+                        parsed_roster = []
+                    factions_cache.append((fac_name, parsed_roster))
+            except Exception:
+                factions_cache = []
+                faction_names_cache = []
+            try:
+                lb_rows = conn.execute(
+                    """SELECT id, name, description, faction, motivation, mannerisms, race
+                       FROM lorebook
+                       WHERE session_id=? AND lower(entity_type) IN ('person', 'npc', 'character')""",
+                    (session_id,),
+                ).fetchall()
+                for lbr in lb_rows:
+                    lb_name = str(lbr["name"] or "").strip().lower()
+                    if lb_name and lb_name not in lorebook_by_name:
+                        lorebook_by_name[lb_name] = lbr
+            except Exception:
+                lorebook_by_name = {}
+
+        enrichment_ctx = {
+            "school_rows": school_rows_cache,
+            "school_by_name": school_by_name,
+            "school_by_id": school_by_id,
+            "anomalous_roster_by_key": anomalous_roster_by_key,
+            "factions": factions_cache,
+            "faction_names": faction_names_cache,
+            "lorebook_by_name": lorebook_by_name,
+            "narrative_loaded": True,
+        }
 
         # Batch-load all intimate_events and households for this session in 2 queries (eliminating N+1 queries)
         events_by_char: dict[str, list[dict]] = {}
@@ -1839,7 +1983,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 raw_info = {}
             enriched_info = _enrich_contact_basic_info(
                 conn, session_id, c_name, raw_info,
-                scenario=scen_key, narrative_text=scene_narrative
+                scenario=scen_key, narrative_text=scene_narrative,
+                preloaded_enrichment=enrichment_ctx,
             )
             if False and enriched_info != raw_info and d.get("id"):
                 try:

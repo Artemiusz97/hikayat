@@ -424,15 +424,22 @@ def ensure_folklore_villager_roster(
     player_gender: str = "",
     session: Optional[Dict[str, Any]] = None,
     persist_db: bool = True,
+    read_only: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Ensures the session has its pregenerated folklore villager roster in `sessions.extra_json`
     WITHOUT inserting any Turn-0 rows into contacts or lorebook.
-    When `persist_db=False`, computes/caches in-memory on `session` with zero DB writes.
+    When `persist_db=False` or `read_only=True`, computes/caches without DB writes;
+    when `read_only=True`, performs zero DB reads as well.
     """
     if not session_id:
         return []
-    sess = session if isinstance(session, dict) else db.get_session(session_id)
+    if isinstance(session, dict):
+        sess = session
+    elif read_only:
+        return []
+    else:
+        sess = db.get_session(session_id)
     if not isinstance(sess, dict):
         return []
     eff_scen = str(scen_key or sess.get("scenario") or "")
@@ -443,11 +450,13 @@ def ensure_folklore_villager_roster(
     ):
         return []
 
-    existing = sess.get("folklore_villager_roster")
-    if isinstance(existing, list) and len(existing) >= 12 and not player_gender and sess.get("folklore_roster_pc_bucket"):
+    sess_extra = sess.get("extra") if isinstance(sess.get("extra"), dict) else {}
+    existing = sess.get("folklore_villager_roster") or sess_extra.get("folklore_villager_roster")
+    existing_bucket = sess.get("folklore_roster_pc_bucket") or sess_extra.get("folklore_roster_pc_bucket")
+    if isinstance(existing, list) and len(existing) >= 12 and not player_gender and existing_bucket:
         return existing
 
-    if not player_gender:
+    if not player_gender and not read_only:
         try:
             chars = db.get_session_characters(session_id) or []
             if chars and isinstance(chars[0], dict):
@@ -459,14 +468,14 @@ def ensure_folklore_villager_roster(
             player_gender = ""
 
     pc_bucket = _normalize_pc_gender_bucket(player_gender)
-    if isinstance(existing, list) and len(existing) >= 12 and sess.get("folklore_roster_pc_bucket") == pc_bucket:
+    if isinstance(existing, list) and len(existing) >= 12 and existing_bucket == pc_bucket:
         return existing
 
     roster = generate_folklore_villager_roster(session_id, scen_key=eff_scen, player_gender=player_gender)
-    if isinstance(session, dict):
+    if isinstance(session, dict) and not read_only:
         session["folklore_villager_roster"] = roster
         session["folklore_roster_pc_bucket"] = pc_bucket
-    if persist_db:
+    if persist_db and not read_only:
         db.update_session(
             session_id,
             extra={
@@ -511,11 +520,14 @@ def get_folklore_villager_spec(
     npc_id_or_name: str,
     session: Optional[Dict[str, Any]] = None,
     persist_db: bool = True,
+    read_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Looks up a pregenerated villager spec by npc_id, slot_key, twin alias, or display name."""
     if not session_id or not npc_id_or_name:
         return None
-    roster = ensure_folklore_villager_roster(session_id, session=session, persist_db=persist_db)
+    roster = ensure_folklore_villager_roster(
+        session_id, session=session, persist_db=persist_db, read_only=read_only
+    )
     return _match_villager_entry(roster, npc_id_or_name)
 
 

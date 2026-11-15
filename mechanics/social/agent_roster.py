@@ -1785,17 +1785,32 @@ def hydrate_faction_colleagues_to_contacts(session_id: int, faction_archetype_ke
     return count
 
 
+def match_special_agent_in_roster(
+    roster: Optional[List[Dict[str, Any]]],
+    npc_name: str,
+) -> Optional[Dict[str, Any]]:
+    """Matches a pre-generated Special Agent by name or npc_id from an in-memory roster."""
+    if not roster or not npc_name:
+        return None
+    target = str(npc_name).strip().lower()
+    target_id = target.replace(" ", "_").replace(".", "")
+    for ag in roster:
+        if not isinstance(ag, dict):
+            continue
+        if (
+            str(ag.get("name") or "").strip().lower() == target
+            or str(ag.get("npc_id") or "").strip().lower() == target_id
+        ):
+            return ag
+    return None
+
+
 def find_special_agent_by_name(session_id: int, npc_name: str, scen_key: str = "") -> Optional[Dict[str, Any]]:
     """Finds a pre-generated Special Agent by name or npc_id."""
     if not session_id or not npc_name:
         return None
     roster = ensure_anomalous_agent_roster(session_id, scen_key=scen_key)
-    target = npc_name.strip().lower()
-    target_id = target.replace(" ", "_").replace(".", "")
-    for ag in roster:
-        if ag.get("name", "").strip().lower() == target or ag.get("npc_id", "").strip().lower() == target_id:
-            return ag
-    return None
+    return match_special_agent_in_roster(roster, npc_name)
 
 
 def evaluate_anomalous_companion_recruitment(

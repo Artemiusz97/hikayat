@@ -867,6 +867,7 @@ def _preload_fog_of_war_context(
     eff_party_npcs: list[dict[str, Any]] = list(preloaded_party_npcs or []) if preloaded_party_npcs is not None else []
     player_last_name = ""
     faction_state: dict[str, Any] | None = None
+    anomalous_agent_roster: list[dict[str, Any]] | None = None
 
     if sid:
         try:
@@ -916,6 +917,13 @@ def _preload_fog_of_war_context(
             except (sqlite3.Error, AttributeError, TypeError, ValueError):
                 eff_session = None
         player_last_name = _extract_player_last_name(sid, cid)
+        if eff_session is not None:
+            raw_ar = eff_session.get("anomalous_agent_roster") or (
+                eff_session.get("extra", {}).get("anomalous_agent_roster")
+                if isinstance(eff_session.get("extra"), dict)
+                else None
+            )
+            anomalous_agent_roster = [a for a in raw_ar if isinstance(a, dict)] if isinstance(raw_ar, list) else []
         if scen_key:
             try:
                 from scenario_data import is_anomalous_incursions_scenario
@@ -953,6 +961,7 @@ def _preload_fog_of_war_context(
         "household_cache": {},
         "party_npcs": eff_party_npcs,
         "faction_state": faction_state,
+        "anomalous_agent_roster": anomalous_agent_roster if sid else None,
         "preloaded": True,
     }
 
@@ -987,12 +996,11 @@ def _enrich_contact_record(
     party_names: set[str] | None = None,
     fow_context: dict | None = None,
 ) -> dict:
-    from mechanics.social import locales as _soc_locales
     from mechanics.social.relationships import enrich_contact_dossier
     from mechanics.social.roster_tags import resolve_character_badges
     from mechanics.world.routine_disclosure import (
+        apply_known_routine_to_contact,
         build_known_routine_payload,
-        format_known_routine_summary,
     )
 
     c_in = dict(c_raw or {})
@@ -1005,6 +1013,8 @@ def _enrich_contact_record(
     is_fow_preloaded = False
     preloaded_party_npcs = None
     preloaded_faction_state = None
+    preloaded_agent_roster = None
+    preloaded_session = None
     if isinstance(fow_context, dict):
         is_fow_preloaded = bool(fow_context.get("preloaded"))
         if fow_context.get("character_id") and not c_in.get("character_id"):
@@ -1025,6 +1035,8 @@ def _enrich_contact_record(
         rom_keys = fow_context.get("romantic_npc_keys")
         preloaded_party_npcs = fow_context.get("party_npcs")
         preloaded_faction_state = fow_context.get("faction_state")
+        preloaded_agent_roster = fow_context.get("anomalous_agent_roster")
+        preloaded_session = fow_context.get("session")
 
     res = enrich_contact_dossier(
         c_in,
@@ -1040,6 +1052,8 @@ def _enrich_contact_record(
         read_only=is_fow_preloaded,
         preloaded_party_npcs=preloaded_party_npcs,
         preloaded_faction_state=preloaded_faction_state,
+        preloaded_agent_roster=preloaded_agent_roster,
+        preloaded_session=preloaded_session,
     )
     if not res.get("grade"):
         b_inf = res.get("basic_info") or {}
@@ -1114,6 +1128,7 @@ def _enrich_contact_record(
             discovered_dossier_rows=preloaded_disc if preloaded_disc is not None else [],
             character_id=fow_char_id,
             preloaded=True,
+            fow_schedule_revealed=bool(res.get("schedule_revealed")),
         )
     else:
         known_routine = build_known_routine_payload(
@@ -1129,31 +1144,10 @@ def _enrich_contact_record(
             romantic_npc_keys=rom_keys,
             discovered_dossier_rows=preloaded_disc,
             character_id=fow_char_id,
+            fow_schedule_revealed=bool(res.get("schedule_revealed")),
         )
 
-    res["known_routine"] = known_routine
-    routine_summary = format_known_routine_summary(known_routine, lang=fow_lang)
-    masked_sched = _soc_locales.get_masked_placeholder("schedule", lang=fow_lang)
-    if known_routine.get("full_schedule_unlocked"):
-        res["schedule_revealed"] = True
-        res["known_schedule"] = routine_summary
-        if "schedule_summary" in res or res.get("schedule_summary") is not None:
-            res["schedule_summary"] = routine_summary
-    else:
-        res["schedule_revealed"] = False
-        eff_partial_or_masked = routine_summary if int(known_routine.get("discovered_count") or 0) > 0 else masked_sched
-        res["known_schedule"] = eff_partial_or_masked
-        if "schedule_summary" in res or res.get("schedule_summary") is not None:
-            res["schedule_summary"] = eff_partial_or_masked
-    if isinstance(res.get("basic_info"), dict) and (
-        "known_schedule" in res["basic_info"] or "schedule_summary" in res["basic_info"]
-    ):
-        res["basic_info"] = dict(res["basic_info"])
-        if "known_schedule" in res["basic_info"]:
-            res["basic_info"]["known_schedule"] = res["known_schedule"]
-        if "schedule_summary" in res["basic_info"]:
-            res["basic_info"]["schedule_summary"] = res["known_schedule"]
-
+    apply_known_routine_to_contact(res, known_routine, lang=fow_lang)
     return res
 
 
