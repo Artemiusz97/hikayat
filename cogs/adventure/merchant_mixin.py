@@ -5,6 +5,7 @@ from db import adb
 import game_engine
 from character_data import inventory_capacity
 from skill_check import resolve_check
+from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     build_merchant_embed as _merchant_embed,
     discounted_price as _discounted_price,
@@ -34,7 +35,10 @@ class MerchantMixin:
         if not interaction.response.is_done():
             await interaction.response.defer()
         session = await adb(db.get_session, session_id)
-        merchant = session["merchant"]
+        if not session:
+            await interaction.followup.send("Session not found.", ephemeral=True)
+            return
+        merchant = dict(session.get("merchant") or {})
         party = list(await asyncio.gather(
             *[(asyncio.gather(adb(db.get_character, uid), adb(db.get_inventory, uid)))
               for uid in session["turn_order"]]
@@ -42,6 +46,26 @@ class MerchantMixin:
 
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         loc = session.get("current_location", "")
+        if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+            shop_avail = await adb(
+                evaluate_shop_staff_availability,
+                session_id,
+                location_str=loc,
+                merchant_type=merchant_type,
+                is_phone_shop=False,
+                scen_key=session.get("scenario", "fantasy"),
+                current_day=current_day,
+                current_minute=current_minute,
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if not shop_avail.get("available"):
+                await interaction.followup.send(
+                    f"🚪 {shop_avail.get('reason_message') or 'This shop is currently closed.'}",
+                    ephemeral=True,
+                )
+                return
+            if shop_avail.get("staff_npc"):
+                merchant["flavor_name"] = str(shop_avail["staff_npc"].get("name") or merchant.get("flavor_name") or "")
 
         from mechanics.combat.merchant import (
             get_store_key,
@@ -235,6 +259,24 @@ class MerchantMixin:
                     return
                 merchant = session["merchant"]
                 is_phone_shop = bool(merchant.get("is_phone_shop", False))
+                if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+                    shop_avail = await adb(
+                        evaluate_shop_staff_availability,
+                        session_id,
+                        location_str=session.get("current_location", ""),
+                        merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                        is_phone_shop=False,
+                        scen_key=session.get("scenario", "fantasy"),
+                        current_day=session.get("current_day"),
+                        current_minute=session.get("current_minute"),
+                        turn_number=int(session.get("turn_count") or 0),
+                    )
+                    if not shop_avail.get("available"):
+                        await interaction.response.send_message(
+                            f"🚪 {shop_avail.get('reason_message') or 'This shop is currently closed.'}",
+                            ephemeral=True,
+                        )
+                        return
                 shop_ctx = await adb(
                     get_anomalous_shop_faction_context,
                     session,
@@ -401,6 +443,28 @@ class MerchantMixin:
             adb(db.get_session, session_id),
             adb(db.get_character, user_id),
         )
+        if not session:
+            await interaction.response.send_message("Session not found.", ephemeral=True)
+            return
+        merchant = session.get("merchant") or {}
+        if not bool(merchant.get("is_phone_shop")) and not bool(merchant.get("is_faction_quartermaster")):
+            shop_avail = await adb(
+                evaluate_shop_staff_availability,
+                session_id,
+                location_str=session.get("current_location", ""),
+                merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                is_phone_shop=False,
+                scen_key=session.get("scenario", "fantasy"),
+                current_day=session.get("current_day"),
+                current_minute=session.get("current_minute"),
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if not shop_avail.get("available"):
+                await interaction.response.send_message(
+                    f"🚪 {shop_avail.get('reason_message') or 'This shop is currently closed.'}",
+                    ephemeral=True,
+                )
+                return
         match = next((dict(i) for i in (inv or []) if i.get("id") == item_id), None)
         if not match:
             await interaction.response.send_message("You no longer have that item.", ephemeral=True)
@@ -426,7 +490,28 @@ class MerchantMixin:
         try:
             async with distributed_session_lock(session_id, raise_http_error=False):
                 session = await adb(db.get_session, session_id)
+                if not session:
+                    await interaction.response.send_message("Session not found.", ephemeral=True)
+                    return
                 merchant = session["merchant"]
+                if not bool(merchant.get("is_phone_shop")) and not bool(merchant.get("is_faction_quartermaster")):
+                    shop_avail = await adb(
+                        evaluate_shop_staff_availability,
+                        session_id,
+                        location_str=session.get("current_location", ""),
+                        merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                        is_phone_shop=False,
+                        scen_key=session.get("scenario", "fantasy"),
+                        current_day=session.get("current_day"),
+                        current_minute=session.get("current_minute"),
+                        turn_number=int(session.get("turn_count") or 0),
+                    )
+                    if not shop_avail.get("available"):
+                        await interaction.response.send_message(
+                            f"🚪 {shop_avail.get('reason_message') or 'The merchant counter is closed.'}",
+                            ephemeral=True,
+                        )
+                        return
                 attempts = merchant.get("haggle_attempts", 0)
                 char = await adb(db.get_character, user_id)
 

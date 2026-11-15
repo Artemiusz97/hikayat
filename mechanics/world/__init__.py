@@ -24,6 +24,13 @@ from .npc_schedule import (
     get_time_block_key,
     get_detailed_npc_time_phase,
 )
+from .venue_seeder import (
+    ensure_venue_staff_seeded,
+    ensure_roaming_merchants_seeded,
+    slot_fill_custom_action_role,
+    evaluate_shop_staff_availability,
+    format_venue_crowd_flavor,
+)
 
 __all__ = [
     "SCENARIO_WORLD_SCHEDULES",
@@ -48,4 +55,9 @@ __all__ = [
     "is_schedule_transition_imminent",
     "get_time_block_key",
     "get_detailed_npc_time_phase",
+    "ensure_venue_staff_seeded",
+    "ensure_roaming_merchants_seeded",
+    "slot_fill_custom_action_role",
+    "evaluate_shop_staff_availability",
+    "format_venue_crowd_flavor",
 ]

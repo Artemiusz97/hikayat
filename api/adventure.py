@@ -13,6 +13,7 @@ import character_data as cd
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
 from mechanics.social.relationships import is_contact_eligible
+from mechanics.world import evaluate_shop_staff_availability
 from services.turn_service import TurnService
 from mechanics.system.concurrency import (
     distributed_adventure_lock,
@@ -160,17 +161,42 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
 
     show_merchant = False
     merchant_label = "Talk to Merchant"
+    shop_closed_reason = ""
+    shop_closed_message = ""
+    staff_keeper_name = ""
     if not in_combat:
-        if is_school:
+        is_phone_active = bool(merchant_state.get("is_phone_shop"))
+        is_quartermaster = bool(merchant_state.get("is_faction_quartermaster"))
+        shop_avail: dict | None = None
+        if not is_phone_active and not is_quartermaster:
+            shop_avail = evaluate_shop_staff_availability(
+                int(session.get("id") or 0),
+                location_str=current_loc_check,
+                is_phone_shop=False,
+                scen_key=scen_key_check,
+                current_day=session.get("current_day"),
+                current_minute=session.get("current_minute"),
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if shop_avail.get("staff_npc"):
+                staff_keeper_name = str(shop_avail["staff_npc"].get("name") or "").strip()
+
+        if shop_avail is not None and not shop_avail.get("available"):
+            show_merchant = False
+            shop_closed_reason = str(shop_avail.get("reason") or "")
+            shop_closed_message = str(shop_avail.get("reason_message") or "")
+        elif is_school:
             if has_shop_loc:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            if merchant_state.get("available") or merchant_state.get("active") or has_shop_loc or merchant_npc_name:
+            roamer_on_site = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            if merchant_state.get("available") or merchant_state.get("active") or has_shop_loc or merchant_npc_name or roamer_on_site:
                 show_merchant = True
                 flavor_name = (
                     (merchant_state.get("flavor_name") if (merchant_state.get("available") or merchant_state.get("active")) else None)
                     or merchant_npc_name
+                    or (staff_keeper_name if (not has_shop_loc and staff_keeper_name) else None)
                 )
                 if has_shop_loc and not flavor_name:
                     merchant_label = "Visit Market / Shop"
@@ -181,6 +207,9 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
 
     session["merchant_available"] = show_merchant
     session["merchant_action_label"] = merchant_label
+    session["shop_closed_reason"] = shop_closed_reason
+    session["shop_closed_message"] = shop_closed_message
+    session["staff_keeper"] = staff_keeper_name
 
     day = int(session.get("current_day", 1) or 1)
     minute = int(session.get("current_minute", 480) or 480)
