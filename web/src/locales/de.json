@@ -912,7 +912,10 @@
     "promotion_hint": "Steige durch +15 Zuneigung, -10 Rivalität, Nummerntausch vor Ort, Quest-Verbindung oder Gruppenbeitritt in Gespeicherte Kontakte auf.",
     "dm_locked_badge": "DM gesperrt",
     "dm_locked_tooltip": "Direktnachrichten sind gesperrt. Frage persönlich nach der Nummer oder verbinde dich über PeerPulse — Zuneigung allein schaltet keine DMs frei.",
-    "search_acquaintances": "Bekannte suchen..."
+    "search_acquaintances": "Bekannte suchen...",
+    "no_acquaintances_match": "Keine passenden Bekannten gefunden.",
+    "background_notes": "📖 Hintergrund & Notizen",
+    "known_traits": "Bekannte Merkmale"
   },
   "phone": {
     "alerts_dispatch": "Warnungen / Leitstelle",

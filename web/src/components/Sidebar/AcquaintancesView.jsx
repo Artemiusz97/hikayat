@@ -29,21 +29,24 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
     );
   }
 
+  const hasSearch = Boolean(String(searchQuery || '').trim());
   if (acquaintances.length === 0) {
     return (
       <div className="text-center py-8 px-3 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
         <Users size={24} className="mx-auto mb-1.5 opacity-40" />
         <p className="text-xs">
-          {searchQuery
-            ? t('contacts.no_acquaintances', 'No met acquaintances yet.')
+          {hasSearch
+            ? t('contacts.no_acquaintances_match', 'No matching acquaintances found.')
             : t('contacts.no_acquaintances', 'No met acquaintances yet.')}
         </p>
-        <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">
-          {t(
-            'contacts.acquaintances_hint',
-            'Characters you briefly meet or converse with appear here until your bond deepens enough for Saved Contacts.'
-          )}
-        </p>
+        {!hasSearch && (
+          <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">
+            {t(
+              'contacts.acquaintances_hint',
+              'Characters you briefly meet or converse with appear here until your bond deepens enough for Saved Contacts.'
+            )}
+          </p>
+        )}
       </div>
     );
   }
@@ -184,7 +187,7 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                 {desc && (
                   <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      📖 Background &amp; Notes
+                      {t('contacts.background_notes', '📖 Background & Notes')}
                     </span>
                     {desc}
                   </div>
@@ -195,7 +198,7 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                 {traits.length > 0 && (
                   <div>
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      Known Traits
+                      {t('contacts.known_traits', 'Known Traits')}
                     </span>
                     <div className="flex flex-wrap gap-1.5">
                       {traits.map((tr, idx) => {

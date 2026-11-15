@@ -47,6 +47,7 @@ async def _get_contacts_ro(session_id: int, character_id: int | None = None) -> 
         mechanics.social.relationships.safe_get_contacts,
         session_id,
         character_id,
+        resolve_relations=False,
         ensure_scene=False,
     ) or []
 
@@ -835,12 +836,14 @@ def _preload_fog_of_war_context(
     preloaded_contacts: list[dict[str, Any]] | None = None,
     preloaded_party_npcs: list[dict[str, Any]] | None = None,
     scen_key: str = "",
+    preloaded_session: dict[str, Any] | None = None,
 ) -> dict:
     """Batch-loads dossier, roster, node, property, tie, and exemption context in O(1) queries."""
     import mechanics.social.relationship_graph as rg
 
     cid = int(character_id or 0)
     sid = int(session_id or 0)
+    eff_session: dict[str, Any] | None = dict(preloaded_session) if isinstance(preloaded_session, dict) else None
     try:
         disc_by_npc = db.get_contact_dossier_discoveries_batch(sid, cid) if sid else {}
     except (sqlite3.Error, AttributeError, TypeError, ValueError):
@@ -897,7 +900,7 @@ def _preload_fog_of_war_context(
         if preloaded_contacts is None:
             try:
                 eff_contacts = mechanics.social.relationships.safe_get_contacts(
-                    sid, cid or None, ensure_scene=False
+                    sid, cid or None, resolve_relations=False, ensure_scene=False
                 ) or []
             except (sqlite3.Error, AttributeError, TypeError, ValueError):
                 eff_contacts = []
@@ -906,14 +909,23 @@ def _preload_fog_of_war_context(
                 eff_party_npcs = db.get_session_party_npcs(sid) or []
             except (sqlite3.Error, AttributeError, TypeError, ValueError):
                 eff_party_npcs = []
+        if eff_session is None:
+            try:
+                s_row = db.get_session(sid)
+                eff_session = dict(s_row) if isinstance(s_row, dict) else s_row
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                eff_session = None
         player_last_name = _extract_player_last_name(sid, cid)
         if scen_key:
             try:
                 from scenario_data import is_anomalous_incursions_scenario
                 if is_anomalous_incursions_scenario(scen_key):
-                    from mechanics.social.factions import get_anomalous_faction_state
-                    f_state = get_anomalous_faction_state(sid)
-                    faction_state = dict(f_state) if isinstance(f_state, dict) else {}
+                    raw_af = (eff_session or {}).get("anomalous_faction_state") if isinstance(eff_session, dict) else None
+                    if isinstance(raw_af, dict) and raw_af:
+                        faction_state = dict(raw_af)
+                    else:
+                        st_fid = str((eff_session or {}).get("starting_faction_id") or "").strip().lower() if isinstance(eff_session, dict) else ""
+                        faction_state = {"faction_archetype_key": st_fid} if st_fid else {}
             except (sqlite3.Error, AttributeError, TypeError, ValueError):
                 faction_state = None
 
@@ -923,6 +935,7 @@ def _preload_fog_of_war_context(
     return {
         "character_id": cid,
         "lang": str(lang or "en"),
+        "session": eff_session,
         "disc_by_npc": disc_by_npc,
         "party_npc_keys": party_npc_keys,
         "kin_npc_keys": kin_npc_keys,
@@ -1266,6 +1279,7 @@ def _build_contacts_and_acquaintances_payload(
     ui_lang: str,
     contacts: list[dict[str, Any]],
     unlocked_raw: list[dict[str, Any]],
+    preloaded_session: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     from mechanics.social.relationships import can_player_dm_contact, get_relationship_tier
 
@@ -1277,6 +1291,7 @@ def _build_contacts_and_acquaintances_payload(
         preloaded_contacts=contacts,
         preloaded_party_npcs=party_npcs,
         scen_key=scen_key,
+        preloaded_session=preloaded_session,
     )
     enriched_contacts = [
         {
@@ -1289,7 +1304,13 @@ def _build_contacts_and_acquaintances_payload(
                 party_names=party_names,
                 fow_context=fow,
             ),
-            "can_dm": can_player_dm_contact(c, party_names=party_names, scenario=scen_key),
+            "can_dm": can_player_dm_contact(
+                c,
+                party_names=party_names,
+                scenario=scen_key,
+                preloaded_session=fow.get("session"),
+                skip_session_lookup=True,
+            ),
         }
         for c in unlocked_raw
     ]
@@ -1343,7 +1364,7 @@ def _build_contacts_and_acquaintances_payload(
         acq_enriched["first_met_turn"] = acq_in["first_met_turn"]
         acq_enriched["staff_status"] = acq_in["staff_status"]
         acq_enriched["workplace_label"] = acq_in["workplace_label"]
-        acq_enriched["can_dm"] = can_player_dm_contact(acq_enriched, party_names=party_names, scenario=scen_key)
+        acq_enriched["can_dm"] = False
         enriched_acquaintances.append(acq_enriched)
 
     enriched_acquaintances.sort(
@@ -1372,10 +1393,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
     lookup_uid = valid_uid or session.get("host_user_id") or 0
     settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
-    from scenario_data import is_nsfw_scenario, is_anomalous_incursions_scenario
-    if is_anomalous_incursions_scenario(scen_key):
-        from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
-        await adb(prune_unmet_preseeded_special_agents, session_id)
+    from scenario_data import is_nsfw_scenario
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await _get_contacts_ro(session_id, char_id)
@@ -1387,7 +1405,17 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
 
     # Pre-filter unlocked contacts before expensive enrichment loop
-    unlocked_raw = [c for c in (contacts or []) if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
+    unlocked_raw = [
+        c
+        for c in (contacts or [])
+        if is_unlocked_contact(
+            c,
+            party_names,
+            met_in_story_names=met_names,
+            preloaded_session=session,
+            skip_session_lookup=True,
+        )
+    ]
     ui_lang = str((settings or {}).get("ui_language") or "en")
     enriched_contacts, enriched_acquaintances = await adb(
         _build_contacts_and_acquaintances_payload,
@@ -1401,6 +1429,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
         ui_lang,
         contacts,
         unlocked_raw,
+        preloaded_session=session,
     )
     return {
         "contacts": enriched_contacts,

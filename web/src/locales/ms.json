@@ -912,7 +912,10 @@
     "promotion_hint": "Naikkan ke Kenalan Tersimpan dengan mencapai +15 Kemesraan, -10 Perseteruan, bertukar nombor secara bersemuka, pautan misi, atau menyertai kumpulan.",
     "dm_locked_badge": "DM Dikunci",
     "dm_locked_tooltip": "Mesej terus dikunci. Minta nombor secara bersemuka atau sambung melalui PeerPulse dahulu; kemesraan sahaja tidak membuka kunci DM.",
-    "search_acquaintances": "Cari Kenalan Sekilas..."
+    "search_acquaintances": "Cari Kenalan Sekilas...",
+    "no_acquaintances_match": "Tiada kenalan sekilas yang sepadan ditemui.",
+    "background_notes": "📖 Latar Belakang & Nota",
+    "known_traits": "Sifat Diketahui"
   },
   "phone": {
     "alerts_dispatch": "Amaran / Siaran",

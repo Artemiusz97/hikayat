@@ -912,7 +912,10 @@
     "promotion_hint": "通过达成 +15 好感、-10 敌对、当面交换联系方式、建立任务关联或邀请入队，即可升入已保存联系人。",
     "dm_locked_badge": "私信未解锁",
     "dm_locked_tooltip": "私信功能尚未解锁。请先当面索取联系方式或通过 PeerPulse 建立连接；仅靠好感度无法解锁私信。",
-    "search_acquaintances": "搜索初识人物..."
+    "search_acquaintances": "搜索初识人物...",
+    "no_acquaintances_match": "未找到匹配的初识人物。",
+    "background_notes": "📖 背景与备注",
+    "known_traits": "已知特质"
   },
   "phone": {
     "alerts_dispatch": "警报 / 调度通知",

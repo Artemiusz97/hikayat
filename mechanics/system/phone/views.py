@@ -153,7 +153,6 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
     async def _open_contacts(self, interaction: discord.Interaction):
         char = await db.adb(db.get_character, self.user_id)
-        contacts = (await db.adb(safe_get_contacts, self.session_id, char.get("id", 0), ensure_scene=False)) if char else []
         session = await db.adb(db.get_session, self.session_id)
         party_npcs = await db.adb(db.get_session_party_npcs, self.session_id) if self.session_id else []
         party_names = {
@@ -163,17 +162,40 @@ class PhoneMainView(PhoneOwnerRestrictedView):
         }
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
+        char_id = int(char.get("id", 0)) if char else 0
+        char_name = char.get("name", "Hero") if char else "Player"
 
-        if not contacts:
+        from cogs.contacts import build_contact_list_embed, ContactView, filter_unlocked_contacts
+        from cogs.contacts_routine_views import (
+            build_acquaintances_list_embed,
+            load_discord_contacts_and_acquaintances,
+        )
+
+        contacts, acquaintances, fow_context = await db.adb(
+            load_discord_contacts_and_acquaintances,
+            self.session_id or 0,
+            char_id,
+            scen_key,
+            user_id=self.user_id,
+            party_names=party_names,
+            party_npcs=party_npcs,
+            filter_unlocked_fn=filter_unlocked_contacts,
+            preloaded_session=session,
+        )
+
+        if not contacts and not acquaintances:
             await interaction.response.send_message(
-                f"{branding['emoji']} **No contacts saved in your phone yet!**\nMeet and talk to NPCs in the story to exchange contact info.",
+                f"{branding['emoji']} **No contacts or acquaintances saved in your phone yet!**\nMeet and talk to NPCs in the story to populate Acquaintances or exchange contact info.",
                 ephemeral=True
             )
             return
 
-        from cogs.contacts import build_contact_list_embed, ContactView
-        char_name = char.get("name", "Hero") if char else "Player"
-        embed = build_contact_list_embed(contacts, scen_key, char_name)
+        initial_mode = "acquaintances" if (not contacts and acquaintances) else "contacts"
+        embed = (
+            build_acquaintances_list_embed(acquaintances, scen_key, char_name)
+            if initial_mode == "acquaintances"
+            else build_contact_list_embed(contacts, scen_key, char_name)
+        )
         view = ContactView(
             contacts,
             scen_key,
@@ -182,6 +204,10 @@ class PhoneMainView(PhoneOwnerRestrictedView):
             cog=self.cog,
             from_phone=True,
             party_names=party_names,
+            acquaintances=acquaintances,
+            mode=initial_mode,
+            fow_context=fow_context,
+            char_name=char_name,
         )
         await interaction.response.edit_message(embed=embed, view=view)
 

@@ -912,7 +912,10 @@
     "promotion_hint": "Awansuj do Zapisanych Kontaktów przez +15 Sympatii, -10 Rywalizacji, wymianę numerów, wątek zadania lub dołączenie do drużyny.",
     "dm_locked_badge": "Czat zablokowany",
     "dm_locked_tooltip": "Wiadomości prywatne są zablokowane. Poproś o numer osobiście lub połącz się przez PeerPulse — sama sympatia nie odblokowuje czatu.",
-    "search_acquaintances": "Szukaj znajomych..."
+    "search_acquaintances": "Szukaj znajomych...",
+    "no_acquaintances_match": "Nie znaleziono pasujących znajomych.",
+    "background_notes": "📖 Tło i notatki",
+    "known_traits": "Znane cechy"
   },
   "phone": {
     "alerts_dispatch": "Alerty / Komunikaty",

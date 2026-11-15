@@ -912,7 +912,10 @@
     "promotion_hint": "Promote to Saved Contacts by reaching +15 Affinity, -10 Rivalry, exchanging numbers in person, forming a quest link, or recruiting them into your party.",
     "dm_locked_badge": "DM Locked",
     "dm_locked_tooltip": "Direct Messaging is locked. Ask for their number in person or connect via PeerPulse first; Affinity alone does not unlock DMs.",
-    "search_acquaintances": "Search Acquaintances..."
+    "search_acquaintances": "Search Acquaintances...",
+    "no_acquaintances_match": "No matching acquaintances found.",
+    "background_notes": "📖 Background & Notes",
+    "known_traits": "Known Traits"
   },
   "phone": {
     "alerts_dispatch": "Alerts / Dispatch",

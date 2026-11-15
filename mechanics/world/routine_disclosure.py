@@ -148,12 +148,12 @@ def _is_residential_label(label: Any, *, fog_labels: Optional[set[str]] = None) 
     return bool(_PRIVATE_HOME_TEXT_RE.search(low))
 
 
-def _humanize_node_id(node_id: str, npc_name: str = "") -> str:
+def _humanize_node_id(node_id: str, npc_name: str = "", *, lang: str = "en") -> str:
     raw = str(node_id or "").strip()
     if not raw:
         return ""
     if raw == SHARED_ABSTRACT_RESIDENCE_NODE:
-        return get_residential_fog_label("en")
+        return get_residential_fog_label(lang)
     for pref in ("sub_npc_res_", "fac_npc_res_", "npc_res_"):
         if raw.lower().startswith(pref):
             slug = raw[len(pref):].replace("_", " ").strip()
@@ -189,7 +189,7 @@ def _resolve_node_label(
             node = nodes_by_id.get(real_home)
             if isinstance(node, Mapping) and node.get("name"):
                 return str(node.get("name")).strip()
-            return _humanize_node_id(real_home, npc_name=npc_name)
+            return _humanize_node_id(real_home, npc_name=npc_name, lang=lang)
         return fog_label
 
     node = nodes_by_id.get(raw) if isinstance(nodes_by_id, Mapping) else None
@@ -218,10 +218,10 @@ def _resolve_node_label(
         home_node = nodes_by_id.get(real_home) if isinstance(nodes_by_id, Mapping) else None
         if isinstance(home_node, Mapping) and home_node.get("name"):
             return str(home_node.get("name")).strip()
-        return _humanize_node_id(real_home, npc_name=npc_name)
+        return _humanize_node_id(real_home, npc_name=npc_name, lang=lang)
 
     if any(raw.lower().startswith(p) for p in ("sub_", "fac_", "loc_", "npc_res_", "zone_")):
-        human = _humanize_node_id(raw, npc_name=npc_name)
+        human = _humanize_node_id(raw, npc_name=npc_name, lang=lang)
         if not residence_unlocked and _is_residential_label(human, fog_labels=all_fog_labels):
             return fog_label
         return human
@@ -682,7 +682,7 @@ def format_known_routine_summary(routine: Mapping[str, Any], *, lang: str = "en"
             return masked_slot
         low = s.lower()
         if s == SHARED_ABSTRACT_RESIDENCE_NODE or any(low.startswith(p) for p in _INTERNAL_RES_PREFIXES):
-            return fog_label if not res_unlocked else _humanize_node_id(s)
+            return fog_label if not res_unlocked else _humanize_node_id(s, lang=eff_lang)
         if not res_unlocked and _is_residential_label(s, fog_labels=all_fog_labels):
             return fog_label
         return s

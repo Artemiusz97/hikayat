@@ -56,6 +56,8 @@ def is_contact_eligible(
     grade: str = "",
     age_group: str = "",
     is_adult_family: bool = False,
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
 ) -> bool:
     """
     Determines whether an NPC is eligible to be registered in the player's Contacts / Directory
@@ -98,10 +100,12 @@ def is_contact_eligible(
     if any(k in role_low_chk for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
         return False
     import scenario_data
-    if session_id and name:
+    if (session_id or preloaded_session) and name:
         try:
-            import db as _db_rel
-            sess_chk = _db_rel.get_session(int(session_id))
+            sess_chk = preloaded_session
+            if sess_chk is None and not skip_session_lookup and session_id:
+                import db as _db_rel
+                sess_chk = _db_rel.get_session(int(session_id))
             if isinstance(sess_chk, dict):
                 eff_scen = str(sess_chk.get("scenario") or scenario or "fantasy")
                 if scenario_data.is_anomalous_incursions_scenario(eff_scen):
@@ -111,8 +115,9 @@ def is_contact_eligible(
                     )
                     if is_anomalous_scene_entity(name, session=sess_chk):
                         return False
-                    if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
-                        return False
+                    if not skip_session_lookup and session_id:
+                        if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
+                            return False
         except Exception:
             pass
 
@@ -128,10 +133,13 @@ def is_contact_eligible(
         player_age_grp = "teen"
         if isinstance(raw_entity_dict, dict) and raw_entity_dict.get("player_age_group"):
             player_age_grp = str(raw_entity_dict.get("player_age_group")).strip().lower()
-        elif session_id:
+        elif preloaded_session is not None or (session_id and not skip_session_lookup):
             try:
-                import db as _db_ahs
-                sess_ahs = _db_ahs.get_session(int(session_id)) or {}
+                if preloaded_session is not None:
+                    sess_ahs = preloaded_session or {}
+                else:
+                    import db as _db_ahs
+                    sess_ahs = _db_ahs.get_session(int(session_id)) or {}
                 player_age_grp = "teen" if is_student_operative(sess_ahs) else "adult"
             except Exception:
                 player_age_grp = "teen"
@@ -144,7 +152,7 @@ def is_contact_eligible(
             "social_role_type": social_role_type,
             "age_group": age_group,
         }
-        if session_id and name and (not role or not grade):
+        if session_id and name and not skip_session_lookup and (not role or not grade):
             try:
                 import db as _db_ahs2
                 for r_entry in (_db_ahs2.get_school_roster(int(session_id)) or []):
@@ -161,7 +169,7 @@ def is_contact_eligible(
         npc_is_agent = bool(
             probe_ent.get("is_special_agent")
             or (probe_ent.get("basic_info") or {}).get("is_special_agent")
-            or classify_anomalous_npc_tag(probe_ent, session_id=int(session_id or 0), scen_key=scenario) == TAG_SPECIAL_AGENT
+            or classify_anomalous_npc_tag(probe_ent, session_id=(0 if skip_session_lookup else int(session_id or 0)), scen_key=scenario) == TAG_SPECIAL_AGENT
         )
         npc_age_grp = str(age_group or "").strip().lower()
         if npc_age_grp not in ("teen", "adult"):
@@ -230,10 +238,13 @@ def is_contact_eligible(
         # Look up grade/role/social_role_type from session, contacts, or school_directory if empty
         club = ""
         is_existing_contact = False
-        if session_id:
+        if preloaded_session is not None or (session_id and not skip_session_lookup):
             try:
-                import db
-                sess = db.get_session(session_id)
+                if preloaded_session is not None:
+                    sess = preloaded_session
+                else:
+                    import db
+                    sess = db.get_session(session_id)
                 if sess:
                     for n in (sess.get("current_npcs") or []):
                         if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == str(name).strip().lower():
@@ -249,34 +260,36 @@ def is_contact_eligible(
                                 if srt_low in ("student_peer", "peer", "contemporary"):
                                     return True
                             break
-                c = db.get_contact(session_id, name)
-                if c:
-                    is_existing_contact = True
-                    b_inf = c.get("basic_info", {}) or {}
-                    role = role or b_inf.get("role", "")
-                    description = description or b_inf.get("description", "")
-                    grade = grade or b_inf.get("grade", "")
-                    club = club or b_inf.get("club", "")
-                    srt = b_inf.get("social_role_type")
-                    if srt:
-                        srt_low = str(srt).lower().strip()
-                        if srt_low in ("faculty_staff", "adult_service"):
-                            return False
-                        if srt_low in ("student_peer", "peer", "contemporary"):
-                            return True
-                if not grade or (not role and not description):
-                    roster = db.get_school_roster(session_id)
-                    for r_entry in (roster or []):
-                        if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
-                            role = role or r_entry.get("role", "")
-                            description = description or r_entry.get("personality_summary", "")
-                            grade = grade or r_entry.get("grade", "")
-                            club = club or r_entry.get("club", "")
-                            break
-                if not role and not description:
-                    lore = db.get_lorebook_entity(session_id, name)
-                    if lore:
-                        description = lore.get("description", "")
+                if session_id and not skip_session_lookup:
+                    import db
+                    c = db.get_contact(session_id, name)
+                    if c:
+                        is_existing_contact = True
+                        b_inf = c.get("basic_info", {}) or {}
+                        role = role or b_inf.get("role", "")
+                        description = description or b_inf.get("description", "")
+                        grade = grade or b_inf.get("grade", "")
+                        club = club or b_inf.get("club", "")
+                        srt = b_inf.get("social_role_type")
+                        if srt:
+                            srt_low = str(srt).lower().strip()
+                            if srt_low in ("faculty_staff", "adult_service"):
+                                return False
+                            if srt_low in ("student_peer", "peer", "contemporary"):
+                                return True
+                    if not grade or (not role and not description):
+                        roster = db.get_school_roster(session_id)
+                        for r_entry in (roster or []):
+                            if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
+                                role = role or r_entry.get("role", "")
+                                description = description or r_entry.get("personality_summary", "")
+                                grade = grade or r_entry.get("grade", "")
+                                club = club or r_entry.get("club", "")
+                                break
+                    if not role and not description:
+                        lore = db.get_lorebook_entity(session_id, name)
+                        if lore:
+                            description = lore.get("description", "")
             except Exception:
                 pass
 
@@ -1348,6 +1361,9 @@ def is_unlocked_contact(
     party_names: set[str] = None,
     met_in_story_names: Optional[Set[str]] = None,
     include_party: bool = False,
+    *,
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
 ) -> bool:
     """
     Determines whether a contact record is eligible to be displayed in the player's
@@ -1391,7 +1407,15 @@ def is_unlocked_contact(
             return True
         scen_val = str(contact.get("scenario") or b_info.get("scenario") or "fantasy")
         sess_val = int(contact.get("session_id") or 0)
-        return bool(is_contact_eligible(contact, scenario=scen_val, session_id=sess_val))
+        return bool(
+            is_contact_eligible(
+                contact,
+                scenario=scen_val,
+                session_id=(0 if skip_session_lookup else sess_val),
+                preloaded_session=preloaded_session,
+                skip_session_lookup=skip_session_lookup,
+            )
+        )
 
     is_special_agent = bool(
         b_info.get("is_special_agent")
@@ -1412,6 +1436,8 @@ def can_player_dm_contact(
     party_names: set[str] | None = None,
     *,
     scenario: str = "fantasy",
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
 ) -> bool:
     """
     Step 3 Messaging Gate: determines whether the player has unlocked two-way phone/DM
@@ -1435,7 +1461,13 @@ def can_player_dm_contact(
     eff_scen = str(scenario or contact.get("scenario") or b_info.get("scenario") or "fantasy")
     sess_val = int(contact.get("session_id") or 0)
     if not is_family and not in_party:
-        if not is_contact_eligible(contact, scenario=eff_scen, session_id=sess_val):
+        if not is_contact_eligible(
+            contact,
+            scenario=eff_scen,
+            session_id=(0 if skip_session_lookup else sess_val),
+            preloaded_session=preloaded_session,
+            skip_session_lookup=skip_session_lookup,
+        ):
             return False
 
     score = int(contact.get("relationship_score", 0) or 0)
@@ -1468,7 +1500,15 @@ def can_player_dm_contact(
     if raw_hci is False:
         return False
 
-    return bool(is_unlocked_contact(contact, party_names, include_party=bool(party_names)))
+    return bool(
+        is_unlocked_contact(
+            contact,
+            party_names,
+            include_party=bool(party_names),
+            preloaded_session=preloaded_session,
+            skip_session_lookup=skip_session_lookup,
+        )
+    )
 
 
 def is_npc_discovered_by_player(
@@ -1882,7 +1922,11 @@ def enrich_contact_dossier(
         ):
             relations = existing_rels
         else:
-            rel_probe = ({k: v for k, v in c.items() if k != "session_id"} if read_only else c)
+            rel_probe = (
+                {k: v for k, v in c.items() if k not in ("session_id", "character_id")}
+                if read_only
+                else c
+            )
             relations = mechanics.social.genealogy.ensure_contact_relations(
                 rel_probe,
                 session_id=(0 if read_only else session_id),

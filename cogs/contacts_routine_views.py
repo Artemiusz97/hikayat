@@ -7,6 +7,7 @@ embeds parity-matched with the React Web SPA.
 
 from __future__ import annotations
 
+import inspect
 import json
 import sqlite3
 from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
@@ -15,7 +16,6 @@ import discord
 
 import db
 from mechanics.social import relationship_graph as rg
-from mechanics.social.factions import get_anomalous_faction_state
 from mechanics.social.relationships import (
     can_player_dm_contact,
     enrich_contact_dossier,
@@ -149,6 +149,18 @@ def _build_acquaintance_workplace(
     return role or work_name
 
 
+def _resolve_aff(row: Mapping[str, Any]) -> int:
+    """Resolve acquaintance/contact affinity without dropping explicit 0 values."""
+    for key in ("affinity_score", "relationship_score", "affection", "affinity"):
+        val = row.get(key)
+        if val is not None:
+            try:
+                return int(val)
+            except (TypeError, ValueError):
+                continue
+    return 0
+
+
 def _index_contacts_and_roster(
     contacts: List[dict],
     roster_rows: List[dict],
@@ -191,11 +203,13 @@ def preload_discord_social_context(
     user_id: int = 0,
     preloaded_contacts: Optional[List[dict]] = None,
     preloaded_party_npcs: Optional[List[dict]] = None,
+    preloaded_session: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Preload all session social/world state in O(1) batch SQLite reads."""
     sid = int(session_id or 0)
     cid = int(character_id or 0)
     scen = str(scenario_key or "fantasy")
+    session_row: Optional[dict] = dict(preloaded_session) if isinstance(preloaded_session, Mapping) else None
 
     reveal_debug = False
     ui_lang = "en"
@@ -219,7 +233,7 @@ def preload_discord_social_context(
     contacts: List[dict] = (
         list(preloaded_contacts)
         if preloaded_contacts is not None
-        else (safe_get_contacts(sid, cid or None, ensure_scene=False) if sid else [])
+        else (safe_get_contacts(sid, cid or None, resolve_relations=False, ensure_scene=False) if sid else [])
     )
 
     roster_rows: List[dict] = []
@@ -278,10 +292,20 @@ def preload_discord_social_context(
                 romantic_npc_keys = set(ex_sets[2] or set())
         except _NON_TRIVIAL_PRELOAD_ERRORS:
             party_npc_keys, kin_npc_keys, romantic_npc_keys = set(), set(), set()
+        if session_row is None:
+            try:
+                raw_sess = db.get_session(sid)
+                session_row = dict(raw_sess) if isinstance(raw_sess, Mapping) else None
+            except _NON_TRIVIAL_PRELOAD_ERRORS:
+                session_row = None
         try:
             if is_anomalous_incursions_scenario(scen):
-                f_state = get_anomalous_faction_state(sid)
-                faction_state = dict(f_state) if isinstance(f_state, dict) else {}
+                raw_af = (session_row or {}).get("anomalous_faction_state") if isinstance(session_row, Mapping) else None
+                if isinstance(raw_af, Mapping) and raw_af:
+                    faction_state = dict(raw_af)
+                else:
+                    st_fid = str((session_row or {}).get("starting_faction_id") or "").strip().lower() if isinstance(session_row, Mapping) else ""
+                    faction_state = {"faction_archetype_key": st_fid} if st_fid else {}
         except _NON_TRIVIAL_PRELOAD_ERRORS:
             faction_state = None
 
@@ -296,6 +320,7 @@ def preload_discord_social_context(
         "session_id": sid,
         "character_id": cid,
         "scenario_key": scen,
+        "session": session_row,
         "reveal_debug": reveal_debug,
         "ui_lang": ui_lang,
         "player_last_name": player_last_name,
@@ -437,7 +462,13 @@ def enrich_discord_npc_with_routine(
         enriched["is_acquaintance"] = True
         enriched["tier_status"] = "acquaintance"
     else:
-        enriched["can_dm"] = can_player_dm_contact(enriched, party_names, scenario=scen)
+        enriched["can_dm"] = can_player_dm_contact(
+            enriched,
+            party_names,
+            scenario=scen,
+            preloaded_session=fow_context.get("session"),
+            skip_session_lookup=True,
+        )
 
     return enriched
 
@@ -450,7 +481,8 @@ def load_discord_contacts_and_acquaintances(
     user_id: int = 0,
     party_names: Optional[Set[str]] = None,
     party_npcs: Optional[List[dict]] = None,
-    filter_unlocked_fn: Optional[Callable[[List[dict], Set[str], str], List[dict]]] = None,
+    filter_unlocked_fn: Optional[Callable[..., List[dict]]] = None,
+    preloaded_session: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[List[dict], List[dict], Dict[str, Any]]:
     """Load and enrich Contacts + read-only deduplicated Acquaintances in O(1)."""
     fow_context = preload_discord_social_context(
@@ -459,15 +491,41 @@ def load_discord_contacts_and_acquaintances(
         scenario_key,
         user_id=user_id,
         preloaded_party_npcs=party_npcs,
+        preloaded_session=preloaded_session,
     )
     eff_party_names = party_names if party_names is not None else set(fow_context.get("party_names") or ())
     fow_context["party_names"] = eff_party_names
 
     raw_contacts = list(fow_context.get("contacts") or [])
+    eff_session = fow_context.get("session")
     if filter_unlocked_fn is not None:
-        unlocked_raw = list(filter_unlocked_fn(raw_contacts, eff_party_names, scenario_key))
+        try:
+            sig_params = inspect.signature(filter_unlocked_fn).parameters
+        except (TypeError, ValueError):
+            sig_params = {}
+        if "preloaded_session" in sig_params and "skip_session_lookup" in sig_params:
+            unlocked_raw = list(
+                filter_unlocked_fn(
+                    raw_contacts,
+                    eff_party_names,
+                    scenario_key,
+                    preloaded_session=eff_session,
+                    skip_session_lookup=True,
+                )
+            )
+        else:
+            unlocked_raw = list(filter_unlocked_fn(raw_contacts, eff_party_names, scenario_key))
     else:
-        unlocked_raw = [c for c in raw_contacts if is_unlocked_contact(c, eff_party_names)]
+        unlocked_raw = [
+            c
+            for c in raw_contacts
+            if is_unlocked_contact(
+                c,
+                eff_party_names,
+                preloaded_session=eff_session,
+                skip_session_lookup=True,
+            )
+        ]
 
     enriched_contacts = [
         enrich_discord_npc_with_routine(c, fow_context, is_acquaintance=False)
@@ -504,10 +562,8 @@ def load_discord_contacts_and_acquaintances(
         seen_acq_keys.add(npc_key)
 
         workplace_label = _build_acquaintance_workplace(row, nodes_by_id=nodes_by_id)
-        raw_aff = row.get("affinity_score")
-        if raw_aff is None:
-            raw_aff = row.get("affinity") if row.get("affinity") is not None else (row.get("affection") or 0)
-        affinity = int(raw_aff)
+        affinity = _resolve_aff(row)
+        first_met_turn = int(row.get("first_met_turn") or 0)
         raw_basic = row.get("basic_info") if isinstance(row.get("basic_info"), Mapping) else {}
         acq_seed = {
             "id": f"acq_{npc_key}",
@@ -519,9 +575,11 @@ def load_discord_contacts_and_acquaintances(
             "role": str(row.get("job_title") or row.get("role") or workplace_label or "Acquaintance"),
             "workplace_label": workplace_label,
             "origin": str(row.get("origin") or "Unknown"),
+            "affinity_score": affinity,
+            "relationship_score": affinity,
             "affection": affinity,
             "affinity": affinity,
-            "relationship_score": affinity,
+            "first_met_turn": first_met_turn,
             "known_status": str(row.get("staff_status") or row.get("status") or "Active"),
             "tier_status": "acquaintance",
             "is_acquaintance": True,
@@ -535,12 +593,22 @@ def load_discord_contacts_and_acquaintances(
         enriched_acq["id"] = f"acq_{npc_key}"
         enriched_acq["workplace_label"] = workplace_label
         enriched_acq["origin"] = acq_seed["origin"]
+        enriched_acq["affinity_score"] = affinity
+        enriched_acq["relationship_score"] = affinity
+        enriched_acq["first_met_turn"] = first_met_turn
         enriched_acq["promotion_hint"] = acq_seed["promotion_hint"]
         enriched_acq["can_dm"] = False
         enriched_acq["is_acquaintance"] = True
         enriched_acq["tier_status"] = "acquaintance"
         acquaintances.append(enriched_acq)
 
+    acquaintances.sort(
+        key=lambda a: (
+            -_resolve_aff(a),
+            -int(a.get("first_met_turn") or 0),
+            str(a.get("name") or "").lower(),
+        )
+    )
     return enriched_contacts, acquaintances, fow_context
 
 
@@ -567,7 +635,7 @@ def build_acquaintances_list_embed(
     for acq in acquaintances[:25]:
         name = str(acq.get("name") or "Unknown")
         workplace = str(acq.get("workplace_label") or acq.get("role") or "Acquaintance")
-        aff = int(acq.get("affection") or acq.get("affinity") or 0)
+        aff = _resolve_aff(acq)
         tier_info = get_relationship_tier(aff, track="platonic", scenario=scenario_key or "default")
         tier_name = str((tier_info or {}).get("name") or "Acquaintance")
         lines.append(f"• **{name}** — *{workplace}* | {tier_name} ({aff:+d}) | 🔒 DM Locked")
@@ -592,7 +660,7 @@ def build_acquaintance_detail_embed(
     name = str(acquaintance.get("name") or "Unknown")
     workplace = str(acquaintance.get("workplace_label") or acquaintance.get("role") or "Acquaintance")
     origin = str(acquaintance.get("origin") or "Unknown")
-    aff = int(acquaintance.get("affection") or acquaintance.get("affinity") or 0)
+    aff = _resolve_aff(acquaintance)
     tier_info = get_relationship_tier(aff, track="platonic", scenario=scenario_key or "default")
     tier_name = str((tier_info or {}).get("name") or "Acquaintance")
 
