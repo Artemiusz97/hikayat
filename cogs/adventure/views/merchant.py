@@ -121,6 +121,7 @@ async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interact
             evaluate_shop_staff_availability,
             session_id,
             location_str=current_loc,
+            merchant_type="",
             is_phone_shop=False,
             scen_key=scen_key,
             current_day=session.get("current_day"),

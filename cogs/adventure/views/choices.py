@@ -122,6 +122,7 @@ def _preload_choice_view_data(
             shop_availability = evaluate_shop_staff_availability(
                 session_id,
                 location_str=current_loc,
+                merchant_type="",
                 is_phone_shop=False,
                 scen_key=scen_key,
                 current_day=sess.get("current_day"),
@@ -521,6 +522,7 @@ class ChoiceView(SessionRestrictedView):
                 evaluate_shop_staff_availability(
                     session_id,
                     location_str=current_loc,
+                    merchant_type="",
                     is_phone_shop=False,
                     scen_key=scen_key,
                     current_day=session.get("current_day"),
@@ -1296,6 +1298,7 @@ class SyncChoiceView(SessionRestrictedView):
                 evaluate_shop_staff_availability(
                     session_id,
                     location_str=current_loc,
+                    merchant_type="",
                     is_phone_shop=False,
                     scen_key=scen_key,
                     current_day=session.get("current_day"),

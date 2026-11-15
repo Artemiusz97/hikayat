@@ -98,6 +98,7 @@ def _generate_unique_seeded_profile(
     check_open_day: int | None = None,
 ) -> tuple[str, str, str]:
     chosen_id, chosen_name, chosen_gender = "", "", "female"
+    fallback_candidate: tuple[str, str, str] | None = None
     for attempt in range(32):
         material = seed_base if attempt == 0 else f"{seed_base}:salt:{attempt}"
         profile = namegen.generate_npc_profile(scenario=scen_key, rng=random.Random(_derive_seed_int(material))) or {}
@@ -110,34 +111,51 @@ def _generate_unique_seeded_profile(
         cand_id = base_slug
         if cand_id.lower() in taken_ids:
             cand_id = next((f"{base_slug}_{i}" for i in range(2, 40) if f"{base_slug}_{i}".lower() not in taken_ids), f"{base_slug}_{attempt}")
+        if fallback_candidate is None:
+            fallback_candidate = (cand_id, name, gender)
 
         # Avoid deterministic weekly rest day landing right on Day 1 or on a replacement hire's onboarding day.
+        # _canonical_seed_key hashes "name" first, so stepping to a new deterministic name on collision is required.
         if check_open_day is not None and not is_24h and shift_profile not in ("student", "roaming_merchant"):
             rep_min = _SHIFT_REPRESENTATIVE_MINUTE.get(shift_profile, 600)
             probe_npc = {
-                "npc_id": cand_id, "origin": "venue_seed", "shift_profile": shift_profile,
+                "npc_id": cand_id, "name": name, "origin": "venue_seed", "shift_profile": shift_profile,
                 "staff_status": "active", "workplace_node_id": facility_node_id,
                 "roaming_route": list(roaming_route or []), "is_unique_proprietor": is_unique,
-                "basic_info": {"is_24h_station": is_24h},
+                "basic_info": {"name": name, "is_24h_station": is_24h},
             }
             on_shift, _ = is_npc_on_active_shift(probe_npc, rep_min, current_day=check_open_day, scen_key=scen_key, session_id=None)
             if not on_shift:
-                for sub in range(1, 20):
-                    alt_id = f"{base_slug}_s{sub}"
-                    if alt_id.lower() in taken_ids:
-                        continue
-                    probe_npc["npc_id"] = alt_id
-                    if is_npc_on_active_shift(probe_npc, rep_min, current_day=check_open_day, scen_key=scen_key, session_id=None)[0]:
-                        cand_id = alt_id
-                        break
+                continue
 
         chosen_id, chosen_name, chosen_gender = cand_id, name, gender
         break
 
     if not chosen_id:
-        fallback_seed = _derive_seed_int(f"{seed_base}:fallback")
-        chosen_id = f"seeded_npc_{fallback_seed % 1000000}"
-        chosen_name = f"Merchant {fallback_seed % 900 + 100}"
+        for fb_idx in range(32):
+            fallback_seed = _derive_seed_int(f"{seed_base}:fallback:{fb_idx}")
+            fb_name = f"Merchant {fallback_seed % 9000 + 1000}"
+            fb_id = slugify_npc_id(fb_name)
+            if fb_name.lower() in taken_names or fb_id.lower() in taken_ids:
+                continue
+            if check_open_day is not None and not is_24h and shift_profile not in ("student", "roaming_merchant"):
+                rep_min = _SHIFT_REPRESENTATIVE_MINUTE.get(shift_profile, 600)
+                probe_fb = {
+                    "npc_id": fb_id, "name": fb_name, "origin": "venue_seed", "shift_profile": shift_profile,
+                    "staff_status": "active", "workplace_node_id": facility_node_id,
+                    "roaming_route": list(roaming_route or []), "is_unique_proprietor": is_unique,
+                    "basic_info": {"name": fb_name, "is_24h_station": is_24h},
+                }
+                if not is_npc_on_active_shift(probe_fb, rep_min, current_day=check_open_day, scen_key=scen_key, session_id=None)[0]:
+                    continue
+            chosen_id, chosen_name = fb_id, fb_name
+            break
+        if not chosen_id and fallback_candidate is not None:
+            chosen_id, chosen_name, chosen_gender = fallback_candidate
+        elif not chosen_id:
+            fallback_seed = _derive_seed_int(f"{seed_base}:fallback")
+            chosen_id = f"seeded_npc_{fallback_seed % 1000000}"
+            chosen_name = f"Merchant {fallback_seed % 900 + 100}"
 
     taken_names.add(chosen_name.lower())
     taken_ids.add(chosen_id.lower())
@@ -677,7 +695,7 @@ def evaluate_shop_staff_availability(
     session_id: int,
     location_str: str = "",
     facility_node_id: str = "",
-    merchant_type: str = "general_merchant",
+    merchant_type: str = "",
     is_phone_shop: bool = False,
     scen_key: str = "fantasy",
     current_day: int | None = None,

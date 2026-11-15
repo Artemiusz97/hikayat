@@ -1810,6 +1810,7 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
         avail = evaluate_shop_staff_availability(
             session_id,
             location_str=cur_loc,
+            merchant_type="",
             scen_key=scen_key,
             current_day=cur_day,
             current_minute=cur_min,
@@ -1822,6 +1823,7 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
             present = False
 
     merchant["available"] = present
+    merchant["is_phone_shop"] = False
     merchant["flavor_name"] = encounter.get("name", "") if present else ""
     merchant["flavor_description"] = encounter.get("description", "") if present else ""
     db.save_merchant_state(session_id, merchant)

@@ -264,7 +264,7 @@ class MerchantMixin:
                         evaluate_shop_staff_availability,
                         session_id,
                         location_str=session.get("current_location", ""),
-                        merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                        merchant_type=str(merchant.get("merchant_type") or ""),
                         is_phone_shop=False,
                         scen_key=session.get("scenario", "fantasy"),
                         current_day=session.get("current_day"),
@@ -452,7 +452,7 @@ class MerchantMixin:
                 evaluate_shop_staff_availability,
                 session_id,
                 location_str=session.get("current_location", ""),
-                merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                merchant_type=str(merchant.get("merchant_type") or ""),
                 is_phone_shop=False,
                 scen_key=session.get("scenario", "fantasy"),
                 current_day=session.get("current_day"),
@@ -499,7 +499,7 @@ class MerchantMixin:
                         evaluate_shop_staff_availability,
                         session_id,
                         location_str=session.get("current_location", ""),
-                        merchant_type=str(merchant.get("merchant_type") or "general_merchant"),
+                        merchant_type=str(merchant.get("merchant_type") or ""),
                         is_phone_shop=False,
                         scen_key=session.get("scenario", "fantasy"),
                         current_day=session.get("current_day"),
@@ -671,9 +671,11 @@ class MerchantMixin:
         just re-render the SAME scene/choices from session state rather
         than generating anything new."""
         session = await adb(db.get_session, session_id)
-        merchant = session["merchant"]
+        merchant = dict(session.get("merchant") or {})
         merchant["active"] = False
         merchant["available"] = False  # this encounter is resolved; a future scene rolls fresh
+        merchant["is_phone_shop"] = False
+        session["merchant"] = merchant
         await adb(db.save_merchant_state, session_id, merchant)
 
         turn_uids = list(session["turn_order"])

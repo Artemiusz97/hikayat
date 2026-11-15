@@ -172,6 +172,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
             shop_avail = evaluate_shop_staff_availability(
                 int(session.get("id") or 0),
                 location_str=current_loc_check,
+                merchant_type="",
                 is_phone_shop=False,
                 scen_key=scen_key_check,
                 current_day=session.get("current_day"),

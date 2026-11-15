@@ -79,7 +79,8 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         body: JSON.stringify({
           session_id: session.id,
           user_id: user.user_id,
-          item_id: item.id
+          item_id: item.id,
+          merchant_type: shop?.merchant_type || selectedStoreType
         })
       });
       setFeedback({ type: 'success', text: t('merchant.sold_feedback', { name: res.item_name, gold: res.gold_earned, defaultValue: `Sold ${res.item_name} for ${res.gold_earned}G!` }) });
@@ -100,7 +101,8 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         method: 'POST',
         body: JSON.stringify({
           session_id: session.id,
-          user_id: user.user_id
+          user_id: user.user_id,
+          merchant_type: shop?.merchant_type || selectedStoreType
         })
       });
       setFeedback({
@@ -124,7 +126,8 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         body: JSON.stringify({
           session_id: session.id,
           user_id: user.user_id,
-          rumor_index: idx
+          rumor_index: idx,
+          merchant_type: shop?.merchant_type || selectedStoreType
         })
       });
       setFeedback({
