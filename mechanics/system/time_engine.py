@@ -13,6 +13,7 @@ Provides:
 """
 import json
 import logging
+import random
 import re
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -443,6 +444,145 @@ def calculate_action_time_cost(
     return 5
 
 
+def run_boundary_autonomy_and_epistemic_tick(
+    session_id: int,
+    old_day: int,
+    old_minute: int,
+    new_day: int,
+    new_minute: int,
+    *,
+    party_uids: Optional[List[int]] = None,
+) -> Dict[str, Any]:
+    """
+    Executes Part A off-screen NPC autonomy (`D8–D11`) and Part B epistemic gossip/decay/alibi
+    ticks (`B4, B5, B8, B11, B16`) once per crossed time-block or day boundary inside a single `UnitOfWork`.
+    """
+    from mechanics.world.schedule_blocks import get_time_block_key
+
+    o_day = max(1, int(old_day or 1))
+    n_day = max(1, int(new_day or o_day))
+    o_min = int(old_minute or 0) % 1440
+    n_min = int(new_minute or 0) % 1440
+    old_block = get_time_block_key(o_min)
+    new_block = get_time_block_key(n_min)
+    if n_day == o_day and old_block == new_block:
+        return {"boundary_crossed": False}
+
+    from mechanics.social import relationship_graph as rg
+    from mechanics.social.epistemic_engine import tick_epistemic_boundary_propagation
+    from mechanics.world.npc_autonomy import compute_boundary_autonomy_deltas
+
+    sid = int(session_id or 0)
+    if not sid:
+        return {"boundary_crossed": False}
+
+    session = db.get_session(sid) or {}
+    scen_key = str(session.get("scenario") or "fantasy").strip().lower()
+    turn_no = int(db.get_effective_session_turn(sid) or 0)
+    roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
+    contacts = db.get_contacts(sid) or []
+    active_events = db.get_world_events(sid, include_hidden=True, statuses=("active", "escalating")) or []
+
+    all_ties: List[Dict[str, Any]] = []
+    with db.get_conn() as read_conn:
+        tie_rows = read_conn.execute(
+            "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active'",
+            (sid,),
+        ).fetchall()
+        all_ties = [dict(r) for r in tie_rows]
+
+    def _key_of(row: Dict[str, Any]) -> str:
+        return str(row.get("person_key") or row.get("npc_id") or row.get("name") or "").strip().lower().replace(" ", "_")
+
+    roster_map: Dict[str, Dict[str, Any]] = {}
+    hh_groups: Dict[int, List[str]] = {}
+    party_key_set: set[str] = set()
+    for row in roster_rows:
+        rk = _key_of(row)
+        if not rk:
+            continue
+        roster_map[rk] = row
+        if row.get("is_companion"):
+            party_key_set.add(rk)
+        hh_id = row.get("household_id")
+        if hh_id:
+            hh_groups.setdefault(int(hh_id), []).append(rk)
+    for c_row in contacts:
+        ck = _key_of(c_row)
+        if not ck:
+            continue
+        if c_row.get("in_party") or c_row.get("is_companion"):
+            party_key_set.add(ck)
+        c_hh = c_row.get("household_id")
+        if c_hh and ck not in hh_groups.get(int(c_hh), ()):
+            hh_groups.setdefault(int(c_hh), []).append(ck)
+
+    households = [{"household_id": hid, "members": mkeys} for hid, mkeys in hh_groups.items() if mkeys]
+    deltas = compute_boundary_autonomy_deltas(
+        sid,
+        old_day=o_day,
+        old_min=o_min,
+        new_day=n_day,
+        new_min=n_min,
+        scen_key=scen_key,
+        roster_rows=roster_rows,
+        contacts=contacts,
+        all_ties=all_ties,
+        party_keys=frozenset(party_key_set),
+        active_events=active_events,
+        turn_number=turn_no,
+    )
+
+    epistemic_res: Dict[str, Any] = {}
+    with db.UnitOfWork() as conn:
+        for top in deltas.get("tie_ops") or []:
+            if top.get("op") == "nudge":
+                rg.record_tie_nudge(
+                    sid,
+                    str(top.get("person_a") or ""),
+                    str(top.get("person_b") or ""),
+                    str(top.get("axis") or ""),
+                    float(top.get("delta") or 0.0),
+                    turn=int(top.get("turn") or turn_no),
+                    conn=conn,
+                )
+        r_muts = deltas.get("roster_mutations") or []
+        if r_muts:
+            db.apply_world_roster_autonomy_mutations(sid, r_muts, turn_number=turn_no, conn=conn)
+
+        rng_seed = random.Random(f"{sid}:{n_day}:{new_block}:{turn_no}")
+        epistemic_res = tick_epistemic_boundary_propagation(
+            sid,
+            session,
+            day=n_day,
+            bell_slot=new_block,
+            roster_map=roster_map,
+            social_ties=all_ties,
+            households=households,
+            rng=rng_seed,
+            turn=turn_no,
+            contacts=contacts,
+            conn=conn,
+        )
+
+    for ping in deltas.get("dm_pings") or []:
+        try:
+            from mechanics.system.phone.messaging import enqueue_autonomy_hangout_ping
+            enqueue_autonomy_hangout_ping(sid, ping)
+        except Exception as _ping_err:
+            log.debug("Autonomy DM ping skipped for session %s: %s", sid, _ping_err)
+
+    return {
+        "boundary_crossed": True,
+        "old_block": old_block,
+        "new_block": new_block,
+        "tie_ops_applied": len(deltas.get("tie_ops") or []),
+        "roster_mutations_applied": len(deltas.get("roster_mutations") or []),
+        "dm_pings_queued": len(deltas.get("dm_pings") or []),
+        "epistemic": epistemic_res,
+    }
+
+
 def advance_time(
     session_id: int,
     delta_minutes: int,
@@ -550,6 +690,19 @@ def advance_time(
     except Exception as e:
         log.warning("Failed ticking Threat Clock for session %s: %s", session_id, e)
 
+    boundary_tick = {}
+    try:
+        boundary_tick = run_boundary_autonomy_and_epistemic_tick(
+            session_id,
+            curr_day,
+            curr_min,
+            new_day,
+            new_minute,
+            party_uids=party_uids,
+        )
+    except Exception as e:
+        log.warning("Failed running boundary autonomy/epistemic tick for session %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "old_day": curr_day,
@@ -561,6 +714,7 @@ def advance_time(
         "day_rolled_over": day_rolled,
         "fatigue_applied": fatigue_notices,
         "threat_clock_tick": threat_clock_tick,
+        "boundary_tick": boundary_tick,
     }
 
 
@@ -835,6 +989,19 @@ def apply_sleep_rest(
     except Exception as e:
         log.warning("Failed morning NPC schedule re-sync for session %s: %s", session_id, e)
 
+    sleep_boundary_tick = {}
+    try:
+        sleep_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
+            session_id,
+            curr_day,
+            curr_min,
+            new_day,
+            new_minute,
+            party_uids=party_uids,
+        )
+    except Exception as e:
+        log.warning("Failed running sleep boundary autonomy/epistemic tick for session %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "new_day": new_day,
@@ -848,6 +1015,7 @@ def apply_sleep_rest(
         "surface_label": surface_label,
         "morning_npcs": morning_npcs,
         "threat_clock_tick": sleep_clock_tick,
+        "boundary_tick": sleep_boundary_tick,
     }
 
 
@@ -901,6 +1069,19 @@ def apply_nap_rest(
         except Exception as e:
             log.warning("Failed to apply nap rest: %s", e)
 
+    nap_boundary_tick = {}
+    try:
+        nap_boundary_tick = run_boundary_autonomy_and_epistemic_tick(
+            session_id,
+            curr_day,
+            curr_min,
+            new_day,
+            new_min,
+            party_uids=party_uids,
+        )
+    except Exception as e:
+        log.warning("Failed running nap boundary autonomy/epistemic tick for session %s: %s", session_id, e)
+
     return {
         "session_id": session_id,
         "new_day": new_day,
@@ -910,6 +1091,7 @@ def apply_nap_rest(
         "nap_minutes": nap_minutes,
         "recovery_ratio": recovery_ratio,
         "surface_label": surface_label,
+        "boundary_tick": nap_boundary_tick,
     }
 
 

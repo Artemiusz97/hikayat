@@ -1056,6 +1056,44 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
 
         _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
         _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
+        if not outcome.get("_b17_neutralized"):
+            _b17_killed = list(outcome.get("deceased_characters") or []) + list(outcome.get("dead_enemies") or [])
+            _b17_ko = list(outcome.get("ko_characters") or [])
+            if _b17_killed or _b17_ko:
+                from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                neutralize_witnesses_from_combat_or_skill(
+                    session_id,
+                    defeated_npcs=_b17_ko,
+                    killed_npcs=_b17_killed,
+                    present_witnesses=session.get("npcs") or [],
+                    turn=int(session.get("turn_count") or 0),
+                    location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                    mode="combat",
+                )
+                outcome["_b17_neutralized"] = True
+        if outcome.get("epistemic_signal"):
+            from mechanics.social.epistemic_engine import resolve_fenced_epistemic_signal
+            _uid = int(session.get("user_id") or 0)
+            _inv = db.get_inventory(_uid) if _uid else []
+            _held_ids = [
+                str(it.get("id") or it.get("item_id") or "")
+                for it in (_inv or [])
+                if isinstance(it, dict) and (it.get("id") or it.get("item_id"))
+            ]
+            _clues = db.get_session_clues(session_id) if session_id else []
+            _clue_ids = [
+                str(cl.get("id") or "")
+                for cl in (_clues or [])
+                if isinstance(cl, dict) and cl.get("id")
+            ]
+            resolve_fenced_epistemic_signal(
+                session_id,
+                outcome["epistemic_signal"],
+                present_npcs=session.get("npcs") or [],
+                held_item_ids=_held_ids,
+                clue_ids=_clue_ids,
+                turn=int(session.get("turn_count") or 0),
+            )
 
         # ── D16 Atomic Commit: Stealth Persistence, Spatial Reset & 100% Escalation ──
         try:

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 import mechanics.system.phone
 import json
 import logging
@@ -46,6 +47,144 @@ from .media_captions import (
     generate_player_casual_photo,
     generate_player_spicy_photo
 )
+
+def build_dm_epistemic_context(
+    session_id: int,
+    actor_keys: list[str],
+    *,
+    sibling_key: str = "",
+) -> dict[str, Any]:
+    """
+    B12 / D-5: Computes holder-filtered epistemic context for 1-on-1 or group DMs.
+    - 1-on-1 DM: returns facts held by that NPC (confidence, containment_state, summary).
+    - Group DM (2+ actor_keys): returns ONLY facts held by EVERY participant in the group.
+    - Sibling romance gate: returns `sibling_romance_known=True` ONLY if a public non-secret
+      romantic `social_tie` exists with the sibling OR the recipient holds an `epistemic_knowledge`
+      row revealing it (never inferred raw from `contacts.track`).
+    """
+    sid = int(session_id or 0)
+    norm_actors = [
+        str(a or "").strip().lower().replace(" ", "_")
+        for a in (actor_keys or [])
+        if str(a or "").strip()
+    ]
+    sib_k = str(sibling_key or "").strip().lower().replace(" ", "_")
+    if not sid or not norm_actors:
+        return {"known_facts": [], "sibling_romance_known": False, "prompt_block": ""}
+
+    matrix = db.preload_epistemic_matrix(sid, actor_keys=norm_actors)
+    facts_by_key = matrix.get("facts_by_key") or {}
+    by_holder = matrix.get("by_holder") or {}
+    holder_maps: dict[str, dict[str, dict[str, Any]]] = {
+        ak: {
+            str(kr.get("fact_key") or ""): kr
+            for kr in (by_holder.get(ak) or [])
+            if isinstance(kr, dict) and kr.get("fact_key")
+        }
+        for ak in norm_actors
+    }
+
+    shared_keys: set[str] | None = None
+    for ak in norm_actors:
+        held = set(holder_maps.get(ak, {}).keys())
+        shared_keys = held if shared_keys is None else (shared_keys & held)
+    shared_keys = shared_keys or set()
+
+    known_facts: list[dict[str, Any]] = []
+    for fkey in sorted(shared_keys):
+        fact = facts_by_key.get(fkey) or {}
+        if str(fact.get("status") or "active").lower() in ("wiped", "decayed"):
+            continue
+        # For group DMs use lowest common knowledge confidence; for solo DM use the NPC row
+        holder_rows = [holder_maps.get(ak, {}).get(fkey) or {} for ak in norm_actors]
+        if any(str(hr.get("containment_state") or "") in ("wiped", "incapacitated") for hr in holder_rows):
+            continue
+        known_facts.append({
+            "fact_key": fkey,
+            "category": fact.get("category") or "",
+            "summary": fact.get("summary") or fkey,
+            "confidence": holder_rows[0].get("confidence") or "rumor",
+            "containment_state": holder_rows[0].get("containment_state") or "active",
+            "subject_actor_key": fact.get("subject_actor_key") or "",
+            "culprit_actor_key": fact.get("culprit_actor_key") or "",
+        })
+
+    sibling_romance_known = False
+    if sib_k:
+        try:
+            from mechanics.social import relationship_graph as rg
+            sib_ties = rg.get_ties(sid, sib_k) or []
+            for t in sib_ties:
+                if str(t.get("status") or "active").lower() != "active":
+                    continue
+                if int(t.get("is_secret") or 0) == 1:
+                    continue
+                ttype = str(t.get("tie_type") or "").strip().lower()
+                if ttype not in (
+                    rg.TIETYPE_DATING,
+                    rg.TIETYPE_ENGAGED,
+                    rg.TIETYPE_MARRIED,
+                    "dating",
+                    "engaged",
+                    "married",
+                ):
+                    continue
+                pa = str(t.get("person_a_key") or "").strip().lower()
+                pb = str(t.get("person_b_key") or "").strip().lower()
+                if rg.is_player_person_key(pa) or rg.is_player_person_key(pb):
+                    sibling_romance_known = True
+                    break
+        except Exception:
+            pass
+
+        if not sibling_romance_known:
+            for kf in known_facts:
+                blob = f"{kf.get('fact_key')} {kf.get('category')} {kf.get('summary')}".lower()
+                subj = str(kf.get("subject_actor_key") or "").lower()
+                culp = str(kf.get("culprit_actor_key") or "").lower()
+                if (sib_k in (subj, culp) or sib_k in blob) and any(
+                    tok in blob for tok in ("romanc", "dat", "affair", "lover", "kiss", "confess", "crush", "couple")
+                ):
+                    sibling_romance_known = True
+                    break
+
+    prompt_lines: list[str] = []
+    if known_facts:
+        prompt_lines.append("- EPISTEMIC KNOWLEDGE (Things YOU personally know / heard):")
+        for kf in known_facts[:4]:
+            c_state = str(kf.get("containment_state") or "active")
+            state_note = " (you promised to stay quiet)" if c_state in ("hushed", "co_conspirator") else ""
+            prompt_lines.append(f"  * [{kf['confidence']}] {kf['summary']}{state_note}")
+    prompt_lines.append("- EPISTEMIC BOUNDARY: Never mention, confront, or hint at off-screen events or romances that are NOT listed in your knowledge above or in conversation history.")
+    return {
+        "known_facts": known_facts,
+        "sibling_romance_known": sibling_romance_known,
+        "prompt_block": "\n".join(prompt_lines) + "\n",
+    }
+
+
+def enqueue_autonomy_hangout_ping(session_id: int, ping: dict) -> bool:
+    """
+    D10: Queues an autonomous DM hangout invite or local gossip text when the scenario supports smartphones,
+    enforcing at most 1 autonomous invite DM queued per NPC session streak without spam.
+    """
+    sid = int(session_id or 0)
+    if not sid or not isinstance(ping, dict):
+        return False
+    sess = db.get_session(sid) or {}
+    scen_key = str(sess.get("scenario") or "fantasy").strip().lower()
+    if not scenario_has_smartphone(scen_key):
+        return False
+    sender_id = str(ping.get("sender_key") or "").strip().lower().replace(" ", "_")
+    summary = str(ping.get("summary") or "").strip()
+    if not sender_id or not summary:
+        return False
+    recent = db.get_phone_messages(sid, sender_id, limit=4) or []
+    if recent and str(recent[-1].get("message") or "").strip() == summary:
+        return False
+    db.save_phone_message(sid, sender_id, sender="npc", message=summary, intent="meetup" if ping.get("kind") == "hangout_invite" else "chat")
+    return True
+
 
 async def generate_contact_dm_reply(session: dict, contact: dict, player_char: dict, user_message: str, intent: str = "chat") -> dict:
     """Generates an in-character text message reply from an NPC contact resolved via skill check and fast LLM."""
@@ -274,6 +413,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     family_and_grade_hint = ""
     grade = basic.get("grade")
     sibling_name = basic.get("sibling_name")
+    epistemic_ctx = build_dm_epistemic_context(session_id, [clean_npc_id], sibling_key=str(sibling_name or ""))
+    epistemic_hint = str(epistemic_ctx.get("prompt_block") or "")
     if grade or sibling_name:
         lines = []
         if grade:
@@ -294,8 +435,10 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             sib_track = sib_contact.get("track", "platonic") if sib_contact else "platonic"
 
             lines.append(f"- Family / Sibling: You are the biological sibling of {sibling_name}.")
-            if sib_track.lower() == "romantic" or sib_score >= 30:
+            if epistemic_ctx.get("sibling_romance_known"):
                 lines.append(f"- SIBLING RELATIONSHIP NOTE: You are aware the player is very close to / romantically involved with your sibling ({sibling_name}). You may tease them or show protective/curious interest!")
+            elif sib_score >= 30 and sib_track.lower() != "romantic":
+                lines.append(f"- SIBLING RELATIONSHIP NOTE: You know the player gets along warmly with your sibling ({sibling_name}) as a friend.")
             elif sib_score < 0:
                 lines.append(f"- SIBLING RELATIONSHIP NOTE: You know the player has bad blood or tension with your sibling ({sibling_name}).")
 
@@ -604,6 +747,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         + feed_hint
         + in_person_hint
         + family_and_grade_hint
+        + epistemic_hint
         + meetup_location_hint
         + (
             (build_side_channel_language_directive(
@@ -772,6 +916,13 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # Save messages to SQLite
     await db.adb(db.save_phone_message, session_id, npc_id, sender="player", message=user_message, intent=intent)
     await db.adb(db.save_phone_message, session_id, npc_id, sender="npc", message=reply_text, intent=intent)
+    if check_result.succeeded and (is_intimate or intent in ("flirt", "nsfw_photo", "spicy_ask", "spicy_send", "confess")):
+        dm_turn_idx = max(1, len((session or {}).get("history") or []))
+        proof_ref = f"dm:{clean_npc_id}:{dm_turn_idx}"
+        for kf in epistemic_ctx.get("known_facts") or []:
+            if str(kf.get("category") or "") in ("affair", "romance", "secret_romance", "intimate", "confession"):
+                await db.adb(db.upsert_epistemic_fact, session_id, kf["fact_key"], proof_artifact_ref=proof_ref, turn=dm_turn_idx)
+                break
 
     # Persist meetup appointment so the NPC appears at the rendezvous location
     if resolved_rendezvous and intent == "meetup":

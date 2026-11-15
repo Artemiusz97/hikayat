@@ -329,6 +329,12 @@ def format_pose_tags(pose_dict: Dict[str, Any], location: str = "", focal_point:
     posture = ""
     holding = ""
     if isinstance(pose_dict, dict):
+        sdxl_pose = str(pose_dict.get("sdxl_pose_tags") or "").strip()
+        if sdxl_pose:
+            for _ptag in sdxl_pose.split(","):
+                _ptag_clean = _ptag.strip().lower()
+                if _ptag_clean and _ptag_clean not in tags:
+                    tags.append(_ptag_clean)
         posture = str(pose_dict.get("posture") or "").lower().strip()
         holding = str(pose_dict.get("holding") or "").lower().strip()
 

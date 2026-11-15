@@ -2090,6 +2090,25 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 except Exception:
                     pass
 
+                if dot_dead_dicts:
+                    from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                    _b17_dot_ko = [
+                        d for d in dot_dead_dicts
+                        if isinstance(d, dict) and d.get("requires_non_lethal_subdue")
+                    ]
+                    _b17_dot_killed = [
+                        d for d in dot_dead_dicts
+                        if not (isinstance(d, dict) and d.get("requires_non_lethal_subdue"))
+                    ]
+                    neutralize_witnesses_from_combat_or_skill(
+                        int(session_id_val or session.get("id") or 0),
+                        defeated_npcs=_b17_dot_ko,
+                        killed_npcs=_b17_dot_killed,
+                        present_witnesses=result.get("npcs") or session.get("npcs") or [],
+                        turn=int(session.get("turn_count") or 0),
+                        location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                        mode="combat",
+                    )
                 if result.get("_combat_resolved_notice"):
 
                     if ", ".join(dot_dead) not in result["_combat_resolved_notice"]:

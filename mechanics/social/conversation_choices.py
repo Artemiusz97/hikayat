@@ -782,7 +782,7 @@ def _is_pre_exit_utility_choice(c: Dict[str, Any]) -> bool:
     if c.get("_convince_stay") or c.get("departure_action") == "convince_stay":
         return True
     intent = str(c.get("intent") or "").lower()
-    if intent in ("phone_contact_exchange", "party_recruit"):
+    if intent in ("phone_contact_exchange", "party_recruit", "join_activity", "epistemic_containment"):
         return True
     lbl_low = str(c.get("label") or "").lower()
     if c.get("_privacy_nudge") or str(c.get("sub_intent") or "").lower() == "privacy_nudge" or "for privacy" in lbl_low:
@@ -1253,8 +1253,134 @@ def enforce_conversation_choice_bands(
             "_priority_slot": True,
             "_server_stamped": True,
         })
+    _b3_intents = {str(u.get("intent") or "").lower() for u in band3_utils if isinstance(u, dict)}
+    _lead_npc_dict: Optional[Dict[str, Any]] = None
+    _lead_low = lead_partner.lower()
+    for _np in list(current_npcs or []) + list(sess.get("npcs") or []):
+        if not isinstance(_np, dict):
+            continue
+        _cands = {
+            str(_np.get("name") or "").strip().lower(),
+            str(_np.get("person_key") or "").strip().lower(),
+            str(_np.get("npc_id") or "").strip().lower(),
+        }
+        if _lead_low in _cands:
+            _lead_npc_dict = _np
+            break
+
+    # D5: Inject [Join Activity: ...] utility from server-verified join_activity_seed
+    if not comp_locked and "join_activity" not in _b3_intents:
+        _jseed = (_lead_npc_dict or {}).get("join_activity_seed")
+        if not isinstance(_jseed, dict) and isinstance(lead_profile, dict):
+            _jseed = lead_profile.get("join_activity_seed")
+        if isinstance(_jseed, dict) and str(_jseed.get("activity_key") or "").strip():
+            _jkey = str(_jseed.get("activity_key") or "").strip()
+            _jtag = str(_jseed.get("activity_tag") or _jkey.replace("_", " ").title()).strip()
+            _jstat = str(_jseed.get("stat") or "CHA").upper()
+            _jdc = max(5, min(8, int(_jseed.get("dc") or 6)))
+            _jlbl = f"[Join Activity: {_jtag}]"
+            if _jlbl.lower() not in seen_lbls:
+                seen_lbls.add(_jlbl.lower())
+                band3_utils.append({
+                    "label": _jlbl,
+                    "stat": _jstat if _jstat in SPECIAL_STATS_SET else "CHA",
+                    "requirement": _jdc,
+                    "mp_cost": 0,
+                    "intent": "join_activity",
+                    "activity_key": _jkey,
+                    "target_npc": lead_partner,
+                    "action_category": "social",
+                    "_server_stamped": True,
+                })
+                _b3_intents.add("join_activity")
+
+    # B6/B10/B7: Inject contextual Epistemic Containment card ONLY for player_aware == 1 secrets
+    _ep_sid = int(sess.get("session_id") or sess.get("id") or 0)
+    if not comp_locked and _ep_sid > 0 and "epistemic_containment" not in _b3_intents:
+        _ep_m = db.preload_epistemic_matrix(_ep_sid)
+        _facts_m = _ep_m.get("facts_by_key") or {}
+        _lead_keys = {
+            _lead_low,
+            _lead_low.replace(" ", "_"),
+            str((_lead_npc_dict or {}).get("person_key") or "").strip().lower(),
+            str((_lead_npc_dict or {}).get("npc_id") or "").strip().lower(),
+        } - {""}
+        _player_gold = int((lead_char or {}).get("gold") or 0)
+        if not lead_char and int(sess.get("user_id") or 0) > 0:
+            _pch = db.get_character(int(sess.get("user_id") or 0))
+            if isinstance(_pch, dict):
+                _player_gold = int(_pch.get("gold") or 0)
+        for _kr in (_ep_m.get("knowledge_rows") or []):
+            if not isinstance(_kr, dict):
+                continue
+            _fk = str(_kr.get("fact_key") or "").strip()
+            _fact = _facts_m.get(_fk)
+            if not isinstance(_fact, dict):
+                continue
+            if str(_fact.get("status") or "active") in ("decayed", "resolved"):
+                continue
+            _hk = str(_kr.get("holder_actor_key") or "").strip().lower()
+            _cstate = str(_kr.get("containment_state") or "active")
+            _culprit = str(_fact.get("culprit_actor_key") or "player").strip().lower()
+            _subj = str(_fact.get("subject_actor_key") or "").strip().lower()
+            # Case 1: Partner holds a player secret & player knows they know it (`player_aware == 1`)
+            if (
+                _hk in _lead_keys
+                and _culprit == "player"
+                and int(bool(_kr.get("player_aware"))) == 1
+                and _cstate in ("spotted_window", "active")
+            ):
+                _sev = max(1, int(_fact.get("severity") or 1))
+                _bribe_cost = max(25, 25 * _sev)
+                if _cstate == "spotted_window" and _player_gold >= _bribe_cost:
+                    _ep_sub = "hush_bribe"
+                    _ep_lbl = f"Hush {lead_partner} ({_bribe_cost}g)"
+                    _ep_gold = _bribe_cost
+                elif _cstate == "spotted_window":
+                    _ep_sub = "discretion_request"
+                    _ep_lbl = f"Ask {lead_partner} for discretion"
+                    _ep_gold = 0
+                else:
+                    _ep_sub = "deny"
+                    _ep_lbl = f"Deny rumor to {lead_partner}"
+                    _ep_gold = 0
+                if _ep_lbl.lower() not in seen_lbls:
+                    seen_lbls.add(_ep_lbl.lower())
+                    band3_utils.append({
+                        "label": _ep_lbl,
+                        "stat": "CHA",
+                        "requirement": 6,
+                        "mp_cost": 0,
+                        "intent": "epistemic_containment",
+                        "sub_intent": _ep_sub,
+                        "fact_key": _fk,
+                        "target_npc": lead_partner,
+                        "hush_gold": _ep_gold,
+                        "action_category": "social",
+                        "_server_stamped": True,
+                    })
+                    break
+            # Case 2: Player holds an active secret about this partner (`holder == player`)
+            if _hk == "player" and (_culprit in _lead_keys or _subj in _lead_keys):
+                _ep_lbl = f"Leverage secret on {lead_partner}"
+                if _ep_lbl.lower() not in seen_lbls:
+                    seen_lbls.add(_ep_lbl.lower())
+                    band3_utils.append({
+                        "label": _ep_lbl,
+                        "stat": "CHA",
+                        "requirement": 7,
+                        "mp_cost": 0,
+                        "intent": "epistemic_containment",
+                        "sub_intent": "use_leverage",
+                        "fact_key": _fk,
+                        "target_npc": lead_partner,
+                        "action_category": "social",
+                        "_server_stamped": True,
+                    })
+                    break
+
     band3_utils.sort(key=_utility_sort_rank)
-    band3_utils = band3_utils[:3]
+    band3_utils = band3_utils[:4]
 
     # ── COLD SHOULDER / FOCUS ON ROAD / BUDGET EXHAUSTION GATES ─────────────
     if comp_locked and comp_state == "cold_shoulder":

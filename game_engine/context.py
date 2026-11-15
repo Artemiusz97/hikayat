@@ -672,7 +672,24 @@ def _scene_context_text(session_id: int, current_location: str,
                         "description": e.get("description") or (c_data.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
                     })
 
+        _live_npc_by_low = {
+            str(e.get("name") or "").strip().lower(): e
+            for e in (current_npcs or [])
+            if isinstance(e, dict) and str(e.get("name") or "").strip()
+        }
         present_persons = [p for p in combined_persons if p.get("name", "").lower().strip() in scene_npc_names]
+        for _pp in present_persons:
+            _live_src = _live_npc_by_low.get(str(_pp.get("name") or "").strip().lower())
+            if isinstance(_live_src, dict):
+                for _lk in ("activity_key", "activity_tag", "micro_blocking", "person_key", "npc_id"):
+                    if _live_src.get(_lk) and not _pp.get(_lk):
+                        _pp[_lk] = _live_src[_lk]
+                if _live_src.get("activity_tag"):
+                    _pp["activity_tag"] = _live_src["activity_tag"]
+                if _live_src.get("telltale_revealed"):
+                    _pp["telltale_revealed"] = True
+                    if _live_src.get("visible_tell_text"):
+                        _pp["visible_tell_text"] = _live_src["visible_tell_text"]
         absent_persons = [p for p in combined_persons if p.get("name", "").lower().strip() not in scene_npc_names]
 
         present_names_for_mem = [p["name"] for p in present_persons if p.get("name")]
@@ -739,6 +756,11 @@ def _scene_context_text(session_id: int, current_location: str,
 
             if act_desc:
                 details.append("Activity: " + act_desc)
+            _act_tag = str(p.get("activity_tag") or "").strip() if isinstance(p, dict) else ""
+            if _act_tag and _act_tag != str(act_desc or "").strip():
+                details.append("Doing: " + _act_tag)
+            if isinstance(p, dict) and p.get("telltale_revealed") and p.get("visible_tell_text"):
+                details.append("Visible Tell: " + str(p.get("visible_tell_text") or "").strip())
             c_data_present = contacts_by_name.get(p_name_low, {})
             p_bi = (c_data_present.get("basic_info") if isinstance(c_data_present, dict) else None) or p.get("basic_info") or {}
             if not isinstance(p_bi, dict):
@@ -1066,6 +1088,55 @@ def _scene_context_text(session_id: int, current_location: str,
                                     f"Resident active leadership present: {', '.join(roster_parts)}. "
                                     f"When writing the scene, portray their presence/observations and report them in `npcs_present` and `entity_audit`."
                                 )
+
+    sid_int = int(session_id or 0)
+    if sid_int > 0:
+        ep_matrix = db.preload_epistemic_matrix(sid_int)
+        facts_by_key = ep_matrix.get("facts_by_key") or {}
+        by_fact = ep_matrix.get("by_fact") or {}
+        if facts_by_key:
+            present_map: dict[str, str] = {}
+            for np_row in (current_npcs or []):
+                if isinstance(np_row, dict):
+                    disp = str(np_row.get("name") or np_row.get("person_key") or np_row.get("npc_id") or "").strip()
+                    pkey = str(np_row.get("person_key") or np_row.get("npc_id") or disp).strip().lower().replace(" ", "_")
+                    if pkey:
+                        present_map[pkey] = disp or pkey
+            ep_lines: list[str] = []
+            for fkey, fact in facts_by_key.items():
+                if not isinstance(fact, dict):
+                    continue
+                fstat = str(fact.get("status") or "active")
+                if fstat in ("decayed", "resolved"):
+                    continue
+                holders_dict = by_fact.get(fkey) or {}
+                active_holders_present: list[str] = []
+                ignorant_present: list[str] = []
+                for pk, disp_name in present_map.items():
+                    kr = holders_dict.get(pk)
+                    if isinstance(kr, dict) and str(kr.get("containment_state") or "active") not in ("wiped", "decayed"):
+                        alibi_txt = str(kr.get("alibi_claim") or "").strip()
+                        tag = f"{disp_name} [{kr.get('confidence', 'rumor')}/{kr.get('containment_state', 'active')}"
+                        if alibi_txt:
+                            tag += f", alibi='{alibi_txt}'"
+                        tag += "]"
+                        active_holders_present.append(tag)
+                    elif fstat != "exposed_public":
+                        ignorant_present.append(disp_name)
+                if active_holders_present or (ignorant_present and "player" in holders_dict):
+                    fsum = str(fact.get("summary") or fkey)[:160]
+                    fcat = str(fact.get("category") or "secret")
+                    if active_holders_present:
+                        ep_lines.append(
+                            f"  * [{fkey}] ({fcat}, {fstat}): {fsum} | Known to: {'; '.join(active_holders_present)}"
+                        )
+                    if ignorant_present:
+                        ep_lines.append(
+                            f"  * [UNWITNESSED — UNKNOWN TO: {', '.join(ignorant_present)}] ({fkey}) -> These NPCs do NOT know this fact; NEVER leak or imply they know it."
+                        )
+            if ep_lines:
+                lines.append("[EPISTEMIC MATRIX — SCENE KNOWLEDGE FILTER (Z2 VOLATILE)]")
+                lines.extend(ep_lines)
 
     return "\n".join(lines)
 

@@ -199,6 +199,85 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             except Exception as _cm_err:
                 log.warning("Failed committing staged commitment ops: %s", _cm_err)
   
+    # Commit staged or inline epistemic containment actions (hush_bribe, confide, deny, proof, etc.)
+    _containment_sub_set = {
+        "hush_bribe",
+        "threaten_silence",
+        "confide",
+        "deny",
+        "present_proof",
+        "destroy_proof",
+        "discretion_request",
+        "use_leverage",
+        "warn_target",
+    }
+    _raw_c_ops = list((_pre_social.get("containment_ops") if isinstance(_pre_social, dict) else None) or [])
+    if not _raw_c_ops and actions:
+        for _a_c in actions:
+            if not isinstance(_a_c, dict):
+                continue
+            _c_int = str(_a_c.get("intent") or "").strip().lower()
+            _c_sub = str(_a_c.get("sub_intent") or "").strip().lower()
+            if _c_int == "epistemic_containment" or _c_sub in _containment_sub_set:
+                _raw_c_ops.append(_a_c)
+    if session_id and _raw_c_ops:
+        try:
+            from mechanics.social.epistemic_engine import resolve_containment_or_epistemic_action
+            from mechanics.social import relationship_graph as _rg_soc
+            _c_contacts = db.get_contacts(session_id) or []
+            _c_turn = int(
+                (outcome.get("_target_turn") if isinstance(outcome, dict) else 0)
+                or (session.get("turn_count") if isinstance(session, dict) else 0)
+                or 1
+            )
+            _lead_c = (party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party else {})) or {}
+            _lead_uid_c = int(_lead_c.get("user_id") or (session.get("host_user_id") if isinstance(session, dict) else 0) or 0)
+            for _cop in _raw_c_ops:
+                if not isinstance(_cop, dict):
+                    continue
+                _sub = str(_cop.get("action_subtype") or _cop.get("sub_intent") or "discretion_request").strip().lower()
+                _fkey = str(_cop.get("fact_key") or "").strip()
+                _tgt_npc = str(_cop.get("target_npc") or _cop.get("target_actor_key") or "").strip()
+                _tgt_k = _tgt_npc.lower().replace(" ", "_")
+                if not _tgt_k:
+                    continue
+                _h_gold = max(0, int(_cop.get("hush_gold") or _cop.get("gold_spent") or 0))
+                if _sub == "hush_bribe" and _h_gold > 0:
+                    _u_id_pay = int(_cop.get("user_id") or _lead_uid_c or 0)
+                    _ch_pay = db.get_character(_u_id_pay, session_id=session_id) if _u_id_pay else None
+                    _cur_g = int((_ch_pay or {}).get("gold") or 0)
+                    if _u_id_pay and _cur_g >= _h_gold:
+                        db.update_character_fields(_u_id_pay, gold=_cur_g - _h_gold)
+                        if isinstance(_lead_c, dict) and int(_lead_c.get("user_id") or 0) == _u_id_pay:
+                            _lead_c["gold"] = _cur_g - _h_gold
+                _c_ties = _rg_soc.get_ties(session_id, _tgt_k) or []
+                _ep_res = resolve_containment_or_epistemic_action(
+                    session_id,
+                    session if isinstance(session, dict) else {},
+                    _sub,
+                    _fkey,
+                    _tgt_k,
+                    _cop.get("check"),
+                    _c_turn,
+                    alibi_claim=str(_cop.get("alibi_claim") or ""),
+                    alibi_witness_key=str(_cop.get("alibi_witness_key") or ""),
+                    proof_artifact_ref=str(_cop.get("proof_artifact_ref") or ""),
+                    gold_spent=_h_gold,
+                    social_ties=_c_ties,
+                    contacts=_c_contacts,
+                )
+                _t_delta = int(_ep_res.get("trust_delta") or 0)
+                if _t_delta != 0 and _tgt_npc:
+                    db.upsert_contact(
+                        session_id=session_id,
+                        npc_id=_tgt_k,
+                        name=_tgt_npc,
+                        character_id=first_char_id,
+                        delta_score=_t_delta,
+                    )
+        except Exception as _ep_err:
+            log.warning("Failed committing epistemic containment action: %s", _ep_err)
+
     # Process Party Companion / Social Escort Recruitment & Dismissal
     from scenario_data import is_mechanic_enabled
     from mechanics.narrative.intent import (
@@ -2845,6 +2924,42 @@ def resolve_pre_turn_social_and_disclosures(
         except Exception as e:
             log.warning("Pre-turn faction resolution error: %s", e)
 
+    containment_ops: List[Dict[str, Any]] = []
+    _ep_subs = {
+        "hush_bribe",
+        "threaten_silence",
+        "confide",
+        "deny",
+        "present_proof",
+        "destroy_proof",
+        "discretion_request",
+        "use_leverage",
+        "warn_target",
+    }
+    for _a_ep in norm_actions:
+        _a_int = str(_a_ep.get("intent") or "").strip().lower()
+        _a_sub = str(_a_ep.get("sub_intent") or "").strip().lower()
+        if _a_int == "epistemic_containment" or _a_sub in _ep_subs:
+            _sub_use = _a_sub if _a_sub in _ep_subs else "discretion_request"
+            _tgt_ep = str(_a_ep.get("target_npc") or primary_target or "").strip()
+            _fk_ep = str(_a_ep.get("fact_key") or "").strip()
+            containment_ops.append({
+                "action_subtype": _sub_use,
+                "fact_key": _fk_ep,
+                "target_npc": _tgt_ep,
+                "check": _a_ep.get("check"),
+                "alibi_claim": str(_a_ep.get("alibi_claim") or ""),
+                "alibi_witness_key": str(_a_ep.get("alibi_witness_key") or ""),
+                "proof_artifact_ref": str(_a_ep.get("proof_artifact_ref") or ""),
+                "hush_gold": int(_a_ep.get("hush_gold") or 0),
+                "user_id": int(_a_ep.get("user_id") or 0),
+            })
+            if _tgt_ep:
+                directives.append(
+                    f"[STAGE DIRECTION — EPISTEMIC CONTAINMENT]: {player_name} attempts `{_sub_use}` with {_tgt_ep} "
+                    f"(Outcome: {'PASSED' if is_check_success(_a_ep.get('check'), default_if_none=True) else 'FAILED'})."
+                )
+
     # Deterministic witness detection
     witness_res = evaluate_pre_turn_witness_detection(
         session=session,
@@ -2868,6 +2983,7 @@ def resolve_pre_turn_social_and_disclosures(
         "faction_promotion_result": faction_promotion_result,
         "directives": directives,
         "witness_detection": witness_res,
+        "containment_ops": containment_ops,
     }
     session["_pre_turn_social_res"] = res
     return res

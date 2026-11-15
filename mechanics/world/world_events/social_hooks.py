@@ -326,6 +326,36 @@ def evaluate_witness_catch_scandal_gate(
         turn_number=int(turn_number),
         scandal_cooldown_day=int(current_day) + PLAYER_SCANDAL_COOLDOWN_DAYS,
     )
+    _scandal_fk = f"scandal:{ev_key}"
+    _witness_k = str(witness or "").strip().lower().replace(" ", "_")
+    _partner_k = str(partner_name or "").strip().lower().replace(" ", "_")
+    if session_id and _scandal_fk:
+        db.upsert_epistemic_fact(
+            session_id,
+            _scandal_fk,
+            category="affair" if (_partner_k or "affair" in str(event_kind or "").lower()) else "crime",
+            culprit_actor_key="player",
+            subject_actor_key=_partner_k,
+            location_node_id=str(location_display or ""),
+            summary=str(desc or "")[:240],
+            severity=3 if is_high_profile else 2,
+            heat_score=70 if is_high_profile else 55,
+            status="active",
+            turn=int(turn_number or 0),
+        )
+        if _witness_k:
+            db.upsert_epistemic_knowledge(
+                session_id,
+                _scandal_fk,
+                _witness_k,
+                confidence="firsthand",
+                containment_state="spotted_window",
+                source_actor_key=_witness_k,
+                acquisition_channel="witness",
+                hop_count=0,
+                player_aware=1,
+                turn=int(turn_number or 0),
+            )
     return {
         "spawned_scandal": True,
         "quest_id": quest_id,

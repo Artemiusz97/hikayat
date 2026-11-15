@@ -667,7 +667,36 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
         dead_enemies=dead_enemies,
         dead_enemy_dicts_rec=dead_enemy_dicts_rec,
     )
+    if dead_enemies and isinstance(session, dict) and session.get("id"):
+        try:
+            from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+            _is_nl = bool(session.get("non_lethal_combat") or session.get("non_lethal_mode"))
+            _dead_items = list(dead_enemy_dicts_rec or dead_enemies or [])
+            _ko_npcs = [d for d in _dead_items if isinstance(d, dict) and (d.get("knocked_out") or d.get("non_lethal") or _is_nl)] if not _is_nl else _dead_items
+            _ko_set = {str(d.get("name") if isinstance(d, dict) else d).strip().lower() for d in _ko_npcs}
+            _kill_npcs = [d for d in _dead_items if str(d.get("name") if isinstance(d, dict) else d).strip().lower() not in _ko_set]
+            _surviving_w = [
+                n for n in list(session.get("current_npcs") or []) + list(enemies or [])
+                if isinstance(n, dict) and not n.get("is_summon")
+                and str(n.get("name") or "").strip().lower() not in {
+                    str(x.get("name") if isinstance(x, dict) else x).strip().lower() for x in _dead_items
+                }
+            ]
+            neutralize_witnesses_from_combat_or_skill(
+                int(session["id"]),
+                _ko_npcs,
+                _kill_npcs,
+                present_witnesses=_surviving_w,
+                turn=int(session.get("turn_count") or 0),
+                location_node_id=str(session.get("current_node_id") or ""),
+                mode="non_lethal" if _is_nl else "combat",
+            )
+            llm_outcome["_b17_neutralized"] = True
+        except Exception:
+            pass
     return llm_outcome
+
+    
 
 
 

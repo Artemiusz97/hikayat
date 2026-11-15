@@ -622,6 +622,11 @@ class TurnService:
             "pact_credit_cost",
             "is_lethal_overdraw",
             "appraisal_state",
+            "_epistemic_verified",
+            "hush_gold_override",
+            "effective_dc_mod",
+            "telltale_revealed",
+            "_activity_reconciled",
         ):
             cleaned.pop(_strip_k, None)
 
@@ -825,6 +830,111 @@ class TurnService:
                     cleaned["label"] = raw_lbl or "Speak"
                     return cleaned
 
+        # 6B. Server-side Join Activity seed reconciliation (F6.1)
+        cand_act_key = str(raw_dc.get("activity_key") or "").strip().lower()
+        if not active_enemies and (raw_intent == "join_activity" or cand_act_key):
+            stage_pool: List[Dict[str, Any]] = []
+            if isinstance(session, dict):
+                for src_k in ("pre_turn_stage_npcs", "current_npcs"):
+                    for _sn in (session.get(src_k) or []):
+                        if isinstance(_sn, dict):
+                            stage_pool.append(_sn)
+            cand_tgt_low = str(raw_dc.get("target_npc") or cleaned.get("target_npc") or "").strip().lower()
+            matched_npc = None
+            matched_act_seed = None
+            for _sn in stage_pool:
+                _jseed = _sn.get("join_activity_seed")
+                if not isinstance(_jseed, dict):
+                    continue
+                _sn_keys = {
+                    str(_sn.get("name") or "").strip().lower(),
+                    str(_sn.get("npc_id") or "").strip().lower(),
+                    str(_sn.get("person_key") or "").strip().lower(),
+                }
+                _sk = str(_jseed.get("activity_key") or "").strip().lower()
+                if (cand_tgt_low and cand_tgt_low in _sn_keys) or (cand_act_key and cand_act_key == _sk):
+                    matched_npc = _sn
+                    matched_act_seed = _jseed
+                    break
+            if matched_act_seed is not None and matched_npc is not None:
+                from mechanics.social.activity_tags import get_activity_situational_dc_mod
+                _a_stat = str(matched_act_seed.get("stat") or "CHA").strip().upper()
+                _a_dc = max(5, min(8, int(matched_act_seed.get("dc") or 6)))
+                _a_dc = max(5, min(8, _a_dc + get_activity_situational_dc_mod(matched_npc, "join_activity", raw_lbl)))
+                cleaned["stat"] = _a_stat if _a_stat in db.STAT_COLUMN else "CHA"
+                cleaned["requirement"] = _a_dc
+                cleaned["mp_cost"] = 0
+                cleaned["intent"] = "join_activity"
+                cleaned["action_category"] = "social"
+                cleaned["target_npc"] = str(matched_npc.get("name") or raw_dc.get("target_npc") or "")
+                cleaned["activity_key"] = str(matched_act_seed.get("activity_key") or cand_act_key)
+                cleaned["_activity_reconciled"] = True
+                cleaned["label"] = raw_lbl or f"Join {cleaned['target_npc']} ({cleaned['activity_key']})"
+                return cleaned
+
+        # 6C. Server-side Epistemic Containment & Hush Bribe verification (D-6 / B16)
+        _CONTAINMENT_SUB_INTENTS = {
+            "hush_bribe",
+            "threaten_silence",
+            "confide",
+            "deny",
+            "present_proof",
+            "destroy_proof",
+            "discretion_request",
+            "use_leverage",
+            "warn_target",
+        }
+        cand_sub_intent = str(raw_dc.get("sub_intent") or cleaned.get("sub_intent") or "").strip().lower()
+        if not active_enemies and (raw_intent == "epistemic_containment" or cand_sub_intent in _CONTAINMENT_SUB_INTENTS):
+            eff_sub = cand_sub_intent if cand_sub_intent in _CONTAINMENT_SUB_INTENTS else "discretion_request"
+            cand_fkey = str(raw_dc.get("fact_key") or cleaned.get("fact_key") or "").strip()
+            cand_tgt = str(raw_dc.get("target_npc") or cleaned.get("target_npc") or "").strip()
+            cand_tgt_k = cand_tgt.lower().replace(" ", "_")
+            fact_row = db.get_epistemic_fact(session_id, cand_fkey) if (session_id and cand_fkey) else None
+            severity_val = int((fact_row or {}).get("severity") or 1)
+            extra_dc = 0
+            if eff_sub in ("hush_bribe", "threaten_silence", "discretion_request") and fact_row and cand_tgt_k:
+                subj_k = str(fact_row.get("subject_actor_key") or "").strip().lower().replace(" ", "_")
+                if subj_k:
+                    from mechanics.social import relationship_graph as _rg_ep
+                    from mechanics.social.epistemic_engine import _is_kin_roommate_or_best_friend
+                    _ties = _rg_ep.get_ties(session_id, cand_tgt_k) if session_id else []
+                    _contacts = db.get_contacts(session_id) if session_id else []
+                    if _is_kin_roommate_or_best_friend(
+                        subj_k, cand_tgt_k, social_ties=_ties, contacts=_contacts
+                    ):
+                        extra_dc = 2
+            req_gold = 0
+            if eff_sub == "hush_bribe":
+                req_gold = max(25, 25 * max(1, severity_val))
+                client_gold = int(raw_dc.get("hush_gold") or 0)
+                if client_gold > req_gold:
+                    req_gold = client_gold
+                char_gold = int((char or {}).get("gold") or 0)
+                if char_gold < req_gold:
+                    raise ValueError(f"Insufficient gold for hush bribe ({char_gold}g < {req_gold}g)")
+            if eff_sub == "threaten_silence":
+                e_stat, base_dc = "STR", 7
+            elif eff_sub in ("present_proof", "destroy_proof"):
+                e_stat, base_dc = "INT", 6
+            else:
+                e_stat, base_dc = "CHA", 6 + (1 if eff_sub == "use_leverage" else 0)
+            cleaned.update({
+                "stat": e_stat,
+                "requirement": max(5, min(14, base_dc + extra_dc)),
+                "mp_cost": 0,
+                "intent": "epistemic_containment",
+                "sub_intent": eff_sub,
+                "fact_key": cand_fkey,
+                "target_npc": cand_tgt,
+                "hush_gold": req_gold,
+                "effective_dc_mod": extra_dc,
+                "_epistemic_verified": True,
+                "action_category": "social",
+                "label": raw_lbl or f"{eff_sub.replace('_', ' ').title()}",
+            })
+            return cleaned
+
         # 7. UI Tactical/Stealth/Dialogue Fallback Cards & Unmatched Payloads -> Deterministic Rolled Check (DC >= 6, NEVER FREE/NONE)
         act_cat_hint = str(cleaned.get("action_category") or "").strip().lower()
         choice_type_hint = str(cleaned.get("choice_type") or "").strip().lower()
@@ -834,6 +944,26 @@ class TurnService:
         except (TypeError, ValueError):
             raw_req_val = 0
         enforced_req = max(6, min(20, raw_req_val))
+        if not active_enemies and isinstance(session, dict):
+            _tgt_act_low = str(cleaned.get("target_npc") or raw_dc.get("target_npc") or "").strip().lower()
+            _act_npcs = list(session.get("pre_turn_stage_npcs") or session.get("current_npcs") or [])
+            _matched_act_npc = next(
+                (
+                    _an for _an in _act_npcs
+                    if isinstance(_an, dict) and _tgt_act_low and _tgt_act_low in {
+                        str(_an.get("name") or "").strip().lower(),
+                        str(_an.get("npc_id") or "").strip().lower(),
+                        str(_an.get("person_key") or "").strip().lower(),
+                    }
+                ),
+                None,
+            )
+            if _matched_act_npc is not None:
+                from mechanics.social.activity_tags import get_activity_situational_dc_mod
+                enforced_req = max(
+                    4,
+                    min(20, enforced_req + get_activity_situational_dc_mod(_matched_act_npc, str(cleaned.get("intent") or raw_intent or ""), raw_lbl)),
+                )
 
         inferred_stat = ""
         try:
@@ -1017,6 +1147,11 @@ class TurnService:
                 chosen = dict(direct_choice)
                 # Strip privileged server-only spoofing keys on un-indexed client direct_choice payloads
                 for _priv_k in (
+                    "_epistemic_verified",
+                    "hush_gold_override",
+                    "effective_dc_mod",
+                    "telltale_revealed",
+                    "_activity_reconciled",
                     "quest_id",
                     "sub_obj_id",
                     "stage_index",
