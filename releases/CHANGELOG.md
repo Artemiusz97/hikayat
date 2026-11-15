@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning (SemVer 2.0.0)](https://semver.
 
 ## 🏷️ Version System Specification
 
-Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PATCH`):
+Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATCH`) tailored to an evolving game engine, persistent SQLite world state, and omnichannel UI (Discord + Web):
 
 | Level | Identifier | Trigger Criteria | Examples |
 | :--- | :--- | :--- | :--- |
-| **MAJOR** | `X.0.0` | Architectural overhauls, database engine changes, incompatible configuration breaks, major operational paradigm transitions. | Genesis release with core RPG engine, SQLite schema, Discord bot & FastAPI web app (`v1.0.0`). |
-| **MINOR** | `X.Y.0` | Substantial new gameplay mechanics, new systems/commands suites, platform expansions, content frameworks introduced backwards-compatibly. | Locations tree & debug suite (`v1.2.0`), NSFW routing cascade (`v1.3.0`), 10-Chapter Campaign & Quests (`v1.4.0`), Tactical Combat & Factions (`v1.5.1`), Living World & Time Engine (`v1.6.0`), Action Intents & Quest UI (`v1.7.0`), Modular Items & FNV Armor DT & 5-Tier Enemies (`v1.8.0`). |
-| **PATCH** | `X.Y.Z` | Backwards-compatible bug fixes, prompt tuning & instruction supremacy, edge-case handling, gear slot hardening, performance optimizations. | LLM Reliability & Semaphore limits (`v1.1.0`), Biome Diversity & Fail-Forward Polish (`v1.5.2`), Narrative Style Supremacy & Equipment Slot Hardening (`v1.8.1`). |
+| **MAJOR** | `X.0.0` | Core simulation or gameplay **paradigm shifts** (even when DB migrations remain backward-compatible), major architectural/platform overhauls, UI/UX redesigns, or breaking save/config/interface changes. | Genesis RPG engine, Discord bot & FastAPI web UI (`v1.0.0`); Modular package architecture & React SPA (`v2.0.0`); Living World NPC Autonomy & Epistemic Asymmetry Matrix (`v3.0.0`). |
+| **MINOR** | `X.Y.0` | New gameplay systems, command suites, quest/content frameworks, localization expansions, or significant deterministic/dev-ops capabilities introduced within the current engine paradigm. | Living World & Time Engine (`v1.6.0`), Modular Items & FNV DT (`v1.8.0`), Spatial Graph & SDXL (`v2.4.0`), Entity Contracts & Realty (`v2.9.0`), Threat Clock & Chapter Plan (`v2.11.0`), Closed-World NPC Engine (`v2.13.0`). |
+| **PATCH** | `X.Y.Z` | Bug fixes, regression patches, performance/N+1 query fixes, concurrency hardening, LLM prompt/sanitizer tuning, translation fixes, and UI polish—with no new gameplay systems added. | Biome Diversity & Fail-Forward Polish (`v1.5.2`), Narrative Style Supremacy & Equipment Slot Hardening (`v1.8.1`). |
 
 ---
 
@@ -23,6 +23,7 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.0.0** | 2026-11-15 | **MAJOR** | Living World NPC Autonomy, Epistemic Asymmetry Matrix (`epistemic_facts` / `epistemic_knowledge`), Venue Activity Tags, Boundary UoW Tick & Server Fog-of-War Parity. |
 | **v2.13.0** | 2026-11-15 | Minor | Closed-World NPC Engine (`world_roster`), Anchor-Node Schedules, Residential Fog-of-War, 6-Tier Presence Resolver, Progressive Routine Disclosure & Contacts/Acquaintances UI. |
 | **v2.12.0** | 2026-11-14 | Minor | Combat Submodule Extraction, Boss Telegraph Sanitization, Crash Replay & LLM Tapes, Shielded Rollback & Web/Bot Parity. |
 | **v2.11.0** | 2026-11-13 | Minor | Modular Combat Engine Decomposition, Chapter Plan & Clue Progression, 6-Segment Threat Clock, Quest Agency Overhaul, and 5-Language Parity. |
@@ -52,6 +53,20 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v3.0.0] - 2026-11-15
+
+#### Added & Enhanced
+- **Epistemic Asymmetry Matrix Schema & Persistence (`db/epistemic.py`, `db/core.py`)**:
+  - Added v55 normalized SQLite tables `epistemic_facts` and `epistemic_knowledge` with natural-key `(session_id, fact_key)` joins, living-world indexes, 10-turn snapshot rollback parity (`db/saves.py`, `db/sessions.py`), proof-artifact transitions (`downgrade_or_upgrade_proof_ref`), and strict server-side Fog-of-War filtering (`build_player_fog_of_war_summary`).
+- **Deterministic Epistemic Engine & Propagation (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`)**:
+  - Added focus-weighted witness detection with mask/stealth culprit anonymization and dialogue overhearing, containment actions (hush/bribe/threaten/discretion/confide/deny/proof/leverage with +2 DC kin penalty), combat/knockout witness neutralization, 1-hop gossip propagation across time boundaries, 2+ source corroboration, Caught Lying alibi checks, rumor heat decay, Watch-role escalations, kin alerts, and server-side fencing of LLM `EpistemicSignal` outputs.
+- **Off-Screen NPC Autonomy & Activity Tags (`mechanics/world/npc_autonomy.py`, `mechanics/social/activity_tags.py`, `mechanics/system/time_engine.py`)**:
+  - Added deterministic off-screen NPC autonomy overrides, romance shields, boundary-tick deltas via `UnitOfWork`, venue-aware activity tags with 5-language localized labels, context swaps, telltale gating, and pair/activity join seeds.
+- **Presence Cutover, Routine Overlay & Turn Reconciliation (`mechanics/world/presence_resolver.py`, `game_engine/npcs/`, `services/turn_service.py`)**:
+  - Added Tier 5 presence caps, autonomy routine overlays, pair auto-joins, pre-turn witness feed alignment, Z2 epistemic filtering (`game_engine/context.py`), discreet encounter handling (`mechanics/social/discreet_encounters.py`), and atomic phone DM / TurnService reconciliation (`mechanics/system/phone/messaging.py`, `social_graph.py`).
+- **Omnichannel UI, Server Fog-of-War Sanitizer & 5-Locale Parity (`api/`, `cogs/`, `web/`)**:
+  - Updated `WorldOutcomeSidebar.jsx` and `KnownRoutineCard.jsx` alongside Discord embeds (`cogs/adventure/embeds.py`, `cogs/contacts_routine_views.py`), REST endpoints (`api/adventure.py`, `api/codex_phone.py`), 5-language locales (`en`, `pl`, `ms`, `de`, `zh`), and rebuilt frontend assets (`web/dist/`).
 
 ### [v2.13.0] - 2026-11-15
 

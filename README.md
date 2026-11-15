@@ -1,6 +1,6 @@
-# Hikayat (v2.13.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v3.0.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-2.13.0-blue.svg)](releases/CHANGELOG-v2.13.0.md)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](releases/CHANGELOG-v3.0.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -31,9 +31,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: Quests in AI games easily lose focus, forget objectives, or conclude abruptly without resolving clues.
 * **How Hikayat works**: Quests are categorized into specific operational engines (Investigation, Bounty, Social Infiltration, Survival) and tracked in relational database tables (`quests`, `quest_dossiers`, `session_clues`). As players uncover evidence and interview witnesses, the system compiles structured forensic dossiers with verifiable leads and sub-objectives in SQLite.
 
-### 6. World Pulse & Autonomous Background Simulation (`mechanics/world/world_events/`)
-* **What problem it solves**: Static RPG worlds feel frozen in place whenever the player is not actively looking at an area.
-* **How Hikayat works**: Alongside player turns, the engine simulates background rumors, weather shifts, faction skirmishes, political scandals, and economic crises across different map zones. Events have countdown timers and can escalate into larger emergencies if the player neglects them.
+### 6. Living World Autonomy & Epistemic Asymmetry Matrix (`npc_autonomy.py`, `epistemic_engine.py`, `db/epistemic.py`)
+* **What problem it solves**: In most RPGs, NPCs never interact with each other off-screen, and every character magically knows secrets the moment something happens—or never hears rumors at all.
+* **How Hikayat works**: Across time-block boundaries, the engine runs deterministic off-screen NPC autonomy (`mechanics/world/npc_autonomy.py`) alongside World Pulse regional events (`mechanics/world/world_events/`) and an Epistemic Asymmetry Matrix (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`). Witnesses track what they saw, rumors decay or spread 1-hop across social ties with server-side Fog-of-War isolation, alibis are checked for lies, and players can confront, hush, bribe, or leverage secrets deterministically.
 
 ### 7. Vector Memory Compaction & Sliding Token Budgets (`mechanics/system/memory/`)
 * **What problem it solves**: Large language models have strict context limits and become slow or expensive as chat history grows.
