@@ -214,6 +214,7 @@ def _hydrate_quest_waypoint_for_enrichment(
     session: Optional[dict] = None,
     session_time: Optional[tuple] = None,
     contacts_cache: Optional[dict] = None,
+    resolve_schedule: bool = True,
 ) -> dict:
     w_dict = dict(wr)
     try:
@@ -224,7 +225,7 @@ def _hydrate_quest_waypoint_for_enrichment(
     if w_dict.get("target_location"):
         w_dict["target_location"] = _normalize_loc_arrow(w_dict["target_location"])
     w_dict["static_target_location"] = w_dict.get("target_location", "")
-    if w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
+    if resolve_schedule and w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
         try:
             from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
             eff_loc = resolve_effective_waypoint_location(
@@ -250,6 +251,7 @@ def _enrich_quest_dict(
     preloaded_wps: Optional[list[Any]] = None,
     preloaded_dossier: Optional[dict] = None,
     dossier_preloaded: bool = False,
+    resolve_schedule: bool = True,
 ) -> dict | None:
     if not row:
         return None
@@ -278,7 +280,10 @@ def _enrich_quest_dict(
     all_wps: list[dict] = []
     if session_id and quest_id:
         if preloaded_wps is not None:
-            all_wps = [_hydrate_quest_waypoint_for_enrichment(session_id, wr) for wr in preloaded_wps]
+            all_wps = [
+                _hydrate_quest_waypoint_for_enrichment(session_id, wr, resolve_schedule=resolve_schedule)
+                for wr in preloaded_wps
+            ]
         else:
             try:
                 with get_conn() as conn:
@@ -288,7 +293,10 @@ def _enrich_quest_dict(
                            ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC""",
                         (session_id, quest_id)
                     ).fetchall()
-                    all_wps = [_hydrate_quest_waypoint_for_enrichment(session_id, wr) for wr in wp_rows]
+                    all_wps = [
+                        _hydrate_quest_waypoint_for_enrichment(session_id, wr, resolve_schedule=resolve_schedule)
+                        for wr in wp_rows
+                    ]
             except Exception:
                 all_wps = []
 
@@ -495,7 +503,7 @@ def get_quest_waypoint_target_location(
         return _query(c)
 
 
-def get_active_story_quest(session_id: int) -> dict | None:
+def get_active_story_quest(session_id: int, *, resolve_schedule: bool = True) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(
             """SELECT * FROM quests
@@ -504,7 +512,7 @@ def get_active_story_quest(session_id: int) -> dict | None:
                ORDER BY (CASE WHEN sub_objectives_json IS NOT NULL AND sub_objectives_json != '[]' AND sub_objectives_json != '' THEN 1 ELSE 0 END) DESC, updated_at DESC""",
             (session_id,)
         ).fetchone()
-    return _enrich_quest_dict(row)
+    return _enrich_quest_dict(row, resolve_schedule=resolve_schedule)
 
 def get_session_quests(session_id: int, status: str = None) -> list[dict]:
     wps_by_qid: dict[str, list[Any]] = {}
@@ -1524,7 +1532,7 @@ def update_waypoint_resource_progress(session_id: int, quest_id: str, stage_inde
             return {"collected": collected, "target": target, "complete": target > 0 and collected >= target}
         return {"collected": 0, "target": 0, "complete": False}
 
-def get_all_session_active_waypoints(session_id: int) -> list[dict]:
+def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool = True) -> list[dict]:
     """Returns all 'active' waypoints across all quests in a session.
     Used by the location UI to show quest markers on the travel menu.
     """
@@ -1557,7 +1565,7 @@ def get_all_session_active_waypoints(session_id: int) -> list[dict]:
             if d.get("target_location"):
                 d["target_location"] = _normalize_loc_arrow(d["target_location"])
             d["static_target_location"] = d.get("target_location", "")
-            if d.get("follow_npc_schedule") and d.get("target_npc"):
+            if resolve_schedule and d.get("follow_npc_schedule") and d.get("target_npc"):
                 try:
                     from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
                     eff_loc = resolve_effective_waypoint_location(session_id, d)

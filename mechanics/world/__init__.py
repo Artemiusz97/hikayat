@@ -13,6 +13,9 @@ from .world_schedule import (
     evaluate_world_schedule_node_access,
 )
 from .npc_schedule import (
+    SHIFT_PROFILES,
+    resolve_anchor_schedule_nodes,
+    is_npc_on_active_shift,
     get_npc_schedule,
     get_npc_scheduled_location,
     get_npc_schedule_node_ids,
@@ -20,6 +23,22 @@ from .npc_schedule import (
     is_schedule_transition_imminent,
     get_time_block_key,
     get_detailed_npc_time_phase,
+)
+from .venue_seeder import (
+    ensure_venue_staff_seeded,
+    ensure_roaming_merchants_seeded,
+    slot_fill_custom_action_role,
+    evaluate_shop_staff_availability,
+    format_venue_crowd_flavor,
+)
+from .presence_resolver import (
+    resolve_node_presence,
+    check_doorbell_etiquette,
+)
+from .routine_disclosure import (
+    build_known_routine_payload,
+    format_known_routine_summary,
+    get_residential_fog_label,
 )
 
 __all__ = [
@@ -35,6 +54,9 @@ __all__ = [
     "is_campus_node_or_location",
     "get_world_schedule_state",
     "evaluate_world_schedule_node_access",
+    "SHIFT_PROFILES",
+    "resolve_anchor_schedule_nodes",
+    "is_npc_on_active_shift",
     "get_npc_schedule",
     "get_npc_scheduled_location",
     "get_npc_schedule_node_ids",
@@ -42,4 +64,14 @@ __all__ = [
     "is_schedule_transition_imminent",
     "get_time_block_key",
     "get_detailed_npc_time_phase",
+    "ensure_venue_staff_seeded",
+    "ensure_roaming_merchants_seeded",
+    "slot_fill_custom_action_role",
+    "evaluate_shop_staff_availability",
+    "format_venue_crowd_flavor",
+    "resolve_node_presence",
+    "check_doorbell_etiquette",
+    "build_known_routine_payload",
+    "format_known_routine_summary",
+    "get_residential_fog_label",
 ]

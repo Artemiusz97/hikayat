@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
+from .status_effects import apply_status_effect
+
 
 def apply_damage_to_combatant(
     target: Dict[str, Any],
@@ -73,6 +75,15 @@ def apply_damage_to_combatant(
     phase_triggered = bool(target.get("phase_2_triggered", False))
 
     # 3. Universal 1 HP Mercy Clamp & Subdue (Cycle 1 & Cycle 2 Locked Decisions)
+    is_ai_ally = bool(
+        attacker
+        and (
+            attacker.get("entity_type") in ("companion", "construct")
+            or attacker.get("_is_party_npc")
+            or attacker.get("is_summon")
+            or attacker.get("is_autonomous_construct")
+        )
+    )
     is_attacker_ally = (
         attacker is None
         or attacker.get("team") == "ally"
@@ -80,7 +91,9 @@ def apply_damage_to_combatant(
     )
     requires_subdue = bool(
         non_lethal_mode
+        or target.get("sparring")
         or (attacker and attacker.get("is_non_lethal"))
+        or (target.get("requires_non_lethal_subdue") and is_ai_ally)
     )
 
     if requires_subdue and is_attacker_ally:
@@ -142,8 +155,7 @@ def apply_damage_to_combatant(
         elif not isinstance(cur_eff, list):
             target["status_effects"] = []
 
-        if "Enraged [3 turns]" not in target["status_effects"]:
-            target["status_effects"].append("Enraged [3 turns]")
+        apply_status_effect(target, "Enraged [3 turns]", source="boss_phase2")
 
         if combat_log is not None:
             b_name = target.get("name", "Boss")

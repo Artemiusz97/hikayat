@@ -17,7 +17,8 @@ Findings are fingerprinted without line numbers and compared against
 
 Usage:
     python scripts/static_check.py                    # full gate (exit 1 on new findings)
-    python scripts/static_check.py --changed          # only files changed vs HEAD (fast pre-commit)
+    python scripts/static_check.py --changed          # only files changed vs HEAD
+    python scripts/static_check.py --staged           # only staged files in git index (pre-commit)
     python scripts/static_check.py --update-baseline  # accept current findings as the baseline
     python scripts/static_check.py --no-pylint        # custom analyzer only (~2s)
     python scripts/static_check.py path/to/file.py    # explicit files
@@ -41,7 +42,16 @@ if hasattr(sys.stdout, "reconfigure"):
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE_PATH = ROOT / "scripts" / "static_baseline.json"
 SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models"]
-SCAN_ROOT_FILES = ["server.py", "llm_client.py", "character_data.py", "scenario_data.py", "catalog.py"]
+SCAN_ROOT_FILES = [
+    "server.py",
+    "llm_client.py",
+    "character_data.py",
+    "scenario_data.py",
+    "catalog.py",
+    "scripts/cleanup_stale_sessions.py",
+    "scripts/package_release.py",
+    "scripts/static_check.py",
+]
 
 # High-signal pylint checks only: each of these is a crash (or silently swallowed crash) at runtime.
 PYLINT_CHECKS = [
@@ -83,6 +93,25 @@ State = Optional[Set[str]]
 
 _SCOPE_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 _COMP_NODES = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+_NORETURN_BARE = frozenset({"exit", "quit"})
+_NORETURN_ATTRS = frozenset({
+    ("sys", "exit"),
+    ("os", "_exit"),
+    ("pytest", "fail"),
+    ("pytest", "exit"),
+    ("pytest", "skip"),
+})
+
+
+def _is_noreturn_call(expr: ast.AST) -> bool:
+    if not isinstance(expr, ast.Call):
+        return False
+    fn = expr.func
+    if isinstance(fn, ast.Name):
+        return fn.id in _NORETURN_BARE
+    if isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name):
+        return (fn.value.id, fn.attr) in _NORETURN_ATTRS
+    return False
 
 
 def _meet(states: Iterable[State]) -> State:
@@ -310,10 +339,18 @@ class _FunctionFlow:
         if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             for d in s.decorator_list:
                 st |= self._check_expr(d, st)
-            if not isinstance(s, ast.ClassDef):
+            if isinstance(s, ast.ClassDef):
+                for b in s.bases:
+                    st |= self._check_expr(b, st)
+                for kw in s.keywords:
+                    st |= self._check_expr(kw.value, st)
+                for item in s.body:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        self.nested.append((item, f"{self.qualname}.{s.name}.{item.name}"))
+            else:
                 for d in s.args.defaults + [d for d in s.args.kw_defaults if d is not None]:
                     st |= self._check_expr(d, st)
-            self.nested.append((s, f"{self.qualname}.{s.name}"))
+                self.nested.append((s, f"{self.qualname}.{s.name}"))
             st.add(s.name)
             return st
         if isinstance(s, ast.Assign):
@@ -337,6 +374,8 @@ class _FunctionFlow:
             st |= self._check_expr(s.value if isinstance(s, ast.Expr) else s.test, st)
             if isinstance(s, ast.Assert):
                 st |= self._check_expr(s.msg, st)
+            elif _is_noreturn_call(s.value):
+                return _TERMINATED
             return st
         if isinstance(s, ast.Return):
             self._check_expr(s.value, st)
@@ -355,6 +394,10 @@ class _FunctionFlow:
             for t in s.targets:
                 self._check_target_loads(t, st)
                 for nm in _target_names(t):
+                    self._check_expr(
+                        ast.Name(id=nm, ctx=ast.Load(), lineno=getattr(t, "lineno", s.lineno), col_offset=0),
+                        st,
+                    )
                     st.discard(nm)
             return st
         if isinstance(s, (ast.Import, ast.ImportFrom)):
@@ -519,12 +562,26 @@ def _all_targets() -> List[Path]:
     return sorted(files)
 
 
-def _changed_targets() -> List[Path]:
-    proc = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=ROOT, capture_output=True, text=True)
-    untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, capture_output=True, text=True)
-    names = set(proc.stdout.split()) | set(untracked.stdout.split())
+def _filter_scoped_py(names: Set[str]) -> List[Path]:
     scoped = {str(p.relative_to(ROOT)).replace("\\", "/") for p in _all_targets()}
     return sorted(ROOT / n for n in names if n.endswith(".py") and n in scoped and (ROOT / n).exists())
+
+
+def _changed_targets() -> List[Path]:
+    proc = subprocess.run(["git", "diff", "--name-only", "HEAD"], cwd=ROOT, capture_output=True, text=True)
+    if proc.returncode != 0:
+        proc = subprocess.run(["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"], cwd=ROOT, capture_output=True, text=True)
+    untracked = subprocess.run(["git", "ls-files", "--others", "--exclude-standard"], cwd=ROOT, capture_output=True, text=True)
+    names = set(proc.stdout.splitlines()) | set(untracked.stdout.splitlines())
+    return _filter_scoped_py(names)
+
+
+def _staged_targets() -> List[Path]:
+    proc = subprocess.run(
+        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    return _filter_scoped_py(set(proc.stdout.splitlines()))
 
 
 def _load_baseline() -> Dict[str, int]:
@@ -552,7 +609,7 @@ def _install_hook() -> int:
     hook = (ROOT / proc.stdout.strip() / "pre-commit").resolve()
     if hook.exists() and _HOOK_MARKER not in hook.read_text(encoding="utf-8", errors="replace"):
         print(f"static_check: {hook} already exists and was not created by this script; leaving it untouched.")
-        print("Add this line to it manually:  python scripts/static_check.py --changed || exit 1")
+        print("Add this line to it manually:  python scripts/static_check.py --staged || exit 1")
         return 1
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text(
@@ -560,7 +617,7 @@ def _install_hook() -> int:
         f"{_HOOK_MARKER}\n"
         "# Blocks commits that introduce NameError/UnboundLocalError/bad-import/bad-call bugs.\n"
         "# Bypass once (not recommended): git commit --no-verify\n"
-        "python scripts/static_check.py --changed || {\n"
+        "python scripts/static_check.py --staged || {\n"
         "  echo \"\"; echo \"Commit blocked by scripts/static_check.py (see findings above).\"; exit 1;\n"
         "}\n",
         encoding="utf-8",
@@ -578,20 +635,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*", help="explicit files to check (default: whole engine)")
     ap.add_argument("--changed", action="store_true", help="only files changed vs HEAD")
+    ap.add_argument("--staged", action="store_true", help="only staged files in git index (for pre-commit)")
     ap.add_argument("--update-baseline", action="store_true", help="accept all current findings")
     ap.add_argument("--no-pylint", action="store_true", help="skip pylint (custom analyzer only)")
     ap.add_argument("--all", action="store_true", help="print baselined findings too")
-    ap.add_argument("--install-hook", action="store_true", help="install a git pre-commit hook running --changed")
+    ap.add_argument("--install-hook", action="store_true", help="install a git pre-commit hook running --staged")
     args = ap.parse_args(argv)
 
     if args.install_hook:
         return _install_hook()
 
-    if args.update_baseline and (args.files or args.changed or args.no_pylint):
+    if args.update_baseline and (args.files or args.changed or args.staged or args.no_pylint):
         raise SystemExit("--update-baseline requires a full scan (no file filters, pylint enabled).")
 
     if args.files:
         targets = [Path(f).resolve() for f in args.files]
+    elif args.staged:
+        targets = _staged_targets()
     elif args.changed:
         targets = _changed_targets()
     else:
@@ -609,7 +669,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     findings.sort(key=lambda f: (f.path, f.line, f.check))
 
     if args.update_baseline:
-        if args.files or args.changed:
+        if args.files or args.changed or args.staged:
             raise SystemExit("--update-baseline requires a full scan (no file filters).")
         payload = {
             "_comment": "Accepted pre-existing findings. Fingerprints omit line numbers. Shrink this file; never grow it casually.",
@@ -629,7 +689,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             new.append(f)
 
-    scope = "changed files" if args.changed else f"{len(targets)} file(s)"
+    scope = "staged files" if args.staged else ("changed files" if args.changed else f"{len(targets)} file(s)")
     if new:
         print(f"static_check: {len(new)} NEW finding(s) in {scope}:\n")
         for f in new:

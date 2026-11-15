@@ -3,12 +3,17 @@ Thin async wrapper around any OpenAI-compatible chat-completions endpoint
 (OpenAI itself, OpenRouter, Groq, Together, a local vLLM/Ollama server, etc).
 Point LLM_BASE_URL / LLM_MODEL / LLM_API_KEY in .env at whatever you're using.
 """
+from __future__ import annotations
+
 import asyncio
+import copy
 import json
 import logging
 import random
 import re
-from typing import Type, Any
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Type, Any, Callable, Awaitable
 from pydantic import BaseModel
 from openai import (
     AsyncOpenAI, RateLimitError, APITimeoutError,
@@ -49,6 +54,66 @@ _semaphore = asyncio.Semaphore(LLM_MAX_CONCURRENCY)
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 _THINK_TAG_RE = re.compile(r"<think(?:ing)?>.*?</think(?:ing)?>", re.DOTALL | re.IGNORECASE)
+
+_ACTIVE_LLM_HANDLER: ContextVar[Callable[..., Awaitable[Any]] | None] = ContextVar("_active_llm_handler", default=None)
+_ACTIVE_LLM_TAPE: ContextVar[list[dict[str, Any]] | None] = ContextVar("_active_llm_tape", default=None)
+_IN_STREAM_CALL: ContextVar[bool] = ContextVar("_in_stream_call", default=False)
+
+
+def is_llm_intercepted() -> bool:
+    """Return True when a ContextVar-scoped LLM handler is active."""
+    return _ACTIVE_LLM_HANDLER.get() is not None
+
+
+@contextmanager
+def use_llm_handler(handler: Callable[..., Awaitable[Any]] | None):
+    """Install a ContextVar-scoped async LLM handler for tests and playthrough sweeps."""
+    token = _ACTIVE_LLM_HANDLER.set(handler)
+    try:
+        yield handler
+    finally:
+        _ACTIVE_LLM_HANDLER.reset(token)
+
+
+@contextmanager
+def record_llm_tape(tape: list[dict[str, Any]] | None = None):
+    """Record ordered LLM call results and exceptions into a ContextVar-scoped tape."""
+    buf: list[dict[str, Any]] = tape if tape is not None else []
+    token = _ACTIVE_LLM_TAPE.set(buf)
+    try:
+        yield buf
+    finally:
+        _ACTIVE_LLM_TAPE.reset(token)
+
+
+def _append_llm_tape_entry(
+    call_kind: str,
+    *,
+    response_model: Type[BaseModel] | None = None,
+    ok: bool = True,
+    result: Any = None,
+    exc: BaseException | None = None,
+) -> None:
+    tape = _ACTIVE_LLM_TAPE.get()
+    if tape is None:
+        return
+    entry: dict[str, Any] = {
+        "call_kind": call_kind,
+        "response_model": response_model.__name__ if response_model is not None else None,
+        "ok": bool(ok),
+    }
+    if ok:
+        try:
+            if hasattr(result, "model_dump"):
+                entry["result"] = result.model_dump(exclude_unset=False)
+            else:
+                entry["result"] = copy.deepcopy(result)
+        except Exception:
+            entry["result"] = result
+    else:
+        entry["error_type"] = type(exc).__name__ if exc is not None else "RuntimeError"
+        entry["error_msg"] = str(exc or "")[:400]
+    tape.append(entry)
 
 import time
 from collections import deque
@@ -209,9 +274,20 @@ def _prioritize_healthy_candidates(candidates: list[tuple[AsyncOpenAI, str]]) ->
 
 async def get_embedding(text: str) -> list[float]:
     """Fetch vector embedding for semantic search."""
-    try:
-        if not text or not text.strip():
+    if not text or not text.strip():
+        return []
+    handler = _ACTIVE_LLM_HANDLER.get()
+    if handler is not None:
+        try:
+            res = await handler(call_kind="embedding", text=text)
+            vec = list(res) if isinstance(res, list) else []
+            _append_llm_tape_entry("embedding", ok=True, result=vec)
+            return vec
+        except Exception as e:
+            _append_llm_tape_entry("embedding", ok=False, exc=e)
+            log.warning(f"Intercepted embedding failed for model {EMBEDDING_MODEL}: {e}")
             return []
+    try:
         # Replace newlines as recommended by OpenAI for embeddings
         clean_text = text.replace('\n', ' ')
         async with _semaphore:
@@ -219,8 +295,11 @@ async def get_embedding(text: str) -> list[float]:
                 model=EMBEDDING_MODEL,
                 input=clean_text
             )
-        return response.data[0].embedding
+        vec = response.data[0].embedding
+        _append_llm_tape_entry("embedding", ok=True, result=vec)
+        return vec
     except Exception as e:
+        _append_llm_tape_entry("embedding", ok=False, exc=e)
         log.warning(f"Embedding failed for model {EMBEDDING_MODEL}: {e}")
         return []
 
@@ -469,12 +548,10 @@ def _is_openai_official(base_url: str) -> bool:
 
 
 def _model_supports_json_schema(base_url: str, model_name: str) -> bool:
-    lower_m = (model_name or "").lower()
-    # Gemma models on third-party endpoints (like Nano-GPT / vLLM / Outlines) have a known bug
-    # where tokenizer control tokens generate infinite whitespace loops under constrained grammar/schema mode.
-    if "gemma" in lower_m and not _is_openai_official(base_url):
+    if not _is_openai_official(base_url):
         return False
-    return True
+    lower_m = (model_name or "").lower()
+    return "gemma" not in lower_m
 
 
 def _model_supports_json_mode(base_url: str, model_name: str) -> bool:
@@ -836,6 +913,56 @@ async def call_llm_json_stream(system_prompt: str | list, user_prompt: str,
     narrative tokens in real-time. Once the stream completes, returns the full parsed JSON dict.
     If streaming fails, automatically falls back to the standard `call_llm_json`.
     """
+    handler = _ACTIVE_LLM_HANDLER.get()
+    stream_tok = _IN_STREAM_CALL.set(True)
+    try:
+        if handler is not None:
+            res = await handler(
+                call_kind="json_stream",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                on_narrative_token=on_narrative_token,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                retries=retries,
+                is_nsfw=is_nsfw,
+                use_utility=use_utility,
+                timeout=timeout,
+                response_model=response_model,
+                system_zones=system_zones,
+            )
+            _append_llm_tape_entry("json_stream", response_model=response_model, ok=True, result=res)
+            return res
+        res = await _call_llm_json_stream_live(
+            system_prompt,
+            user_prompt,
+            on_narrative_token,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            retries=retries,
+            is_nsfw=is_nsfw,
+            use_utility=use_utility,
+            timeout=timeout,
+            response_model=response_model,
+            system_zones=system_zones,
+        )
+        _append_llm_tape_entry("json_stream", response_model=response_model, ok=True, result=res)
+        return res
+    except BaseException as exc:
+        if isinstance(exc, Exception):
+            _append_llm_tape_entry("json_stream", response_model=response_model, ok=False, exc=exc)
+        raise
+    finally:
+        _IN_STREAM_CALL.reset(stream_tok)
+
+
+async def _call_llm_json_stream_live(system_prompt: str | list, user_prompt: str,
+                                     on_narrative_token,
+                                     temperature: float | None = None, max_tokens: int = 4096,
+                                     retries: int = 1, is_nsfw: bool = False, use_utility: bool = False,
+                                     timeout: float | None = None,
+                                     response_model: Type[BaseModel] | None = None,
+                                     system_zones: tuple[str, ...] | list[str] | None = None) -> dict:
     if temperature is None:
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
@@ -1074,6 +1201,56 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
     Iterates through candidate models (primary -> fallbacks). If a candidate model fails
     (timeout, rate limit, server error, bad JSON, or truncated output), it automatically failovers to the next model.
     """
+    record_tape = not _IN_STREAM_CALL.get()
+    handler = _ACTIVE_LLM_HANDLER.get()
+    try:
+        if handler is not None:
+            res = await handler(
+                call_kind="json",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                retries=retries,
+                is_nsfw=is_nsfw,
+                use_utility=use_utility,
+                timeout=timeout,
+                required_any_keys=required_any_keys,
+                response_model=response_model,
+                system_zones=system_zones,
+            )
+            if record_tape:
+                _append_llm_tape_entry("json", response_model=response_model, ok=True, result=res)
+            return res
+        res = await _call_llm_json_live(
+            system_prompt,
+            user_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            retries=retries,
+            is_nsfw=is_nsfw,
+            use_utility=use_utility,
+            timeout=timeout,
+            required_any_keys=required_any_keys,
+            response_model=response_model,
+            system_zones=system_zones,
+        )
+        if record_tape:
+            _append_llm_tape_entry("json", response_model=response_model, ok=True, result=res)
+        return res
+    except BaseException as exc:
+        if record_tape and isinstance(exc, Exception):
+            _append_llm_tape_entry("json", response_model=response_model, ok=False, exc=exc)
+        raise
+
+
+async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
+                              temperature: float | None = None, max_tokens: int = 4096,
+                              retries: int = 1, is_nsfw: bool = False, use_utility: bool = False,
+                              timeout: float | None = None,
+                              required_any_keys: list[list[str]] | None = None,
+                              response_model: Type[BaseModel] | None = None,
+                              system_zones: tuple[str, ...] | list[str] | None = None) -> dict:
     if temperature is None:
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
@@ -1284,7 +1461,8 @@ async def call_llm_json(system_prompt: str | list, user_prompt: str,
                     if attempt < retries:
                         await _backoff_sleep(attempt, error=e)
 
-            trip_model_circuit(model_name)
+            if retries > 0:
+                trip_model_circuit(model_name)
             log.warning("All attempts for model '%s' failed. Cascading to next fallback candidate...", model_name)
 
     raise RuntimeError(f"All LLM candidate models in fallback chain failed. Last error: {last_err}") from last_err
@@ -1297,6 +1475,46 @@ async def call_llm_text(system_prompt: str, user_prompt: str,
                         is_nsfw: bool = False, use_utility: bool = False,
                         timeout: float | None = None) -> str:
     """Call the LLM and return the raw string content of the response with automatic retries and failover."""
+    handler = _ACTIVE_LLM_HANDLER.get()
+    if handler is not None:
+        try:
+            res = await handler(
+                call_kind="text",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                retries=retries,
+                is_nsfw=is_nsfw,
+                use_utility=use_utility,
+                timeout=timeout,
+            )
+            text_res = str(res) if res is not None else ""
+            _append_llm_tape_entry("text", ok=True, result=text_res)
+            return text_res
+        except Exception as e:
+            _append_llm_tape_entry("text", ok=False, exc=e)
+            log.error("All candidate LLM models failed for intercepted call_llm_text: %s", e)
+            return ""
+    res = await _call_llm_text_live(
+        system_prompt,
+        user_prompt,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        retries=retries,
+        is_nsfw=is_nsfw,
+        use_utility=use_utility,
+        timeout=timeout,
+    )
+    _append_llm_tape_entry("text", ok=True, result=res)
+    return res
+
+
+async def _call_llm_text_live(system_prompt: str, user_prompt: str,
+                              temperature: float | None = None, max_tokens: int = 1024,
+                              retries: int = 1,
+                              is_nsfw: bool = False, use_utility: bool = False,
+                              timeout: float | None = None) -> str:
     if temperature is None:
         temperature = NSFW_LLM_TEMPERATURE if is_nsfw else LLM_TEMPERATURE
 
@@ -1338,7 +1556,8 @@ async def call_llm_text(system_prompt: str, user_prompt: str,
                     if attempt < retries:
                         await _backoff_sleep(attempt, error=e)
 
-            trip_model_circuit(model_name)
+            if retries > 0:
+                trip_model_circuit(model_name)
             log.warning("All attempts for text model '%s' failed. Cascading to next candidate...", model_name)
 
     if last_err:

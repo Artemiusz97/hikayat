@@ -16,7 +16,6 @@ class TurnContext:
         self.actions = actions or []
         self.mp_already_spent = mp_already_spent or {}
         self._cache = {}
-        self._deck_cache: dict[tuple[int, str, int], dict] = {}
 
     def invalidate(self, key: str):
         """Invalidates a specific cached key if a mid-turn DB write occurs, cascading coupled keys."""
@@ -25,22 +24,6 @@ class TurnContext:
             self._cache.pop("story_quest", None)
             self._cache.pop("all_quests", None)
             self._cache.pop("active_waypoints", None)
-        if key in ("deck", "deck_cache", "combat", "equipment", "stance", "inventory", "status_effects", "statuses", "status"):
-            self.invalidate_deck_cache()
-
-    def get_cached_deck(self, user_id: int, enemy_target: str, turn_count: int) -> dict | None:
-        """Returns cached action deck and calculated odds for a specific user and enemy target in a given turn."""
-        cache_key = (int(user_id), str(enemy_target).strip().lower(), int(turn_count))
-        return self._deck_cache.get(cache_key)
-
-    def cache_deck(self, user_id: int, enemy_target: str, turn_count: int, deck_data: dict) -> None:
-        """Caches action deck and calculated odds on the ephemeral TurnContext."""
-        cache_key = (int(user_id), str(enemy_target).strip().lower(), int(turn_count))
-        self._deck_cache[cache_key] = deck_data
-
-    def invalidate_deck_cache(self) -> None:
-        """Flushes the ephemeral combat deck cache upon equipment, stance, or turn transitions."""
-        self._deck_cache.clear()
 
     @classmethod
     def load_snapshot(

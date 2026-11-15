@@ -5,6 +5,7 @@ import { isValidSessionId, isAnomalousScenarioKey } from '../utils/session';
 
 export const useCodex = (sessionId, user, session = null) => {
   const [contacts, setContacts] = useState([]);
+  const [acquaintances, setAcquaintances] = useState([]);
   const [factions, setFactions] = useState([]);
   const [agentDossier, setAgentDossier] = useState(null);
   const [factionMembership, setFactionMembership] = useState({ joined_faction_id: '', faction_rank: 0, faction_title: '' });
@@ -32,6 +33,10 @@ export const useCodex = (sessionId, user, session = null) => {
 
   const fetchCodexData = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !user) {
+      if (!isValidSessionId(sessionId)) {
+        setContacts([]);
+        setAcquaintances([]);
+      }
       setLoading(false);
       return;
     }
@@ -52,7 +57,13 @@ export const useCodex = (sessionId, user, session = null) => {
       const [contactsRes, factionsRes, lorebookRes, questsRes, encyclopediaRes] = await Promise.allSettled(requests);
 
       if (contactsRes.status === 'fulfilled') {
-        setContacts(contactsRes.value.contacts || []);
+        const contactsData = contactsRes.value || {};
+        setContacts(contactsData.contacts || []);
+        if (contactsData?.acquaintances) {
+          setAcquaintances(contactsData.acquaintances);
+        } else {
+          setAcquaintances([]);
+        }
       }
       if (factionsRes.status === 'fulfilled') {
         const fData = factionsRes.value || {};
@@ -277,6 +288,7 @@ export const useCodex = (sessionId, user, session = null) => {
 
   return {
     contacts,
+    acquaintances,
     factions,
     agentDossier,
     factionMembership,

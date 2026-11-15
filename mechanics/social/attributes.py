@@ -26,16 +26,18 @@ import character_data as cd
 def calculate_combat_attributes(
     character: Dict[str, Any],
     equipped_items: Optional[List[Dict[str, Any]]] = None,
-    scenario: Optional[str] = None
+    scenario: Optional[str] = None,
+    allow_non_combat: bool = False,
 ) -> Dict[str, Any]:
     """
     Computes base combat attributes dynamically from a character's SPECIAL stats
     and any equipped gear modifiers.
-    If the character's scenario is non-combat, returns 0 values with is_non_combat=True.
+    If the character's scenario is non-combat, returns 0 values with is_non_combat=True
+    unless allow_non_combat=True (active combat/brawl resolution).
     """
     from scenario_data import is_non_combat_scenario
     scen = scenario or character.get("scenario")
-    if scen and is_non_combat_scenario(scen):
+    if not allow_non_combat and scen and is_non_combat_scenario(scen):
         return {
             "atk": 0, "matk": 0,
             "acc": 0, "macc": 0, "eva": 0, "block_chance": 0,
@@ -269,7 +271,12 @@ def calculate_combat_attributes(
     buff_dr = 0.0
     status_effects = character.get("status_effects") or []
     for eff in status_effects:
-        eff_str = str(eff).strip()
+        if isinstance(eff, dict):
+            eff_str = str((eff.get("metadata") or {}).get("raw_tag") or eff.get("name") or "").strip()
+        else:
+            eff_str = str(eff).strip()
+        if not eff_str:
+            continue
         eff_lower = eff_str.lower()
 
         # Parse positive DT buff: "Iron Skin [+8 DT] [3 turns]" or "[4 DT]"

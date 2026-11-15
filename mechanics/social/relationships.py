@@ -5,6 +5,7 @@ Modular Relationship Engine for Hikayat.
 Handles -100 to +100 relationship score calculations, tier lookup across genres,
 platonic vs romantic track branching, progressive trait disclosure, and skill check modifiers.
 """
+import inspect
 import json
 import math
 import re
@@ -55,6 +56,8 @@ def is_contact_eligible(
     grade: str = "",
     age_group: str = "",
     is_adult_family: bool = False,
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
 ) -> bool:
     """
     Determines whether an NPC is eligible to be registered in the player's Contacts / Directory
@@ -96,19 +99,25 @@ def is_contact_eligible(
     role_low_chk = str(role or "").strip().lower()
     if any(k in role_low_chk for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
         return False
-    if session_id and name:
+    import scenario_data
+    if (session_id or preloaded_session) and name:
         try:
-            import db as _db_rel
-            sess_chk = _db_rel.get_session(int(session_id))
+            sess_chk = preloaded_session
+            if sess_chk is None and not skip_session_lookup and session_id:
+                import db as _db_rel
+                sess_chk = _db_rel.get_session(int(session_id))
             if isinstance(sess_chk, dict):
-                from mechanics.world.anomalous_events import (
-                    is_anomalous_scene_entity,
-                    _resolve_active_non_hostile_anomaly_context,
-                )
-                if is_anomalous_scene_entity(name, session=sess_chk):
-                    return False
-                if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
-                    return False
+                eff_scen = str(sess_chk.get("scenario") or scenario or "fantasy")
+                if scenario_data.is_anomalous_incursions_scenario(eff_scen):
+                    from mechanics.world.anomalous_events import (
+                        is_anomalous_scene_entity,
+                        _resolve_active_non_hostile_anomaly_context,
+                    )
+                    if is_anomalous_scene_entity(name, session=sess_chk):
+                        return False
+                    if not skip_session_lookup and session_id:
+                        if _resolve_active_non_hostile_anomaly_context(int(session_id), session=sess_chk, entity_name=str(name)):
+                            return False
         except Exception:
             pass
 
@@ -116,7 +125,6 @@ def is_contact_eligible(
     if namegen.is_collective_entity_name(name) or namegen.is_generic_role_name(name):
         return False
 
-    import scenario_data
     if scenario_data.is_anomalous_high_school_scenario(scenario):
         from mechanics.social.roster_tags import derive_age_group, is_anomalous_high_school_contact_eligible
         from mechanics.social.origin_mode import is_student_operative
@@ -125,10 +133,13 @@ def is_contact_eligible(
         player_age_grp = "teen"
         if isinstance(raw_entity_dict, dict) and raw_entity_dict.get("player_age_group"):
             player_age_grp = str(raw_entity_dict.get("player_age_group")).strip().lower()
-        elif session_id:
+        elif preloaded_session is not None or (session_id and not skip_session_lookup):
             try:
-                import db as _db_ahs
-                sess_ahs = _db_ahs.get_session(int(session_id)) or {}
+                if preloaded_session is not None:
+                    sess_ahs = preloaded_session or {}
+                else:
+                    import db as _db_ahs
+                    sess_ahs = _db_ahs.get_session(int(session_id)) or {}
                 player_age_grp = "teen" if is_student_operative(sess_ahs) else "adult"
             except Exception:
                 player_age_grp = "teen"
@@ -141,7 +152,7 @@ def is_contact_eligible(
             "social_role_type": social_role_type,
             "age_group": age_group,
         }
-        if session_id and name and (not role or not grade):
+        if session_id and name and not skip_session_lookup and (not role or not grade):
             try:
                 import db as _db_ahs2
                 for r_entry in (_db_ahs2.get_school_roster(int(session_id)) or []):
@@ -155,10 +166,26 @@ def is_contact_eligible(
             except Exception:
                 pass
 
+        _ar_pre = None
+        if isinstance(preloaded_session, dict):
+            _raw_ar = preloaded_session.get("anomalous_agent_roster") or (
+                preloaded_session.get("extra", {}).get("anomalous_agent_roster")
+                if isinstance(preloaded_session.get("extra"), dict)
+                else None
+            )
+            if isinstance(_raw_ar, list):
+                _ar_pre = [a for a in _raw_ar if isinstance(a, dict)]
         npc_is_agent = bool(
             probe_ent.get("is_special_agent")
             or (probe_ent.get("basic_info") or {}).get("is_special_agent")
-            or classify_anomalous_npc_tag(probe_ent, session_id=int(session_id or 0), scen_key=scenario) == TAG_SPECIAL_AGENT
+            or classify_anomalous_npc_tag(
+                probe_ent,
+                session_id=int(session_id or 0),
+                scen_key=scenario,
+                read_only=skip_session_lookup,
+                preloaded_agent_roster=_ar_pre,
+                preloaded_session=preloaded_session,
+            ) == TAG_SPECIAL_AGENT
         )
         npc_age_grp = str(age_group or "").strip().lower()
         if npc_age_grp not in ("teen", "adult"):
@@ -227,10 +254,13 @@ def is_contact_eligible(
         # Look up grade/role/social_role_type from session, contacts, or school_directory if empty
         club = ""
         is_existing_contact = False
-        if session_id:
+        if preloaded_session is not None or (session_id and not skip_session_lookup):
             try:
-                import db
-                sess = db.get_session(session_id)
+                if preloaded_session is not None:
+                    sess = preloaded_session
+                else:
+                    import db
+                    sess = db.get_session(session_id)
                 if sess:
                     for n in (sess.get("current_npcs") or []):
                         if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == str(name).strip().lower():
@@ -246,34 +276,36 @@ def is_contact_eligible(
                                 if srt_low in ("student_peer", "peer", "contemporary"):
                                     return True
                             break
-                c = db.get_contact(session_id, name)
-                if c:
-                    is_existing_contact = True
-                    b_inf = c.get("basic_info", {}) or {}
-                    role = role or b_inf.get("role", "")
-                    description = description or b_inf.get("description", "")
-                    grade = grade or b_inf.get("grade", "")
-                    club = club or b_inf.get("club", "")
-                    srt = b_inf.get("social_role_type")
-                    if srt:
-                        srt_low = str(srt).lower().strip()
-                        if srt_low in ("faculty_staff", "adult_service"):
-                            return False
-                        if srt_low in ("student_peer", "peer", "contemporary"):
-                            return True
-                if not grade or (not role and not description):
-                    roster = db.get_school_roster(session_id)
-                    for r_entry in (roster or []):
-                        if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
-                            role = role or r_entry.get("role", "")
-                            description = description or r_entry.get("personality_summary", "")
-                            grade = grade or r_entry.get("grade", "")
-                            club = club or r_entry.get("club", "")
-                            break
-                if not role and not description:
-                    lore = db.get_lorebook_entity(session_id, name)
-                    if lore:
-                        description = lore.get("description", "")
+                if session_id and not skip_session_lookup:
+                    import db
+                    c = db.get_contact(session_id, name)
+                    if c:
+                        is_existing_contact = True
+                        b_inf = c.get("basic_info", {}) or {}
+                        role = role or b_inf.get("role", "")
+                        description = description or b_inf.get("description", "")
+                        grade = grade or b_inf.get("grade", "")
+                        club = club or b_inf.get("club", "")
+                        srt = b_inf.get("social_role_type")
+                        if srt:
+                            srt_low = str(srt).lower().strip()
+                            if srt_low in ("faculty_staff", "adult_service"):
+                                return False
+                            if srt_low in ("student_peer", "peer", "contemporary"):
+                                return True
+                    if not grade or (not role and not description):
+                        roster = db.get_school_roster(session_id)
+                        for r_entry in (roster or []):
+                            if str(r_entry.get("name", "")).strip().lower() == str(name).strip().lower():
+                                role = role or r_entry.get("role", "")
+                                description = description or r_entry.get("personality_summary", "")
+                                grade = grade or r_entry.get("grade", "")
+                                club = club or r_entry.get("club", "")
+                                break
+                    if not role and not description:
+                        lore = db.get_lorebook_entity(session_id, name)
+                        if lore:
+                            description = lore.get("description", "")
             except Exception:
                 pass
 
@@ -1199,28 +1231,52 @@ def is_unmet_preseeded_special_agent(
     return True
 
 
-def is_unlocked_contact(
-    contact: dict,
-    party_names: set[str] = None,
-    met_in_story_names: Optional[Set[str]] = None,
-    include_party: bool = False,
-) -> bool:
-    """
-    Determines whether a contact record is eligible to be displayed in the player's
-    personal Contacts List (Sidebar Contacts tab and Smartphone Messenger).
+def _parse_contact_relations(contact: dict) -> dict:
+    raw = contact.get("relations")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
 
-    Strict 3-Way Rule:
-      1. Player succeeded an in-person phone_contact_exchange skill check (exchanged_contact: True), OR
-      2. Player succeeded a PeerPulse social media friend request (added_via_peerpulse: True), OR
-      3. Character reached Friend tier (relationship_score >= 100, or previously unlocked_via_friendship: True).
-    Note: < 100 affinity hired/requisitioned Party Companions do NOT automatically become personal Contacts,
-    and synthetic dispatch broadcast channels are excluded.
-    """
-    if not contact or not isinstance(contact, dict):
+
+def is_promoted_family_or_cohabitant(contact: dict, b_info: dict | None = None) -> bool:
+    """Public check for promoted family / household cohabitant exemptions."""
+    if not isinstance(contact, dict):
         return False
-    b_info = _parse_contact_basic_info(contact)
+    eff_b_info = b_info if isinstance(b_info, dict) else _parse_contact_basic_info(contact)
+    return _is_promoted_family_or_cohabitant(contact, eff_b_info)
+
+
+def _is_promoted_family_or_cohabitant(contact: dict, b_info: dict) -> bool:
+    promo_reason = str(contact.get("promotion_reason") or b_info.get("promotion_reason") or "").strip().lower()
+    if promo_reason == "family":
+        return True
+    # Note: contacts.household_role defaults to 'child' in SQLite, so never treat bare 'child' as promoted family,
+    # and check basic_info.household_role even when the DB column defaulted to 'child'.
+    _promoted_hh_roles = ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife")
+    hh_roles = {
+        str(contact.get("household_role") or "").strip().lower(),
+        str(b_info.get("household_role") or "").strip().lower(),
+    }
+    if hh_roles & set(_promoted_hh_roles):
+        return True
+    if b_info.get("is_adult_family") or b_info.get("cohabiting_family") is True:
+        return True
+    rels = _parse_contact_relations(contact)
+    if rels.get("cohabiting_family") is True:
+        return True
+    return False
+
+
+def _is_non_personal_contact_entity(contact: dict, b_info: dict) -> bool:
     if contact.get("is_dispatch_channel") or b_info.get("is_dispatch_channel"):
-        return False
+        return True
     if (
         contact.get("is_anomalous_entity")
         or b_info.get("is_anomalous_entity")
@@ -1229,6 +1285,118 @@ def is_unlocked_contact(
         or str(contact.get("npc_type") or b_info.get("npc_type") or "").lower() == "anomaly"
         or str(contact.get("social_role_type") or b_info.get("social_role_type") or "").lower() == "anomaly"
     ):
+        return True
+    return False
+
+
+def should_promote_roster_npc_to_contact(
+    npc: dict | None = None,
+    *,
+    affinity: int | None = None,
+    affinity_score: int | None = None,
+    exchanged_contact: bool | None = None,
+    added_via_peerpulse: bool | None = None,
+    has_quest_link: bool = False,
+    in_party: bool = False,
+    is_family: bool = False,
+    scenario: str = "fantasy",
+    session_id: int | None = None,
+) -> tuple[bool, str]:
+    """
+    Deterministic Step 1 -> Step 2 promotion threshold from `world_roster` into `contacts`.
+    Returns `(should_promote, reason)`.
+    """
+    npc_dict = npc if isinstance(npc, dict) else {}
+    b_info = _parse_contact_basic_info(npc_dict)
+    if npc_dict and _is_non_personal_contact_entity(npc_dict, b_info):
+        return (False, "")
+
+    eff_family = bool(
+        is_family
+        or _is_promoted_family_or_cohabitant(npc_dict, b_info)
+        or npc_dict.get("is_promoted_parent")
+        or b_info.get("is_promoted_parent")
+    )
+    if eff_family:
+        return (True, "family")
+
+    eff_scen = str(scenario or npc_dict.get("scenario") or b_info.get("scenario") or "fantasy")
+    eff_sess = int(session_id if session_id is not None else (npc_dict.get("session_id") or 0))
+    if not is_contact_eligible(
+        npc_dict if npc_dict.get("name") else str(npc_dict.get("name") or ""),
+        role=str(npc_dict.get("role") or b_info.get("role") or ""),
+        description=str(npc_dict.get("description") or b_info.get("description") or ""),
+        scenario=eff_scen,
+        session_id=eff_sess,
+        social_role_type=str(npc_dict.get("social_role_type") or b_info.get("social_role_type") or ""),
+        grade=str(npc_dict.get("grade") or b_info.get("grade") or ""),
+        age_group=str(npc_dict.get("age_group") or b_info.get("age_group") or ""),
+    ):
+        return (False, "")
+
+    if in_party:
+        return (True, "party")
+
+    eff_exchanged = (
+        bool(exchanged_contact)
+        if exchanged_contact is not None
+        else bool(npc_dict.get("exchanged_contact") or b_info.get("exchanged_contact") or npc_dict.get("has_contact_info") is True or b_info.get("has_contact_info") is True)
+    )
+    if eff_exchanged:
+        return (True, "exchanged_contact")
+
+    eff_peerpulse = (
+        bool(added_via_peerpulse)
+        if added_via_peerpulse is not None
+        else bool(npc_dict.get("added_via_peerpulse") or b_info.get("added_via_peerpulse"))
+    )
+    if eff_peerpulse:
+        return (True, "peerpulse")
+
+    if has_quest_link or bool(npc_dict.get("has_quest_link") or b_info.get("has_quest_link")):
+        return (True, "quest_link")
+
+    explicit_aff = affinity_score if affinity_score is not None else affinity
+    if explicit_aff is not None:
+        eff_aff = int(explicit_aff or 0)
+    else:
+        raw_aff = npc_dict.get("affinity_score")
+        if raw_aff is None:
+            raw_aff = npc_dict.get("relationship_score", 0)
+        eff_aff = int(raw_aff or 0)
+
+    if eff_aff >= 15:
+        return (True, "affinity_positive_15")
+    if eff_aff <= -10:
+        return (True, "affinity_hostile_10")
+    return (False, "")
+
+
+def is_unlocked_contact(
+    contact: dict,
+    party_names: set[str] = None,
+    met_in_story_names: Optional[Set[str]] = None,
+    include_party: bool = False,
+    *,
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
+) -> bool:
+    """
+    Determines whether a contact record is eligible to be displayed in the player's
+    personal Contacts List (Sidebar Contacts tab and World Codex Contacts).
+
+    Visible when:
+      1. Player succeeded in-person phone exchange (`exchanged_contact: True`), PeerPulse (`added_via_peerpulse: True`),
+         or reached Friend tier (`relationship_score >= 100` / `unlocked_via_friendship: True`), OR
+      2. NPC passed the 3-step promotion threshold (`promoted_from_roster_turn is not None`) and is contact-eligible
+         or promoted family.
+    Legacy unpromoted rows (`promoted_from_roster_turn is None`) with < 100 affinity and no exchange/PeerPulse
+    flags keep the legacy contract unless `contact_added` / `is_contact` was explicitly granted on non-special-agents.
+    """
+    if not contact or not isinstance(contact, dict):
+        return False
+    b_info = _parse_contact_basic_info(contact)
+    if _is_non_personal_contact_entity(contact, b_info):
         return False
     if include_party and party_names:
         c_nm = str(contact.get("name") or "").strip().lower()
@@ -1246,6 +1414,25 @@ def is_unlocked_contact(
         return False
     if is_unmet_preseeded_special_agent(contact, met_in_story_names=met_in_story_names, party_names=party_names):
         return False
+
+    promoted_turn = contact.get("promoted_from_roster_turn")
+    if promoted_turn is None:
+        promoted_turn = b_info.get("promoted_from_roster_turn")
+    if promoted_turn is not None:
+        if _is_promoted_family_or_cohabitant(contact, b_info):
+            return True
+        scen_val = str(contact.get("scenario") or b_info.get("scenario") or "fantasy")
+        sess_val = int(contact.get("session_id") or 0)
+        return bool(
+            is_contact_eligible(
+                contact,
+                scenario=scen_val,
+                session_id=(0 if skip_session_lookup else sess_val),
+                preloaded_session=preloaded_session,
+                skip_session_lookup=skip_session_lookup,
+            )
+        )
+
     is_special_agent = bool(
         b_info.get("is_special_agent")
         or contact.get("is_special_agent")
@@ -1258,6 +1445,86 @@ def is_unlocked_contact(
     if b_info.get("contact_added") or b_info.get("is_contact") or contact.get("contact_added"):
         return True
     return False
+
+
+def can_player_dm_contact(
+    contact: dict | None,
+    party_names: set[str] | None = None,
+    *,
+    scenario: str = "fantasy",
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    skip_session_lookup: bool = False,
+) -> bool:
+    """
+    Step 3 Messaging Gate: determines whether the player has unlocked two-way phone/DM
+    messaging with an NPC (`has_contact_info=True`, contact exchange, PeerPulse connection,
+    Friend >= 100, active party companion, or verified immediate family / household cohabitant).
+    Requires an eligible, non-deceased, non-dispatch, non-blocked contact.
+    """
+    if not contact or not isinstance(contact, dict):
+        return False
+    b_info = _parse_contact_basic_info(contact)
+    if _is_non_personal_contact_entity(contact, b_info):
+        return False
+    if contact.get("deceased") or b_info.get("deceased"):
+        return False
+    if is_contact_blocked(contact):
+        return False
+
+    is_family = _is_promoted_family_or_cohabitant(contact, b_info)
+    c_nm = str(contact.get("name") or "").strip().lower()
+    in_party = bool(party_names and c_nm and c_nm in {str(p).strip().lower() for p in party_names})
+    eff_scen = str(scenario or contact.get("scenario") or b_info.get("scenario") or "fantasy")
+    sess_val = int(contact.get("session_id") or 0)
+    if not is_family and not in_party:
+        if not is_contact_eligible(
+            contact,
+            scenario=eff_scen,
+            session_id=(0 if skip_session_lookup else sess_val),
+            preloaded_session=preloaded_session,
+            skip_session_lookup=skip_session_lookup,
+        ):
+            return False
+
+    score = int(contact.get("relationship_score", 0) or 0)
+    if "has_contact_info" in contact:
+        raw_hci = contact.get("has_contact_info")
+    else:
+        raw_hci = b_info.get("has_contact_info")
+
+    if (
+        raw_hci is True
+        or bool(b_info.get("exchanged_contact"))
+        or bool(b_info.get("added_via_peerpulse"))
+        or bool(b_info.get("unlocked_via_friendship"))
+        or score >= 100
+        or in_party
+        or is_family
+    ):
+        if b_info.get("offscreen_ripple_only") and not b_info.get("met_in_person"):
+            return False
+        return True
+
+    promoted_turn = contact.get("promoted_from_roster_turn")
+    if promoted_turn is None:
+        promoted_turn = b_info.get("promoted_from_roster_turn")
+    if promoted_turn is not None:
+        # Step 2 promoted NPC (e.g. affinity >= 15, <= -10, or quest_link) still requires
+        # contact exchange, PeerPulse acceptance, or Friend >= 100 before DMing.
+        return False
+
+    if raw_hci is False:
+        return False
+
+    return bool(
+        is_unlocked_contact(
+            contact,
+            party_names,
+            include_party=bool(party_names),
+            preloaded_session=preloaded_session,
+            skip_session_lookup=skip_session_lookup,
+        )
+    )
 
 
 def is_npc_discovered_by_player(
@@ -1576,6 +1843,12 @@ def enrich_contact_dossier(
     party_npc_keys: set[str] | None = None,
     kin_npc_keys: set[str] | None = None,
     romantic_npc_keys: set[str] | None = None,
+    *,
+    read_only: bool = False,
+    preloaded_party_npcs: list[dict] | None = None,
+    preloaded_faction_state: dict | None = None,
+    preloaded_agent_roster: list[dict] | None = None,
+    preloaded_session: dict | None = None,
 ) -> dict:
     """Shared deterministic NPC Contact Dossier enrichment for both Web Codex/Phone and Discord embeds."""
     import mechanics.social.persona
@@ -1659,9 +1932,24 @@ def enrich_contact_dossier(
 
     # 1. Synchronize & format Relations, Romantic Standing, and Family Tree
     try:
-        relations = mechanics.social.genealogy.ensure_contact_relations(
-            c, session_id=session_id, scenario=scen_key
-        )
+        existing_rels = c.get("relations")
+        if (
+            read_only
+            and isinstance(existing_rels, dict)
+            and (existing_rels.get("family") is not None or existing_rels.get("romance") is not None)
+        ):
+            relations = existing_rels
+        else:
+            rel_probe = (
+                {k: v for k, v in c.items() if k not in ("session_id", "character_id")}
+                if read_only
+                else c
+            )
+            relations = mechanics.social.genealogy.ensure_contact_relations(
+                rel_probe,
+                session_id=(0 if read_only else session_id),
+                scenario=scen_key,
+            )
     except Exception:
         relations = c.get("relations") if isinstance(c.get("relations"), dict) else {}
 
@@ -1760,7 +2048,7 @@ def enrich_contact_dossier(
         except Exception:
             past_history = []
 
-    if c.get("id") and past_history and isinstance(c.get("intimate_memories"), list):
+    if not read_only and c.get("id") and past_history and isinstance(c.get("intimate_memories"), list):
         existing_past = [
             str(m).replace("Past History:", "").strip()
             for m in c["intimate_memories"]
@@ -2024,11 +2312,22 @@ def enrich_contact_dossier(
             from mechanics.social.factions import get_anomalous_faction_state
             in_party_companion = False
             comp_level = 1
-            if session_id:
+            c_name_low = str(c_name or "").strip().lower()
+            if preloaded_party_npcs is not None:
+                for p_npc in preloaded_party_npcs:
+                    if str((p_npc or {}).get("name") or "").strip().lower() == c_name_low:
+                        in_party_companion = True
+                        comp_level = max(1, int((p_npc or {}).get("level") or 1))
+                        break
+            elif party_npc_keys is not None and c_name_low:
+                canon_name_key = re.sub(r"[^a-z0-9]+", "_", c_name_low).strip("_")
+                if canon_name_key in party_npc_keys or c_name_low in party_npc_keys:
+                    in_party_companion = True
+            elif session_id and not read_only:
                 try:
-                    import db
-                    for p_npc in (db.get_session_party_npcs(session_id) or []):
-                        if str(p_npc.get("name") or "").strip().lower() == str(c_name or "").strip().lower():
+                    import db as _db_party
+                    for p_npc in (_db_party.get_session_party_npcs(session_id) or []):
+                        if str(p_npc.get("name") or "").strip().lower() == c_name_low:
                             in_party_companion = True
                             comp_level = max(1, int(p_npc.get("level") or 1))
                             break
@@ -2040,6 +2339,9 @@ def enrich_contact_dossier(
                 scen_key=scen_key,
                 player_level=comp_level,
                 is_party_companion=in_party_companion,
+                read_only=read_only,
+                preloaded_agent_roster=preloaded_agent_roster,
+                preloaded_session=preloaded_session,
             )
             c_binfo_mut = dict(c.get("basic_info") or {})
             c_binfo_mut["anomalous_npc_tag"] = anom_prof["anomalous_npc_tag"]
@@ -2068,10 +2370,14 @@ def enrich_contact_dossier(
 
             same_faction_colleague = False
             if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
-                if session_id:
+                if preloaded_faction_state is not None or (session_id and not read_only):
                     try:
-                        p_fstate = get_anomalous_faction_state(session_id)
-                        p_fid = str(p_fstate.get("faction_archetype_key") or "").strip()
+                        p_fstate = (
+                            preloaded_faction_state
+                            if preloaded_faction_state is not None
+                            else get_anomalous_faction_state(session_id)
+                        )
+                        p_fid = str((p_fstate or {}).get("faction_archetype_key") or "").strip()
                         if p_fid and p_fid != "freelancer" and p_fid == anom_prof.get("faction_id"):
                             same_faction_colleague = True
                     except Exception:
@@ -2220,6 +2526,56 @@ def enrich_contact_dossier(
             romantic_npc_keys=romantic_npc_keys,
         )
     return c
+
+
+def safe_get_contacts(
+    session_id: int,
+    character_id: int | None = None,
+    *,
+    resolve_relations: bool | None = None,
+    ensure_scene: bool | None = False,
+) -> list[dict]:
+    """Read contacts safely across full db.get_contacts and 1/2-arg test mocks."""
+    import db
+
+    sid = int(session_id or 0)
+    if sid <= 0:
+        return []
+    fn = db.get_contacts
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        params = {}
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    has_varpos = any(p.kind == inspect.Parameter.VAR_POSITIONAL for p in params.values())
+    kwargs: dict[str, Any] = {}
+    if ensure_scene is not None and (has_varkw or "ensure_scene" in params):
+        kwargs["ensure_scene"] = ensure_scene
+    if resolve_relations is not None and (has_varkw or "resolve_relations" in params):
+        kwargs["resolve_relations"] = resolve_relations
+
+    pos_params = [
+        p for p in params.values()
+        if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    supports_char_id = (
+        character_id is not None
+        and (has_varpos or len(pos_params) >= 2 or "character_id" in params)
+    )
+    try:
+        if supports_char_id:
+            if "character_id" in params or has_varkw:
+                return fn(sid, character_id=character_id, **kwargs) or []
+            return fn(sid, character_id, **kwargs) or []
+        return fn(sid, **kwargs) or []
+    except TypeError:
+        try:
+            if character_id is not None:
+                return fn(sid, character_id) or []
+        except TypeError:
+            pass
+        return fn(sid) or []
+
 
 
 

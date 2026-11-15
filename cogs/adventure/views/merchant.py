@@ -9,6 +9,7 @@ import discord
 import db
 from db import adb
 from .base import SessionRestrictedView
+from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (
     MERCHANT_ARCHETYPES,
     compute_effective_shop_item_price,
@@ -114,6 +115,26 @@ async def handle_talk_to_merchant(cog: "AdventureCog", session_id: int, interact
 
     scen_key = session.get("scenario", "fantasy")
     current_loc = session.get("current_location", "")
+    merchant_state = session.get("merchant") or {}
+    if not bool(merchant_state.get("is_phone_shop")) and not bool(merchant_state.get("is_faction_quartermaster")):
+        shop_avail = await adb(
+            evaluate_shop_staff_availability,
+            session_id,
+            location_str=current_loc,
+            merchant_type="",
+            is_phone_shop=False,
+            scen_key=scen_key,
+            current_day=session.get("current_day"),
+            current_minute=session.get("current_minute"),
+            turn_number=int(session.get("turn_count") or 0),
+        )
+        if not shop_avail.get("available"):
+            await interaction.response.send_message(
+                f"🚪 {shop_avail.get('reason_message') or 'This shop is currently closed.'}",
+                ephemeral=True,
+            )
+            return
+
     from mechanics.world.locations import get_available_merchant_types_for_location
     available_stores = get_available_merchant_types_for_location(current_loc, scen_key=scen_key)
 

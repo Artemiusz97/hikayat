@@ -414,4 +414,30 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
                             if s_loc_m:
                                 _register_location_marker(s_loc_m, tag)
 
+    # Mark unclaimed Bonus Leads (bonus=True) left behind on earlier completed/bypassed stages of active quests
+    active_quests_map = {
+        str(q.get("quest_id") or ""): str(q.get("title") or "Quest")
+        for q in (db.get_session_quests(session_id, status="Active") or [])
+        if q.get("quest_id")
+    }
+    for dos_b in (db.get_session_quest_dossiers(session_id, status_stage="compiled") or []):
+        b_qid = str(dos_b.get("quest_id") or "")
+        if b_qid not in active_quests_map:
+            continue
+        b_title = active_quests_map[b_qid]
+        for ms_b in ((dos_b.get("climax_spec") or {}).get("main_stages") or []):
+            if not isinstance(ms_b, dict):
+                continue
+            ms_stat_b = str(ms_b.get("status") or "").lower()
+            if not (ms_b.get("completed") or ms_stat_b in ("completed", "bypassed")):
+                continue
+            for src_b in (ms_b.get("clue_sources") or []):
+                if not isinstance(src_b, dict) or not src_b.get("bonus"):
+                    continue
+                if str(src_b.get("status") or "").lower() in ("closed", "open"):
+                    b_loc = str(src_b.get("location") or "").strip()
+                    if b_loc:
+                        b_hint = str(src_b.get("approach_hint") or src_b.get("label") or b_title).strip()
+                        _register_location_marker(b_loc, f"⭐ [Bonus Lead] {b_hint}")
+
     return markers

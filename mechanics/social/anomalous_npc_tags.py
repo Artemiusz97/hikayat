@@ -109,6 +109,10 @@ def classify_anomalous_npc_tag(
     contact_record: Any = _UNSET,
     lore_record: Any = _UNSET,
     agent_roster_names: Optional[set[str]] = None,
+    *,
+    read_only: bool = False,
+    preloaded_agent_roster: Optional[List[Dict[str, Any]]] = None,
+    preloaded_session: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Deterministically classifies an NPC in Anomalous Incursions as either
@@ -154,7 +158,13 @@ def classify_anomalous_npc_tag(
         from mechanics.social.folklore_roster import get_folklore_villager_spec, npc_is_folklore_villager
         if npc_is_folklore_villager(ent_dict):
             return TAG_FOLKLORE_VILLAGER
-        if session_id and name and get_folklore_villager_spec(session_id, name, persist_db=False):
+        if session_id and name and get_folklore_villager_spec(
+            session_id,
+            name,
+            session=preloaded_session,
+            persist_db=False,
+            read_only=read_only,
+        ):
             return TAG_FOLKLORE_VILLAGER
     except Exception:
         pass
@@ -165,11 +175,24 @@ def classify_anomalous_npc_tag(
         return TAG_CIVILIAN
 
     # 2. Check 44 Pre-Seeded Special Agents Roster + Persisted DB Contact / Lorebook
-    if (session_id or contact_record is not _UNSET or lore_record is not _UNSET or agent_roster_names is not None) and name:
-        if agent_roster_names is not None:
+    if (
+        session_id
+        or contact_record is not _UNSET
+        or lore_record is not _UNSET
+        or agent_roster_names is not None
+        or preloaded_agent_roster is not None
+    ) and name:
+        if preloaded_agent_roster is not None:
+            try:
+                from mechanics.social.agent_roster import match_special_agent_in_roster
+                if match_special_agent_in_roster(preloaded_agent_roster, name):
+                    return TAG_SPECIAL_AGENT
+            except Exception:
+                pass
+        elif agent_roster_names is not None:
             if name.lower() in agent_roster_names:
                 return TAG_SPECIAL_AGENT
-        elif session_id:
+        elif session_id and not read_only:
             try:
                 from mechanics.social.agent_roster import find_special_agent_by_name
                 if find_special_agent_by_name(session_id, name, scen_key=scen_key):
@@ -180,10 +203,10 @@ def classify_anomalous_npc_tag(
         try:
             if contact_record is not _UNSET:
                 c_rec = contact_record if isinstance(contact_record, dict) else None
-            elif session_id:
+            elif session_id and not read_only:
                 c_rec = db.get_contact(session_id, name)
                 if not isinstance(c_rec, dict):
-                    for cand in (db.get_contacts(session_id) or []):
+                    for cand in (db.get_contacts(session_id, resolve_relations=False, ensure_scene=False) or []):
                         if isinstance(cand, dict) and str(cand.get("name") or "").strip().lower() == name.lower():
                             c_rec = cand
                             break
@@ -211,7 +234,7 @@ def classify_anomalous_npc_tag(
         try:
             if lore_record is not _UNSET:
                 lore_ent = lore_record if isinstance(lore_record, dict) else None
-            elif session_id:
+            elif session_id and not read_only:
                 lore_ent = db.get_lorebook_entity(session_id, name)
             else:
                 lore_ent = None
@@ -689,6 +712,12 @@ def hydrate_anomalous_npc_profile(
     scen_key: str = "anomalous_incursions",
     player_level: int = 1,
     is_party_companion: bool = False,
+    *,
+    read_only: bool = False,
+    preloaded_agent_roster: Optional[List[Dict[str, Any]]] = None,
+    preloaded_session: Optional[Dict[str, Any]] = None,
+    contact_record: Any = _UNSET,
+    lore_record: Any = _UNSET,
 ) -> Dict[str, Any]:
     """
     Produces a complete normalized profile for any NPC in Anomalous Incursions,
@@ -696,7 +725,16 @@ def hydrate_anomalous_npc_profile(
     """
     name = str(entity.get("name") or entity.get("title") or "Unknown").strip()
     basic = _extract_basic_info(entity)
-    tag = classify_anomalous_npc_tag(entity, session_id=session_id, scen_key=scen_key)
+    tag = classify_anomalous_npc_tag(
+        entity,
+        session_id=session_id,
+        scen_key=scen_key,
+        contact_record=contact_record,
+        lore_record=lore_record,
+        read_only=read_only,
+        preloaded_agent_roster=preloaded_agent_roster,
+        preloaded_session=preloaded_session,
+    )
     role_text = str(
         entity.get("role")
         or entity.get("occupation")
@@ -707,7 +745,17 @@ def hydrate_anomalous_npc_profile(
 
     if tag == TAG_FOLKLORE_VILLAGER:
         from mechanics.social.folklore_roster import get_folklore_villager_spec, is_myobu_fox_race
-        fk_spec = (get_folklore_villager_spec(session_id, name, persist_db=False) if (session_id and name) else None) or {}
+        fk_spec = (
+            get_folklore_villager_spec(
+                session_id,
+                name,
+                session=preloaded_session,
+                persist_db=False,
+                read_only=read_only,
+            )
+            if (session_id and name)
+            else None
+        ) or {}
         fk_tier = int(entity.get("agent_tier") or basic.get("agent_tier") or fk_spec.get("agent_tier") or 3)
         fk_village = str(
             entity.get("folklore_village")
@@ -781,12 +829,19 @@ def hydrate_anomalous_npc_profile(
 
     if tag == TAG_SPECIAL_AGENT:
         sp_agent = None
-        if session_id and name:
-            try:
-                from mechanics.social.agent_roster import find_special_agent_by_name
-                sp_agent = find_special_agent_by_name(session_id, name, scen_key=scen_key)
-            except Exception:
-                sp_agent = None
+        if name:
+            if preloaded_agent_roster is not None:
+                try:
+                    from mechanics.social.agent_roster import match_special_agent_in_roster
+                    sp_agent = match_special_agent_in_roster(preloaded_agent_roster, name)
+                except Exception:
+                    sp_agent = None
+            elif session_id and not read_only:
+                try:
+                    from mechanics.social.agent_roster import find_special_agent_by_name
+                    sp_agent = find_special_agent_by_name(session_id, name, scen_key=scen_key)
+                except Exception:
+                    sp_agent = None
 
         seed_val = _stable_hash(f"{session_id}:{name.lower()}")
         inf_fid, inf_fname, inf_cls, inf_tier = _infer_emergent_agent_faction_and_class(

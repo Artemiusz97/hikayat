@@ -91,7 +91,15 @@
     "resolved": "已结算",
     "waiting_party": "等待队友行动...",
     "locked_in": "已就绪",
-    "submitting": "结算回合中..."
+    "submitting": "结算回合中...",
+    "charging_skill": "蓄力中",
+    "stagger_label": "失衡度",
+    "stagger_breaking": "即将破防！",
+    "aggro_label": "仇恨",
+    "taunted_label": "被嘲讽",
+    "companion_kit": "战斗技能组",
+    "kit_ready": "就绪",
+    "kit_cd": "冷却"
   },
   "inventory": {
     "all": "全部物品",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 合成重大突破",
     "deduce_single_clue": "🔮 单一线索推理",
     "main_objective": "核心主目标",
+    "primary_operation": "核心行动",
     "peak_chapter": "高潮大场面",
     "aid_secured": "支援已生效",
     "bypass_active": "捷径已开启",
@@ -270,7 +279,13 @@
     "source_burned": "已失手",
     "source_cold": "已中断",
     "source_claimed": "已获取",
-    "source_bonus": "额外线索"
+    "source_bonus": "额外线索",
+    "corroboration_confirmed": "线索已印证",
+    "partial_corroboration_hint": "两项关键线索相互印证。请将其中一项与支线或额外线索配对，即可触发重大突破。",
+    "clue_tier_key": "关键线索",
+    "clue_tier_corroborating": "佐证线索",
+    "off_hours_trace": "非营业时间勘查 (+2 DC)",
+    "threat_pushed_back": "威胁已延缓 (-1)"
   },
   "quest": {
     "threat_clock": {
@@ -518,7 +533,21 @@
     "turn_number": "第 {{number}} 回合",
     "latest_outcome": "最新结算 • 第 {{number}} 回合",
     "excitement": "兴奋度",
-    "uncanny_stranger": "诡异陌生人"
+    "uncanny_stranger": "诡异陌生人",
+    "activity_prefix": "当前动作",
+    "visible_tell_prefix": "外显破绽",
+    "epistemic_watch": "秘密风声监控",
+    "leak_risk_low": "泄密风险：低",
+    "leak_risk_moderate": "泄密风险：中等",
+    "leak_risk_medium": "泄密风险：中",
+    "leak_risk_high": "泄密风险：高",
+    "leak_risk_critical": "泄密风险：危急",
+    "join_activity_btn": "加入活动",
+    "spotted_you_badge": "已目击你",
+    "spotted_witnesses": "已察觉目击者",
+    "known_witnesses": "已知目击者",
+    "active_alibis": "有效不在场证明",
+    "held_secrets": "掌握的把柄"
   },
   "conditions": {
     "aroused": "动情",
@@ -887,7 +916,20 @@
     "preferred_likes": "钟爱偏好",
     "aversions_dislikes": "排斥反感",
     "virgin_history": "• 处子之身（在与你相识前没有任何亲密经历）",
-    "romantic_milestones": "共同情爱里程碑"
+    "romantic_milestones": "共同情爱里程碑",
+    "tab_contacts": "联系人",
+    "tab_acquaintances": "点头之交",
+    "acquaintances_count": "已结识 {{count}} 位",
+    "no_acquaintances": "尚未结识任何点头之交。",
+    "acquaintances_hint": "你曾短暂照面或交谈的角色会显示在这里，待羁绊加深后即可升入已保存联系人。",
+    "acquaintance_badge": "初识",
+    "promotion_hint": "通过达成 +15 好感、-10 敌对、当面交换联系方式、建立任务关联或邀请入队，即可升入已保存联系人。",
+    "dm_locked_badge": "私信未解锁",
+    "dm_locked_tooltip": "私信功能尚未解锁。请先当面索取联系方式或通过 PeerPulse 建立连接；仅靠好感度无法解锁私信。",
+    "search_acquaintances": "搜索初识人物...",
+    "no_acquaintances_match": "未找到匹配的初识人物。",
+    "background_notes": "📖 背景与备注",
+    "known_traits": "已知特质"
   },
   "phone": {
     "alerts_dispatch": "警报 / 调度通知",
@@ -1273,7 +1315,19 @@
       "rival_sparked": "燃起劲敌意识",
       "cold_shoulder": "冷淡疏远",
       "focus_on_road": "专注于旅途"
-    }
+    },
+    "routine_weekday": "工作日",
+    "routine_weekend": "周末",
+    "routine_blocks": {
+      "morning": "清晨",
+      "lunch": "午间",
+      "afternoon": "午后",
+      "evening": "傍晚",
+      "night": "夜间"
+    },
+    "routine_unlock_hint": "完整周常作息将在好感度达到 40+ 或通过观察、打听对方日程后解锁。",
+    "residence_fog_hint": "私人住所将在达到“友人”（100+）关系或受邀做客后解锁。",
+    "routine_override_today": "今日日程变动"
   },
   "contracts": {
     "nav_label": "契约",

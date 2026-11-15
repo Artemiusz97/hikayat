@@ -223,7 +223,7 @@ class ClueDeductionView(SessionRestrictedView):
 
         async with distributed_session_lock(self.session_id):
             session = await adb(db.get_session, self.session_id)
-            cur_turn = len((session or {}).get("history") or [])
+            cur_turn = int(await adb(db.infer_session_turn, session))
             attempts_map = dict((session or {}).get("deduction_attempts_turn") or {})
             if attempts_map.get(pair_key) == cur_turn:
                 await interaction.response.send_message("⏳ You already attempted to connect this lead or pair this turn. Advance the story or try another lead!", ephemeral=True)
@@ -249,22 +249,33 @@ class ClueDeductionView(SessionRestrictedView):
 
         title = ded_res.get("title") or "Confirmed Trail"
         detail_text = ded_res.get("detail_text") or ""
-        unlock_notes = []
-        if ded_res.get("climax_unlocked"):
-            unlock_notes.append("🔓 **Climax Unlocked:** Hidden culprit / lair revealed!")
-        if ded_res.get("twist_revealed"):
-            unlock_notes.append("⚡ **Twist Uncovered:** New side-switch / blackmail leverage unlocked!")
-        extra_str = ("\n" + "\n".join(unlock_notes)) if unlock_notes else ""
+        if ded_res.get("partial_corroboration"):
+            embed = discord.Embed(
+                title=f"🔎 Corroboration Confirmed: {title}",
+                description=(
+                    f"🧩 **Chapter Trail Strengthened**\n\n"
+                    f"{detail_text}\n\n"
+                    f"*Keep exploring: pair any Key Clue with an Optional or Bonus Lead to trigger a Breakthrough.*"
+                ),
+                color=discord.Color.blue()
+            )
+        else:
+            unlock_notes = []
+            if ded_res.get("climax_unlocked"):
+                unlock_notes.append("🔓 **Climax Unlocked:** Hidden culprit / lair revealed!")
+            if ded_res.get("twist_revealed"):
+                unlock_notes.append("⚡ **Twist Uncovered:** New side-switch / blackmail leverage unlocked!")
+            extra_str = ("\n" + "\n".join(unlock_notes)) if unlock_notes else ""
 
-        embed = discord.Embed(
-            title=f"⚡ Deduction Breakthrough: {title}!",
-            description=(
-                f"🧩 **Corroborated Logic Link Verified**\n\n"
-                f"{detail_text}\n\n"
-                f"🎉 **Reward:** `+{ded_res.get('xp_awarded', 50)} XP` awarded to party!{extra_str}"
-            ),
-            color=discord.Color.gold()
-        )
+            embed = discord.Embed(
+                title=f"⚡ Deduction Breakthrough: {title}!",
+                description=(
+                    f"🧩 **Corroborated Logic Link Verified**\n\n"
+                    f"{detail_text}\n\n"
+                    f"🎉 **Reward:** `+{ded_res.get('xp_awarded', 50)} XP` awarded to party!{extra_str}"
+                ),
+                color=discord.Color.gold()
+            )
         view, _ = await create_quest_log_view_and_embed(self.session_id, tab="Caseboard", custom_embed=embed)
         await interaction.response.edit_message(embed=embed, view=view)
 

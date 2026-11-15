@@ -838,6 +838,90 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             except Exception as _fk_c_err:
                 log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
 
+        if isinstance(outcome, dict) and isinstance(outcome.get("_staged_roster_ops"), dict) and session_id:
+            try:
+                _r_ops = outcome["_staged_roster_ops"]
+                from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
+                from mechanics.world.venue_templates import is_node_staffable
+
+                for _vs in (_r_ops.get("venue_seeds") or []):
+                    if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
+                        continue
+                    _vs_nid = str(_vs["facility_node_id"])
+                    _vs_node = db.get_world_node(session_id, _vs_nid)
+                    _vs_scen = str(_vs.get("scen_key") or "fantasy")
+                    if isinstance(_vs_node, dict) and is_node_staffable(_vs_node, scen_key=_vs_scen):
+                        ensure_venue_staff_seeded(
+                            session_id,
+                            _vs_nid,
+                            scen_key=_vs_scen,
+                            current_day=int(_vs.get("current_day") or 1),
+                            turn_number=int(_vs.get("turn_number") or 1),
+                        )
+                for _rm in (_r_ops.get("roaming_merchants") or []):
+                    if not isinstance(_rm, dict):
+                        continue
+                    ensure_roaming_merchants_seeded(
+                        session_id,
+                        scen_key=str(_rm.get("scen_key") or "fantasy"),
+                        turn_number=int(_rm.get("turn_number") or 1),
+                    )
+
+                for _sf in (_r_ops.get("role_slot_fills") or []):
+                    if not isinstance(_sf, dict) or not _sf.get("facility_node_id"):
+                        continue
+                    _fnid = str(_sf["facility_node_id"])
+                    _fnode = db.get_world_node(session_id, _fnid)
+                    if isinstance(_fnode, dict) and is_node_staffable(_fnode, scen_key=str(_sf.get("scen_key") or "fantasy")):
+                        ensure_venue_staff_seeded(
+                            session_id,
+                            _fnid,
+                            scen_key=str(_sf.get("scen_key") or "fantasy"),
+                            current_day=int(_sf.get("current_day") or 1),
+                            turn_number=int(_sf.get("turn_number") or 0),
+                        )
+                    slot_row = slot_fill_custom_action_role(
+                        session_id,
+                        _fnid,
+                        str(_sf.get("role_title") or ""),
+                        scen_key=str(_sf.get("scen_key") or "fantasy"),
+                        current_day=int(_sf.get("current_day") or 1),
+                        current_minute=int(_sf.get("current_minute") if _sf.get("current_minute") is not None else 480),
+                        turn_number=int(_sf.get("turn_number") or 0),
+                    )
+                    if isinstance(slot_row, dict) and slot_row.get("name"):
+                        db.upsert_lorebook_entity(
+                            session_id=session_id,
+                            entity_type="person",
+                            name=slot_row["name"],
+                            description=str(_sf.get("lorebook_description") or f"{slot_row['name']} encountered nearby."),
+                            disposition="neutral",
+                            gender=str(_sf.get("gender") or slot_row.get("gender") or ""),
+                            appearance=_sf.get("appearance") or slot_row.get("appearance"),
+                            traits=list(_sf.get("traits") or []),
+                        )
+                for _ru in (_r_ops.get("roster_upserts") or []):
+                    if not isinstance(_ru, dict) or not isinstance(_ru.get("roster_payload"), dict):
+                        continue
+                    db.upsert_world_roster_npc(
+                        session_id,
+                        _ru["roster_payload"],
+                        turn_number=int(_ru.get("turn_number") or 0),
+                    )
+                    if _ru.get("name"):
+                        db.upsert_lorebook_entity(
+                            session_id=session_id,
+                            entity_type="person",
+                            name=str(_ru["name"]),
+                            description=str(_ru.get("lorebook_description") or f"{_ru['name']} encountered nearby."),
+                            disposition="neutral",
+                            gender=str(_ru.get("gender") or ""),
+                            appearance=_ru.get("appearance"),
+                            traits=list(_ru.get("traits") or []),
+                        )
+            except Exception as _ro_err:
+                log.warning("Failed committing staged roster ops: %s", _ro_err)
+
         # Commit staged civilian permadeaths from combat outcome inside UnitOfWork (DEF-03)
         if isinstance(outcome, dict) and outcome.get("slain_civilians") and session_id:
             try:
@@ -972,6 +1056,101 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
 
         _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
         _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
+        if not outcome.get("_b17_neutralized"):
+            _b17_killed = list(outcome.get("deceased_characters") or []) + list(outcome.get("dead_enemies") or [])
+            _b17_ko = list(outcome.get("ko_characters") or [])
+            if _b17_killed or _b17_ko:
+                from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                neutralize_witnesses_from_combat_or_skill(
+                    session_id,
+                    defeated_npcs=_b17_ko,
+                    killed_npcs=_b17_killed,
+                    present_witnesses=session.get("npcs") or [],
+                    turn=int(session.get("turn_count") or 0),
+                    location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                    mode="combat",
+                )
+                outcome["_b17_neutralized"] = True
+            elif session_id and actions:
+                _wipe_targets: list[str] = []
+                _wipe_mode = ""
+                for _act in actions:
+                    if not isinstance(_act, dict):
+                        continue
+                    _st_a = str(_act.get("stat") or "NONE").upper()
+                    if not is_check_success(_act.get("check"), default_if_none=(_st_a in ("NONE", "FREE"))):
+                        continue
+                    _sp_id = str(_act.get("spell_id") or "").strip().lower()
+                    _sub_i = str(_act.get("sub_intent") or "").strip().lower()
+                    _lbl_a = str(_act.get("label") or _act.get("action") or "").strip().lower()
+                    _pact_meta = _act.get("_pact_cast_meta") if isinstance(_act.get("_pact_cast_meta"), dict) else {}
+                    _is_pact = bool(_act.get("is_pact_skill") or _sp_id.startswith("pact_") or _pact_meta.get("patron_id"))
+                    _patron_suppresses = False
+                    if _is_pact and _pact_meta.get("patron_id"):
+                        try:
+                            from mechanics.pacts import get_patron_by_id
+                            _pat_obj = get_patron_by_id(str(_pact_meta["patron_id"]), scenario_or_key=scen_key)
+                            _patron_suppresses = bool(((_pat_obj or {}).get("field_utility") or {}).get("suppresses_witness_heat"))
+                        except Exception:
+                            _patron_suppresses = False
+                    _is_skill_wipe = (
+                        _sub_i in ("memory_wipe", "patron_suppress_rumor", "scrub_witness")
+                        or any(
+                            tok in _sp_id or tok in _lbl_a
+                            for tok in (
+                                "obliviate", "memory_wipe", "wipe_memory", "mind_wipe", "memory_burn",
+                                "neural_wipe", "scrub_witness", "forensic_erasure", "lye_fog",
+                                "suppress_rumor", "erase witness", "wipe witness",
+                            )
+                        )
+                    )
+                    if not (_patron_suppresses or _is_skill_wipe):
+                        continue
+                    _wipe_mode = "pact" if (_is_pact or _patron_suppresses or _sub_i == "patron_suppress_rumor") else "skill"
+                    _tgt_w = str(_act.get("target_npc") or "").strip().lower().replace(" ", "_")
+                    if _tgt_w:
+                        _wipe_targets.append(_tgt_w)
+                    else:
+                        for _sn in (session.get("npcs") or []):
+                            if isinstance(_sn, dict):
+                                _sk = str(_sn.get("person_key") or _sn.get("npc_id") or _sn.get("name") or "").strip().lower().replace(" ", "_")
+                                if _sk:
+                                    _wipe_targets.append(_sk)
+                if _wipe_targets:
+                    from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                    neutralize_witnesses_from_combat_or_skill(
+                        session_id,
+                        defeated_npcs=[],
+                        killed_npcs=list(dict.fromkeys(_wipe_targets)),
+                        present_witnesses=[],
+                        turn=int(session.get("turn_count") or 0),
+                        location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                        mode=_wipe_mode or "skill",
+                    )
+                    outcome["_b17_neutralized"] = True
+        if outcome.get("epistemic_signal"):
+            from mechanics.social.epistemic_engine import resolve_fenced_epistemic_signal
+            _uid = int(session.get("user_id") or 0)
+            _inv = db.get_inventory(_uid) if _uid else []
+            _held_ids = [
+                str(it.get("id") or it.get("item_id") or "")
+                for it in (_inv or [])
+                if isinstance(it, dict) and (it.get("id") or it.get("item_id"))
+            ]
+            _clues = db.get_session_clues(session_id) if session_id else []
+            _clue_ids = [
+                str(cl.get("id") or "")
+                for cl in (_clues or [])
+                if isinstance(cl, dict) and cl.get("id")
+            ]
+            resolve_fenced_epistemic_signal(
+                session_id,
+                outcome["epistemic_signal"],
+                present_npcs=session.get("npcs") or [],
+                held_item_ids=_held_ids,
+                clue_ids=_clue_ids,
+                turn=int(session.get("turn_count") or 0),
+            )
 
         # ── D16 Atomic Commit: Stealth Persistence, Spatial Reset & 100% Escalation ──
         try:

@@ -17,6 +17,56 @@ def _safe_get_contacts(session_id: int, character_id: int = 0, resolve_relations
         return db.get_contacts(session_id, character_id=character_id) or []
 
 
+def _parse_contact_binfo(contact: dict | None) -> dict:
+    if not isinstance(contact, dict):
+        return {}
+    raw = contact.get("basic_info")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _is_blocked_or_deceased_contact(contact: dict | None) -> bool:
+    if not isinstance(contact, dict):
+        return False
+    from mechanics.social.relationships import is_contact_blocked
+    b_info = _parse_contact_binfo(contact)
+    return bool(is_contact_blocked(contact) or contact.get("deceased") or b_info.get("deceased"))
+
+
+def _is_peerpulse_or_dm_connected(
+    contact: dict | None,
+    party_names: set[str] | None = None,
+    *,
+    scenario: str = "",
+) -> bool:
+    """
+    True when a contact is connected for Step-3 DMs/PeerPulse (can_player_dm_contact)
+    or holds explicit DM/PeerPulse provenance. Step-2 promoted contacts without
+    contact info remain False so PeerPulse stays available.
+    """
+    if not isinstance(contact, dict) or _is_blocked_or_deceased_contact(contact):
+        return False
+    from mechanics.social.relationships import can_player_dm_contact
+    b_info = _parse_contact_binfo(contact)
+    eff_scen = str(scenario or contact.get("scenario") or b_info.get("scenario") or "")
+    if can_player_dm_contact(contact, party_names, scenario=eff_scen):
+        return True
+    return bool(
+        int(contact.get("relationship_score", 0) or 0) >= 100
+        or b_info.get("added_via_peerpulse")
+        or b_info.get("exchanged_contact")
+        or b_info.get("unlocked_via_friendship")
+        or b_info.get("has_contact_info") is True
+    )
+
+
 def get_mutual_friends_and_ties(session_id: int, user_id: int, target_dict: dict) -> dict:
     """Calculates mutual contacts, shared clubs, and sibling connections with a target NPC."""
     char = db.get_character(user_id)
@@ -219,13 +269,24 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
         )
 
     contact_npc_id = str(target_rec.get("npc_id") or name).strip().lower().replace(" ", "_").replace(".", "")
-    existing_contact = db.get_contact(session_id, contact_npc_id, character_id=char.get("id", 0)) if char else None
+    existing_contact = (
+        (
+            db.get_contact(session_id, contact_npc_id, character_id=char.get("id", 0))
+            or db.get_contact(session_id, name, character_id=char.get("id", 0))
+        )
+        if char
+        else None
+    )
 
-    # Determine whether they are already an unlocked friend in smartphone Line/DMs
-    from mechanics.social.relationships import is_unlocked_contact
+    # Gate PeerPulse "already connected" on Step-3 DM/PeerPulse readiness, never Step-2 affinity promotion alone.
     party_npcs = db.get_session_party_npcs(session_id)
-    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    is_connected = bool(existing_contact and is_unlocked_contact(existing_contact, party_names))
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+    is_blocked_or_dead = _is_blocked_or_deceased_contact(existing_contact)
+    is_connected = bool(
+        existing_contact
+        and not is_blocked_or_dead
+        and _is_peerpulse_or_dm_connected(existing_contact, party_names, scenario=scen_key)
+    )
 
     # Check cooldown (keyed strictly by npc_id or exact canonical full name to prevent shared-surname / honorific collisions)
     state = db.get_phone_social_state(session_id) or {}
@@ -235,7 +296,11 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
-    turn_count = len(session.get("history", [])) if session else 0
+    turn_count = max(
+        int((session or {}).get("turn_count") or 0),
+        int((s_row or {}).get("turn_count") or 0),
+        len((session or {}).get("history") or []),
+    )
 
     on_cooldown = False
     turns_left = 0
@@ -278,7 +343,9 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
         "personality": desc,
         "is_eligible": is_eligible,
         "is_faculty": not is_eligible,
-        "is_already_contact": is_connected,
+        "is_already_contact": bool(is_connected),
+        "can_dm": bool(is_connected),
+        "is_blocked_or_deceased": bool(is_blocked_or_dead),
         "cooldown_turns_left": turns_left,
         "on_cooldown": on_cooldown,
         "npc_id": contact_npc_id,
@@ -303,7 +370,30 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
             "message": "🔒 **Account Restricted:** Faculty, staff, and adult town accounts cannot be added to student friend circles under Academy digital policy."
         }
 
-    if profile.get("is_already_contact"):
+    existing_live = (
+        (
+            db.get_contact(session_id, npc_id, character_id=char.get("id", 0))
+            or db.get_contact(session_id, name, character_id=char.get("id", 0))
+        )
+        if char
+        else None
+    )
+    if profile.get("is_blocked_or_deceased") or (existing_live and _is_blocked_or_deceased_contact(existing_live)):
+        return {
+            "accepted": False,
+            "error": "blocked_or_deceased",
+            "message": f"🔒 **Unavailable:** {name} cannot receive friend requests right now.",
+        }
+
+    party_npcs = db.get_session_party_npcs(session_id) or []
+    party_names = {str(p.get("name", "")).strip().lower() for p in party_npcs if isinstance(p, dict)}
+    scen_k = str((session or {}).get("scenario") or "")
+    live_connected = bool(
+        existing_live
+        and _is_peerpulse_or_dm_connected(existing_live, party_names, scenario=scen_k)
+    )
+    prof_connected = bool(profile.get("is_already_contact") and profile.get("can_dm", True))
+    if live_connected or prof_connected:
         return {
             "accepted": True,
             "already_friend": True,
@@ -317,7 +407,11 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
-    turn_count = len(session.get("history", [])) if session else 0
+    turn_count = max(
+        int((session or {}).get("turn_count") or 0),
+        int((s_row or {}).get("turn_count") or 0),
+        len((session or {}).get("history") or []),
+    )
 
     on_cooldown = False
     if entry:
@@ -374,17 +468,31 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         "succeeded": check_res.succeeded
     }
 
-    turn_count = len(session.get("history", []))
     state = db.get_phone_social_state(session_id) or {}
     cds = state.setdefault("friend_request_cooldowns", {})
 
     if check["succeeded"]:
         # Hydrate contact and unlock in smartphone
         scen_key = session.get("scenario", "fantasy")
+        eff_char_id = char.get("id", 0) if char else 0
+        eff_turn_1b = max(1, int(turn_count or 0) + 1)
+        wr_row = (
+            db.get_world_roster_npc(session_id, npc_id, include_legacy_rosters=True)
+            or db.get_world_roster_npc(session_id, name, include_legacy_rosters=True)
+        )
         if "school" in scen_key or "high_school" in scen_key:
             from mechanics.social.school_roster import hydrate_school_character
             hydrate_school_character(session_id, profile.get("raw_record") or profile)
-            c = db.get_contact(session_id, npc_id)
+            if wr_row:
+                db.promote_world_roster_to_contact(
+                    session_id,
+                    eff_char_id,
+                    wr_row.get("name") or name or npc_id,
+                    reason="peerpulse",
+                    has_contact_info=True,
+                    turn_number=eff_turn_1b,
+                )
+            c = db.get_contact(session_id, npc_id, character_id=eff_char_id) or db.get_contact(session_id, name, character_id=eff_char_id)
             if c:
                 b_info = c.get("basic_info") or {}
                 if isinstance(b_info, str):
@@ -395,30 +503,65 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                 b_info["contact_added"] = True
                 b_info["is_contact"] = True
                 b_info["added_via_peerpulse"] = True
+                b_info["has_contact_info"] = True
+                db.upsert_contact(
+                    session_id=session_id,
+                    npc_id=c.get("npc_id") or npc_id,
+                    name=c.get("name") or name,
+                    character_id=eff_char_id,
+                    basic_info=b_info,
+                )
+        else:
+            if wr_row:
+                db.record_world_roster_interaction(
+                    session_id,
+                    wr_row.get("npc_id") or name or npc_id,
+                    delta_score=5,
+                    met_in_person=bool(wr_row.get("met_in_person")),
+                    turn_number=eff_turn_1b,
+                )
+                promoted = db.promote_world_roster_to_contact(
+                    session_id,
+                    eff_char_id,
+                    wr_row.get("name") or name or npc_id,
+                    reason="peerpulse",
+                    has_contact_info=True,
+                    turn_number=eff_turn_1b,
+                )
+                if promoted:
+                    p_info = dict(promoted.get("basic_info") or {})
+                    p_info.update({
+                        "contact_added": True,
+                        "is_contact": True,
+                        "added_via_peerpulse": True,
+                        "has_contact_info": True,
+                    })
+                    db.upsert_contact(
+                        session_id=session_id,
+                        npc_id=promoted.get("npc_id") or npc_id,
+                        name=promoted.get("name") or name,
+                        character_id=eff_char_id,
+                        basic_info=p_info,
+                    )
+            else:
                 db.upsert_contact(
                     session_id=session_id,
                     npc_id=npc_id,
                     name=name,
-                    character_id=char.get("id", 0) if char else 0,
-                    basic_info=b_info,
+                    character_id=eff_char_id,
+                    delta_score=5,
+                    basic_info={
+                        "role": profile.get("role", "Contact"),
+                        "description": profile.get("personality", ""),
+                        "contact_added": True,
+                        "is_contact": True,
+                        "added_via_peerpulse": True,
+                        "has_contact_info": True,
+                    },
+                    track="platonic"
                 )
-        else:
-            db.upsert_contact(
-                session_id=session_id,
-                npc_id=npc_id,
-                name=name,
-                character_id=char.get("id", 0) if char else 0,
-                delta_score=5,
-                basic_info={
-                    "role": profile.get("role", "Contact"),
-                    "description": profile.get("personality", ""),
-                    "contact_added": True,
-                    "is_contact": True,
-                    "added_via_peerpulse": True,
-                },
-                track="platonic"
-            )
         profile["is_already_contact"] = True
+        profile["can_dm"] = True
         return {
             "accepted": True,
             "check": check,
@@ -458,11 +601,17 @@ def discover_suggested_peer(session_id: int, user_id: int) -> dict:
     """Discovers an un-contacted student peer or dynamically generates a new one."""
     char = db.get_character(user_id)
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
-    contact_ids = {c["npc_id"].lower() for c in contacts}
-
-    roster = db.get_school_roster(session_id)
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "high_school_drama") if session else "high_school_drama"
+    party_npcs = db.get_session_party_npcs(session_id)
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+    contact_ids = {
+        str(c.get("npc_id") or "").lower()
+        for c in contacts
+        if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key) or _is_blocked_or_deceased_contact(c)
+    }
+
+    roster = db.get_school_roster(session_id)
     import scenario_data
     from mechanics import relationships
     if scenario_data.is_anomalous_high_school_scenario(scen_key):
@@ -511,14 +660,19 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     - Characters who are already unlocked contacts (relationship_score >= 100 or contact_added).
     """
     session = db.get_session(session_id) or {}
+    scen_key = str(session.get("scenario") or "")
     char = db.get_character(user_id)
     char_name = str(char.get("name", "")).strip().lower() if char else ""
     party_npcs = db.get_session_party_npcs(session_id)
-    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
+    party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
 
     contacts = _safe_get_contacts(session_id, character_id=char.get("id", 0), resolve_relations=False) if char else []
-    from mechanics.social.relationships import is_unlocked_contact
-    unlocked_contact_names = {c["name"].lower().strip() for c in contacts if is_unlocked_contact(c, party_names)}
+    unlocked_contact_names = {
+        str(c.get("name") or "").lower().strip()
+        for c in contacts
+        if _is_peerpulse_or_dm_connected(c, party_names, scenario=scen_key)
+        or _is_blocked_or_deceased_contact(c)
+    }
 
     seen_names = set(unlocked_contact_names)
     if char_name:
@@ -573,13 +727,100 @@ def get_suggested_peers(session_id: int, user_id: int, limit: int = 12) -> list[
     profiles = []
     for name in suggested_names:
         prof = lookup_social_profile(session_id, user_id, name)
-        if prof and prof.get("is_eligible") and not prof.get("is_faculty"):
+        if prof and prof.get("is_eligible") and not prof.get("is_faculty") and not prof.get("is_blocked_or_deceased"):
             if not prof.get("is_already_contact"):
                 profiles.append(prof)
         if len(profiles) >= limit:
             break
 
     return profiles
+
+
+def _collect_nearby_roster_witness_candidates(
+    session_id: int,
+    curr_node_id: str,
+    exclude_lowers: set[str],
+) -> list[dict]:
+    """
+    Collects 0-1 real nearby roster/contact NPCs (never synthetic 'Passerby Student')
+    for discreet 0.08 vs public 0.35 witness rolls when the stage candidate pool is empty.
+    """
+    if not session_id:
+        return []
+    sid = int(session_id)
+    node_norm = str(curr_node_id or "").strip().lower()
+    matched: list[dict] = []
+    fallback_peers: list[dict] = []
+    fallback_staff: list[dict] = []
+
+    def _is_valid_cand(row: dict) -> bool:
+        if not isinstance(row, dict):
+            return False
+        if _is_blocked_or_deceased_contact(row):
+            return False
+        st = str(row.get("staff_status") or "active").strip().lower()
+        if st in ("deceased", "wiped", "removed"):
+            return False
+        nm = str(row.get("name") or "").strip()
+        if not nm:
+            return False
+        aliases = {
+            nm.lower(),
+            str(row.get("person_key") or "").strip().lower(),
+            str(row.get("npc_id") or "").strip().lower(),
+        }
+        return not bool(aliases & exclude_lowers)
+
+    def _is_staff_cand(row: dict) -> bool:
+        bi = row.get("basic_info") if isinstance(row.get("basic_info"), dict) else {}
+        grade_low = str(row.get("grade") or bi.get("grade") or "").strip().lower()
+        role_low = str(row.get("role") or bi.get("role") or "").strip().lower()
+        if "faculty" in grade_low:
+            return True
+        return any(tok in role_low for tok in ("teacher", "principal", "nurse", "dean", "counselor"))
+
+    try:
+        wr = db.get_world_roster(sid) or []
+    except Exception:
+        wr = []
+    for r in wr:
+        if not _is_valid_cand(r):
+            continue
+        r_nodes = {
+            str(r.get("home_node_id") or "").strip().lower(),
+            str(r.get("workplace_node_id") or "").strip().lower(),
+            str(r.get("hangout_node_id") or "").strip().lower(),
+        }
+        if node_norm and node_norm in r_nodes:
+            matched.append(r)
+        elif _is_staff_cand(r):
+            fallback_staff.append(r)
+        else:
+            fallback_peers.append(r)
+
+    if not matched and not fallback_peers and not fallback_staff:
+        try:
+            sr = db.get_school_roster(sid) or []
+        except Exception:
+            sr = []
+        for r in sr:
+            if not _is_valid_cand(r):
+                continue
+            if _is_staff_cand(r):
+                fallback_staff.append(r)
+            else:
+                fallback_peers.append(r)
+
+    if not matched and not fallback_peers and not fallback_staff:
+        for c in _safe_get_contacts(sid):
+            if not _is_valid_cand(c):
+                continue
+            if _is_staff_cand(c):
+                fallback_staff.append(c)
+            else:
+                fallback_peers.append(c)
+
+    return matched[:1] or fallback_peers[:1] or fallback_staff[:1]
 
 
 def evaluate_pre_turn_witness_detection(
@@ -668,14 +909,16 @@ def evaluate_pre_turn_witness_detection(
     if any(k in loc_low for k in ("bedroom", "private bath", "dorm room", "personal quarters", "safehouse")):
         return {"witness_spotted": False, "private": True}
 
-    # Candidate witness extraction
+    # Candidate witness extraction (real world_roster / scene NPCs ONLY — B3/B13/B14 zero phantom bystanders)
     stage_npcs = session.get("pre_turn_stage_npcs") or session.get("current_stage_npcs") or session.get("current_npcs") or []
-    candidate_witnesses = []
+    candidate_pool = []
     for n in stage_npcs:
-        n_name = (n.get("name") if isinstance(n, dict) else str(n)).strip()
+        if not isinstance(n, dict):
+            continue
+        n_name = str(n.get("name") or "").strip()
         is_partner_in_act = (n_name.lower() == target_npc.lower()) and not is_public_exposure
         if n_name and not is_partner_in_act and n_name.lower() != player_name.lower():
-            candidate_witnesses.append(n_name)
+            candidate_pool.append(n)
 
     if is_public_exposure:
         event_kind = "scandal" if exposure_type in ("fully_naked", "bottomless") else "indecency"
@@ -695,36 +938,95 @@ def evaluate_pre_turn_witness_detection(
 
     is_discreet_spot = is_discreet_venue(loc_display, curr_node_id, session_id=session_id)
     witness_name = None
-    if candidate_witnesses:
-        witness_name = candidate_witnesses[0]
-    elif is_public_exposure:
-        witness_name = "Shocked Bystander"
-    elif is_discreet_spot:
-        # 8% passerby thrill risk in secluded `is_discreet` spots
-        if random.random() < 0.08:
-            witness_name = "Passerby Student"
-    elif any(k in loc_low for k in (
-        "hallway", "corridor", "courtyard", "cafeteria", "plaza", "city square",
-        "street", "quad", "library", "park", "campus", "classroom", "beach", "pier", "lookout",
-    )):
-        # 35% passerby chance in open public areas
-        if random.random() < 0.35:
-            witness_name = "Passerby Student"
+    culprit_unknown = False
+    detected_events: list[dict] = []
+    active_spots: list[dict] = []
+
+    exclude_lowers = {"player"}
+    if player_name:
+        exclude_lowers.add(player_name.strip().lower())
+    if target_npc and not is_public_exposure:
+        exclude_lowers.add(target_npc.strip().lower())
+    for _cand in candidate_pool:
+        for _cf in ("name", "person_key", "npc_id"):
+            _cv = str(_cand.get(_cf) or "").strip().lower()
+            if _cv:
+                exclude_lowers.add(_cv)
+
+    nearby_pool = _collect_nearby_roster_witness_candidates(
+        int(session_id or 0),
+        curr_node_id,
+        exclude_lowers,
+    ) if (session_id and not candidate_pool) else []
+
+    if session_id and (candidate_pool or nearby_pool):
+        from mechanics.social.epistemic_engine import detect_scene_witnesses
+        act_ctx = {
+            "intent": "stealth_covert" if is_illicit else ("intimate_act" if is_romantic_or_intimate else "general_action"),
+            "category": "crime" if is_illicit else ("affair" if event_kind == "secret_affair" else "secret"),
+            "location_node_id": curr_node_id or loc_display,
+            "summary": action_str or f"Observed {event_kind} scene at {loc_display}",
+            "is_illicit": bool(event_kind == "secret_affair" or is_illicit),
+            "is_crime": is_illicit,
+            "is_secret_deed": True,
+            "is_private_venue": bool(is_discreet_spot),
+            "force_spotted": bool(is_public_exposure or (bool(candidate_pool) and not is_discreet_spot)),
+            "turn": len(session.get("history") or []) + 1,
+            "dialogue_partners": [],
+            "actor_garments": session.get("actor_garments"),
+        }
+        detected_events = detect_scene_witnesses(
+            int(session_id),
+            session,
+            candidate_pool,
+            nearby_pool,
+            act_ctx,
+            random,
+            turn=act_ctx["turn"],
+        )
+        active_spots = [
+            ev for ev in detected_events
+            if ev.get("containment_state") not in ("co_conspirator", "hushed", "wiped", "incapacitated")
+            and ev.get("holder_actor_key")
+        ]
+        if active_spots:
+            first_ev = active_spots[0]
+            culprit_unknown = (str(first_ev.get("culprit_actor_key") or "") == "unknown")
+            hkey = str(first_ev["holder_actor_key"]).strip().lower()
+            combined_pool = list(candidate_pool) + list(nearby_pool)
+            matched_obj = next(
+                (
+                    n for n in combined_pool
+                    if hkey in {
+                        str(n.get(f) or "").strip().lower()
+                        for f in ("person_key", "npc_id", "npc_key", "name")
+                    }
+                ),
+                None,
+            )
+            witness_name = str((matched_obj or {}).get("name") or first_ev["holder_actor_key"]).strip()
+    elif (candidate_pool or nearby_pool) and is_public_exposure:
+        fallback_obj = (candidate_pool or nearby_pool)[0]
+        witness_name = str(fallback_obj.get("name") or "").strip()
 
     if not witness_name:
         return {"witness_spotted": False}
 
-    post = queue_witness_gossip_post(
-        session_id=session_id,
-        witness_name=witness_name,
-        player_name=player_name,
-        partner_name=target_npc or "Someone",
-        location_display=loc_display,
-        event_kind=event_kind,
-    )
+    # B3: Respect spotted_window — do NOT broadcast #SecretAffair feed gossip if still inside containment window or culprit masked
+    post = None
+    uncontained_exists = bool(active_spots) if detected_events else bool(is_public_exposure)
+    if uncontained_exists and not culprit_unknown:
+        post = queue_witness_gossip_post(
+            session_id=session_id,
+            witness_name=witness_name,
+            player_name=player_name,
+            partner_name=target_npc or "Someone",
+            location_display=loc_display,
+            event_kind=event_kind,
+        )
 
     affair_confrontation_triggered = False
-    if event_kind == "secret_affair" and session_id:
+    if event_kind == "secret_affair" and session_id and uncontained_exists and not culprit_unknown:
         try:
             import mechanics.social.relationship_graph as rg
             prim_partner = rg.get_current_partner(session_id, "player")

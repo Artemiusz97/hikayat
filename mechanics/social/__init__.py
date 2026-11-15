@@ -17,6 +17,15 @@ from .roster_tags import (
 )
 from .genealogy import get_or_generate_family_tree
 from .factions import is_school_club_faction, get_faction_category_tag
+from .relationships import (
+    can_player_dm_contact,
+    is_contact_blocked,
+    is_contact_eligible,
+    is_promoted_family_or_cohabitant,
+    is_unlocked_contact,
+    safe_get_contacts,
+    should_promote_roster_npc_to_contact,
+)
 from .folklore_roster import (
     FOLKLORE_RACES,
     befriend_folklore_villager,
@@ -58,6 +67,13 @@ __all__ = [
     "get_or_generate_family_tree",
     "is_school_club_faction",
     "get_faction_category_tag",
+    "can_player_dm_contact",
+    "is_contact_blocked",
+    "is_contact_eligible",
+    "is_promoted_family_or_cohabitant",
+    "is_unlocked_contact",
+    "safe_get_contacts",
+    "should_promote_roster_npc_to_contact",
     "befriend_folklore_villager",
     "commit_staged_folklore_ops",
     "ensure_folklore_villager_roster",

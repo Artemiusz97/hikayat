@@ -11,6 +11,7 @@ import re
 from typing import Any, Mapping
 
 import db
+import scenario_data
 
 from .realty_catalog import (
     ALL_STATIC_RESIDENTIAL_FACILITY_IDS,
@@ -22,6 +23,12 @@ from .realty_catalog import (
     iter_session_realty_catalog,
     resolve_realty_entry,
     resolve_starter_quarters_spec,
+)
+from .residence_fog import (
+    RESIDENCE_UNLOCK_REASONS,
+    SHARED_ABSTRACT_RESIDENCE_NODE,
+    can_materialize_npc_residence,
+    unlock_npc_residence_node,
 )
 
 
@@ -90,6 +97,9 @@ def get_player_owned_or_starter_property_for_node(
     session_id: int,
     node_id: str,
     session: Mapping[str, Any] | None = None,
+    *,
+    world_node: Mapping[str, Any] | None = None,
+    world_node_loaded: bool = False,
 ) -> dict[str, Any] | None:
     """
     If `node_id` belongs to the player's active starter quarters, a Student Operative's
@@ -106,12 +116,18 @@ def get_player_owned_or_starter_property_for_node(
         return None
 
     parent_id = ""
-    try:
-        w_node = db.get_world_node(int(session_id), target)
-        if w_node:
-            parent_id = str(w_node.get("parent_id") or "")
-    except Exception:
-        parent_id = ""
+    if world_node_loaded:
+        if isinstance(world_node, Mapping):
+            parent_id = str(world_node.get("parent_id") or "")
+    elif isinstance(world_node, Mapping):
+        parent_id = str(world_node.get("parent_id") or "")
+    else:
+        try:
+            w_node = db.get_world_node(int(session_id), target)
+            if w_node:
+                parent_id = str(w_node.get("parent_id") or "")
+        except Exception:
+            parent_id = ""
 
     props = db.get_player_properties(int(session_id))
     for p in props:
@@ -258,7 +274,10 @@ def is_excluded_from_random_incursions(
                 # Anomalous seed zones live in data/locations_seed.json (the old `seeds_anomalous`
                 # module no longer exists, so this lookup previously failed silently every call).
                 from .seeds import get_scenario_seed_data
+                _known_scenarios = scenario_data.load_scenarios()
                 for _anom_scen in ("anomalous_incursions", "anomalous_high_school", "urban_anomalies"):
+                    if _anom_scen not in _known_scenarios:
+                        continue
                     for z in (get_scenario_seed_data(_anom_scen) or {}).get("zones", []):
                         for fac in z.get("primary_locations", []):
                             if isinstance(fac, dict) and fac.get("id") in ALL_STATIC_RESIDENTIAL_FACILITY_IDS and fac.get("name"):
@@ -761,6 +780,9 @@ def is_npc_active_spare_key_holder(
     session_id: int,
     npc_ref: str | Mapping[str, Any],
     spare_keys: Mapping[str, Any] | None,
+    *,
+    contacts: list[dict[str, Any]] | None = None,
+    person_ties: list[Mapping[str, Any]] | None = None,
 ) -> bool:
     """
     Returns True if `npc_ref` holds a Spare Key in `spare_keys`, is NOT deceased,
@@ -798,11 +820,13 @@ def is_npc_active_spare_key_holder(
 
     key_lows = {str(k).strip().lower() for k in spare_keys.keys() if str(k).strip()}
     matched_c: dict[str, Any] | None = None
-    try:
-        contacts = db.get_contacts(int(session_id)) or []
-    except Exception:
-        contacts = []
-    for c in contacts:
+    eff_contacts = contacts
+    if eff_contacts is None:
+        try:
+            eff_contacts = db.get_contacts(int(session_id), ensure_scene=False) or []
+        except Exception:
+            eff_contacts = []
+    for c in eff_contacts:
         cid_l = str(c.get("npc_id") or "").strip().lower()
         cnm_l = str(c.get("name") or "").strip().lower()
         cslug = _slugify(cnm_l) if cnm_l else ""
@@ -842,8 +866,11 @@ def is_npc_active_spare_key_holder(
         )
         if not is_rom:
             try:
-                import mechanics.social.relationship_graph as rg
-                ties = rg.get_person_ties(int(session_id), "player") if hasattr(rg, "get_person_ties") else []
+                if person_ties is not None:
+                    ties = person_ties
+                else:
+                    import mechanics.social.relationship_graph as rg
+                    ties = rg.get_person_ties(int(session_id), "player") if hasattr(rg, "get_person_ties") else []
                 for t in (ties or []):
                     t_type = str(t.get("tie_type") or "").strip().lower()
                     if t.get("status") == "active" and t_type in ("romantic", "dating", "partner", "lover", "engaged", "married", "spouse"):
@@ -864,6 +891,12 @@ def resolve_spare_key_evening_visit_node(
     npc_dict: Mapping[str, Any],
     current_day: int,
     slot_key: str,
+    *,
+    primary_property: Mapping[str, Any] | None = None,
+    primary_property_loaded: bool = False,
+    contacts: list[dict[str, Any]] | None = None,
+    person_ties: list[Mapping[str, Any]] | None = None,
+    session: Mapping[str, Any] | None = None,
 ) -> str | None:
     """
     If the player's Primary Home is a permanently purchased deed (`is_starter == 0`)
@@ -874,14 +907,23 @@ def resolve_spare_key_evening_visit_node(
         return None
     if slot_key == "afternoon" and (max(1, int(current_day or 1)) % 7) != 0:
         return None
-    try:
-        prim = db.get_primary_property(int(session_id))
-    except Exception:
-        prim = None
+    if primary_property_loaded:
+        prim = primary_property
+    else:
+        try:
+            prim = db.get_primary_property(int(session_id))
+        except Exception:
+            prim = None
     if not prim or prim.get("is_starter"):
         return None
     spare_keys = prim.get("spare_keys") or {}
-    if not is_npc_active_spare_key_holder(int(session_id), npc_dict, spare_keys):
+    if not is_npc_active_spare_key_holder(
+        int(session_id),
+        npc_dict,
+        spare_keys,
+        contacts=contacts,
+        person_ties=person_ties,
+    ):
         return None
 
     b_raw = npc_dict.get("basic_info")
@@ -901,7 +943,8 @@ def resolve_spare_key_evening_visit_node(
     if (int(roll_seed[:8], 16) % 4) != 0:
         return None
 
-    cat = resolve_realty_entry(str(prim.get("property_id") or ""), session_or_id=session_id)
+    sess_ref: Mapping[str, Any] | int = session if isinstance(session, Mapping) else session_id
+    cat = resolve_realty_entry(str(prim.get("property_id") or ""), session_or_id=sess_ref)
     if cat:
         rooms = list(cat.get("all_room_ids") or ())
         if len(rooms) >= 2:

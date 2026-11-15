@@ -4,6 +4,7 @@ Hikayat - Bounty Board & Quest Archetypes Mechanics
 Modular mechanic handling quest archetype taxonomies, icon mappings, bounty prompt schemas, and dynamic bounty generation.
 """
 
+from typing import Any
 import logging
 import re
 import uuid
@@ -792,6 +793,17 @@ def _filter_general_bounties(rows: list[dict]) -> list[dict]:
     ]
 
 
+def _extract_bounties_list(result: Any) -> list:
+    if isinstance(result, list):
+        return [b for b in result if isinstance(b, dict)]
+    if isinstance(result, dict):
+        for k in ("bounties", "bounty_board", "contracts", "postings", "tasks", "quests"):
+            val = result.get(k)
+            if isinstance(val, list):
+                return [b for b in val if isinstance(b, dict)]
+    return []
+
+
 async def generate_bounty_board(session: dict | int, force_refresh: bool = False) -> list[dict]:
     """Generates 3 dynamic bounty board postings for a session using LLM JSON completion."""
     from game_engine import _scenario_block, is_nsfw_scenario
@@ -992,7 +1004,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
     try:
         result = await call_llm_json(system_prompt, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-        bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
+        bounties_raw = _extract_bounties_list(result)
     except Exception as _bnt_err:
         log.warning("Dynamic notice board LLM generation failed: %s. Using fallback.", _bnt_err)
         bounties_raw = []
@@ -1080,13 +1092,18 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
 
     def _save_bounties_sync(raw_list):
         from mechanics.world.locations import clean_narrative_location_arrows, parse_tiered_location
+        from game_engine.quest_lifecycle import sanitize_dossier_prose
         for idx, b in enumerate(raw_list):
-            if not isinstance(b, dict) or not b.get("title"):
+            if not isinstance(b, dict):
+                continue
+            raw_title = b.get("title") or b.get("name") or b.get("quest_title")
+            if not raw_title or not str(raw_title).strip():
                 continue
             b_id = f"BNT-{uuid.uuid4().hex[:8].upper()}"
             q_type = str(b.get("quest_type", "Side Bounty"))
-            obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the bounty task.")))[:200]
-            title_text = clean_narrative_location_arrows(str(b.get("title")))[:60]
+            raw_obj = b.get("objective") or b.get("description") or b.get("goal") or "Complete the bounty task."
+            obj_text = sanitize_dossier_prose(clean_narrative_location_arrows(str(raw_obj)))[:200]
+            title_text = sanitize_dossier_prose(clean_narrative_location_arrows(str(raw_title)))[:60]
 
             from mechanics.narrative.blueprints import get_blueprint_for_archetype, infer_required_item_and_count_from_text, roll_quest_deadline
             blueprint_id = get_blueprint_for_archetype(q_type, obj_text)
@@ -1338,7 +1355,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         fac_sys_prompt = f"{FACTION_BOUNTY_SYSTEM_PROMPT}\n\n{fac_lang_dir}" if fac_lang_dir else FACTION_BOUNTY_SYSTEM_PROMPT
         result = await call_llm_json(fac_sys_prompt, user_prompt, temperature=0.8,
                                       is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)
-        bounties_raw = (result.get("bounties", []) or []) if isinstance(result, dict) else []
+        bounties_raw = _extract_bounties_list(result)
     except Exception as _fac_err:
         log.warning("Dynamic faction bounty LLM generation failed: %s. Using fallback.", _fac_err)
         bounties_raw = []

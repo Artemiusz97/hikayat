@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning (SemVer 2.0.0)](https://semver.
 
 ## 🏷️ Version System Specification
 
-Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PATCH`):
+Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATCH`) tailored to an evolving game engine, persistent SQLite world state, and omnichannel UI (Discord + Web):
 
 | Level | Identifier | Trigger Criteria | Examples |
 | :--- | :--- | :--- | :--- |
-| **MAJOR** | `X.0.0` | Architectural overhauls, database engine changes, incompatible configuration breaks, major operational paradigm transitions. | Genesis release with core RPG engine, SQLite schema, Discord bot & FastAPI web app (`v1.0.0`). |
-| **MINOR** | `X.Y.0` | Substantial new gameplay mechanics, new systems/commands suites, platform expansions, content frameworks introduced backwards-compatibly. | Locations tree & debug suite (`v1.2.0`), NSFW routing cascade (`v1.3.0`), 10-Chapter Campaign & Quests (`v1.4.0`), Tactical Combat & Factions (`v1.5.1`), Living World & Time Engine (`v1.6.0`), Action Intents & Quest UI (`v1.7.0`), Modular Items & FNV Armor DT & 5-Tier Enemies (`v1.8.0`). |
-| **PATCH** | `X.Y.Z` | Backwards-compatible bug fixes, prompt tuning & instruction supremacy, edge-case handling, gear slot hardening, performance optimizations. | LLM Reliability & Semaphore limits (`v1.1.0`), Biome Diversity & Fail-Forward Polish (`v1.5.2`), Narrative Style Supremacy & Equipment Slot Hardening (`v1.8.1`). |
+| **MAJOR** | `X.0.0` | Core simulation or gameplay **paradigm shifts** (even when DB migrations remain backward-compatible), major architectural/platform overhauls, UI/UX redesigns, or breaking save/config/interface changes. | Genesis RPG engine, Discord bot & FastAPI web UI (`v1.0.0`); Modular package architecture & React SPA (`v2.0.0`); Living World NPC Autonomy & Epistemic Asymmetry Matrix (`v3.0.0`). |
+| **MINOR** | `X.Y.0` | New gameplay systems, command suites, quest/content frameworks, localization expansions, or significant deterministic/dev-ops capabilities introduced within the current engine paradigm. | Living World & Time Engine (`v1.6.0`), Modular Items & FNV DT (`v1.8.0`), Spatial Graph & SDXL (`v2.4.0`), Entity Contracts & Realty (`v2.9.0`), Threat Clock & Chapter Plan (`v2.11.0`), Closed-World NPC Engine (`v2.13.0`). |
+| **PATCH** | `X.Y.Z` | Bug fixes, regression patches, performance/N+1 query fixes, concurrency hardening, LLM prompt/sanitizer tuning, translation fixes, and UI polish—with no new gameplay systems added. | Biome Diversity & Fail-Forward Polish (`v1.5.2`), Narrative Style Supremacy & Equipment Slot Hardening (`v1.8.1`). |
 
 ---
 
@@ -23,6 +23,9 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.0.0** | 2026-11-15 | **MAJOR** | Living World NPC Autonomy, Epistemic Asymmetry Matrix (`epistemic_facts` / `epistemic_knowledge`), Venue Activity Tags, Boundary UoW Tick & Server Fog-of-War Parity. |
+| **v2.13.0** | 2026-11-15 | Minor | Closed-World NPC Engine (`world_roster`), Anchor-Node Schedules, Residential Fog-of-War, 6-Tier Presence Resolver, Progressive Routine Disclosure & Contacts/Acquaintances UI. |
+| **v2.12.0** | 2026-11-14 | Minor | Combat Submodule Extraction, Boss Telegraph Sanitization, Crash Replay & LLM Tapes, Shielded Rollback & Web/Bot Parity. |
 | **v2.11.0** | 2026-11-13 | Minor | Modular Combat Engine Decomposition, Chapter Plan & Clue Progression, 6-Segment Threat Clock, Quest Agency Overhaul, and 5-Language Parity. |
 | **v2.10.0** | 2026-11-10 | Minor | Flow-Sensitive Static Bug Gate, Deterministic Social State Snapshots, Privacy Nudge Hierarchy, Contract Indexing & Packaging Hardening. |
 | **v2.9.0** | 2026-11-10 | Minor | Entity Contracts & Pacts, Realty & Property Ownership, Folklore Veil Settlements, Social Pacing Engine, and Security Layer. |
@@ -50,6 +53,50 @@ Hikayat uses the standard **Semantic Versioning 2.0.0** scheme (`MAJOR.MINOR.PAT
 ---
 
 ## Release Details
+
+### [v3.0.0] - 2026-11-15
+
+#### Added & Enhanced
+- **Epistemic Asymmetry Matrix Schema & Persistence (`db/epistemic.py`, `db/core.py`)**:
+  - Added v55 normalized SQLite tables `epistemic_facts` and `epistemic_knowledge` with natural-key `(session_id, fact_key)` joins, living-world indexes, 10-turn snapshot rollback parity (`db/saves.py`, `db/sessions.py`), proof-artifact transitions (`downgrade_or_upgrade_proof_ref`), and strict server-side Fog-of-War filtering (`build_player_fog_of_war_summary`).
+- **Deterministic Epistemic Engine & Propagation (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`)**:
+  - Added focus-weighted witness detection with mask/stealth culprit anonymization and dialogue overhearing, containment actions (hush/bribe/threaten/discretion/confide/deny/proof/leverage with +2 DC kin penalty), combat/knockout witness neutralization, 1-hop gossip propagation across time boundaries, 2+ source corroboration, Caught Lying alibi checks, rumor heat decay, Watch-role escalations, kin alerts, and server-side fencing of LLM `EpistemicSignal` outputs.
+- **Off-Screen NPC Autonomy & Activity Tags (`mechanics/world/npc_autonomy.py`, `mechanics/social/activity_tags.py`, `mechanics/system/time_engine.py`)**:
+  - Added deterministic off-screen NPC autonomy overrides, romance shields, boundary-tick deltas via `UnitOfWork`, venue-aware activity tags with 5-language localized labels, context swaps, telltale gating, and pair/activity join seeds.
+- **Presence Cutover, Routine Overlay & Turn Reconciliation (`mechanics/world/presence_resolver.py`, `game_engine/npcs/`, `services/turn_service.py`)**:
+  - Added Tier 5 presence caps, autonomy routine overlays, pair auto-joins, pre-turn witness feed alignment, Z2 epistemic filtering (`game_engine/context.py`), discreet encounter handling (`mechanics/social/discreet_encounters.py`), and atomic phone DM / TurnService reconciliation (`mechanics/system/phone/messaging.py`, `social_graph.py`).
+- **Omnichannel UI, Server Fog-of-War Sanitizer & 5-Locale Parity (`api/`, `cogs/`, `web/`)**:
+  - Updated `WorldOutcomeSidebar.jsx` and `KnownRoutineCard.jsx` alongside Discord embeds (`cogs/adventure/embeds.py`, `cogs/contacts_routine_views.py`), REST endpoints (`api/adventure.py`, `api/codex_phone.py`), 5-language locales (`en`, `pl`, `ms`, `de`, `zh`), and rebuilt frontend assets (`web/dist/`).
+
+### [v2.13.0] - 2026-11-15
+
+#### Added & Enhanced
+- **Normalized Closed-World Roster & Lifecycle (`db/roster.py`, `db/roster_adapters.py`)**:
+  - Added SQLite `world_roster` persistence, turn-indexed rollback snapshots, legacy roster adaptation, and atomic `seeded -> acquaintance -> promoted` progression synced with save/load slots (`db/saves.py`) and session lifecycle (`db/sessions.py`, `db/core.py`).
+- **Anchor-Node Schedules & Residential Fog-of-War (`mechanics/world/anchor_schedule.py`, `mechanics/world/locations/residence_fog.py`)**:
+  - Deterministic shift profiles (`day`, `evening`, `night`, `student`, `rotating`, `roaming_merchant`), rest-day rules, and `zone_residential_abstract` masking until concrete homes are unlocked by invitation, Friend-tier affinity, quest lead, tailing, family, or cohabitation.
+- **Lazy Venue Seeder, Roamers & Staff-Bound Shops (`mechanics/world/venue_seeder.py`, `venue_templates.py`, `api/inventory_merchant.py`)**:
+  - Seed-deterministic staff and rotating roamer population per venue, slot-fill matching, and merchant shop availability gated strictly by on-duty roster/contact staff.
+- **Unified 6-Tier Presence Resolver & Doorbell Etiquette (`mechanics/world/presence_resolver.py`, `presence_preload.py`, `presence_graph.py`, `presence_doorbell.py`)**:
+  - O(1)-preloaded turn resolution ordering Party -> Commitments -> Quest Pins -> Doorbell -> Active Schedules -> Crowd Flavor, eliminating travel-to-meet bypasses and N+1 waypoint queries.
+- **Closed-World Turn Pipeline, 3-Step Promotion & DM Gate (`game_engine/npcs/stage_manager.py`, `cast_planner.py`, `turn/core.py`, `services/turn_service.py`)**:
+  - Enforced closed-world stage plans, post-narration cast contract enforcement (`cast_contract.py`), 3-step NPC promotion, and phone DM contact gating.
+- **Progressive Schedule Disclosure & Omnichannel Contacts | Acquaintances UI (`mechanics/world/routine_disclosure.py`, `api/codex_phone.py`, `cogs/contacts_routine_views.py`, `web/`)**:
+  - Slot-by-slot discovery masking (`???` below affinity threshold), O(1) read-only contacts/acquaintances hydration, Discord routine embeds, React `AcquaintancesView.jsx` + `KnownRoutineCard.jsx`, and 5-language UI parity (`en`, `pl`, `ms`, `de`, `zh`).
+
+### [v2.12.0] - 2026-11-14
+
+#### Added & Enhanced
+- **Combat Phase Submodule Extraction (`mechanics/combat/`)**:
+  - Decomposed turn logic into `player_turn.py`, `player_spells.py`, `ally_turn.py`, `loadouts.py`, `enemy_turn.py`, `enemy_profiles.py`, `targeting.py`, and `post_combat.py`.
+- **Boss Telegraph Sanitization & Stagger Meter (`api/adventure.py`)**:
+  - Scrubbed raw `interrupt_threshold` and `accumulated_interrupt_damage` from enemy/boss payloads while computing qualitative `stagger_pct` progress bars.
+- **Deterministic Crash Capture & LLM Tape Replay (`services/crash_capture.py`, `llm_client.py`)**:
+  - Added ContextVar-scoped `use_llm_handler` and `record_llm_tape` plus opt-in pre-turn SQLite crash bundles with automatic local path scrubbing.
+- **Cancellation-Shielded Rollback (`services/turn_service.py`)**:
+  - Wrapped turn rollback in `asyncio.shield` and extended recovery to `combat_threat_ledger`, `combat_boss_telegraph`, `party_npcs`, and character `status_effects`.
+- **Web, Discord & 5-Language Parity**:
+  - Updated `PartyWidget.jsx`, `CharacterSheet.jsx`, `QuestLogPanel.jsx`, `StoryFeed.jsx`, and compiled production assets (`index-BAcdG7_s.js`, `index-h3KvT_y1.css`).
 
 ### [v2.11.0] - 2026-11-13
 

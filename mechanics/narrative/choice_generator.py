@@ -165,7 +165,7 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
     from mechanics.combat.equipment import parse_equipment_metadata
 
     equipped_items = [item for item in inventory if isinstance(item, dict) and item.get("equipped")] if inventory else []
-    p_attrs = calculate_combat_attributes(char, equipped_items)
+    p_attrs = calculate_combat_attributes(char, equipped_items, allow_non_combat=True)
     m_attrs = calculate_combat_attributes(monster_stats)
 
     acc_val = p_attrs.get("acc", 66)

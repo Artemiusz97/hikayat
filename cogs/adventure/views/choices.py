@@ -25,6 +25,7 @@ from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
 from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
 from skill_check import resolve_check, success_chance, CheckResult
+from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
     handle_talk_to_merchant as _handle_talk_to_merchant,
@@ -114,6 +115,22 @@ def _preload_choice_view_data(
     scen_key = sess.get("scenario", "fantasy") if sess else "fantasy"
     faction = db.get_faction_by_hq(session_id, current_loc) if (session_id and not in_combat) else None
 
+    shop_availability: dict | None = None
+    if sess and not in_combat:
+        sess_merch = sess.get("merchant") or {}
+        if not bool(sess_merch.get("is_phone_shop")) and not bool(sess_merch.get("is_faction_quartermaster")):
+            shop_availability = evaluate_shop_staff_availability(
+                session_id,
+                location_str=current_loc,
+                merchant_type="",
+                is_phone_shop=False,
+                scen_key=scen_key,
+                current_day=sess.get("current_day"),
+                current_minute=sess.get("current_minute"),
+                turn_number=int(sess.get("turn_count") or 0),
+                session=sess,
+            )
+
     contacts: list | None = None
     if not in_combat:
         from scenario_data import is_mechanic_enabled
@@ -133,6 +150,7 @@ def _preload_choice_view_data(
         "actor_inv": resolved_inv,
         "faction": faction,
         "contacts": contacts,
+        "shop_availability": shop_availability,
     }
 
 
@@ -347,6 +365,7 @@ class ChoiceView(SessionRestrictedView):
             actor_settings=preloaded["actor_settings"],
             preloaded_faction=preloaded["faction"],
             preloaded_contacts=preloaded["contacts"],
+            preloaded_shop_availability=preloaded["shop_availability"],
         )
 
     def __init__(
@@ -364,6 +383,7 @@ class ChoiceView(SessionRestrictedView):
         actor_settings: dict | None = None,
         preloaded_faction: Any = _UNSET,
         preloaded_contacts: list | None = None,
+        preloaded_shop_availability: Any = _UNSET,
     ):
         super().__init__(session_id=session_id, timeout=86400)
         self.cog = cog
@@ -378,6 +398,7 @@ class ChoiceView(SessionRestrictedView):
         self.session = session
         self._actor_inv = actor_inv
         self._actor_settings = actor_settings
+        self._preloaded_shop_availability = preloaded_shop_availability
         scen_key = session.get("scenario", "fantasy")
         from mechanics.combat import is_in_combat
         self.in_combat = is_in_combat(session)
@@ -495,15 +516,41 @@ class ChoiceView(SessionRestrictedView):
         is_school = is_school_scenario(scen_key)
         show_merchant = False
         merchant_label = "Talk to Merchant"
-        if is_school:
-            if location_has_merchant_shop(current_loc, scen_key=scen_key):
+        has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
+        shop_avail: dict | None = None
+        if not self.in_combat and not bool(self.merchant.get("is_phone_shop")) and not bool(self.merchant.get("is_faction_quartermaster")):
+            shop_avail = (
+                evaluate_shop_staff_availability(
+                    session_id,
+                    location_str=current_loc,
+                    merchant_type="",
+                    is_phone_shop=False,
+                    scen_key=scen_key,
+                    current_day=session.get("current_day"),
+                    current_minute=session.get("current_minute"),
+                    turn_number=int(session.get("turn_count") or 0),
+                    session=session,
+                )
+                if preloaded_shop_availability is _UNSET
+                else preloaded_shop_availability
+            )
+
+        if shop_avail is not None and not shop_avail.get("available"):
+            show_merchant = False
+        elif is_school:
+            if has_shop:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
-            if self.merchant.get("available") or has_shop:
+            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            if self.merchant.get("available") or has_shop or roamer_or_bypass:
                 show_merchant = True
-                merchant_label = "Visit Market / Shop" if has_shop else "Talk to Merchant"
+                if has_shop:
+                    merchant_label = "Visit Market / Shop"
+                elif shop_avail and shop_avail.get("staff_npc"):
+                    merchant_label = f"Trade with {shop_avail['staff_npc'].get('name') or 'Merchant'}"
+                else:
+                    merchant_label = "Talk to Merchant"
 
         if show_merchant and not self.in_combat:
             merchant_button = discord.ui.Button(label=merchant_label,
@@ -1111,6 +1158,7 @@ class SyncChoiceView(SessionRestrictedView):
             session=preloaded["session"],
             preloaded_faction=preloaded["faction"],
             preloaded_contacts=preloaded["contacts"],
+            preloaded_shop_availability=preloaded["shop_availability"],
         )
 
     def __init__(
@@ -1125,6 +1173,7 @@ class SyncChoiceView(SessionRestrictedView):
         session: dict | None = None,
         preloaded_faction: Any = _UNSET,
         preloaded_contacts: list | None = None,
+        preloaded_shop_availability: Any = _UNSET,
     ):
         super().__init__(
             session_id=session_id,
@@ -1244,15 +1293,41 @@ class SyncChoiceView(SessionRestrictedView):
         is_school = is_school_scenario(scen_key)
         show_merchant = False
         merchant_label = "Talk to Merchant"
-        if is_school:
-            if location_has_merchant_shop(current_loc, scen_key=scen_key):
+        has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
+        shop_avail: dict | None = None
+        if not in_combat and not bool(self.merchant.get("is_phone_shop")) and not bool(self.merchant.get("is_faction_quartermaster")):
+            shop_avail = (
+                evaluate_shop_staff_availability(
+                    session_id,
+                    location_str=current_loc,
+                    merchant_type="",
+                    is_phone_shop=False,
+                    scen_key=scen_key,
+                    current_day=session.get("current_day"),
+                    current_minute=session.get("current_minute"),
+                    turn_number=int(session.get("turn_count") or 0),
+                    session=session,
+                )
+                if preloaded_shop_availability is _UNSET
+                else preloaded_shop_availability
+            )
+
+        if shop_avail is not None and not shop_avail.get("available"):
+            show_merchant = False
+        elif is_school:
+            if has_shop:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
-            if self.merchant.get("available") or has_shop:
+            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            if self.merchant.get("available") or has_shop or roamer_or_bypass:
                 show_merchant = True
-                merchant_label = "Visit Market / Shop" if has_shop else "Talk to Merchant"
+                if has_shop:
+                    merchant_label = "Visit Market / Shop"
+                elif shop_avail and shop_avail.get("staff_npc"):
+                    merchant_label = f"Trade with {shop_avail['staff_npc'].get('name') or 'Merchant'}"
+                else:
+                    merchant_label = "Talk to Merchant"
 
         if show_merchant and not in_combat:
             merchant_button = discord.ui.Button(label=merchant_label,

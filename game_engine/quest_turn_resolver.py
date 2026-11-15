@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import time
 from typing import Any, Dict, List, Optional
 
@@ -117,6 +118,8 @@ def resolve_clue_source_claim(
                         conn=conn,
                     )
                 upd["clue_key"] = kc_key
+                upd["corroboration_group"] = quest_id
+                upd["clue_tier"] = "key_clue"
                 upd["clue_id"] = int(cid_val)
                 upd["stage_index"] = int(stage_index)
                 upd["title"] = kc_title
@@ -142,6 +145,8 @@ def resolve_clue_source_claim(
         new_node = {
             "clue_key": kc_key,
             "key_clue_id": kc_key,
+            "corroboration_group": quest_id,
+            "clue_tier": "key_clue",
             "stage_index": int(stage_index),
             "clue_id": int(cid_new),
             "title": kc_title,
@@ -197,6 +202,8 @@ def resolve_clue_source_claim(
         kc_node["paired_with"] = pw_kc
         bonus_node = {
             "clue_key": bonus_key,
+            "corroboration_group": quest_id,
+            "clue_tier": "corroborating",
             "stage_index": int(stage_index),
             "is_bonus": True,
             "is_red_herring": False,
@@ -1034,20 +1041,27 @@ def resolve_quest_approach_failure(
         )
         now = time.time()
         from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+        so_id_int = int(wp_sub_id or 0)
         adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
-        is_final = bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)) if ms_list else True
+        is_final = True if (so_id_int != 0 or not ms_list) else bool(int(stage_idx) >= len(ms_list))
+        nxt_wp = db.get_active_waypoint(session_id, qid, so_id_int) if not is_final else None
         if sub_obj:
             if is_final:
                 sub_obj["completed"] = True
             sub_obj["resolution_approach"] = "dire_cost"
         db.set_quest_resolution_approach(session_id, qid, "dire_cost")
-        db.upsert_quest_dossier(session_id, qid, alert_level=0)
+        db.upsert_quest_dossier(session_id, qid, alert_level=0, turn_number=eff_turn, sync_projection=True)
         db.reset_quest_strikes(session_id, qid)
         lead_uid = party_user_ids[0] if party_user_ids else 1
         db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
         return {
             "status": "dire_cost",
             "failed": False,
+            "stage_advanced": not is_final,
+            "all_stages_complete": is_final,
+            "completed_stage": stage_idx,
+            "next_stage": int(adv_res.get("next_stage_idx") or (stage_idx + 1)),
+            "next_waypoint": dict(nxt_wp) if nxt_wp else None,
             "burned_approach": norm_appr,
             "world_scar": scar_ev,
             "directive": (
@@ -1097,6 +1111,8 @@ def resolve_quest_approach_failure(
     return {
         "status": "dire_cost",
         "failed": False,
+        "all_stages_complete": True,
+        "stage_advanced": False,
         "directive": (
             f"[MANDATORY PYRRHIC BREAKTHROUGH / DIRE COST]: The sub-objective for '{quest.get('title')}' "
             f"was forced through at a dire cost! Narrate the narrow escape and physical/social toll."
@@ -1139,11 +1155,11 @@ def resolve_quest_optional_objective(
         or ([int(user_id)] if user_id else [])
         or (db.get_session_members(session_id) or [])
     )
-    prev_leads = [dict(l) for l in (dossier.get("leads_graph") or [])]
-    leads = [dict(l) for l in prev_leads]
-    prev_climax = dict(dossier.get("climax_spec") or {})
-    climax = dict(prev_climax)
-    econ = dict(dossier.get("contract_economy") or {})
+    prev_leads = [copy.deepcopy(l) for l in (dossier.get("leads_graph") or [])]
+    leads = [copy.deepcopy(l) for l in prev_leads]
+    prev_climax = copy.deepcopy(dossier.get("climax_spec") or {})
+    climax = copy.deepcopy(prev_climax)
+    econ = copy.deepcopy(dossier.get("contract_economy") or {})
 
     opt_low = str(optional_id or "").strip().lower()
     target_idx: Optional[int] = None
@@ -1292,11 +1308,21 @@ def resolve_quest_optional_objective(
     double_crossed = False
     betrayed_faction = ""
     main_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
+    pushback_info: Dict[str, Any] = {}
 
     if role == "aid":
+        from mechanics.narrative.threat_clock import (
+            apply_optional_pushback_to_climax,
+            is_threat_clock_eligible,
+        )
+
         climax["aid_dc_reduction"] = int(climax.get("aid_dc_reduction") or 0) + 2
-        climax["reinforcements"] = []
-        climax["rush_un_nerfed_buffs"] = {}
+        pushback_info = apply_optional_pushback_to_climax(
+            climax,
+            delta=1,
+            clear_base_guards=True,
+            clock_eligible=is_threat_clock_eligible(sess, q_row, dossier),
+        )
         if lead.get("target_npc") and not climax.get("aid_ally_striker"):
             climax["aid_ally_striker"] = str(lead["target_npc"])
         aid_slug = str(lead.get("rival_faction_slug") or "order_faction").strip()
@@ -1306,7 +1332,18 @@ def resolve_quest_optional_objective(
         climax["claimed_aid_factions"] = claimed_factions
 
     elif role == "bypass":
+        from mechanics.narrative.threat_clock import (
+            apply_optional_pushback_to_climax,
+            is_threat_clock_eligible,
+        )
+
         climax["bypass_unlocked"] = True
+        pushback_info = apply_optional_pushback_to_climax(
+            climax,
+            delta=1,
+            clear_base_guards=False,
+            clock_eligible=is_threat_clock_eligible(sess, q_row, dossier),
+        )
         if main_stages:
             if str(main_stages[0].get("status") or "active") not in ("completed", "bypassed"):
                 main_stages[0]["status"] = "bypassed"
@@ -1529,6 +1566,7 @@ def resolve_quest_optional_objective(
         "field_bonus_awarded": fb_awarded,
         "aid_dc_reduction": int(climax.get("aid_dc_reduction") or 0),
         "bypass_unlocked": bool(climax.get("bypass_unlocked")),
+        "threat_clock_pushed_back": bool(pushback_info.get("pushed_back")),
         "roster_scouted": True,
         "roster_cleared": True,
         "climax_unlocked": bool(climax.get("is_unlocked")),
@@ -1562,11 +1600,11 @@ def evaluate_nonlinear_leads_and_climax_gate(
 
     sess = db.get_session(session_id) or {}
     eff_turn = int(turn_number if turn_number is not None else db.infer_session_turn(sess))
-    prev_leads = [dict(l) for l in (dossier.get("leads_graph") or [])]
-    leads = [dict(l) for l in prev_leads]
-    prev_climax = dict(dossier.get("climax_spec") or {})
-    climax = dict(prev_climax)
-    econ = dict(dossier.get("contract_economy") or {})
+    prev_leads = [copy.deepcopy(l) for l in (dossier.get("leads_graph") or [])]
+    leads = [copy.deepcopy(l) for l in prev_leads]
+    prev_climax = copy.deepcopy(dossier.get("climax_spec") or {})
+    climax = copy.deepcopy(prev_climax)
+    econ = copy.deepcopy(dossier.get("contract_economy") or {})
 
     if rush_climax:
         gate_type = str(climax.get("gate_type") or "open")
@@ -1578,48 +1616,88 @@ def evaluate_nonlinear_leads_and_climax_gate(
                 "reason": "Climax location or true culprit remains hidden—uncover a lead or pair Caseboard clues first.",
             }
 
-        cascaded_enemies: List[Dict[str, Any]] = list(climax.get("reinforcements") or [])
+        main_stages_all = [ms for ms in (climax.get("main_stages") or []) if isinstance(ms, dict)]
+        has_main_stages = len(main_stages_all) > 0
+        skipped_main_stages = [
+            ms for ms in main_stages_all
+            if not ms.get("is_climax_stage")
+            and str(ms.get("status") or "").lower() not in ("completed", "bypassed")
+        ]
+        fam_low = str(dossier.get("family_tier") or "bounty").lower()
+        has_non_optional_leads = any(not l.get("is_optional") for l in leads if isinstance(l, dict))
+        existing_reinf: List[Dict[str, Any]] = [
+            dict(r) for r in (climax.get("reinforcements") or []) if isinstance(r, dict)
+        ]
+        seen_reinf_keys = {
+            (str(r.get("lead_id") or "").lower(), str(r.get("name") or "").lower())
+            for r in existing_reinf
+        }
         bypassed_ids: List[str] = []
+        bypassed_non_optional_ids: List[str] = []
+        allow_bounty_opt_rush = bool(
+            (not has_main_stages or skipped_main_stages)
+            and fam_low != "story"
+            and not has_non_optional_leads
+        )
         for ld in leads:
             if ld.get("status") == "active":
-                if ld.get("is_optional") and str(ld.get("role") or "").lower() in ("threatened", "alternative"):
-                    # Keep `threatened` evaluable on completion and rival `alternative` open for 11th-hour Double-Cross!
-                    continue
+                if ld.get("is_optional"):
+                    if not allow_bounty_opt_rush or str(ld.get("role") or "").lower() in ("threatened", "alternative"):
+                        # Keep optional leads (`threatened`/`alternative`, and all optionals on Story quests or finished main_stages) un-bypassed (D2)
+                        continue
                 ld["status"] = "bypassed"
-                bypassed_ids.append(str(ld.get("lead_id") or ""))
+                lid = str(ld.get("lead_id") or "")
+                bypassed_ids.append(lid)
+                if not ld.get("is_optional"):
+                    bypassed_non_optional_ids.append(lid)
                 if ld.get("encounter_roster") and not ld.get("roster_cleared"):
-                    cascaded_enemies.extend(list(ld["encounter_roster"]))
+                    for unit in list(ld["encounter_roster"]):
+                        if not isinstance(unit, dict):
+                            continue
+                        u_copy = dict(unit)
+                        u_copy["from_rush"] = True
+                        if lid and not u_copy.get("lead_id"):
+                            u_copy["lead_id"] = lid
+                        u_key = (str(u_copy.get("lead_id") or "").lower(), str(u_copy.get("name") or "").lower())
+                        if u_key not in seen_reinf_keys:
+                            seen_reinf_keys.add(u_key)
+                            existing_reinf.append(u_copy)
 
+        is_actual_rush = bool(
+            skipped_main_stages
+            or bypassed_non_optional_ids
+            or (allow_bounty_opt_rush and bypassed_ids)
+        )
         climax["is_unlocked"] = True
-        climax["reinforcements"] = cascaded_enemies
-        if bypassed_ids and climax.get("boss_sheet") and climax.get("rush_un_nerfed_buffs"):
+        climax["reinforcements"] = existing_reinf
+        if is_actual_rush and climax.get("boss_sheet") and climax.get("rush_un_nerfed_buffs") and not climax["boss_sheet"].get("rushed_un_nerfed"):
             boss = dict(climax["boss_sheet"])
             bonus_dt = int((climax["rush_un_nerfed_buffs"] or {}).get("bonus_dt") or 4)
+            old_max = int(boss.get("max_hp") or boss.get("hp") or 120)
+            old_hp = int(boss.get("hp") if boss.get("hp") is not None else old_max)
+            new_max = int(round(old_max * 1.15))
             boss["dt"] = int(boss.get("dt") or 2) + bonus_dt
-            boss["max_hp"] = int(round(int(boss.get("max_hp") or 120) * 1.15))
-            boss["hp"] = boss["max_hp"]
+            boss["max_hp"] = new_max
+            boss["hp"] = new_max if old_hp >= old_max else min(new_max, old_hp)
             boss["rushed_un_nerfed"] = True
             climax["boss_sheet"] = boss
 
-        db.append_dossier_state_event(session_id, quest_id, eff_turn, "leads_graph", prev_leads, leads)
-        db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax)
-        if int(dossier.get("engaged_flag") or 0) == 0:
-            db.append_dossier_state_event(session_id, quest_id, eff_turn, "engaged_flag", 0, 1)
+        needs_proj = bool(climax.get("main_stages") or any(l.get("is_optional") for l in leads))
         updated = db.upsert_quest_dossier(
             session_id,
             quest_id,
             engaged_flag=1,
             leads_graph=leads,
             climax_spec=climax,
+            turn_number=eff_turn,
+            sync_projection=needs_proj,
         )
-        if climax.get("main_stages") or any(l.get("is_optional") for l in leads):
-            db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=updated)
         return {
             "success": True,
             "allowed": True,
-            "rushed": len(bypassed_ids) > 0,
+            "rushed": is_actual_rush,
             "bypassed_leads": bypassed_ids,
-            "reinforcements_count": len(cascaded_enemies),
+            "reinforcements_count": len(existing_reinf),
             "dossier": updated,
         }
 

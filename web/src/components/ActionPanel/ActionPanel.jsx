@@ -752,6 +752,11 @@ const ActionPanel = ({
                               : `🏺 ${activeTargetObj.tether_vessel_name}`}
                           </span>
                         )}
+                        {activeTargetObj.telegraphed_skill && typeof activeTargetObj.telegraphed_skill === 'object' && (
+                          <span className="text-[9.5px] px-1 rounded bg-amber-950/90 border border-amber-500/70 text-amber-200 font-bold">
+                            ⚠️ {activeTargetObj.telegraphed_skill.skill_name || activeTargetObj.telegraphed_skill.telegraphed_label || activeTargetObj.telegraphed_skill.name}
+                          </span>
+                        )}
                       </button>
                     )}
 

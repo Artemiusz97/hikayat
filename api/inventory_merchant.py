@@ -33,6 +33,7 @@ from mechanics.combat.items import (
 from mechanics.combat.merchant import MERCHANT_ARCHETYPES
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
 from .security import verify_session_participant, verify_user_access
+from mechanics.world import evaluate_shop_staff_availability
 from mechanics.world.locations import get_available_merchant_types_for_location, is_school_scenario
 from skill_check import resolve_check
 import game_engine
@@ -498,6 +499,46 @@ async def _ensure_merchant_session_member(session_id: int, user_id: int, session
         raise HTTPException(status_code=403, detail="You are not an active participant of this session.")
 
 
+def _resolve_open_venue_stall(
+    *,
+    session_id: int,
+    loc: str,
+    scen_key: str,
+    cur_day: int,
+    cur_min: int,
+    turn_no: int,
+    skip_type: str,
+    venue_avail: dict,
+    is_anom_scen: bool,
+) -> tuple[str, dict] | None:
+    """Finds an open specialist stall or roamer at a multi-stall venue when default merchant_type is off-shift."""
+    loc_stores = get_available_merchant_types_for_location(loc, scen_key=scen_key) or []
+    open_archs = list(((venue_avail.get("staff_npc") or {}).get("basic_info") or {}).get("merchant_archetypes") or [])
+    cand_order: list[str] = []
+    for raw_arch in open_archs:
+        arch_name = str(raw_arch or "").strip()
+        if arch_name and arch_name != skip_type and arch_name not in cand_order and not (is_anom_scen and arch_name in ("spellbook_merchant", "magic_merchant")):
+            cand_order.append(arch_name)
+    for store_entry in loc_stores:
+        st = str(store_entry.get("type") or "").strip()
+        if st and st != skip_type and st not in cand_order and not (is_anom_scen and st in ("spellbook_merchant", "magic_merchant")):
+            cand_order.append(st)
+    for cand in cand_order:
+        res = evaluate_shop_staff_availability(
+            session_id,
+            location_str=loc,
+            merchant_type=cand,
+            is_phone_shop=False,
+            scen_key=scen_key,
+            current_day=cur_day,
+            current_minute=cur_min,
+            turn_number=turn_no,
+        )
+        if res.get("available"):
+            return cand, res
+    return None
+
+
 @router.get("/api/merchant/{session_id}")
 async def get_merchant_shop(
     session_id: int,
@@ -526,13 +567,15 @@ async def get_merchant_shop(
             status_code=403,
             detail="Sanctuary spirit merchants trade strictly in person and never accept remote Smartphone E-Shop orders.",
         )
+    explicit_merchant_type = str(merchant_type or "").strip() or None
     prev_m_type = merchant.get("merchant_type") or "general_merchant"
-    m_type = "online_delivery" if is_phone_shop else (merchant_type or prev_m_type)
+    m_type = "online_delivery" if is_phone_shop else (explicit_merchant_type or prev_m_type)
     from scenario_data import is_anomalous_incursions_scenario as _is_anom_merch
-    if _is_anom_merch(scen_key) and m_type in ("spellbook_merchant", "magic_merchant"):
+    is_anom_scen = bool(_is_anom_merch(scen_key))
+    if is_anom_scen and m_type in ("spellbook_merchant", "magic_merchant"):
         m_type = "general_merchant"
     # If player explicitly switches store tabs at a street location, clear stale Quartermaster flag
-    if not is_phone_shop and merchant_type and merchant.get("is_faction_quartermaster"):
+    if not is_phone_shop and explicit_merchant_type and merchant.get("is_faction_quartermaster"):
         merchant["is_faction_quartermaster"] = False
         merchant.pop("quartermaster_faction_arch", None)
     pre_shop_ctx = await adb(
@@ -549,7 +592,66 @@ async def get_merchant_shop(
         and pre_shop_ctx.get("shop_faction_archetype") == "monastic_order"
         and pre_shop_ctx.get("player_faction_archetype") == "monastic_order"
     )
-    switched_store = bool(not is_phone_shop and not is_monastic_member_shrine and merchant_type and merchant_type != prev_m_type)
+
+    shop_avail: dict | None = None
+    is_shop_open = True
+    shop_closed_reason = ""
+    staff_keeper_name = ""
+    if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+        turn_no = int(session.get("turn_count") or 0)
+        shop_avail = await adb(
+            evaluate_shop_staff_availability,
+            session_id,
+            location_str=loc,
+            merchant_type=m_type,
+            is_phone_shop=False,
+            scen_key=scen_key,
+            current_day=cur_day,
+            current_minute=cur_min,
+            turn_number=turn_no,
+        )
+        if not shop_avail.get("available") and not explicit_merchant_type:
+            venue_avail = await adb(
+                evaluate_shop_staff_availability,
+                session_id,
+                location_str=loc,
+                merchant_type="",
+                is_phone_shop=False,
+                scen_key=scen_key,
+                current_day=cur_day,
+                current_minute=cur_min,
+                turn_number=turn_no,
+            )
+            if venue_avail.get("available"):
+                picked = await adb(
+                    _resolve_open_venue_stall,
+                    session_id=session_id,
+                    loc=loc,
+                    scen_key=scen_key,
+                    cur_day=cur_day,
+                    cur_min=cur_min,
+                    turn_no=turn_no,
+                    skip_type=m_type,
+                    venue_avail=venue_avail,
+                    is_anom_scen=is_anom_scen,
+                )
+                if picked is not None:
+                    m_type, shop_avail = picked
+            elif venue_avail.get("reason"):
+                shop_avail = venue_avail
+
+        is_shop_open = bool(shop_avail.get("available"))
+        if not is_shop_open:
+            shop_closed_reason = str(shop_avail.get("reason") or "no_merchant")
+        elif shop_avail.get("staff_npc"):
+            staff_keeper_name = str(shop_avail["staff_npc"].get("name") or "").strip()
+
+    switched_store = bool(
+        not is_phone_shop
+        and not is_monastic_member_shrine
+        and m_type != prev_m_type
+        and (bool(explicit_merchant_type) or is_shop_open)
+    )
     store_key = (
         f"{loc or 'monastic_shrine'}:monastic_shrine_daily"
         if is_monastic_member_shrine
@@ -558,14 +660,19 @@ async def get_merchant_shop(
 
     stock_field = "phone_stock" if is_phone_shop else "stock"
     catalogue, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, cur_day, cur_min)
-    if needs_restock and (switched_store or not merchant.get(stock_field)):
+    if is_shop_open and needs_restock and (switched_store or not merchant.get(stock_field)):
         inv = await adb(db.get_inventory, user_id)
         party = [(dict(char), inv)]
         arch_meta = MERCHANT_ARCHETYPES.get(m_type, MERCHANT_ARCHETYPES.get("general_merchant", {}))
+        restock_name = (
+            "Express E-Shop Delivery"
+            if is_phone_shop
+            else (staff_keeper_name or (arch_meta.get("title") if switched_store else (merchant.get("flavor_name") or arch_meta.get("title") or "Local Merchant")))
+        )
         try:
             shop_data = await generate_merchant_shop(
                 party=party,
-                merchant_name="Express E-Shop Delivery" if is_phone_shop else (arch_meta.get("title") if switched_store else (merchant.get("flavor_name") or arch_meta.get("title") or "Local Merchant")),
+                merchant_name=restock_name,
                 merchant_description="Instant drone & courier delivery straight to your location." if is_phone_shop else (arch_meta.get("intro_template") if switched_store else (merchant.get("flavor_description") or "")),
                 session=session,
                 is_phone_shop=is_phone_shop,
@@ -606,7 +713,7 @@ async def get_merchant_shop(
             merchant["discount_pct"] = catalogue.get("discount_pct", 0)
             merchant["available"] = True
         await adb(db.save_merchant_state, session_id, merchant)
-    elif catalogue and (switched_store or not merchant.get(stock_field)):
+    elif is_shop_open and catalogue and (switched_store or not merchant.get(stock_field)):
         merchant[stock_field] = catalogue.get("stock", [])
         if not is_phone_shop:
             merchant["merchant_type"] = m_type
@@ -616,6 +723,7 @@ async def get_merchant_shop(
             merchant["rumors"] = catalogue.get("rumors", [])
             merchant["haggle_attempts"] = catalogue.get("haggle_attempts", merchant.get("haggle_attempts", 0))
             merchant["discount_pct"] = catalogue.get("discount_pct", merchant.get("discount_pct", 0))
+            merchant["available"] = True
             if switched_store:
                 await adb(db.save_merchant_state, session_id, merchant)
 
@@ -660,17 +768,18 @@ async def get_merchant_shop(
             if isinstance(s_it, dict) and int(s_it.get("quantity", 1) or 1) > 1:
                 s_it["quantity"] = 1
     stock = []
-    for item in raw_stock:
-        if item.get("quantity", 1) <= 0:
-            continue
-        base_price = int(item.get("price", 15) or 15)
-        final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
-        entry = dict(item)
-        entry["base_price"] = base_price
-        entry["final_price"] = final_price
-        if shop_ctx.get("pricing_badge"):
-            entry["faction_pricing_badge"] = shop_ctx["pricing_badge"]
-        stock.append(entry)
+    if is_shop_open:
+        for item in raw_stock:
+            if item.get("quantity", 1) <= 0:
+                continue
+            base_price = int(item.get("price", 15) or 15)
+            final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
+            entry = dict(item)
+            entry["base_price"] = base_price
+            entry["final_price"] = final_price
+            if shop_ctx.get("pricing_badge"):
+                entry["faction_pricing_badge"] = shop_ctx["pricing_badge"]
+            stock.append(entry)
 
     # Compute sellable items from player inventory
     inv_items = await adb(db.get_inventory, user_id)
@@ -737,16 +846,21 @@ async def get_merchant_shop(
 
     arch_info = MERCHANT_ARCHETYPES.get(m_type, {})
     merchant_name = "Express E-Shop" if is_phone_shop else (
-        arch_info.get("title") if switched_store else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant")
+        staff_keeper_name or (arch_info.get("title") if switched_store else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant"))
     )
-    merchant_desc = "Order snacks, gifts, and gear for immediate delivery." if is_phone_shop else (
-        merchant.get("intro_narrative") or merchant.get("flavor_description") or arch_info.get("intro_template") or "Browse wares and trade gear."
-    )
+    if is_phone_shop:
+        merchant_desc = "Order snacks, gifts, and gear for immediate delivery."
+    elif not is_shop_open:
+        merchant_desc = str((shop_avail or {}).get("reason_message") or "This shop is currently closed.")
+    else:
+        merchant_desc = merchant.get("intro_narrative") or merchant.get("flavor_description") or arch_info.get("intro_template") or "Browse wares and trade gear."
     haggle_attempts = int(merchant.get("haggle_attempts", 0) or 0)
     haggle_discount_pct = int(merchant.get("discount_pct", 0) or 0)
 
     return {
-        "available": True if is_phone_shop else bool(merchant.get("available", True)),
+        "available": True if is_phone_shop else is_shop_open,
+        "shop_closed_reason": "" if is_phone_shop else shop_closed_reason,
+        "staff_keeper": "" if is_phone_shop else staff_keeper_name,
         "is_phone_shop": is_phone_shop,
         "merchant_type": m_type,
         "available_stores": available_stores,
@@ -783,6 +897,24 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             raise HTTPException(status_code=404, detail="Character not found")
 
         merchant = dict(session.get("merchant") or {})
+        is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
+        if not is_phone and not bool(merchant.get("is_faction_quartermaster")):
+            shop_avail = await adb(
+                evaluate_shop_staff_availability,
+                req.session_id,
+                location_str=session.get("current_location") or "",
+                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                is_phone_shop=False,
+                scen_key=session.get("scenario") or "fantasy",
+                current_day=session.get("current_day"),
+                current_minute=session.get("current_minute"),
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if not shop_avail.get("available"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=shop_avail.get("reason_message") or "The merchant counter is closed.",
+                )
         attempts = int(merchant.get("haggle_attempts", 0) or 0)
         if attempts >= 3:
             raise HTTPException(status_code=400, detail="The merchant has grown tired of haggling (3/3 attempts used).")
@@ -806,7 +938,7 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             )
 
         active_key = merchant.get("active_store_key")
-        if active_key and isinstance(merchant.get("catalogues"), dict) and active_key in merchant["catalogues"]:
+        if not bool(req.is_phone_shop) and active_key and isinstance(merchant.get("catalogues"), dict) and active_key in merchant["catalogues"]:
             merchant["catalogues"][active_key]["haggle_attempts"] = merchant["haggle_attempts"]
             merchant["catalogues"][active_key]["discount_pct"] = merchant.get("discount_pct", 0)
 
@@ -943,6 +1075,23 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
             raise HTTPException(status_code=404, detail="Character not found")
 
         merchant = dict(session.get("merchant") or {})
+        if not bool(req.is_phone_shop) and not bool(merchant.get("is_faction_quartermaster")):
+            shop_avail = await adb(
+                evaluate_shop_staff_availability,
+                req.session_id,
+                location_str=session.get("current_location") or "",
+                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                is_phone_shop=False,
+                scen_key=session.get("scenario") or "fantasy",
+                current_day=session.get("current_day"),
+                current_minute=session.get("current_minute"),
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if not shop_avail.get("available"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=shop_avail.get("reason_message") or "The shop is currently closed.",
+                )
         m_arch = MERCHANT_ARCHETYPES.get(str(merchant.get("merchant_type") or merchant.get("type") or ""), {})
         is_in_person_store = bool(merchant.get("in_person_only") or m_arch.get("in_person_only"))
         if req.is_phone_shop:
@@ -1121,6 +1270,26 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
         char = await adb(db.get_character, req.user_id)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
+
+        merchant = dict(session.get("merchant") or {})
+        is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
+        if not is_phone and not bool(merchant.get("is_faction_quartermaster")):
+            shop_avail = await adb(
+                evaluate_shop_staff_availability,
+                req.session_id,
+                location_str=session.get("current_location") or "",
+                merchant_type=str(req.merchant_type or merchant.get("merchant_type") or ""),
+                is_phone_shop=False,
+                scen_key=session.get("scenario") or "fantasy",
+                current_day=session.get("current_day"),
+                current_minute=session.get("current_minute"),
+                turn_number=int(session.get("turn_count") or 0),
+            )
+            if not shop_avail.get("available"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=shop_avail.get("reason_message") or "The shop is currently closed.",
+                )
 
         items = await adb(db.get_inventory, req.user_id)
         target_item = next((dict(i) for i in items if i.get("id") == req.item_id), None)

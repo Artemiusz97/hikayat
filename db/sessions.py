@@ -227,8 +227,13 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
                         combat_boss_telegraph: dict = None):
     clean_narrative = _to_str(narrative)
     if clean_narrative:
-        from game_engine.keywords import sanitize_meta_objective_leaks
-        clean_narrative = sanitize_meta_objective_leaks(clean_narrative)
+        from game_engine.keywords import (
+            sanitize_internal_tags_and_raw_stats,
+            sanitize_meta_objective_leaks,
+        )
+        clean_narrative = sanitize_meta_objective_leaks(
+            sanitize_internal_tags_and_raw_stats(clean_narrative)
+        )
 
     fields = {
         "scene_title": _to_str(scene_title),
@@ -1068,6 +1073,8 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
             "contracts_restored": 0,
             "grudges_restored": 0,
             "pact_gear_pruned": 0,
+            "world_roster_rolled_back": 0,
+            "epistemic_rolled_back": 0,
         }
     import mechanics.social.relationship_graph as rg
     from mechanics.social.persona.intimacy.ledger import delete_intimate_events_after_turn
@@ -1077,6 +1084,8 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
     from .social import rollback_actor_physical_state_after_turn, rollback_social_pacing_state_after_turn
     from .properties import rollback_player_properties_after_turn
     from .contracts import rollback_entity_contracts_after_turn
+    from .roster import rollback_world_roster_after_turn
+    from .epistemic import rollback_epistemic_state_after_turn
 
     t_num = int(turn_number)
     with UnitOfWork() as conn:
@@ -1088,6 +1097,8 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         soc_pacing_res = rollback_social_pacing_state_after_turn(session_id, t_num, conn=conn)
         prop_res = rollback_player_properties_after_turn(session_id, t_num, conn=conn)
         pact_res = rollback_entity_contracts_after_turn(session_id, t_num, conn=conn)
+        roster_res = rollback_world_roster_after_turn(session_id, t_num, conn=conn)
+        ep_res = rollback_epistemic_state_after_turn(session_id, t_num, conn=conn)
         from mechanics.world.locations.folklore_veil import rollback_folklore_veil_state_after_turn
         veil_res = rollback_folklore_veil_state_after_turn(session_id, t_num, conn=conn)
         intimate_cnt = delete_intimate_events_after_turn(session_id, t_num, conn=conn)
@@ -1367,6 +1378,17 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         "contracts_restored": pact_res.get("contracts_restored", 0),
         "grudges_restored": pact_res.get("grudges_restored", 0),
         "pact_gear_pruned": pact_res.get("pact_gear_pruned", 0),
+        "world_roster_rolled_back": (
+            roster_res.get("roster_deleted", 0)
+            + roster_res.get("roster_restored", 0)
+            + roster_res.get("promoted_contacts_reverted", 0)
+        ),
+        "epistemic_rolled_back": (
+            ep_res.get("facts_deleted", 0)
+            + ep_res.get("facts_restored", 0)
+            + ep_res.get("knowledge_deleted", 0)
+            + ep_res.get("knowledge_restored", 0)
+        ),
     }
 
 

@@ -8,7 +8,7 @@ import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import scenario_data
-from models.llm_schemas import ChapterPlan
+from models.llm_schemas import ChapterPlan, ChapterPlanClueSource
 from mechanics.narrative.quest_engines import (
     build_engine_lead_approaches,
     load_quest_engines_catalog,
@@ -113,11 +113,22 @@ def build_chapter_plan_candidates(
                     parts.append(s_clean)
             if len(parts) >= 2:
                 _add_room(" ➔ ".join(parts))
-        for node in (db.get_session_world_nodes(session_id) or []):
+        all_nodes = list(db.get_session_world_nodes(session_id) or [])
+        parent_ids = {
+            str(n.get("parent_id") or "")
+            for n in all_nodes
+            if isinstance(n, dict) and n.get("parent_id")
+        }
+        for node in all_nodes:
             if not isinstance(node, dict):
                 continue
-            if str(node.get("node_type") or "").upper() in ("ROOM", "FACILITY", "POI"):
-                tiered = db.format_node_tiered_location(session_id, str(node.get("node_id") or "")) if node.get("node_id") else ""
+            nt = str(node.get("node_type") or "").upper()
+            nid = str(node.get("node_id") or "")
+            priv = str(node.get("privacy_level") or "public").lower()
+            if priv == "private":
+                continue
+            if nt in ("ROOM", "FACILITY", "POI") or (nt == "BUILDING" and nid and nid not in parent_ids):
+                tiered = db.format_node_tiered_location(session_id, nid) if nid else ""
                 _add_room(tiered or node.get("name"))
         # Include non-climax rooms already bound to leads or main stages (avoid bare parent zones)
         for st in ((dossier.get("climax_spec") or {}).get("main_stages") or []):
@@ -229,11 +240,37 @@ def validate_chapter_plan(
         s_lbl = str(st.get("stage_label") or "").strip()
         if not s_lbl or _LEAK_RE.search(s_lbl):
             errors.append(f"Stage {req_idx}: invalid or leaking stage_label.")
-        bc = dict(st.get("beat_contract") or {})
-        kc = dict(st.get("key_clue") or {})
-        if not str(kc.get("title") or "").strip() or not str(kc.get("lead_text") or "").strip():
+        raw_bc = st.get("beat_contract")
+        bc = {"player_verb": raw_bc.strip()} if isinstance(raw_bc, str) and raw_bc.strip() else (dict(raw_bc) if isinstance(raw_bc, dict) else {})
+        raw_kc = st.get("key_clue")
+        if isinstance(raw_kc, str) and raw_kc.strip():
+            s = raw_kc.strip()
+            kc = {"title": s[:80].strip(), "lead_text": f"Evidence related to {s}."}
+        elif isinstance(raw_kc, dict):
+            kc = dict(raw_kc)
+        else:
+            kc = {}
+        if not str(kc.get("title") or "").strip():
+            for syn in ("name", "clue", "clue_title", "label", "item"):
+                if kc.get(syn) and str(kc[syn]).strip():
+                    kc["title"] = str(kc[syn]).strip()
+                    break
+        if not str(kc.get("lead_text") or "").strip():
+            for syn in ("description", "summary", "details", "text", "clue_text"):
+                if kc.get(syn) and str(kc[syn]).strip():
+                    kc["lead_text"] = str(kc[syn]).strip()
+                    break
+        kc_title = str(kc.get("title") or "").strip()
+        kc_lead = str(kc.get("lead_text") or "").strip()
+        if kc_title and not kc_lead:
+            kc_lead = f"Evidence confirming {kc_title}."
+            kc["lead_text"] = kc_lead
+        elif kc_lead and not kc_title:
+            kc_title = kc_lead[:60].strip()
+            kc["title"] = kc_title
+        if not kc_title or not kc_lead:
             errors.append(f"Stage {req_idx}: key_clue must include non-empty title and lead_text.")
-        if _LEAK_RE.search(str(kc.get("title") or "")) or _LEAK_RE.search(str(kc.get("lead_text") or "")):
+        if _LEAK_RE.search(kc_title) or _LEAK_RE.search(kc_lead):
             errors.append(f"Stage {req_idx}: key_clue contains internal stat/JSON tokens.")
 
         sources = st.get("clue_sources") or []
@@ -348,7 +385,7 @@ async def generate_chapter_plan_with_resilience(
 
     sess, cands = await adb(_gather)
     scen_key = str(sess.get("scenario") or "fantasy")
-    lang = normalize_quest_locale(sess.get("language") or "en")
+    lang = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
     climax_spec = dossier.get("climax_spec") or {}
     main_stages = [s for s in (climax_spec.get("main_stages") or []) if isinstance(s, dict)]
     expected_indices = [
@@ -378,7 +415,7 @@ async def generate_chapter_plan_with_resilience(
         "2. Each non-climax stage MUST have >= 3 `clue_sources` in DISTINCT rooms from CANDIDATE_ROOMS.\n"
         "3. Every `'witness'` source MUST set `npc_name` verbatim from CANDIDATE_NPCS; non-witness sources leave `npc_name` null.\n"
         "4. NEVER include raw HP, MP, DC numbers, dice math, or `[ITEM_JSON]` tags in any text.\n"
-        "5. Output ONLY JSON matching the ChapterPlan schema."
+        "5. Output ONLY JSON matching schema: {'title': str, 'objective': str, 'optional_hooks': [str], 'stages': [{'stage_index': int, 'stage_label': str, 'beat_contract': {'player_verb': str, 'reveal': str, 'handover': str, 'next_pointer': str}, 'key_clue': {'title': str, 'lead_text': str}, 'clue_sources': [...]}]}."
     )
     usr_prompt = json.dumps(
         {
@@ -419,6 +456,73 @@ async def generate_chapter_plan_with_resilience(
                 response_model=ChapterPlan,
             )
             plan_obj = ChapterPlan.model_validate(raw if isinstance(raw, dict) else {})
+            if not plan_obj.title or len(plan_obj.title) < 3:
+                plan_obj.title = q_title
+            if not plan_obj.objective or len(plan_obj.objective) < 8:
+                plan_obj.objective = str(climax_spec.get("main_objective_text") or dossier.get("objective") or q_title)
+
+            # Attempt 0: validate raw LLM response first so validation errors drive Attempt-1 repair prompt.
+            # Attempt >= 1: deterministic room/NPC auto-healing + localized clue prose recovery before final validation.
+            if attempt >= 1:
+                climax_leaf_heal = _canon_loc_leaf(cands["climax_location"])
+                cand_leaf_map = {_canon_loc_leaf(r): r for r in cand_rooms if r}
+                cand_npc_set = {str(n).strip().lower() for n in cand_npcs if str(n or "").strip()}
+                for st_item in (plan_obj.stages or []):
+                    used_stage_leaves = set()
+                    healed_sources = []
+                    stage_kc_title = str(
+                        (st_item.key_clue.title if st_item.key_clue else "")
+                        or st_item.stage_label
+                        or ""
+                    )
+                    for src in (st_item.clue_sources or []):
+                        src_loc = str(src.location or "").strip()
+                        matched_room = cand_leaf_map.get(_canon_loc_leaf(src_loc)) or cand_leaf_map.get(src_loc.lower())
+                        if not matched_room or matched_room.lower() == cands["climax_location"].lower() or _canon_loc_leaf(matched_room) == climax_leaf_heal or _canon_loc_leaf(matched_room) in used_stage_leaves:
+                            for r in cand_rooms:
+                                r_leaf = _canon_loc_leaf(r)
+                                if r_leaf not in used_stage_leaves and r.lower() != cands["climax_location"].lower() and r_leaf != climax_leaf_heal:
+                                    matched_room = r
+                                    break
+                        if matched_room:
+                            src.location = matched_room
+                            used_stage_leaves.add(_canon_loc_leaf(matched_room))
+                        if str(src.kind or "").lower() == "witness":
+                            raw_w = str(src.npc_name or "").strip().lower()
+                            if raw_w not in cand_npc_set:
+                                src.kind = "record"
+                                src.npc_name = None
+                        if not src.approach_hint:
+                            eff_hint, _ = build_clue_source_prose(
+                                kind=str(src.kind or "record").lower(),
+                                location=str(src.location or matched_room or ""),
+                                clue_title=stage_kc_title,
+                                npc_name=str(src.npc_name or ""),
+                                lang=lang,
+                            )
+                            src.approach_hint = eff_hint
+                        healed_sources.append(src)
+                    for r in cand_rooms:
+                        if len(healed_sources) >= 3:
+                            break
+                        r_leaf = _canon_loc_leaf(r)
+                        if r_leaf not in used_stage_leaves and r.lower() != cands["climax_location"].lower() and r_leaf != climax_leaf_heal:
+                            used_stage_leaves.add(r_leaf)
+                            eff_hint, _ = build_clue_source_prose(
+                                kind="record",
+                                location=r,
+                                clue_title=stage_kc_title,
+                                npc_name="",
+                                lang=lang,
+                            )
+                            healed_sources.append(ChapterPlanClueSource(
+                                source_id=f"S{st_item.stage_index}-{len(healed_sources)+1}",
+                                kind="record",
+                                location=r,
+                                approach_hint=eff_hint,
+                            ))
+                    st_item.clue_sources = healed_sources
+
             ok, errors, clean_plan = validate_chapter_plan(
                 plan_obj,
                 candidate_rooms=cand_rooms,
@@ -463,9 +567,13 @@ def apply_chapter_plan_to_dossier(
     if not fresh_dos:
         return None
     sess = db.get_session(session_id) or {}
-    lang = normalize_quest_locale(sess.get("language") or "en")
+    lang = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
     danger_tier = max(1, int(fresh_dos.get("danger_tier") or 1))
+    engaged = int(fresh_dos.get("engaged_flag") or 0) != 0
     climax = dict(fresh_dos.get("climax_spec") or {})
+    leads_graph: List[Dict[str, Any]] = [
+        dict(ld) for ld in (fresh_dos.get("leads_graph") or []) if isinstance(ld, dict)
+    ]
     main_stages = [dict(s) for s in (climax.get("main_stages") or []) if isinstance(s, dict)]
     plan_by_idx = {int(s.get("stage_index") or 0): s for s in (plan.get("stages") or []) if isinstance(s, dict)}
     raw_clue_graph = fresh_dos.get("clue_graph")
@@ -478,16 +586,19 @@ def apply_chapter_plan_to_dossier(
         legacy_id = f"{quest_id}_clue_{st_num_val}"
         for existing in clue_graph:
             cid = str(existing.get("clue_id") or "")
-            if cid in (kc_id, legacy_id) or int(existing.get("stage_index") or 0) == st_num_val:
+            kcid = str(existing.get("key_clue_id") or existing.get("clue_key") or "")
+            if cid in (kc_id, legacy_id) or kcid in (kc_id, legacy_id) or int(existing.get("stage_index") or 0) == st_num_val:
                 existing["title"] = str(kc_dict.get("title") or existing.get("title") or "")
                 existing["summary"] = str(kc_dict.get("lead_text") or existing.get("summary") or "")
                 existing["category"] = str(kc_dict.get("category") or existing.get("category") or "document")
                 existing["stage_index"] = int(st_num_val)
                 existing["key_clue_id"] = kc_id
+                existing["clue_key"] = kc_id
                 return
         clue_graph.append(
             {
-                "clue_id": kc_id,
+                "clue_id": None,
+                "clue_key": kc_id,
                 "key_clue_id": kc_id,
                 "stage_index": int(st_num_val),
                 "title": str(kc_dict.get("title") or ""),
@@ -500,6 +611,37 @@ def apply_chapter_plan_to_dossier(
         )
 
     any_updated = False
+    obj_updated = ""
+    leads_updated = False
+    if not engaged:
+        plan_obj_txt = str(plan.get("objective") or "").strip()
+        if plan_obj_txt and not _LEAK_RE.search(plan_obj_txt):
+            climax["main_objective_text"] = plan_obj_txt[:220]
+            climax["label"] = plan_obj_txt[:220]
+            obj_updated = plan_obj_txt[:220]
+            any_updated = True
+        opt_hooks = [
+            str(h).strip()
+            for h in (plan.get("optional_hooks") or [])
+            if str(h or "").strip() and not _LEAK_RE.search(str(h))
+        ]
+        if opt_hooks and leads_graph:
+            hook_idx = 0
+            for ld in leads_graph:
+                if hook_idx >= len(opt_hooks):
+                    break
+                if not ld.get("is_optional", True):
+                    continue
+                ld_st = str(ld.get("status") or "active").lower()
+                if ld_st in ("completed", "failed", "bypassed") or ld.get("completed") or ld.get("claimed_by"):
+                    continue
+                hook_txt = opt_hooks[hook_idx][:180]
+                ld["title"] = hook_txt
+                ld["label"] = hook_txt
+                hook_idx += 1
+                leads_updated = True
+                any_updated = True
+
     for idx, st in enumerate(main_stages):
         st_num = int(st.get("stage_index") or (idx + 1))
         status = str(st.get("status") or "locked").lower()
@@ -613,16 +755,21 @@ def apply_chapter_plan_to_dossier(
 
     climax["main_stages"] = main_stages
     climax["chapter_plan_applied"] = True
-    saved = db.upsert_quest_dossier(
-        session_id,
-        quest_id,
-        climax_spec=climax,
-        clue_graph=clue_graph,
-        conn=conn,
-    )
-    if saved:
-        db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=saved, conn=conn)
-    return saved
+    if obj_updated:
+        conn.execute(
+            "UPDATE quests SET objective = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+            (obj_updated, time.time(), session_id, quest_id),
+        )
+    upsert_kwargs: Dict[str, Any] = {
+        "climax_spec": climax,
+        "clue_graph": clue_graph,
+        "is_baseline_enrichment": not engaged,
+        "sync_projection": True,
+        "conn": conn,
+    }
+    if leads_updated:
+        upsert_kwargs["leads_graph"] = leads_graph
+    return db.upsert_quest_dossier(session_id, quest_id, **upsert_kwargs)
 
 
 async def run_background_chapter_plan(session_id: int, quest_id: str) -> Optional[Dict[str, Any]]:

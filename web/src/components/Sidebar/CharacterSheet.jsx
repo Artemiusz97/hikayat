@@ -33,14 +33,20 @@ const StatBar = ({ label, current, max, color, icon: Icon, extraText }) => {
 
 export const parseAndTranslateStatus = (effect, t) => {
   let effName = typeof effect === 'string' ? effect : (effect?.name || 'Effect');
-  let duration = typeof effect === 'object' && effect?.duration !== undefined ? effect.duration : null;
-  let durationUnit = 't';
+  const rawRem = typeof effect === 'object' && effect !== null
+    ? (effect.remaining_duration ?? effect.duration ?? null)
+    : null;
+  let duration = rawRem !== null && rawRem !== undefined && Number(rawRem) > 0 ? Number(rawRem) : null;
+  let durationUnit = typeof effect === 'object' && effect?.duration_type === 'minutes' ? 'm' : 't';
+  const stacks = typeof effect === 'object' && effect !== null
+    ? Math.max(1, Number(effect.intensity_stacks || effect.stacks || 1))
+    : 1;
 
   // Support bracketed duration strings like "Refractory Recovery [28 min]" or "Aroused [3 turns]"
   const match = typeof effName === 'string' ? effName.match(/^(.*?)\s*\[(\d+)\s*(min|m|turns?|t)\]$/i) : null;
   if (match) {
     effName = match[1].trim();
-    duration = match[2];
+    duration = Number(match[2]);
     durationUnit = match[3].toLowerCase().startsWith('m') ? 'm' : 't';
   }
 
@@ -54,9 +60,12 @@ export const parseAndTranslateStatus = (effect, t) => {
         .join(' & ')
     : t(`conditions.${effName.toLowerCase().replace(/[\s\-]+/g, '_')}`, effName);
 
-  const formattedText = duration !== null ? `${displayLabel} [${duration}${durationUnit}]` : displayLabel;
+  const stackSuffix = stacks > 1 ? ` x${stacks}` : '';
+  const formattedText = duration !== null && duration > 0
+    ? `${displayLabel}${stackSuffix} [${duration}${durationUnit}]`
+    : `${displayLabel}${stackSuffix}`;
 
-  return { effName, displayLabel, duration, durationUnit, formattedText };
+  return { effName, displayLabel, duration, durationUnit, stacks, formattedText };
 };
 
 const formatTitle = (str) => {
@@ -151,7 +160,7 @@ const MALE_TEXTURE_OPTIONS = [
 
 export const StatusEffectBadge = ({ effect }) => {
   const { t } = useTranslation();
-  const { effName, displayLabel, duration, durationUnit } = parseAndTranslateStatus(effect, t);
+  const { effName, displayLabel, duration, durationUnit, stacks } = parseAndTranslateStatus(effect, t);
   
   const lower = effName.toLowerCase();
   const isNegative = ['bleed', 'poison', 'burn', 'stun', 'prone', 'weaken', 'wound', 'curse', 'drain', 'freeze'].some(k => lower.includes(k));
@@ -163,18 +172,19 @@ export const StatusEffectBadge = ({ effect }) => {
       ? 'bg-emerald-950/70 text-emerald-300 border-emerald-700/70' 
       : 'bg-amber-950/70 text-amber-300 border-amber-700/70';
 
-  const tooltip = duration !== null 
-    ? `${displayLabel} (${duration}${durationUnit === 'm' ? ' min' : ' turns'} remaining)` 
-    : displayLabel;
+  const stackLabel = stacks > 1 ? ` x${stacks}` : '';
+  const tooltip = duration !== null && duration > 0
+    ? `${displayLabel}${stackLabel} (${duration}${durationUnit === 'm' ? ' min' : ' turns'} remaining)` 
+    : `${displayLabel}${stackLabel}`;
 
   return (
     <span 
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-semibold border ${badgeColor}`}
       title={tooltip}
     >
-      <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0"></span>
-      <span>{displayLabel}</span>
-      {duration !== null && <span className="opacity-75 text-[9px] font-mono font-bold">({duration}{durationUnit})</span>}
+      <span className="w-1.5 h-1.5 rounded-full bg-current motion-safe:animate-pulse shrink-0"></span>
+      <span>{displayLabel}{stackLabel}</span>
+      {duration !== null && duration > 0 && <span className="opacity-75 text-[9px] font-mono font-bold">({duration}{durationUnit})</span>}
     </span>
   );
 };

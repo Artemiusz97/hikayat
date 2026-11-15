@@ -54,6 +54,7 @@ from .quest_agency import (
     redact_quest_for_fog_of_war,
     build_fog_of_war_quest_payload,
     build_fog_of_war_quest_prompt_block,
+    format_fow_dossier_for_narrator,
 )
 from .state import *
 from .turn import *

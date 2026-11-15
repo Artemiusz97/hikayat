@@ -11,6 +11,7 @@ import scenario_data
 from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
 from skill_check import resolve_check, success_chance, CheckResult
+from mechanics.social.relationships import can_player_dm_contact, safe_get_contacts
 
 from .embeds import (
     build_media_gallery_embed,
@@ -152,36 +153,85 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
     async def _open_contacts(self, interaction: discord.Interaction):
         char = await db.adb(db.get_character, self.user_id)
-        contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0))) if char else []
         session = await db.adb(db.get_session, self.session_id)
+        party_npcs = await db.adb(db.get_session_party_npcs, self.session_id) if self.session_id else []
+        party_names = {
+            str(p.get("name", "")).strip().lower()
+            for p in (party_npcs or [])
+            if isinstance(p, dict) and p.get("name")
+        }
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
+        char_id = int(char.get("id", 0)) if char else 0
+        char_name = char.get("name", "Hero") if char else "Player"
 
-        if not contacts:
+        from cogs.contacts import build_contact_list_embed, ContactView, filter_unlocked_contacts
+        from cogs.contacts_routine_views import (
+            build_acquaintances_list_embed,
+            load_discord_contacts_and_acquaintances,
+        )
+
+        contacts, acquaintances, fow_context = await db.adb(
+            load_discord_contacts_and_acquaintances,
+            self.session_id or 0,
+            char_id,
+            scen_key,
+            user_id=self.user_id,
+            party_names=party_names,
+            party_npcs=party_npcs,
+            filter_unlocked_fn=filter_unlocked_contacts,
+            preloaded_session=session,
+        )
+
+        if not contacts and not acquaintances:
             await interaction.response.send_message(
-                f"{branding['emoji']} **No contacts saved in your phone yet!**\nMeet and talk to NPCs in the story to exchange contact info.",
+                f"{branding['emoji']} **No contacts or acquaintances saved in your phone yet!**\nMeet and talk to NPCs in the story to populate Acquaintances or exchange contact info.",
                 ephemeral=True
             )
             return
 
-        from cogs.contacts import build_contact_list_embed, ContactView
-        char_name = char.get("name", "Hero") if char else "Player"
-        embed = build_contact_list_embed(contacts, scen_key, char_name)
-        view = ContactView(contacts, scen_key, self.user_id, session_id=self.session_id, cog=self.cog, from_phone=True)
+        initial_mode = "acquaintances" if (not contacts and acquaintances) else "contacts"
+        embed = (
+            build_acquaintances_list_embed(acquaintances, scen_key, char_name)
+            if initial_mode == "acquaintances"
+            else build_contact_list_embed(contacts, scen_key, char_name)
+        )
+        view = ContactView(
+            contacts,
+            scen_key,
+            self.user_id,
+            session_id=self.session_id,
+            cog=self.cog,
+            from_phone=True,
+            party_names=party_names,
+            acquaintances=acquaintances,
+            mode=initial_mode,
+            fow_context=fow_context,
+            char_name=char_name,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_dms(self, interaction: discord.Interaction):
-        char = await db.adb(db.get_character, self.user_id)
-        contacts = (await db.adb(db.get_contacts, self.session_id, character_id=char.get("id", 0))) if char else []
-        session = await db.adb(db.get_session, self.session_id)
+        def _load_dms():
+            ch = db.get_character(self.user_id)
+            cts = safe_get_contacts(self.session_id, ch.get("id", 0), ensure_scene=False) if ch else []
+            sess = db.get_session(self.session_id)
+            p_npcs = db.get_session_party_npcs(self.session_id)
+            return ch, cts, sess, p_npcs
+
+        char, contacts, session, party_npcs = await db.adb(_load_dms)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
         branding = get_phone_branding(scen_key)
+        party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+        dm_contacts = [c for c in (contacts or []) if can_player_dm_contact(c, party_names=party_names, scenario=scen_key)]
 
-        if not contacts:
-            await interaction.response.send_message(
-                f"{branding['emoji']} **No contacts saved in your phone yet!**\nMeet and talk to NPCs in the story to exchange contact info.",
-                ephemeral=True
+        if not dm_contacts:
+            msg = (
+                f"{branding['emoji']} **No contacts with phone info yet!**\nExchange phone numbers or connect on PeerPulse first to DM them."
+                if contacts
+                else f"{branding['emoji']} **No contacts saved in your phone yet!**\nMeet and talk to NPCs in the story to exchange contact info."
             )
+            await interaction.response.send_message(msg, ephemeral=True)
             return
 
         embed = discord.Embed(
@@ -189,7 +239,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
             description=f"Pick a contact below to text, flirt, or ask for investigation clues:",
             color=branding["color"]
         )
-        view = DMContactSelectView(self.cog, self.session_id, self.user_id, contacts)
+        view = DMContactSelectView(self.cog, self.session_id, self.user_id, dm_contacts)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_feed(self, interaction: discord.Interaction):
@@ -269,13 +319,23 @@ class DMContactSelectView(PhoneOwnerRestrictedView):
         if not contact:
             await interaction.response.send_message("Contact not found.", ephemeral=True)
             return
-
         def _prep_dm_chat():
-            emb = _build_dm_chat_embed(self.session_id, contact)
             sess = db.get_session(self.session_id)
+            p_npcs = db.get_session_party_npcs(self.session_id)
+            p_names = {str(p.get("name", "")).strip().lower() for p in (p_npcs or []) if isinstance(p, dict)}
+            scen_k = str((sess or {}).get("scenario") or "fantasy")
+            if not can_player_dm_contact(contact, party_names=p_names, scenario=scen_k):
+                return None, sess
+            emb = _build_dm_chat_embed(self.session_id, contact)
             return emb, sess
 
         embed, session = await db.adb(_prep_dm_chat)
+        if embed is None:
+            await interaction.response.send_message(
+                "You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
+                ephemeral=True,
+            )
+            return
         view = DMChatView(self.cog, self.session_id, self.user_id, contact, list(self.contacts_dict.values()), session=session)
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -383,9 +443,20 @@ class DMChatView(PhoneOwnerRestrictedView):
         await interaction.response.defer()
 
         def _load_dm_ctx():
-            return db.get_character(self.user_id), db.get_session(self.session_id)
+            ch = db.get_character(self.user_id)
+            sess = db.get_session(self.session_id)
+            p_npcs = db.get_session_party_npcs(self.session_id)
+            return ch, sess, p_npcs
 
-        char, session = await db.adb(_load_dm_ctx)
+        char, session, party_npcs = await db.adb(_load_dm_ctx)
+        party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
+        scen_key = str((session or {}).get("scenario") or "fantasy")
+        if not can_player_dm_contact(self.contact, party_names=party_names, scenario=scen_key):
+            await interaction.followup.send(
+                "You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
+                ephemeral=True,
+            )
+            return
 
         if not message_text:
             message_text = await generate_player_chat_message(session, self.contact, char, intent=intent)
@@ -658,7 +729,10 @@ class SocialProfileView(PhoneOwnerRestrictedView):
         self.profile = profile
         self.posts = posts
 
-        if not profile.get("is_faculty") and not profile.get("is_already_contact"):
+        is_blocked_or_dead = bool(profile.get("is_blocked_or_deceased"))
+        is_dm_ready = bool(profile.get("is_already_contact") and profile.get("can_dm", True))
+
+        if not profile.get("is_faculty") and not is_blocked_or_dead and not is_dm_ready:
             cooldown = profile.get("cooldown_turns_left", 0)
             is_cd = bool(profile.get("on_cooldown") or cooldown > 0)
             if is_cd:
@@ -678,7 +752,7 @@ class SocialProfileView(PhoneOwnerRestrictedView):
                 )
                 req_btn.callback = self._send_request
             self.add_item(req_btn)
-        elif profile.get("is_already_contact"):
+        elif is_dm_ready and not is_blocked_or_dead:
             dm_btn = discord.ui.Button(
                 label="Send Direct Message",
                 emoji="💬",
@@ -747,7 +821,7 @@ class SocialProfileView(PhoneOwnerRestrictedView):
     async def _open_dm_with_contact(self, interaction: discord.Interaction):
         def _prep_dm():
             ch = db.get_character(self.user_id)
-            cts = db.get_contacts(self.session_id, character_id=ch.get("id", 0)) if ch else []
+            cts = safe_get_contacts(self.session_id, ch.get("id", 0), ensure_scene=False) if ch else []
             ct = db.get_contact(self.session_id, self.profile["npc_id"], character_id=ch.get("id", 0)) if ch else None
             if not ct:
                 return None, [], None, None
@@ -759,6 +833,15 @@ class SocialProfileView(PhoneOwnerRestrictedView):
 
         if not contact:
             await interaction.response.send_message("Contact not found.", ephemeral=True)
+            return
+        _sc_dm = str((session or {}).get("scenario") or "fantasy")
+        _party_dm = await db.adb(db.get_session_party_npcs, self.session_id)
+        _pnames_dm = {str(p.get("name", "")).strip().lower() for p in (_party_dm or []) if isinstance(p, dict) and p.get("name")}
+        if not can_player_dm_contact(contact, party_names=_pnames_dm, scenario=_sc_dm):
+            await interaction.response.send_message(
+                "You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
+                ephemeral=True,
+            )
             return
 
         view = DMChatView(self.cog, self.session_id, self.user_id, contact, contacts, session=session)

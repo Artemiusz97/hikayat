@@ -22,6 +22,8 @@ run_tests.bat
 requirements-dev.txt
 scripts/run_tests.py
 scripts/simulate_*.py
+scripts/playthrough_bot.py
+crash_reports/
 .github/
 .pytest_cache/
 .coverage

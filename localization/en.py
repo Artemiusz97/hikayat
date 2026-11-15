@@ -178,6 +178,7 @@ QUEST_UI_LABELS = {
     "threat_paused": "Paused (Climax)",
     "threat_dormant": "Dormant until Chapter engaged",
     "threat_reinforced": "Reinforcements",
+    "threat_pushed_back": "Threat Delayed (-1)",
     "threat_scar_pending": "Chapter Scar Risk",
     "clue_sources": "Clue Avenues",
     "source_open": "Open",

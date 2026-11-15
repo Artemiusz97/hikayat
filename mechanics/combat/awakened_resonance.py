@@ -21,6 +21,11 @@ from mechanics.combat.spells.awakened_kits import (
     COMBAT_ARCHETYPES,
     normalize_anomalous_attribute,
 )
+from .status_effects import (
+    apply_status_effect,
+    format_status_badge,
+    normalize_status_effect,
+)
 
 POSITIVE_BUFF_KEYWORDS: Tuple[str, ...] = (
     "fortified", "enraged", "shield", "ward", "haste", "empower", "barrier", "regen", "+20%", "+25%", "+30%"
@@ -55,7 +60,7 @@ def _is_shielded_or_armored(target: Dict[str, Any]) -> bool:
     if any(k in t for t in tags for k in ("armor", "shield", "carapace", "golem", "plate", "construct")):
         return True
     for eff in (target.get("status_effects") or []):
-        eff_low = str(eff).lower()
+        eff_low = format_status_badge(eff).lower()
         if any(k in eff_low for k in ("shield", "ward", "fortified", "barrier", "armor")):
             return True
     return False
@@ -64,7 +69,7 @@ def _is_shielded_or_armored(target: Dict[str, Any]) -> bool:
 def _has_implanted_weakness(target: Dict[str, Any], attr: str) -> bool:
     needle = f"weakness implant ({attr})"
     for eff in (target.get("status_effects") or []):
-        if needle in str(eff).lower():
+        if needle in format_status_badge(eff).lower():
             return True
     return False
 
@@ -270,7 +275,6 @@ def apply_stability_and_break(
         return result
 
     t_name = str(target.get("name") or "Anomaly")
-    effects: List[str] = list(target.get("status_effects") or [])
 
     # Already BREACHED -> Super Break (+20% ATK)
     if target.get("is_breached"):
@@ -296,49 +300,56 @@ def apply_stability_and_break(
     if attr == "fire":
         result["payoff_name"] = "Thermokinetic Detonation"
         result["payoff_damage"] = max(6, int(round(atk_val * 0.65)))
-        effects.append("Burned [2 turns]")
+        apply_status_effect(target, "Burned [2 turns]", source="anomaly_break")
     elif attr == "water":
         result["payoff_name"] = "Abyssal Undertow"
         result["payoff_damage"] = max(4, int(round(atk_val * 0.35)))
         result["squad_heal"] = 12
-        effects.append("Slowed [2 turns]")
+        apply_status_effect(target, "Slowed [2 turns]", source="anomaly_break")
     elif attr == "wind":
         result["payoff_name"] = "Vacuum Shear"
         result["payoff_damage"] = max(5, int(round(atk_val * 0.45)))
         result["aoe_splash_damage"] = max(3, int(round(atk_val * 0.25)))
-        effects.append("Exposed [2 turns]")
+        apply_status_effect(target, "Exposed [2 turns]", source="anomaly_break")
     elif attr == "earth":
         result["payoff_name"] = "Tectonic Lock"
         result["payoff_damage"] = max(5, int(round(atk_val * 0.40)))
-        effects.append("Petrified (Tectonic Lock) [1 turn]")
-        effects.append("Grounded (-20% EVA) [2 turns]")
+        apply_status_effect(target, "Petrified (Tectonic Lock) [1 turn]", source="anomaly_break")
+        apply_status_effect(target, "Grounded (-20% EVA) [2 turns]", source="anomaly_break")
     elif attr == "ice":
         result["payoff_name"] = "Zero-Kelvin Freeze"
         result["payoff_damage"] = max(5, int(round(atk_val * 0.40)))
-        effects.append("Frozen [1 turn]")
-        effects.append("Shatter Vulnerable (+25% Crit) [1 turn]")
+        apply_status_effect(target, "Frozen [1 turn]", source="anomaly_break")
+        apply_status_effect(target, "Shatter Vulnerable (+25% Crit) [1 turn]", source="anomaly_break")
     elif attr == "electric":
         result["payoff_name"] = "Grid Overload"
         result["payoff_damage"] = max(5, int(round(atk_val * 0.45)))
         result["chain_damage"] = max(3, int(round(atk_val * 0.25)))
-        effects.append("Grid Overloaded [2 turns]")
+        apply_status_effect(target, "Grid Overloaded [2 turns]", source="anomaly_break")
     elif attr == "bio":
         result["payoff_name"] = "Spore Rupture"
         result["payoff_damage"] = max(5, int(round(atk_val * 0.40)))
-        effects.append("Spore Rupture (-30% DEF, Anti-Heal) [2 turns]")
+        apply_status_effect(target, "Spore Rupture (-30% DEF, Anti-Heal) [2 turns]", source="anomaly_break")
     elif attr == "physical":
         result["payoff_name"] = "Trauma Rupture"
         result["payoff_damage"] = max(8, int(round(max_hp * 0.12)))
-        effects.append("Trauma Bleed [2 turns]")
+        apply_status_effect(target, "Trauma Bleed [2 turns]", source="anomaly_break")
     else:  # aether
         result["payoff_name"] = "Rift Collapse"
         result["payoff_damage"] = max(6, int(round(atk_val * 0.50)))
         result["bonus_pips"] = 1
         result["mp_refund"] = 8
         pierce_shield = True
-        effects = [
-            e for e in effects
-            if not any(pk in str(e).lower() for pk in POSITIVE_BUFF_KEYWORDS)
+        target["status_effects"] = [
+            e for e in (target.get("status_effects") or [])
+            if normalize_status_effect(e)["category"] != "buff"
+            and not any(
+                pk in (
+                    f"{format_status_badge(e)} "
+                    f"{(e.get('metadata') or {}).get('raw_tag', '') if isinstance(e, dict) else e}"
+                ).lower()
+                for pk in POSITIVE_BUFF_KEYWORDS
+            )
         ]
 
     # Apply payoff burst (respecting temp_hp unless Aether pierces, and 1 HP Mercy Clamp on capture targets)
@@ -357,7 +368,6 @@ def apply_stability_and_break(
             else:
                 target["hp"] = max(0, cur_hp - rem)
 
-    target["status_effects"] = effects
     emoji = ATTRIBUTE_META[attr]["emoji"]
     combat_log.append(
         f"⚡ **ANOMALY BREACHED!** {t_name}'s Stability collapses — {emoji} **{result['payoff_name']}** deals {dmg} Break damage!"
@@ -396,10 +406,8 @@ def tick_enemy_breach_recovery(
         max_hp = max(1, int(target.get("max_hp") or 100))
         heal_amt = max(1, int(max_hp * 0.20))
         target["hp"] = min(max_hp, int(target.get("hp", 1)) + heal_amt)
-        effs = list(target.get("status_effects") or [])
-        if not any("enraged" in str(x).lower() for x in effs):
-            effs.append("Enraged [3 turns]")
-        target["status_effects"] = effs
+        if not any("enraged" in format_status_badge(x).lower() for x in (target.get("status_effects") or [])):
+            apply_status_effect(target, "Enraged [3 turns]", source="boss_phase2")
         info["triggered_delayed_phase_2"] = True
         combat_log.append(
             f"🔥 **PHASE 2 SURGE!** **{t_name}** erupts from its Breach state, revitalizing vitality and becoming **Enraged**!"

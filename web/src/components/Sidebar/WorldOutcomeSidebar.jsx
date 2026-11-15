@@ -225,6 +225,7 @@ const WorldOutcomeSidebar = ({
   session,
   onOpenWorldMap,
   onSelectContact,
+  onQuickAction,
   isMobileDrawer = false,
 }) => {
   const { t } = useTranslation();
@@ -572,6 +573,75 @@ const WorldOutcomeSidebar = ({
                         </div>
                       )}
 
+                      {/* Row 3.5: Activity Tag, Epistemic Badge, Join Button & Revealed Telltale */}
+                      {(npc?.activity_tag || npc?.epistemic_tag || (npc?.telltale_revealed && npc?.visible_tell_text) || (npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function')) && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-fantasy-border/20 text-[10px]">
+                          {npc?.activity_tag && (() => {
+                            const actMode = String(npc?.activity_mode || '').toLowerCase();
+                            const actToneClass =
+                              actMode === 'joined'
+                                ? 'bg-emerald-950/70 border-emerald-500/45 text-emerald-200'
+                                : actMode === 'waiting'
+                                  ? 'bg-sky-950/70 border-sky-500/45 text-sky-200'
+                                  : actMode === 'packing_up'
+                                    ? 'bg-slate-900/75 border-slate-500/40 text-slate-300'
+                                    : 'bg-fantasy-950/60 border-fantasy-border/40 text-amber-200/90';
+                            return (
+                              <span
+                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${actToneClass}`}
+                                title={t('scene.activity_prefix', 'Doing')}
+                              >
+                                <span aria-hidden="true">🎯</span>
+                                <span>{npc.activity_tag}</span>
+                              </span>
+                            );
+                          })()}
+                          {npc?.epistemic_tag && (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/75 border border-rose-500/50 text-rose-200 font-semibold"
+                              title={t('scene.epistemic_watch', 'Epistemic Watch')}
+                            >
+                              <span aria-hidden="true">⚠️</span>
+                              <span>
+                                {npc.epistemic_tag === 'spotted_you'
+                                  ? t('scene.spotted_you_badge', 'Spotted You!')
+                                  : npc.epistemic_tag}
+                              </span>
+                            </span>
+                          )}
+                          {npc?.telltale_revealed && npc?.visible_tell_text && (
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-950/65 border border-purple-500/40 text-purple-200"
+                              title={t('scene.visible_tell_prefix', 'Noticeable Tell')}
+                            >
+                              <span aria-hidden="true">👁️</span>
+                              <span>{npc.visible_tell_text}</span>
+                            </span>
+                          )}
+                          {npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function' && (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onQuickAction({
+                                  intent: 'join_activity',
+                                  direct_choice: {
+                                    intent: 'join_activity',
+                                    target_npc: npc.name || npc.npc_id || '',
+                                    activity_key: npc?.join_activity_seed?.activity_key || npc?.activity_key || '',
+                                    label: `${t('scene.join_activity_btn', 'Join Activity')}: ${npc.name || ''}`.trim(),
+                                  },
+                                });
+                              }}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-900/50 hover:bg-amber-800/70 border border-amber-500/50 text-amber-100 font-semibold transition-colors cursor-pointer"
+                            >
+                              <span aria-hidden="true">🤝</span>
+                              <span>{t('scene.join_activity_btn', 'Join Activity')}</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+
                       {/* Row 4: Active Status Effects */}
                       {statusEffects && statusEffects.length > 0 && (
                         <div className="flex flex-wrap gap-1 pt-1 border-t border-fantasy-border/20">
@@ -592,6 +662,76 @@ const WorldOutcomeSidebar = ({
           </div>
         </div>
       )}
+
+      {/* B7 Server Fog-of-War Epistemic HUD (strictly player_aware == 1 only) */}
+      {(() => {
+        const ep = session?.epistemic_hud;
+        if (!ep || typeof ep !== 'object') return null;
+        const risk = String(ep.leak_risk || 'none').toLowerCase();
+        const spotted = Array.isArray(ep.spotted_witnesses) ? ep.spotted_witnesses : [];
+        const knownW = Array.isArray(ep.known_witnesses) ? ep.known_witnesses : [];
+        const alibis = Array.isArray(ep.active_alibis) ? ep.active_alibis : [];
+        const secrets = Array.isArray(ep.held_npc_secrets) ? ep.held_npc_secrets : [];
+        if (risk === 'none' && spotted.length === 0 && knownW.length === 0 && alibis.length === 0 && secrets.length === 0) {
+          return null;
+        }
+        const riskClass =
+          risk === 'critical'
+            ? 'bg-red-950/90 border-red-400/70 text-red-100 font-semibold'
+            : risk === 'high'
+              ? 'bg-red-950/80 border-red-500/50 text-red-200'
+              : risk === 'moderate' || risk === 'medium'
+                ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+                : 'bg-yellow-950/70 border-yellow-600/40 text-yellow-200';
+        const riskLabel =
+          risk === 'critical'
+            ? t('scene.leak_risk_critical', 'Leak Risk: Critical')
+            : risk === 'high'
+              ? t('scene.leak_risk_high', 'Leak Risk: High')
+              : risk === 'moderate'
+                ? t('scene.leak_risk_moderate', 'Leak Risk: Moderate')
+                : risk === 'medium'
+                  ? t('scene.leak_risk_medium', 'Leak Risk: Medium')
+                  : t('scene.leak_risk_low', 'Leak Risk: Low');
+        return (
+          <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/50 space-y-1.5 text-[11px] shrink-0">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1">
+                <span aria-hidden="true">🕵️</span>
+                <span>{t('scene.epistemic_watch', 'Epistemic Watch')}</span>
+              </span>
+              {risk !== 'none' && (
+                <span className={`px-1.5 py-0.5 rounded border font-mono text-[10px] ${riskClass}`}>
+                  {riskLabel}
+                </span>
+              )}
+            </div>
+            {spotted.length > 0 && (
+              <div className="text-amber-200/90 leading-snug">
+                <span className="font-semibold">{t('scene.spotted_witnesses', 'Spotted Witnesses')}:</span>{' '}
+                {spotted.slice(0, 4).map((w) => String(w?.holder_actor_key || 'Unknown').replace(/_/g, ' ')).join(', ')}
+              </div>
+            )}
+            <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-300">
+              {knownW.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-neutral-700/60">
+                  {t('scene.known_witnesses', 'Known Witnesses')}: {knownW.length}
+                </span>
+              )}
+              {alibis.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-neutral-700/60">
+                  {t('scene.active_alibis', 'Active Alibis')}: {alibis.length}
+                </span>
+              )}
+              {secrets.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-purple-700/50 text-purple-200">
+                  {t('scene.held_secrets', 'Secrets Held')}: {secrets.length}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* SECTION 2: Outcomes & Changes Header */}
       <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/60 flex items-center justify-between shrink-0">

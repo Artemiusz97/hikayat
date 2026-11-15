@@ -34,7 +34,6 @@ from mechanics.world.world_events.engine import (
     spawn_endless_mode_contracts,
     spawn_quest_world_scar,
 )
-from models.llm_schemas import DossierEnrichment
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +126,14 @@ def seed_or_discover_dossier_clue(
         return None
 
     node = dict(clue_graph[clue_index])
-    if node.get("clue_id"):
-        existing_c = db.get_session_clue_by_id(int(node["clue_id"]), conn=conn)
-        if existing_c:
-            return existing_c
+    if node.get("clue_id") is not None:
+        try:
+            cid_int = int(node["clue_id"])
+            existing_c = db.get_session_clue_by_id(cid_int, conn=conn)
+            if existing_c:
+                return existing_c
+        except (ValueError, TypeError):
+            pass
 
     sess = db.get_session(session_id) or {}
     cur_ch = int(db.get_session_chapter(session_id) or 1)
@@ -293,11 +296,18 @@ def sync_dossier_main_stage_advance(
         if completed_stage_idx >= 1:
             seed_or_discover_dossier_clue(session_id, quest_id, clue_index=completed_stage_idx - 1, source_location=cur_loc, conn=c)
 
-        saved = db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, conn=c)
+        eff_t = int(db.get_effective_session_turn(session_id, conn=c))
+        saved = db.upsert_quest_dossier(
+            session_id,
+            quest_id,
+            climax_spec=climax,
+            turn_number=eff_t,
+            sync_projection=True,
+            conn=c,
+        )
         if newly_completed and completed_stage_idx >= 1:
             try:
                 from mechanics.narrative.threat_clock import decrement_threat_clock
-                eff_t = int(db.get_effective_session_turn(session_id))
                 decrement_threat_clock(session_id, quest_id, delta=1, turn_number=eff_t, conn=c)
                 saved = db.get_quest_dossier(session_id, quest_id, conn=c) or saved
             except Exception:
@@ -486,7 +496,11 @@ def heal_session_quests_on_load(session_id: int) -> bool:
 
 
 def _heal_story_dossier_atomic(session_id: int, dos: dict, spine: dict, rename_map: dict, needs_splice: bool, conn=None):
-    from mechanics.narrative.dossier_compiler import format_short_venue_display, get_protected_quest_cast_names
+    from mechanics.narrative.dossier_compiler import (
+        build_spliced_mid_stage,
+        format_short_venue_display,
+        get_protected_quest_cast_names,
+    )
     from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
     qid = str(dos["quest_id"])
     climax = dict(dos.get("climax_spec") or {})
@@ -535,41 +549,26 @@ def _heal_story_dossier_atomic(session_id: int, dos: dict, spine: dict, rename_m
         st1_done = bool(st1.get("completed") or str(st1.get("status") or "") in ("completed", "bypassed"))
         climax_loc = str(old_climax.get("target_location") or climax.get("location") or "")
         st1_loc = str(st1.get("target_location") or "")
+        sess_heal = db.get_session(session_id) or {}
+        eff_lang_heal = normalize_quest_locale(sess_heal.get("narration_language") or sess_heal.get("language") or "en")
+        new_st2 = build_spliced_mid_stage(
+            session_id,
+            st1_loc=st1_loc,
+            climax_loc=climax_loc,
+            leads=leads,
+            st1_done=st1_done,
+            lang=eff_lang_heal,
+        )
 
-        def _run_splice_db(c_db):
-            node = c_db.execute(
-                "SELECT name FROM world_nodes WHERE session_id=? AND node_type='ROOM' AND name NOT IN (?, ?) LIMIT 1",
-                (session_id, st1_loc, climax_loc)
-            ).fetchone()
-            mid_val = str(node["name"] if node and isinstance(node, dict) else (node[0] if node else (leads[0].get("target_location") if leads else f"Relay Sub-Node of {format_short_venue_display(climax_loc)}")))
+        def _clear_future_waypoints(c_db) -> None:
             c_db.execute("DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=0 AND stage_index >= 2", (session_id, qid))
-            return mid_val
 
         if conn is not None:
-            mid_loc = _run_splice_db(conn)
+            _clear_future_waypoints(conn)
         else:
             with db.UnitOfWork() as uow_c:
-                mid_loc = _run_splice_db(uow_c)
+                _clear_future_waypoints(uow_c)
 
-        new_st2 = {
-            "stage_index": 2,
-            "stage_label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
-            "label": f"Infiltrate supply relay at {format_short_venue_display(mid_loc)}",
-            "target_location": mid_loc,
-            "target_npc": "",
-            "completion_trigger": "action",
-            "approaches": ["STR", "INT", "CHA"],
-            "status": "active" if st1_done else "locked",
-            "completed": False,
-            "is_climax_stage": False,
-            "beat_contract": {
-                "player_verb": f"Breach relay at {format_short_venue_display(mid_loc)}",
-                "reveal": f"Telemetry logs pinpoint headquarters at {format_short_venue_display(climax_loc)}",
-                "handover": "Relay access cipher",
-                "next_pointer": format_short_venue_display(climax_loc),
-                "is_dialogue_beat": False,
-            }
-        }
         old_climax["stage_index"] = 3
         old_climax["status"] = "locked"
         old_climax["completed"] = False
@@ -612,94 +611,10 @@ async def enrich_dossier_with_utility_llm(
     quest_id: str,
     dossier: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    """Retired 6s utility-LLM dossier pass (replaced by 30s background ChapterPlan pre-generation).
+    Preserved as an instantaneous deterministic passthrough for legacy callers and `game_engine` exports.
     """
-    Bounded (`timeout=4.0`, `retries=0`, `use_utility=True`) flavor enrichment pass.
-    Routes NSFW / hybrid quests to `NSFW_LLM_UTILITY_MODEL` via `is_nsfw=uses_nsfw_routing`.
-    Polishes Main + Optional flavor notes and `stakes_hint` prose while never mutating deterministic topology.
-    Falls back instantaneously to the deterministic 5-locale `QuestDossier` on timeout/offline.
-    """
-    dos = dossier or await adb(db.get_quest_dossier, session_id, quest_id)
-    if not dos:
-        return {}
-
-    sess = await adb(db.get_session, session_id) or {}
-    lang = normalize_quest_locale(sess.get("narration_language") or sess.get("language") or "en")
-    uses_nsfw = bool((dos.get("contract_economy") or {}).get("uses_nsfw_routing"))
-    stub = dict(dos.get("pitch_stub") or {})
-    leads = [dict(l) for l in (dos.get("leads_graph") or [])]
-    climax = dict(dos.get("climax_spec") or {})
-    twist = dict(dos.get("twist_spec") or {})
-
-    opt_roles = [str(l.get("role") or "aid") for l in leads]
-    sys_prompt = (
-        "You enrich tabletop RPG quest dossiers with vivid, context-aware flavor prose. "
-        "NEVER include raw HP/MP/DC numbers or internal JSON tags ([ITEM_JSON], [GEAR_JSON], [SPELLBOOK_JSON]). "
-        f"Respond strictly in JSON matching the schema in language '{lang}'."
-    )
-    usr_prompt = (
-        f"Engine: {dos.get('engine')}\n"
-        f"Title: {stub.get('title')}\n"
-        f"Pitch: {stub.get('public_pitch')}\n"
-        f"Main Stages: {len(climax.get('main_stages') or [])}\n"
-        f"Optional Roles ({len(leads)}): {', '.join(opt_roles)}\n"
-        f"Has Twist: {twist.get('has_twist')} ({twist.get('twist_type')})"
-    )
-    try:
-        enriched = await llm_client.call_llm_json(
-            sys_prompt,
-            usr_prompt,
-            temperature=0.5,
-            max_tokens=600,
-            retries=0,
-            is_nsfw=uses_nsfw,
-            use_utility=True,
-            timeout=4.0,
-            response_model=DossierEnrichment,
-        )
-        if enriched:
-            p_txt = sanitize_dossier_prose(enriched.get("public_pitch") or enriched.get("objective_flavor") or "")
-            if p_txt:
-                stub["public_pitch"] = p_txt
-            m_labels = list(enriched.get("main_stage_labels") or [])
-            main_stages = [dict(ms) for ms in (climax.get("main_stages") or [])]
-            for idx, m_lbl in enumerate(m_labels):
-                if idx < len(main_stages) and m_lbl:
-                    clean_m = sanitize_dossier_prose(str(m_lbl))
-                    if clean_m:
-                        main_stages[idx]["stage_label"] = clean_m[:180]
-                        main_stages[idx]["label"] = clean_m[:180]
-            if main_stages:
-                climax["main_stages"] = main_stages
-            l_descs = list(enriched.get("lead_descriptions") or enriched.get("lead_titles") or [])
-            for idx, desc in enumerate(l_descs):
-                if idx < len(leads) and desc:
-                    clean_d = sanitize_dossier_prose(str(desc))
-                    if clean_d:
-                        leads[idx]["flavor_note"] = clean_d
-            s_hints = list(enriched.get("stakes_hints") or [])
-            for idx, sh in enumerate(s_hints):
-                if idx < len(leads) and sh:
-                    clean_sh = sanitize_dossier_prose(str(sh))
-                    if clean_sh:
-                        leads[idx]["stakes_hint"] = clean_sh[:160]
-            t_txt = sanitize_dossier_prose(enriched.get("twist_summary") or "")
-            if twist.get("has_twist") and t_txt:
-                twist["summary"] = t_txt
-            saved = await adb(
-                db.upsert_quest_dossier,
-                session_id,
-                quest_id,
-                pitch_stub=stub,
-                leads_graph=leads,
-                climax_spec=climax,
-                twist_spec=twist,
-            )
-            if saved and (climax.get("main_stages") or any(l.get("is_optional") for l in leads)):
-                await adb(db.sync_quest_projection_from_dossier, session_id, quest_id, saved)
-            return saved or dos
-    except Exception as exc:
-        logger.debug("Utility LLM dossier enrichment skipped/fell back for %s: %s", quest_id, exc)
-    return dos
+    return dossier or (await adb(db.get_quest_dossier, session_id, quest_id)) or {}
 
 
 def accept_bounty_contract(
@@ -851,9 +766,6 @@ async def accept_bounty_contract_async(
             from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
             if is_clue_based_quest(str(dos_b.get("family_tier") or ""), str(dos_b.get("engine") or "")):
                 schedule_background_chapter_plan(session_id, quest_id)
-            elif enrich_llm:
-                enriched_dos = await enrich_dossier_with_utility_llm(session_id, quest_id, dos_b)
-                res["dossier"] = enriched_dos
         return res
 
 
@@ -1598,6 +1510,9 @@ def resolve_chapter_transition(
             dossier_stage="compiled",
         )
         db.sync_quest_projection_from_dossier(session_id, next_sq_id, dossier=patched_dossier)
+        from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
+        if is_clue_based_quest("story", next_engine) and not (patched_dossier.get("climax_spec") or {}).get("chapter_plan_applied"):
+            schedule_background_chapter_plan(session_id, next_sq_id)
         next_dossier = patched_dossier
         refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
     else:
@@ -1654,6 +1569,9 @@ def resolve_chapter_transition(
             scen_key=scen_key,
             lang=lang,
         )
+        from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
+        if is_clue_based_quest("story", next_engine):
+            schedule_background_chapter_plan(session_id, next_sq_id)
         refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
 
     res_payload: Dict[str, Any] = {

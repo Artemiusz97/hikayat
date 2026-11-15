@@ -24,9 +24,11 @@ def merchant_prompt_note(triggered: bool = False, scen_key: str = None) -> str:
     if is_school_scenario(scen_key):
         return ("\nMERCHANTS: In modern high school settings, DO NOT generate wandering roadside merchants. "
                 "Shopping is strictly handled at designated campus/commercial stores and via the smartphone delivery app.\n")
-    return ("\nMERCHANTS: Do not force a merchant encounter. However, if the scene naturally takes place in a shop/bazaar, "
-            "or if you generate a story choice to approach a roadside trader/caravan, set `merchant_encounter.present: true`. "
-            "A dedicated UI button will handle opening the shop, so DO NOT generate skill-check choices for basic browsing/buying/selling.\n")
+    return ("\nMERCHANTS: Do not force a merchant encounter, and NEVER invent spontaneous unnamed roadside merchants, "
+            "peddlers, or caravans out of thin air. Set `merchant_encounter.present: true` ONLY when the scene naturally "
+            "takes place at a legitimate staffed market/shop venue during operating hours or when a scheduled traveling "
+            "merchant from the existing cast is already on-site. A dedicated UI button will handle opening the shop, "
+            "so DO NOT generate skill-check choices for basic browsing/buying/selling.\n")
 
 
 MERCHANT_ENCOUNTER_FIELD = """{"present": boolean, "name": "string (token if new)", "description": "short flavor sentence"}"""
@@ -1774,6 +1776,16 @@ async def evaluate_items_for_sale(items: list) -> dict:
     return prices
 
 
+_ALLOWED_MERCHANT_ENCOUNTER_REASONS: frozenset[str] = frozenset({
+    "roaming_merchant",
+    "world_event_bypass",
+    "kiosk_bypass",
+    "active_staff",
+    "replacement_hired",
+    "legacy_no_graph",
+})
+
+
 def apply_merchant_encounter_result(session_id: int, encounter: dict | list | None) -> dict:
     session = db.get_session(session_id)
     merchant = (session.get("merchant") if session else None) or {"available": False, "flavor_name": "", "tier": 1, "inventory": []}
@@ -1784,13 +1796,34 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
 
     present = bool(encounter.get("present"))
     scen_key = session.get("scenario", "") if session else ""
-    from mechanics.world.locations import is_school_scenario
-    if is_school_scenario(scen_key):
+    from mechanics.world.locations import is_school_scenario, location_has_merchant_shop
+    if not session or is_school_scenario(scen_key):
         present = False  # In high school settings, never spawn random wandering roadside merchants
     elif present and not scenario_data.is_mechanic_enabled(scen_key, "merchant_encounters"):
         present = False
+    elif present:
+        from mechanics.world.venue_seeder import evaluate_shop_staff_availability
+        cur_loc = str(session.get("current_location") or "").strip()
+        cur_day = int(session.get("current_day") or 1)
+        cur_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
+        turn_no = int(session.get("turn_count") or 0)
+        avail = evaluate_shop_staff_availability(
+            session_id,
+            location_str=cur_loc,
+            merchant_type="",
+            scen_key=scen_key,
+            current_day=cur_day,
+            current_minute=cur_min,
+            turn_number=turn_no,
+        )
+        reason = str(avail.get("reason") or "")
+        if not avail.get("available") or reason not in _ALLOWED_MERCHANT_ENCOUNTER_REASONS:
+            present = False
+        elif reason == "legacy_no_graph" and not location_has_merchant_shop(cur_loc, scen_key=scen_key):
+            present = False
 
     merchant["available"] = present
+    merchant["is_phone_shop"] = False
     merchant["flavor_name"] = encounter.get("name", "") if present else ""
     merchant["flavor_description"] = encounter.get("description", "") if present else ""
     db.save_merchant_state(session_id, merchant)

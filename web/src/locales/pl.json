@@ -91,7 +91,15 @@
     "resolved": "Rozwiązane",
     "waiting_party": "Oczekiwanie na członków drużyny...",
     "locked_in": "Zatwierdzone",
-    "submitting": "Rozpatrywanie tury..."
+    "submitting": "Rozpatrywanie tury...",
+    "charging_skill": "ŁADOWANIE",
+    "stagger_label": "Zachwianie",
+    "stagger_breaking": "Przełamanie!",
+    "aggro_label": "Agresja",
+    "taunted_label": "Sprowokowany",
+    "companion_kit": "Zestaw Bojowy",
+    "kit_ready": "Gotowe",
+    "kit_cd": "Odnowienie"
   },
   "inventory": {
     "all": "Wszystkie",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Zsyntetyzuj przełom",
     "deduce_single_clue": "🔮 Dedykuj z jednej poszlaki",
     "main_objective": "Cel Główny",
+    "primary_operation": "Główna Operacja",
     "peak_chapter": "Kulminacja",
     "aid_secured": "Wsparcie Aktywne",
     "bypass_active": "Skrót Aktywny",
@@ -270,7 +279,13 @@
     "source_burned": "Spalony",
     "source_cold": "Wygasł",
     "source_claimed": "Zdobyty",
-    "source_bonus": "Dodatkowy Trop"
+    "source_bonus": "Dodatkowy Trop",
+    "corroboration_confirmed": "Trop Potwierdzony",
+    "partial_corroboration_hint": "Oba Kluczowe Tropy pasują do siebie. Połącz jeden z Tropem Opcjonalnym lub Dodatkowym, aby odkryć Przełom.",
+    "clue_tier_key": "Kluczowy Trop",
+    "clue_tier_corroborating": "Potwierdzający",
+    "off_hours_trace": "Ślad Poza Godzinami (+2 ST)",
+    "threat_pushed_back": "Zagrożenie Opóźnione (-1)"
   },
   "quest": {
     "threat_clock": {
@@ -518,7 +533,21 @@
     "turn_number": "Tura #{{number}}",
     "latest_outcome": "Najnowszy Wynik • Tura #{{number}}",
     "excitement": "Podekscytowanie",
-    "uncanny_stranger": "Niepokojący Nieznajomy"
+    "uncanny_stranger": "Niepokojący Nieznajomy",
+    "activity_prefix": "Zajęcie",
+    "visible_tell_prefix": "Widoczny Sygnał",
+    "epistemic_watch": "Czujność Tajemnic",
+    "leak_risk_low": "Ryzyko przecieku: Niskie",
+    "leak_risk_moderate": "Ryzyko przecieku: Umiarkowane",
+    "leak_risk_medium": "Ryzyko przecieku: Średnie",
+    "leak_risk_high": "Ryzyko przecieku: Wysokie",
+    "leak_risk_critical": "Ryzyko przecieku: Krytyczne",
+    "join_activity_btn": "Dołącz do zajęcia",
+    "spotted_you_badge": "Widział Cię",
+    "spotted_witnesses": "Zauważeni Świadkowie",
+    "known_witnesses": "Znani Świadkowie",
+    "active_alibis": "Aktywne Alibi",
+    "held_secrets": "Znane Sekrety"
   },
   "conditions": {
     "aroused": "Podekscytowany",
@@ -887,7 +916,20 @@
     "preferred_likes": "Preferowane / Ulubione",
     "aversions_dislikes": "Awersje / Nielubiane",
     "virgin_history": "• Dziewica/prawiczek (brak wcześniejszych doświadczeń intymnych przed spotkaniem z tobą)",
-    "romantic_milestones": "Wspólne romantyczne kamienie milowe"
+    "romantic_milestones": "Wspólne romantyczne kamienie milowe",
+    "tab_contacts": "Kontakty",
+    "tab_acquaintances": "Znajomi",
+    "acquaintances_count": "Poznano: {{count}}",
+    "no_acquaintances": "Nie poznano jeszcze żadnych znajomych.",
+    "acquaintances_hint": "Postacie, z którymi krótko rozmawiasz lub które spotykasz, pojawiają się tutaj, dopóki więź nie wystarczy na Zapisane Kontakty.",
+    "acquaintance_badge": "Znajomy",
+    "promotion_hint": "Awansuj do Zapisanych Kontaktów przez +15 Sympatii, -10 Rywalizacji, wymianę numerów, wątek zadania lub dołączenie do drużyny.",
+    "dm_locked_badge": "Czat zablokowany",
+    "dm_locked_tooltip": "Wiadomości prywatne są zablokowane. Poproś o numer osobiście lub połącz się przez PeerPulse — sama sympatia nie odblokowuje czatu.",
+    "search_acquaintances": "Szukaj znajomych...",
+    "no_acquaintances_match": "Nie znaleziono pasujących znajomych.",
+    "background_notes": "📖 Tło i notatki",
+    "known_traits": "Znane cechy"
   },
   "phone": {
     "alerts_dispatch": "Alerty / Komunikaty",
@@ -1273,7 +1315,19 @@
       "rival_sparked": "Iskra rywalizacji",
       "cold_shoulder": "Chłodny dystans",
       "focus_on_road": "Skupienie na drodze"
-    }
+    },
+    "routine_weekday": "Dni robocze",
+    "routine_weekend": "Weekend",
+    "routine_blocks": {
+      "morning": "Rano",
+      "lunch": "Południe",
+      "afternoon": "Popołudnie",
+      "evening": "Wieczór",
+      "night": "Noc"
+    },
+    "routine_unlock_hint": "Pełny plan tygodnia odblokuje się przy Sympatii 40+ lub przez obserwację i pytanie o rutynę.",
+    "residence_fog_hint": "Prywatne mieszkanie odblokuje się na poziomie Przyjaciel (100+) lub po zaproszeniu.",
+    "routine_override_today": "Dzisiejsza Zmiana"
   },
   "contracts": {
     "nav_label": "Pakty",

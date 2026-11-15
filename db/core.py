@@ -371,6 +371,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_social_ties_active
     ON social_ties(session_id, person_a_key, person_b_key, tie_type) WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS idx_social_ties_a ON social_ties(session_id, person_a_key, status);
 CREATE INDEX IF NOT EXISTS idx_social_ties_b ON social_ties(session_id, person_b_key, status);
+CREATE INDEX IF NOT EXISTS idx_social_ties_sess_status ON social_ties(session_id, status);
 
 CREATE TABLE IF NOT EXISTS factions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1031,6 +1032,91 @@ CREATE TABLE IF NOT EXISTS user_patron_compendium (
 );
 CREATE INDEX IF NOT EXISTS idx_user_patron_comp_uid ON user_patron_compendium(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_patron_comp_codex ON user_patron_compendium(user_id, codex_id);
+
+CREATE TABLE IF NOT EXISTS world_roster (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    npc_id                  TEXT NOT NULL,
+    name                    TEXT NOT NULL,
+    gender                  TEXT NOT NULL DEFAULT '',
+    race                    TEXT NOT NULL DEFAULT 'human',
+    role                    TEXT NOT NULL DEFAULT '',
+    origin                  TEXT NOT NULL DEFAULT 'venue_seed',
+    tier_status             TEXT NOT NULL DEFAULT 'seeded',
+    affinity_score          INTEGER NOT NULL DEFAULT 0,
+    met_in_person           INTEGER NOT NULL DEFAULT 0,
+    first_met_turn          INTEGER DEFAULT NULL,
+    workplace_node_id       TEXT NOT NULL DEFAULT '',
+    home_node_id            TEXT NOT NULL DEFAULT '',
+    hangout_node_id         TEXT NOT NULL DEFAULT '',
+    roaming_route_json      TEXT NOT NULL DEFAULT '[]',
+    shift_profile           TEXT NOT NULL DEFAULT 'day',
+    staff_status            TEXT NOT NULL DEFAULT 'active',
+    staff_status_day        INTEGER NOT NULL DEFAULT 0,
+    is_unique_proprietor    INTEGER NOT NULL DEFAULT 0,
+    residence_unlocked      INTEGER NOT NULL DEFAULT 0,
+    residence_unlock_reason TEXT NOT NULL DEFAULT '',
+    discovered_slots_json   TEXT NOT NULL DEFAULT '{}',
+    basic_info_json         TEXT NOT NULL DEFAULT '{}',
+    appearance_json         TEXT NOT NULL DEFAULT '{}',
+    traits_json             TEXT NOT NULL DEFAULT '[]',
+    turn_snapshots_json     TEXT NOT NULL DEFAULT '{}',
+    turn_created            INTEGER NOT NULL DEFAULT 0,
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, npc_id)
+);
+CREATE INDEX IF NOT EXISTS idx_world_roster_sess_tier ON world_roster(session_id, tier_status);
+CREATE INDEX IF NOT EXISTS idx_world_roster_workplace ON world_roster(session_id, workplace_node_id, staff_status);
+CREATE INDEX IF NOT EXISTS idx_world_roster_sess_nodes ON world_roster(session_id, staff_status, home_node_id, workplace_node_id, hangout_node_id);
+
+CREATE TABLE IF NOT EXISTS epistemic_facts (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    fact_key                TEXT NOT NULL,
+    category                TEXT NOT NULL DEFAULT 'secret',
+    culprit_actor_key       TEXT NOT NULL DEFAULT 'player',
+    subject_actor_key       TEXT NOT NULL DEFAULT '',
+    location_node_id        TEXT NOT NULL DEFAULT '',
+    summary                 TEXT NOT NULL DEFAULT '',
+    severity                INTEGER NOT NULL DEFAULT 1,
+    proof_artifact_ref      TEXT NOT NULL DEFAULT '',
+    heat_score              INTEGER NOT NULL DEFAULT 50,
+    decay_day_last_ticked   INTEGER NOT NULL DEFAULT 0,
+    status                  TEXT NOT NULL DEFAULT 'active',
+    metadata_json           TEXT NOT NULL DEFAULT '{}',
+    turn_created            INTEGER NOT NULL DEFAULT 0,
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, fact_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ep_facts_session_status ON epistemic_facts(session_id, status);
+
+CREATE TABLE IF NOT EXISTS epistemic_knowledge (
+    id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id              INTEGER NOT NULL,
+    fact_key                TEXT NOT NULL,
+    holder_actor_key        TEXT NOT NULL,
+    confidence              TEXT NOT NULL DEFAULT 'rumor',
+    containment_state       TEXT NOT NULL DEFAULT 'active',
+    source_actor_key        TEXT NOT NULL DEFAULT '',
+    acquisition_channel     TEXT NOT NULL DEFAULT 'witness',
+    hop_count               INTEGER NOT NULL DEFAULT 0,
+    player_aware            INTEGER NOT NULL DEFAULT 0,
+    alibi_claim             TEXT NOT NULL DEFAULT '',
+    alibi_witness_key       TEXT NOT NULL DEFAULT '',
+    is_alibi_busted         INTEGER NOT NULL DEFAULT 0,
+    metadata_json           TEXT NOT NULL DEFAULT '{}',
+    turn_acquired           INTEGER NOT NULL DEFAULT 0,
+    turn_updated            INTEGER NOT NULL DEFAULT 0,
+    created_at              REAL NOT NULL,
+    updated_at              REAL NOT NULL,
+    UNIQUE(session_id, fact_key, holder_actor_key)
+);
+CREATE INDEX IF NOT EXISTS idx_ep_know_session_holder ON epistemic_knowledge(session_id, holder_actor_key);
+CREATE INDEX IF NOT EXISTS idx_ep_know_session_fact ON epistemic_knowledge(session_id, fact_key);
 """
 
 
@@ -2115,6 +2201,30 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+from .roster import WORLD_ROSTER_V54_DDL as _WORLD_ROSTER_V54_DDL
+
+SCHEMA_MIGRATIONS.append(
+    (
+        54,
+        "world_roster_closed_world_v54",
+        list(_WORLD_ROSTER_V54_DDL),
+    )
+)
+
+from .epistemic import EPISTEMIC_V55_DDL as _EPISTEMIC_V55_DDL
+
+_LIVING_WORLD_V55_DDL: tuple[str, ...] = (
+    "CREATE INDEX IF NOT EXISTS idx_world_roster_sess_nodes ON world_roster(session_id, staff_status, home_node_id, workplace_node_id, hangout_node_id)",
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        55,
+        "epistemic_and_living_world_v55",
+        list(_EPISTEMIC_V55_DDL) + list(_LIVING_WORLD_V55_DDL),
+    )
+)
+
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
     """Executes pending versioned schema migrations deterministically and records applied versions."""
@@ -2224,6 +2334,11 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
             _migrate_combat_evolution_v53(conn)
         except Exception as e:
             print(f"[migration 53] Warning: combat evolution phase 3 backfill encountered: {e}")
+    if 55 in newly_applied:
+        try:
+            _ensure_living_world_indexes_v55(conn)
+        except Exception as e:
+            print(f"[migration 55] Warning: living world index creation encountered: {e}")
 
     try:
         _strip_legacy_session_fk_constraints(conn)
@@ -2231,6 +2346,17 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         print(f"[schema] Warning: session FK cleanup encountered: {e}")
 
     return newly_applied
+
+
+def _ensure_living_world_indexes_v55(conn: sqlite3.Connection) -> None:
+    """Ensures Migration 55 covering indexes exist whenever target tables are present."""
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='social_ties' LIMIT 1").fetchone():
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_social_ties_sess_status ON social_ties(session_id, status)")
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_roster' LIMIT 1").fetchone():
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_world_roster_sess_nodes "
+            "ON world_roster(session_id, staff_status, home_node_id, workplace_node_id, hangout_node_id)"
+        )
 
 
 def _migrate_zone_split_and_hidden_villages_v49(conn: sqlite3.Connection) -> int:
@@ -3436,15 +3562,32 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 "attribute", "combat_archetype", "ability_medium", "anomalous_npc_tag",
                 "npc_type", "social_role_type", "sapience", "temperament",
                 "quest_id", "incursion_id", "disposition",
+                "activity_key", "activity_id", "activity_tag", "activity_mode",
+                "secondary_tag", "npc_id", "person_key",
+                "paired_with", "paired_with_name", "spotted_fact_key", "epistemic_tag",
             ):
                 if npc.get(k):
                     clean_entry[k] = str(npc[k]).strip()[:80]
             for bool_k in (
                 "is_anomalous_entity", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
+                "activity_is_telltale", "telltale_revealed",
             ):
                 if bool_k in npc and npc.get(bool_k) is not None:
                     clean_entry[bool_k] = bool(npc.get(bool_k))
+            if npc.get("visible_tell_text"):
+                clean_entry["visible_tell_text"] = str(npc["visible_tell_text"]).strip()[:200]
+            if npc.get("focus_dc_mod") is not None:
+                clean_entry["focus_dc_mod"] = _safe_int_db(npc.get("focus_dc_mod"), 0)
+            if isinstance(npc.get("join_activity_seed"), dict) and npc["join_activity_seed"]:
+                clean_entry["join_activity_seed"] = dict(npc["join_activity_seed"])
+            raw_pose_tags = npc.get("sdxl_pose_tags")
+            if isinstance(raw_pose_tags, list):
+                pose_str = ", ".join(str(x).strip() for x in raw_pose_tags if str(x or "").strip())
+                if pose_str:
+                    clean_entry["sdxl_pose_tags"] = pose_str[:200]
+            elif isinstance(raw_pose_tags, str) and raw_pose_tags.strip():
+                clean_entry["sdxl_pose_tags"] = raw_pose_tags.strip()[:200]
             if npc.get("sub_obj_id") is not None:
                 clean_entry["sub_obj_id"] = _safe_int_db(npc.get("sub_obj_id"))
             if npc.get("description"):
@@ -3486,6 +3629,12 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 "quest_id", "sub_obj_id", "incursion_id", "disposition",
                 "is_anomalous_entity", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
+                "activity_key", "activity_id", "activity_tag", "activity_mode",
+                "secondary_tag", "npc_id", "person_key",
+                "activity_is_telltale", "telltale_revealed", "visible_tell_text",
+                "paired_with", "paired_with_name",
+                "join_activity_seed", "focus_dc_mod", "sdxl_pose_tags",
+                "spotted_fact_key", "epistemic_tag",
             ):
                 if existing.get(field) in (None, "") and entry.get(field) not in (None, ""):
                     existing[field] = entry[field]
@@ -3518,7 +3667,8 @@ SESSION_CHILD_TABLES = (
     "campaign_spines", "quest_dossiers", "session_anomaly_records", "player_properties",
     "npc_social_composure", "character_social_daily", "social_topic_states",
     "contact_dossier_discoveries", "social_turn_snapshots",
-    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots"
+    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots",
+    "world_roster", "epistemic_facts", "epistemic_knowledge"
 )
 
 STAT_COLUMN = {"STR": "str_", "PER": "per_", "END": "end_", "CHA": "cha",
@@ -3676,6 +3826,9 @@ def set_db_path(new_path: str):
     config.DB_PATH = new_path
 
 
+_ISOLATED_PREV_DB_PATHS: dict[str, str] = {}
+
+
 def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikayat_sim_") -> tuple[str, bool]:
     """Switches the active database to an isolated database for simulation/testing.
     Returns:
@@ -3683,6 +3836,7 @@ def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikay
     """
     import tempfile
 
+    prev_path = str(getattr(db, "DB_PATH", "") or DB_PATH or "")
     if explicit_path:
         target_path = explicit_path
         is_temp = False
@@ -3691,6 +3845,9 @@ def isolate_simulation_db(explicit_path: str | None = None, prefix: str = "hikay
         target_path = tf.name
         tf.close()
         is_temp = True
+
+    if is_temp and prev_path and prev_path != target_path:
+        _ISOLATED_PREV_DB_PATHS[target_path] = prev_path
 
     set_db_path(target_path)
     init_db()
@@ -3703,9 +3860,14 @@ def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = 
     import gc
     import time
 
-    close_all_connections()
+    prev_path = _ISOLATED_PREV_DB_PATHS.pop(target_path, None)
+    active_path = str(getattr(db, "DB_PATH", "") or DB_PATH or "")
+    if is_temp and not keep and prev_path and active_path == target_path:
+        set_db_path(prev_path)
+    else:
+        close_all_connections()
+    gc.collect()
     if is_temp and not keep:
-        gc.collect()
         for ext in ["", "-wal", "-shm", "-journal"]:
             f_path = target_path + ext if ext else target_path
             if os.path.exists(f_path):

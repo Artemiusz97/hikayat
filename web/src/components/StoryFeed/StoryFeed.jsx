@@ -253,7 +253,7 @@ const StoryFeed = ({
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
-                      <div className="flex items-center gap-1.5 min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
                         <Skull size={13} className={isDefeated ? 'text-gray-500' : isSelectedTarget ? 'text-amber-400 shrink-0' : 'text-red-400 shrink-0'} />
                         <span className={`text-xs font-bold truncate ${isDefeated ? 'line-through text-gray-400' : 'text-gray-100'}`}>
                           {monster.name}
@@ -261,6 +261,19 @@ const StoryFeed = ({
                         {isSelectedTarget && (
                           <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/50 font-bold uppercase shrink-0">
                             🎯 {t('feed.target', 'Target')}
+                          </span>
+                        )}
+                        {!isDefeated && monster.aggro_target_name && (
+                          <span
+                            className={`text-[9px] px-1.5 py-0.2 rounded font-bold shrink-0 border ${
+                              monster.aggro_mode === 'taunted'
+                                ? 'bg-amber-950/80 text-amber-200 border-amber-500/60'
+                                : 'bg-rose-950/70 text-rose-200 border-rose-700/50'
+                            }`}
+                          >
+                            {monster.aggro_mode === 'taunted'
+                              ? `🔒 ${t('combat.taunted_label', 'Taunted')}: ${monster.aggro_target_name}`
+                              : `🎯 ${t('combat.aggro_label', 'Aggro')}: ${monster.aggro_target_name}`}
                           </span>
                         )}
                       </div>
@@ -288,6 +301,45 @@ const StoryFeed = ({
                         />
                       </div>
                     </div>
+
+                    {/* Qualitative Boss Charging Telegraph & Stagger Progress */}
+                    {!isDefeated && monster.telegraphed_skill && typeof monster.telegraphed_skill === 'object' && (() => {
+                      const skillLabel =
+                        monster.telegraphed_skill.skill_name ||
+                        monster.telegraphed_skill.telegraphed_label ||
+                        monster.telegraphed_skill.name ||
+                        'Signature Attack';
+                      const staggerPct = Math.max(0, Math.min(100, Number(monster.stagger_pct || 0)));
+                      const isBreaking = staggerPct >= 65;
+                      const staggerLabel = isBreaking
+                        ? t('combat.stagger_breaking', 'Breaking!')
+                        : t('combat.stagger_label', 'Stagger');
+                      return (
+                        <div className="mt-2 p-2 rounded border border-amber-500/60 bg-amber-950/50 space-y-1">
+                          <div className="flex items-center justify-between gap-2 text-[10px] font-mono">
+                            <span className="font-bold text-amber-200 truncate">
+                              ⚠️ {t('combat.charging_skill', 'CHARGING')}: {skillLabel}
+                            </span>
+                            <span className={`font-bold shrink-0 ${isBreaking ? 'text-rose-300 motion-safe:animate-pulse' : 'text-amber-300'}`}>
+                              {staggerLabel} ({staggerPct}%)
+                            </span>
+                          </div>
+                          <div
+                            role="progressbar"
+                            aria-label={`${t('combat.stagger_label', 'Stagger')} — ${skillLabel}`}
+                            aria-valuemin={0}
+                            aria-valuemax={100}
+                            aria-valuenow={staggerPct}
+                            className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-amber-800/60"
+                          >
+                            <div
+                              className={`h-full transition-all duration-500 ${isBreaking ? 'bg-rose-500' : 'bg-amber-400'}`}
+                              style={{ width: `${staggerPct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Anomalous Stability / Poise Bar & Weakness Pills */}
                     {Number(monster.max_stability || 0) > 0 && !isDefeated && (() => {
@@ -354,13 +406,19 @@ const StoryFeed = ({
                     {statuses.length > 0 && (
                       <div className="flex flex-wrap gap-1 mt-2">
                         {statuses.map((st, sIdx) => {
-                          const label = typeof st === 'string' ? st : (st.name || 'Condition');
+                          const isObj = typeof st === 'object' && st !== null;
+                          const baseName = isObj ? (st.name || 'Condition') : String(st || 'Condition');
+                          const stacks = isObj ? Math.max(1, Number(st.intensity_stacks || st.stacks || 1)) : 1;
+                          const remDur = isObj ? Number(st.remaining_duration ?? st.duration ?? 0) : 0;
+                          const durUnit = isObj && st.duration_type === 'minutes' ? 'm' : 't';
                           return (
                             <span
                               key={sIdx}
-                              className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50 font-medium"
+                              className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50 font-medium font-mono"
                             >
-                              {label}
+                              {baseName}
+                              {stacks > 1 ? ` x${stacks}` : ''}
+                              {remDur > 0 ? ` (${remDur}${durUnit})` : ''}
                             </span>
                           );
                         })}

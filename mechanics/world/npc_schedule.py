@@ -28,74 +28,23 @@ High School NPC Schedule:
 from __future__ import annotations
 from typing import Dict, Any, List, Tuple, Optional
 import hashlib
+import json
 import re
 
+import db
+from .anchor_schedule import (
+    SHIFT_PROFILES,
+    is_npc_on_active_shift,
+    resolve_anchor_schedule_nodes,
+)
+from .locations.residences import SHARED_ABSTRACT_RESIDENCE_NODE
+from .schedule_blocks import (
+    BLOCK_BOUNDARIES,
+    SCHEDULE_TIME_BLOCKS,
+    get_detailed_npc_time_phase,
+    get_time_block_key,
+)
 from .world_schedule import is_weekend, is_high_school_setting
-
-# Standard 5-block daily time blocks (minutes from midnight 0..1439)
-SCHEDULE_TIME_BLOCKS = [
-    (360, 719, "morning", "Morning"),
-    (720, 779, "lunch", "Lunch"),
-    (780, 1019, "afternoon", "Afternoon"),
-    (1020, 1199, "evening", "Evening"),
-]
-# Night covers 1200..1439 and 0..359
-
-# Boundary minutes where schedule transitions occur
-BLOCK_BOUNDARIES = [
-    (420, "commute"),         # 07:00 Morning Wake & Commute
-    (480, "morning"),         # 08:00 Class Start / Morning Opening
-    (720, "lunch"),           # 12:00 Lunch Break
-    (780, "afternoon"),       # 13:00 Afternoon Classes / Weekend Afternoon
-    (900, "extracurricular"), # 15:00 After-School Extracurriculars (Weekdays)
-    (1020, "evening"),        # 17:00 Evening Shift
-    (1200, "night"),          # 20:00 After-Hours / Return Home
-]
-
-
-def get_time_block_key(minute: int) -> str:
-    """Returns the canonical 5-block identifier: 'morning', 'lunch', 'afternoon', 'evening', or 'night'."""
-    safe_min = int(minute or 0) % 1440
-    for start, end, key, _ in SCHEDULE_TIME_BLOCKS:
-        if start <= safe_min <= end:
-            return key
-    return "night"
-
-
-def get_detailed_npc_time_phase(
-    minute: int,
-    current_day: int = 1,
-    scen_key: str = "high_school_drama"
-) -> str:
-    """
-    Returns the granular High School schedule phase key for an NPC at (minute, current_day):
-      - 'night': 20:00–06:59 (1200..1439 and 0..419)
-      - 'commute': 07:00–07:59 (420..479)
-      - 'morning': 08:00–11:59 (480..719)
-      - 'lunch': 12:00–12:59 (720..779)
-      - 'class_afternoon': 13:00–14:59 (780..899) on weekdays, or 'afternoon' on weekends
-      - 'extracurricular': 15:00–19:59 (900..1199) on weekdays, or 'afternoon'/'evening' on weekends
-    """
-    safe_min = int(minute or 0) % 1440
-    if not is_high_school_setting(scen_key):
-        return get_time_block_key(safe_min)
-
-    if safe_min >= 1200 or safe_min < 420:
-        return "night"
-    if 420 <= safe_min < 480:
-        return "commute"
-    if 480 <= safe_min < 720:
-        return "morning"
-    if 720 <= safe_min < 780:
-        return "lunch"
-    if is_weekend(current_day):
-        if 780 <= safe_min < 1020:
-            return "afternoon"
-        return "evening"
-    else:
-        if 780 <= safe_min < 900:
-            return "class_afternoon"
-        return "extracurricular"
 
 
 def is_schedule_transition_imminent(
@@ -682,6 +631,7 @@ def is_npc_nocturnal_or_night_shift(
     npc: Dict[str, Any],
     scen_key: str = "fantasy",
     current_day: int = 1,
+    session_id: Optional[int] = None,
 ) -> bool:
     """
     Returns True if the NPC operates on an active nocturnal / night-watch shift
@@ -689,6 +639,47 @@ def is_npc_nocturnal_or_night_shift(
     """
     if not isinstance(npc, dict):
         return False
+
+    basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
+    shift_prof = str(npc.get("shift_profile") or basic.get("shift_profile") or "").strip().lower()
+    is_24h = bool(npc.get("is_24h_station") or basic.get("is_24h_station"))
+    origin_val = str(npc.get("origin") or basic.get("origin") or "").strip().lower()
+    staff_stat = str(npc.get("staff_status") or basic.get("staff_status") or "active").strip().lower()
+    is_dead = bool(npc.get("is_deceased") or basic.get("is_deceased") or npc.get("alive") is False or basic.get("alive") is False)
+
+    if session_id and not npc.get("_roster_premerged"):
+        lookup_key = str(
+            npc.get("npc_key")
+            or npc.get("npc_id")
+            or npc.get("name")
+            or basic.get("name")
+            or ""
+        ).strip()
+        if lookup_key:
+            try:
+                roster_row = db.get_world_roster_npc(
+                    int(session_id),
+                    lookup_key,
+                    include_legacy_rosters=False,
+                )
+            except Exception:
+                roster_row = None
+            if isinstance(roster_row, dict):
+                r_basic = roster_row.get("basic_info") if isinstance(roster_row.get("basic_info"), dict) else {}
+                origin_val = origin_val or str(roster_row.get("origin") or "").strip().lower()
+                if not shift_prof:
+                    shift_prof = str(roster_row.get("shift_profile") or r_basic.get("shift_profile") or "").strip().lower()
+                is_24h = is_24h or bool(roster_row.get("is_24h_station") or r_basic.get("is_24h_station"))
+                db_stat = str(roster_row.get("staff_status") or "active").strip().lower()
+                if db_stat != "active":
+                    staff_stat = db_stat
+
+    if is_dead or (staff_stat and staff_stat != "active"):
+        return False
+
+    if origin_val != "legacy_adapter" and (shift_prof == "night" or is_24h):
+        return True
+
     if is_high_school_setting(scen_key):
         basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
         if npc.get("is_nocturnal_shift") or basic.get("is_nocturnal_shift"):
@@ -748,16 +739,32 @@ def _hydrate_npc_from_db(npc: Dict[str, Any], session_id: Optional[int]) -> Dict
     clique_val = str(npc.get("clique") or basic.get("clique") or "").strip()
     primary_fac = str(npc.get("primary_facility") or basic.get("primary_facility") or basic.get("location") or "").strip()
 
-    # Only attempt DB lookup if fundamental identity is missing
+    # Hydrate world_roster anchor fields whenever session_id is present (without forcing legacy_adapter rows into anchors)
+    world_roster_row: Optional[Dict[str, Any]] = None
+    lookup_key = str(
+        npc.get("npc_key")
+        or npc.get("npc_id")
+        or name
+        or ""
+    ).strip()
+    if lookup_key:
+        try:
+            world_roster_row = db.get_world_roster_npc(
+                int(session_id),
+                lookup_key,
+                include_legacy_rosters=False,
+            )
+        except Exception:
+            world_roster_row = None
+
+    # Only attempt school/contact DB lookup if fundamental identity is missing
     if not grade_val or not role or role == "none":
         try:
-            import db as local_db
-            c_row = local_db.get_contact(session_id, name)
+            c_row = db.get_contact(session_id, name)
             if c_row:
                 b_inf = c_row.get("basic_info") or {}
                 if isinstance(b_inf, str):
                     try:
-                        import json
                         b_inf = json.loads(b_inf)
                     except Exception:
                         b_inf = {}
@@ -771,7 +778,7 @@ def _hydrate_npc_from_db(npc: Dict[str, Any], session_id: Optional[int]) -> Dict
                 if not primary_fac:
                     primary_fac = str(c_row.get("primary_facility") or b_inf.get("primary_facility") or b_inf.get("location") or "").strip()
             if not grade_val or not role or role == "none":
-                r_rows = local_db.get_school_roster(session_id) or []
+                r_rows = db.get_school_roster(session_id) or []
                 for r_item in r_rows:
                     if str(r_item.get("name", "")).strip().lower() == name.lower():
                         grade_val = grade_val or str(r_item.get("grade") or "").strip()
@@ -789,6 +796,32 @@ def _hydrate_npc_from_db(npc: Dict[str, Any], session_id: Optional[int]) -> Dict
 
     hydrated = dict(npc)
     hydrated["_db_hydrated"] = True
+    if isinstance(world_roster_row, dict):
+        for field in (
+            "npc_key",
+            "origin",
+            "shift_profile",
+            "workplace_node_id",
+            "hangout_node_id",
+            "roaming_route",
+            "is_unique_proprietor",
+        ):
+            cur_v = hydrated.get(field)
+            if (cur_v is None or cur_v == "" or cur_v == []) and world_roster_row.get(field) not in (None, ""):
+                hydrated[field] = world_roster_row[field]
+        wr_status = str(world_roster_row.get("staff_status") or "active").strip().lower()
+        if wr_status != "active" or not hydrated.get("staff_status"):
+            hydrated["staff_status"] = wr_status
+        if "residence_unlocked" in world_roster_row:
+            hydrated["residence_unlocked"] = bool(world_roster_row.get("residence_unlocked"))
+        if world_roster_row.get("home_node_id"):
+            hydrated["home_node_id"] = str(world_roster_row.get("home_node_id") or "").strip()
+        wr_basic = world_roster_row.get("basic_info") if isinstance(world_roster_row.get("basic_info"), dict) else {}
+        if wr_basic:
+            merged_basic = dict(wr_basic)
+            if isinstance(hydrated.get("basic_info"), dict):
+                merged_basic.update(hydrated["basic_info"])
+            hydrated["basic_info"] = merged_basic
     if grade_val:
         hydrated["grade"] = grade_val
     if role:
@@ -882,6 +915,16 @@ def get_npc_schedule_node_ids(
     name_slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
 
     schedule_nodes: Dict[str, str] = {}
+
+    anchor_nodes = resolve_anchor_schedule_nodes(
+        npc,
+        current_day=current_day,
+        scen_key=scen_key_low,
+        session_id=session_id,
+        current_minute=current_minute,
+    )
+    if anchor_nodes is not None:
+        return _apply_spare_key_schedule_overrides(anchor_nodes, session_id, npc, current_day, scen_key_low)
 
     from mechanics.social.roster_tags import npc_is_folklore_villager
     if npc_is_folklore_villager(npc):
@@ -1159,7 +1202,7 @@ def get_npc_schedule_node_ids(
         tier = prof["agent_tier"]
         p_nid = prof["primary_node_id"]
         s_nid = prof["secondary_node_id"]
-        night_watch = is_npc_nocturnal_or_night_shift(npc, scen_key=scen_key_low, current_day=current_day)
+        night_watch = is_npc_nocturnal_or_night_shift(npc, scen_key=scen_key_low, current_day=current_day, session_id=session_id)
         is_tp_hangout = s_nid.startswith("loc_tp_")
         agent_home_nid = str(npc.get("residence_facility_id") or basic.get("residence_facility_id") or "").strip()
         if not agent_home_nid and (is_spec_agent or fac_id in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction")):
@@ -1349,7 +1392,6 @@ def get_npc_scheduled_node_id(
     """Returns the canonical node_id where the NPC is scheduled at (current_minute, current_day) or time_slot."""
     story_nid = ""
     date_nid = ""
-    import db
     if session_id:
         npc_nm_clean = str(npc.get("name") or "").strip().lower()
         if npc_nm_clean:
@@ -1556,7 +1598,7 @@ def get_npc_schedule(
         p_path = prof["primary_path"]
         s_path = prof["secondary_path"]
         fac_id = prof["faction_id"]
-        night_watch = is_npc_nocturnal_or_night_shift(npc, scen_key=scen_key, current_day=current_day)
+        night_watch = is_npc_nocturnal_or_night_shift(hydrated_npc, scen_key=scen_key, current_day=current_day, session_id=session_id)
         is_tp_hangout = str(prof["secondary_node_id"]).startswith("loc_tp_")
 
         if fac_id in ("cult_faction", "clandestine_faction"):
@@ -1621,8 +1663,7 @@ def get_npc_schedule(
 
     # If session_id is provided, overlay resolved world_nodes paths and Circadian Crisis Shifts
     if session_id:
-        import db as local_db
-        session_nodes = local_db.get_session_world_nodes(session_id) or []
+        session_nodes = db.get_session_world_nodes(session_id) or []
         node_map = {n["node_id"]: n for n in session_nodes} if session_nodes else {}
 
         def _fmt_node_path(nid_key: str) -> str:
@@ -1648,7 +1689,7 @@ def get_npc_schedule(
 
         # Circadian Crisis Shifts: evacuate/reroute non-enforcer NPCs out of locked-down or Peak-scarred facilities
         try:
-            ev_list = local_db.get_world_events(session_id, entity_type="macro_event") or []
+            ev_list = db.get_world_events(session_id, entity_type="macro_event") or []
             crisis_events = [
                 ev
                 for ev in ev_list
@@ -1678,14 +1719,16 @@ def get_npc_schedule(
                         sanc_target_nid = open_rooms[0]
                 sanctuary_path = _fmt_node_path(sanc_target_nid) if sanc_target_nid else ""
                 if sanctuary_path:
-                    cur_ch = int(local_db.get_session_chapter(int(session_id)) or 1)
+                    cur_ch = int(db.get_session_chapter(int(session_id)) or 1)
                     martial_curfew = cur_ch in (8, 9) and any(
                         bool((ev.get("modifiers") or {}).get("martial_law_lockdown")) for ev in crisis_events
                     )
                     for block, loc_str in list(schedule.items()):
+                        if node_sched.get(block) == SHARED_ABSTRACT_RESIDENCE_NODE:
+                            continue
                         loc_low = str(loc_str or "").strip().lower()
                         loc_nid = node_sched.get(block) or (
-                            local_db.resolve_node_id_from_location(int(session_id), loc_str) if loc_str else ""
+                            db.resolve_node_id_from_location(int(session_id), loc_str) if loc_str else ""
                         ) or ""
                         fac_nid = (
                             str(node_map[loc_nid].get("parent_id") or "")
@@ -1714,6 +1757,10 @@ def get_npc_schedule(
                                 schedule[block] = sanctuary_path
         except Exception:
             pass
+
+    for block, nid in node_sched.items():
+        if nid == SHARED_ABSTRACT_RESIDENCE_NODE and block in schedule:
+            schedule[block] = "Residential District (Unknown Address)"
 
     return schedule
 
@@ -1789,7 +1836,6 @@ def is_npc_eligible_for_private_room(
     session_id = session.get("id") or session.get("session_id")
     if session_id:
         try:
-            import db
             with db.get_conn() as conn:
                 rows = conn.execute(
                     "SELECT npc_id, status FROM commitments_ledger WHERE session_id = ? AND commitment_type = 'rendezvous'",
@@ -1805,7 +1851,6 @@ def is_npc_eligible_for_private_room(
     # 4. Spare-key home access & station authority check
     if node_id and session_id:
         try:
-            import db
             from mechanics.world.locations.access_gate import has_npc_authority_for_node
             from mechanics.world.locations.residences import (
                 get_player_owned_or_starter_property_for_node,

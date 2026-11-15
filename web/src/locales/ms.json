@@ -91,7 +91,15 @@
     "resolved": "Diselesaikan",
     "waiting_party": "Menunggu ahli kumpulan...",
     "locked_in": "Terkunci",
-    "submitting": "Menyelesaikan giliran..."
+    "submitting": "Menyelesaikan giliran...",
+    "charging_skill": "MENGEJUT",
+    "stagger_label": "Goyahan",
+    "stagger_breaking": "Hampir Pecah!",
+    "aggro_label": "Sasaran",
+    "taunted_label": "Terpancing",
+    "companion_kit": "Kit Tempur",
+    "kit_ready": "Sedia",
+    "kit_cd": "Tempoh"
   },
   "inventory": {
     "all": "Semua",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Sintesis Penemuan Penting",
     "deduce_single_clue": "🔮 Deduksi dengan Petunjuk Tunggal",
     "main_objective": "Objektif Utama",
+    "primary_operation": "Operasi Utama",
     "peak_chapter": "Kemuncak Bab",
     "aid_secured": "Bantuan Aktif",
     "bypass_active": "Pintasan Aktif",
@@ -270,7 +279,13 @@
     "source_burned": "Hangus",
     "source_cold": "Terputus",
     "source_claimed": "Diperoleh",
-    "source_bonus": "Petunjuk Bonus"
+    "source_bonus": "Petunjuk Bonus",
+    "corroboration_confirmed": "Jejak Disahkan",
+    "partial_corroboration_hint": "Kedua-dua Petunjuk Utama sepadan. Gandingkan salah satu dengan Petunjuk Pilihan atau Bonus untuk mencetuskan Terobosan.",
+    "clue_tier_key": "Petunjuk Utama",
+    "clue_tier_corroborating": "Penyokong",
+    "off_hours_trace": "Jejak Luar Waktu (+2 DC)",
+    "threat_pushed_back": "Ancaman Ditunda (-1)"
   },
   "quest": {
     "threat_clock": {
@@ -518,7 +533,21 @@
     "turn_number": "Giliran #{{number}}",
     "latest_outcome": "Hasil Terkini • Giliran #{{number}}",
     "excitement": "Keterujaan",
-    "uncanny_stranger": "Orang Asing Ganjil"
+    "uncanny_stranger": "Orang Asing Ganjil",
+    "activity_prefix": "Sedang",
+    "visible_tell_prefix": "Petunjuk Ketara",
+    "epistemic_watch": "Pantauan Rahsia",
+    "leak_risk_low": "Risiko Bocor: Rendah",
+    "leak_risk_moderate": "Risiko Bocor: Sederhana",
+    "leak_risk_medium": "Risiko Bocor: Sederhana",
+    "leak_risk_high": "Risiko Bocor: Tinggi",
+    "leak_risk_critical": "Risiko Bocor: Kritikal",
+    "join_activity_btn": "Sertai Aktiviti",
+    "spotted_you_badge": "Ternampak Anda",
+    "spotted_witnesses": "Saksi Dikesan",
+    "known_witnesses": "Saksi Diketahui",
+    "active_alibis": "Alibi Aktif",
+    "held_secrets": "Rahsia Dipegang"
   },
   "conditions": {
     "aroused": "Terangsang",
@@ -887,7 +916,20 @@
     "preferred_likes": "Pilihan / Kegemaran",
     "aversions_dislikes": "Kebencian / Ketidaksukaan",
     "virgin_history": "• Dara/Teruna (Tiada sejarah intim sebelum bertemu anda)",
-    "romantic_milestones": "Pencapaian Romantis Bersama"
+    "romantic_milestones": "Pencapaian Romantis Bersama",
+    "tab_contacts": "Kenalan",
+    "tab_acquaintances": "Kenalan Sekilas",
+    "acquaintances_count": "{{count}} Ditemui",
+    "no_acquaintances": "Belum ada kenalan yang ditemui.",
+    "acquaintances_hint": "Watak yang anda temui atau berbual seketika akan muncul di sini sehingga ikatan cukup erat untuk Kenalan Tersimpan.",
+    "acquaintance_badge": "Kenalan Sekilas",
+    "promotion_hint": "Naikkan ke Kenalan Tersimpan dengan mencapai +15 Kemesraan, -10 Perseteruan, bertukar nombor secara bersemuka, pautan misi, atau menyertai kumpulan.",
+    "dm_locked_badge": "DM Dikunci",
+    "dm_locked_tooltip": "Mesej terus dikunci. Minta nombor secara bersemuka atau sambung melalui PeerPulse dahulu; kemesraan sahaja tidak membuka kunci DM.",
+    "search_acquaintances": "Cari Kenalan Sekilas...",
+    "no_acquaintances_match": "Tiada kenalan sekilas yang sepadan ditemui.",
+    "background_notes": "📖 Latar Belakang & Nota",
+    "known_traits": "Sifat Diketahui"
   },
   "phone": {
     "alerts_dispatch": "Amaran / Siaran",
@@ -1273,7 +1315,19 @@
       "rival_sparked": "Persaingan Tercetus",
       "cold_shoulder": "Layanan Dingin",
       "focus_on_road": "Fokus Pada Perjalanan"
-    }
+    },
+    "routine_weekday": "Hari Bekerja",
+    "routine_weekend": "Hujung Minggu",
+    "routine_blocks": {
+      "morning": "Pagi",
+      "lunch": "Tengah Hari",
+      "afternoon": "Petang",
+      "evening": "Senja",
+      "night": "Malam"
+    },
+    "routine_unlock_hint": "Jadual mingguan penuh dibuka pada Kemesraan 40+ atau dengan memerhati dan bertanya tentang rutin mereka.",
+    "residence_fog_hint": "Kediaman peribadi dibuka pada tahap Sahabat (100+) atau apabila dijemput pulang.",
+    "routine_override_today": "Pindaan Hari Ini"
   },
   "contracts": {
     "nav_label": "Perjanjian",

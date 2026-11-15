@@ -91,7 +91,15 @@
     "resolved": "Abgeschlossen",
     "waiting_party": "Warte auf Gruppenmitglieder...",
     "locked_in": "Eingeloggt",
-    "submitting": "Runde wird berechnet..."
+    "submitting": "Runde wird berechnet...",
+    "charging_skill": "LÄDT AUF",
+    "stagger_label": "Taumel",
+    "stagger_breaking": "Kurz vor Bruch!",
+    "aggro_label": "Aggro",
+    "taunted_label": "Provoziert",
+    "companion_kit": "Kampf-Kit",
+    "kit_ready": "Bereit",
+    "kit_cd": "Abklingzeit"
   },
   "inventory": {
     "all": "Alle Gegenstände",
@@ -234,6 +242,7 @@
     "synthesize_breakthrough": "🧩 Durchbruch synthetisieren",
     "deduce_single_clue": "🔮 Mit einzelnem Hinweis deduzieren",
     "main_objective": "Hauptziel",
+    "primary_operation": "Hauptoperation",
     "peak_chapter": "Höhepunkt-Kapitel",
     "aid_secured": "Unterstützung Aktiv",
     "bypass_active": "Abkürzung Aktiv",
@@ -270,7 +279,13 @@
     "source_burned": "Verbrannt",
     "source_cold": "Kalt",
     "source_claimed": "Gesichert",
-    "source_bonus": "Bonus-Spur"
+    "source_bonus": "Bonus-Spur",
+    "corroboration_confirmed": "Spur Bestätigt",
+    "partial_corroboration_hint": "Beide Schlüsselhinweise passen zusammen. Kombiniere einen mit einer Optionalen oder Bonus-Spur für den Durchbruch.",
+    "clue_tier_key": "Schlüsselhinweis",
+    "clue_tier_corroborating": "Stützend",
+    "off_hours_trace": "Spurensuche Außerhalb (+2 SG)",
+    "threat_pushed_back": "Bedrohung Verzögert (-1)"
   },
   "quest": {
     "threat_clock": {
@@ -518,7 +533,21 @@
     "turn_number": "Runde #{{number}}",
     "latest_outcome": "Neuestes Ergebnis • Runde #{{number}}",
     "excitement": "Erregung",
-    "uncanny_stranger": "Unheimlicher Fremder"
+    "uncanny_stranger": "Unheimlicher Fremder",
+    "activity_prefix": "Aktiv",
+    "visible_tell_prefix": "Auffälliges Indiz",
+    "epistemic_watch": "Geheimnis-Überwachung",
+    "leak_risk_low": "Leck-Risiko: Niedrig",
+    "leak_risk_moderate": "Leck-Risiko: Mäßig",
+    "leak_risk_medium": "Leck-Risiko: Mittel",
+    "leak_risk_high": "Leck-Risiko: Hoch",
+    "leak_risk_critical": "Leck-Risiko: Kritisch",
+    "join_activity_btn": "Aktivität anschließen",
+    "spotted_you_badge": "Hat dich gesehen",
+    "spotted_witnesses": "Entdeckte Zeugen",
+    "known_witnesses": "Bekannte Zeugen",
+    "active_alibis": "Aktive Alibis",
+    "held_secrets": "Gehaltene Geheimnisse"
   },
   "conditions": {
     "aroused": "Erregt",
@@ -887,7 +916,20 @@
     "preferred_likes": "Bevorzugt / Gemocht",
     "aversions_dislikes": "Aversionen / Ungemocht",
     "virgin_history": "• Jungfräulich (Keine früheren intimen Erfahrungen vor der Begegnung mit dir)",
-    "romantic_milestones": "Gemeinsame romantische Meilensteine"
+    "romantic_milestones": "Gemeinsame romantische Meilensteine",
+    "tab_contacts": "Kontakte",
+    "tab_acquaintances": "Bekannte",
+    "acquaintances_count": "{{count}} Getroffen",
+    "no_acquaintances": "Noch keine Bekannten getroffen.",
+    "acquaintances_hint": "Charaktere, denen du kurz begegnest, erscheinen hier, bis eure Bindung für Gespeicherte Kontakte ausreicht.",
+    "acquaintance_badge": "Bekanntschaft",
+    "promotion_hint": "Steige durch +15 Zuneigung, -10 Rivalität, Nummerntausch vor Ort, Quest-Verbindung oder Gruppenbeitritt in Gespeicherte Kontakte auf.",
+    "dm_locked_badge": "DM gesperrt",
+    "dm_locked_tooltip": "Direktnachrichten sind gesperrt. Frage persönlich nach der Nummer oder verbinde dich über PeerPulse — Zuneigung allein schaltet keine DMs frei.",
+    "search_acquaintances": "Bekannte suchen...",
+    "no_acquaintances_match": "Keine passenden Bekannten gefunden.",
+    "background_notes": "📖 Hintergrund & Notizen",
+    "known_traits": "Bekannte Merkmale"
   },
   "phone": {
     "alerts_dispatch": "Warnungen / Leitstelle",
@@ -1273,7 +1315,19 @@
       "rival_sparked": "Rivalität entfacht",
       "cold_shoulder": "Kalte Schulter",
       "focus_on_road": "Auf den Weg konzentriert"
-    }
+    },
+    "routine_weekday": "Wochentag",
+    "routine_weekend": "Wochenende",
+    "routine_blocks": {
+      "morning": "Morgen",
+      "lunch": "Mittag",
+      "afternoon": "Nachmittag",
+      "evening": "Abend",
+      "night": "Nacht"
+    },
+    "routine_unlock_hint": "Der vollständige Wochenablauf wird bei Zuneigung 40+ oder durch Beobachten und Nachfragen freigeschaltet.",
+    "residence_fog_hint": "Privatwohnung wird ab Freundschaft (100+) oder nach einer Einladung nach Hause freigeschaltet.",
+    "routine_override_today": "Heutige Abweichung"
   },
   "contracts": {
     "nav_label": "Pakte",

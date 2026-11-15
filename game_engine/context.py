@@ -1,7 +1,43 @@
 from __future__ import annotations
 import json
+from typing import Any
 import game_engine
 from .core import *
+
+
+def _coerce_status_labels(raw_status: Any) -> list[str]:
+    """Normalize status_effects entries (strings, dicts, or JSON lists) into prompt-safe labels."""
+    if isinstance(raw_status, str):
+        stripped = raw_status.strip()
+        if not stripped:
+            return []
+        try:
+            raw_status = json.loads(stripped)
+        except Exception:
+            raw_status = [stripped]
+    if isinstance(raw_status, dict):
+        items = [raw_status]
+    elif isinstance(raw_status, (list, tuple, set)):
+        items = list(raw_status)
+    else:
+        return []
+    labels: list[str] = []
+    for entry in items:
+        if not entry:
+            continue
+        if isinstance(entry, dict):
+            label = (
+                entry.get("name")
+                or entry.get("condition")
+                or entry.get("tag")
+                or entry.get("label")
+                or entry
+            )
+            labels.append(str(label))
+        else:
+            labels.append(str(entry))
+    return [lbl for lbl in labels if lbl]
+
 
 def _character_sheet_text(char: dict, inventory: list) -> str:
     equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
@@ -88,15 +124,8 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
             b_desc += f" ({tex})"
         anatomy_line = f"Anatomy: Breasts: {b_desc}. (STRICTLY FEMALE: Has NO phallus. NEVER describe her having a penis.)"
 
-    raw_status = char.get("status_effects")
-    if isinstance(raw_status, str):
-        try:
-            parsed_status = json.loads(raw_status)
-        except Exception:
-            parsed_status = []
-    else:
-        parsed_status = raw_status or []
-    status_str = ", ".join(parsed_status) if parsed_status else "None"
+    status_labels = _coerce_status_labels(char.get("status_effects"))
+    status_str = ", ".join(status_labels) if status_labels else "None"
 
     str_val = char.get("str_", 5)
     hp_line = f"HP: {char.get('hp', 70)}/{char.get('max_hp', 70)}"
@@ -190,7 +219,7 @@ def _describe_tracked_entity(entity) -> str:
 
     status = entity.get("status_effects") or []
     if status:
-        clean_status = [str(s.get("name") or s.get("condition") or s.get("tag") or s) if isinstance(s, dict) else str(s) for s in status if s]
+        clean_status = _coerce_status_labels(status)
         if clean_status:
             bits.append("status: " + ", ".join(clean_status))
 
@@ -296,6 +325,38 @@ def _history_text(
     from mechanics.system.memory.digest import RAW_HISTORY_LIMIT
     sections: list[str] = []
 
+    if session_id is not None and (present_npcs is None or not current_location):
+        sess_row = None
+        try:
+            sess_row = db.get_session(int(session_id))
+        except Exception:
+            sess_row = None
+        if isinstance(sess_row, dict):
+            if present_npcs is None:
+                raw_curr = sess_row.get("current_npcs") or sess_row.get("npcs") or []
+                norm_present: list[str] = []
+                for n in (raw_curr if isinstance(raw_curr, (list, tuple)) else ()):
+                    if isinstance(n, dict):
+                        lbl_n = str(n.get("name") or n.get("person_key") or n.get("npc_id") or "").strip()
+                        if lbl_n:
+                            norm_present.append(lbl_n)
+                    elif isinstance(n, str) and n.strip():
+                        norm_present.append(n.strip())
+                present_npcs = norm_present
+            if not current_location:
+                current_location = str(sess_row.get("current_location") or "")
+
+    if present_npcs:
+        coerced_present: list[str] = []
+        for pn in present_npcs:
+            if isinstance(pn, dict):
+                lbl_pn = str(pn.get("name") or pn.get("person_key") or pn.get("npc_id") or "").strip()
+                if lbl_pn:
+                    coerced_present.append(lbl_pn)
+            elif str(pn or "").strip():
+                coerced_present.append(str(pn).strip())
+        present_npcs = coerced_present
+
     # ---------- Tier 2: Chapter Digest ----------
     if session_id is not None:
         try:
@@ -327,6 +388,7 @@ def _history_text(
     def _format_hist_item(item, is_latest: bool = True) -> str:
         return _format_history_prompt_entry(item, is_latest=is_latest)
 
+    displayed_entries: list[Any] = []
     if budget:
         # Dynamic Token Budgeting - Sliding Window
         max_hist_chars = budget.chars_for("history")
@@ -344,12 +406,15 @@ def _history_text(
                 if current_len + len(line) > max_hist_chars and recent:
                     break
                 recent.append(line)
+                displayed_entries.append(h)
                 current_len += len(line)
             recent.reverse()
+            displayed_entries.reverse()
     else:
         if history:
             valid_history = [h for h in history if h]
             sliced = valid_history[-RAW_HISTORY_LIMIT:]
+            displayed_entries = list(sliced)
             total_items = len(sliced)
             recent = [
                 f"- {game_engine.sanitize_comparative_cliches(formatted)}"
@@ -364,6 +429,77 @@ def _history_text(
         tier1_lines = "\n".join(recent)
         if budget:
             tier1_lines = budget.trim_keep_tail(tier1_lines, "history")
+        if present_npcs and displayed_entries:
+            cur_loc_norm = str(current_location or "").strip().lower()
+            ep_mat: dict[str, Any] = {}
+            if session_id is not None:
+                try:
+                    ep_mat = db.preload_epistemic_matrix(int(session_id)) or {}
+                except Exception:
+                    ep_mat = {}
+            present_norm = [
+                (str(pn).strip(), str(pn).strip().lower(), str(pn).strip().lower().replace(" ", "_"))
+                for pn in present_npcs
+                if str(pn or "").strip()
+            ]
+            unwitnessed_names: list[str] = []
+            for _pdisp, _plow, _pkey in present_norm:
+                saw_offscreen_turn = False
+                for _he in displayed_entries:
+                    if not isinstance(_he, dict):
+                        continue
+                    _h_loc = str(_he.get("location") or _he.get("location_name") or "").strip().lower()
+                    _h_wit = _he.get("witnessed_by")
+                    if isinstance(_h_wit, str) and _h_wit.strip():
+                        try:
+                            _parsed_wit = json.loads(_h_wit)
+                            _h_wit = _parsed_wit if isinstance(_parsed_wit, list) else ([_parsed_wit] if _parsed_wit else [])
+                        except Exception:
+                            _h_wit = [_h_wit.strip()]
+                    _h_npcs_raw = _he.get("witnesses") or _h_wit or _he.get("npcs_present") or _he.get("npcs") or []
+                    _h_npcs = {
+                        str(x.get("name") if isinstance(x, dict) else x).strip().lower()
+                        for x in (_h_npcs_raw if isinstance(_h_npcs_raw, (list, tuple, set)) else ())
+                        if x
+                    } | {
+                        str(x.get("person_key") or x.get("npc_id") or "").strip().lower()
+                        for x in (_h_npcs_raw if isinstance(_h_npcs_raw, (list, tuple, set)) else ())
+                        if isinstance(x, dict)
+                    }
+                    if (
+                        (_h_loc and cur_loc_norm and _h_loc != cur_loc_norm)
+                        or (_h_npcs and _plow not in _h_npcs and _pkey not in _h_npcs)
+                        or ("witnessed_by" in _he and not _h_npcs)
+                    ):
+                        saw_offscreen_turn = True
+                        break
+                if not saw_offscreen_turn and ep_mat:
+                    _facts_map = ep_mat.get("facts_by_key") or {}
+                    _by_fact = ep_mat.get("by_fact") or {}
+                    for _fkey, _fobj in _facts_map.items():
+                        if not isinstance(_fobj, dict):
+                            continue
+                        if str(_fobj.get("status") or "active") in ("decayed", "resolved", "exposed_public"):
+                            continue
+                        _holders_map = _by_fact.get(_fkey) or {}
+                        _knows_pkey = (
+                            isinstance(_holders_map.get(_pkey), dict)
+                            and str(_holders_map[_pkey].get("containment_state") or "active") not in ("wiped", "decayed")
+                        )
+                        _knows_plow = (
+                            isinstance(_holders_map.get(_plow), dict)
+                            and str(_holders_map[_plow].get("containment_state") or "active") not in ("wiped", "decayed")
+                        )
+                        if not (_knows_pkey or _knows_plow):
+                            saw_offscreen_turn = True
+                            break
+                if saw_offscreen_turn:
+                    unwitnessed_names.append(_pdisp)
+            if unwitnessed_names:
+                tier1_lines += (
+                    f"\n[EPISTEMIC GUARD — UNWITNESSED BY: {', '.join(unwitnessed_names)}] "
+                    "Off-screen turns above occurred out of their sight; never reveal or imply they witnessed them unless listed in their known facts."
+                )
         if sections:
             sections.append("[RECENT TURNS (last session moments)]:\n" + tier1_lines)
         else:
@@ -378,6 +514,52 @@ def _history_text(
             if active_commits:
                 c_lines = []
                 for c in active_commits:
+                    c_meta = c.get("metadata") if isinstance(c.get("metadata"), dict) else {}
+                    if not c_meta and isinstance(c.get("metadata_json"), str) and c["metadata_json"].strip():
+                        try:
+                            _parsed_cm = json.loads(c["metadata_json"])
+                            if isinstance(_parsed_cm, dict):
+                                c_meta = _parsed_cm
+                        except Exception:
+                            c_meta = {}
+                    is_conf = bool(c.get("is_confidential") or c_meta.get("is_confidential"))
+                    if is_conf and present_npcs:
+                        allowed_actors = {"player", "you", "party", ""}
+                        for _ak in (c.get("source_entity"), c.get("target_entity")):
+                            if _ak:
+                                _akl = str(_ak).strip().lower()
+                                allowed_actors.add(_akl)
+                                allowed_actors.add(_akl.replace(" ", "_"))
+                                allowed_actors.add(_akl.replace("_", " "))
+                        raw_parts = c.get("participants") or c_meta.get("participants") or ()
+                        if not raw_parts and isinstance(c.get("participants_json"), str) and c["participants_json"].strip():
+                            try:
+                                _parsed_pj = json.loads(c["participants_json"])
+                                if isinstance(_parsed_pj, (list, tuple)):
+                                    raw_parts = _parsed_pj
+                            except Exception:
+                                raw_parts = ()
+                        for _pk in raw_parts:
+                            if isinstance(_pk, dict):
+                                for _pf in (_pk.get("npc_id"), _pk.get("person_key"), _pk.get("name")):
+                                    if _pf:
+                                        _pkl = str(_pf).strip().lower()
+                                        allowed_actors.add(_pkl)
+                                        allowed_actors.add(_pkl.replace(" ", "_"))
+                                        allowed_actors.add(_pkl.replace("_", " "))
+                            elif _pk:
+                                _pkl = str(_pk).strip().lower()
+                                allowed_actors.add(_pkl)
+                                allowed_actors.add(_pkl.replace(" ", "_"))
+                                allowed_actors.add(_pkl.replace("_", " "))
+                        outsider_present = any(
+                            str(_pn or "").strip().lower() not in allowed_actors
+                            and str(_pn or "").strip().lower().replace(" ", "_") not in allowed_actors
+                            for _pn in present_npcs
+                            if str(_pn or "").strip()
+                        )
+                        if outsider_present:
+                            continue
                     src = c.get("source_entity", "player")
                     tgt = c.get("target_entity", "")
                     ctype = c.get("commitment_type", "promise").upper()
@@ -643,7 +825,24 @@ def _scene_context_text(session_id: int, current_location: str,
                         "description": e.get("description") or (c_data.get("basic_info") or {}).get("description", "") or sd_data.get("role") or ""
                     })
 
+        _live_npc_by_low = {
+            str(e.get("name") or "").strip().lower(): e
+            for e in (current_npcs or [])
+            if isinstance(e, dict) and str(e.get("name") or "").strip()
+        }
         present_persons = [p for p in combined_persons if p.get("name", "").lower().strip() in scene_npc_names]
+        for _pp in present_persons:
+            _live_src = _live_npc_by_low.get(str(_pp.get("name") or "").strip().lower())
+            if isinstance(_live_src, dict):
+                for _lk in ("activity_key", "activity_tag", "micro_blocking", "person_key", "npc_id"):
+                    if _live_src.get(_lk) and not _pp.get(_lk):
+                        _pp[_lk] = _live_src[_lk]
+                if _live_src.get("activity_tag"):
+                    _pp["activity_tag"] = _live_src["activity_tag"]
+                if _live_src.get("telltale_revealed"):
+                    _pp["telltale_revealed"] = True
+                    if _live_src.get("visible_tell_text"):
+                        _pp["visible_tell_text"] = _live_src["visible_tell_text"]
         absent_persons = [p for p in combined_persons if p.get("name", "").lower().strip() not in scene_npc_names]
 
         present_names_for_mem = [p["name"] for p in present_persons if p.get("name")]
@@ -710,6 +909,11 @@ def _scene_context_text(session_id: int, current_location: str,
 
             if act_desc:
                 details.append("Activity: " + act_desc)
+            _act_tag = str(p.get("activity_tag") or "").strip() if isinstance(p, dict) else ""
+            if _act_tag and _act_tag != str(act_desc or "").strip():
+                details.append("Doing: " + _act_tag)
+            if isinstance(p, dict) and p.get("telltale_revealed") and p.get("visible_tell_text"):
+                details.append("Visible Tell: " + str(p.get("visible_tell_text") or "").strip())
             c_data_present = contacts_by_name.get(p_name_low, {})
             p_bi = (c_data_present.get("basic_info") if isinstance(c_data_present, dict) else None) or p.get("basic_info") or {}
             if not isinstance(p_bi, dict):
@@ -1037,6 +1241,55 @@ def _scene_context_text(session_id: int, current_location: str,
                                     f"Resident active leadership present: {', '.join(roster_parts)}. "
                                     f"When writing the scene, portray their presence/observations and report them in `npcs_present` and `entity_audit`."
                                 )
+
+    sid_int = int(session_id or 0)
+    if sid_int > 0:
+        ep_matrix = db.preload_epistemic_matrix(sid_int)
+        facts_by_key = ep_matrix.get("facts_by_key") or {}
+        by_fact = ep_matrix.get("by_fact") or {}
+        if facts_by_key:
+            present_map: dict[str, str] = {}
+            for np_row in (current_npcs or []):
+                if isinstance(np_row, dict):
+                    disp = str(np_row.get("name") or np_row.get("person_key") or np_row.get("npc_id") or "").strip()
+                    pkey = str(np_row.get("person_key") or np_row.get("npc_id") or disp).strip().lower().replace(" ", "_")
+                    if pkey:
+                        present_map[pkey] = disp or pkey
+            ep_lines: list[str] = []
+            for fkey, fact in facts_by_key.items():
+                if not isinstance(fact, dict):
+                    continue
+                fstat = str(fact.get("status") or "active")
+                if fstat in ("decayed", "resolved"):
+                    continue
+                holders_dict = by_fact.get(fkey) or {}
+                active_holders_present: list[str] = []
+                ignorant_present: list[str] = []
+                for pk, disp_name in present_map.items():
+                    kr = holders_dict.get(pk)
+                    if isinstance(kr, dict) and str(kr.get("containment_state") or "active") not in ("wiped", "decayed"):
+                        alibi_txt = str(kr.get("alibi_claim") or "").strip()
+                        tag = f"{disp_name} [{kr.get('confidence', 'rumor')}/{kr.get('containment_state', 'active')}"
+                        if alibi_txt:
+                            tag += f", alibi='{alibi_txt}'"
+                        tag += "]"
+                        active_holders_present.append(tag)
+                    elif fstat != "exposed_public":
+                        ignorant_present.append(disp_name)
+                if active_holders_present or (ignorant_present and "player" in holders_dict):
+                    fsum = str(fact.get("summary") or fkey)[:160]
+                    fcat = str(fact.get("category") or "secret")
+                    if active_holders_present:
+                        ep_lines.append(
+                            f"  * [{fkey}] ({fcat}, {fstat}): {fsum} | Known to: {'; '.join(active_holders_present)}"
+                        )
+                    if ignorant_present:
+                        ep_lines.append(
+                            f"  * [UNWITNESSED — UNKNOWN TO: {', '.join(ignorant_present)}] ({fkey}) -> These NPCs do NOT know this fact; NEVER leak or imply they know it."
+                        )
+            if ep_lines:
+                lines.append("[EPISTEMIC MATRIX — SCENE KNOWLEDGE FILTER (Z2 VOLATILE)]")
+                lines.extend(ep_lines)
 
     return "\n".join(lines)
 

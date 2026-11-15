@@ -22,6 +22,7 @@ from .dossiers import (
     get_user_folklore_codex,
     get_users_folklore_codex_batch,
     hydrate_session_anomaly_records,
+    normalize_clue_graph_nodes,
     persist_anomalous_quest_containment,
     promote_prewarmed_dossier,
     record_folklore_codex_progress,
@@ -99,7 +100,8 @@ from .quests import (
     update_quest_anomaly_blueprint,
 )
 from .social import (
-    _active_resolving_contacts,
+    _get_ensuring_scene_set,
+    _get_resolving_contacts_set,
     _parse_faction_row,
     backfill_exempt_and_legacy_contact_discoveries,
     canon_social_npc_id,
@@ -160,4 +162,38 @@ from .contracts import (
     sign_entity_contract,
     upgrade_entity_contract_tier,
     upsert_user_patron_compendium,
+)
+from .roster import *
+from .roster import (
+    ALLOWED_ROSTER_ORIGINS,
+    ALLOWED_ROSTER_TIERS,
+    ALLOWED_SHIFT_PROFILES,
+    ALLOWED_STAFF_STATUSES,
+    WORLD_ROSTER_V54_DDL,
+    apply_world_roster_autonomy_mutations,
+    get_world_roster,
+    get_world_roster_npc,
+    mark_world_roster_staff_status,
+    promote_world_roster_to_contact,
+    record_discovered_schedule_slot,
+    record_world_roster_interaction,
+    rollback_world_roster_after_turn,
+    set_world_roster_residence_unlocked,
+    upsert_world_roster_npc,
+)
+from .epistemic import *
+from .epistemic import (
+    ALLOWED_CONFIDENCES,
+    ALLOWED_CONTAINMENT_STATES,
+    ALLOWED_FACT_CATEGORIES,
+    ALLOWED_FACT_STATUSES,
+    EPISTEMIC_V55_DDL,
+    build_player_fog_of_war_summary,
+    downgrade_or_upgrade_proof_ref,
+    get_epistemic_fact,
+    get_epistemic_knowledge_rows,
+    preload_epistemic_matrix,
+    rollback_epistemic_state_after_turn,
+    upsert_epistemic_fact,
+    upsert_epistemic_knowledge,
 )

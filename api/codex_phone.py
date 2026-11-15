@@ -2,7 +2,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel
+import inspect
 import json
+import re
+import sqlite3
 import time
 
 import db
@@ -36,6 +39,19 @@ async def _verify_missing_session_codex_auth(request: Request | None, user_id: i
             await verify_user_access(request, valid_uid)
         elif not tok or extract_verified_token_uid(tok) is None:
             raise HTTPException(status_code=401, detail="user_id and actor token are required.")
+
+
+async def _get_contacts_ro(session_id: int, character_id: int | None = None) -> list[dict[str, Any]]:
+    """Read-only safe_get_contacts wrapper compatible with 1/2-arg test monkeypatches."""
+    return await adb(
+        mechanics.social.relationships.safe_get_contacts,
+        session_id,
+        character_id,
+        resolve_relations=False,
+        ensure_scene=False,
+    ) or []
+
+
 from mechanics.system.phone import (
     scenario_has_smartphone,
     get_phone_branding,
@@ -71,6 +87,7 @@ from mechanics.social.factions import (
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label
 from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
+from mechanics.combat.loadouts import build_combatant_stat_sheet, compute_companion_vitals, ensure_combatant_loadout
 from mechanics.world.world_events.engine import build_client_world_pulse_payload
 from .deps import (
     manager,
@@ -286,12 +303,15 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     char_level = max(1, int(char_row.get("level", 1) or 1)) if char_row else 1
     rec_cost = get_recruitment_cost(score, level=char_level)
     char_gold = int(char_row.get("gold", 0) or 0) if char_row else 0
-    extra_companion_fields = {}
-
-    comp_hp = 45
-    comp_max_hp = 45
-    comp_mp = 25
-    comp_max_mp = 25
+    role_label = str(basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion")
+    comp_stats = build_combatant_stat_sheet(char_level, role_label, role_tier="companion")
+    comp_max_hp, comp_max_mp = compute_companion_vitals(char_level, comp_stats, is_civilian=False)
+    comp_hp = comp_max_hp
+    comp_mp = comp_max_mp
+    extra_companion_fields = {
+        "level": char_level,
+        "stats": comp_stats,
+    }
 
     if scenario_data.is_anomalous_incursions_scenario(scen_key):
         from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
@@ -299,9 +319,9 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         if not eval_res.get("allowed"):
             raise HTTPException(status_code=400, detail=eval_res.get("reason") or f"Cannot recruit {npc_name}.")
         rec_cost = int(eval_res.get("cost", 0) or 0)
-        comp_hp = int(eval_res.get("hp", 130) or 130)
+        comp_hp = int(eval_res.get("hp", comp_max_hp) or comp_max_hp)
         comp_max_hp = int(eval_res.get("max_hp", comp_hp) or comp_hp)
-        comp_mp = int(eval_res.get("mp", 60) or 60)
+        comp_mp = int(eval_res.get("mp", comp_max_mp) or comp_max_mp)
         comp_max_mp = int(eval_res.get("max_mp", comp_mp) or comp_mp)
         extra_companion_fields = {
             "anomalous_npc_tag": "special_agent",
@@ -313,7 +333,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
             "faction_name": eval_res.get("faction_name", ""),
             "innate_abilities": eval_res.get("innate_abilities", []),
             "level": eval_res.get("level", char_level),
-            "stats": eval_res.get("stats", {}),
+            "stats": eval_res.get("stats") or comp_stats,
             "weapon_profile": eval_res.get("weapon_profile", {}),
         }
 
@@ -328,7 +348,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
         "npc_id": (matched_contact or {}).get("npc_id") or npc_name.lower().replace(" ", "_"),
-        "role": extra_companion_fields.get("agent_class") or basic_info.get("role") or basic_info.get("occupation") or matched_contact.get("role") or "Companion",
+        "role": extra_companion_fields.get("agent_class") or role_label or "Companion",
         "hp": comp_hp,
         "max_hp": comp_max_hp,
         "mp": comp_mp,
@@ -336,6 +356,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         "relationship_score": score,
         **extra_companion_fields,
     }
+    ensure_combatant_loadout(npc_payload, scenario_key=scen_key)
     added = await adb(db.add_session_party_npc, req.session_id, npc_payload)
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
@@ -457,7 +478,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
 
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
-    contacts = await adb(db.get_contacts, session_id) or []
+    contacts = await _get_contacts_ro(session_id)
     school_roster = await adb(db.get_school_roster, session_id) or []
     dir_by_name = {str(d.get("name", "")).strip().lower(): d for d in school_roster if d.get("name")}
 
@@ -766,32 +787,256 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
     }
 
 
+def _index_npc_records(rows: list[dict[str, Any]] | None) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
+    by_key: dict[str, dict[str, Any]] = {}
+    by_name_low: dict[str, dict[str, Any]] = {}
+    for row in (rows or []):
+        if not isinstance(row, dict):
+            continue
+        for raw_k in (row.get("npc_key"), row.get("npc_id"), row.get("name")):
+            s_val = str(raw_k or "").strip()
+            if not s_val:
+                continue
+            by_key.setdefault(s_val.lower(), row)
+            canon_k = db.canon_social_npc_id(s_val)
+            if canon_k:
+                by_key.setdefault(canon_k, row)
+        nm_low = str(row.get("name") or "").strip().lower()
+        if nm_low:
+            by_name_low.setdefault(nm_low, row)
+    return by_key, by_name_low
+
+
+def _extract_player_last_name(session_id: int, character_id: int) -> str:
+    p_name = ""
+    if character_id:
+        try:
+            char_row = db.get_character_by_id(int(character_id))
+            p_name = str((char_row or {}).get("name") or "").strip()
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            p_name = ""
+    if not p_name and session_id:
+        try:
+            sess_row = db.get_session(int(session_id))
+            sess_cid = int((sess_row or {}).get("character_id") or 0)
+            if sess_cid and sess_cid != character_id:
+                char_row = db.get_character_by_id(sess_cid)
+                p_name = str((char_row or {}).get("name") or "").strip()
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            p_name = ""
+    parts = [p for p in p_name.split() if p]
+    return parts[-1] if parts else ""
+
+
 def _preload_fog_of_war_context(
     session_id: int,
     character_id: int,
     party_names: set[str] | None = None,
     lang: str = "en",
+    preloaded_contacts: list[dict[str, Any]] | None = None,
+    preloaded_party_npcs: list[dict[str, Any]] | None = None,
+    scen_key: str = "",
+    preloaded_session: dict[str, Any] | None = None,
 ) -> dict:
-    """Batch-loads dossier discoveries and kin/romance/party exemptions in O(1) queries to prevent N+1 loops."""
+    """Batch-loads dossier, roster, node, property, tie, and exemption context in O(1) queries."""
     import mechanics.social.relationship_graph as rg
 
     cid = int(character_id or 0)
     sid = int(session_id or 0)
-    disc_by_npc = db.get_contact_dossier_discoveries_batch(sid, cid) if sid else {}
-    ex_sets = db.get_player_fow_exemption_sets(sid) if sid else {}
-    party_npc_keys = set(ex_sets.get("party_npc_keys") or set()) | {
+    eff_session: dict[str, Any] | None = dict(preloaded_session) if isinstance(preloaded_session, dict) else None
+    try:
+        disc_by_npc = db.get_contact_dossier_discoveries_batch(sid, cid) if sid else {}
+    except (sqlite3.Error, AttributeError, TypeError, ValueError):
+        disc_by_npc = {}
+    try:
+        ex_sets = db.get_player_fow_exemption_sets(sid) if sid else {}
+    except (sqlite3.Error, AttributeError, TypeError, ValueError):
+        ex_sets = {}
+
+    party_npc_keys = set((ex_sets or {}).get("party_npc_keys") or set()) | {
         db.canon_social_npc_id(n) for n in (party_names or set()) if str(n).strip()
     }
-    kin_npc_keys = set(ex_sets.get("kin_npc_keys") or set())
-    romantic_npc_keys = set(ex_sets.get("romantic_npc_keys") or set())
+    kin_npc_keys = set((ex_sets or {}).get("kin_npc_keys") or set())
+    romantic_npc_keys = set((ex_sets or {}).get("romantic_npc_keys") or set())
+
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    roster_rows: list[dict[str, Any]] = []
+    primary_property: dict[str, Any] | None = None
+    person_ties: list[dict[str, Any]] = []
+    active_ties_by_person: dict[str, list[dict[str, Any]]] = {}
+    active_events: list[dict[str, Any]] = []
+    eff_contacts: list[dict[str, Any]] = list(preloaded_contacts or []) if preloaded_contacts is not None else []
+    eff_party_npcs: list[dict[str, Any]] = list(preloaded_party_npcs or []) if preloaded_party_npcs is not None else []
+    player_last_name = ""
+    faction_state: dict[str, Any] | None = None
+    anomalous_agent_roster: list[dict[str, Any]] | None = None
+
+    if sid:
+        try:
+            raw_nodes = db.get_session_world_nodes(sid) or []
+            nodes_by_id = {
+                str(n["node_id"]): n
+                for n in raw_nodes
+                if isinstance(n, dict) and n.get("node_id")
+            }
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            nodes_by_id = {}
+        try:
+            roster_rows = [
+                r for r in (db.get_world_roster(sid, include_legacy_rosters=True) or [])
+                if isinstance(r, dict)
+            ]
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            roster_rows = []
+        try:
+            prop = db.get_primary_property(sid)
+            primary_property = dict(prop) if isinstance(prop, dict) else None
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            primary_property = None
+        try:
+            with db.get_conn() as conn_ties:
+                t_rows = conn_ties.execute(
+                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
+                    (sid,),
+                ).fetchall()
+            for tr in t_rows:
+                td = dict(tr)
+                pa = str(td.get("person_a_key") or "").strip().lower()
+                pb = str(td.get("person_b_key") or "").strip().lower()
+                if pa:
+                    active_ties_by_person.setdefault(pa, []).append(td)
+                if pb and pb != pa:
+                    active_ties_by_person.setdefault(pb, []).append(td)
+                if pa == "player" or pb == "player" or pa.startswith("player:") or pb.startswith("player:"):
+                    person_ties.append(td)
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            active_ties_by_person = {}
+            try:
+                if hasattr(rg, "get_person_ties"):
+                    person_ties = rg.get_person_ties(sid, "player") or []
+                elif hasattr(rg, "get_ties"):
+                    person_ties = rg.get_ties(sid, "player") or []
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                person_ties = []
+        try:
+            active_events = [
+                ev for ev in (db.get_world_events(sid, entity_type="macro_event") or [])
+                if isinstance(ev, dict)
+            ]
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            active_events = []
+        if preloaded_contacts is None:
+            try:
+                eff_contacts = mechanics.social.relationships.safe_get_contacts(
+                    sid, cid or None, resolve_relations=False, ensure_scene=False
+                ) or []
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                eff_contacts = []
+        if preloaded_party_npcs is None:
+            try:
+                eff_party_npcs = db.get_session_party_npcs(sid) or []
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                eff_party_npcs = []
+        if eff_session is None:
+            try:
+                s_row = db.get_session(sid)
+                eff_session = dict(s_row) if isinstance(s_row, dict) else s_row
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                eff_session = None
+        player_last_name = _extract_player_last_name(sid, cid)
+        if eff_session is not None:
+            raw_ar = eff_session.get("anomalous_agent_roster") or (
+                eff_session.get("extra", {}).get("anomalous_agent_roster")
+                if isinstance(eff_session.get("extra"), dict)
+                else None
+            )
+            anomalous_agent_roster = [a for a in raw_ar if isinstance(a, dict)] if isinstance(raw_ar, list) else []
+        if scen_key:
+            try:
+                from scenario_data import is_anomalous_incursions_scenario
+                if is_anomalous_incursions_scenario(scen_key):
+                    raw_af = (eff_session or {}).get("anomalous_faction_state") if isinstance(eff_session, dict) else None
+                    if isinstance(raw_af, dict) and raw_af:
+                        faction_state = dict(raw_af)
+                    else:
+                        st_fid = str((eff_session or {}).get("starting_faction_id") or "").strip().lower() if isinstance(eff_session, dict) else ""
+                        faction_state = {"faction_archetype_key": st_fid} if st_fid else {}
+            except (sqlite3.Error, AttributeError, TypeError, ValueError):
+                faction_state = None
+
+    roster_by_key, roster_by_name_low = _index_npc_records(roster_rows)
+    contacts_by_key, contacts_by_name_low = _index_npc_records(eff_contacts)
+
+    current_day: int | None = None
+    current_minute: int | None = None
+    if isinstance(eff_session, dict):
+        if eff_session.get("current_day") is not None:
+            current_day = int(eff_session.get("current_day") or 1)
+        if eff_session.get("current_minute") is not None:
+            current_minute = int(eff_session.get("current_minute"))
+    elif sid:
+        try:
+            db_day, db_min, _ = db.get_session_time(sid)
+            current_day = int(db_day or 1)
+            current_minute = int(db_min) if db_min is not None else None
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            pass
+    player_home_node_id = str(
+        (primary_property or {}).get("node_id")
+        or (eff_session.get("player_home_node_id") if isinstance(eff_session, dict) else "")
+        or ""
+    ).strip()
+
     return {
         "character_id": cid,
         "lang": str(lang or "en"),
+        "session": eff_session,
         "disc_by_npc": disc_by_npc,
         "party_npc_keys": party_npc_keys,
         "kin_npc_keys": kin_npc_keys,
         "romantic_npc_keys": romantic_npc_keys,
+        "nodes_by_id": nodes_by_id,
+        "roster_rows": roster_rows,
+        "roster_by_key": roster_by_key,
+        "roster_by_name_low": roster_by_name_low,
+        "primary_property": primary_property,
+        "contacts": eff_contacts,
+        "contacts_by_key": contacts_by_key,
+        "contacts_by_name_low": contacts_by_name_low,
+        "person_ties": person_ties,
+        "active_ties_by_person": active_ties_by_person,
+        "active_events": active_events,
+        "current_day": current_day,
+        "current_minute": current_minute,
+        "player_home_node_id": player_home_node_id,
+        "player_last_name": player_last_name,
+        "household_cache": {},
+        "party_npcs": eff_party_npcs,
+        "faction_state": faction_state,
+        "anomalous_agent_roster": anomalous_agent_roster if sid else None,
+        "preloaded": True,
     }
+
+
+def _lookup_indexed_npc(
+    fow_context: dict,
+    by_key_field: str,
+    by_name_field: str,
+    c_in: dict,
+) -> dict | None:
+    by_key = fow_context.get(by_key_field) or {}
+    by_name_low = fow_context.get(by_name_field) or {}
+    for cand in (c_in.get("npc_key"), c_in.get("npc_id"), c_in.get("name")):
+        s_val = str(cand or "").strip()
+        if not s_val:
+            continue
+        hit = by_key.get(db.canon_social_npc_id(s_val)) or by_key.get(s_val.lower())
+        if isinstance(hit, dict):
+            return hit
+    nm_low = str(c_in.get("name") or "").strip().lower()
+    if nm_low and isinstance(by_name_low.get(nm_low), dict):
+        return by_name_low[nm_low]
+    return None
 
 
 def _enrich_contact_record(
@@ -805,23 +1050,46 @@ def _enrich_contact_record(
 ) -> dict:
     from mechanics.social.relationships import enrich_contact_dossier
     from mechanics.social.roster_tags import resolve_character_badges
+    from mechanics.world.routine_disclosure import (
+        apply_known_routine_to_contact,
+        build_known_routine_payload,
+    )
+
     c_in = dict(c_raw or {})
     preloaded_disc = None
     fow_lang = "en"
+    fow_char_id = int(c_in.get("character_id") or 0)
     party_keys = None
     kin_keys = None
     rom_keys = None
+    is_fow_preloaded = False
+    preloaded_party_npcs = None
+    preloaded_faction_state = None
+    preloaded_agent_roster = None
+    preloaded_session = None
     if isinstance(fow_context, dict):
+        is_fow_preloaded = bool(fow_context.get("preloaded"))
         if fow_context.get("character_id") and not c_in.get("character_id"):
-            c_in["character_id"] = int(fow_context["character_id"])
+            fow_char_id = int(fow_context["character_id"])
+            c_in["character_id"] = fow_char_id
         fow_lang = str(fow_context.get("lang") or "en")
         canon_nid = db.canon_social_npc_id(c_in.get("npc_id") or c_in.get("name") or "")
+        canon_name = db.canon_social_npc_id(c_in.get("name") or "")
         disc_map = fow_context.get("disc_by_npc")
         if isinstance(disc_map, dict):
-            preloaded_disc = disc_map.get(canon_nid, [])
+            preloaded_disc = disc_map.get(canon_nid)
+            if preloaded_disc is None and canon_name:
+                preloaded_disc = disc_map.get(canon_name)
+            if preloaded_disc is None:
+                preloaded_disc = []
         party_keys = fow_context.get("party_npc_keys")
         kin_keys = fow_context.get("kin_npc_keys")
         rom_keys = fow_context.get("romantic_npc_keys")
+        preloaded_party_npcs = fow_context.get("party_npcs")
+        preloaded_faction_state = fow_context.get("faction_state")
+        preloaded_agent_roster = fow_context.get("anomalous_agent_roster")
+        preloaded_session = fow_context.get("session")
+
     res = enrich_contact_dossier(
         c_in,
         session_id,
@@ -833,6 +1101,11 @@ def _enrich_contact_record(
         party_npc_keys=party_keys,
         kin_npc_keys=kin_keys,
         romantic_npc_keys=rom_keys,
+        read_only=is_fow_preloaded,
+        preloaded_party_npcs=preloaded_party_npcs,
+        preloaded_faction_state=preloaded_faction_state,
+        preloaded_agent_roster=preloaded_agent_roster,
+        preloaded_session=preloaded_session,
     )
     if not res.get("grade"):
         b_inf = res.get("basic_info") or {}
@@ -841,11 +1114,12 @@ def _enrich_contact_record(
         if inferred:
             res["grade"] = inferred
 
+    is_acq_row = str(c_in.get("tier_status") or "").strip().lower() == "acquaintance"
     c_badges = resolve_character_badges(
         res,
         scen_key=scen_key,
         party_names=party_names,
-        is_contact=True,
+        is_contact=not is_acq_row,
         is_blocked=bool(res.get("is_blocked")),
     )
     res["standing"] = c_badges.standing
@@ -867,8 +1141,7 @@ def _enrich_contact_record(
         cur_r = str(res.get("role") or (res.get("basic_info") or {}).get("role") or "").strip()
         if cur_r.lower() in ("club member", "club officer", "club vice president", "club secretary", "club treasurer", "events coordinator"):
             desc_str = str(res.get("description") or (res.get("basic_info") or {}).get("description") or "")
-            import re as _re_role
-            m_p = _re_role.search(r"\(([^)]{3,45})\)", desc_str)
+            m_p = re.search(r"\(([^)]{3,45})\)", desc_str)
             healed_role = m_p.group(1).strip() if (m_p and not any(k in m_p.group(1).lower() for k in ("née", "nee", "formerly"))) else "Citizen"
             res["role"] = healed_role
             res["public_role"] = healed_role
@@ -883,6 +1156,56 @@ def _enrich_contact_record(
     # Faction affiliation is tracked separately from school club so student agents show both.
     res["faction_affiliation"] = _resolve_faction_affiliation(res)
 
+    if is_fow_preloaded and isinstance(fow_context, dict):
+        matched_roster = _lookup_indexed_npc(fow_context, "roster_by_key", "roster_by_name_low", c_in)
+        matched_contact = _lookup_indexed_npc(fow_context, "contacts_by_key", "contacts_by_name_low", c_in)
+        eff_contact_row = None if (is_acq_row and matched_contact is None) else (matched_contact or c_in)
+        known_routine = build_known_routine_payload(
+            res,
+            session_id=session_id,
+            scen_key=scen_key,
+            lang=fow_lang,
+            debug_reveal_all=debug_reveal_all,
+            nodes_by_id=fow_context.get("nodes_by_id"),
+            roster_row=matched_roster,
+            contact_row=eff_contact_row,
+            primary_property=fow_context.get("primary_property"),
+            contacts=fow_context.get("contacts"),
+            person_ties=fow_context.get("person_ties"),
+            household_cache=fow_context.get("household_cache"),
+            player_last_name=fow_context.get("player_last_name"),
+            party_npc_keys=party_keys,
+            kin_npc_keys=kin_keys,
+            romantic_npc_keys=rom_keys,
+            discovered_dossier_rows=preloaded_disc if preloaded_disc is not None else [],
+            character_id=fow_char_id,
+            preloaded=True,
+            fow_schedule_revealed=bool(res.get("schedule_revealed")),
+            current_day=fow_context.get("current_day"),
+            current_minute=fow_context.get("current_minute"),
+            active_ties_by_person=fow_context.get("active_ties_by_person"),
+            roster_by_key=fow_context.get("roster_by_key"),
+            active_events=fow_context.get("active_events") or (),
+            player_home_node_id=str(fow_context.get("player_home_node_id") or ""),
+        )
+    else:
+        known_routine = build_known_routine_payload(
+            res,
+            session_id=session_id,
+            scen_key=scen_key,
+            lang=fow_lang,
+            debug_reveal_all=debug_reveal_all,
+            roster_row=c_in if is_acq_row else None,
+            contact_row=None if is_acq_row else c_in,
+            party_npc_keys=party_keys,
+            kin_npc_keys=kin_keys,
+            romantic_npc_keys=rom_keys,
+            discovered_dossier_rows=preloaded_disc,
+            character_id=fow_char_id,
+            fow_schedule_revealed=bool(res.get("schedule_revealed")),
+        )
+
+    apply_known_routine_to_contact(res, known_routine, lang=fow_lang)
     return res
 
 
@@ -900,9 +1223,215 @@ def _resolve_faction_affiliation(res: dict) -> str:
     return ""
 
 
+def _build_acquaintance_input_dict(
+    row: dict[str, Any],
+    session_id: int,
+    nodes_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    raw_basic = row.get("basic_info")
+    if isinstance(raw_basic, str) and raw_basic.strip():
+        try:
+            raw_basic = json.loads(raw_basic)
+        except (TypeError, ValueError):
+            raw_basic = {}
+    r_basic = dict(raw_basic) if isinstance(raw_basic, dict) else {}
+
+    raw_app = row.get("appearance")
+    if isinstance(raw_app, str) and raw_app.strip():
+        try:
+            raw_app = json.loads(raw_app)
+        except (TypeError, ValueError):
+            raw_app = {}
+    r_app = dict(raw_app) if isinstance(raw_app, dict) else {}
+
+    raw_traits = row.get("traits")
+    if isinstance(raw_traits, str) and raw_traits.strip():
+        try:
+            raw_traits = json.loads(raw_traits)
+        except (TypeError, ValueError):
+            raw_traits = []
+    traits_list = list(raw_traits) if isinstance(raw_traits, list) else []
+
+    raw_slots = row.get("discovered_slots")
+    if not raw_slots and isinstance(row.get("discovered_slots_json"), str) and row["discovered_slots_json"].strip():
+        try:
+            raw_slots = json.loads(row["discovered_slots_json"])
+        except (TypeError, ValueError):
+            raw_slots = {}
+    slots_dict = dict(raw_slots) if isinstance(raw_slots, dict) else {}
+
+    npc_id = str(row.get("npc_id") or row.get("npc_key") or db.canon_social_npc_id(row.get("name") or "")).strip()
+    npc_key = str(row.get("npc_key") or db.canon_social_npc_id(npc_id or row.get("name") or "")).strip()
+    score = int(row.get("affinity_score") or 0)
+    work_nid = str(row.get("workplace_node_id") or r_basic.get("workplace_node_id") or "").strip()
+    work_node = nodes_by_id.get(work_nid) if work_nid else None
+    work_label = str(
+        (work_node or {}).get("name")
+        or r_basic.get("workplace_label")
+        or r_basic.get("workplace")
+        or r_basic.get("primary_facility")
+        or ""
+    ).strip()
+
+    return {
+        "id": f"acq_{npc_key or db.canon_social_npc_id(row.get('name') or 'npc')}",
+        "session_id": session_id,
+        "npc_id": npc_id,
+        "npc_key": npc_key,
+        "name": str(row.get("name") or r_basic.get("name") or "Unknown").strip(),
+        "role": str(row.get("role") or r_basic.get("role") or "").strip(),
+        "gender": str(row.get("gender") or r_basic.get("gender") or "").strip(),
+        "race": str(row.get("race") or r_basic.get("race") or "human").strip(),
+        "tier_status": "acquaintance",
+        "origin": str(row.get("origin") or "").strip(),
+        "affinity_score": score,
+        "relationship_score": score,
+        "first_met_turn": int(row.get("first_met_turn") or 0),
+        "met_in_person": bool(row.get("met_in_person", 1)),
+        "staff_status": str(row.get("staff_status") or "active").strip(),
+        "workplace_node_id": work_nid,
+        "workplace_label": work_label,
+        "home_node_id": str(row.get("home_node_id") or "").strip(),
+        "hangout_node_id": str(row.get("hangout_node_id") or "").strip(),
+        "shift_profile": str(row.get("shift_profile") or "").strip(),
+        "residence_unlocked": bool(row.get("residence_unlocked")),
+        "discovered_slots": slots_dict,
+        "has_contact_info": bool(r_basic.get("has_contact_info") is True),
+        "basic_info": r_basic,
+        "appearance": r_app,
+        "traits": traits_list,
+        "unlocked_traits": list(traits_list),
+    }
+
+
+def _collect_contact_identity_keys(rows: list[dict[str, Any]]) -> set[str]:
+    keys: set[str] = set()
+    for c in rows:
+        if not isinstance(c, dict):
+            continue
+        for raw_k in (c.get("npc_key"), c.get("npc_id"), c.get("name")):
+            s_val = str(raw_k or "").strip()
+            if not s_val:
+                continue
+            keys.add(s_val.lower())
+            canon_k = db.canon_social_npc_id(s_val)
+            if canon_k:
+                keys.add(canon_k)
+    return keys
+
+
+def _build_contacts_and_acquaintances_payload(
+    session_id: int,
+    char_id: int,
+    scen_key: str,
+    debug_reveal_all: bool,
+    phys_st: dict | None,
+    party_npcs: list[dict] | None,
+    party_names: set[str],
+    ui_lang: str,
+    contacts: list[dict[str, Any]],
+    unlocked_raw: list[dict[str, Any]],
+    preloaded_session: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    from mechanics.social.relationships import can_player_dm_contact, get_relationship_tier
+
+    fow = _preload_fog_of_war_context(
+        session_id,
+        char_id,
+        party_names,
+        ui_lang,
+        preloaded_contacts=contacts,
+        preloaded_party_npcs=party_npcs,
+        scen_key=scen_key,
+        preloaded_session=preloaded_session,
+    )
+    enriched_contacts = [
+        {
+            **_enrich_contact_record(
+                c,
+                session_id,
+                scen_key,
+                debug_reveal_all,
+                phys_st=phys_st,
+                party_names=party_names,
+                fow_context=fow,
+            ),
+            "can_dm": can_player_dm_contact(
+                c,
+                party_names=party_names,
+                scenario=scen_key,
+                preloaded_session=fow.get("session"),
+                skip_session_lookup=True,
+            ),
+        }
+        for c in unlocked_raw
+    ]
+
+    contact_keys = _collect_contact_identity_keys(list(contacts or []) + list(unlocked_raw or []))
+    nodes_by_id = fow.get("nodes_by_id") or {}
+    seen_acq_keys: set[str] = set()
+    enriched_acquaintances: list[dict[str, Any]] = []
+
+    for r in (fow.get("roster_rows") or []):
+        if not isinstance(r, dict):
+            continue
+        if str(r.get("tier_status") or "").strip().lower() != "acquaintance":
+            continue
+        r_keys: set[str] = set()
+        for raw_k in (r.get("npc_key"), r.get("npc_id"), r.get("name")):
+            s_val = str(raw_k or "").strip()
+            if not s_val:
+                continue
+            r_keys.add(s_val.lower())
+            canon_k = db.canon_social_npc_id(s_val)
+            if canon_k:
+                r_keys.add(canon_k)
+        if not r_keys or (r_keys & contact_keys) or (r_keys & seen_acq_keys):
+            continue
+        seen_acq_keys.update(r_keys)
+
+        acq_in = _build_acquaintance_input_dict(r, session_id, nodes_by_id)
+        acq_enriched = _enrich_contact_record(
+            acq_in,
+            session_id,
+            scen_key,
+            debug_reveal_all,
+            phys_st=phys_st,
+            party_names=party_names,
+            fow_context=fow,
+        )
+        score = int(acq_in["affinity_score"])
+        tier_obj = get_relationship_tier(
+            score,
+            track=str(acq_enriched.get("track") or "platonic"),
+            scenario=scen_key,
+        )
+        acq_enriched["npc_id"] = str(acq_enriched.get("npc_id") or acq_in["npc_id"])
+        acq_enriched["npc_key"] = acq_in["npc_key"]
+        acq_enriched["tier_status"] = "acquaintance"
+        acq_enriched["origin"] = acq_in["origin"]
+        acq_enriched["affinity_score"] = score
+        acq_enriched["relationship_score"] = score
+        acq_enriched["relationship_tier"] = str((tier_obj or {}).get("name") or acq_enriched.get("standing") or "Acquaintance")
+        acq_enriched["first_met_turn"] = acq_in["first_met_turn"]
+        acq_enriched["staff_status"] = acq_in["staff_status"]
+        acq_enriched["workplace_label"] = acq_in["workplace_label"]
+        acq_enriched["can_dm"] = False
+        enriched_acquaintances.append(acq_enriched)
+
+    enriched_acquaintances.sort(
+        key=lambda a: (
+            -int(a.get("affinity_score") or 0),
+            -int(a.get("first_met_turn") or 0),
+            str(a.get("name") or "").lower(),
+        )
+    )
+    return enriched_contacts, enriched_acquaintances
+
+
 @router.get("/api/contacts/{session_id}")
 async def get_contacts(session_id: int, user_id: int | None = Query(None), request: Request = None):
-    """Fetches NPC contacts and relationship standings."""
+    """Fetches NPC contacts and met acquaintances with progressive routine disclosure."""
     user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
     raw_sess = await adb(db.get_session, session_id)
     if raw_sess:
@@ -916,34 +1445,49 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
     lookup_uid = valid_uid or session.get("host_user_id") or 0
     settings = await adb(db.get_settings, lookup_uid) if lookup_uid else {}
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
-    from scenario_data import is_nsfw_scenario, is_anomalous_incursions_scenario
-    if is_anomalous_incursions_scenario(scen_key):
-        from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
-        await adb(prune_unmet_preseeded_special_agents, session_id)
+    from scenario_data import is_nsfw_scenario
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await _get_contacts_ro(session_id, char_id)
     if not contacts and lookup_uid and char_id != lookup_uid:
-        contacts = await adb(db.get_contacts, session_id, lookup_uid)
+        contacts = await _get_contacts_ro(session_id, lookup_uid)
     from mechanics.social.relationships import collect_met_npc_names, is_unlocked_contact
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
 
     # Pre-filter unlocked contacts before expensive enrichment loop
-    unlocked_raw = [c for c in (contacts or []) if is_unlocked_contact(c, party_names, met_in_story_names=met_names)]
-    enriched_contacts = await adb(
-        lambda: (
-            lambda _fow=_preload_fog_of_war_context(session_id, char_id, party_names, str((settings or {}).get("ui_language") or "en")): [
-                _enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=_fow)
-                for c in unlocked_raw
-            ]
-        )()
+    unlocked_raw = [
+        c
+        for c in (contacts or [])
+        if is_unlocked_contact(
+            c,
+            party_names,
+            met_in_story_names=met_names,
+            preloaded_session=session,
+            skip_session_lookup=True,
+        )
+    ]
+    ui_lang = str((settings or {}).get("ui_language") or "en")
+    enriched_contacts, enriched_acquaintances = await adb(
+        _build_contacts_and_acquaintances_payload,
+        session_id,
+        char_id,
+        scen_key,
+        debug_reveal_all,
+        phys_st,
+        party_npcs,
+        party_names,
+        ui_lang,
+        contacts,
+        unlocked_raw,
+        preloaded_session=session,
     )
     return {
         "contacts": enriched_contacts,
+        "acquaintances": enriched_acquaintances,
         "is_nsfw": is_nsfw_scenario(scen_key),
-        "scenario": scen_key
+        "scenario": scen_key,
     }
 
 
@@ -1534,7 +2078,23 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                     if ms.get("target_location"):
                         ms["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, ms["target_location"], scen_key))
                     if ms.get("key_clue"):
-                        ms["key_clue"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["key_clue"], scen_key))
+                        if isinstance(ms["key_clue"], dict):
+                            raw_kc = ms["key_clue"]
+                            kc_t = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, str(raw_kc.get("title") or ""), scen_key))
+                            kc_l = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, str(raw_kc.get("lead_text") or ""), scen_key))
+                            ms["key_clue"] = f"{kc_t} — {kc_l}" if (kc_t and kc_l and kc_l.lower() != kc_t.lower()) else (kc_t or kc_l)
+                            ms["key_clue_meta"] = {"title": kc_t, "lead_text": kc_l, "clue_id": str(raw_kc.get("clue_id") or "")}
+                        else:
+                            ms["key_clue"] = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, ms["key_clue"], scen_key))
+                    if isinstance(ms.get("key_clue_meta"), dict):
+                        if ms["key_clue_meta"].get("title"):
+                            ms["key_clue_meta"]["title"] = clean_narrative_location_arrows(
+                                resolve_session_location_tokens(session_id, str(ms["key_clue_meta"]["title"]), scen_key)
+                            )
+                        if ms["key_clue_meta"].get("lead_text"):
+                            ms["key_clue_meta"]["lead_text"] = clean_narrative_location_arrows(
+                                resolve_session_location_tokens(session_id, str(ms["key_clue_meta"]["lead_text"]), scen_key)
+                            )
                     for src in (ms.get("clue_sources") or []):
                         if isinstance(src, dict):
                             if src.get("label"):
@@ -1617,6 +2177,52 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         except Exception:
             pass
     clues = [dict(c) for c in db.get_session_clues(session_id) if c]
+    if clues:
+        cg_by_clue_id: dict[int, dict] = {}
+        cg_by_title: dict[str, dict] = {}
+        for _dos_c in (db.get_session_quest_dossiers(session_id) or []):
+            _d_qid = str(_dos_c.get("quest_id") or "").strip()
+            for _cn in (_dos_c.get("clue_graph") or []):
+                if not isinstance(_cn, dict):
+                    continue
+                _node_meta = {
+                    "clue_tier": "corroborating"
+                    if (bool(_cn.get("is_red_herring")) or str(_cn.get("clue_tier") or "").strip().lower() == "red_herring")
+                    else (
+                        str(_cn.get("clue_tier") or "").strip().lower()
+                        if str(_cn.get("clue_tier") or "").strip().lower() in ("key_clue", "corroborating")
+                        else "corroborating"
+                    ),
+                    "corroboration_group": str(_cn.get("corroboration_group") or _cn.get("quest_id") or _d_qid).strip(),
+                }
+                _raw_cid = _cn.get("clue_id")
+                try:
+                    if _raw_cid is not None and not isinstance(_raw_cid, bool):
+                        cg_by_clue_id[int(_raw_cid)] = _node_meta
+                except (TypeError, ValueError):
+                    pass
+                _n_title = str(_cn.get("title") or "").strip().lower()
+                if _n_title:
+                    cg_by_title.setdefault(f"{_d_qid}::{_n_title}", _node_meta)
+                    cg_by_title.setdefault(f"::{_n_title}", _node_meta)
+        for c in clues:
+            try:
+                _cid_int = int(c["id"]) if c.get("id") is not None else None
+            except (TypeError, ValueError):
+                _cid_int = None
+            _c_qid = str(c.get("quest_id") or "").strip()
+            _c_title = str(c.get("title") or "").strip().lower()
+            _meta = (
+                (cg_by_clue_id.get(_cid_int) if _cid_int is not None else None)
+                or cg_by_title.get(f"{_c_qid}::{_c_title}")
+                or cg_by_title.get(f"::{_c_title}")
+            )
+            if _meta:
+                c["clue_tier"] = _meta["clue_tier"]
+                if _meta["corroboration_group"]:
+                    c["corroboration_group"] = _meta["corroboration_group"]
+            elif c.get("clue_tier") == "red_herring":
+                c["clue_tier"] = "corroborating"
     available_bounties = [q for q in quests if q.get("status") == "Available"]
     import scenario_data as _sd_qp
     if _sd_qp.is_anomalous_incursions_scenario(scen_key):
@@ -1873,6 +2479,9 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
         "success": True,
         "is_valid": bool(ded_res.get("is_valid")),
         "is_red_herring": bool(ded_res.get("is_red_herring")),
+        "partial_corroboration": bool(ded_res.get("partial_corroboration")),
+        "shortcut_unlocked": bool(ded_res.get("shortcut_unlocked")),
+        "threat_clock_paused": bool(ded_res.get("threat_clock_paused")),
         "title": ded_res.get("title") or "",
         "detail_text": ded_res.get("detail_text") or "",
         "xp_awarded": int(ded_res.get("xp_awarded") or 0),
@@ -1976,9 +2585,9 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
         await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await _get_contacts_ro(session_id, char_id)
     if not contacts and char_id != user_id:
-        contacts = await adb(db.get_contacts, session_id, user_id)
+        contacts = await _get_contacts_ro(session_id, user_id)
     social_state = await adb(get_social_state_summary, session_id, session)
 
     digital_media = []
@@ -1997,13 +2606,14 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
 
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_contact_blocked, is_unlocked_contact
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
     unlocked_contacts = []
     for c in contacts:
-        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names) and can_player_dm_contact(c, party_names=party_names, scenario=str((session or {}).get("scenario") or "fantasy")):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            uc_copy["can_dm"] = True
             if not uc_copy.get("debug_revealed"):
                 if "_phone_fow_ctx" not in locals():
                     _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
@@ -2184,16 +2794,17 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
     res = await adb(resolve_social_friend_request, dict(session), req.user_id, dict(req.profile))
     char_row = await adb(db.get_character, req.user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await _get_contacts_ro(session_id, char_id)
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_contact_blocked, is_unlocked_contact
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
     unlocked_contacts = []
     for c in contacts:
-        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names) and can_player_dm_contact(c, party_names=party_names, scenario=str((session or {}).get("scenario") or "fantasy")):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            uc_copy["can_dm"] = True
             if not uc_copy.get("debug_revealed"):
                 if "_phone_fow_ctx" not in locals():
                     _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
@@ -2290,27 +2901,57 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
         contact = await adb(db.get_contact, session_id, npc_id, character_id=player_char.get("id", 0))
         if not contact:
             # Try matching against all contacts in session
-            all_contacts = await adb(db.get_contacts, session_id, canonical_id)
+            all_contacts = await _get_contacts_ro(session_id, canonical_id)
             for c in all_contacts:
                 if c.get("npc_id") == npc_id or c.get("name", "").lower().replace(" ", "_") == npc_id.lower():
                     contact = dict(c)
                     break
+        if not contact:
+            wr_match = await adb(db.get_world_roster_npc, session_id, npc_id, include_legacy_rosters=False)
+            if wr_match:
+                wr_b = dict(wr_match.get("basic_info") or {})
+                wr_b.setdefault("has_contact_info", False)
+                contact = {
+                    "npc_id": wr_match.get("npc_id") or npc_id,
+                    "name": wr_match.get("name") or npc_id.replace("_", " ").title(),
+                    "role": wr_match.get("role") or wr_b.get("role") or "",
+                    "relationship_score": int(wr_match.get("affinity_score") or 0),
+                    "track": "platonic",
+                    "basic_info": wr_b,
+                    "session_id": session_id,
+                }
         if not contact:
             contact = {
                 "npc_id": npc_id,
                 "name": npc_id.replace("_", " ").title(),
                 "relationship_score": 0,
                 "track": "platonic",
-                "basic_info": {}
+                "basic_info": {},
+                "session_id": session_id,
             }
 
-        from mechanics.social.relationships import is_contact_blocked, is_contact_eligible
+        from mechanics.social.relationships import (
+            can_player_dm_contact,
+            is_contact_blocked,
+            is_contact_eligible,
+            is_promoted_family_or_cohabitant,
+        )
         scen_key = str(session.get("scenario") or "")
-        if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
-            raise HTTPException(
-                status_code=403,
-                detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
-            )
+        party_npcs_dm = await adb(db.get_session_party_npcs, session_id)
+        party_names_dm = {
+            str(p.get("name", "")).strip().lower()
+            for p in (party_npcs_dm or [])
+            if isinstance(p, dict) and p.get("name")
+        }
+        c_name_dm = str(contact.get("name") or "").strip().lower()
+        in_party_dm = bool(c_name_dm and c_name_dm in party_names_dm)
+        is_family_dm = is_promoted_family_or_cohabitant(contact)
+        if not is_family_dm and not in_party_dm:
+            if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"{contact.get('name', 'This entity')} is not eligible as a personal phone contact in this scenario."
+                )
         if isinstance(contact, dict) and (
             contact.get("is_dispatch_channel")
             or (isinstance(contact.get("basic_info"), dict) and contact["basic_info"].get("is_dispatch_channel"))
@@ -2332,6 +2973,12 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             raise HTTPException(
                 status_code=400,
                 detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
+            )
+
+        if not can_player_dm_contact(contact, party_names=party_names_dm, scenario=scen_key):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
             )
 
         if not text or text == "__auto__":
@@ -2381,7 +3028,7 @@ async def cancel_session_commitment(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Commitment not found or already resolved")
 
-    contacts = await adb(db.get_contacts, session_id) or []
+    contacts = await _get_contacts_ro(session_id)
     active_commitments = await adb(db.get_active_commitments, session_id)
     pending_appts = await adb(db.get_phone_appointments, session_id, status="pending")
     arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")

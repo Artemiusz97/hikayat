@@ -1,5 +1,6 @@
 """Pre-turn stage management: Authoritative spatial and NPC presence resolution before LLM generation."""
 from __future__ import annotations
+from contextlib import nullcontext
 from typing import Dict, Any, List, Tuple, Optional
 import json
 import logging
@@ -31,19 +32,283 @@ from mechanics.narrative.intent import (
     IntentContext,
 )
 from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+from mechanics.social.relationships import safe_get_contacts
 from mechanics.world.schedules import get_time_block_key
 
 log = logging.getLogger(__name__)
+
+
+def _session_has_world_nodes(sess_id: Any) -> bool:
+    if not sess_id:
+        return False
+    try:
+        return bool(db.get_session_world_nodes(int(sess_id)))
+    except Exception:
+        return False
+
+
+def _resolve_facility_node_for_stage(
+    sess_id: Any,
+    node_id: Optional[str] = None,
+    location_str: str = "",
+) -> Tuple[str, Optional[dict], str]:
+    """Resolves `(facility_node_id, facility_or_target_node, resolved_target_node_id)`."""
+    if not sess_id:
+        return ("", None, str(node_id or "").strip())
+    try:
+        sid = int(sess_id)
+    except (TypeError, ValueError):
+        return ("", None, str(node_id or "").strip())
+    target_nid = str(node_id or "").strip()
+    if not target_nid and location_str:
+        target_nid = str(db.resolve_node_id_from_location(sid, location_str) or "").strip()
+    if not target_nid:
+        return ("", None, "")
+    target_node = db.get_world_node(sid, target_nid)
+    if not isinstance(target_node, dict):
+        return ("", None, target_nid)
+    if str(target_node.get("node_type") or "").upper() == "ROOM" and target_node.get("parent_id"):
+        parent_node = db.get_world_node(sid, str(target_node["parent_id"]))
+        if isinstance(parent_node, dict) and str(parent_node.get("node_type") or "").upper() == "FACILITY":
+            return (str(parent_node.get("node_id") or ""), parent_node, target_nid)
+    return (target_nid, target_node, target_nid)
+
+
+def _resolve_active_turn_1based(session: Optional[dict], default: int = 1) -> int:
+    """Resolve active 1-based turn number, preferring `_target_turn` over stale pre-commit `turn_count`."""
+    if not isinstance(session, dict):
+        return max(1, int(default))
+    raw_target = session.get("_target_turn")
+    if raw_target is not None:
+        try:
+            val = int(raw_target)
+            if val > 0:
+                return val
+        except (TypeError, ValueError):
+            pass
+    raw_tc = session.get("turn_count")
+    if raw_tc is not None:
+        try:
+            return max(1, int(raw_tc) + 1)
+        except (TypeError, ValueError):
+            pass
+    hist = session.get("history")
+    if isinstance(hist, list):
+        return len(hist) + 1
+    return max(1, int(default))
+
+
+def _merge_staged_roster_ops(dest: Optional[dict], src: Optional[dict]) -> dict:
+    """Merge deferred pre-turn roster mutations without duplicating facility/merchant/slot entries."""
+    out = dest if isinstance(dest, dict) else {}
+    if not isinstance(src, dict):
+        return out
+
+    if src.get("venue_seeds"):
+        bucket = out.setdefault("venue_seeds", [])
+        seen_fids = {str(x.get("facility_node_id") or "") for x in bucket if isinstance(x, dict)}
+        for item in src["venue_seeds"]:
+            if not isinstance(item, dict):
+                continue
+            fid = str(item.get("facility_node_id") or "")
+            if fid and fid not in seen_fids:
+                seen_fids.add(fid)
+                bucket.append(dict(item))
+
+    if src.get("roaming_merchants"):
+        bucket = out.setdefault("roaming_merchants", [])
+        seen_keys = {
+            (str(x.get("scen_key") or ""), int(x.get("turn_number") or 1))
+            for x in bucket if isinstance(x, dict)
+        }
+        for item in src["roaming_merchants"]:
+            if not isinstance(item, dict):
+                continue
+            key = (str(item.get("scen_key") or ""), int(item.get("turn_number") or 1))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                bucket.append(dict(item))
+
+    if src.get("role_slot_fills"):
+        bucket = out.setdefault("role_slot_fills", [])
+        seen_sf = {
+            (str(x.get("facility_node_id") or ""), str(x.get("role_title") or "").strip().lower())
+            for x in bucket if isinstance(x, dict)
+        }
+        for item in src["role_slot_fills"]:
+            if not isinstance(item, dict):
+                continue
+            key = (str(item.get("facility_node_id") or ""), str(item.get("role_title") or "").strip().lower())
+            if key not in seen_sf:
+                seen_sf.add(key)
+                bucket.append(dict(item))
+
+    if src.get("roster_upserts"):
+        bucket = out.setdefault("roster_upserts", [])
+        seen_ru = {str(x.get("name") or "").strip().lower() for x in bucket if isinstance(x, dict)}
+        for item in src["roster_upserts"]:
+            if not isinstance(item, dict):
+                continue
+            r_nm = str(item.get("name") or "").strip().lower()
+            if r_nm and r_nm not in seen_ru:
+                seen_ru.add(r_nm)
+                bucket.append(dict(item))
+
+    return out
+
+
+def _ensure_parent_facility_seeded(
+    sess_id: int,
+    target_node_id: Optional[str],
+    scen_key: str,
+    eff_day: int,
+    eff_turn: int,
+    *,
+    staged_ops: Optional[dict] = None,
+) -> None:
+    """When inside a ROOM whose parent is a staffable FACILITY, ensure baseline venue staff is seeded."""
+    if not sess_id or not target_node_id:
+        return
+    try:
+        target_node = db.get_world_node(sess_id, target_node_id)
+        if not isinstance(target_node, dict):
+            return
+        if str(target_node.get("node_type") or "").upper() != "ROOM" or not target_node.get("parent_id"):
+            return
+        parent_node = db.get_world_node(sess_id, str(target_node["parent_id"]))
+        if not isinstance(parent_node, dict):
+            return
+        from mechanics.world.venue_templates import is_node_staffable
+        from mechanics.world import ensure_venue_staff_seeded
+        if is_node_staffable(parent_node, scen_key=scen_key):
+            parent_nid = str(parent_node.get("node_id") or "")
+            pre_keys = (
+                {
+                    str(r.get("npc_id") or "").strip().lower()
+                    for r in (db.get_world_roster(sess_id, include_legacy_rosters=False) or [])
+                    if isinstance(r, dict) and r.get("npc_id")
+                }
+                if isinstance(staged_ops, dict)
+                else set()
+            )
+            ensure_venue_staff_seeded(
+                sess_id,
+                parent_nid,
+                scen_key=scen_key,
+                current_day=eff_day,
+                turn_number=eff_turn,
+            )
+            if isinstance(staged_ops, dict) and parent_nid:
+                post_rows = db.get_world_roster(sess_id, include_legacy_rosters=False) or []
+                created = any(
+                    isinstance(r, dict)
+                    and str(r.get("origin") or "").lower() == "venue_seed"
+                    and str(r.get("npc_id") or "").strip().lower() not in pre_keys
+                    for r in post_rows
+                )
+                if created:
+                    _merge_staged_roster_ops(
+                        staged_ops,
+                        {
+                            "venue_seeds": [{
+                                "facility_node_id": parent_nid,
+                                "scen_key": scen_key,
+                                "current_day": eff_day,
+                                "turn_number": eff_turn,
+                            }]
+                        },
+                    )
+    except Exception:
+        pass
+
+
+def _run_stage_presence_check(
+    sess_id: int,
+    target_node_id: Optional[str],
+    location_str: str,
+    curr_day: int,
+    curr_min: Optional[int],
+    scen_key: str,
+    party_names: set[str],
+    actions: list,
+    session: dict,
+    eff_turn: int,
+    *,
+    persist_db: bool,
+    staged_ops: Optional[dict] = None,
+) -> dict:
+    """Resolve 6-tier presence cleanly; roll back parent-facility pre-seeding via SAVEPOINT when `persist_db=False`."""
+    from mechanics.world import resolve_node_presence
+
+    if persist_db:
+        _ensure_parent_facility_seeded(int(sess_id), target_node_id, scen_key, curr_day, eff_turn)
+        return resolve_node_presence(
+            int(sess_id),
+            target_node_id or "",
+            location_str=location_str or "",
+            current_day=curr_day,
+            current_minute=curr_min,
+            scen_key=scen_key,
+            party_names=party_names,
+            actions=actions,
+            session=session,
+            turn_number=eff_turn,
+            record_discovery=True,
+            persist_db=True,
+        )
+
+    sp_name = "sp_stage_presence"
+    with db.UnitOfWork() as uow_conn:
+        uow_conn.execute(f"SAVEPOINT {sp_name}")
+        try:
+            _ensure_parent_facility_seeded(
+                int(sess_id),
+                target_node_id,
+                scen_key,
+                curr_day,
+                eff_turn,
+                staged_ops=staged_ops,
+            )
+            pres_res = resolve_node_presence(
+                int(sess_id),
+                target_node_id or "",
+                location_str=location_str or "",
+                current_day=curr_day,
+                current_minute=curr_min,
+                scen_key=scen_key,
+                party_names=party_names,
+                actions=actions,
+                session=session,
+                turn_number=eff_turn,
+                record_discovery=False,
+                persist_db=False,
+            )
+            if isinstance(pres_res, dict) and pres_res.get("staged_roster_ops") and isinstance(staged_ops, dict):
+                _merge_staged_roster_ops(staged_ops, pres_res["staged_roster_ops"])
+            return pres_res
+        finally:
+            try:
+                uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+            except Exception:
+                pass
 
 
 def _spawn_canonical_role_npc_pre_turn(
     session: dict,
     role_title: str,
     effective_location: str,
+    *,
+    persist_db: bool = True,
+    strict_facility: bool = False,
+    facility_node_id: Optional[str] = None,
+    staged_ops: Optional[dict] = None,
 ) -> dict:
     """
-    Instantly generates a canonical named NPC in 0ms for an unseeded role interaction
-    (e.g. ActionCommand.spawns_npc_role == 'barista') and registers them in contacts.
+    Resolves or slot-fills a canonical named NPC for a role interaction
+    (e.g. ActionCommand.spawns_npc_role == 'barista'), registering them ONLY in
+    `world_roster` (`origin='role_slot_fill'`, `tier_status='acquaintance'`) and
+    Lorebook (`lorebook_entities`), never prematurely in `contacts`.
     """
     import namegen
     from mechanics.social.persona import (
@@ -51,18 +316,177 @@ def _spawn_canonical_role_npc_pre_turn(
         split_traits_and_preferences,
         normalize_appearance,
     )
+    from mechanics.social.roster_tags import derive_age_group, normalize_standing, is_school_scenario
 
     scen_key = session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy"
     sess_id = session.get("id") if isinstance(session, dict) else None
     clean_role = str(role_title or "Local Resident").strip().title()
+    eff_day = max(1, int(session.get("current_day", 1) or 1)) if isinstance(session, dict) else 1
+    eff_min = (
+        int(session.get("current_minute"))
+        if isinstance(session, dict) and session.get("current_minute") is not None
+        else 480
+    )
+    eff_turn = _resolve_active_turn_1based(session, default=1)
+    role_slug_key = re.sub(r"[^a-z0-9]+", "_", clean_role.lower()).strip("_")
 
-    # Check if an existing facility/school roster NPC or contact already matches this role
+    def _build_npc_dict_from_roster(row: dict) -> dict:
+        r_name = str(row.get("name") or "").strip()
+        r_basic = dict(row.get("basic_info") or {})
+        r_role = str(row.get("role") or r_basic.get("role") or clean_role).strip()
+        r_gender = str(row.get("gender") or r_basic.get("gender") or "female").strip().lower()
+        r_race = str(row.get("race") or "human").strip() or "human"
+        r_traits = list(row.get("traits") or [])
+        r_prefs = list(row.get("preferences") or [])
+        if not r_traits:
+            r_traits, gen_prefs = split_traits_and_preferences(
+                [], [], role=r_role, race=r_race, seed_str=f"{r_name}_{r_role}_{effective_location}"
+            )
+            if not r_prefs:
+                r_prefs = gen_prefs
+        r_app = dict(row.get("appearance") or {})
+        if not r_app:
+            r_app = normalize_appearance(
+                {}, gender=r_gender, race=r_race, desc=f"{r_name} ({r_role})",
+                scen_key=scen_key, traits=r_traits, role=r_role,
+            )
+        r_grade = str(row.get("grade") or r_basic.get("grade") or "").strip()
+        if not r_grade and is_school_scenario(scen_key):
+            derived_st = normalize_standing(r_role, "", scen_key=scen_key)
+            r_grade = derived_st if derived_st in ("Faculty", "Staff", "Citizen") else "Citizen"
+        r_age = str(row.get("age_group") or r_basic.get("age_group") or derive_age_group(grade=r_grade, role=r_role, scen_key=scen_key))
+        r_basic.setdefault("role", r_role)
+        r_basic.setdefault("grade", r_grade)
+        r_basic.setdefault("age_group", r_age)
+        r_basic.setdefault("gender", r_gender)
+        r_basic.setdefault("location", effective_location)
+        r_basic["met_in_person"] = True
+        return {
+            "npc_id": str(row.get("npc_id") or re.sub(r"[^a-z0-9]+", "_", r_name.lower()).strip("_")),
+            "name": r_name,
+            "role": r_role,
+            "grade": r_grade,
+            "age_group": r_age,
+            "gender": r_gender,
+            "race": r_race,
+            "origin": str(row.get("origin") or "role_slot_fill"),
+            "tier_status": str(row.get("tier_status") or "acquaintance"),
+            "workplace_node_id": str(row.get("workplace_node_id") or ""),
+            "demeanor": str(r_app.get("intimate_demeanor") or "attentive"),
+            "traits": r_traits,
+            "unlocked_traits": list(row.get("unlocked_traits") or r_traits[:2]),
+            "preferences": r_prefs,
+            "appearance": r_app,
+            "location": effective_location,
+            "status_effects": ["Present"],
+            "stage_role": "active_partner",
+            "attention_ring": "ring_1_primary",
+            "basic_info": r_basic,
+        }
+
+    has_spatial_graph = _session_has_world_nodes(sess_id)
+    fac_nid = str(facility_node_id or "").strip()
+    fac_node = db.get_world_node(int(sess_id), fac_nid) if (sess_id and fac_nid) else None
+    if sess_id and not fac_nid and has_spatial_graph:
+        sess_nid = session.get("current_node_id") if isinstance(session, dict) else None
+        fac_nid, fac_node, _ = _resolve_facility_node_for_stage(sess_id, sess_nid, effective_location)
+
+    if sess_id and fac_nid:
+        try:
+            from mechanics.world import ensure_venue_staff_seeded, slot_fill_custom_action_role
+            from mechanics.world.venue_templates import is_node_staffable
+
+            sp_name = "sp_preturn_role_fill"
+            ctx_mgr = db.UnitOfWork() if not persist_db else nullcontext(None)
+            with ctx_mgr as uow_conn:
+                if not persist_db and uow_conn is not None:
+                    uow_conn.execute(f"SAVEPOINT {sp_name}")
+                try:
+                    if isinstance(fac_node, dict) and is_node_staffable(fac_node, scen_key=scen_key):
+                        ensure_venue_staff_seeded(
+                            int(sess_id), fac_nid, scen_key=scen_key, current_day=eff_day, turn_number=eff_turn
+                        )
+                    slot_row = slot_fill_custom_action_role(
+                        int(sess_id),
+                        fac_nid,
+                        clean_role,
+                        scen_key=scen_key,
+                        current_day=eff_day,
+                        current_minute=eff_min,
+                        turn_number=eff_turn,
+                    )
+                    if not isinstance(slot_row, dict) or not slot_row.get("name"):
+                        if not persist_db and uow_conn is not None:
+                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        if strict_facility:
+                            return {}
+                    else:
+                        npc_dict = _build_npc_dict_from_roster(slot_row)
+                        lore_desc = f"{npc_dict['name']} ({npc_dict['role']}) encountered at {effective_location}."
+                        db.upsert_lorebook_entity(
+                            session_id=int(sess_id),
+                            entity_type="person",
+                            name=npc_dict["name"],
+                            description=lore_desc,
+                            disposition="neutral",
+                            gender=npc_dict["gender"],
+                            appearance=npc_dict["appearance"],
+                            traits=npc_dict["unlocked_traits"],
+                        )
+                        if not persist_db and uow_conn is not None:
+                            if isinstance(staged_ops, dict):
+                                staged_ops.setdefault("role_slot_fills", []).append({
+                                    "facility_node_id": fac_nid,
+                                    "role_title": clean_role,
+                                    "scen_key": scen_key,
+                                    "current_day": eff_day,
+                                    "current_minute": eff_min,
+                                    "turn_number": eff_turn,
+                                    "name": npc_dict["name"],
+                                    "lorebook_description": lore_desc,
+                                    "gender": npc_dict["gender"],
+                                    "appearance": npc_dict["appearance"],
+                                    "traits": npc_dict["unlocked_traits"],
+                                })
+                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        return npc_dict
+                except Exception:
+                    if not persist_db and uow_conn is not None:
+                        try:
+                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        except Exception:
+                            pass
+                    raise
+        except Exception as _sf_err:
+            log.debug("Closed-world slot-fill skipped (%s): %s", clean_role, _sf_err)
+            if strict_facility:
+                return {}
+
+    if strict_facility:
+        return {}
+
+    # Unseeded/legacy session fallback (no spatial graph nodes): check existing world_roster first so role repeats reuse cleanly
     matched_seed_char = None
     if sess_id:
         try:
+            existing_wr = db.get_world_roster(sess_id, include_legacy_rosters=False) or []
+            for wr in existing_wr:
+                if not isinstance(wr, dict) or not wr.get("name"):
+                    continue
+                wr_basic = wr.get("basic_info") if isinstance(wr.get("basic_info"), dict) else {}
+                wr_role = str(wr.get("role") or wr_basic.get("role") or "").lower()
+                if (
+                    str(wr.get("origin") or "").lower() == "role_slot_fill"
+                    and str(wr_basic.get("slot_fill_role_key") or "").lower() == role_slug_key
+                ) or (clean_role.lower() in wr_role or (wr_role and wr_role in clean_role.lower())):
+                    return _build_npc_dict_from_roster(wr)
+
             fac_chars = db.get_school_characters_by_facility(sess_id, effective_location, limit=10) if hasattr(db, "get_school_characters_by_facility") else []
             roster_chars = db.get_school_roster(sess_id) if hasattr(db, "get_school_roster") else []
-            all_contacts = db.get_contacts(sess_id) or []
+            all_contacts = safe_get_contacts(sess_id, ensure_scene=False)
             eff_low = str(effective_location or "").lower()
             local_contacts = [
                 c for c in all_contacts
@@ -80,11 +504,9 @@ def _spawn_canonical_role_npc_pre_turn(
                         is_match = True
                 if is_match:
                     from mechanics.world.locations.access_gate import can_npc_stage_at_facility
-                    c_min = int(session.get("current_minute", 480) or 480) if isinstance(session, dict) else 480
-                    if not can_npc_stage_at_facility(c, effective_location, session=session, current_minute=c_min, scen_key=scen_key):
+                    if not can_npc_stage_at_facility(c, effective_location, session=session, current_minute=eff_min, scen_key=scen_key):
                         continue
                     if c.get("appearance") and isinstance(c.get("appearance"), dict):
-                        from mechanics.social.roster_tags import derive_age_group, normalize_standing
                         matched_grade = str(c.get("grade") or (c.get("basic_info") or {}).get("grade") or "").strip()
                         if not matched_grade:
                             matched_grade = normalize_standing(c.get("role") or clean_role, "", scen_key=scen_key)
@@ -159,7 +581,6 @@ def _spawn_canonical_role_npc_pre_turn(
     )
     demeanor = str(app_dict.get("intimate_demeanor") or "attentive")
 
-    from mechanics.social.roster_tags import derive_age_group, normalize_standing, is_school_scenario
     char_grade = str((matched_seed_char or {}).get("grade") or ((matched_seed_char or {}).get("basic_info") or {}).get("grade") or "").strip()
     if is_school_scenario(scen_key) and not char_grade:
         derived_standing = normalize_standing(clean_role, "", scen_key=scen_key)
@@ -173,13 +594,18 @@ def _spawn_canonical_role_npc_pre_turn(
             else:
                 char_grade = "Citizen"
     char_age_group = derive_age_group(grade=char_grade, role=clean_role, scen_key=scen_key)
+    slug_id = re.sub(r"[^a-z0-9]+", "_", npc_name.lower()).strip("_")
 
     npc_dict = {
+        "npc_id": slug_id,
         "name": npc_name,
         "role": clean_role,
         "grade": char_grade,
         "age_group": char_age_group,
         "gender": gender,
+        "race": race_val,
+        "origin": "role_slot_fill",
+        "tier_status": "acquaintance",
         "demeanor": demeanor,
         "traits": traits,
         "unlocked_traits": traits[:2],
@@ -195,37 +621,54 @@ def _spawn_canonical_role_npc_pre_turn(
             "age_group": char_age_group,
             "gender": gender,
             "location": effective_location,
+            "slot_fill_role_key": role_slug_key,
             "met_in_person": True,
         },
     }
 
     if sess_id:
-        try:
-            slug_id = re.sub(r"[^a-z0-9]+", "_", npc_name.lower()).strip("_")
-            db.upsert_contact(
-                sess_id,
-                slug_id,
-                npc_name,
-                delta_score=0,
-                track="platonic",
-                new_traits=npc_dict["unlocked_traits"],
-                new_preferences=prefs[:2],
-                basic_info=npc_dict["basic_info"],
-                gender=gender,
-                appearance=app_dict,
-            )
-            db.upsert_lorebook_entity(
-                session_id=sess_id,
-                entity_type="person",
-                name=npc_name,
-                description=f"{npc_name} ({clean_role}) encountered at {effective_location}.",
-                disposition="neutral",
-                gender=gender,
-                appearance=app_dict,
-                traits=npc_dict["unlocked_traits"],
-            )
-        except Exception:
-            pass
+        roster_payload = {
+            "npc_id": slug_id,
+            "name": npc_name,
+            "gender": gender,
+            "race": race_val,
+            "role": clean_role,
+            "origin": "role_slot_fill",
+            "tier_status": "acquaintance",
+            "met_in_person": True,
+            "workplace_node_id": fac_nid or "",
+            "shift_profile": "day",
+            "staff_status": "active",
+            "traits": traits,
+            "appearance": app_dict,
+            "basic_info": npc_dict["basic_info"],
+        }
+        lore_desc = f"{npc_name} ({clean_role}) encountered at {effective_location}."
+        if persist_db:
+            try:
+                db.upsert_world_roster_npc(int(sess_id), roster_payload, turn_number=eff_turn)
+                db.upsert_lorebook_entity(
+                    session_id=int(sess_id),
+                    entity_type="person",
+                    name=npc_name,
+                    description=lore_desc,
+                    disposition="neutral",
+                    gender=gender,
+                    appearance=app_dict,
+                    traits=npc_dict["unlocked_traits"],
+                )
+            except Exception:
+                pass
+        elif isinstance(staged_ops, dict):
+            staged_ops.setdefault("roster_upserts", []).append({
+                "roster_payload": roster_payload,
+                "turn_number": eff_turn,
+                "name": npc_name,
+                "lorebook_description": lore_desc,
+                "gender": gender,
+                "appearance": app_dict,
+                "traits": npc_dict["unlocked_traits"],
+            })
 
     return npc_dict
 
@@ -278,6 +721,10 @@ def compute_pre_turn_stage(
             "blocked_invalid_exit": False,
             "party_cohesion_deferred": False,
             "pending_folklore_ops": {},
+            "pending_roster_ops": {},
+            "doorbell_events": [],
+            "crowd_flavor": "",
+            "epistemic_matrix": {},
             "effective_node_id": None,
             "focal_point": None,
         }
@@ -309,6 +756,10 @@ def compute_pre_turn_stage(
     effective_node_id: Optional[str] = None
     access_gate_info: dict = {"gated": False}
     pending_folklore_ops: dict = {}
+    pending_roster_ops: dict = {}
+    doorbell_events: list[dict] = []
+    crowd_flavor: str = ""
+    epistemic_matrix: dict = {}
 
     cached_stage_contacts: Optional[list] = None
     cached_stage_roster: Optional[list] = None
@@ -320,7 +771,7 @@ def compute_pre_turn_stage(
                 cached_stage_contacts = ctx.contacts
             elif sess_id and hasattr(db, "get_contacts"):
                 try:
-                    cached_stage_contacts = db.get_contacts(sess_id) or []
+                    cached_stage_contacts = safe_get_contacts(sess_id, ensure_scene=False)
                 except Exception:
                     cached_stage_contacts = []
             else:
@@ -330,13 +781,29 @@ def compute_pre_turn_stage(
     def _get_stage_roster() -> list:
         nonlocal cached_stage_roster
         if cached_stage_roster is None:
+            combined: list[dict] = []
+            seen_keys: set[str] = set()
+            if sess_id and hasattr(db, "get_world_roster"):
+                try:
+                    for wr in (db.get_world_roster(sess_id, include_legacy_rosters=False) or []):
+                        if isinstance(wr, dict) and wr.get("name"):
+                            k = str(wr["name"]).strip().lower()
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                combined.append(wr)
+                except Exception:
+                    pass
             if sess_id and hasattr(db, "get_school_roster"):
                 try:
-                    cached_stage_roster = db.get_school_roster(sess_id) or []
+                    for sr in (db.get_school_roster(sess_id) or []):
+                        if isinstance(sr, dict) and sr.get("name"):
+                            k = str(sr["name"]).strip().lower()
+                            if k not in seen_keys:
+                                seen_keys.add(k)
+                                combined.append(sr)
                 except Exception:
-                    cached_stage_roster = []
-            else:
-                cached_stage_roster = []
+                    pass
+            cached_stage_roster = combined
         return cached_stage_roster
     spawned_role_npcs: list[dict] = []
     traveling_companions: list[dict] = []
@@ -1042,6 +1509,112 @@ def compute_pre_turn_stage(
             seen_stage_names.add(nm_low)
             stage_npcs.append(dict(npc_dict))
 
+    def _build_party_names_set() -> set[str]:
+        p_set: set[str] = set()
+        for grp in (party or session.get("party") or [], session.get("party_npcs") or [], session.get("temporary_companions") or []):
+            for item in grp:
+                obj = item[0] if isinstance(item, (tuple, list)) and item else item
+                if isinstance(obj, dict) and obj.get("name"):
+                    p_set.add(str(obj["name"]).strip().lower())
+                elif isinstance(obj, str) and obj.strip():
+                    p_set.add(obj.strip().lower())
+        for tc in traveling_companions:
+            t_nm = _get_npc_name(tc).strip().lower()
+            if t_nm:
+                p_set.add(t_nm)
+        return p_set
+
+    def _apply_presence_outputs(
+        pres_res: dict,
+        *,
+        include_tier5: bool = True,
+        target_nid: Optional[str] = None,
+    ) -> set[str]:
+        nonlocal doorbell_events, crowd_flavor, epistemic_matrix, has_exited_convo, has_confidential_rendezvous
+        blocked_keys: set[str] = set()
+        if not isinstance(pres_res, dict):
+            return blocked_keys
+        doorbell_events = list(pres_res.get("doorbell_events") or [])
+        crowd_flavor = str(pres_res.get("crowd_flavor") or "")
+        if isinstance(pres_res.get("epistemic_matrix"), dict) and pres_res.get("epistemic_matrix"):
+            epistemic_matrix = dict(pres_res["epistemic_matrix"])
+        for dbell in doorbell_events:
+            if not isinstance(dbell, dict):
+                continue
+            if dbell.get("applicable") and not dbell.get("allowed"):
+                d_name = str(dbell.get("name") or dbell.get("npc_id") or "Resident").strip()
+                if d_name:
+                    blocked_keys.add(d_name.lower())
+                if dbell.get("npc_id"):
+                    blocked_keys.add(str(dbell["npc_id"]).strip().lower())
+                d_reason = str(dbell.get("reason") or dbell.get("doorbell_status") or "unanswered").strip()
+                d_dir = (
+                    f"[STAGE DIRECTION — DOORBELL UNANSWERED / REFUSED]: {d_name} did not answer the door "
+                    f"({d_reason}). Do NOT depict {d_name} physically inside the scene or in npcs_present."
+                )
+                if d_dir not in stage_directives:
+                    stage_directives.append(d_dir)
+
+        tier2_matched = False
+        for p_npc in (pres_res.get("present_npcs") or []):
+            if not isinstance(p_npc, dict) or not p_npc.get("name"):
+                continue
+            p_tier = int(p_npc.get("presence_tier") or 5)
+            p_reason = str(p_npc.get("presence_reason") or "").strip().lower()
+            p_name = str(p_npc["name"]).strip()
+            if p_name.lower() in blocked_keys:
+                continue
+            if p_tier >= 5 and not include_tier5:
+                continue
+            entry = dict(p_npc)
+            entry.setdefault("status_effects", ["Present"])
+            if p_tier == 1 or p_reason == "party":
+                entry.setdefault("stage_role", "party_companion")
+                entry.setdefault("attention_ring", "ring_2_attentive_peer")
+            elif p_tier == 2 or p_reason == "commitment":
+                tier2_matched = True
+                entry.setdefault("role", "Rendezvous Partner")
+                if not entry.get("role"):
+                    entry["role"] = "Rendezvous Partner"
+                rendezvous_participant_names.add(p_name.lower())
+                if entry.get("npc_id"):
+                    rendezvous_participant_names.add(str(entry["npc_id"]).strip().lower())
+                if p_name not in new_partners:
+                    new_partners.append(p_name)
+                has_exited_convo = False
+            elif p_tier == 3 or p_reason == "quest_pin":
+                entry.setdefault("is_quest_target", True)
+                entry.setdefault("stage_role", "room_bystander")
+                entry.setdefault("attention_ring", "ring_2_attentive_peer")
+            elif p_tier == 4 or p_reason == "doorbell_answered":
+                entry.setdefault("role", "Resident")
+                entry.setdefault("stage_role", "room_bystander")
+                entry.setdefault("attention_ring", "ring_2_attentive_peer")
+            else:
+                entry.setdefault("role", entry.get("role") or (entry.get("basic_info") or {}).get("role") or "Resident")
+                entry.setdefault("stage_role", "room_bystander")
+                entry.setdefault("attention_ring", "ring_3_bystander")
+                entry["scheduled_station"] = True
+            _add_stage_npc(entry)
+
+        if tier2_matched and sess_id:
+            try:
+                from mechanics.system.commitments_engine import get_active_rendezvous_at_node
+                s_day_t = session.get("current_day") if isinstance(session, dict) else None
+                s_min_t = session.get("current_minute") if isinstance(session, dict) else None
+                for loc_p in ([target_nid, effective_location] if target_nid else [effective_location]):
+                    if not loc_p:
+                        continue
+                    for appt in get_active_rendezvous_at_node(sess_id, loc_p, current_day=s_day_t, current_minute=s_min_t):
+                        if bool(appt.get("is_confidential") or (appt.get("metadata") or {}).get("is_romantic")):
+                            has_confidential_rendezvous = True
+                            break
+            except Exception:
+                pass
+        elif not tier2_matched and session.get("current_minute") is None and not _session_has_world_nodes(sess_id):
+            _check_rendezvous_for_stage(effective_location, target_nid)
+        return blocked_keys
+
     if is_movement:
         # 1. Traveling companions
         for c in traveling_companions:
@@ -1056,219 +1629,99 @@ def compute_pre_turn_stage(
             if patrol_nm and patrol_nm not in new_partners:
                 new_partners.append(patrol_nm)
 
-        # 2. Check for active/pending phone appointments / commitments at arrival destination
-        if not access_gate_info.get("gated"):
-            _check_rendezvous_for_stage(effective_location, effective_node_id)
-
-        # 3. Add target resident or schedule-verified facility occupants stationed there
-        curr_stage_min = int(session.get("current_minute", 480) or 480)
-        curr_stage_day = int(session.get("current_day", 1) or 1)
-        scheduled_residents = []
-        if not access_gate_info.get("gated") and sess_id and effective_location:
+        # 2-5. Unified closed-world presence resolver (Tiers 1-6)
+        if not access_gate_info.get("gated") and sess_id:
+            curr_stage_day = int(session.get("current_day", 1) or 1)
+            raw_min = session.get("current_minute")
+            curr_stage_min = int(raw_min) if raw_min is not None else None
+            eff_turn_val = _resolve_active_turn_1based(session)
             try:
-                from mechanics.world.mobility import is_campus_scenario
-                if is_campus_scenario(scen_key):
-                    from mechanics.social.school_roster import get_facility_ambient_characters
-                    scheduled_residents = get_facility_ambient_characters(
-                        sess_id,
-                        effective_location,
-                        limit=3,
-                        current_day=curr_stage_day,
-                        current_minute=curr_stage_min,
-                        active_npc_names=seen_stage_names,
-                    )
-                elif scenario_data.is_anomalous_incursions_scenario(scen_key):
-                    from mechanics.social.agent_roster import get_anomalous_facility_ambient_agents
-                    scheduled_residents = get_anomalous_facility_ambient_agents(
-                        sess_id,
-                        effective_location,
-                        limit=3,
-                        current_day=curr_stage_day,
-                        current_minute=curr_stage_min,
-                        active_npc_names=seen_stage_names,
-                    )
-                elif 420 <= (curr_stage_min % 1440) < 1200:
-                    scheduled_residents = list(facility_residents or [])
-            except Exception:
-                scheduled_residents = list(facility_residents or []) if (420 <= (curr_stage_min % 1440) < 1200) else []
+                pres_res = _run_stage_presence_check(
+                    int(sess_id),
+                    effective_node_id,
+                    effective_location or "",
+                    curr_stage_day,
+                    curr_stage_min,
+                    scen_key,
+                    _build_party_names_set(),
+                    actions,
+                    session,
+                    eff_turn_val,
+                    persist_db=bool(persist_db),
+                    staged_ops=pending_roster_ops,
+                )
+                blocked_res_keys = _apply_presence_outputs(pres_res, include_tier5=True, target_nid=effective_node_id)
+            except Exception as _pres_err:
+                log.debug("resolve_node_presence movement fallback (%s): %s", effective_node_id, _pres_err)
+                blocked_res_keys = set()
+                _check_rendezvous_for_stage(effective_location, effective_node_id)
 
-        if target_resident_name and not access_gate_info.get("gated"):
-            sched_res_names = {str(r.get("name") or "").strip().lower() for r in scheduled_residents}
-            # Never auto-stage a campus/HQ resident who is off-duty at night unless verified by schedule
-            if target_resident_name.strip().lower() in sched_res_names or (420 <= (curr_stage_min % 1440) < 1200):
-                _add_stage_npc({"name": target_resident_name, "role": "Resident", "status_effects": ["Present"]})
+            if target_resident_name and not _session_has_world_nodes(sess_id):
+                min_chk = curr_stage_min if curr_stage_min is not None else 480
+                if (
+                    target_resident_name.strip().lower() not in blocked_res_keys
+                    and (420 <= (min_chk % 1440) < 1200)
+                ):
+                    _add_stage_npc({"name": target_resident_name, "role": "Resident", "status_effects": ["Present"]})
 
-        if not access_gate_info.get("gated") and sess_id and effective_node_id:
-            try:
-                from mechanics.world.npc_schedule import dispatch_micro_social_npcs
-                for micro_npc in dispatch_micro_social_npcs(sess_id, effective_node_id, session):
-                    if isinstance(micro_npc, dict):
-                        _add_stage_npc(micro_npc)
-                    elif isinstance(micro_npc, str) and micro_npc.strip():
-                        _add_stage_npc({"name": micro_npc.strip(), "role": "Companion", "status_effects": ["Present"]})
-            except Exception:
-                pass
-
-        if not access_gate_info.get("gated") and scheduled_residents:
-            is_priv_dest = False
-            if sess_id and effective_node_id:
+            if not _session_has_world_nodes(sess_id):
                 try:
-                    dest_node_obj = db.get_world_node(sess_id, effective_node_id)
-                    if dest_node_obj and str(dest_node_obj.get("privacy_level") or "").lower() in ("private", "restricted", "discreet"):
-                        is_priv_dest = True
+                    from mechanics.world.npc_schedule import dispatch_micro_social_npcs
+                    for micro_npc in dispatch_micro_social_npcs(sess_id, effective_node_id, session):
+                        if isinstance(micro_npc, dict):
+                            _add_stage_npc(micro_npc)
+                        elif isinstance(micro_npc, str) and micro_npc.strip():
+                            _add_stage_npc({"name": micro_npc.strip(), "role": "Companion", "status_effects": ["Present"]})
                 except Exception:
                     pass
-            fac_added = 0
-            for fr in scheduled_residents:
-                if len(stage_npcs) >= 4 or fac_added >= 3:
-                    break
-                fr_nm = fr.get("name")
-                if not fr_nm or fr_nm.strip().lower() in seen_stage_names:
-                    continue
-                if is_priv_dest:
-                    from mechanics.world.npc_schedule import is_npc_eligible_for_private_room
-                    if not is_npc_eligible_for_private_room(fr_nm, session, node_id=effective_node_id):
-                        continue
-                _add_stage_npc({
-                    "name": fr_nm,
-                    "role": fr.get("role") or "Faculty",
-                    "status_effects": ["Present"],
-                    "stage_role": "room_bystander",
-                    "attention_ring": "ring_3_bystander",
-                    "facility_resident": True
-                })
-                fac_added += 1
 
-        # 4. Add explicitly relocated schedule-departed NPCs + scheduled NPCs at arrival destination
-        if effective_location and not access_gate_info.get("gated"):
-            try:
-                from mechanics.world.schedules import get_time_block_key
-                from mechanics.world.waypoints import check_location_matches_waypoint
-                curr_min_rel = int(session.get("current_minute", 480) or 480)
-                curr_day_rel = int(session.get("current_day", 1) or 1)
-                curr_blk_rel = get_time_block_key(curr_min_rel)
-                rel_overrides = session.get("npc_relocated_overrides")
-                if not isinstance(rel_overrides, dict) and isinstance(session.get("extra"), dict):
-                    rel_overrides = session["extra"].get("npc_relocated_overrides")
-                if isinstance(rel_overrides, dict):
-                    for _, r_rec in rel_overrides.items():
-                        if not isinstance(r_rec, dict):
-                            continue
-                        r_nm = str(r_rec.get("name") or "").strip()
-                        r_loc = str(r_rec.get("location") or "").strip()
-                        r_nid = str(r_rec.get("node_id") or "").strip()
-                        if not r_nm or r_nm.lower() in seen_stage_names:
-                            continue
-                        if int(r_rec.get("day") or curr_day_rel) != curr_day_rel:
-                            continue
-                        dep_min = int(r_rec.get("minute") if r_rec.get("minute") is not None else curr_min_rel)
-                        same_blk = (not r_rec.get("block")) or (str(r_rec.get("block")) == curr_blk_rel)
-                        if not same_blk and not (0 <= (curr_min_rel - dep_min) <= 180):
-                            continue
-                        rel_match = False
-                        if r_nid and effective_node_id and sess_id:
-                            rel_match = (
-                                r_nid == effective_node_id
-                                or db.is_descendant_of(sess_id, effective_node_id, r_nid)
-                                or db.is_descendant_of(sess_id, r_nid, effective_node_id)
-                            )
-                        if not rel_match and r_loc:
-                            rel_match = check_location_matches_waypoint(
-                                effective_location, r_loc, session_id=sess_id, current_node_id=effective_node_id
-                            ) or (r_loc.split("➔")[-1].strip().lower() in effective_location.lower())
-                        if rel_match:
-                            _add_stage_npc({
-                                "name": r_nm,
-                                "role": "Resident",
-                                "status_effects": ["Present"],
-                                "stage_role": "room_bystander",
-                                "attention_ring": "ring_3_bystander",
-                                "scheduled_station": True,
-                            })
-            except Exception:
-                pass
-
-        if len(stage_npcs) < 4 and sess_id and effective_location and not access_gate_info.get("gated"):
-            try:
-                from mechanics.world.schedules import get_npc_scheduled_node_id, get_npc_scheduled_location
-                from mechanics.world.waypoints import check_location_matches_waypoint
-                curr_min = int(session.get("current_minute", 480) or 480)
-                curr_day = int(session.get("current_day", 1) or 1)
-                contacts = _get_stage_contacts()
-                roster = _get_stage_roster()
-                # Known contacts prioritized first, then roster
-                seen_cand_names = set()
-                combined_cands = []
-                for c in contacts + roster:
-                    c_nm = (c.get("name") or "").strip()
-                    if c_nm and c_nm.lower() not in seen_cand_names:
-                        seen_cand_names.add(c_nm.lower())
-                        combined_cands.append(c)
-
-                hoisted_waypoints = None
-                hoisted_events = None
-                if sess_id:
-                    try:
-                        with db.get_conn() as conn:
-                            hoisted_waypoints = [
-                                dict(r)
-                                for r in conn.execute(
-                                    """SELECT qw.target_node_id, qw.stage_label, q.objective
-                                       FROM quest_waypoints qw
-                                       JOIN quests q ON q.session_id = qw.session_id AND q.quest_id = qw.quest_id
-                                       WHERE qw.session_id = ? AND qw.status = 'active'
-                                         AND q.status = 'Active' AND q.is_story_quest = 1
-                                         AND qw.target_node_id != ''""",
-                                    (sess_id,),
-                                ).fetchall()
-                            ]
-                        hoisted_events = db.get_world_events(sess_id, entity_type="macro_event")
-                    except Exception:
-                        pass
-
-                scheduled_added = 0
-                for cand in combined_cands[:25]:
-                    if scheduled_added >= 2:
-                        break
-                    cand_name = cand.get("name")
-                    if not cand_name or cand_name.lower() in seen_stage_names:
-                        continue
-                    sched_node = get_npc_scheduled_node_id(
-                        cand,
-                        current_minute=curr_min,
-                        scen_key=scen_key,
-                        current_day=curr_day,
-                        session_id=sess_id,
-                        story_waypoints=hoisted_waypoints,
-                        active_events=hoisted_events,
-                    )
-                    is_match = False
-                    if sched_node and effective_node_id:
-                        is_match = (
-                            sched_node == effective_node_id
-                            or db.is_descendant_of(sess_id, effective_node_id, sched_node)
-                            or db.is_descendant_of(sess_id, sched_node, effective_node_id)
-                        )
-                    elif not sched_node or not effective_node_id:
-                        sched_loc = get_npc_scheduled_location(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day, session_id=sess_id)
-                        if sched_loc:
-                            is_match = check_location_matches_waypoint(
-                                effective_location, sched_loc,
-                                session_id=sess_id, current_node_id=effective_node_id
-                            )
-                    if is_match:
-                        _add_stage_npc({
-                            "name": cand_name,
-                            "role": cand.get("role") or (cand.get("basic_info") or {}).get("role") or "Student",
-                            "grade": cand.get("grade") or (cand.get("basic_info") or {}).get("grade") or "",
-                            "status_effects": ["Present"],
-                            "stage_role": "room_bystander",
-                            "attention_ring": "ring_3_bystander",
-                            "scheduled_station": True
-                        })
-                        scheduled_added += 1
-            except Exception:
-                pass
+            # Explicitly relocated same-day schedule-departed overrides
+            if effective_location:
+                try:
+                    from mechanics.world.waypoints import check_location_matches_waypoint
+                    curr_min_rel = int(session.get("current_minute", 480) or 480)
+                    curr_day_rel = int(session.get("current_day", 1) or 1)
+                    curr_blk_rel = get_time_block_key(curr_min_rel)
+                    rel_overrides = session.get("npc_relocated_overrides")
+                    if not isinstance(rel_overrides, dict) and isinstance(session.get("extra"), dict):
+                        rel_overrides = session["extra"].get("npc_relocated_overrides")
+                    if isinstance(rel_overrides, dict):
+                        for _, r_rec in rel_overrides.items():
+                            if not isinstance(r_rec, dict):
+                                continue
+                            r_nm = str(r_rec.get("name") or "").strip()
+                            r_loc = str(r_rec.get("location") or "").strip()
+                            r_nid = str(r_rec.get("node_id") or "").strip()
+                            if not r_nm or r_nm.lower() in seen_stage_names or r_nm.lower() in blocked_res_keys:
+                                continue
+                            if int(r_rec.get("day") or curr_day_rel) != curr_day_rel:
+                                continue
+                            dep_min = int(r_rec.get("minute") if r_rec.get("minute") is not None else curr_min_rel)
+                            same_blk = (not r_rec.get("block")) or (str(r_rec.get("block")) == curr_blk_rel)
+                            if not same_blk and not (0 <= (curr_min_rel - dep_min) <= 180):
+                                continue
+                            rel_match = False
+                            if r_nid and effective_node_id and sess_id:
+                                rel_match = (
+                                    r_nid == effective_node_id
+                                    or db.is_descendant_of(sess_id, effective_node_id, r_nid)
+                                    or db.is_descendant_of(sess_id, r_nid, effective_node_id)
+                                )
+                            if not rel_match and r_loc:
+                                rel_match = check_location_matches_waypoint(
+                                    effective_location, r_loc, session_id=sess_id, current_node_id=effective_node_id
+                                ) or (r_loc.split("➔")[-1].strip().lower() in effective_location.lower())
+                            if rel_match:
+                                _add_stage_npc({
+                                    "name": r_nm,
+                                    "role": "Resident",
+                                    "status_effects": ["Present"],
+                                    "stage_role": "room_bystander",
+                                    "attention_ring": "ring_3_bystander",
+                                    "scheduled_station": True,
+                                })
+                except Exception:
+                    pass
     else:
         # Same location: start with current_npcs
         old_npcs = session.get("current_npcs") or []
@@ -1310,9 +1763,7 @@ def compute_pre_turn_stage(
             nm = _get_npc_name(n)
             if not nm or nm in schedule_departed_npcs:
                 continue
-            # If the player explicitly exited dialogue or dismissed them
             if has_exited_convo and nm.strip().lower() in [p.lower() for p in get_session_dialogue_partners(session)]:
-                # Conversational exit does not necessarily physically remove them, but they are no longer active dialogue partner
                 pass
             _add_stage_npc(n)
 
@@ -1329,36 +1780,57 @@ def compute_pre_turn_stage(
                         "attention_ring": "ring_2_attentive_peer"
                     })
 
-        # Check for active/pending appointments / commitments at current location
-        _check_rendezvous_for_stage(effective_location, curr_node_id_val)
-
-        # If schedule crossed, introduce newly scheduled arrivals at this location
-        if prev_min is not None and (prev_min != curr_min or (prev_day is not None and prev_day != curr_day)) and bound_info.get("crossed") and sess_id and curr_node_id_val:
+        # Same-location closed-world presence resolver (Tiers 1-6)
+        if sess_id and not access_gate_info.get("gated"):
+            eff_turn_val = _resolve_active_turn_1based(session)
+            raw_min_same = session.get("current_minute")
+            curr_min_same = int(raw_min_same) if raw_min_same is not None else None
             try:
-                from mechanics.world.npc_schedule import get_npc_scheduled_node_id
-                contacts = _get_stage_contacts()
-                roster = _get_stage_roster()
-                newly_added = 0
-                for cand in contacts + roster:
-                    if newly_added >= 2:
-                        break
-                    cand_nm = cand.get("name")
-                    if not cand_nm or cand_nm.lower() in seen_stage_names:
-                        continue
-                    sched_n = get_npc_scheduled_node_id(cand, current_minute=curr_min, scen_key=scen_key, current_day=curr_day, session_id=sess_id)
-                    if sched_n == curr_node_id_val or (db.is_descendant_of(sess_id, curr_node_id_val, sched_n) or db.is_descendant_of(sess_id, sched_n, curr_node_id_val)):
-                        _add_stage_npc({
-                            "name": cand_nm,
-                            "role": cand.get("role") or (cand.get("basic_info") or {}).get("role") or "Student",
-                            "grade": cand.get("grade") or (cand.get("basic_info") or {}).get("grade") or "",
-                            "status_effects": ["Present"],
-                            "stage_role": "room_bystander",
-                            "attention_ring": "ring_3_bystander",
-                            "scheduled_station": True,
-                        })
-                        newly_added += 1
-            except Exception:
-                pass
+                pres_same = _run_stage_presence_check(
+                    int(sess_id),
+                    curr_node_id_val,
+                    effective_location or "",
+                    curr_day,
+                    curr_min_same,
+                    scen_key,
+                    _build_party_names_set(),
+                    actions,
+                    session,
+                    eff_turn_val,
+                    persist_db=bool(persist_db),
+                    staged_ops=pending_roster_ops,
+                )
+                pres_names_low = {
+                    str(pn.get("name") or "").strip().lower()
+                    for pn in (pres_same.get("present_npcs") or [])
+                    if isinstance(pn, dict) and pn.get("name")
+                }
+                blocked_same = _apply_presence_outputs(pres_same, include_tier5=True, target_nid=curr_node_id_val)
+                if _session_has_world_nodes(sess_id) and old_npcs:
+                    roster_same_low = {
+                        str(r.get("name") or "").strip().lower()
+                        for r in (db.get_world_roster(int(sess_id), include_legacy_rosters=False) or [])
+                        if isinstance(r, dict) and r.get("name") and str(r.get("origin") or "").lower() != "legacy_adapter"
+                    }
+                    keep_active_low = (
+                        {p.strip().lower() for p in new_partners if p}
+                        | ({str(session.get("dialogue_partner") or "").strip().lower()} if not has_exited_convo else set())
+                        | _build_party_names_set()
+                    ) - {""}
+                    pruned_same = []
+                    for sn in stage_npcs:
+                        sn_low = _get_npc_name(sn).strip().lower()
+                        if sn_low in blocked_same and sn_low not in keep_active_low:
+                            seen_stage_names.discard(sn_low)
+                            continue
+                        if sn_low in roster_same_low and sn_low not in pres_names_low and sn_low not in keep_active_low:
+                            seen_stage_names.discard(sn_low)
+                            continue
+                        pruned_same.append(sn)
+                    stage_npcs = pruned_same
+            except Exception as _pres_same_err:
+                log.debug("resolve_node_presence same-loc fallback (%s): %s", curr_node_id_val, _pres_same_err)
+                _check_rendezvous_for_stage(effective_location, curr_node_id_val)
 
         # Multi-Turn Threshold Evaluation (Turn 2 breach / intercom / sneak / truancy attempt)
         curr_loc = session.get("current_location", "")
@@ -1403,11 +1875,13 @@ def compute_pre_turn_stage(
                             from mechanics.world.locations.seeds import get_session_school_name
                             school_zone = get_session_school_name(sess_id, scen_key) or "Main Academy Campus"
                             curr_node_id = "loc_courtyard"
+                            effective_node_id = curr_node_id
                             session["current_node_id"] = curr_node_id
                             effective_location = f"{school_zone} ➔ Central Courtyard ➔ Main Area"
                             focal_point = None
                         elif access_gate_info.get("resolved_target_node_id"):
                             curr_node_id = access_gate_info["resolved_target_node_id"]
+                            effective_node_id = curr_node_id
                             session["current_node_id"] = curr_node_id
                             res_node = db.get_world_node(sess_id, curr_node_id)
                             if res_node:
@@ -1421,6 +1895,7 @@ def compute_pre_turn_stage(
                         else:
                             # Unlocked! Clear threshold sub-location and move inside!
                             from mechanics.world.locations.pathfinding import format_node_hierarchy
+                            effective_node_id = curr_node_id
                             node_loc = format_node_hierarchy(sess_id, curr_node_id) if curr_node_id else ""
                             if node_loc and "➔" in node_loc:
                                 effective_location = node_loc
@@ -1431,15 +1906,127 @@ def compute_pre_turn_stage(
                                 pp = parts[1] if len(parts) >= 2 else (parts[0] if parts else "Main Area")
                                 effective_location = f"{pz} ➔ {pp} ➔ Main Area"
                             focal_point = None
+
+                        if effective_node_id and effective_node_id != curr_node_id_val:
+                            try:
+                                pres_unlock = _run_stage_presence_check(
+                                    int(sess_id),
+                                    effective_node_id,
+                                    effective_location or "",
+                                    curr_day,
+                                    int(session["current_minute"]) if session.get("current_minute") is not None else None,
+                                    scen_key,
+                                    _build_party_names_set(),
+                                    actions,
+                                    session,
+                                    _resolve_active_turn_1based(session),
+                                    persist_db=bool(persist_db),
+                                    staged_ops=pending_roster_ops,
+                                )
+                                _apply_presence_outputs(pres_unlock, include_tier5=True, target_nid=effective_node_id)
+                            except Exception:
+                                pass
                     else:
                         if access_gate_info.get("halt_location_override"):
                             effective_location = access_gate_info["halt_location_override"]
                         if access_gate_info.get("node_id"):
                             curr_node_id = access_gate_info["node_id"]
+                            effective_node_id = curr_node_id
                             session["current_node_id"] = curr_node_id
                         focal_point = access_gate_info.get("focal_point") or "Outside the Locked Entrance"
                 except Exception:
                     pass
+
+    # Active Quest Witness Staging (D3): daytime non-private rooms stage open/bonus witnesses; off-hours leaves traces
+    if sess_id and effective_location and not access_gate_info.get("gated"):
+        try:
+            from mechanics.world.waypoints.matching import check_location_matches_waypoint
+
+            wit_curr_min = int(session.get("current_minute", 480) or 480)
+            wit_is_daytime = 420 <= (wit_curr_min % 1440) < 1320
+            wit_dest_nid = (
+                effective_node_id
+                or session.get("current_node_id")
+                or db.resolve_node_id_from_location(sess_id, effective_location)
+            )
+            wit_priv_dest = False
+            if wit_dest_nid:
+                wit_node_obj = db.get_world_node(sess_id, wit_dest_nid)
+                if wit_node_obj and str(wit_node_obj.get("privacy_level") or "").lower() in ("private", "restricted", "discreet"):
+                    wit_priv_dest = True
+            if not wit_priv_dest:
+                eff_low = str(effective_location or "").lower()
+                if any(pk in eff_low for pk in ("bedroom", "dorm room", "private suite", "private quarters")):
+                    wit_priv_dest = True
+
+            if not wit_is_daytime:
+                keep_wit_names = (
+                    {str(p).strip().lower() for p in (new_partners or []) if p}
+                    | {_get_npc_name(c).strip().lower() for c in (traveling_companions or []) if _get_npc_name(c)}
+                )
+                filtered_wit_npcs = []
+                for sn in stage_npcs:
+                    sn_low = _get_npc_name(sn).strip().lower()
+                    if isinstance(sn, dict) and sn.get("quest_witness") and sn_low not in keep_wit_names:
+                        seen_stage_names.discard(sn_low)
+                        continue
+                    filtered_wit_npcs.append(sn)
+                stage_npcs = filtered_wit_npcs
+            elif not wit_priv_dest:
+                active_qs = db.get_session_quests(sess_id, status="Active") or []
+                active_qids = {str(aq.get("quest_id") or "") for aq in active_qs if aq.get("quest_id")}
+                if active_qids:
+                    eff_parts = [p.strip().lower() for p in re.split(r"\s*(?:➔|->|✖)\s*", str(effective_location)) if p.strip()]
+                    cand_lookup: dict[str, dict] = {}
+                    for cand in (_get_stage_contacts() + _get_stage_roster()):
+                        if isinstance(cand, dict):
+                            cnm = str(cand.get("name") or "").strip().lower()
+                            if cnm and cnm not in cand_lookup:
+                                cand_lookup[cnm] = cand
+
+                    for dos in (db.get_session_quest_dossiers(sess_id) or []):
+                        if str(dos.get("quest_id") or "") not in active_qids:
+                            continue
+                        clx = dos.get("climax_spec") or {}
+                        for st in (clx.get("main_stages") or []):
+                            if not isinstance(st, dict) or st.get("is_climax_stage"):
+                                continue
+                            st_status = str(st.get("status") or "").lower()
+                            st_done = bool(st.get("completed") or st_status in ("completed", "bypassed"))
+                            st_active = (st_status == "active") or (not st_done and st_status != "locked")
+                            for src in (st.get("clue_sources") or []):
+                                if not isinstance(src, dict) or str(src.get("kind") or "").lower() != "witness":
+                                    continue
+                                src_status = str(src.get("status") or "open").lower()
+                                eligible = (st_active and src_status == "open") or (st_done and bool(src.get("bonus")) and src_status != "claimed")
+                                if not eligible:
+                                    continue
+                                w_npc = str(src.get("npc_name") or "").strip()
+                                w_loc = str(src.get("location") or "").strip()
+                                if not w_npc or not w_loc or w_npc.lower() in seen_stage_names:
+                                    continue
+                                if not check_location_matches_waypoint(effective_location, w_loc, session_id=sess_id):
+                                    continue
+                                s_parts = [p.strip().lower() for p in re.split(r"\s*(?:➔|->|✖)\s*", w_loc) if p.strip()]
+                                if len(s_parts) >= 2:
+                                    s_leaf = s_parts[-2] if s_parts[-1] in ("main area", "area", "") else s_parts[-1]
+                                    if s_leaf not in eff_parts and (not eff_parts or eff_parts[-1] != s_leaf):
+                                        continue
+                                base_c = cand_lookup.get(w_npc.lower()) or {}
+                                w_role = base_c.get("role") or (base_c.get("basic_info") or {}).get("role") or "Witness"
+                                w_grade = base_c.get("grade") or (base_c.get("basic_info") or {}).get("grade") or ""
+                                _add_stage_npc({
+                                    "name": w_npc,
+                                    "role": w_role,
+                                    "grade": w_grade,
+                                    "status_effects": ["Present"],
+                                    "stage_role": "room_bystander",
+                                    "attention_ring": "ring_2_attentive_peer",
+                                    "is_quest_target": True,
+                                    "quest_witness": True,
+                                })
+        except Exception:
+            pass
 
     # Folklore Villages: Non-Spoiler Roster Seeding, Sanctuary Non-Aggression Pact, Leyline Check & Stage Hydration
     import scenario_data as _fk_scen_data
@@ -1463,7 +2050,7 @@ def compute_pre_turn_stage(
                 resolve_folklore_village_for_node,
             )
 
-            eff_turn_num = int(session.get("_target_turn") or session.get("turn_count") or 0)
+            eff_turn_num = _resolve_active_turn_1based(session)
             ensure_folklore_villager_roster(sess_id, session=session, persist_db=persist_db)
             if not persist_db:
                 pending_folklore_ops["ensure_roster"] = True
@@ -1764,8 +2351,6 @@ def compute_pre_turn_stage(
                     npc["attention_ring"] = "ring_3_bystander"
 
     # Synchronize micro-blocking and in-scene composure momentum with session["scene_stage_state"]
-    from mechanics.world.schedules import get_time_block_key
-    from mechanics.social.persona.actor_card import derive_initial_micro_blocking
 
     curr_min = int(session.get("current_minute", 480) or 480)
     time_block = session.get("time_slot") or get_time_block_key(curr_min)
@@ -1781,7 +2366,7 @@ def compute_pre_turn_stage(
                 pruned_state[k_nm] = v_state
         session["scene_stage_state"] = pruned_state
         scene_stage_state = pruned_state
-        if sess_id:
+        if sess_id and persist_db:
             try:
                 db.update_session(sess_id, extra={"scene_stage_state": pruned_state})
             except Exception:
@@ -1829,8 +2414,17 @@ def compute_pre_turn_stage(
         "rep", "representative", "club rep", "member", "director", "lead", "president", "aide", "editor",
         "monitor", "runner", "painter", "council", "organizer", "host", "usher", "actor", "actress",
     )
+    resolved_node_id = (
+        effective_node_id if (is_movement and effective_node_id)
+        else (effective_node_id or session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, effective_location) if sess_id else None))
+    )
+
+    # 5. Pre-Turn Canonical Role Spawning (max 1 role slot-fill per turn; closed-world facility gated)
     from game_engine.turn.generation import _SPAWN_ROLE_RE
+    role_slot_fills_done = 0
     for a in (actions or []):
+        if role_slot_fills_done >= 1:
+            break
         role_req = str(a.get("spawns_npc_role") or "").strip() if isinstance(a, dict) else ""
         if not role_req:
             lbl_str = str(a.get("label", "") if isinstance(a, dict) else a).strip()
@@ -1846,15 +2440,24 @@ def compute_pre_turn_stage(
                 for n in stage_npcs
             )
             if not already_has_role:
-                sp_npc = _spawn_canonical_role_npc_pre_turn(session, role_req, effective_location)
-                _add_stage_npc(sp_npc)
-                if sp_npc["name"] not in new_partners:
-                    new_partners.append(sp_npc["name"])
-                spawned_role_npcs.append(sp_npc)
-                stage_directives.append(
-                    f"[STAGE DIRECTION — CANONICAL ROLE ENCOUNTER]: The {sp_npc['role']} approached by the player is {sp_npc['name']}. "
-                    f"Use their exact canonical name '{sp_npc['name']}' in narrative."
+                sp_npc = _spawn_canonical_role_npc_pre_turn(
+                    session,
+                    role_req,
+                    effective_location,
+                    persist_db=persist_db,
+                    facility_node_id=resolved_node_id if _session_has_world_nodes(sess_id) else None,
+                    staged_ops=pending_roster_ops,
                 )
+                if isinstance(sp_npc, dict) and sp_npc.get("name"):
+                    role_slot_fills_done += 1
+                    _add_stage_npc(sp_npc)
+                    if sp_npc["name"] not in new_partners:
+                        new_partners.append(sp_npc["name"])
+                    spawned_role_npcs.append(sp_npc)
+                    stage_directives.append(
+                        f"[STAGE DIRECTION — CANONICAL ROLE ENCOUNTER]: The {sp_npc['role']} approached by the player is {sp_npc['name']}. "
+                        f"Use their exact canonical name '{sp_npc['name']}' in narrative."
+                    )
 
     # 6. Deterministic Scene Tension Timer & Escalation Spawning
     from game_engine.npcs.dialogue_tracking import evaluate_and_tick_scene_tension_timer
@@ -1893,10 +2496,14 @@ def compute_pre_turn_stage(
                 "[STAGE DIRECTION — PRIVATE RENDEZVOUS]: Confidential 1-on-1 meetup. Party companions step aside and wait in the outer antechamber."
             )
 
-    resolved_node_id = (
-        effective_node_id if (is_movement and effective_node_id)
-        else (session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, effective_location) if sess_id else None))
-    )
+    # Tier 6 Ambient Crowd Flavor Directive (unnamed venue crowd or Tier 5 overflow crowd per F2)
+    if crowd_flavor and not access_gate_info.get("gated"):
+        crowd_dir = (
+            f"[AMBIENT CROWD FLAVOR — UNNAMED BACKGROUND ONLY]: {crowd_flavor} "
+            "Background figures beyond the named scene cast are unnamed atmosphere only — do NOT invent or name unrepresented individuals."
+        )
+        if crowd_dir not in stage_directives:
+            stage_directives.append(crowd_dir)
 
     ret_stage = {
         "is_movement": is_movement,
@@ -1922,6 +2529,10 @@ def compute_pre_turn_stage(
         "blocked_invalid_exit": blocked_invalid_exit,
         "party_cohesion_deferred": party_cohesion_deferred,
         "pending_folklore_ops": pending_folklore_ops,
+        "pending_roster_ops": pending_roster_ops,
+        "doorbell_events": doorbell_events,
+        "crowd_flavor": crowd_flavor,
+        "epistemic_matrix": epistemic_matrix,
     }
     if isinstance(session, dict):
         session["pre_turn_stage_npcs"] = list(stage_npcs)
@@ -2105,6 +2716,7 @@ def resolve_post_turn_stage_delta(
     scenario_key: str = "",
     excluded_names: set = None,
     skip_prose_departures: bool = False,
+    staged_names: set | list | None = None,
 ) -> list:
     """
     Resolves the post-turn physical stage roster by applying stateful deltas:
@@ -2130,8 +2742,8 @@ def resolve_post_turn_stage_delta(
         else:
             baseline = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (raw_npcs_present or [])]
     else:
-        # Location changed: raw_npcs_present represents the arrival stage roster
-        baseline = [dict(n) if isinstance(n, dict) else {"name": str(n)} for n in (raw_npcs_present or [])]
+        # Location changed: arrival NPCs must pass absence, closed-world schedule/rendezvous/party, and mobility filters.
+        baseline = []
 
     all_stage_peer_names = [
         _get_npc_name(x) for x in list(baseline) + list(raw_npcs_present or []) if _get_npc_name(x)
@@ -2233,14 +2845,60 @@ def resolve_post_turn_stage_delta(
             retained_names_lower.add(tok)
             retained_token_owner.setdefault(tok, n)
 
-    # 3. Inspect newcomers in raw_npcs_present (for walk-ins when not location_changed)
+    # 3. Inspect newcomers in raw_npcs_present
     if contacts is None and session and session.get("id"):
         try:
-            contacts = db.get_contacts(session["id"])
+            contacts = safe_get_contacts(session["id"], ensure_scene=False)
         except Exception:
             contacts = []
     contacts = contacts or []
     contacts_map = {str(c.get("name", "")).strip().lower(): c for c in contacts if isinstance(c, dict) and c.get("name")}
+    world_roster_rows = []
+    closed_world_active = False
+    if session and session.get("id"):
+        try:
+            world_roster_rows = db.get_world_roster(session["id"], include_legacy_rosters=False) or []
+            closed_world_active = bool(world_roster_rows or _session_has_world_nodes(session["id"]))
+        except Exception:
+            world_roster_rows = []
+            closed_world_active = False
+    world_roster_map = {
+        str(r.get("name", "")).strip().lower(): r
+        for r in world_roster_rows
+        if isinstance(r, dict) and r.get("name")
+    }
+    party_names_lower: set[str] = set()
+    pre_move_names_lower: set[str] = set()
+    if session:
+        for _grp in (session.get("party_npcs") or [], session.get("party") or [], session.get("temporary_companions") or []):
+            for _item in _grp:
+                _obj = _item[0] if isinstance(_item, (tuple, list)) and _item else _item
+                _p_nm = _obj.get("name") if isinstance(_obj, dict) else (_obj if isinstance(_obj, str) else "")
+                if _p_nm and str(_p_nm).strip():
+                    party_names_lower.add(str(_p_nm).strip().lower())
+        for _pm in list(session.get("current_npcs") or []) + list(session.get("pre_turn_stage_npcs") or []):
+            _pm_nm = _get_npc_name(_pm).strip().lower()
+            if _pm_nm:
+                pre_move_names_lower.add(_pm_nm)
+    appt_names_lower: set[str] = set()
+    if closed_world_active and session and session.get("id"):
+        try:
+            from mechanics.system.commitments_engine import get_active_rendezvous_at_node
+            s_day = int(session.get("current_day", 1) or 1)
+            s_min = int(session.get("current_minute", 480) if session.get("current_minute") is not None else 480)
+            for loc_p in [new_loc, session.get("current_node_id")]:
+                if not loc_p:
+                    continue
+                for r in (get_active_rendezvous_at_node(session["id"], str(loc_p), current_day=s_day, current_minute=s_min) or []):
+                    for p in (r.get("participants") or []):
+                        if isinstance(p, dict) and p.get("name"):
+                            appt_names_lower.add(str(p["name"]).strip().lower())
+                    for k in ("npc_name", "target_npc", "target_entity"):
+                        if r.get(k):
+                            appt_names_lower.add(str(r[k]).strip().lower())
+        except Exception:
+            pass
+    staged_names_low: set[str] = {str(s).strip().lower() for s in (staged_names or ()) if str(s).strip()}
 
     for cand in (raw_npcs_present or []):
         cand_name = _get_npc_name(cand)
@@ -2279,15 +2937,60 @@ def resolve_post_turn_stage_delta(
             continue
 
         # Check mobility & role locks
-        matched_contact = contacts_map.get(c_low)
+        matched_contact = contacts_map.get(c_low) or world_roster_map.get(c_low)
         if not matched_contact and c_toks:
-            contact_keys_list = list(contacts_map.keys())
+            all_known_map = {**world_roster_map, **contacts_map}
+            contact_keys_list = list(all_known_map.keys())
             c_matches = [
-                c for k, c in contacts_map.items()
+                c for k, c in all_known_map.items()
                 if c_toks & namegen.get_unique_person_tokens(k, peer_names=contact_keys_list, min_len=2)
             ]
             if len(c_matches) == 1:
                 matched_contact = c_matches[0]
+
+        if closed_world_active:
+            first_tok = c_low.split()[0] if c_low.split() else ""
+            is_allowed_closed = (
+                (c_low in party_names_lower)
+                or (c_low in appt_names_lower)
+                or (c_low in staged_names_low)
+                or (len(first_tok) >= 3 and first_tok in staged_names_low)
+                or bool(c_toks & staged_names_low)
+            )
+            if not is_allowed_closed and actions and session and (matched_contact is not None or c_low in pre_move_names_lower):
+                try:
+                    from mechanics.world.mobility import has_narrative_continuity_bridge
+                    if has_narrative_continuity_bridge(cand_name, session=session, actions=actions, new_loc=new_loc):
+                        is_allowed_closed = True
+                except Exception:
+                    pass
+            schedule_probe = matched_contact
+            if schedule_probe is None and isinstance(cand, dict) and (
+                cand.get("workplace_node_id")
+                or cand.get("home_node_id")
+                or cand.get("hangout_node_id")
+                or cand.get("roaming_route")
+            ):
+                schedule_probe = cand
+            if not is_allowed_closed and schedule_probe is not None:
+                try:
+                    from mechanics.world import resolve_anchor_schedule_nodes, is_npc_on_active_shift
+                    eff_day = int(session.get("current_day", 1) or 1)
+                    eff_min = int(session.get("current_minute", 480) if session.get("current_minute") is not None else 480)
+                    _dest_nid = db.resolve_node_id_from_location(session["id"], new_loc) if new_loc else ""
+                    curr_nid = str((_dest_nid if location_changed else "") or session.get("current_node_id") or _dest_nid or "")
+                    curr_blk = get_time_block_key(eff_min)
+                    on_s, w_nid = is_npc_on_active_shift(schedule_probe, eff_min, current_day=eff_day, scen_key=scenario_key, session_id=session["id"])
+                    a_map = resolve_anchor_schedule_nodes(schedule_probe, current_day=eff_day, scen_key=scenario_key, session_id=session["id"], current_minute=eff_min)
+                    s_nid = str((a_map or {}).get(curr_blk) or "").strip()
+                    for cnid in (w_nid if on_s else "", s_nid):
+                        if cnid and curr_nid and (cnid == curr_nid or db.is_descendant_of(session["id"], curr_nid, cnid) or db.is_descendant_of(session["id"], cnid, curr_nid)):
+                            is_allowed_closed = True
+                            break
+                except Exception:
+                    is_allowed_closed = False
+            if not is_allowed_closed:
+                continue
 
         if matched_contact:
             if not is_character_mobile(cand_name, matched_contact, scen_key=scenario_key):

@@ -614,10 +614,16 @@ def build_actor_direction_card(
 
     # ── Layer 1: Situational Presence & Agency ──
     activity = derive_scene_activity(npc, location=curr_loc, current_minute=curr_min, scen_key=scen_key)
+    if isinstance(npc, dict):
+        _act_tag = str(npc.get("activity_tag") or "").strip()
+        if _act_tag:
+            activity = _act_tag
     agenda = derive_immediate_agenda(npc, session=session, actions=actions)
 
     lines.append("[Situational Presence & Agency]")
     lines.append(f"  * Physical Activity: {activity}")
+    if isinstance(npc, dict) and npc.get("telltale_revealed") and npc.get("visible_tell_text"):
+        lines.append(f"  * Visible Tell: {npc.get('visible_tell_text')}")
     lines.append(f"  * Immediate Agenda: {agenda}")
 
     # Situational Speech Register

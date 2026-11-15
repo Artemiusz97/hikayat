@@ -59,6 +59,9 @@ def build_initial_threat_clock(
         "crossed_thresholds": [],
         "reinforced": False,
         "world_scar_pending": False,
+        "paused_by_breakthrough": False,
+        "paused": False,
+        "pushed_back": False,
         "last_consequence_note": "",
         "last_consequence_event": None,
     }
@@ -78,6 +81,9 @@ def _ensure_clock_dict(climax: Dict[str, Any], eligible: bool) -> Dict[str, Any]
     clk["crossed_thresholds"] = [int(x) for x in (clk.get("crossed_thresholds") or []) if isinstance(x, (int, float, str)) and str(x).isdigit()]
     clk["reinforced"] = bool(clk.get("reinforced", False))
     clk["world_scar_pending"] = bool(clk.get("world_scar_pending", False))
+    clk["paused_by_breakthrough"] = bool(clk.get("paused_by_breakthrough", False))
+    clk["paused"] = bool(clk.get("paused", False))
+    clk["pushed_back"] = bool(clk.get("pushed_back", False))
     clk["last_consequence_event"] = raw.get("last_consequence_event") if isinstance(raw, dict) else None
     return clk
 
@@ -157,7 +163,9 @@ def get_threat_clock_view(
     return {
         "enabled": True,
         "engaged": bool(dossier.get("engaged_flag")),
-        "paused": _is_in_climax_combat(session, qid_str, climax),
+        "paused": bool(clk.get("paused_by_breakthrough") or clk.get("paused") or _is_in_climax_combat(session, qid_str, climax)),
+        "paused_by_breakthrough": bool(clk.get("paused_by_breakthrough")),
+        "pushed_back": bool(clk.get("pushed_back")),
         "filled": filled,
         "max_segments": max_seg,
         "next_threshold": next_th,
@@ -464,8 +472,18 @@ def tick_threat_clock(
         return {"ticked": False, "ticks_added": 0, "directives": []}
 
     climax = copy.deepcopy(dossier.get("climax_spec") or {})
-    if _is_in_climax_combat(sess, qid, climax):
-        return {"ticked": False, "ticks_added": 0, "paused_climax_combat": True, "directives": []}
+    clk_pre = _ensure_clock_dict(climax, True)
+    _in_combat = _is_in_climax_combat(sess, qid, climax)
+    if clk_pre.get("paused_by_breakthrough") or clk_pre.get("paused") or _in_combat:
+        return {
+            "ticked": False,
+            "ticks_added": 0,
+            "paused": True,
+            "paused_by_breakthrough": bool(clk_pre.get("paused_by_breakthrough")),
+            "paused_climax_combat": bool(_in_combat),
+            "clock": clk_pre,
+            "directives": [],
+        }
 
     # E1: never tick before chapter engagement
     if int(dossier.get("engaged_flag") or 0) == 0:
@@ -498,6 +516,8 @@ def tick_threat_clock(
     clk["last_tick_minute_abs"] = abs_now
     clk["pending_minutes"] = rem
     clk["filled"] = new_filled
+    if new_filled > old_filled:
+        clk["pushed_back"] = False
     climax["threat_clock"] = clk
 
     cons_res = _apply_threshold_consequences(
@@ -562,3 +582,107 @@ def decrement_threat_clock(
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax, conn=conn)
     db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, conn=conn)
     return clk
+
+
+def apply_optional_pushback_to_climax(
+    climax: Dict[str, Any],
+    *,
+    delta: int = 1,
+    clear_base_guards: bool = False,
+    clock_eligible: bool = True,
+) -> Dict[str, Any]:
+    """Mutates `climax` in-place for `aid`/`bypass` counter-play (`F-4` safe reinforcement stripping)."""
+    reinf = [dict(r) for r in (climax.get("reinforcements") or []) if isinstance(r, dict)]
+    eff_delta = max(1, int(delta or 1))
+    removed_clock = 0
+    kept_reinf: List[Dict[str, Any]] = []
+    stripped_names: List[str] = []
+    for r in reinf:
+        if r.get("from_rush"):
+            kept_reinf.append(r)
+        elif r.get("from_threat_clock"):
+            if removed_clock < eff_delta:
+                removed_clock += 1
+                stripped_names.append(str(r.get("name") or ""))
+            else:
+                kept_reinf.append(r)
+        elif clear_base_guards:
+            stripped_names.append(str(r.get("name") or ""))
+        else:
+            kept_reinf.append(r)
+    climax["reinforcements"] = kept_reinf
+    if clear_base_guards and not any(r.get("from_rush") for r in kept_reinf):
+        climax["rush_un_nerfed_buffs"] = {}
+
+    if not clock_eligible:
+        return {
+            "pushed_back": False,
+            "old_filled": 0,
+            "filled": 0,
+            "stripped_reinforcements": stripped_names,
+            "clock": climax.get("threat_clock"),
+        }
+
+    clk = _ensure_clock_dict(climax, True)
+    old_filled = int(clk["filled"])
+    new_filled = max(0, old_filled - eff_delta)
+    pushed_back = new_filled < old_filled
+    clk["filled"] = new_filled
+    if pushed_back:
+        clk["pushed_back"] = True
+    clk["crossed_thresholds"] = [int(t) for t in (clk.get("crossed_thresholds") or []) if int(t) <= new_filled]
+    clk["world_scar_pending"] = bool(new_filled >= int(clk.get("max_segments") or THREAT_CLOCK_MAX_SEGMENTS))
+    clk["reinforced"] = any(bool(r.get("from_threat_clock")) for r in kept_reinf)
+    climax["threat_clock"] = clk
+    return {
+        "pushed_back": pushed_back,
+        "old_filled": old_filled,
+        "filled": new_filled,
+        "stripped_reinforcements": stripped_names,
+        "clock": clk,
+    }
+
+
+def pushback_threat_clock_from_optional(
+    session_id: int,
+    quest_id: str,
+    delta: int = 1,
+    *,
+    clear_base_guards: bool = False,
+    turn_number: Optional[int] = None,
+    conn: Any = None,
+) -> Dict[str, Any]:
+    """D5: Decrements the active chapter's Threat Clock by `delta` and strips `<=delta` `from_threat_clock` adds."""
+    import db
+
+    if not session_id or not quest_id:
+        return {"pushed_back": False, "filled": 0, "stripped_reinforcements": []}
+    if conn is None:
+        with db.UnitOfWork() as uow_conn:
+            return pushback_threat_clock_from_optional(
+                session_id,
+                quest_id,
+                delta=delta,
+                clear_base_guards=clear_base_guards,
+                turn_number=turn_number,
+                conn=uow_conn,
+            )
+    sess = db.get_session(session_id) or {}
+    q = db.get_minimal_story_quest(session_id, quest_id, conn=conn)
+    dossier = db.get_quest_dossier(session_id, quest_id, conn=conn)
+    if not dossier:
+        return {"pushed_back": False, "filled": 0, "stripped_reinforcements": []}
+    eligible = is_threat_clock_eligible(sess, q, dossier)
+    prev_climax = copy.deepcopy(dossier.get("climax_spec") or {})
+    climax = copy.deepcopy(prev_climax)
+    res = apply_optional_pushback_to_climax(
+        climax,
+        delta=delta,
+        clear_base_guards=clear_base_guards,
+        clock_eligible=eligible,
+    )
+    if climax != prev_climax:
+        eff_turn = int(turn_number if turn_number is not None else db.get_effective_session_turn(session_id, sess=sess, conn=conn))
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax, conn=conn)
+        db.upsert_quest_dossier(session_id, quest_id, climax_spec=climax, conn=conn)
+    return res

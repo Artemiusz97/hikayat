@@ -299,18 +299,19 @@ def calculate_tactical_damage(
         and str(convert_type).lower() not in ("physical", "ballistic", "ranged", "slash", "slashing", "hack", "thrust", "pierce", "piercing", "stabbing", "blunt", "bludgeoning")
     )
 
+    match_swing_type = "" if is_magical else active_type
     if is_non_corporeal and not is_magical:
         if has_non_phys_conv:
             is_immune = matches_damage_type(target_immunities, str(convert_type))
         else:
             is_immune = True
     else:
-        is_immune = matches_damage_type(target_immunities, chosen_dmg_type, active_type)
+        is_immune = matches_damage_type(target_immunities, chosen_dmg_type, match_swing_type)
 
-    if matches_damage_type(target_resistances, chosen_dmg_type, active_type):
+    if matches_damage_type(target_resistances, chosen_dmg_type, match_swing_type):
         phys_mult *= 0.5
         elem_mult *= 0.5
-    if matches_damage_type(target_weaknesses, chosen_dmg_type, active_type):
+    if matches_damage_type(target_weaknesses, chosen_dmg_type, match_swing_type):
         phys_mult *= 1.5
         elem_mult *= 1.5
 
@@ -526,7 +527,7 @@ def calculate_turn_damage(action: dict, player_stats: dict, monster_stats: dict)
     player_damage = max(0, int(monster_stats.get("ATK", 10) * 0.5))
     return max(0, enemy_damage), max(0, player_damage)
 
-def tick_status_timers(entity: dict) -> dict:
+def tick_status_timers(entity: dict, non_lethal_mode: bool = False) -> dict:
     """Hybrid Status Effect Timer System & DoT Lifecycle.
     Decrements turn timers on any status effect (both StatusEffectInstance dicts and '<effect> [N turns]' strings).
     Applies DoT damage (Burn, Poison, Bleed) with intensity stacking and removes effects when timer reaches 0.
@@ -534,6 +535,6 @@ def tick_status_timers(entity: dict) -> dict:
     Mutates entity['status_effects'] in-place and returns it.
     """
     from .status_effects import tick_status_instance_timers
-    return tick_status_instance_timers(entity)
+    return tick_status_instance_timers(entity, non_lethal_mode=non_lethal_mode)
 
 

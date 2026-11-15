@@ -1348,7 +1348,10 @@ def evaluate_quest_state_predicates(
             if target_status in ("deceased", "captured", "disappeared", "spared"):
                 def advance_waypoint_stage(_sid: int, _qid: str, _so_id):
                     _wp = db.get_active_waypoint(_sid, _qid, _so_id)
-                    return db.advance_waypoint(_sid, _qid, int((_wp or {}).get("stage_index") or 1), _so_id) if _wp else None
+                    if not _wp:
+                        return None
+                    _st_idx = int(_wp["stage_index"]) if _wp.get("stage_index") is not None else 0
+                    return db.advance_waypoint(_sid, _qid, _st_idx, _so_id)
                 top_active_wp = db.get_active_waypoint(session_id, qid, None)
                 if top_active_wp:
                     wp_npc = str(top_active_wp.get("target_npc") or "").strip().lower()
@@ -2872,33 +2875,45 @@ def _resolve_pre_turn_quests_impl(
                                 )
                                 if strike_res and strike_res.get("directive"):
                                     directives.append(strike_res["directive"])
-                                if strike_res and strike_res.get("status") == "dire_cost":
-                                    so_done = True
-                                elif strike_res and strike_res.get("stage_advanced"):
-                                    advanced_keys.append((qid, so_id))
-                                    comp_st = int(strike_res.get("completed_stage") or 1)
-                                    nxt_wp = strike_res.get("next_waypoint") or {}
-                                    nxt_st = int(strike_res.get("next_stage") or (comp_st + 1))
-                                    staged_advances[f"{qid}:{so_id}"] = {
-                                        "quest_id": qid,
-                                        "sub_obj_id": so_id,
-                                        "completed_stage": comp_st,
-                                        "next_stage": nxt_st,
-                                        "next_waypoint": nxt_wp,
-                                        "fail_forward": True,
-                                    }
-                                    waypoint_notices.append({
-                                        "quest_id": qid,
-                                        "sub_obj_id": so_id,
-                                        "completed_stage_index": comp_st,
-                                        "stage_index": comp_st,
-                                        "status": "completed",
-                                        "next_stage": nxt_st,
-                                        "next_waypoint": nxt_wp,
-                                        "fail_forward": True,
-                                    })
-                                    if strike_res.get("all_stages_complete"):
+                                if strike_res:
+                                    is_dire = strike_res.get("status") == "dire_cost"
+                                    if is_dire:
+                                        so_done = bool(strike_res.get("all_stages_complete", True))
+                                    elif strike_res.get("stage_advanced") and strike_res.get("all_stages_complete"):
                                         so_done = True
+                                    if strike_res.get("stage_advanced") and (not is_dire or not so_done):
+                                        advanced_keys.append((qid, so_id))
+                                        comp_st = int(strike_res.get("completed_stage") or 1)
+                                        nxt_wp = strike_res.get("next_waypoint") or {}
+                                        nxt_st = int(strike_res.get("next_stage") or (comp_st + 1))
+                                        adv_entry = {
+                                            "quest_id": qid,
+                                            "sub_obj_id": so_id,
+                                            "completed_stage": comp_st,
+                                            "next_stage": nxt_st,
+                                            "next_waypoint": nxt_wp,
+                                            "fail_forward": True,
+                                        }
+                                        notice_entry = {
+                                            "quest_id": qid,
+                                            "sub_obj_id": so_id,
+                                            "completed_stage_index": comp_st,
+                                            "stage_index": comp_st,
+                                            "status": "completed",
+                                            "next_stage": nxt_st,
+                                            "next_waypoint": nxt_wp,
+                                            "fail_forward": True,
+                                        }
+                                        if is_dire:
+                                            adv_entry["dire_cost"] = True
+                                            notice_entry["dire_cost"] = True
+                                        staged_advances[f"{qid}:{so_id}"] = adv_entry
+                                        waypoint_notices.append(notice_entry)
+                                        if is_dire and session_id:
+                                            _q_dc = db.get_quest_by_id(session_id, qid)
+                                            if _q_dc and isinstance(_q_dc.get("sub_objectives"), list):
+                                                sub_objs = _q_dc["sub_objectives"]
+                                                q["sub_objectives"] = sub_objs
 
                 if not so_done and resolves_so_id is not None and str(resolves_so_id) == str(so_id) and is_success:
                     so_done = True

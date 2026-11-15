@@ -1,6 +1,6 @@
-# Hikayat (v2.11.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v3.0.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-2.11.0-blue.svg)](releases/CHANGELOG-v2.11.0.md)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](releases/CHANGELOG-v3.0.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -15,9 +15,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: In typical AI dungeon masters, the language model invents dice rolls, changes character health arbitrarily, and forgets inventory constraints, leading to hallucinations and broken rules.
 * **How Hikayat works**: The game separates logic from storytelling. Every player action is first processed by Python code in `TurnService`: the engine calculates dice rolls, applies Fallout-style damage reduction, deducts item charges, and checks quest status. Only after the numbers are locked does the AI receive a prompt instructing it to describe what just happened without altering the math.
 
-### 2. Deterministic Stage Manager & Cast Tracking (`CastPlanner`)
-* **What problem it solves**: AI story games often suffer from "phantom NPCs"—characters who speak when they are not in the room, or disappear mid-conversation.
-* **How Hikayat works**: The engine maintains a stage state machine (`game_engine/npcs/cast_planner.py` and `presence.py`) that tracks who is physically present in the scene, who is speaking, and who is an onlooker. When a character leaves the area, their conversation thread is closed by code, preventing the AI from continuing to generate dialogue for absent characters.
+### 2. Closed-World NPC Engine & 6-Tier Presence Resolver (`CastPlanner`, `presence_resolver.py`)
+* **What problem it solves**: AI story games often suffer from "phantom NPCs"—characters who speak when they are not in the room, invent random shopkeepers every visit, or disappear mid-conversation.
+* **How Hikayat works**: Every character belongs to a persistent closed-world database roster (`db/roster.py`) with seeded workplace anchors and daily shifts (`mechanics/world/venue_seeder.py`, `anchor_schedule.py`). Before each turn, a 6-tier presence resolver (`mechanics/world/presence_resolver.py`) and stage manager (`game_engine/npcs/cast_planner.py`, `stage_manager.py`) determine physically present characters—checking party companions, scheduled commitments, quest pins, home doorbell rules, and shift schedules—so the AI only writes dialogue for people who are actually there.
 
 ### 3. Graph-Based World Map & Dijkstra Pathfinding (`locations/pathfinding.py`)
 * **What problem it solves**: Instead of letting the player teleport or describe traveling across impossible distances, the world needs realistic distances and movement costs.
@@ -31,9 +31,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: Quests in AI games easily lose focus, forget objectives, or conclude abruptly without resolving clues.
 * **How Hikayat works**: Quests are categorized into specific operational engines (Investigation, Bounty, Social Infiltration, Survival) and tracked in relational database tables (`quests`, `quest_dossiers`, `session_clues`). As players uncover evidence and interview witnesses, the system compiles structured forensic dossiers with verifiable leads and sub-objectives in SQLite.
 
-### 6. World Pulse & Autonomous Background Simulation (`mechanics/world/world_events/`)
-* **What problem it solves**: Static RPG worlds feel frozen in place whenever the player is not actively looking at an area.
-* **How Hikayat works**: Alongside player turns, the engine simulates background rumors, weather shifts, faction skirmishes, political scandals, and economic crises across different map zones. Events have countdown timers and can escalate into larger emergencies if the player neglects them.
+### 6. Living World Autonomy & Epistemic Asymmetry Matrix (`npc_autonomy.py`, `epistemic_engine.py`, `db/epistemic.py`)
+* **What problem it solves**: In most RPGs, NPCs never interact with each other off-screen, and every character magically knows secrets the moment something happens—or never hears rumors at all.
+* **How Hikayat works**: Across time-block boundaries, the engine runs deterministic off-screen NPC autonomy (`mechanics/world/npc_autonomy.py`) alongside World Pulse regional events (`mechanics/world/world_events/`) and an Epistemic Asymmetry Matrix (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`). Witnesses track what they saw, rumors decay or spread 1-hop across social ties with server-side Fog-of-War isolation, alibis are checked for lies, and players can confront, hush, bribe, or leverage secrets deterministically.
 
 ### 7. Vector Memory Compaction & Sliding Token Budgets (`mechanics/system/memory/`)
 * **What problem it solves**: Large language models have strict context limits and become slow or expensive as chat history grows.
@@ -72,9 +72,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What it looks like**: An in-game smartphone interface with messaging, contacts, camera, and apps.
 * **How it plays**: Your character carries a phone that you can use to browse contacts, text NPCs, receive photos, schedule meetups, and read local town or school gossip feeds that update as the story develops.
 
-### 5. Real-Time Clock & Circadian NPC Schedules
-* **What it looks like**: An in-game clock advancing across 8 distinct daily phases (Dawn, Morning, Afternoon, Dusk, Night, etc.).
-* **How it plays**: Non-player characters follow daily schedules based on their jobs, grades, or factions. They commute to work, attend classes, eat at restaurants, and sleep at home. If you visit a shop after hours, the owner will not be there.
+### 5. Real-Time Clock, Circadian Schedules & Progressive Routine Discovery
+* **What it looks like**: An in-game clock advancing across daily phases, paired with an Acquaintances & Contacts directory displaying discovered 5-block weekday/weekend schedules (`KnownRoutineCard`).
+* **How it plays**: Persistent characters follow work shifts, rest days, hangout habits, and sleep schedules. Shops only open when an assigned staff member is on duty, private home addresses remain masked until you earn enough trust or receive an invitation, and each NPC's weekly schedule reveals progressively as you meet them or build affinity.
 
 ### 6. Detailed Social Relationships & Family Trees
 * **What it looks like**: NPCs have documented family members, occupations, personal traits, and relationship levels.

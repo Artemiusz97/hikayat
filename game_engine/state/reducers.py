@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 from .constants import *
 from .helpers import get_combined_narrative, is_check_success
 import mechanics.narrative.event_handlers
@@ -18,6 +19,13 @@ import game_engine
 import db
 import config
 import scenario_data
+
+def _status_effect_text(entry: Any) -> str:
+    """Extract comparable status text from string or StatusEffectInstance dict entries."""
+    if isinstance(entry, dict):
+        return str(entry.get("name") or entry.get("condition") or entry.get("tag") or "")
+    return str(entry or "")
+
 
 def _resolve_current_turn_1based(session: dict | None, outcome: dict | None = None) -> int:
     """Resolve 1-based monotonic gameplay turn number (0 is reserved for character backstory)."""
@@ -956,7 +964,7 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           if isinstance(cs, str) and cs.strip():
               if re.search(r"\[\d+\s*(?:turns?|min)\]", cs, re.IGNORECASE):
                   base_name = re.sub(r"\s*\[\d+\s*(?:turns?|min)\]", "", cs).strip().lower()
-                  if not any(base_name in str(s).lower() for s in status_raw):
+                  if not any(base_name in _status_effect_text(s).lower() for s in status_raw):
                       status_raw.append(cs)
 
       from character_data import sanitize_status_effects
@@ -965,8 +973,8 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           # Clear temporary combat turn buffs when transitioning outside combat
           cleaned_status = [
               s for s in cleaned_status
-              if not any(k in s for k in ("Iron Skin", "Aegis Warding", "Combat Booster", "Quickstep", "DT]", "DR]", "% ATK]", "% EVA]"))
-              and not (re.search(r"\[\d+\s*turns?\]", s, re.IGNORECASE) and "aroused" not in s.lower())
+              if not any(k in _status_effect_text(s) for k in ("Iron Skin", "Aegis Warding", "Combat Booster", "Quickstep", "DT]", "DR]", "% ATK]", "% EVA]"))
+              and not (re.search(r"\[\d+\s*(?:turns?|min|turn)\]", _status_effect_text(s), re.IGNORECASE) and "aroused" not in _status_effect_text(s).lower())
           ]
 
       # Refractory & Climax Cleanse: If in refractory recovery or spent, purge lingering Aroused and Breathless
@@ -999,26 +1007,26 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
               refr_tag = format_partner_recovery_status_tag(refr_mins_check, char_gen)
               cleaned_status = [
                   s for s in cleaned_status
-                  if not any(k in str(s).lower() for k in ("aroused", "breathless", "spent"))
-                  and not any(k in str(s).lower() for k in ("refractory", "satisfied"))
+                  if not any(k in _status_effect_text(s).lower() for k in ("aroused", "breathless", "spent"))
+                  and not any(k in _status_effect_text(s).lower() for k in ("refractory", "satisfied"))
               ]
               cleaned_status.append(refr_tag)
           else:
               cleaned_status = [
                   s for s in cleaned_status
-                  if not any(k in str(s).lower() for k in ("refractory", "satisfied"))
+                  if not any(k in _status_effect_text(s).lower() for k in ("refractory", "satisfied"))
               ]
       except Exception:
           pass
 
-      if any(k in s.lower() for s in (status_raw or []) + (cleaned_status or []) for k in ("recovering", "exhausted")):
+      if any(k in _status_effect_text(s).lower() for s in (status_raw or []) + (cleaned_status or []) for k in ("recovering", "exhausted")):
           # Character was revived or recovering from party defeat: purge trauma/combat debuffs and turn counters
           cleaned_status = [
               s for s in cleaned_status
-              if not any(k in s.lower() for k in ("bleed", "poison", "burn", "torn", "scorched", "stun", "frozen", "shock", "bruised"))
-              and not re.search(r"\[\d+\s*turns?\]", s, re.IGNORECASE)
+              if not any(k in _status_effect_text(s).lower() for k in ("bleed", "poison", "burn", "torn", "scorched", "stun", "frozen", "shock", "bruised"))
+              and not re.search(r"\[\d+\s*turns?\]", _status_effect_text(s), re.IGNORECASE)
           ]
-          if not any("exhausted" in s.lower() or "recovering" in s.lower() for s in cleaned_status):
+          if not any("exhausted" in _status_effect_text(s).lower() or "recovering" in _status_effect_text(s).lower() for s in cleaned_status):
               cleaned_status.append("Exhausted / Recovering")
       db.set_status_effects(user_id, cleaned_status)
       if isinstance(char, dict):

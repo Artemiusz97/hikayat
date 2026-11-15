@@ -31,6 +31,7 @@ from mechanics.world.mobility import (
     is_solo_travel_intent,
     ACCOMPANIED_TRAVEL_PHRASES,
 )
+from mechanics.social.relationships import safe_get_contacts
 from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
 
 logger = logging.getLogger("hikayat.game_engine.npcs.cast_planner")
@@ -197,9 +198,27 @@ def plan_pre_turn(
     from mechanics.combat import is_in_combat as _check_combat
     if is_combat or _check_combat(session) or stealth_active:
         current_partners = []
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
 
     # 2. Movement / Location transition
     old_loc = session.get("current_location", "")
+    curr_node_now = str((stage_info.get("effective_node_id") if stage_info else None) or session.get("current_node_id") or "")
+    joined_node_prev = str(session.get("_joined_activity_node_id") or "")
+    moved_via_action = any(
+        isinstance(a, dict)
+        and str(a.get("intent") or "").strip().lower() in ("move_location", "movement", "travel", "fast_travel")
+        and (
+            (a.get("target_location") and str(a["target_location"]).strip() != str(old_loc or "").strip())
+            or (a.get("target_node_id") and str(a["target_node_id"]).strip() != curr_node_now)
+        )
+        for a in (actions or ())
+    )
+    if (new_loc and new_loc != old_loc) or moved_via_action or (joined_node_prev and curr_node_now and joined_node_prev != curr_node_now):
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
     if new_loc and new_loc != old_loc:
         retained_partners = []
         if not stealth_active:
@@ -301,6 +320,9 @@ def plan_pre_turn(
     )
     if has_exit_action:
         has_exited_convo = True
+        session["joined_activity_npc"] = None
+        session["joined_activity_partners"] = []
+        session.pop("_joined_activity_node_id", None)
         for p in current_partners:
             p_clean = p.strip()
             p_low = p_clean.lower()
@@ -369,8 +391,21 @@ def plan_pre_turn(
     if not has_exited_convo and not stealth_active:
         import namegen
         social_intents = {
-            "dialogue_init", "social_invite", "romantic_confession", "gift_offer",
-            "disclosure_inquiry", "affection_touch", "party_recruit"
+            "dialogue_init", "social_invite", "join_activity", "romantic_confession",
+            "gift_offer", "disclosure_inquiry", "affection_touch", "party_recruit",
+            "epistemic_containment",
+        }
+        is_private_pull = any(
+            isinstance(a, dict) and (
+                a.get("is_confidential")
+                or any(tok in str(a.get("label") or a.get("text") or "").lower() for tok in ("alone", "in private", "pull aside", "whisper"))
+            )
+            for a in actions
+        )
+        npcs_by_low = {
+            game_engine._get_npc_name(n).strip().lower(): n
+            for n in current_npcs
+            if game_engine._get_npc_name(n).strip()
         }
         for a in actions:
             if isinstance(a, dict):
@@ -407,6 +442,30 @@ def plan_pre_turn(
                             idle_turns[n_low] = 0
                             disengaged_at_turn.pop(n_low, None)
                             logger.info("[CastPlanner] Player initiated dialogue with '%s'", n_name)
+                            if intent_cat == "join_activity":
+                                a_chk = a.get("check")
+                                join_ok = True if a_chk is None else bool(
+                                    a_chk.succeeded if hasattr(a_chk, "succeeded") and a_chk.succeeded is not None
+                                    else (a_chk.get("succeeded", True) if isinstance(a_chk, dict) else True)
+                                )
+                                if join_ok:
+                                    session["joined_activity_npc"] = n_name
+                                    existing_joined = list(session.get("joined_activity_partners") or [])
+                                    if n_name not in existing_joined:
+                                        existing_joined.append(n_name)
+                                    session["joined_activity_partners"] = existing_joined
+                                    session["_joined_activity_node_id"] = str(effective_node_id or session.get("current_node_id") or "")
+                            # D4: 3-way group conversation auto-join when engaging a paired NPC openly
+                            paired_raw = str(n.get("paired_with") or "").strip() if isinstance(n, dict) else ""
+                            if paired_raw and not is_private_pull:
+                                p_low = paired_raw.lower()
+                                p_obj = npcs_by_low.get(p_low)
+                                if p_obj is not None:
+                                    p_canon = game_engine._get_npc_name(p_obj).strip()
+                                    if p_canon and p_canon not in current_partners:
+                                        current_partners.append(p_canon)
+                                    idle_turns[p_canon.lower()] = 0
+                                    disengaged_at_turn.pop(p_canon.lower(), None)
 
     # 7. Idle Turn Counter (3 non-involving turns -> automatic disengagement)
     if not has_exited_convo and current_partners:
@@ -527,6 +586,178 @@ def _resolve_present_npc_name(npc_name: str, present_list: list, party_names: se
     return None
 
 
+def _is_closed_world_record_scheduled_here(
+    rec: dict,
+    *,
+    curr_node: str,
+    curr_loc: str,
+    curr_block: str,
+    eff_day: int,
+    eff_min: int,
+    eff_slot: str,
+    scen_key: str,
+    sess_id: Any,
+    resolve_anchor_fn: Any,
+    on_shift_fn: Any,
+    sched_loc_fn: Any,
+) -> bool:
+    """Return True when a closed-world NPC record is scheduled or anchored at the active location."""
+    if not isinstance(rec, dict):
+        return False
+    origin_low = str(rec.get("origin") or "").lower()
+    staff_low = str(rec.get("staff_status") or "active").lower()
+    if origin_low not in ("", "legacy_adapter") and staff_low == "active":
+        try:
+            a_map = resolve_anchor_fn(
+                rec,
+                current_day=eff_day,
+                scen_key=scen_key,
+                session_id=sess_id,
+                current_minute=eff_min,
+            )
+            on_shift, work_nid = on_shift_fn(
+                rec, eff_min, current_day=eff_day, scen_key=scen_key, session_id=sess_id
+            )
+            sched_nid = str((a_map or {}).get(curr_block) or "").strip()
+            for cand_nid in (work_nid if on_shift else "", sched_nid):
+                if cand_nid and curr_node and (
+                    cand_nid == curr_node
+                    or (
+                        sess_id
+                        and (
+                            db.is_descendant_of(sess_id, curr_node, cand_nid)
+                            or db.is_descendant_of(sess_id, cand_nid, curr_node)
+                        )
+                    )
+                ):
+                    return True
+        except Exception:
+            pass
+    try:
+        sched_loc = sched_loc_fn(
+            rec,
+            current_minute=eff_min,
+            scen_key=scen_key,
+            time_slot=eff_slot,
+            session_id=sess_id,
+            current_day=eff_day,
+        )
+    except Exception:
+        sched_loc = ""
+    if not sched_loc:
+        sched_loc = str(
+            rec.get("location")
+            or (rec.get("basic_info") or {}).get("location")
+            or ""
+        )
+    return bool(sched_loc and _locations_overlap(sched_loc, curr_loc))
+
+
+def _resolve_closed_world_role_alias(
+    alias_name: str,
+    *,
+    ev_gender: str,
+    candidates: List[Any],
+    known_npcs_by_low: Dict[str, dict],
+    staged_allowed_low: set,
+    active_appt_npcs: set,
+    party_names: set,
+    doorbell_blocked_lows: set,
+    is_private_room: bool,
+    curr_node: str,
+    curr_loc: str,
+    curr_block: str,
+    eff_day: int,
+    eff_min: int,
+    eff_slot: str,
+    scen_key: str,
+    sess_id: Any,
+    resolve_anchor_fn: Any,
+    on_shift_fn: Any,
+    sched_loc_fn: Any,
+) -> Optional[Tuple[str, Optional[dict]]]:
+    """Match a generic role alias (e.g. 'Field Agent', 'a friendly barista') onto a closed-world NPC."""
+    alias_low = (alias_name or "").strip().lower()
+    if not alias_low:
+        return None
+    alias_clean = re.sub(r"^(?:a|an|the)\s+", "", alias_low).strip()
+    if not alias_clean:
+        return None
+    had_article = alias_clean != alias_low
+    ev_g = (ev_gender or "").strip().lower()
+
+    seen_low: set = set()
+    first_fallback: Optional[Tuple[str, Optional[dict]]] = None
+    for cand in candidates:
+        cand_name = game_engine._get_npc_name(cand).strip()
+        if not cand_name:
+            continue
+        cand_low = cand_name.lower()
+        if cand_low in seen_low:
+            continue
+        seen_low.add(cand_low)
+
+        rec = cand if isinstance(cand, dict) else known_npcs_by_low.get(cand_low)
+        merged_rec = dict(known_npcs_by_low.get(cand_low) or {})
+        if isinstance(rec, dict):
+            merged_rec.update({k: v for k, v in rec.items() if v is not None and v != ""})
+
+        cand_role = str(
+            merged_rec.get("role")
+            or (merged_rec.get("basic_info") or {}).get("role")
+            or merged_rec.get("occupation")
+            or ""
+        ).strip().lower()
+        if not cand_role:
+            continue
+        if alias_clean != cand_role and not (
+            had_article and len(cand_role) >= 3 and _matches_name_boundary(cand_role, alias_clean)
+        ):
+            continue
+
+        cand_gender = str(
+            merged_rec.get("gender")
+            or (merged_rec.get("basic_info") or {}).get("gender")
+            or ""
+        ).strip().lower()
+        if ev_g in ("male", "female") and cand_gender in ("male", "female") and cand_gender != ev_g:
+            continue
+
+        eligible_here = (
+            cand_low in staged_allowed_low
+            or cand_low in active_appt_npcs
+            or cand_low in party_names
+            or (
+                not is_private_room
+                and _is_closed_world_record_scheduled_here(
+                    merged_rec,
+                    curr_node=curr_node,
+                    curr_loc=curr_loc,
+                    curr_block=curr_block,
+                    eff_day=eff_day,
+                    eff_min=eff_min,
+                    eff_slot=eff_slot,
+                    scen_key=scen_key,
+                    sess_id=sess_id,
+                    resolve_anchor_fn=resolve_anchor_fn,
+                    on_shift_fn=on_shift_fn,
+                    sched_loc_fn=sched_loc_fn,
+                )
+            )
+        )
+        blocked = (
+            cand_low in doorbell_blocked_lows
+            and cand_low not in active_appt_npcs
+            and cand_low not in party_names
+        )
+        if eligible_here and not blocked:
+            return cand_name, merged_rec or None
+        if first_fallback is None:
+            first_fallback = (cand_name, merged_rec or None)
+
+    return first_fallback
+
+
 def apply_cast_events(
     plan: CastPlan,
     cast_events: list,
@@ -537,12 +768,12 @@ def apply_cast_events(
     narrative_text: Optional[str] = None,
 ) -> Tuple[CastPlan, List[Dict[str, Any]]]:
     """
-    Arbitrates narrative-suggested cast_events against deterministic rules (D4 & D16).
+    Arbitrates narrative-suggested cast_events against closed-world deterministic rules (D4 & D16).
 
-    When ``narrative_text`` is provided, brand-new open-world arrivals must be grounded in the
-    narration (named outside quoted dialogue, or matched by descriptor as physically acting),
-    or be pre-confirmed by the stage-plan contract check (``_contract_confirmed``).
-    
+    Generic role aliases are matched onto closed-world staged/scheduled NPCs before cast closure,
+    and when ``narrative_text`` is provided, arrivals not pre-confirmed by ``_contract_confirmed``
+    must also be grounded in the narration (named outside dialogue or physically acting by descriptor).
+
     Returns (final_plan, rejected_events_list).
     """
     if not cast_events:
@@ -570,39 +801,70 @@ def apply_cast_events(
         for p in (party or [])
     }
 
-    # Fetch active appointments & commitments at current node/location
+    # Fetch active appointments & commitments in-window at current node/location
     active_appt_npcs = set()
     if sess_id:
         try:
-            appts = db.get_phone_appointments(sess_id, status="arrived") + db.get_phone_appointments(sess_id, status="pending")
-            for a in appts:
-                an = str(a.get("npc_name") or "").strip().lower()
-                a_loc = str(a.get("location") or a.get("target_node_id") or "").strip()
-                if an and (not a_loc or not curr_loc or _locations_overlap(a_loc, curr_loc) or (curr_node and a_loc == curr_node)):
-                    active_appt_npcs.add(an)
+            from mechanics.system.commitments_engine import get_active_rendezvous_at_node
+            probes = [p for p in (curr_node, curr_loc) if p]
+            for loc_probe in probes:
+                rdvs = get_active_rendezvous_at_node(sess_id, loc_probe, current_day=eff_day, current_minute=eff_min)
+                for r in (rdvs or []):
+                    for p in (r.get("participants") or []):
+                        if isinstance(p, dict):
+                            p_nm = str(p.get("name") or p.get("npc_name") or "").strip().lower()
+                            p_id = str(p.get("npc_id") or p.get("person_key") or "").strip().lower()
+                            if p_nm and p_nm != "player":
+                                active_appt_npcs.add(p_nm)
+                            if p_id and p_id != "player" and not p_id.startswith("player:"):
+                                active_appt_npcs.add(p_id.replace("_", " "))
+                    for k in ("npc_name", "target_npc", "target_entity"):
+                        rn = str(r.get(k) or "").strip().lower()
+                        if rn and rn not in ("player", "group"):
+                            active_appt_npcs.add(rn.replace("_", " ") if "_" in rn else rn)
         except Exception:
             pass
-        if curr_node:
-            try:
-                from mechanics.system.commitments_engine import get_active_rendezvous_at_node
-                rdvs = get_active_rendezvous_at_node(sess_id, curr_node, current_day=eff_day, current_minute=eff_min)
-                for r in (rdvs or []):
-                    rn = str(r.get("npc_name") or r.get("target_npc") or "").strip().lower()
-                    if rn:
-                        active_appt_npcs.add(rn)
-            except Exception:
-                pass
 
-    # Build lookup of known contacts & faction roster members
+    # Closed-world blocked residents from Tier 4 doorbell evaluation
+    doorbell_blocked_lows = set()
+    for dbell in ((stage_info or {}).get("doorbell_events") or []):
+        if isinstance(dbell, dict) and dbell.get("applicable") and not dbell.get("allowed"):
+            for dk in (dbell.get("name"), dbell.get("npc_id")):
+                if dk:
+                    doorbell_blocked_lows.add(str(dk).strip().lower())
+
+    staged_allowed_low = set()
+    for st_n in ((stage_info or {}).get("stage_npcs") or []) + (plan.present_npcs or []):
+        st_nm = game_engine._get_npc_name(st_n).strip().lower()
+        if st_nm:
+            staged_allowed_low.add(st_nm)
+
+    # Build lookup of known contacts, closed-world roster, folklore roster & legacy rosters
     known_npcs_by_low: Dict[str, dict] = {}
     if sess_id:
         try:
-            for c_rec in (db.get_contacts(sess_id) or []):
+            for c_rec in safe_get_contacts(sess_id, ensure_scene=False):
                 cn = str(c_rec.get("name") or "").strip()
                 if cn:
                     known_npcs_by_low[cn.lower()] = c_rec
         except Exception:
             pass
+        try:
+            for wr in (db.get_world_roster(sess_id, include_legacy_rosters=False) or []):
+                wn = str(wr.get("name") or "").strip()
+                if wn and wn.lower() not in known_npcs_by_low:
+                    known_npcs_by_low[wn.lower()] = wr
+        except Exception:
+            pass
+        _fk_list = session.get("folklore_villager_roster")
+        if _fk_list is None:
+            _sess_fk = db.get_session(sess_id) or {}
+            _fk_list = _sess_fk.get("folklore_villager_roster") or []
+        for fv in (_fk_list or []):
+            if isinstance(fv, dict):
+                fn = str(fv.get("name") or "").strip()
+                if fn and fn.lower() not in known_npcs_by_low:
+                    known_npcs_by_low[fn.lower()] = fv
         try:
             for fac in (db.get_factions(sess_id) or []):
                 for mem in (fac.get("leadership_roster") or []):
@@ -625,8 +887,13 @@ def apply_cast_events(
                     known_npcs_by_low[an.lower()] = ar
         except Exception:
             pass
+    for st_n in ((stage_info or {}).get("stage_npcs") or []):
+        if isinstance(st_n, dict) and st_n.get("name"):
+            sn_low = str(st_n["name"]).strip().lower()
+            if sn_low not in known_npcs_by_low:
+                known_npcs_by_low[sn_low] = st_n
 
-    # Determine room privacy & open-world status for D4 unscheduled arrival cap
+    # Determine room privacy for private-room gating
     is_private_room = False
     if sess_id and curr_node:
         try:
@@ -643,17 +910,16 @@ def apply_cast_events(
         except Exception:
             pass
 
-    is_closed_schedule_world = bool(
-        is_campus_scenario(scen_key) or scenario_data.is_non_combat_scenario(scen_key)
-    )
-    unscheduled_named_arrivals = 0
-
     rejections: List[Dict[str, Any]] = []
     updated_present = list(plan.present_npcs)
     updated_partners = list(plan.dialogue_partners)
     updated_departures = list(plan.departing_npcs)
 
     from mechanics.world.npc_schedule import get_npc_scheduled_location
+    from mechanics.world import resolve_anchor_schedule_nodes, is_npc_on_active_shift
+    from mechanics.world.schedule_blocks import get_time_block_key
+
+    curr_block = get_time_block_key(eff_min)
 
     for ev in cast_events:
         if not isinstance(ev, dict):
@@ -669,8 +935,15 @@ def apply_cast_events(
             continue
         npc_low = npc_name.lower()
 
-        # ── EVENT: ARRIVE (D4: Schedule / Appointment / Open-World 1-Cap) ────
+        # ── EVENT: ARRIVE (Closed-World: Schedule / Appointment / Staged / Party only) ──
         if ev_type == "arrive":
+            orig_npc_name = npc_name
+            arrival_meta: Dict[str, Any] = {}
+            for meta_key in ("gender", "descriptor", "role"):
+                meta_val = ev.get(meta_key)
+                if isinstance(meta_val, str) and meta_val.strip():
+                    arrival_meta[meta_key] = meta_val.strip()
+
             known_rec = known_npcs_by_low.get(npc_low)
             if known_rec is None and sess_id:
                 try:
@@ -678,115 +951,128 @@ def apply_cast_events(
                 except Exception:
                     known_rec = None
 
-            is_ambient_role = (
+            if (
                 known_rec is None
-                and any(_matches_name_boundary(kw, npc_low) for kw in _AMBIENT_ROLE_KEYWORDS)
-            )
+                and npc_low not in staged_allowed_low
+                and npc_low not in active_appt_npcs
+                and npc_low not in party_names
+            ):
+                role_match = _resolve_closed_world_role_alias(
+                    orig_npc_name,
+                    ev_gender=str(ev.get("gender") or ""),
+                    candidates=list((stage_info or {}).get("stage_npcs") or [])
+                    + list(plan.present_npcs or [])
+                    + list(known_npcs_by_low.values()),
+                    known_npcs_by_low=known_npcs_by_low,
+                    staged_allowed_low=staged_allowed_low,
+                    active_appt_npcs=active_appt_npcs,
+                    party_names=party_names,
+                    doorbell_blocked_lows=doorbell_blocked_lows,
+                    is_private_room=is_private_room,
+                    curr_node=curr_node,
+                    curr_loc=curr_loc,
+                    curr_block=curr_block,
+                    eff_day=eff_day,
+                    eff_min=eff_min,
+                    eff_slot=eff_slot,
+                    scen_key=scen_key,
+                    sess_id=sess_id,
+                    resolve_anchor_fn=resolve_anchor_schedule_nodes,
+                    on_shift_fn=is_npc_on_active_shift,
+                    sched_loc_fn=get_npc_scheduled_location,
+                )
+                if role_match is not None:
+                    npc_name, known_rec = role_match
+                    npc_low = npc_name.lower()
+                    arrival_meta.setdefault("descriptor", orig_npc_name)
+
+            if npc_low in doorbell_blocked_lows and npc_low not in active_appt_npcs and npc_low not in party_names:
+                rej = {
+                    "type": "arrive",
+                    "npc": npc_name,
+                    "reason": f"Resident '{npc_name}' blocked by doorbell etiquette.",
+                }
+                rejections.append(rej)
+                logger.warning("[CastPlanner] Rejected doorbell-blocked arrive: %s", rej)
+                continue
+
+            is_staged_here = npc_low in staged_allowed_low
             has_appt_here = npc_low in active_appt_npcs
+            is_party_here = npc_low in party_names
             is_scheduled_here = False
-            if has_appt_here:
-                is_scheduled_here = True
-            elif known_rec is not None:
-                try:
-                    sched_loc = get_npc_scheduled_location(
-                        known_rec,
-                        current_minute=eff_min,
-                        scen_key=scen_key,
-                        time_slot=eff_slot,
-                        session_id=sess_id,
-                        current_day=eff_day,
-                    )
-                except Exception:
-                    sched_loc = ""
-                if not sched_loc:
-                    sched_loc = str(
-                        known_rec.get("location")
-                        or (known_rec.get("basic_info") or {}).get("location")
-                        or ""
-                    )
-                if sched_loc and _locations_overlap(sched_loc, curr_loc):
-                    is_scheduled_here = True
 
-            allow_new_open_world_arrival = (
-                known_rec is None
-                and not is_ambient_role
-                and not is_closed_schedule_world
-                and not is_private_room
-                and unscheduled_named_arrivals < 1
-            )
+            if not (has_appt_here or is_staged_here or is_party_here) and known_rec is not None:
+                is_scheduled_here = _is_closed_world_record_scheduled_here(
+                    known_rec,
+                    curr_node=curr_node,
+                    curr_loc=curr_loc,
+                    curr_block=curr_block,
+                    eff_day=eff_day,
+                    eff_min=eff_min,
+                    eff_slot=eff_slot,
+                    scen_key=scen_key,
+                    sess_id=sess_id,
+                    resolve_anchor_fn=resolve_anchor_schedule_nodes,
+                    on_shift_fn=is_npc_on_active_shift,
+                    sched_loc_fn=get_npc_scheduled_location,
+                )
 
-            if is_ambient_role or is_scheduled_here or allow_new_open_world_arrival:
-                arrival_meta: Dict[str, Any] = {}
-                for meta_key in ("gender", "descriptor", "role"):
-                    meta_val = ev.get(meta_key)
-                    if isinstance(meta_val, str) and meta_val.strip():
-                        arrival_meta[meta_key] = meta_val.strip()
+            if is_private_room and not (is_staged_here or has_appt_here or is_party_here):
+                is_scheduled_here = False
 
-                if allow_new_open_world_arrival:
-                    # Grounding guard: a brand-new person must actually be on-screen in narration
-                    if narrative_text is not None and not ev.get("_contract_confirmed"):
-                        from game_engine.npcs.descriptor_presence import (
-                            has_descriptor_physical_presence,
-                            protagonist_role_tokens,
-                            strip_quoted_dialogue,
-                        )
-                        narr_only = strip_quoted_dialogue(narrative_text).lower()
-                        named_in_prose = bool(re.search(rf"\b{re.escape(npc_low)}\b", narr_only)) or any(
-                            len(tok) >= 3 and re.search(rf"\b{re.escape(tok)}\b", narr_only)
-                            for tok in npc_low.split()[:1]
-                        )
-                        grounded = named_in_prose or has_descriptor_physical_presence(
-                            {"name": npc_name, **arrival_meta},
-                            narrative_text,
-                            exclude_tokens=protagonist_role_tokens(party, session),
-                        )
-                        if not grounded:
-                            rej = {
-                                "type": "arrive",
-                                "npc": npc_name,
-                                "reason": f"New NPC '{npc_name}' is not physically present in the narration.",
-                            }
-                            rejections.append(rej)
-                            logger.warning("[CastPlanner] Rejected ungrounded cast event arrive: %s", rej)
-                            continue
-
-                    # Never register a role title ("Investigator", "Field Agent") as a personal name
-                    import namegen
-                    from game_engine.npcs.descriptor_presence import NEUTRAL_PERSON_NOUNS
-                    _name_toks = npc_low.split()
-                    _is_role_phrase = bool(_name_toks) and len(_name_toks) <= 3 and (
-                        _name_toks[-1] in NEUTRAL_PERSON_NOUNS
-                        or _name_toks[-1] in ("man", "woman", "boy", "girl", "lady", "gentleman")
-                    )
-                    if _is_role_phrase or namegen.is_generic_role_name(npc_name) or not namegen.is_valid_entity_name(npc_name):
-                        arrival_meta.setdefault("descriptor", npc_name)
-                        arrival_meta.setdefault("role", npc_name.title())
-                        c_gen = arrival_meta.get("gender", "")
-                        if not c_gen and sess_id:
-                            player_gen = db.get_session_player_gender(sess_id)
-                            from scenario_data import resolve_scenario_npc_gender
-                            c_gen = resolve_scenario_npc_gender(scen_key, player_gen, rng=random)
-                            arrival_meta["gender"] = c_gen
-                        npc_name = namegen.generate_person_name(
-                            scenario=scen_key, gender=c_gen
-                        )
-                        npc_low = npc_name.lower()
-                    unscheduled_named_arrivals += 1
-                if not any(game_engine._get_npc_name(n).strip().lower() == npc_low for n in updated_present):
-                    updated_present.append({"name": npc_name, "stage_role": "room_bystander", **arrival_meta})
-                    logger.info("[CastPlanner] Approved cast event arrive: '%s' (%s)", npc_name, reason)
-            else:
+            if not (is_staged_here or has_appt_here or is_party_here or is_scheduled_here):
                 rej = {
                     "type": "arrive",
                     "npc": npc_name,
                     "reason": (
                         f"Known NPC '{npc_name}' is scheduled elsewhere without an active appointment here."
                         if known_rec is not None
-                        else f"NPC '{npc_name}' arrival blocked (private room, closed-roster scenario, or 1-arrival cap reached)."
+                        else f"Unscheduled/unseeded NPC '{npc_name}' arrival rejected under closed-world cast closure."
                     ),
                 }
                 rejections.append(rej)
                 logger.warning("[CastPlanner] Rejected cast event arrive: %s", rej)
+                continue
+
+            already_present = any(
+                game_engine._get_npc_name(n).strip().lower() == npc_low for n in updated_present
+            )
+            if not already_present and narrative_text is not None and not ev.get("_contract_confirmed"):
+                from game_engine.npcs.descriptor_presence import (
+                    has_descriptor_physical_presence,
+                    protagonist_role_tokens,
+                    strip_quoted_dialogue,
+                )
+
+                narr_only = strip_quoted_dialogue(narrative_text).lower()
+                named_in_prose = bool(re.search(rf"\b{re.escape(npc_low)}\b", narr_only)) or any(
+                    len(tok) >= 3 and re.search(rf"\b{re.escape(tok)}\b", narr_only)
+                    for tok in npc_low.split()[:1]
+                )
+                probe_entity: Dict[str, Any] = {"name": npc_name, **arrival_meta}
+                if isinstance(known_rec, dict):
+                    if known_rec.get("role") and not probe_entity.get("role"):
+                        probe_entity["role"] = known_rec.get("role")
+                    if known_rec.get("gender") and not probe_entity.get("gender"):
+                        probe_entity["gender"] = known_rec.get("gender")
+                grounded = named_in_prose or has_descriptor_physical_presence(
+                    probe_entity,
+                    narrative_text,
+                    exclude_tokens=protagonist_role_tokens(party, session),
+                )
+                if not grounded:
+                    rej = {
+                        "type": "arrive",
+                        "npc": npc_name,
+                        "reason": f"New NPC '{npc_name}' is not physically present in the narration.",
+                    }
+                    rejections.append(rej)
+                    logger.warning("[CastPlanner] Rejected ungrounded cast event arrive: %s", rej)
+                    continue
+
+            if not already_present:
+                updated_present.append({"name": npc_name, "stage_role": "room_bystander", **arrival_meta})
+                logger.info("[CastPlanner] Approved cast event arrive: '%s' (%s)", npc_name, reason)
 
         # ── EVENT: DEPART ────────────────────────────────────────────────────
         elif ev_type == "depart":

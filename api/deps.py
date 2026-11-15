@@ -529,26 +529,29 @@ class MerchantBuyRequest(BaseModel):
     user_id: int
     item_name: str
     is_phone_shop: Optional[bool] = False
-    merchant_type: Optional[str] = "general_merchant"
+    merchant_type: Optional[str] = None
 
 
 class MerchantSellRequest(BaseModel):
     session_id: int
     user_id: int
     item_id: int
+    is_phone_shop: Optional[bool] = False
+    merchant_type: Optional[str] = None
 
 
 class MerchantHaggleRequest(BaseModel):
     session_id: int
     user_id: int
-    merchant_type: Optional[str] = "general_merchant"
+    is_phone_shop: Optional[bool] = False
+    merchant_type: Optional[str] = None
 
 
 class MerchantRumorRequest(BaseModel):
     session_id: int
     user_id: int
     rumor_index: int
-    merchant_type: Optional[str] = "general_merchant"
+    merchant_type: Optional[str] = None
 
 
 class PhoneMessageRequest(BaseModel):
