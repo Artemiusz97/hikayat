@@ -97,6 +97,9 @@ def get_player_owned_or_starter_property_for_node(
     session_id: int,
     node_id: str,
     session: Mapping[str, Any] | None = None,
+    *,
+    world_node: Mapping[str, Any] | None = None,
+    world_node_loaded: bool = False,
 ) -> dict[str, Any] | None:
     """
     If `node_id` belongs to the player's active starter quarters, a Student Operative's
@@ -113,12 +116,18 @@ def get_player_owned_or_starter_property_for_node(
         return None
 
     parent_id = ""
-    try:
-        w_node = db.get_world_node(int(session_id), target)
-        if w_node:
-            parent_id = str(w_node.get("parent_id") or "")
-    except Exception:
-        parent_id = ""
+    if world_node_loaded:
+        if isinstance(world_node, Mapping):
+            parent_id = str(world_node.get("parent_id") or "")
+    elif isinstance(world_node, Mapping):
+        parent_id = str(world_node.get("parent_id") or "")
+    else:
+        try:
+            w_node = db.get_world_node(int(session_id), target)
+            if w_node:
+                parent_id = str(w_node.get("parent_id") or "")
+        except Exception:
+            parent_id = ""
 
     props = db.get_player_properties(int(session_id))
     for p in props:
@@ -882,6 +891,12 @@ def resolve_spare_key_evening_visit_node(
     npc_dict: Mapping[str, Any],
     current_day: int,
     slot_key: str,
+    *,
+    primary_property: Mapping[str, Any] | None = None,
+    primary_property_loaded: bool = False,
+    contacts: list[dict[str, Any]] | None = None,
+    person_ties: list[Mapping[str, Any]] | None = None,
+    session: Mapping[str, Any] | None = None,
 ) -> str | None:
     """
     If the player's Primary Home is a permanently purchased deed (`is_starter == 0`)
@@ -892,14 +907,23 @@ def resolve_spare_key_evening_visit_node(
         return None
     if slot_key == "afternoon" and (max(1, int(current_day or 1)) % 7) != 0:
         return None
-    try:
-        prim = db.get_primary_property(int(session_id))
-    except Exception:
-        prim = None
+    if primary_property_loaded:
+        prim = primary_property
+    else:
+        try:
+            prim = db.get_primary_property(int(session_id))
+        except Exception:
+            prim = None
     if not prim or prim.get("is_starter"):
         return None
     spare_keys = prim.get("spare_keys") or {}
-    if not is_npc_active_spare_key_holder(int(session_id), npc_dict, spare_keys):
+    if not is_npc_active_spare_key_holder(
+        int(session_id),
+        npc_dict,
+        spare_keys,
+        contacts=contacts,
+        person_ties=person_ties,
+    ):
         return None
 
     b_raw = npc_dict.get("basic_info")
@@ -919,7 +943,8 @@ def resolve_spare_key_evening_visit_node(
     if (int(roll_seed[:8], 16) % 4) != 0:
         return None
 
-    cat = resolve_realty_entry(str(prim.get("property_id") or ""), session_or_id=session_id)
+    sess_ref: Mapping[str, Any] | int = session if isinstance(session, Mapping) else session_id
+    cat = resolve_realty_entry(str(prim.get("property_id") or ""), session_or_id=sess_ref)
     if cat:
         rooms = list(cat.get("all_room_ids") or ())
         if len(rooms) >= 2:

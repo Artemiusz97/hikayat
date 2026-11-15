@@ -2,6 +2,7 @@ from __future__ import annotations
 """
 Location matching, arrival triggers, and skill check completion logic.
 """
+import json
 import re
 from typing import Optional, Any
 
@@ -102,6 +103,337 @@ def _minutes_until_next_shift_open(shift_profile: str, safe_min: int, fallback_w
     return wait_mins if wait_mins > 0 else 60
 
 
+def _lookup_in_memory_special_agent(
+    session: Optional[dict],
+    target_npc: str,
+    slug_npc: str,
+    legacy_entries_by_key: Optional[dict[str, dict]],
+) -> Optional[dict]:
+    tgt_low = target_npc.lower()
+    if isinstance(legacy_entries_by_key, dict):
+        hit = legacy_entries_by_key.get(tgt_low) or legacy_entries_by_key.get(slug_npc)
+        if isinstance(hit, dict):
+            return hit
+    if not isinstance(session, dict):
+        return None
+    agents = session.get("anomalous_agent_roster")
+    if not isinstance(agents, list) and isinstance(session.get("extra"), dict):
+        agents = session["extra"].get("anomalous_agent_roster")
+    if not isinstance(agents, list) and isinstance(session.get("extra_json"), str) and session["extra_json"].strip():
+        try:
+            parsed_extra = json.loads(session["extra_json"])
+            if isinstance(parsed_extra, dict):
+                agents = parsed_extra.get("anomalous_agent_roster")
+        except Exception:
+            agents = None
+    if not isinstance(agents, list):
+        return None
+    for ag in agents:
+        if not isinstance(ag, dict):
+            continue
+        ag_nm = str(ag.get("name") or "").strip().lower()
+        ag_id = str(ag.get("npc_id") or "").strip().lower()
+        if ag_nm == tgt_low or (slug_npc and ag_id == slug_npc):
+            return ag
+    return None
+
+
+def _resolve_sanctuary_node_in_memory(nodes_by_id: dict) -> str:
+    from mechanics.world.locations.access_gate import (
+        _SANCTUARY_EXCLUDED_KEYWORDS,
+        _SANCTUARY_PREFERRED_KEYWORDS,
+    )
+    from mechanics.world.venue_templates import parse_node_state
+
+    nodes = [n for n in nodes_by_id.values() if isinstance(n, dict)]
+    if not nodes:
+        return "loc_hub_sanctuary"
+    facilities = [n for n in nodes if str(n.get("node_type") or "").upper() == "FACILITY"] or list(nodes)
+    for fac in facilities:
+        nid = str(fac.get("node_id") or "")
+        if nid and parse_node_state(fac).get("safe_sanctuary_exempt"):
+            return nid
+    for fac in facilities:
+        nid = str(fac.get("node_id") or "")
+        tier = str(fac.get("access_tier") or "open").lower()
+        blob = f"{nid} {fac.get('name') or ''}".lower()
+        if tier == "open" and not any(ex in blob for ex in _SANCTUARY_EXCLUDED_KEYWORDS) and any(pk in blob for pk in _SANCTUARY_PREFERRED_KEYWORDS):
+            return nid
+    for fac in facilities:
+        nid = str(fac.get("node_id") or "")
+        tier = str(fac.get("access_tier") or "open").lower()
+        blob = f"{nid} {fac.get('name') or ''}".lower()
+        if tier == "open" and not any(ex in blob for ex in _SANCTUARY_EXCLUDED_KEYWORDS):
+            return nid
+    return "loc_hub_sanctuary"
+
+
+def _apply_in_memory_commitment_override(
+    active_commitments: list,
+    npc_dict: dict,
+    target_npc: str,
+    current_day: int,
+    current_minute: int,
+    nodes_by_id: dict,
+) -> tuple[str, str]:
+    from mechanics.world.presence_graph import format_node_display_label, slugify_key
+
+    tokens: set[str] = set()
+    for raw in (npc_dict.get("npc_id"), npc_dict.get("npc_key"), npc_dict.get("name"), target_npc):
+        s = str(raw or "").strip().lower()
+        if s:
+            tokens.add(s)
+            sl = slugify_key(s)
+            if sl:
+                tokens.add(sl)
+    if not tokens:
+        return "", ""
+
+    abs_now = (max(1, int(current_day)) - 1) * 1440 + max(0, int(current_minute))
+    for row in active_commitments:
+        if not isinstance(row, dict):
+            continue
+        stat = str(row.get("status") or "active").strip().lower()
+        if stat in ("cancelled", "canceled", "completed", "missed", "expired", "failed"):
+            continue
+        row_keys: set[str] = set()
+        for rk_field in ("npc_id", "target_entity", "source_entity"):
+            r_val = str(row.get(rk_field) or "").strip().lower()
+            if r_val and r_val != "player":
+                row_keys.add(r_val)
+                row_keys.add(slugify_key(r_val))
+        p_raw = row.get("participants")
+        if p_raw is None and isinstance(row.get("participants_json"), str):
+            try:
+                p_raw = json.loads(row["participants_json"])
+            except Exception:
+                p_raw = []
+        if isinstance(p_raw, list):
+            for p in p_raw:
+                if isinstance(p, dict):
+                    for pk in (p.get("person_key"), p.get("npc_id"), p.get("name"), p.get("npc_name")):
+                        ps = str(pk or "").strip().lower()
+                        if ps and ps != "player" and not ps.startswith("player:"):
+                            row_keys.add(ps)
+                            row_keys.add(slugify_key(ps))
+                else:
+                    ps = str(p or "").strip().lower()
+                    if ps and ps != "player" and not ps.startswith("player:"):
+                        row_keys.add(ps)
+                        row_keys.add(slugify_key(ps))
+        row_keys.discard("")
+        if not (row_keys & tokens):
+            continue
+
+        s_day = max(1, int(row.get("scheduled_day") or 1))
+        s_min = max(0, int(row.get("start_minute") if row.get("start_minute") is not None else 0))
+        raw_end = int(row.get("end_minute") if row.get("end_minute") is not None else 1439)
+        if raw_end >= 1440:
+            extra_d, e_min = divmod(raw_end, 1440)
+            e_day = s_day + extra_d
+        else:
+            e_min = max(0, raw_end)
+            if row.get("end_day") is not None:
+                e_day = max(s_day, int(row["end_day"]))
+            elif e_min < s_min:
+                e_day = s_day + 1
+            else:
+                e_day = s_day
+        abs_start = (s_day - 1) * 1440 + s_min
+        abs_end = (e_day - 1) * 1440 + e_min
+        if max(0, abs_start - 15) <= abs_now <= abs_end:
+            ov_nid = str(row.get("target_node_id") or "").strip()
+            ov_loc = str(row.get("target_location") or "").strip()
+            if ov_nid and ov_nid in nodes_by_id:
+                return format_node_display_label(ov_nid, ov_loc, nodes_by_id), ov_nid
+            if ov_loc:
+                return ov_loc, ov_nid
+    return "", ""
+
+
+def _resolve_waypoint_scheduled_location_in_memory(
+    session_id: int,
+    npc_dict: dict,
+    target_npc: str,
+    curr_day: int,
+    safe_min: int,
+    scen_key: str,
+    session: Optional[dict],
+    nodes_by_id: dict,
+    *,
+    active_events: Optional[list[dict]] = None,
+    primary_property: Optional[dict] = None,
+    primary_property_loaded: bool = False,
+    contacts: Optional[list[dict]] = None,
+    person_ties: Optional[list[Any]] = None,
+    active_commitments: Optional[list[dict]] = None,
+    skip_uncached_db: bool = False,
+) -> tuple[str, str]:
+    from mechanics.social.races import is_myobu_fox_race
+    from mechanics.social.roster_tags import npc_is_folklore_villager
+    from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
+    from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
+    from mechanics.world.locations.residences import resolve_spare_key_evening_visit_node
+    from mechanics.world.npc_schedule import (
+        get_detailed_npc_time_phase,
+        get_npc_schedule,
+        get_npc_schedule_node_ids,
+    )
+    from mechanics.world.presence_graph import format_node_display_label, resolve_node_id_in_memory
+    from mechanics.world.schedule_blocks import get_time_block_key
+
+    if active_commitments is not None:
+        ov_loc, ov_nid = _apply_in_memory_commitment_override(
+            active_commitments, npc_dict, target_npc, curr_day, safe_min, nodes_by_id
+        )
+        if ov_loc:
+            return ov_loc, ov_nid
+    elif session_id and not skip_uncached_db:
+        try:
+            from mechanics.system.commitments_engine import inject_npc_schedule_overrides
+            npc_id_key = str(npc_dict.get("npc_id") or npc_dict.get("name") or "").strip().lower().replace(" ", "_")
+            override = inject_npc_schedule_overrides(session_id, npc_id_key, curr_day, safe_min)
+            if override and override.get("location"):
+                return str(override["location"]).strip(), str(override.get("node_id") or "").strip()
+        except Exception:
+            pass
+
+    scen_low = str(scen_key or "").lower()
+    node_sched = dict(
+        get_npc_schedule_node_ids(
+            npc_dict,
+            scen_key=scen_key,
+            current_day=curr_day,
+            current_minute=safe_min,
+            session_id=None,
+        )
+        or {}
+    )
+
+    skip_spare = npc_is_folklore_villager(npc_dict) and is_myobu_fox_race(str(npc_dict.get("race") or ""))
+    if session_id and is_anomalous_realty_scenario(scen_low) and not skip_spare and (primary_property_loaded or not skip_uncached_db):
+        sk_eve = resolve_spare_key_evening_visit_node(
+            int(session_id),
+            npc_dict,
+            curr_day,
+            "evening",
+            primary_property=primary_property,
+            primary_property_loaded=primary_property_loaded,
+            contacts=contacts,
+            person_ties=person_ties,
+            session=session,
+        )
+        if sk_eve:
+            node_sched["evening"] = sk_eve
+            if "extracurricular" in node_sched:
+                node_sched["extracurricular"] = sk_eve
+        sk_aft = resolve_spare_key_evening_visit_node(
+            int(session_id),
+            npc_dict,
+            curr_day,
+            "afternoon",
+            primary_property=primary_property,
+            primary_property_loaded=primary_property_loaded,
+            contacts=contacts,
+            person_ties=person_ties,
+            session=session,
+        )
+        if sk_aft:
+            node_sched["afternoon"] = sk_aft
+
+    detail_block = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
+    base_block = get_time_block_key(safe_min)
+    block_key = detail_block if detail_block in node_sched else (base_block if base_block in node_sched else "morning")
+    sched_nid = str(node_sched.get(block_key) or node_sched.get("morning") or "").strip()
+
+    ev_list = active_events
+    if ev_list is None and session_id and not skip_uncached_db:
+        try:
+            ev_list = db.get_world_events(session_id, entity_type="macro_event") or []
+        except Exception:
+            ev_list = []
+
+    if ev_list and sched_nid != SHARED_ABSTRACT_RESIDENCE_NODE:
+        crisis_events = [
+            ev for ev in ev_list
+            if isinstance(ev, dict)
+            and ev.get("status") == "active"
+            and (
+                (ev.get("modifiers") or {}).get("is_locked")
+                or (ev.get("modifiers") or {}).get("lockdown_nodes")
+                or (ev.get("modifiers") or {}).get("martial_law_lockdown")
+                or (ev.get("metadata") or {}).get("scar_tier") == "peak"
+            )
+        ]
+        basic = npc_dict.get("basic_info") if isinstance(npc_dict.get("basic_info"), dict) else {}
+        role = str(npc_dict.get("role") or basic.get("role") or npc_dict.get("occupation") or "").lower()
+        if crisis_events and not any(w in role for w in ("inquisitor", "enforcer", "warden", "sentinel", "occupier")):
+            try:
+                from mechanics.world.world_events.modifiers import is_node_locked_by_event
+                sanctuary_nid = _resolve_sanctuary_node_in_memory(nodes_by_id)
+                sanc_target_nid = sanctuary_nid
+                open_rooms = [
+                    n["node_id"]
+                    for n in nodes_by_id.values()
+                    if isinstance(n, dict)
+                    and str(n.get("parent_id") or "") == sanctuary_nid
+                    and str(n.get("access_tier") or "open").lower() == "open"
+                ]
+                if open_rooms:
+                    sanc_target_nid = open_rooms[0]
+                loc_obj = nodes_by_id.get(sched_nid)
+                fac_nid = (
+                    str(loc_obj.get("parent_id") or "")
+                    if (isinstance(loc_obj, dict) and str(loc_obj.get("node_type") or "").upper() == "ROOM")
+                    else sched_nid
+                )
+                if not (sanctuary_nid and (sched_nid == sanctuary_nid or fac_nid == sanctuary_nid)):
+                    cur_ch = int((session or {}).get("current_chapter") or 1)
+                    martial_curfew = cur_ch in (8, 9) and any(
+                        bool((ev.get("modifiers") or {}).get("martial_law_lockdown")) for ev in crisis_events
+                    )
+                    locked_hit = bool(
+                        (sched_nid and is_node_locked_by_event(crisis_events, sched_nid, safe_sanctuary_node_id=sanctuary_nid))
+                        or (fac_nid and is_node_locked_by_event(crisis_events, fac_nid, safe_sanctuary_node_id=sanctuary_nid))
+                    )
+                    sched_disp_low = format_node_display_label(sched_nid, "", nodes_by_id).lower()
+                    scar_hit = any(
+                        (ev.get("metadata") or {}).get("scar_tier") == "peak"
+                        and any(
+                            len(seg.strip()) >= 4 and seg.strip().lower() in sched_disp_low
+                            for seg in str(ev.get("location_name") or "").split("➔")[-1:]
+                        )
+                        for ev in crisis_events
+                    )
+                    curfew_hit = bool(martial_curfew and block_key in ("evening", "night"))
+                    if locked_hit or scar_hit or curfew_hit:
+                        home_nid = str(npc_dict.get("home_node_id") or basic.get("home_node_id") or "").strip()
+                        if block_key == "night" and home_nid and home_nid != SHARED_ABSTRACT_RESIDENCE_NODE and home_nid != sched_nid:
+                            sched_nid = home_nid
+                        elif sanc_target_nid:
+                            sched_nid = sanc_target_nid
+            except Exception:
+                pass
+
+    if sched_nid == SHARED_ABSTRACT_RESIDENCE_NODE:
+        return "Residential District (Unknown Address)", sched_nid
+    if sched_nid and sched_nid in nodes_by_id:
+        return format_node_display_label(sched_nid, "", nodes_by_id), sched_nid
+
+    text_sched = get_npc_schedule(
+        npc_dict, scen_key=scen_key, session_id=None, current_day=curr_day, current_minute=safe_min
+    )
+    fallback_loc = str(
+        text_sched.get(detail_block, text_sched.get(base_block, text_sched.get("morning", "")))
+    ).strip()
+    resolved_nid = (
+        resolve_node_id_in_memory(fallback_loc, nodes_by_id, prefer_facility=False)
+        if (fallback_loc and nodes_by_id)
+        else ""
+    )
+    return fallback_loc, (resolved_nid or sched_nid)
+
+
 def get_waypoint_npc_schedule_info(
     session_id: int,
     wp: dict,
@@ -111,6 +443,13 @@ def get_waypoint_npc_schedule_info(
     contacts_by_name: Optional[dict] = None,
     roster_by_key: Optional[dict] = None,
     nodes_by_id: Optional[dict] = None,
+    active_events: Optional[list[dict]] = None,
+    primary_property: Optional[dict] = None,
+    primary_property_loaded: bool = False,
+    contacts: Optional[list[dict]] = None,
+    person_ties: Optional[list[Any]] = None,
+    active_commitments: Optional[list[dict]] = None,
+    legacy_entries_by_key: Optional[dict[str, dict]] = None,
 ) -> dict:
     """
     Resolves live NPC schedule routing and Nighttime Off-Duty Guard for a waypoint.
@@ -160,26 +499,61 @@ def get_waypoint_npc_schedule_info(
         safe_min = int(curr_min or 0) % 1440
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
 
+        slug_npc = re.sub(r"[^a-z0-9]+", "_", target_npc.lower()).strip("_")
+        if roster_by_key is not None:
+            roster_npc = roster_by_key.get(target_npc.lower()) or roster_by_key.get(slug_npc)
+        else:
+            roster_npc = db.get_world_roster_npc(session_id, target_npc, include_legacy_rosters=False)
+
         if contacts_by_name is not None:
-            contact = contacts_by_name.get(target_npc.lower())
+            contact = contacts_by_name.get(target_npc.lower()) or contacts_by_name.get(slug_npc)
+            if not contact and contacts:
+                target_keys = {k for k in (target_npc.lower(), slug_npc) if k}
+                for c_item in contacts:
+                    if not isinstance(c_item, dict):
+                        continue
+                    c_id_l = str(c_item.get("npc_id") or "").strip().lower()
+                    c_nm_l = str(c_item.get("name") or "").strip().lower()
+                    c_sl = re.sub(r"[^a-z0-9]+", "_", c_nm_l).strip("_")
+                    if target_keys & {k for k in (c_id_l, c_nm_l, c_sl) if k}:
+                        contact = c_item
+                        break
         else:
             contact = db.get_contact(session_id, target_npc)
-        if not contact and scenario_data.is_anomalous_incursions_scenario(scen_key):
+
+        legacy_npc = _lookup_in_memory_special_agent(session, target_npc, slug_npc, legacy_entries_by_key)
+        is_preloaded_lookup = (
+            contacts_by_name is not None
+            or roster_by_key is not None
+            or legacy_entries_by_key is not None
+        )
+        if (
+            not contact
+            and not roster_npc
+            and not legacy_npc
+            and not is_preloaded_lookup
+            and scenario_data.is_anomalous_incursions_scenario(scen_key)
+        ):
             try:
                 from mechanics.social.agent_roster import find_special_agent_by_name
                 contact = find_special_agent_by_name(session_id, target_npc, scen_key=scen_key)
             except Exception:
                 contact = None
 
-        if roster_by_key is not None:
-            slug_npc = re.sub(r"[^a-z0-9]+", "_", target_npc.lower()).strip("_")
-            roster_npc = roster_by_key.get(target_npc.lower()) or roster_by_key.get(slug_npc)
-        else:
-            roster_npc = db.get_world_roster_npc(session_id, target_npc, include_legacy_rosters=False)
-
         npc_record: Optional[dict] = None
-        if contact or roster_npc:
+        if contact or roster_npc or legacy_npc:
             npc_record = dict(contact or {})
+            if isinstance(legacy_npc, dict):
+                l_basic = legacy_npc.get("basic_info") if isinstance(legacy_npc.get("basic_info"), dict) else {}
+                c_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
+                merged_basic = dict(l_basic)
+                merged_basic.update(c_basic)
+                npc_record["basic_info"] = merged_basic
+                for l_key, l_val in legacy_npc.items():
+                    if l_key == "basic_info":
+                        continue
+                    if not npc_record.get(l_key) and l_val not in (None, "", []):
+                        npc_record[l_key] = l_val
             if isinstance(roster_npc, dict):
                 r_basic = roster_npc.get("basic_info") if isinstance(roster_npc.get("basic_info"), dict) else {}
                 c_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
@@ -325,20 +699,40 @@ def get_waypoint_npc_schedule_info(
                     "wake_minute": wake_min,
                 }
 
-        # Only override static_loc with dynamic schedule if contact/roster exists in DB
+        # Only override static_loc with dynamic schedule if contact/roster/legacy exists
         if npc_record:
             npc_dict = dict(npc_record)
             if not npc_dict.get("name"):
                 npc_dict["name"] = target_npc
-            sched_loc = get_npc_scheduled_location(
-                npc_dict,
-                current_minute=safe_min,
-                scen_key=scen_key,
-                session_id=session_id,
-                current_day=curr_day,
-            )
+            eff_sched_nid = ""
+            if nodes_by_id is not None:
+                sched_loc, eff_sched_nid = _resolve_waypoint_scheduled_location_in_memory(
+                    session_id,
+                    npc_dict,
+                    target_npc,
+                    curr_day,
+                    safe_min,
+                    scen_key,
+                    session,
+                    nodes_by_id,
+                    active_events=active_events,
+                    primary_property=primary_property,
+                    primary_property_loaded=primary_property_loaded,
+                    contacts=contacts,
+                    person_ties=person_ties,
+                    active_commitments=active_commitments,
+                    skip_uncached_db=is_preloaded_lookup,
+                )
+            else:
+                sched_loc = get_npc_scheduled_location(
+                    npc_dict,
+                    current_minute=safe_min,
+                    scen_key=scen_key,
+                    session_id=session_id,
+                    current_day=curr_day,
+                )
             if sched_loc and str(sched_loc).strip():
-                return {
+                res_out = {
                     "effective_location": str(sched_loc).strip(),
                     "static_location": static_loc,
                     "scheduled_location": str(sched_loc).strip(),
@@ -349,6 +743,9 @@ def get_waypoint_npc_schedule_info(
                     "wake_clock": format_clock(wake_min),
                     "wake_minute": wake_min,
                 }
+                if eff_sched_nid:
+                    res_out["effective_node_id"] = eff_sched_nid
+                return res_out
     except Exception:
         pass
 
