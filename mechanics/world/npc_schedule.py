@@ -647,7 +647,7 @@ def is_npc_nocturnal_or_night_shift(
     staff_stat = str(npc.get("staff_status") or basic.get("staff_status") or "active").strip().lower()
     is_dead = bool(npc.get("is_deceased") or basic.get("is_deceased") or npc.get("alive") is False or basic.get("alive") is False)
 
-    if session_id:
+    if session_id and not npc.get("_roster_premerged"):
         lookup_key = str(
             npc.get("npc_key")
             or npc.get("npc_id")

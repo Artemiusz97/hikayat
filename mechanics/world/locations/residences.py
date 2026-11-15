@@ -771,6 +771,9 @@ def is_npc_active_spare_key_holder(
     session_id: int,
     npc_ref: str | Mapping[str, Any],
     spare_keys: Mapping[str, Any] | None,
+    *,
+    contacts: list[dict[str, Any]] | None = None,
+    person_ties: list[Mapping[str, Any]] | None = None,
 ) -> bool:
     """
     Returns True if `npc_ref` holds a Spare Key in `spare_keys`, is NOT deceased,
@@ -808,11 +811,13 @@ def is_npc_active_spare_key_holder(
 
     key_lows = {str(k).strip().lower() for k in spare_keys.keys() if str(k).strip()}
     matched_c: dict[str, Any] | None = None
-    try:
-        contacts = db.get_contacts(int(session_id)) or []
-    except Exception:
-        contacts = []
-    for c in contacts:
+    eff_contacts = contacts
+    if eff_contacts is None:
+        try:
+            eff_contacts = db.get_contacts(int(session_id), ensure_scene=False) or []
+        except Exception:
+            eff_contacts = []
+    for c in eff_contacts:
         cid_l = str(c.get("npc_id") or "").strip().lower()
         cnm_l = str(c.get("name") or "").strip().lower()
         cslug = _slugify(cnm_l) if cnm_l else ""
@@ -852,8 +857,11 @@ def is_npc_active_spare_key_holder(
         )
         if not is_rom:
             try:
-                import mechanics.social.relationship_graph as rg
-                ties = rg.get_person_ties(int(session_id), "player") if hasattr(rg, "get_person_ties") else []
+                if person_ties is not None:
+                    ties = person_ties
+                else:
+                    import mechanics.social.relationship_graph as rg
+                    ties = rg.get_person_ties(int(session_id), "player") if hasattr(rg, "get_person_ties") else []
                 for t in (ties or []):
                     t_type = str(t.get("tie_type") or "").strip().lower()
                     if t.get("status") == "active" and t_type in ("romantic", "dating", "partner", "lover", "engaged", "married", "spouse"):

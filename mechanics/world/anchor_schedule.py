@@ -216,7 +216,7 @@ def _merge_roster_context(
 
     db_row: Optional[Dict[str, Any]] = None
     lookup_key = _extract_lookup_key(eff)
-    if session_id and lookup_key:
+    if session_id and lookup_key and not eff.get("_roster_premerged"):
         try:
             db_row = db.get_world_roster_npc(int(session_id), lookup_key, include_legacy_rosters=False)
         except Exception:

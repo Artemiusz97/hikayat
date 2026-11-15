@@ -1057,9 +1057,32 @@ def evaluate_scene_attention_transition(
                     if n_norm in wp_txt or any(t in wp_txt for t in n_tokens):
                         return True
 
-                # Rendezvous targets
+                # Rendezvous targets (always scope to resolved destination / current venue)
                 from mechanics.world.mobility import is_rendezvous_target
-                if is_rendezvous_target(npc_name, session_id=sess_id, actions=actions):
+                dest_loc = ""
+                for a in (actions or []):
+                    if isinstance(a, dict) and (a.get("target_location") or a.get("target_node_id")):
+                        dest_loc = str(a.get("target_location") or a.get("target_node_id") or "").strip()
+                        break
+                    a_txt = str(a.get("label", "") if isinstance(a, dict) else a).strip()
+                    if a_txt:
+                        try:
+                            from mechanics.world.locations import extract_movement_destination, get_zone_location_name
+                            curr_l = str(session.get("current_location") or "")
+                            act_dest = extract_movement_destination(
+                                a_txt,
+                                sess_id,
+                                current_zone=get_zone_location_name(curr_l),
+                                scen_key=str(session.get("scenario") or "default"),
+                            )
+                            if act_dest:
+                                dest_loc = f"{act_dest[0]} ➔ {act_dest[1]}" if act_dest[0] and act_dest[1] else (act_dest[1] or act_dest[0] or "")
+                                break
+                        except Exception:
+                            pass
+                if not dest_loc:
+                    dest_loc = str(session.get("current_node_id") or session.get("current_location") or "").strip()
+                if dest_loc and is_rendezvous_target(npc_name, session_id=sess_id, actions=actions, new_loc=dest_loc):
                     return True
             except Exception:
                 pass

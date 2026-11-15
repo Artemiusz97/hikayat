@@ -40,9 +40,15 @@ def _slugify_res(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", str(text or "").strip().lower()).strip("_")
 
 
+_UNSET = object()
+
+
 def _resolve_residence_lookup_records(
     session_id: Optional[int],
     npc: Optional[Mapping[str, Any] | str],
+    *,
+    roster_row: Any = _UNSET,
+    contact_row: Any = _UNSET,
 ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Resolves caller NPC dict alongside world_roster and contact DB rows."""
     npc_dict: Dict[str, Any] = dict(npc) if isinstance(npc, Mapping) else {}
@@ -59,23 +65,26 @@ def _resolve_residence_lookup_records(
         ).strip()
     )
 
-    db_row: Optional[Dict[str, Any]] = None
-    contact_row: Optional[Dict[str, Any]] = None
+    db_row: Optional[Dict[str, Any]] = None if roster_row is _UNSET else (dict(roster_row) if isinstance(roster_row, Mapping) else None)
+    eff_contact_row: Optional[Dict[str, Any]] = None if contact_row is _UNSET else (dict(contact_row) if isinstance(contact_row, Mapping) else None)
+    premerged = bool(npc_dict.get("_roster_premerged"))
     if session_id is not None and lookup_key:
-        try:
-            db_row = db.get_world_roster_npc(int(session_id), lookup_key, include_legacy_rosters=False)
-        except Exception:
-            db_row = None
-        try:
-            contact_row = db.get_contact(int(session_id), lookup_key)
-        except Exception:
-            contact_row = None
-        if not npc_dict:
-            if isinstance(db_row, dict):
-                npc_dict = dict(db_row)
-            elif isinstance(contact_row, dict):
-                npc_dict = dict(contact_row)
-    return npc_dict, db_row, contact_row
+        if roster_row is _UNSET and not premerged:
+            try:
+                db_row = db.get_world_roster_npc(int(session_id), lookup_key, include_legacy_rosters=False)
+            except Exception:
+                db_row = None
+        if contact_row is _UNSET and not premerged:
+            try:
+                eff_contact_row = db.get_contact(int(session_id), lookup_key)
+            except Exception:
+                eff_contact_row = None
+    if not npc_dict:
+        if isinstance(db_row, dict):
+            npc_dict = dict(db_row)
+        elif isinstance(eff_contact_row, dict):
+            npc_dict = dict(eff_contact_row)
+    return npc_dict, db_row, eff_contact_row
 
 
 def _parse_int_score(raw: Any) -> Optional[int]:
@@ -91,6 +100,9 @@ def _is_player_household_cohabitant(
     sess_id: Optional[int],
     contact_row: Optional[Dict[str, Any]],
     db_row: Optional[Dict[str, Any]],
+    *,
+    household_cache: Optional[dict[int, Optional[Dict[str, Any]]]] = None,
+    player_last_name: Optional[str] = None,
 ) -> bool:
     """Checks contact/household cohabitation safely without trusting raw SQL household_role defaults."""
     c_rel = contact_row.get("relations") if isinstance(contact_row, Mapping) and isinstance(contact_row.get("relations"), Mapping) else {}
@@ -106,20 +118,30 @@ def _is_player_household_cohabitant(
     if not hh_id:
         return False
     try:
-        hh = db.get_household_by_id(int(hh_id))
+        hh_int = int(hh_id)
+        if household_cache is not None and hh_int in household_cache:
+            hh = household_cache[hh_int]
+        else:
+            hh = db.get_household_by_id(hh_int)
+            if household_cache is not None:
+                household_cache[hh_int] = hh if isinstance(hh, dict) else (dict(hh) if isinstance(hh, Mapping) else None)
         if not isinstance(hh, Mapping):
             return False
         hh_key = str(hh.get("household_key") or "").strip().lower()
         if hh_key.startswith("player"):
             return True
+        hh_surname = str(hh.get("surname") or "").strip().lower()
+        if not hh_surname:
+            return False
+        if player_last_name is not None:
+            return bool(player_last_name and player_last_name.lower() == hh_surname)
         session_row = db.get_session(int(sess_id)) if hasattr(db, "get_session") else None
         char_id = int((session_row or {}).get("character_id") or 0)
         if char_id and hasattr(db, "get_character_by_id"):
             p_char = db.get_character_by_id(char_id)
             p_name = str((p_char or {}).get("name") or "").strip()
             p_parts = p_name.split()
-            hh_surname = str(hh.get("surname") or "").strip().lower()
-            if hh_surname and p_parts and p_parts[-1].lower() == hh_surname:
+            if p_parts and p_parts[-1].lower() == hh_surname:
                 return True
     except Exception:
         pass
@@ -130,6 +152,14 @@ def can_materialize_npc_residence(
     session_id: Optional[int] | Mapping[str, Any],
     npc: Optional[Mapping[str, Any] | str | int] = None,
     reason: str = "",
+    *,
+    roster_row: Any = _UNSET,
+    contact_row: Any = _UNSET,
+    primary_property: Any = _UNSET,
+    contacts: Optional[list[dict[str, Any]]] = None,
+    person_ties: Optional[list[Mapping[str, Any]]] = None,
+    household_cache: Optional[dict[int, Optional[Dict[str, Any]]]] = None,
+    player_last_name: Optional[str] = None,
 ) -> bool:
     """
     Returns True if an NPC's private residence is unlocked or eligible for concrete
@@ -146,20 +176,22 @@ def can_materialize_npc_residence(
     if clean_reason in RESIDENCE_UNLOCK_REASONS:
         return True
 
-    npc_dict, db_row, contact_row = _resolve_residence_lookup_records(sess_id, npc_obj)
-    if not npc_dict and not db_row and not contact_row:
+    npc_dict, db_row, eff_contact_row = _resolve_residence_lookup_records(
+        sess_id, npc_obj, roster_row=roster_row, contact_row=contact_row
+    )
+    if not npc_dict and not db_row and not eff_contact_row:
         return False
 
     basic = npc_dict.get("basic_info") if isinstance(npc_dict.get("basic_info"), Mapping) else {}
     db_basic = db_row.get("basic_info") if isinstance(db_row, Mapping) and isinstance(db_row.get("basic_info"), Mapping) else {}
-    c_basic = contact_row.get("basic_info") if isinstance(contact_row, Mapping) and isinstance(contact_row.get("basic_info"), Mapping) else {}
-    has_db_record = (db_row is not None) or (contact_row is not None)
+    c_basic = eff_contact_row.get("basic_info") if isinstance(eff_contact_row, Mapping) and isinstance(eff_contact_row.get("basic_info"), Mapping) else {}
+    has_db_record = (db_row is not None) or (eff_contact_row is not None)
 
     # 1. Explicit persisted unlock flag: DB truth is strictly authoritative over stale caller dicts
     if db_row is not None:
         if bool(db_row.get("residence_unlocked")):
             return True
-    elif contact_row is not None:
+    elif eff_contact_row is not None:
         if bool(c_basic.get("residence_unlocked")):
             return True
     else:
@@ -170,11 +202,15 @@ def can_materialize_npc_residence(
     for src in (npc_dict, basic, db_row or {}, db_basic, c_basic):
         if isinstance(src, Mapping) and (src.get("cohabiting") or src.get("cohabiting_family")):
             return True
-    if _is_player_household_cohabitant(sess_id, contact_row, db_row):
+    if _is_player_household_cohabitant(
+        sess_id, eff_contact_row, db_row,
+        household_cache=household_cache,
+        player_last_name=player_last_name,
+    ):
         return True
 
     # 3. Romantic partner / Friend-tier relationship (>= 100): DB truth authoritative when present
-    tier_sources = (db_row or {}, db_basic, contact_row or {}, c_basic) if has_db_record else (npc_dict, basic)
+    tier_sources = (db_row or {}, db_basic, eff_contact_row or {}, c_basic) if has_db_record else (npc_dict, basic)
     for src in tier_sources:
         if isinstance(src, Mapping) and (src.get("is_romantic") or src.get("romantic_partner")):
             return True
@@ -184,7 +220,7 @@ def can_materialize_npc_residence(
                 return True
 
     raw_score_candidates = (
-        ((db_row or {}).get("affinity_score"), (contact_row or {}).get("relationship_score"))
+        ((db_row or {}).get("affinity_score"), (eff_contact_row or {}).get("relationship_score"))
         if has_db_record
         else (npc_dict.get("affinity_score"), npc_dict.get("relationship_score"), basic.get("affinity_score"))
     )
@@ -201,9 +237,11 @@ def can_materialize_npc_residence(
         try:
             from .residences import is_npc_active_spare_key_holder
 
-            primary_prop = db.get_primary_property(sess_id)
-            spare_keys = primary_prop.get("spare_keys") if isinstance(primary_prop, Mapping) else None
-            if spare_keys and is_npc_active_spare_key_holder(sess_id, npc_dict, spare_keys):
+            eff_prop = db.get_primary_property(sess_id) if primary_property is _UNSET else primary_property
+            spare_keys = eff_prop.get("spare_keys") if isinstance(eff_prop, Mapping) else None
+            if spare_keys and is_npc_active_spare_key_holder(
+                sess_id, npc_dict, spare_keys, contacts=contacts, person_ties=person_ties
+            ):
                 return True
         except Exception:
             pass

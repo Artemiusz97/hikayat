@@ -71,6 +71,7 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                     is_acc = True
                     break
 
+        departure_dest_loc = ""
         if parsed_action.category == IntentCategory.MOVEMENT:
             curr_loc = session.get("current_location", "")
             curr_zone = get_zone_location_name(curr_loc)
@@ -78,6 +79,7 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             action_dest = extract_movement_destination(label, session.get("id"), current_zone=curr_zone, scen_key=scen_k)
             if action_dest:
                 dest_z, dest_p = action_dest
+                departure_dest_loc = f"{dest_z} ➔ {dest_p}" if dest_z and dest_p else (dest_p or dest_z or "")
                 curr_p = get_primary_location_name(curr_loc)
                 curr_s = get_clean_leaf_location(curr_loc)
                 is_diff_room = (
@@ -89,8 +91,29 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             elif parsed_action.metadata.get("is_room_exit"):
                 if not is_acc:
                     is_departing_venue = True
-            elif isinstance(a, dict) and (a.get("target_node_id") or a.get("target_location")) and not is_acc:
-                is_departing_venue = True
+            elif isinstance(a, dict) and (a.get("target_node_id") or a.get("target_location")):
+                departure_dest_loc = str(a.get("target_location") or a.get("target_node_id") or "").strip()
+                if not is_acc:
+                    is_departing_venue = True
+            elif session.get("id") and label_low:
+                try:
+                    import db
+                    w_nodes = db.get_session_world_nodes(session["id"]) or []
+                    curr_nid = str(session.get("current_node_id") or "").strip()
+                    for wn in sorted(
+                        (n for n in w_nodes if isinstance(n, dict) and len(str(n.get("name") or "").strip()) >= 3),
+                        key=lambda n: len(str(n.get("name") or "")),
+                        reverse=True,
+                    ):
+                        wn_name = str(wn.get("name") or "").strip()
+                        wn_nid = str(wn.get("node_id") or "").strip()
+                        if re.search(rf"(?<!\w){re.escape(wn_name.lower())}(?!\w)", label_low):
+                            departure_dest_loc = wn_nid or wn_name
+                            if wn_nid != curr_nid and not is_acc:
+                                is_departing_venue = True
+                            break
+                except Exception:
+                    pass
 
         # Check for conversational exit: unified intent engine + explicit server-stamped flags
         is_let_single_depart = isinstance(a, dict) and a.get("departure_action") == "let_npc_depart"
@@ -218,23 +241,50 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             # Check if this departure action was taken specifically to meet a new NPC at the destination
             # e.g. "Travel to the Gym & Fieldhouse to meet Sofia Anderson"
             from mechanics.world.mobility import is_rendezvous_target
-            if session.get("id"):
+            if session.get("id") and not departure_dest_loc and label_low:
+                try:
+                    import db
+                    w_nodes = db.get_session_world_nodes(session["id"]) or []
+                    for wn in sorted(
+                        (n for n in w_nodes if isinstance(n, dict) and len(str(n.get("name") or "").strip()) >= 3),
+                        key=lambda n: len(str(n.get("name") or "")),
+                        reverse=True,
+                    ):
+                        wn_name = str(wn.get("name") or "").strip()
+                        if re.search(rf"(?<!\w){re.escape(wn_name.lower())}(?!\w)", label_low):
+                            departure_dest_loc = str(wn.get("node_id") or wn_name)
+                            break
+                except Exception:
+                    pass
+
+            if session.get("id") and departure_dest_loc:
                 import db
                 try:
-                    roster = db.get_school_roster(session["id"])
-                    contacts = db.get_contacts(session["id"])
-                    cand_names = [m.get("name", "") for m in roster] + [c.get("name", "") for c in contacts]
+                    roster = db.get_school_roster(session["id"]) or []
+                    contacts = db.get_contacts(session["id"], ensure_scene=False) or []
+                    w_roster = db.get_world_roster(session["id"], include_legacy_rosters=False) or []
+                    cand_names: list[str] = []
+                    seen_cands: set[str] = set()
+                    for rec in (list(w_roster) + list(contacts) + list(roster)):
+                        cn = str(rec.get("name") or "").strip() if isinstance(rec, dict) else ""
+                        if cn and cn.lower() not in seen_cands:
+                            seen_cands.add(cn.lower())
+                            cand_names.append(cn)
                     for cn in cand_names:
-                        if cn and is_rendezvous_target(cn, actions=actions, session_id=session.get("id")):
+                        if is_rendezvous_target(
+                            cn, actions=actions, session_id=session.get("id"), new_loc=departure_dest_loc
+                        ):
                             new_partners = [cn]
                             break
                 except Exception:
                     pass
 
-            if not new_partners:
+            if not new_partners and departure_dest_loc:
                 for m in re.finditer(r"\bmeet\s+(?:with\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", label):
                     cand_target = m.group(1).strip()
-                    if is_rendezvous_target(cand_target, actions=actions, session_id=session.get("id")):
+                    if is_rendezvous_target(
+                        cand_target, actions=actions, session_id=session.get("id"), new_loc=departure_dest_loc
+                    ):
                         new_partners = [cand_target]
                         break
         else:

@@ -91,6 +91,17 @@ def is_hostile_or_lair_waypoint(wp: dict) -> bool:
     return False
 
 
+def _minutes_until_next_shift_open(shift_profile: str, safe_min: int, fallback_wake: int) -> int:
+    from mechanics.world.anchor_schedule import SHIFT_PROFILES, _normalize_shift_profile
+    norm = _normalize_shift_profile(shift_profile, has_route=False)
+    windows = SHIFT_PROFILES.get(norm, {}).get("work_windows") or []
+    waits = [((int(start) - safe_min) % 1440) or 1440 for start, _ in windows]
+    if waits:
+        return min(waits)
+    wait_mins = (fallback_wake - safe_min) % 1440
+    return wait_mins if wait_mins > 0 else 60
+
+
 def get_waypoint_npc_schedule_info(
     session_id: int,
     wp: dict,
@@ -98,6 +109,8 @@ def get_waypoint_npc_schedule_info(
     session: Optional[dict] = None,
     session_time: Optional[tuple] = None,
     contacts_by_name: Optional[dict] = None,
+    roster_by_key: Optional[dict] = None,
+    nodes_by_id: Optional[dict] = None,
 ) -> dict:
     """
     Resolves live NPC schedule routing and Nighttime Off-Duty Guard for a waypoint.
@@ -148,7 +161,7 @@ def get_waypoint_npc_schedule_info(
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
 
         if contacts_by_name is not None:
-            contact = contacts_by_name.get(target_npc.lower()) or db.get_contact(session_id, target_npc)
+            contact = contacts_by_name.get(target_npc.lower())
         else:
             contact = db.get_contact(session_id, target_npc)
         if not contact and scenario_data.is_anomalous_incursions_scenario(scen_key):
@@ -158,7 +171,12 @@ def get_waypoint_npc_schedule_info(
             except Exception:
                 contact = None
 
-        roster_npc = db.get_world_roster_npc(session_id, target_npc, include_legacy_rosters=False)
+        if roster_by_key is not None:
+            slug_npc = re.sub(r"[^a-z0-9]+", "_", target_npc.lower()).strip("_")
+            roster_npc = roster_by_key.get(target_npc.lower()) or roster_by_key.get(slug_npc)
+        else:
+            roster_npc = db.get_world_roster_npc(session_id, target_npc, include_legacy_rosters=False)
+
         npc_record: Optional[dict] = None
         if contact or roster_npc:
             npc_record = dict(contact or {})
@@ -172,11 +190,13 @@ def get_waypoint_npc_schedule_info(
                     "npc_key", "npc_id", "name", "origin", "shift_profile",
                     "workplace_node_id", "hangout_node_id", "home_node_id",
                     "roaming_route", "is_unique_proprietor", "residence_unlocked",
-                    "staff_status", "affinity_score",
+                    "staff_status", "affinity_score", "is_24h_station",
                 ):
                     r_val = roster_npc.get(r_key)
                     if r_val not in (None, "", []):
                         npc_record[r_key] = r_val
+            npc_record["_roster_premerged"] = True
+            npc_record["_db_hydrated"] = True
 
         score_cands = []
         for rec_s, key_s in (
@@ -213,68 +233,97 @@ def get_waypoint_npc_schedule_info(
         if not night_allowed and npc_record:
             from mechanics.world.schedules import is_npc_nocturnal_or_night_shift
             night_allowed = is_npc_nocturnal_or_night_shift(
-                npc_record, scen_key=scen_key, current_day=curr_day, session_id=session_id
+                npc_record, scen_key=scen_key, current_day=curr_day, session_id=None
             )
 
-        is_night = (safe_min >= 1200 or safe_min < wake_min)
-        if is_night and not night_allowed and affinity < 40:
-            wait_mins = (wake_min - safe_min) % 1440
-            if wait_mins == 0:
-                wait_mins = 60
-            return {
-                "effective_location": static_loc,
-                "static_location": static_loc,
-                "scheduled_location": static_loc,
-                "is_off_duty": True,
-                "schedule_phase": "night",
-                "status_label": "Off-Duty: Sleeping",
-                "wait_until_morning_minutes": wait_mins,
-                "wake_clock": format_clock(wake_min),
-                "wake_minute": wake_min,
-            }
+        rec_basic = (npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}) if npc_record else {}
+        origin_low = str((npc_record or {}).get("origin") or rec_basic.get("origin") or "").strip().lower()
+        shift_prof = str((npc_record or {}).get("shift_profile") or rec_basic.get("shift_profile") or "").strip().lower()
+        is_closed_world_worker = bool(npc_record) and (
+            origin_low in ("venue_seed", "replacement_hire", "roaming_merchant", "role_slot_fill")
+            or (roster_npc is not None and origin_low != "legacy_adapter" and bool(shift_prof))
+        )
 
-        # Shift-aware gating for closed-world roster workers during off-shift / closed hours
-        if npc_record:
-            rec_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
-            origin_low = str(npc_record.get("origin") or rec_basic.get("origin") or "").strip().lower()
-            shift_prof = str(npc_record.get("shift_profile") or rec_basic.get("shift_profile") or "").strip().lower()
-            is_closed_world_worker = (
-                origin_low in ("venue_seed", "replacement_hire", "roaming_merchant", "role_slot_fill")
-                or (roster_npc is not None and origin_low != "legacy_adapter" and bool(shift_prof))
+        # Shift-aware evaluation BEFORE generic >= 20:00 sleeping guard so active evening/night workers stay On-Duty
+        if is_closed_world_worker and npc_record is not None:
+            on_shift, _ = is_npc_on_active_shift(
+                npc_record, safe_min, current_day=curr_day, scen_key=scen_key, session_id=None
             )
-            if is_closed_world_worker and not night_allowed and affinity < 40:
-                on_shift, _ = is_npc_on_active_shift(
-                    npc_record, safe_min, current_day=curr_day, scen_key=scen_key, session_id=session_id
+            if not on_shift and affinity < 40:
+                anchor_nodes = resolve_anchor_schedule_nodes(
+                    npc_record,
+                    current_day=curr_day,
+                    scen_key=scen_key,
+                    session_id=None,
+                    current_minute=safe_min,
                 )
-                if not on_shift:
-                    anchor_nodes = resolve_anchor_schedule_nodes(
-                        npc_record,
-                        current_day=curr_day,
-                        scen_key=scen_key,
-                        session_id=session_id,
-                        current_minute=safe_min,
-                    )
-                    sched_nid_now = str((anchor_nodes or {}).get(get_time_block_key(safe_min)) or "").strip()
-                    wp_node_id = str(wp.get("target_node_id") or "").strip()
-                    if not wp_node_id and static_loc:
+                sched_nid_now = str((anchor_nodes or {}).get(get_time_block_key(safe_min)) or "").strip()
+                wp_node_id = str(wp.get("target_node_id") or "").strip()
+                if not wp_node_id and static_loc:
+                    if nodes_by_id is not None:
+                        from mechanics.world.presence_graph import resolve_node_id_in_memory
+                        wp_node_id = resolve_node_id_in_memory(static_loc, nodes_by_id, prefer_facility=True)
+                    else:
                         wp_node_id = str(db.resolve_node_id_from_location(session_id, static_loc, prefer_facility=True) or "").strip()
-                    work_nid = str(npc_record.get("workplace_node_id") or "").strip()
-                    at_pinned_venue = bool(wp_node_id and sched_nid_now and sched_nid_now == wp_node_id)
-                    if (wp_node_id and not at_pinned_venue) or (not wp_node_id and work_nid and sched_nid_now != work_nid):
-                        wait_mins = (wake_min - safe_min) % 1440
-                        if wait_mins == 0:
-                            wait_mins = 60
-                        return {
-                            "effective_location": static_loc,
-                            "static_location": static_loc,
-                            "scheduled_location": static_loc,
-                            "is_off_duty": True,
-                            "schedule_phase": phase_key,
-                            "status_label": "Off-Duty: Closed",
-                            "wait_until_morning_minutes": wait_mins,
-                            "wake_clock": format_clock(wake_min),
-                            "wake_minute": wake_min,
-                        }
+                work_nid = str(npc_record.get("workplace_node_id") or "").strip()
+                at_pinned_venue = bool(wp_node_id and sched_nid_now and sched_nid_now == wp_node_id)
+
+                from mechanics.world.presence_doorbell import resolve_sleep_windows
+                sleep_wins = resolve_sleep_windows(npc_record, scen_key)
+                in_shift_sleep = any(s <= safe_min < e for s, e in sleep_wins)
+                if shift_prof in ("day", "student", "roaming_merchant", "") and not night_allowed:
+                    in_shift_sleep = in_shift_sleep or (safe_min >= 1200 or safe_min < wake_min)
+
+                if in_shift_sleep and not at_pinned_venue and not (night_allowed and shift_prof != "night"):
+                    wait_mins = (
+                        ((wake_min - safe_min) % 1440) or 60
+                        if shift_prof in ("day", "student", "roaming_merchant", "")
+                        else _minutes_until_next_shift_open(shift_prof or "day", safe_min, wake_min)
+                    )
+                    return {
+                        "effective_location": static_loc,
+                        "static_location": static_loc,
+                        "scheduled_location": static_loc,
+                        "is_off_duty": True,
+                        "schedule_phase": phase_key,
+                        "status_label": "Off-Duty: Sleeping",
+                        "wait_until_morning_minutes": wait_mins,
+                        "wake_clock": format_clock(wake_min),
+                        "wake_minute": wake_min,
+                    }
+
+                if not (shift_prof != "night" and night_allowed) and (
+                    (wp_node_id and not at_pinned_venue) or (not wp_node_id and work_nid and sched_nid_now != work_nid)
+                ):
+                    wait_mins = _minutes_until_next_shift_open(shift_prof or "day", safe_min, wake_min)
+                    return {
+                        "effective_location": static_loc,
+                        "static_location": static_loc,
+                        "scheduled_location": static_loc,
+                        "is_off_duty": True,
+                        "schedule_phase": phase_key,
+                        "status_label": "Off-Duty: Closed",
+                        "wait_until_morning_minutes": wait_mins,
+                        "wake_clock": format_clock(wake_min),
+                        "wake_minute": wake_min,
+                    }
+        else:
+            is_night = (safe_min >= 1200 or safe_min < wake_min)
+            if is_night and not night_allowed and affinity < 40:
+                wait_mins = (wake_min - safe_min) % 1440
+                if wait_mins == 0:
+                    wait_mins = 60
+                return {
+                    "effective_location": static_loc,
+                    "static_location": static_loc,
+                    "scheduled_location": static_loc,
+                    "is_off_duty": True,
+                    "schedule_phase": "night",
+                    "status_label": "Off-Duty: Sleeping",
+                    "wait_until_morning_minutes": wait_mins,
+                    "wake_clock": format_clock(wake_min),
+                    "wake_minute": wake_min,
+                }
 
         # Only override static_loc with dynamic schedule if contact/roster exists in DB
         if npc_record:

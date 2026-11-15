@@ -739,17 +739,87 @@ def is_character_mobile(npc_name: str, contact_data: dict = None, scen_key: str 
     return any(mr in role for mr in mobile_roles)
 
 
-def _extract_npc_match_candidates(npc_name: str) -> tuple[str, set[str]]:
+_NON_SURNAME_FOLLOWERS: frozenset[str] = frozenset({
+    "a", "about", "across", "after", "again", "against", "all", "almost", "alone", "along",
+    "already", "also", "always", "am", "among", "an", "and", "another", "any", "are", "around",
+    "as", "asked", "asks", "at", "away", "back", "be", "because", "been", "before", "behind",
+    "being", "below", "beside", "between", "beyond", "both", "but", "by", "came", "can", "come",
+    "comes", "coming", "could", "did", "didn", "do", "does", "doesn", "doing", "done", "down",
+    "during", "each", "either", "else", "enough", "even", "ever", "every", "first", "for", "from",
+    "get", "gets", "go", "goes", "going", "gone", "got", "had", "has", "have", "having", "he",
+    "her", "here", "hers", "herself", "him", "himself", "his", "how", "i", "if", "in", "inside",
+    "into", "is", "isn", "it", "its", "itself", "just", "later", "left", "like", "ll", "maybe",
+    "me", "met", "might", "more", "most", "much", "must", "my", "myself", "near", "nearby",
+    "needs", "neither", "never", "next", "no", "nor", "not", "now", "of", "off", "often", "on",
+    "once", "only", "or", "other", "our", "ours", "out", "outside", "over", "own", "past",
+    "perhaps", "please", "privately", "quickly", "quietly", "rather", "re", "really", "regarding",
+    "said", "same", "saw", "say", "says", "see", "seems", "sent", "she", "should", "since", "so",
+    "some", "soon", "standing", "stands", "still", "such", "than", "that", "the", "their",
+    "them", "themselves", "then", "there", "these", "they", "this", "those", "though", "through",
+    "to", "today", "together", "told", "tomorrow", "tonight", "too", "toward", "towards", "under",
+    "unless", "until", "up", "upon", "us", "ve", "very", "waiting", "waits", "walks", "wants",
+    "was", "wasn", "we", "went", "were", "what", "when", "where", "whether", "which", "while",
+    "who", "whom", "whose", "why", "will", "with", "within", "without", "won", "would", "yet",
+    "you", "your", "yours",
+})
+
+
+def _extract_npc_match_candidates(
+    npc_name: str,
+    peer_pool: list | None = None,
+) -> tuple[str, set[str], set[str]]:
     import namegen
     n_low = str(npc_name or "").lower().strip()
-    n_first = n_low.split()[0] if n_low else ""
-    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+    parts = [re.sub(r"[^a-z'-]", "", tok) for tok in n_low.split()]
+    parts = [p for p in parts if p]
+    n_first = parts[0] if parts else ""
+    n_given = re.sub(r"[^a-z'-]", "", namegen.extract_first_and_last_name(npc_name)[0].lower().strip())
+    disambig = namegen.get_unique_person_tokens(npc_name, peer_names=peer_pool, min_len=2) if peer_pool else set()
+    min_len = 2 if peer_pool else 3
     first_candidates = {
         tok
-        for tok in (n_first, n_given)
-        if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
+        for tok in ({n_first, n_given} | set(disambig))
+        if len(tok) >= min_len and tok != n_low and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
     }
-    return n_low, first_candidates
+    last_tokens = {
+        tok
+        for tok in parts[1:]
+        if len(tok) >= 2 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
+    }
+    return n_low, first_candidates, last_tokens
+
+
+def _text_matches_npc_name(
+    npc_name: str,
+    text: str,
+    peer_pool: list | None = None,
+) -> bool:
+    """Word-bounded NPC match rejecting conflicting surnames (e.g. 'Elena Chen' != 'Elena Vance')."""
+    raw_text = str(text or "")
+    if not raw_text.strip() or not npc_name:
+        return False
+    n_low, first_candidates, last_tokens = _extract_npc_match_candidates(npc_name, peer_pool=peer_pool)
+    if not n_low:
+        return False
+    if re.search(rf"(?<!\w){re.escape(n_low)}(?!\w)", raw_text, re.IGNORECASE):
+        return True
+    if not first_candidates:
+        return False
+
+    for fc in first_candidates:
+        for m in re.finditer(rf"(?<!\w){re.escape(fc)}(?!\w)", raw_text, re.IGNORECASE):
+            if not last_tokens:
+                return True
+            tail = raw_text[m.end():]
+            if re.match(r"^(?:'s|’s)\b", tail, re.IGNORECASE):
+                return True
+            nxt = re.match(r"^\s+([A-Za-z][A-Za-z'-]+)", tail)
+            if not nxt:
+                return True
+            next_tok = nxt.group(1).lower()
+            if next_tok in last_tokens or next_tok in _NON_SURNAME_FOLLOWERS:
+                return True
+    return False
 
 
 def is_action_targeting_present_npc_meetup(npc_name: str, actions: list = None) -> bool:
@@ -760,16 +830,16 @@ def is_action_targeting_present_npc_meetup(npc_name: str, actions: list = None) 
     if not npc_name:
         return False
 
-    n_low, first_candidates = _extract_npc_match_candidates(npc_name)
     travel_meetup_verbs = (
         "meet ", "meet with ", "convene with ", "convene meeting with ",
         "rendezvous with ", "catch up with "
     )
     from mechanics.world.locations import is_movement_action
     for a in (actions or []):
-        lbl = (a.get("label") if isinstance(a, dict) else str(a)).lower()
+        raw_lbl = str(a.get("label", "") if isinstance(a, dict) else a)
+        lbl = raw_lbl.lower()
         if is_movement_action(lbl) or any(k in lbl for k in ("travel to", "head to", "walk to", "go to", "visit")):
-            if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
+            if _text_matches_npc_name(npc_name, raw_lbl):
                 if any(mv in lbl for mv in travel_meetup_verbs) or "meet" in lbl or "rendezvous" in lbl:
                     return True
     return False
@@ -787,51 +857,67 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
     if not npc_name or not session_id:
         return False
 
-    n_low, first_candidates = _extract_npc_match_candidates(npc_name)
-    from mechanics.world.presence_resolver import is_node_descendant_in_memory, resolve_node_id_in_memory
+    from mechanics.world.presence_graph import is_node_descendant_in_memory, resolve_node_id_in_memory
     from mechanics.world.waypoints import check_location_matches_waypoint
 
     sess = db.get_session(session_id)
-    sess_node = str(sess.get("current_node_id", "") if sess else "")
+    sess_node = str(sess.get("current_node_id", "") if sess else "").strip()
+    sess_loc = str(sess.get("current_location", "") if sess else "").strip()
+    new_loc_clean = str(new_loc or "").strip()
+    eff_probe_loc = new_loc_clean or sess_loc
+
     world_nodes = db.get_session_world_nodes(session_id) or []
     nodes_by_id = {
         str(n["node_id"]): n for n in world_nodes if isinstance(n, dict) and n.get("node_id")
     }
     loc_cache: dict[tuple[str, bool], str] = {}
-    probe_node = (
-        resolve_node_id_in_memory(new_loc, nodes_by_id, prefer_facility=False, cache=loc_cache)
-        if (new_loc and nodes_by_id)
-        else ("" if new_loc else sess_node)
-    )
+    if new_loc_clean:
+        probe_node = resolve_node_id_in_memory(new_loc_clean, nodes_by_id, prefer_facility=False, cache=loc_cache) if nodes_by_id else ""
+    else:
+        probe_node = sess_node
+        if not probe_node and eff_probe_loc and nodes_by_id:
+            probe_node = resolve_node_id_in_memory(eff_probe_loc, nodes_by_id, prefer_facility=False, cache=loc_cache)
+    if probe_node and not eff_probe_loc and probe_node in nodes_by_id:
+        eff_probe_loc = str(nodes_by_id[probe_node].get("name") or "")
 
     def _check_loc_or_node_match(target_location_str: str, target_node: str = "") -> bool:
-        if not target_location_str and not target_node:
-            return True
+        tgt_loc_clean = str(target_location_str or "").strip()
         resolved_node = str(target_node or "").strip()
-        if not resolved_node and target_location_str and nodes_by_id:
+        if not tgt_loc_clean and not resolved_node:
+            return True
+        if not resolved_node and tgt_loc_clean and nodes_by_id:
             resolved_node = resolve_node_id_in_memory(
-                target_location_str, nodes_by_id, prefer_facility=False, cache=loc_cache
+                tgt_loc_clean, nodes_by_id, prefer_facility=False, cache=loc_cache
             )
         if probe_node and resolved_node:
             return (
                 is_node_descendant_in_memory(probe_node, resolved_node, nodes_by_id)
                 or is_node_descendant_in_memory(resolved_node, probe_node, nodes_by_id)
             )
-        if not new_loc or not target_location_str:
-            return True
-        return (
-            check_location_matches_waypoint(new_loc, target_location_str)
-            or check_location_matches_waypoint(target_location_str, new_loc)
-        )
+        if not eff_probe_loc:
+            return False
+        if tgt_loc_clean:
+            return (
+                check_location_matches_waypoint(eff_probe_loc, tgt_loc_clean)
+                or check_location_matches_waypoint(tgt_loc_clean, eff_probe_loc)
+            )
+        if resolved_node and resolved_node in nodes_by_id:
+            res_name = str(nodes_by_id[resolved_node].get("name") or "").strip()
+            if res_name:
+                return (
+                    check_location_matches_waypoint(eff_probe_loc, res_name)
+                    or check_location_matches_waypoint(res_name, eff_probe_loc)
+                )
+        return False
 
     # 1. Inspect all active quest waypoints
     active_wps = db.get_all_session_active_waypoints(session_id) or []
     for wp in active_wps:
-        wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')} {wp.get('stage_label', '')} {wp.get('target_npc', '')}".lower()
+        wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')} {wp.get('stage_label', '')} {wp.get('target_npc', '')}"
         wp_loc = wp.get("target_location") or wp.get("location") or ""
         wp_node = wp.get("target_node_id") or ""
         if _check_loc_or_node_match(wp_loc, wp_node):
-            if n_low in wp_text or any(f" {fc}" in f" {wp_text}" for fc in first_candidates):
+            if _text_matches_npc_name(npc_name, wp_text):
                 return True
 
     # 2. Inspect active story quest sub-objectives
@@ -844,17 +930,17 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
         for so in sub_objs:
             if isinstance(so, dict) and not so.get("completed"):
                 has_active_sub = True
-                so_text = f"{so.get('text', '')} {so.get('stage_label', '')} {so.get('target_npc', '')}".lower()
+                so_text = f"{so.get('text', '')} {so.get('stage_label', '')} {so.get('target_npc', '')}"
                 so_loc = so.get("target_location") or so.get("location") or sq_loc
                 so_node = so.get("target_node_id") or sq_node
                 if _check_loc_or_node_match(so_loc, so_node):
-                    if n_low in so_text or any(f" {fc}" in f" {so_text}" for fc in first_candidates):
+                    if _text_matches_npc_name(npc_name, so_text):
                         return True
 
         if not has_active_sub:
             if _check_loc_or_node_match(sq_loc, sq_node):
-                sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}".lower()
-                if n_low in sq_text or any(f" {fc}" in f" {sq_text}" for fc in first_candidates):
+                sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}"
+                if _text_matches_npc_name(npc_name, sq_text):
                     return True
 
     # 3. Inspect phone appointments / commitments_ledger (pending/approaching or ongoing arrived meetups)
@@ -865,10 +951,10 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
         or str(sess.get("dialogue_partner") or "").strip().lower() == a.get("npc_name", "").strip().lower()
     ] if sess else []
     for appt in (pending_appts + arrived_appts):
-        a_npc = str(appt.get("npc_name", "")).lower().strip()
+        a_npc = str(appt.get("npc_name", "")).strip()
         a_loc = str(appt.get("rendezvous_location", ""))
         a_node = str(appt.get("target_node_id", "") or "")
-        if a_npc and (n_low in a_npc or a_npc in n_low) and _check_loc_or_node_match(a_loc, a_node):
+        if a_npc and _text_matches_npc_name(npc_name, a_npc) and _text_matches_npc_name(a_npc, npc_name) and _check_loc_or_node_match(a_loc, a_node):
             return True
 
     return False
@@ -1176,14 +1262,8 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
     from mechanics.world.locations import get_primary_location_name
     import namegen
 
-    n_low = npc_name.lower().strip()
-    n_given = namegen.get_given_name(npc_name).lower().strip()
     peer_pool = (session.get("current_npcs") or []) if isinstance(session, dict) else None
-    n_disambig = namegen.get_unique_person_tokens(npc_name, peer_names=peer_pool, min_len=2)
-    first_candidates = {
-        tok for tok in ({n_given} | n_disambig)
-        if len(tok) >= 2 and tok != n_low and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
-    }
+    n_low, first_candidates, _ = _extract_npc_match_candidates(npc_name, peer_pool=peer_pool)
 
     old_loc = (session.get("current_location") or "") if session else ""
     old_primary = get_primary_location_name(old_loc) if old_loc else ""
@@ -1231,7 +1311,12 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
                     or (isinstance(a, dict) and str(a.get("target_npc") or "").strip().lower() in ({n_low} | first_candidates))
                 ):
                     return True
-                if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
+                raw_lbl = (
+                    (str(a.get("label", "")) + " " + str(a.get("text", "")))
+                    if isinstance(a, dict)
+                    else str(a)
+                )
+                if _text_matches_npc_name(npc_name, raw_lbl, peer_pool=peer_pool):
                     if any(k in lbl for k in ("invite", "bring", "escort", "take with", "come with", "with me", "follow")) or re.search(
                         rf"\b(?:with|accompany)\s+(?:{re.escape(n_low)}" + ("".join(rf"|{re.escape(fc)}" for fc in first_candidates)) + r")\b",
                         lbl,
@@ -1257,8 +1342,8 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
             return True
         old_npcs = session.get("current_npcs") or []
         for on in old_npcs:
-            on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower()
-            if on_name and (on_name == n_low or any(on_name.startswith(fc) or f" {fc}" in f" {on_name}" for fc in first_candidates)):
+            on_name = str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip()
+            if on_name and _text_matches_npc_name(npc_name, on_name, peer_pool=peer_pool):
                 return True
 
     return False
