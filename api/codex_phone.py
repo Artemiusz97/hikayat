@@ -462,7 +462,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
 
     grouped = await adb(db.get_lorebook, session_id)
     commitments = await adb(db.get_active_commitments, session_id)
-    contacts = await adb(db.get_contacts, session_id) or []
+    contacts = await adb(db.get_contacts, session_id, ensure_scene=False) or []
     school_roster = await adb(db.get_school_roster, session_id) or []
     dir_by_name = {str(d.get("name", "")).strip().lower(): d for d in school_roster if d.get("name")}
 
@@ -927,10 +927,10 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
         await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
     if not contacts and lookup_uid and char_id != lookup_uid:
-        contacts = await adb(db.get_contacts, session_id, lookup_uid)
-    from mechanics.social.relationships import collect_met_npc_names, is_unlocked_contact
+        contacts = await adb(db.get_contacts, session_id, lookup_uid, ensure_scene=False)
+    from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_unlocked_contact
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
@@ -940,7 +940,10 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
     enriched_contacts = await adb(
         lambda: (
             lambda _fow=_preload_fog_of_war_context(session_id, char_id, party_names, str((settings or {}).get("ui_language") or "en")): [
-                _enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=_fow)
+                {
+                    **_enrich_contact_record(c, session_id, scen_key, debug_reveal_all, phys_st=phys_st, party_names=party_names, fow_context=_fow),
+                    "can_dm": can_player_dm_contact(c, party_names=party_names, scenario=scen_key),
+                }
                 for c in unlocked_raw
             ]
         )()
@@ -2046,9 +2049,9 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
         await adb(prune_unmet_preseeded_special_agents, session_id)
     char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
     if not contacts and char_id != user_id:
-        contacts = await adb(db.get_contacts, session_id, user_id)
+        contacts = await adb(db.get_contacts, session_id, user_id, ensure_scene=False)
     social_state = await adb(get_social_state_summary, session_id, session)
 
     digital_media = []
@@ -2067,13 +2070,14 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
 
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_contact_blocked, is_unlocked_contact
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
     unlocked_contacts = []
     for c in contacts:
-        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names) and can_player_dm_contact(c, party_names=party_names, scenario=str((session or {}).get("scenario") or "fantasy")):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            uc_copy["can_dm"] = True
             if not uc_copy.get("debug_revealed"):
                 if "_phone_fow_ctx" not in locals():
                     _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
@@ -2254,16 +2258,17 @@ async def send_peerpulse_friend_request(session_id: int, req: PeerPulseFriendReq
     res = await adb(resolve_social_friend_request, dict(session), req.user_id, dict(req.profile))
     char_row = await adb(db.get_character, req.user_id)
     char_id = char_row.get("id", 0) if char_row else 0
-    contacts = await adb(db.get_contacts, session_id, char_id)
+    contacts = await adb(db.get_contacts, session_id, char_id, ensure_scene=False)
     party_npcs = await adb(db.get_session_party_npcs, session_id)
     party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or [])}
-    from mechanics.social.relationships import collect_met_npc_names, is_contact_blocked, is_unlocked_contact
+    from mechanics.social.relationships import can_player_dm_contact, collect_met_npc_names, is_contact_blocked, is_unlocked_contact
     met_names = collect_met_npc_names(session, party_npcs=party_npcs)
     unlocked_contacts = []
     for c in contacts:
-        if is_unlocked_contact(c, party_names, met_in_story_names=met_names):
+        if is_unlocked_contact(c, party_names, met_in_story_names=met_names) and can_player_dm_contact(c, party_names=party_names, scenario=str((session or {}).get("scenario") or "fantasy")):
             uc_copy = dict(c)
             uc_copy["is_blocked_contact"] = is_contact_blocked(uc_copy)
+            uc_copy["can_dm"] = True
             if not uc_copy.get("debug_revealed"):
                 if "_phone_fow_ctx" not in locals():
                     _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
@@ -2360,21 +2365,36 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
         contact = await adb(db.get_contact, session_id, npc_id, character_id=player_char.get("id", 0))
         if not contact:
             # Try matching against all contacts in session
-            all_contacts = await adb(db.get_contacts, session_id, canonical_id)
+            all_contacts = await adb(db.get_contacts, session_id, canonical_id, ensure_scene=False)
             for c in all_contacts:
                 if c.get("npc_id") == npc_id or c.get("name", "").lower().replace(" ", "_") == npc_id.lower():
                     contact = dict(c)
                     break
+        if not contact:
+            wr_match = await adb(db.get_world_roster_npc, session_id, npc_id, include_legacy_rosters=False)
+            if wr_match:
+                wr_b = dict(wr_match.get("basic_info") or {})
+                wr_b.setdefault("has_contact_info", False)
+                contact = {
+                    "npc_id": wr_match.get("npc_id") or npc_id,
+                    "name": wr_match.get("name") or npc_id.replace("_", " ").title(),
+                    "role": wr_match.get("role") or wr_b.get("role") or "",
+                    "relationship_score": int(wr_match.get("affinity_score") or 0),
+                    "track": "platonic",
+                    "basic_info": wr_b,
+                    "session_id": session_id,
+                }
         if not contact:
             contact = {
                 "npc_id": npc_id,
                 "name": npc_id.replace("_", " ").title(),
                 "relationship_score": 0,
                 "track": "platonic",
-                "basic_info": {}
+                "basic_info": {},
+                "session_id": session_id,
             }
 
-        from mechanics.social.relationships import is_contact_blocked, is_contact_eligible
+        from mechanics.social.relationships import can_player_dm_contact, is_contact_blocked, is_contact_eligible
         scen_key = str(session.get("scenario") or "")
         if not is_contact_eligible(contact, scenario=scen_key, session_id=session_id):
             raise HTTPException(
@@ -2402,6 +2422,14 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             raise HTTPException(
                 status_code=400,
                 detail=f"{contact.get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach."
+            )
+
+        party_npcs_dm = await adb(db.get_session_party_npcs, session_id)
+        party_names_dm = {str(p.get("name", "")).strip().lower() for p in (party_npcs_dm or []) if isinstance(p, dict)}
+        if not can_player_dm_contact(contact, party_names=party_names_dm, scenario=scen_key):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
             )
 
         if not text or text == "__auto__":
@@ -2451,7 +2479,7 @@ async def cancel_session_commitment(
     if not cancelled:
         raise HTTPException(status_code=404, detail="Commitment not found or already resolved")
 
-    contacts = await adb(db.get_contacts, session_id) or []
+    contacts = await adb(db.get_contacts, session_id, ensure_scene=False) or []
     active_commitments = await adb(db.get_active_commitments, session_id)
     pending_appts = await adb(db.get_phone_appointments, session_id, status="pending")
     arrived_appts = await adb(db.get_phone_appointments, session_id, status="arrived")

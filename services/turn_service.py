@@ -21,7 +21,7 @@ import llm_client
 import scenario_data
 from character_data import XP_REWARDS
 from mechanics.combat.merchant import apply_merchant_encounter_result
-from mechanics.social.relationships import is_contact_eligible
+from mechanics.social.relationships import is_contact_eligible, should_promote_roster_npc_to_contact
 from services import crash_capture
 
 log = logging.getLogger(__name__)
@@ -370,6 +370,18 @@ class TurnService:
                     log.debug("Ch.1 background ChapterPlan schedule skipped: %s", _bg_plan_err)
             char_id = char_row["id"] if char_row else 0
             enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
+            party_npc_rows = await adb(db.get_session_party_npcs, session_id) or []
+            open_party_names = {
+                str(p.get("name") or "").strip().lower()
+                for p in party_npc_rows
+                if isinstance(p, dict) and p.get("name")
+            }
+            for sc_p in (session.get("party") or []):
+                sp_obj = sc_p[0] if isinstance(sc_p, (list, tuple)) and sc_p else sc_p
+                if isinstance(sp_obj, dict) and sp_obj.get("name") and not sp_obj.get("user_id"):
+                    open_party_names.add(str(sp_obj["name"]).strip().lower())
+            open_party_names.discard(str(char_row.get("name") or "").strip().lower() if char_row else "")
+
             for npc in (npcs_arg or []):
                 n_name = game_engine._get_npc_name(npc)
                 if n_name and n_name.lower() not in enemy_names:
@@ -382,43 +394,79 @@ class TurnService:
                     if not b_info.get("location"):
                         b_info["location"] = scene.get("location") or session.get("current_location", "")
                     b_info["met_in_person"] = True
-                    if is_contact_eligible(
+
+                    existing_wr = await adb(db.get_world_roster_npc, session_id, n_name, include_legacy_rosters=False)
+                    roster_payload = {
+                        "name": n_name,
+                        "role": b_info.get("role", "") or (npc.get("role", "") if isinstance(npc, dict) else ""),
+                        "gender": npc.get("gender", "") if isinstance(npc, dict) else "",
+                        "race": npc.get("race", "") if isinstance(npc, dict) else "",
+                        "traits": (npc.get("traits") or []) if isinstance(npc, dict) else [],
+                        "appearance": (npc.get("appearance") or {}) if isinstance(npc, dict) else {},
+                        "origin": (existing_wr.get("origin") if existing_wr else None) or (npc.get("origin") if isinstance(npc, dict) and npc.get("origin") else "venue_seed"),
+                        "tier_status": (existing_wr.get("tier_status") if existing_wr else "acquaintance"),
+                        "met_in_person": True,
+                        "discovered_turn": 0,
+                        "basic_info": b_info,
+                    }
+                    await adb(db.upsert_world_roster_npc, session_id, roster_payload, turn_number=0)
+
+                    m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+                    if not m_val and isinstance(b_info, dict):
+                        m_val = b_info.get("mannerisms", "")
+                    await adb(
+                        db.upsert_lorebook_entity,
+                        session_id=session_id,
+                        entity_type="person",
                         name=n_name,
+                        description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                        traits=npc.get("traits") if isinstance(npc, dict) else [],
+                        mannerisms=m_val,
+                        race=npc.get("race", "") if isinstance(npc, dict) else "",
+                        appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                        gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                    )
+
+                    existing_c = await adb(db.get_contact, session_id, n_name, char_id)
+                    hh_role = str(
+                        (existing_c.get("household_role") if existing_c else "")
+                        or (npc.get("household_role") if isinstance(npc, dict) else "")
+                        or ""
+                    ).strip().lower()
+                    is_family = bool(
+                        hh_role in ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife")
+                        or b_info.get("is_adult_family")
+                        or b_info.get("cohabiting_family") is True
+                        or (existing_c and ((existing_c.get("basic_info") or {}).get("is_adult_family") or (existing_c.get("basic_info") or {}).get("cohabiting_family") is True))
+                        or (existing_wr and str(existing_wr.get("origin") or "").lower() == "household")
+                    )
+                    in_party = n_name.lower() in open_party_names
+                    eligible = is_family or in_party or is_contact_eligible(
+                        name=npc if isinstance(npc, dict) else n_name,
                         role=b_info.get("role", ""),
                         description=b_info.get("description", ""),
                         scenario=scenario_key,
                         session_id=session_id,
-                    ):
-                        await adb(
-                            db.upsert_contact,
-                            session_id=session_id,
-                            character_id=char_id,
-                            npc_id=n_name,
-                            name=n_name,
-                            basic_info=b_info,
-                            delta_score=0,
-                            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
-                            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
-                            race=npc.get("race", "") if isinstance(npc, dict) else "",
-                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                    )
+                    if eligible:
+                        qualifies, promo_reason = should_promote_roster_npc_to_contact(
+                            npc if isinstance(npc, dict) else {"name": n_name, "basic_info": b_info},
+                            affinity=int((existing_c or {}).get("relationship_score") or (existing_wr or {}).get("affinity_score") or 0),
+                            in_party=in_party,
+                            is_family=is_family,
+                            has_quest_link=bool(b_info.get("has_quest_link")),
                         )
-                    else:
-                        m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
-                        if not m_val and isinstance(b_info, dict):
-                            m_val = b_info.get("mannerisms", "")
-                        await adb(
-                            db.upsert_lorebook_entity,
-                            session_id=session_id,
-                            entity_type="person",
-                            name=n_name,
-                            description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
-                            traits=npc.get("traits") if isinstance(npc, dict) else [],
-                            mannerisms=m_val,
-                            race=npc.get("race", "") if isinstance(npc, dict) else "",
-                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
-                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                        )
+                        if qualifies:
+                            await adb(
+                                db.promote_world_roster_to_contact,
+                                session_id,
+                                char_id,
+                                n_name,
+                                promo_reason or "opening_scene",
+                                has_contact_info=bool(is_family or in_party or b_info.get("exchanged_contact") or b_info.get("added_via_peerpulse")),
+                                turn_number=0,
+                                narrative_text=narrative,
+                            )
         except Exception as e:
             log.error("Error generating opening scene: %s", e)
             try:

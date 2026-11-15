@@ -838,6 +838,67 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             except Exception as _fk_c_err:
                 log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
 
+        if isinstance(outcome, dict) and isinstance(outcome.get("_staged_roster_ops"), dict) and session_id:
+            try:
+                _r_ops = outcome["_staged_roster_ops"]
+                from mechanics.world import ensure_venue_staff_seeded, slot_fill_custom_action_role
+                from mechanics.world.venue_templates import is_node_staffable
+
+                for _sf in (_r_ops.get("role_slot_fills") or []):
+                    if not isinstance(_sf, dict) or not _sf.get("facility_node_id"):
+                        continue
+                    _fnid = str(_sf["facility_node_id"])
+                    _fnode = db.get_world_node(session_id, _fnid)
+                    if isinstance(_fnode, dict) and is_node_staffable(_fnode, scen_key=str(_sf.get("scen_key") or "fantasy")):
+                        ensure_venue_staff_seeded(
+                            session_id,
+                            _fnid,
+                            scen_key=str(_sf.get("scen_key") or "fantasy"),
+                            current_day=int(_sf.get("current_day") or 1),
+                            turn_number=int(_sf.get("turn_number") or 0),
+                        )
+                    slot_row = slot_fill_custom_action_role(
+                        session_id,
+                        _fnid,
+                        str(_sf.get("role_title") or ""),
+                        scen_key=str(_sf.get("scen_key") or "fantasy"),
+                        current_day=int(_sf.get("current_day") or 1),
+                        current_minute=int(_sf.get("current_minute") if _sf.get("current_minute") is not None else 480),
+                        turn_number=int(_sf.get("turn_number") or 0),
+                    )
+                    if isinstance(slot_row, dict) and slot_row.get("name"):
+                        db.upsert_lorebook_entity(
+                            session_id=session_id,
+                            entity_type="person",
+                            name=slot_row["name"],
+                            description=str(_sf.get("lorebook_description") or f"{slot_row['name']} encountered nearby."),
+                            disposition="neutral",
+                            gender=str(_sf.get("gender") or slot_row.get("gender") or ""),
+                            appearance=_sf.get("appearance") or slot_row.get("appearance"),
+                            traits=list(_sf.get("traits") or []),
+                        )
+                for _ru in (_r_ops.get("roster_upserts") or []):
+                    if not isinstance(_ru, dict) or not isinstance(_ru.get("roster_payload"), dict):
+                        continue
+                    db.upsert_world_roster_npc(
+                        session_id,
+                        _ru["roster_payload"],
+                        turn_number=int(_ru.get("turn_number") or 0),
+                    )
+                    if _ru.get("name"):
+                        db.upsert_lorebook_entity(
+                            session_id=session_id,
+                            entity_type="person",
+                            name=str(_ru["name"]),
+                            description=str(_ru.get("lorebook_description") or f"{_ru['name']} encountered nearby."),
+                            disposition="neutral",
+                            gender=str(_ru.get("gender") or ""),
+                            appearance=_ru.get("appearance"),
+                            traits=list(_ru.get("traits") or []),
+                        )
+            except Exception as _ro_err:
+                log.warning("Failed committing staged roster ops: %s", _ro_err)
+
         # Commit staged civilian permadeaths from combat outcome inside UnitOfWork (DEF-03)
         if isinstance(outcome, dict) and outcome.get("slain_civilians") and session_id:
             try:

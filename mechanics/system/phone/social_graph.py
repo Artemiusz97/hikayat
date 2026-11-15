@@ -235,7 +235,11 @@ def lookup_social_profile(session_id: int, user_id: int, query_name: str) -> dic
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
-    turn_count = len(session.get("history", [])) if session else 0
+    turn_count = max(
+        int((session or {}).get("turn_count") or 0),
+        int((s_row or {}).get("turn_count") or 0),
+        len((session or {}).get("history") or []),
+    )
 
     on_cooldown = False
     turns_left = 0
@@ -317,7 +321,11 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
 
     s_row = db.get_session(session_id) if session_id else None
     curr_day = int((session.get("current_day") if session else None) or (s_row.get("current_day") if s_row else 1) or 1)
-    turn_count = len(session.get("history", [])) if session else 0
+    turn_count = max(
+        int((session or {}).get("turn_count") or 0),
+        int((s_row or {}).get("turn_count") or 0),
+        len((session or {}).get("history") or []),
+    )
 
     on_cooldown = False
     if entry:
@@ -374,17 +382,31 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
         "succeeded": check_res.succeeded
     }
 
-    turn_count = len(session.get("history", []))
     state = db.get_phone_social_state(session_id) or {}
     cds = state.setdefault("friend_request_cooldowns", {})
 
     if check["succeeded"]:
         # Hydrate contact and unlock in smartphone
         scen_key = session.get("scenario", "fantasy")
+        eff_char_id = char.get("id", 0) if char else 0
+        eff_turn_1b = max(1, int(turn_count or 0) + 1)
+        wr_row = (
+            db.get_world_roster_npc(session_id, npc_id, include_legacy_rosters=False)
+            or db.get_world_roster_npc(session_id, name, include_legacy_rosters=False)
+        )
         if "school" in scen_key or "high_school" in scen_key:
             from mechanics.social.school_roster import hydrate_school_character
             hydrate_school_character(session_id, profile.get("raw_record") or profile)
-            c = db.get_contact(session_id, npc_id)
+            if wr_row:
+                db.promote_world_roster_to_contact(
+                    session_id,
+                    eff_char_id,
+                    wr_row.get("name") or name or npc_id,
+                    reason="peerpulse",
+                    has_contact_info=True,
+                    turn_number=eff_turn_1b,
+                )
+            c = db.get_contact(session_id, npc_id, character_id=eff_char_id) or db.get_contact(session_id, name, character_id=eff_char_id)
             if c:
                 b_info = c.get("basic_info") or {}
                 if isinstance(b_info, str):
@@ -395,29 +417,63 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
                 b_info["contact_added"] = True
                 b_info["is_contact"] = True
                 b_info["added_via_peerpulse"] = True
+                b_info["has_contact_info"] = True
+                db.upsert_contact(
+                    session_id=session_id,
+                    npc_id=c.get("npc_id") or npc_id,
+                    name=c.get("name") or name,
+                    character_id=eff_char_id,
+                    basic_info=b_info,
+                )
+        else:
+            if wr_row:
+                db.record_world_roster_interaction(
+                    session_id,
+                    wr_row.get("npc_id") or name or npc_id,
+                    delta_score=5,
+                    met_in_person=bool(wr_row.get("met_in_person")),
+                    turn_number=eff_turn_1b,
+                )
+                promoted = db.promote_world_roster_to_contact(
+                    session_id,
+                    eff_char_id,
+                    wr_row.get("name") or name or npc_id,
+                    reason="peerpulse",
+                    has_contact_info=True,
+                    turn_number=eff_turn_1b,
+                )
+                if promoted:
+                    p_info = dict(promoted.get("basic_info") or {})
+                    p_info.update({
+                        "contact_added": True,
+                        "is_contact": True,
+                        "added_via_peerpulse": True,
+                        "has_contact_info": True,
+                    })
+                    db.upsert_contact(
+                        session_id=session_id,
+                        npc_id=promoted.get("npc_id") or npc_id,
+                        name=promoted.get("name") or name,
+                        character_id=eff_char_id,
+                        basic_info=p_info,
+                    )
+            else:
                 db.upsert_contact(
                     session_id=session_id,
                     npc_id=npc_id,
                     name=name,
-                    character_id=char.get("id", 0) if char else 0,
-                    basic_info=b_info,
+                    character_id=eff_char_id,
+                    delta_score=5,
+                    basic_info={
+                        "role": profile.get("role", "Contact"),
+                        "description": profile.get("personality", ""),
+                        "contact_added": True,
+                        "is_contact": True,
+                        "added_via_peerpulse": True,
+                        "has_contact_info": True,
+                    },
+                    track="platonic"
                 )
-        else:
-            db.upsert_contact(
-                session_id=session_id,
-                npc_id=npc_id,
-                name=name,
-                character_id=char.get("id", 0) if char else 0,
-                delta_score=5,
-                basic_info={
-                    "role": profile.get("role", "Contact"),
-                    "description": profile.get("personality", ""),
-                    "contact_added": True,
-                    "is_contact": True,
-                    "added_via_peerpulse": True,
-                },
-                track="platonic"
-            )
         profile["is_already_contact"] = True
         return {
             "accepted": True,

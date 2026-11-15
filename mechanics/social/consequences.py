@@ -793,13 +793,49 @@ def apply_v50_social_turn_for_npc(
 
         for b_name, b_del in (conseq.get("bystander_deltas") or {}).items():
             if int(b_del or 0) != 0:
-                db.upsert_contact(
-                    session_id=session_id,
-                    character_id=int(character_id or 0),
-                    npc_id=b_name,
-                    name=b_name,
-                    delta_score=int(b_del),
-                )
+                b_contact = db.get_contact(session_id, b_name, character_id=int(character_id or 0))
+                if b_contact:
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=int(character_id or 0),
+                        npc_id=b_name,
+                        name=b_name,
+                        delta_score=int(b_del),
+                    )
+                else:
+                    b_wr = db.get_world_roster_npc(session_id, b_name, include_legacy_rosters=False)
+                    if b_wr:
+                        upd_b_wr = db.record_world_roster_interaction(
+                            session_id,
+                            b_wr.get("npc_id") or b_name,
+                            delta_score=int(b_del),
+                            met_in_person=True,
+                            turn_number=turn_number,
+                        ) or b_wr
+                        from mechanics.social.relationships import should_promote_roster_npc_to_contact
+                        do_prom_b, prom_reason_b = should_promote_roster_npc_to_contact(
+                            upd_b_wr,
+                            affinity=int(upd_b_wr.get("affinity_score") or 0),
+                            scenario=scen,
+                            session_id=session_id,
+                        )
+                        if do_prom_b:
+                            db.promote_world_roster_to_contact(
+                                session_id,
+                                int(character_id or 0),
+                                upd_b_wr.get("name") or b_name,
+                                reason=prom_reason_b or "bystander_delta",
+                                has_contact_info=bool((upd_b_wr.get("basic_info") or {}).get("has_contact_info") is True),
+                                turn_number=turn_number,
+                            )
+                    elif not (db.get_session_world_nodes(session_id) or []):
+                        db.upsert_contact(
+                            session_id=session_id,
+                            character_id=int(character_id or 0),
+                            npc_id=b_name,
+                            name=b_name,
+                            delta_score=int(b_del),
+                        )
 
         if not is_gift:
             eff_tid = topic_id or f"{cat}:dialogue_turn"

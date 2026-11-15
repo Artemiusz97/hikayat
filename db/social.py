@@ -1728,48 +1728,9 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
             # A1: If an NPC parent from an existing household appears in-scene, promote them to a Contact
             try:
                 import mechanics.social.genealogy as genealogy
-                promoted_parent = genealogy.maybe_promote_scene_parent(session_id, n_name)
-                if promoted_parent:
-                    continue
+                genealogy.maybe_promote_scene_parent(session_id, n_name)
             except Exception:
                 pass
-
-            n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
-            n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
-
-            # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
-            import mechanics.social.relationships as relationships
-            if not relationships.is_contact_eligible(name=n_name, role=n_role, description=n_desc, scenario=scen_key):
-                continue
-
-            # Do not auto-add pure generic ambient crowd (e.g. "Drunken Patron", "Town Guard") unless spoken to or friendly
-            disp = str(npc.get("disposition", "")).lower() if isinstance(npc, dict) else ""
-            is_dialogue = (n_name.lower() in dialogue_partners) or any(dp in n_name.lower() or n_name.lower() in dp for dp in dialogue_partners)
-            if namegen.is_generic_role_name(n_name) and not is_dialogue and disp not in ("friendly", "companion", "ally"):
-                continue
-
-            b_info = {"met_in_person": True}
-            if isinstance(npc, dict):
-                for k in ("role", "occupation", "description", "faction", "club", "club_role", "grade", "clique", "age", "mannerisms", "motivation", "disposition"):
-                    val = npc.get(k)
-                    if not _is_empty_info_val(val):
-                        b_info[k] = val
-
-            upsert_contact(
-                session_id=session_id,
-                character_id=character_id,
-                npc_id=n_name,
-                name=n_name,
-                basic_info=b_info if b_info else None,
-                delta_score=0,
-                track=None,
-                new_traits=npc.get("traits") if isinstance(npc, dict) else None,
-                new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
-                race=npc.get("race", "") if isinstance(npc, dict) else "",
-                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
-                narrative_text=scene_narrative
-            )
     finally:
         ensuring_set.discard(session_id)
 

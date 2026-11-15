@@ -2770,7 +2770,7 @@ def build_hybrid_turn_choices(
     from mechanics.system.phone import scenario_has_smartphone
     if scenario_has_smartphone(scen_key) and in_active_dialogue_turn:
         try:
-            from mechanics.social.relationships import is_contact_eligible, is_unlocked_contact, calculate_contact_exchange_dc
+            from mechanics.social.relationships import can_player_dm_contact, is_contact_eligible, calculate_contact_exchange_dc
             party_names_lower = {
                 str(p[0].get("name", "")).strip().lower() if isinstance(p, (tuple, list)) else str(p.get("name", "")).strip().lower()
                 for p in (party or [])
@@ -2800,7 +2800,7 @@ def build_hybrid_turn_choices(
                     session_id=session_id,
                 ):
                     continue
-                if is_unlocked_contact(existing_c) or p_lower in party_names_lower:
+                if can_player_dm_contact(existing_c, party_names_lower, scenario=scen_key) or p_lower in party_names_lower:
                     continue
 
                 # Check if contact request was attempted during the current turn
@@ -2858,7 +2858,12 @@ def build_hybrid_turn_choices(
                         for c in (priority_buttons + cleaned)
                     )
                     if not already_has:
-                        dc = calculate_contact_exchange_dc(existing_c or lore_ent, scenario=scen_key)
+                        wr_ent = (
+                            db.get_world_roster_npc(session_id, partner, include_legacy_rosters=False)
+                            if (not existing_c and session_id)
+                            else None
+                        )
+                        dc = calculate_contact_exchange_dc(existing_c or wr_ent or lore_ent, scenario=scen_key)
                         priority_buttons.append({
                             "label": f"📱 Ask for {partner}'s Phone Number / Contact Info",
                             "stat": "CHA",

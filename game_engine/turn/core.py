@@ -2593,26 +2593,104 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         completed_appt_npc_ids = []
         if session.get("id") and new_loc:
             try:
-                from mechanics.world.waypoints import check_location_matches_waypoint
-                active_appts = db.get_active_rendezvous_appointments(session["id"])
-                for appt in active_appts:
-                    appt_loc = appt.get("rendezvous_location", "")
-                    appt_node = appt.get("target_node_id", "")
-                    is_at_appt = False
-                    if appt_node and new_node_id:
-                        is_at_appt = db.is_descendant_of(session["id"], new_node_id, appt_node)
-                    if not is_at_appt and appt_loc:
-                        is_at_appt = check_location_matches_waypoint(new_loc, appt_loc) or check_location_matches_waypoint(appt_loc, new_loc)
-                    if is_at_appt:
-                        if appt.get("npc_id"):
-                            completed_appt_npc_ids.append(appt["npc_id"])
-                        a_name = appt.get("npc_name", "")
-                        if a_name:
-                            if not any(game_engine.is_dialogue_partner(a_name, [game_engine._get_npc_name(n)]) for n in result["npcs_present"]):
+                from mechanics.system.commitments_engine import (
+                    _canon_key,
+                    get_active_rendezvous_at_node,
+                )
+                eff_day = int(
+                    result.get("_staged_day")
+                    or session.get("_staged_day")
+                    or session.get("current_day")
+                    or 1
+                )
+                eff_min = (
+                    session.get("_staged_minute")
+                    if session.get("_staged_minute") is not None
+                    else session.get("current_minute")
+                )
+                probes = []
+                for p_probe in (new_node_id, new_loc):
+                    if p_probe and str(p_probe) not in probes:
+                        probes.append(str(p_probe))
+
+                window_appts = []
+                seen_cids = set()
+                for loc_probe in probes:
+                    for r in get_active_rendezvous_at_node(
+                        session["id"],
+                        loc_probe,
+                        current_day=eff_day,
+                        current_minute=eff_min,
+                        enforce_window=True,
+                    ):
+                        cid = r.get("id") or r.get("commitment_key")
+                        if cid not in seen_cids:
+                            seen_cids.add(cid)
+                            window_appts.append(r)
+
+                if window_appts:
+                    contacts_now = db.get_contacts(session["id"], ensure_scene=False) or []
+                    contact_by_key = {}
+                    for kc in contacts_now:
+                        k_nm = str(kc.get("name") or "").strip()
+                        k_id = str(kc.get("npc_id") or "").strip()
+                        for kk in (k_id, k_nm, _canon_key(k_nm) if k_nm else ""):
+                            if kk:
+                                contact_by_key[str(kk).strip().lower()] = kc
+
+                    phone_appts_by_key = {}
+                    try:
+                        for pa in (db.get_active_rendezvous_appointments(session["id"]) or []):
+                            for pak in (pa.get("npc_id"), pa.get("npc_name"), _canon_key(str(pa.get("npc_name") or ""))):
+                                if pak:
+                                    phone_appts_by_key[str(pak).strip().lower()] = pa
+                    except Exception:
+                        pass
+
+                    departed_lows = {
+                        str(d.get("name") if isinstance(d, dict) else (d or "")).strip().lower()
+                        for d in (result.get("npc_departures") or [])
+                        if (d.get("name") if isinstance(d, dict) else d)
+                    }
+                    for appt in window_appts:
+                        cand_pairs = []
+                        for part in (appt.get("participants") or []):
+                            if not isinstance(part, dict):
+                                continue
+                            pk = str(part.get("npc_id") or part.get("person_key") or "").strip()
+                            if pk.lower() == "player" or pk.lower().startswith("player:"):
+                                continue
+                            kc = contact_by_key.get(pk.lower()) or contact_by_key.get(_canon_key(pk))
+                            a_name = str((kc.get("name") if kc else "") or part.get("name") or pk.replace("_", " ").title()).strip()
+                            pa_row = phone_appts_by_key.get(a_name.lower()) or phone_appts_by_key.get(pk.lower())
+                            a_npc_id = str((pa_row.get("npc_id") if pa_row else "") or (kc.get("npc_id") if kc else "") or pk or a_name).strip()
+                            if a_name:
+                                cand_pairs.append((a_npc_id, a_name))
+                        if not cand_pairs:
+                            tgt = str(appt.get("target_entity") or "").strip()
+                            if tgt and tgt.lower() not in ("player", "group"):
+                                kc = contact_by_key.get(tgt.lower()) or contact_by_key.get(_canon_key(tgt))
+                                a_name = str((kc.get("name") if kc else "") or tgt.replace("_", " ").title()).strip()
+                                pa_row = phone_appts_by_key.get(a_name.lower()) or phone_appts_by_key.get(tgt.lower())
+                                a_npc_id = str((pa_row.get("npc_id") if pa_row else "") or (kc.get("npc_id") if kc else "") or tgt or a_name).strip()
+                                cand_pairs.append((a_npc_id, a_name))
+
+                        for a_npc_id, a_name in cand_pairs:
+                            if a_name.lower() in departed_lows:
+                                continue
+                            already_present = any(
+                                game_engine.is_dialogue_partner(a_name, [game_engine._get_npc_name(n)])
+                                for n in result["npcs_present"]
+                            )
+                            if not already_present and (new_loc != old_loc):
                                 result["npcs_present"].append({"name": a_name, "role": "Rendezvous Partner", "status_effects": ["Present"]})
-                            if a_name not in new_partners:
-                                new_partners.append(a_name)
-                            has_exited_convo = False
+                                already_present = True
+                            if already_present:
+                                if a_npc_id and a_npc_id not in completed_appt_npc_ids:
+                                    completed_appt_npc_ids.append(a_npc_id)
+                                if a_name not in new_partners:
+                                    new_partners.append(a_name)
+                                has_exited_convo = False
             except Exception:
                 pass
         if completed_appt_npc_ids:
@@ -2738,6 +2816,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             if is_retry:
                 fk_ops_copy["is_retry"] = True
             result["_staged_folklore_ops"] = fk_ops_copy
+        if stage_info.get("pending_roster_ops"):
+            result["_staged_roster_ops"] = dict(stage_info["pending_roster_ops"])
 
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list

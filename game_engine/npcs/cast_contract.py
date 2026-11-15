@@ -21,6 +21,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+import db
 from game_engine.npcs.descriptor_presence import (
     detect_unregistered_onscreen_actors,
     protagonist_role_tokens,
@@ -85,6 +86,26 @@ async def repair_cast_contract_violations(
 
     result["_cast_contract_violations"] = violations
     log.warning("[CastContract] Unregistered on-screen actors detected: %s", [v["mention"] for v in violations])
+
+    # Closed-world enforcement: never invent brand-new personal names for background crowd figures
+    # or unscheduled hallucinations when spatial world_nodes / world_roster governance is active.
+    sess_id = session.get("id") if isinstance(session, dict) else None
+    is_closed_world = False
+    if sess_id:
+        try:
+            is_closed_world = bool(
+                db.get_session_world_nodes(int(sess_id))
+                or db.get_world_roster(int(sess_id), include_legacy_rosters=False)
+            )
+        except Exception:
+            is_closed_world = False
+    has_crowd_directive = any(
+        "[AMBIENT CROWD FLAVOR" in str(d)
+        for d in (result.get("_stage_directives") or (session.get("stage_directives") if isinstance(session, dict) else []) or [])
+    )
+    if is_closed_world or has_crowd_directive:
+        log.info("[CastContract] Closed-world/crowd-flavor mode active; skipping unscheduled arrival synthesis.")
+        return []
 
     narrative = f"{result.get('outcome_narrative') or ''}\n\n{result.get('next_narrative') or ''}".strip()
     user_prompt = (

@@ -12,7 +12,7 @@ from mechanics.social.relationships import (
     get_relationship_tier,
     get_relationship_modifier,
     format_progress_bar,
-    get_unlocked_info_level
+    get_unlocked_info_level, can_player_dm_contact
 )
 from mechanics.social.races import format_race_display
 
@@ -376,15 +376,23 @@ class ContactView(discord.ui.View):
         if from_phone and session_id:
             phone_row = 2
             if active_contact:
+                _dm_allowed = can_player_dm_contact(active_contact, scenario=scenario_key)
                 contact_short = active_contact.get("name", "Contact")[:15]
                 text_btn = discord.ui.Button(
-                    label=f"Text {contact_short}",
+                    label=f"Text {contact_short}" if _dm_allowed else f"Text {contact_short} (No #)",
                     emoji="💬",
-                    style=discord.ButtonStyle.success,
+                    style=discord.ButtonStyle.success if _dm_allowed else discord.ButtonStyle.secondary,
+                    disabled=not _dm_allowed,
                     row=phone_row
                 )
                 async def _on_text(inter: discord.Interaction):
                     from mechanics.system.phone import DMChatView, _build_dm_chat_embed
+                    _sess_chk = await adb(db.get_session, session_id)
+                    _party_chk = await adb(db.get_session_party_npcs, session_id)
+                    _p_names_chk = {str(p.get("name", "")).strip().lower() for p in (_party_chk or [])}
+                    if not can_player_dm_contact(active_contact, party_names=_p_names_chk, scenario=scenario_key):
+                        await inter.response.send_message("You don't have their contact info yet. Exchange numbers or connect on PeerPulse first.", ephemeral=True)
+                        return
                     embed = _build_dm_chat_embed(session_id, active_contact)
                     view = DMChatView(cog, session_id, user_id, active_contact, contacts)
                     await inter.response.edit_message(embed=embed, view=view)

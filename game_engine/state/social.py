@@ -202,27 +202,66 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 target_npc_name = None
 
             if target_npc_name:
+                ex_turn_num = _resolve_current_turn_1based(session, outcome)
+                existing_c = db.get_contact(session_id, target_npc_name, first_char_id)
+                wr_c = db.get_world_roster_npc(session_id, target_npc_name, include_legacy_rosters=False)
                 if is_success:
-                    existing_c = db.get_contact(session_id, target_npc_name, first_char_id)
-                    b_info = dict(existing_c.get("basic_info") or {}) if existing_c else {}
-                    b_info["contact_added"] = True
-                    b_info["is_contact"] = True
-                    b_info["exchanged_contact"] = True
-                    b_info["met_in_person"] = True
-                    b_info.pop("offscreen_ripple_only", None)
-                    db.upsert_contact(
-                        session_id=session_id,
-                        character_id=first_char_id,
-                        npc_id=target_npc_name,
-                        name=target_npc_name,
-                        basic_info=b_info,
-                        delta_score=8,
-                        track="platonic",
-                        new_general_memory=f"{target_npc_name} gave {first_char_name} their phone number and exchanged Line contact info."
-                    )
+                    ex_mem = f"{target_npc_name} gave {first_char_name} their phone number and exchanged Line contact info."
+                    if wr_c:
+                        db.record_world_roster_interaction(
+                            session_id,
+                            wr_c.get("npc_id") or target_npc_name,
+                            delta_score=8,
+                            met_in_person=True,
+                            turn_number=ex_turn_num,
+                        )
+                        promoted_c = db.promote_world_roster_to_contact(
+                            session_id,
+                            first_char_id,
+                            wr_c.get("name") or target_npc_name,
+                            reason="exchanged_contact",
+                            has_contact_info=True,
+                            turn_number=ex_turn_num,
+                            narrative_text=get_combined_narrative(outcome),
+                        )
+                        ref_c = db.get_contact(session_id, target_npc_name, first_char_id) or promoted_c or existing_c
+                        b_info = dict((ref_c or {}).get("basic_info") or {})
+                        b_info["contact_added"] = True
+                        b_info["is_contact"] = True
+                        b_info["exchanged_contact"] = True
+                        b_info["met_in_person"] = True
+                        b_info["has_contact_info"] = True
+                        b_info.pop("offscreen_ripple_only", None)
+                        db.upsert_contact(
+                            session_id=session_id,
+                            character_id=first_char_id,
+                            npc_id=(ref_c or {}).get("npc_id") or target_npc_name,
+                            name=(ref_c or {}).get("name") or target_npc_name,
+                            basic_info=b_info,
+                            delta_score=0,
+                            track="platonic",
+                            new_general_memory=ex_mem,
+                        )
+                    else:
+                        b_info = dict(existing_c.get("basic_info") or {}) if existing_c else {}
+                        b_info["contact_added"] = True
+                        b_info["is_contact"] = True
+                        b_info["exchanged_contact"] = True
+                        b_info["met_in_person"] = True
+                        b_info["has_contact_info"] = True
+                        b_info.pop("offscreen_ripple_only", None)
+                        db.upsert_contact(
+                            session_id=session_id,
+                            character_id=first_char_id,
+                            npc_id=target_npc_name,
+                            name=target_npc_name,
+                            basic_info=b_info,
+                            delta_score=8,
+                            track="platonic",
+                            new_general_memory=ex_mem,
+                        )
                 else:
                     db.set_contact_request_cooldown(session_id, target_npc_name, hours=24, until_next_day=True)
-                    existing_c = db.get_contact(session_id, target_npc_name, first_char_id)
                     if existing_c:
                         db.upsert_contact(
                             session_id=session_id,
@@ -231,6 +270,14 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                             name=target_npc_name,
                             delta_score=-1,
                             new_general_memory=f"{target_npc_name} declined to share their contact info with {first_char_name} for now."
+                        )
+                    elif wr_c:
+                        db.record_world_roster_interaction(
+                            session_id,
+                            wr_c.get("npc_id") or target_npc_name,
+                            delta_score=-1,
+                            met_in_person=True,
+                            turn_number=ex_turn_num,
                         )
   
     for a in (actions or []):
@@ -421,9 +468,41 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     else:
                         db.set_recruitment_cooldown(session_id, target_npc_name, turns=3)
   
-    # Auto-register all non-hostile scene NPCs into contacts
+    # Track present scene NPCs in Step 1 world_roster and only promote to contacts when qualified
     party_names: set = set()
     all_scene_npcs: list = []
+    _quest_linked_lows: set = set()
+    _sc_slot: Optional[tuple] = None
+    _closed_world_sess = False
+    if session_id:
+        try:
+            for _q in (db.get_session_quests(session_id, status="active") or []):
+                if not isinstance(_q, dict):
+                    continue
+                for _qk in ("giver_name", "target_npc", "quest_giver"):
+                    _qv = str(_q.get(_qk) or "").strip().lower()
+                    if _qv:
+                        _quest_linked_lows.add(_qv)
+                for _wp in (_q.get("waypoints") or []):
+                    if isinstance(_wp, dict) and not _wp.get("completed"):
+                        for _wk in ("target_npc", "npc_name", "target_entity"):
+                            _wv = str(_wp.get(_wk) or "").strip().lower()
+                            if _wv:
+                                _quest_linked_lows.add(_wv)
+        except Exception:
+            pass
+        try:
+            from mechanics.world.schedule_blocks import get_time_block_key, is_weekend
+            _sc_day = max(1, int((session or {}).get("current_day") or 1))
+            _sc_min = int((session or {}).get("current_minute") if (session or {}).get("current_minute") is not None else 480)
+            _sc_loc = str(outcome.get("location") or (session or {}).get("current_location") or "")
+            _sc_dk = "weekend" if is_weekend(_sc_day) else "weekday"
+            _sc_bk = get_time_block_key(_sc_min)
+            if _sc_bk and _sc_loc:
+                _sc_slot = (_sc_dk, _sc_bk, _sc_loc)
+        except Exception:
+            _sc_slot = None
+
     if is_mechanic_enabled(scen_key, "contact_list") or is_mechanic_enabled(scen_key, "relationship_meter"):
         enemy_list = game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)
         enemy_names = {game_engine._get_npc_name(e).lower() for e in enemy_list if e}
@@ -433,23 +512,33 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 party_names.add(str(c[0]["name"]).strip().lower())
             elif isinstance(c, dict) and c.get("name"):
                 party_names.add(str(c["name"]).strip().lower())
-        
+
         all_scene_npcs = list(outcome.get("npcs_present") or (session.get("current_npcs", []) if session else []))
         for ent in (outcome.get("new_entities") or []):
             if isinstance(ent, dict) and ent.get("type", "person").lower() == "person":
                 all_scene_npcs.append(ent)
-                
+
         from mechanics.world.mobility import get_session_dialogue_partners
         active_partners = get_session_dialogue_partners(outcome)
-  
         raw_scene_narrative = get_combined_narrative(outcome)
-  
+        _sc_turn_num = _resolve_current_turn_1based(session, outcome)
+        _wr_by_low: dict = {}
+        try:
+            for _wr in (db.get_world_roster(session_id, include_legacy_rosters=False) or []):
+                if isinstance(_wr, dict) and _wr.get("name"):
+                    _wr_by_low[str(_wr["name"]).strip().lower()] = _wr
+        except Exception:
+            _wr_by_low = {}
+        try:
+            _closed_world_sess = bool(_wr_by_low or (db.get_session_world_nodes(session_id) or []))
+        except Exception:
+            _closed_world_sess = bool(_wr_by_low)
+
         for npc in all_scene_npcs:
             n_name = game_engine._get_npc_name(npc)
             if not n_name or n_name.lower() == "none" or n_name.lower() in enemy_names or n_name.lower() in party_names:
                 continue
-  
-            # Do not auto-add pure generic ambient crowd (e.g. "Drunken Patron", "Town Guard") unless spoken to or friendly
+
             from namegen import is_generic_role_name, is_collective_entity_name
             if is_collective_entity_name(n_name):
                 continue
@@ -457,10 +546,23 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
             is_dialogue = game_engine.is_dialogue_partner(n_name, active_partners) or game_engine.is_dialogue_partner(n_name, [str(a.get("label", "")) for a in (actions or [])])
             if is_generic_role_name(n_name) and not is_dialogue and disp not in ("friendly", "companion", "ally"):
                 continue
-  
-            n_role = (npc.get("role") if isinstance(npc, dict) else "") or ""
-            n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
 
+            n_low_sc = n_name.lower().strip()
+            wr_entry = _wr_by_low.get(n_low_sc) or (
+                db.get_world_roster_npc(session_id, n_name, include_legacy_rosters=False) if session_id else None
+            )
+            if wr_entry and session_id:
+                wr_entry = db.record_world_roster_interaction(
+                    session_id,
+                    wr_entry.get("npc_id") or n_name,
+                    delta_score=0,
+                    discovered_slot=_sc_slot,
+                    met_in_person=True,
+                    turn_number=_sc_turn_num,
+                ) or wr_entry
+
+            n_role = (npc.get("role") if isinstance(npc, dict) else "") or (wr_entry.get("role") if wr_entry else "") or ""
+            n_desc = (npc.get("description") if isinstance(npc, dict) else "") or ""
             n_srt = (npc.get("social_role_type") if isinstance(npc, dict) else "") or ""
             promoted_parent = None
             if session_id:
@@ -475,23 +577,36 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 promoted_parent
                 or (existing_c and (existing_c.get("household_role") in ("father", "mother") or (existing_c.get("basic_info") or {}).get("is_adult_family")))
             )
-            # Check Peer / Role Eligibility (e.g. students vs teachers/parents/clerks in high school)
             import mechanics.social.relationships as relationships
-            if not is_promoted_parent and not relationships.is_contact_eligible(name=npc if isinstance(npc, dict) else n_name, role=n_role, description=n_desc, scenario=scen_key, session_id=session_id, social_role_type=n_srt):
+            is_eligible_sc = is_promoted_parent or relationships.is_contact_eligible(
+                name=npc if isinstance(npc, dict) else n_name,
+                role=n_role,
+                description=n_desc,
+                scenario=scen_key,
+                session_id=session_id,
+                social_role_type=n_srt,
+            )
+            if not is_eligible_sc:
                 continue
 
-            # Contacts require Friend tier (score >= 100), active party membership, or explicit contact_added
-            from mechanics.social.relationships import is_unlocked_contact
-            is_party = n_name.lower() in party_names
-            if not is_party and not is_unlocked_contact(existing_c, party_names):
-                continue
-  
+            is_party = n_low_sc in party_names
+            has_q_link = n_low_sc in _quest_linked_lows
+            should_prom_sc, promo_reason_sc = relationships.should_promote_roster_npc_to_contact(
+                wr_entry or existing_c or (npc if isinstance(npc, dict) else {"name": n_name}),
+                affinity=int((existing_c or {}).get("relationship_score") if existing_c else (wr_entry or {}).get("affinity_score") or 0),
+                has_quest_link=has_q_link,
+                in_party=is_party,
+                is_family=is_promoted_parent,
+                scenario=scen_key,
+                session_id=session_id,
+            )
+
             n_traits = (npc.get("traits") if isinstance(npc, dict) else []) or []
             n_prefs = (npc.get("preferences") if isinstance(npc, dict) else []) or []
             n_race = (npc.get("race") if isinstance(npc, dict) else "") or ""
             n_gender = (npc.get("gender") if isinstance(npc, dict) else "") or ""
             n_app = (npc.get("appearance") if isinstance(npc, dict) else {}) or {}
-            
+
             basic_info = {"met_in_person": True}
             if isinstance(npc, dict):
                 for k in ("role", "occupation", "description", "faction", "club", "club_role", "grade", "clique", "age", "location", "mannerisms", "motivation", "disposition"):
@@ -506,22 +621,70 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                     basic_info["is_special_agent"] = (t_tag == "special_agent")
                 except Exception:
                     pass
-                
-            db.upsert_contact(
-                session_id=session_id,
-                character_id=first_char_id,
-                npc_id=n_name,
-                name=n_name,
-                basic_info=basic_info if basic_info else None,
-                delta_score=0,
-                track="platonic",
-                new_traits=n_traits,
-                new_preferences=n_prefs,
-                race=n_race,
-                gender=n_gender,
-                appearance=n_app if n_app else None,
-                narrative_text=raw_scene_narrative
-            )
+
+            if existing_c:
+                if is_party or is_promoted_parent or relationships.is_unlocked_contact(existing_c, party_names):
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=first_char_id,
+                        npc_id=existing_c.get("npc_id") or n_name,
+                        name=existing_c.get("name") or n_name,
+                        basic_info=basic_info if basic_info else None,
+                        delta_score=0,
+                        track="platonic",
+                        new_traits=n_traits,
+                        new_preferences=n_prefs,
+                        race=n_race,
+                        gender=n_gender,
+                        appearance=n_app if n_app else None,
+                        narrative_text=raw_scene_narrative,
+                    )
+            elif should_prom_sc:
+                if wr_entry:
+                    db.promote_world_roster_to_contact(
+                        session_id,
+                        first_char_id,
+                        wr_entry.get("name") or n_name,
+                        reason=promo_reason_sc or "scene",
+                        has_contact_info=bool(
+                            is_party
+                            or is_promoted_parent
+                            or (wr_entry.get("basic_info") or {}).get("has_contact_info") is True
+                            or (wr_entry.get("basic_info") or {}).get("exchanged_contact")
+                            or (wr_entry.get("basic_info") or {}).get("added_via_peerpulse")
+                        ),
+                        turn_number=_sc_turn_num,
+                        narrative_text=raw_scene_narrative,
+                    )
+                else:
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=first_char_id,
+                        npc_id=n_name,
+                        name=n_name,
+                        basic_info=basic_info if basic_info else None,
+                        delta_score=0,
+                        track="platonic",
+                        new_traits=n_traits,
+                        new_preferences=n_prefs,
+                        race=n_race,
+                        gender=n_gender,
+                        appearance=n_app if n_app else None,
+                        narrative_text=raw_scene_narrative,
+                    )
+            elif wr_entry:
+                # Keep Step 1 world_roster NPC in Known Characters (Lorebook), NOT in contacts
+                db.upsert_lorebook_entity(
+                    session_id=session_id,
+                    entity_type="person",
+                    name=n_name,
+                    description=basic_info.get("description", ""),
+                    traits=n_traits,
+                    mannerisms=str(basic_info.get("mannerisms") or ""),
+                    race=n_race,
+                    appearance=n_app if n_app else {},
+                    gender=n_gender,
+                )
   
         # Deterministic Social Check & Dialogue Partner Affinity Fallback:
         existing_ru_names = {
@@ -533,6 +696,14 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
         for a in (actions or []):
             label = str(a.get("label", ""))
             label_low = label.lower()
+            _fb_parsed = resolve_action_intent(a)
+            if (
+                _fb_parsed.category == IntentCategory.PHONE_CONTACT_EXCHANGE
+                or is_contact_exchange_action(label)
+                or (any(kw in label_low for kw in ("contact info", "phone number", "line id")) and any(kw in label_low for kw in ("ask", "exchange", "request", "add")))
+            ):
+                # Already handled deterministically (+8 / -1) in the PHONE_CONTACT_EXCHANGE block above.
+                continue
             stat = str(a.get("stat", "NONE")).upper()
             a_check = a.get("check")
             tier = "success"
@@ -925,13 +1096,24 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 primary_action = actions[0]
 
             contact = db.get_contact(session_id, npc_name, first_char_id) if (session_id and first_char_id) else None
+            existing_wr = (
+                db.get_world_roster_npc(session_id, npc_name, include_legacy_rosters=False)
+                if session_id
+                else None
+            )
             target_scene_npc = None
             for npc in (all_scene_npcs or []):
                 if isinstance(npc, dict) and str(npc.get("name", "")).strip().lower() == n_low:
                     target_scene_npc = npc
                     break
 
-            eval_contact = dict(contact) if contact else {}
+            if contact:
+                eval_contact = dict(contact)
+            elif existing_wr:
+                eval_contact = dict(existing_wr)
+                eval_contact["relationship_score"] = int(existing_wr.get("affinity_score") or 0)
+            else:
+                eval_contact = {}
             if rel.get("new_traits"):
                 eval_contact["traits"] = list(eval_contact.get("unlocked_traits") or eval_contact.get("traits") or []) + list(rel["new_traits"])
             if rel.get("new_preferences"):
@@ -1203,7 +1385,11 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                             rel["mannerisms_revealed"] = True
   
             single_update = len(outcome.get("relationship_updates", [])) == 1
-            raw_contact_score = int((contact or {}).get("relationship_score", 0) or 0)
+            raw_contact_score = int(
+                contact.get("relationship_score", 0)
+                if contact
+                else ((existing_wr or {}).get("affinity_score") or 0)
+            )
             (
                 new_mem,
                 current_intercourse,
@@ -1297,7 +1483,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 elif not rom_mem and not confession_too_early:
                     rom_mem = custom_summary.strip()
 
-            from mechanics.social.relationships import is_contact_eligible
+            from mechanics.social.relationships import is_contact_eligible, should_promote_roster_npc_to_contact
             is_c_promoted_parent = bool(
                 contact
                 and (
@@ -1306,6 +1492,15 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 )
             )
             if not is_c_promoted_parent and not is_contact_eligible(name=npc_name, role=rel_binfo.get("role", ""), description=rel_binfo.get("description", ""), scenario=scen_key, session_id=session_id):
+                if existing_wr and session_id:
+                    db.record_world_roster_interaction(
+                        session_id,
+                        existing_wr.get("npc_id") or npc_name,
+                        delta_score=0,
+                        discovered_slot=_sc_slot,
+                        met_in_person=True,
+                        turn_number=_resolve_current_turn_1based(session, outcome),
+                    )
                 m_val = rel.get("mannerisms") or (app_dict.get("mannerisms") if isinstance(app_dict, dict) else "") or ""
                 db.upsert_lorebook_entity(
                     session_id=session_id,
@@ -1320,28 +1515,166 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 )
                 continue
 
-            upserted = db.upsert_contact(
-                session_id=session_id,
-                character_id=first_char_id,
-                npc_id=npc_name,
-                name=npc_name,
-                basic_info=rel_binfo if rel_binfo else None,
-                delta_score=delta,
-                track=track,
-                new_traits=traits,
-                new_preferences=prefs,
-                race=rel_race,
-                gender=rel_gender,
-                appearance=app_dict if app_dict else None,
-                new_memory=rom_mem,
-                new_general_memory=gen_mem,
-                narrative_text=narrative_text
-            )
             turn_num = _resolve_current_turn_1based(session, outcome)
+            upserted = None
+            if contact is None and existing_wr is not None and session_id:
+                upd_wr = db.record_world_roster_interaction(
+                    session_id,
+                    existing_wr.get("npc_id") or npc_name,
+                    delta_score=delta,
+                    discovered_slot=_sc_slot,
+                    met_in_person=True,
+                    turn_number=turn_num,
+                ) or existing_wr
+                m_val_wr = rel.get("mannerisms") or (app_dict.get("mannerisms") if isinstance(app_dict, dict) else "") or ""
+                db.upsert_lorebook_entity(
+                    session_id=session_id,
+                    entity_type="person",
+                    name=upd_wr.get("name") or npc_name,
+                    description=rel_binfo.get("description", ""),
+                    traits=traits,
+                    mannerisms=m_val_wr,
+                    race=rel_race,
+                    appearance=app_dict if app_dict else {},
+                    gender=rel_gender,
+                )
+                wr_binfo = dict(upd_wr.get("basic_info") or {})
+                has_q_link = (n_low in _quest_linked_lows) or bool(rel.get("has_quest_link"))
+                is_p_member = n_low in party_names
+                is_fam_wr = bool(
+                    rel.get("is_adult_family")
+                    or wr_binfo.get("is_adult_family")
+                    or wr_binfo.get("cohabiting_family") is True
+                    or str(upd_wr.get("origin") or "").lower() == "household"
+                )
+                exch_wr = bool(rel.get("exchanged_contact") or wr_binfo.get("exchanged_contact") or wr_binfo.get("has_contact_info") is True)
+                peer_wr = bool(rel.get("added_via_peerpulse") or wr_binfo.get("added_via_peerpulse"))
+                do_promote, promo_reason = should_promote_roster_npc_to_contact(
+                    upd_wr,
+                    affinity=int(upd_wr.get("affinity_score") or 0),
+                    exchanged_contact=exch_wr,
+                    added_via_peerpulse=peer_wr,
+                    has_quest_link=has_q_link,
+                    in_party=is_p_member,
+                    is_family=is_fam_wr,
+                    scenario=scen_key,
+                    session_id=session_id,
+                )
+                if do_promote:
+                    has_ci = bool(
+                        is_p_member
+                        or is_fam_wr
+                        or exch_wr
+                        or peer_wr
+                        or int(upd_wr.get("affinity_score") or 0) >= 100
+                        or wr_binfo.get("has_contact_info") is True
+                    )
+                    promoted_row = db.promote_world_roster_to_contact(
+                        session_id,
+                        first_char_id,
+                        upd_wr.get("name") or npc_name,
+                        reason=promo_reason or "affinity",
+                        has_contact_info=has_ci,
+                        turn_number=turn_num,
+                        narrative_text=narrative_text,
+                    )
+                    if promoted_row:
+                        upserted = db.upsert_contact(
+                            session_id=session_id,
+                            character_id=first_char_id,
+                            npc_id=promoted_row.get("npc_id") or npc_name,
+                            name=promoted_row.get("name") or npc_name,
+                            basic_info=rel_binfo if rel_binfo else None,
+                            delta_score=0,
+                            track=track,
+                            new_traits=traits,
+                            new_preferences=prefs,
+                            race=rel_race,
+                            gender=rel_gender,
+                            appearance=app_dict if app_dict else None,
+                            new_memory=rom_mem,
+                            new_general_memory=gen_mem,
+                            narrative_text=narrative_text,
+                        )
+            elif contact is None and _closed_world_sess and session_id:
+                probe_dict = {
+                    "name": npc_name,
+                    "role": rel_binfo.get("role", ""),
+                    "description": rel_binfo.get("description", ""),
+                    "affinity_score": delta,
+                    "has_quest_link": (n_low in _quest_linked_lows) or bool(rel.get("has_quest_link")),
+                }
+                do_prom_fallback, _ = should_promote_roster_npc_to_contact(
+                    probe_dict,
+                    affinity=delta,
+                    has_quest_link=bool(probe_dict["has_quest_link"]),
+                    in_party=(n_low in party_names),
+                    scenario=scen_key,
+                    session_id=session_id,
+                )
+                if do_prom_fallback:
+                    upserted = db.upsert_contact(
+                        session_id=session_id,
+                        character_id=first_char_id,
+                        npc_id=npc_name,
+                        name=npc_name,
+                        basic_info=rel_binfo if rel_binfo else None,
+                        delta_score=delta,
+                        track=track,
+                        new_traits=traits,
+                        new_preferences=prefs,
+                        race=rel_race,
+                        gender=rel_gender,
+                        appearance=app_dict if app_dict else None,
+                        new_memory=rom_mem,
+                        new_general_memory=gen_mem,
+                        narrative_text=narrative_text,
+                    )
+                else:
+                    m_val_fb = rel.get("mannerisms") or (app_dict.get("mannerisms") if isinstance(app_dict, dict) else "") or ""
+                    db.upsert_lorebook_entity(
+                        session_id=session_id,
+                        entity_type="person",
+                        name=npc_name,
+                        description=rel_binfo.get("description", ""),
+                        traits=traits,
+                        mannerisms=m_val_fb,
+                        race=rel_race,
+                        appearance=app_dict if app_dict else {},
+                        gender=rel_gender,
+                    )
+            else:
+                if existing_wr and session_id:
+                    db.record_world_roster_interaction(
+                        session_id,
+                        existing_wr.get("npc_id") or npc_name,
+                        delta_score=delta,
+                        discovered_slot=_sc_slot,
+                        met_in_person=True,
+                        turn_number=turn_num,
+                    )
+                upserted = db.upsert_contact(
+                    session_id=session_id,
+                    character_id=first_char_id,
+                    npc_id=npc_name,
+                    name=npc_name,
+                    basic_info=rel_binfo if rel_binfo else None,
+                    delta_score=delta,
+                    track=track,
+                    new_traits=traits,
+                    new_preferences=prefs,
+                    race=rel_race,
+                    gender=rel_gender,
+                    appearance=app_dict if app_dict else None,
+                    new_memory=rom_mem,
+                    new_general_memory=gen_mem,
+                    narrative_text=narrative_text,
+                )
+
             cur_day_val = int((session or {}).get("current_day") or 1)
             cur_loc_val = str(outcome.get("location") or (session or {}).get("current_location") or "")
 
-            if session_id and resolved_milestone_ev:
+            if session_id and resolved_milestone_ev and upserted:
                 try:
                     from mechanics.social.persona.intimacy.ledger import record_intimate_turn_encounter
                     u_dict = upserted if isinstance(upserted, dict) else {}

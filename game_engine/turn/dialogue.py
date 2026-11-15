@@ -678,7 +678,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         contact_exchange_prompt = ""
         from mechanics.system.phone import scenario_has_smartphone
         if scenario_has_smartphone(_scen_name) and not _in_active_erotic_dlg:
-            from mechanics.social.relationships import is_contact_eligible, is_unlocked_contact, calculate_contact_exchange_dc
+            from mechanics.social.relationships import can_player_dm_contact, is_contact_eligible, calculate_contact_exchange_dc
             party_names_lower = {str(p.get("name", "")).strip().lower() for p in party_npcs}
             lore_people = db.get_lorebook(session["id"]).get("person", []) if session.get("id") else []
             for partner in new_partners:
@@ -700,11 +700,16 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 ):
                     continue
                 existing_c = db.get_contact(session["id"], partner) if session.get("id") else None
-                if is_unlocked_contact(existing_c, party_names_lower) or partner.lower() in party_names_lower:
+                if can_player_dm_contact(existing_c, party_names_lower, scenario=_scen_name) or partner.lower() in party_names_lower:
                     continue
                 cd = db.get_contact_request_cooldown(session["id"], partner) if session.get("id") else 0
                 if cd == 0:
-                    dc = calculate_contact_exchange_dc(existing_c or lore_ent, scenario=_scen_name)
+                    wr_ent = (
+                        db.get_world_roster_npc(session["id"], partner, include_legacy_rosters=False)
+                        if (not existing_c and session.get("id"))
+                        else None
+                    )
+                    dc = calculate_contact_exchange_dc(existing_c or wr_ent or lore_ent, scenario=_scen_name)
                     contact_exchange_prompt += f"  * 📱 [CHA] Smartphone Contact Request check (DC {dc}): 'Ask for {partner}\\'s Phone Number / Contact Info' (Difficult social check to exchange numbers and add them to your phone contacts bypassing friend affinity requirement).\n"
                 elif cd > 0:
                     contact_exchange_prompt += f"  * Note: {partner} declined to share their contact info earlier and cannot be asked again today (on cooldown until tomorrow). NEVER offer a contact request choice for {partner}.\n"
