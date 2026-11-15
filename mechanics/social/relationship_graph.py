@@ -16,7 +16,7 @@ import re
 import sqlite3
 import time
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Set, Tuple, Union
 
 import db
 
@@ -352,6 +352,58 @@ def is_incestuous(
     return False
 
 
+MAX_TIE_TURN_SNAPSHOTS = 10
+
+
+def _parse_tie_meta_dict(raw_meta: Any) -> dict[str, Any]:
+    if isinstance(raw_meta, dict):
+        return dict(raw_meta)
+    if isinstance(raw_meta, str) and raw_meta.strip():
+        try:
+            parsed = json.loads(raw_meta)
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, TypeError, ValueError):
+            pass
+    return {}
+
+
+def _infer_session_turn(conn: sqlite3.Connection, session_id: int) -> int:
+    try:
+        row = conn.execute("SELECT turn_count FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        if row is not None and row["turn_count"] is not None:
+            return int(row["turn_count"])
+    except sqlite3.OperationalError:
+        pass
+    return 0
+
+
+def _snapshot_tie_row_metadata(existing_row: Mapping[str, Any] | sqlite3.Row, turn: int) -> dict[str, Any]:
+    meta = _parse_tie_meta_dict(existing_row["metadata_json"] if "metadata_json" in existing_row.keys() else "{}")
+    snaps = meta.get("_turn_snapshots")
+    snaps_dict = dict(snaps) if isinstance(snaps, dict) else {}
+    t_key = str(int(turn))
+    if t_key not in snaps_dict:
+        clean_meta = {k: v for k, v in meta.items() if k != "_turn_snapshots"}
+        snaps_dict[t_key] = {
+            "tie_type": str(existing_row["tie_type"] or TIETYPE_ACQUAINTANCE),
+            "closeness": int(existing_row["closeness"] if existing_row["closeness"] is not None else 50),
+            "visibility": str(existing_row["visibility"] or "public") if "visibility" in existing_row.keys() else "public",
+            "origin": str(existing_row["origin"] or "procedural") if "origin" in existing_row.keys() else "procedural",
+            "metadata": json.loads(json.dumps(clean_meta)),
+        }
+    if len(snaps_dict) > MAX_TIE_TURN_SNAPSHOTS:
+        def _sort_k(k: str) -> int:
+            try:
+                return int(k)
+            except (TypeError, ValueError):
+                return -1
+        for drop_k in sorted(snaps_dict.keys(), key=_sort_k)[: len(snaps_dict) - MAX_TIE_TURN_SNAPSHOTS]:
+            snaps_dict.pop(drop_k, None)
+    meta["_turn_snapshots"] = snaps_dict
+    return meta
+
+
 # --- Mutations ---
 
 def form_tie(
@@ -505,18 +557,21 @@ def form_tie(
 
         # 4. Upsert active tie
         existing = c.execute(
-            """SELECT id FROM social_ties
+            """SELECT id, tie_type, closeness, visibility, origin, metadata_json FROM social_ties
                WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
             (session_id, a_canon, b_canon, actual_tie_type),
         ).fetchone()
 
         if existing:
             tie_id = existing["id"]
+            snapped_meta = _snapshot_tie_row_metadata(existing, turn)
+            merged_meta = dict(metadata or {})
+            merged_meta["_turn_snapshots"] = snapped_meta["_turn_snapshots"]
             c.execute(
                 """UPDATE social_ties
                    SET closeness = ?, visibility = ?, origin = ?, metadata_json = ?, updated_at = ?
                    WHERE id = ?""",
-                (closeness_clamped, actual_visibility, origin, meta_json, now, tie_id),
+                (closeness_clamped, actual_visibility, origin, json.dumps(merged_meta), now, tie_id),
             )
         else:
             cur = c.execute(
@@ -655,6 +710,7 @@ def adjust_closeness(
     tie_type: Optional[Union[str, int]] = None,
     delta: int = 0,
     *,
+    turn: Optional[int] = None,
     materialize: bool = True,
     conn: Optional[sqlite3.Connection] = None,
 ) -> int:
@@ -671,13 +727,13 @@ def adjust_closeness(
             is_dir = bool(tie_type in DIRECTED_TYPES)
             a_canon, b_canon = canonical_pair(a_norm, b_norm, is_directed=is_dir)
             row = c.execute(
-                """SELECT id, closeness FROM social_ties
+                """SELECT id, tie_type, closeness, visibility, origin, metadata_json FROM social_ties
                    WHERE session_id = ? AND person_a_key = ? AND person_b_key = ? AND tie_type = ? AND status = 'active'""",
                 (session_id, a_canon, b_canon, tie_type),
             ).fetchone()
         else:
             row = c.execute(
-                """SELECT id, closeness FROM social_ties
+                """SELECT id, tie_type, closeness, visibility, origin, metadata_json FROM social_ties
                    WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
                      AND status = 'active'
                    ORDER BY updated_at DESC LIMIT 1""",
@@ -686,14 +742,64 @@ def adjust_closeness(
 
         if not row:
             return 50
+        eff_turn = int(turn) if turn is not None else _infer_session_turn(c, session_id)
+        snapped_meta = _snapshot_tie_row_metadata(row, eff_turn)
         new_val = max(0, min(100, int(row["closeness"]) + int(delta)))
         c.execute(
-            "UPDATE social_ties SET closeness = ?, updated_at = ? WHERE id = ?",
-            (new_val, time.time(), row["id"]),
+            "UPDATE social_ties SET closeness = ?, metadata_json = ?, updated_at = ? WHERE id = ?",
+            (new_val, json.dumps(snapped_meta), time.time(), row["id"]),
         )
         if materialize:
             _materialize_endpoints(session_id, a_norm, b_norm, conn=c)
         return new_val
+
+
+def record_tie_nudge(
+    session_id: int,
+    person_a: str,
+    person_b: str,
+    axis: str,
+    delta: float,
+    *,
+    turn: int,
+    conn: Optional[sqlite3.Connection] = None,
+) -> dict[str, Any]:
+    """Records a social sandbox nudge weight (`nudge_weights[axis]`) on an active tie with turn-snapshot capture (`D9`, `F3`)."""
+    a_norm = "player" if is_player_person_key(person_a) else canonical_person_key(person_a)
+    b_norm = "player" if is_player_person_key(person_b) else canonical_person_key(person_b)
+    if not session_id or a_norm == b_norm or not str(axis or "").strip():
+        return {}
+    clean_axis = str(axis).strip().lower()
+    t_num, now = int(turn), time.time()
+
+    with _get_connection(conn) as c:
+        row = c.execute(
+            """SELECT * FROM social_ties
+               WHERE session_id = ? AND ((person_a_key = ? AND person_b_key = ?) OR (person_a_key = ? AND person_b_key = ?))
+                 AND status = 'active'
+               ORDER BY closeness DESC, updated_at DESC LIMIT 1""",
+            (session_id, a_norm, b_norm, b_norm, a_norm),
+        ).fetchone()
+        if not row:
+            tie_id = form_tie(
+                session_id, a_norm, b_norm, TIETYPE_ACQUAINTANCE,
+                closeness=35, turn=t_num, origin="sandbox_nudge", materialize=False, conn=c,
+            )
+            row = c.execute("SELECT * FROM social_ties WHERE id = ?", (tie_id,)).fetchone()
+        if not row:
+            return {}
+        meta = _snapshot_tie_row_metadata(row, t_num)
+        nudges = dict(meta.get("nudge_weights") or {})
+        prev = float(nudges.get(clean_axis) or 0.0)
+        nudges[clean_axis] = round(max(-5.0, min(5.0, prev + float(delta))), 4)
+        meta["nudge_weights"] = nudges
+        c.execute(
+            "UPDATE social_ties SET metadata_json = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(meta), now, row["id"]),
+        )
+        updated = dict(c.execute("SELECT * FROM social_ties WHERE id = ?", (row["id"],)).fetchone())
+        updated["nudge_weights"] = nudges
+        return updated
 
 
 # --- Queries ---
@@ -1095,7 +1201,8 @@ def rollback_ties_after_turn(
     Rolls back graph ties to the state at turn:
     1. Deletes active/ended ties that started after turn (origin != 'migration').
     2. Reopens ties that ended after turn (status='active', ended_turn=NULL, end_reason='').
-    3. Re-materializes all contacts in the session.
+    3. Restores earliest in-place `_turn_snapshots` captured strictly after turn (`F3`).
+    4. Re-materializes all contacts in the session.
     """
     with _get_connection(conn) as c:
         now = time.time()
@@ -1115,12 +1222,67 @@ def rollback_ties_after_turn(
         )
         reopened_count = reopen_cur.rowcount
 
-        # 3. Re-materialize all contacts
+        # 3. Restore in-place tie mutations (closeness / nudge_weights / metadata) via _turn_snapshots
+        restored_count = 0
+        surviving_rows = c.execute(
+            "SELECT id, tie_type, closeness, visibility, origin, metadata_json FROM social_ties WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+        for sr in surviving_rows:
+            meta = _parse_tie_meta_dict(sr["metadata_json"])
+            snaps = meta.get("_turn_snapshots")
+            if not isinstance(snaps, dict) or not snaps:
+                continue
+            future_keys: list[tuple[int, str]] = []
+            for sk in snaps:
+                try:
+                    ki = int(sk)
+                except (TypeError, ValueError):
+                    continue
+                if ki > turn:
+                    future_keys.append((ki, str(sk)))
+            if not future_keys:
+                continue
+            future_keys.sort(key=lambda item: item[0])
+            snap = snaps.get(future_keys[0][1])
+            new_snaps = dict(snaps)
+            for _, fk in future_keys:
+                new_snaps.pop(fk, None)
+            if isinstance(snap, dict):
+                rest_meta = dict(snap.get("metadata") or {})
+                if new_snaps:
+                    rest_meta["_turn_snapshots"] = new_snaps
+                c.execute(
+                    """UPDATE social_ties
+                       SET tie_type = ?, closeness = ?, visibility = ?, origin = ?, metadata_json = ?, updated_at = ?
+                       WHERE id = ?""",
+                    (
+                        str(snap.get("tie_type") or sr["tie_type"]),
+                        int(snap.get("closeness") if snap.get("closeness") is not None else sr["closeness"]),
+                        str(snap.get("visibility") or sr["visibility"]),
+                        str(snap.get("origin") or sr["origin"]),
+                        json.dumps(rest_meta),
+                        now,
+                        sr["id"],
+                    ),
+                )
+                restored_count += 1
+            else:
+                if new_snaps:
+                    meta["_turn_snapshots"] = new_snaps
+                else:
+                    meta.pop("_turn_snapshots", None)
+                c.execute(
+                    "UPDATE social_ties SET metadata_json = ?, updated_at = ? WHERE id = ?",
+                    (json.dumps(meta), now, sr["id"]),
+                )
+
+        # 4. Re-materialize all contacts
         contacts = c.execute("SELECT npc_id FROM contacts WHERE session_id = ?", (session_id,)).fetchall()
         for cont in contacts:
             materialize_and_save_relations(session_id, cont["npc_id"], conn=c)
 
-        return deleted_count + reopened_count
+        return deleted_count + reopened_count + restored_count
 
 
 def rollback_intimate_events_after_turn(

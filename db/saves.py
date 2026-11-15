@@ -13,6 +13,78 @@ from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, 
 
 MAX_SAVE_SLOTS_PER_CHAR = 6
 
+def _remap_single_proof_ref(raw_ref: str, clue_id_map: dict[int, int], inv_id_map: dict[int, int]) -> str:
+    ref = str(raw_ref or "").strip()
+    if ":" not in ref:
+        return ref
+    prefix, rest = ref.split(":", 1)
+    prefix_low = prefix.strip().lower()
+    if prefix_low == "clue":
+        try:
+            mapped = clue_id_map.get(int(rest.strip()))
+            if mapped is not None:
+                return f"clue:{mapped}"
+        except (TypeError, ValueError):
+            pass
+    elif prefix_low in ("inv", "photo"):
+        try:
+            mapped = inv_id_map.get(int(rest.strip()))
+            if mapped is not None:
+                return f"{prefix_low}:{mapped}"
+        except (TypeError, ValueError):
+            pass
+    return ref
+
+
+def _remap_epistemic_proof_refs(
+    conn: sqlite3.Connection,
+    new_session_id: int,
+    clue_id_map: dict[int, int],
+    inv_id_map: dict[int, int],
+) -> int:
+    """Remaps `clue:<id>`, `inv:<id>`, and `photo:<inv_id>` references inside loaded `epistemic_facts` (`D-2`)."""
+    if not clue_id_map and not inv_id_map:
+        return 0
+    try:
+        rows = conn.execute(
+            "SELECT id, proof_artifact_ref, metadata_json FROM epistemic_facts WHERE session_id = ?",
+            (new_session_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return 0
+    updated = 0
+    for r in rows:
+        cur_ref = str(r["proof_artifact_ref"] or "").strip()
+        new_ref = _remap_single_proof_ref(cur_ref, clue_id_map, inv_id_map)
+        dirty = new_ref != cur_ref
+        raw_meta = r["metadata_json"] or "{}"
+        try:
+            meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
+        except Exception:
+            meta = {}
+        if isinstance(meta, dict):
+            snaps = meta.get("_turn_snapshots")
+            if isinstance(snaps, dict):
+                for snap in snaps.values():
+                    if isinstance(snap, dict) and snap.get("proof_artifact_ref"):
+                        remapped_snap = _remap_single_proof_ref(str(snap["proof_artifact_ref"]), clue_id_map, inv_id_map)
+                        if remapped_snap != snap["proof_artifact_ref"]:
+                            snap["proof_artifact_ref"] = remapped_snap
+                            dirty = True
+            if isinstance(meta.get("proof_refs"), list):
+                new_list = [_remap_single_proof_ref(str(x), clue_id_map, inv_id_map) for x in meta["proof_refs"]]
+                if new_list != meta["proof_refs"]:
+                    meta["proof_refs"] = new_list
+                    dirty = True
+        if dirty:
+            conn.execute(
+                "UPDATE epistemic_facts SET proof_artifact_ref = ?, metadata_json = ? WHERE id = ?",
+                (new_ref, json.dumps(meta), r["id"]),
+            )
+            updated += 1
+    return updated
+
+
 def _rewrite_session_key_id(key_str: str, old_session_id: int | None, new_session_id: int) -> str:
     """Safely rewrites the embedded session_id segment in household_key / commitment_key without corrupting timestamps."""
     if not key_str or not old_session_id:
@@ -973,6 +1045,9 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         )
             except Exception:
                 pass
+
+        # Remap clue:<id>, inv:<id>, photo:<inv_id> references in epistemic_facts after both maps exist (D-2)
+        _remap_epistemic_proof_refs(conn, new_session_id, clue_id_map, inv_id_map)
 
         # Restore character vitals, 3-axis resonance, spell progress, and link active_session_id
         raw_status = char_state.get("status_effects", "[]")

@@ -170,6 +170,7 @@ from .roster import (
     ALLOWED_SHIFT_PROFILES,
     ALLOWED_STAFF_STATUSES,
     WORLD_ROSTER_V54_DDL,
+    apply_world_roster_autonomy_mutations,
     get_world_roster,
     get_world_roster_npc,
     mark_world_roster_staff_status,
@@ -179,4 +180,20 @@ from .roster import (
     rollback_world_roster_after_turn,
     set_world_roster_residence_unlocked,
     upsert_world_roster_npc,
+)
+from .epistemic import *
+from .epistemic import (
+    ALLOWED_CONFIDENCES,
+    ALLOWED_CONTAINMENT_STATES,
+    ALLOWED_FACT_CATEGORIES,
+    ALLOWED_FACT_STATUSES,
+    EPISTEMIC_V55_DDL,
+    build_player_fog_of_war_summary,
+    downgrade_or_upgrade_proof_ref,
+    get_epistemic_fact,
+    get_epistemic_knowledge_rows,
+    preload_epistemic_matrix,
+    rollback_epistemic_state_after_turn,
+    upsert_epistemic_fact,
+    upsert_epistemic_knowledge,
 )

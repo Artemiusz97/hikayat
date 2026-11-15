@@ -156,6 +156,8 @@ def _capture_turn_snapshot(snapshots: dict[str, Any], row: dict[str, Any], turn_
             "residence_unlocked": int(bool(row.get("residence_unlocked"))),
             "residence_unlock_reason": str(row.get("residence_unlock_reason") or ""),
             "home_node_id": str(row.get("home_node_id") or ""),
+            "workplace_node_id": str(row.get("workplace_node_id") or ""),
+            "hangout_node_id": str(row.get("hangout_node_id") or ""),
             "discovered_slots": json.loads(json.dumps(row.get("discovered_slots") or {})),
             "basic_info": json.loads(json.dumps(row.get("basic_info") or {})),
         }
@@ -672,12 +674,26 @@ def _resync_promoted_contact_row(conn: sqlite3.Connection, cr: sqlite3.Row, c_in
             c_info["residence_unlocked"] = True
         else:
             c_info.pop("residence_unlocked", None)
-    if sync["home_node_id"] and c_info.get("home_node_id") != sync["home_node_id"]:
-        c_info["home_node_id"] = sync["home_node_id"]
-        dirty = True
-    elif not sync["home_node_id"] and "home_node_id" in c_info:
-        c_info.pop("home_node_id", None)
-        dirty = True
+    for anchor_k in ("home_node_id", "workplace_node_id", "hangout_node_id"):
+        if anchor_k not in sync:
+            continue
+        anchor_val = sync[anchor_k]
+        if anchor_val and c_info.get(anchor_k) != anchor_val:
+            c_info[anchor_k] = anchor_val
+            dirty = True
+        elif not anchor_val and anchor_k in c_info:
+            c_info.pop(anchor_k, None)
+            dirty = True
+    if isinstance(sync.get("basic_info"), dict):
+        sync_bi = sync["basic_info"]
+        for opt_k in ("autonomy_override", "pending_hangout_ping"):
+            if opt_k in sync_bi:
+                if c_info.get(opt_k) != sync_bi[opt_k]:
+                    c_info[opt_k] = json.loads(json.dumps(sync_bi[opt_k]))
+                    dirty = True
+            elif opt_k in c_info:
+                c_info.pop(opt_k, None)
+                dirty = True
     if dirty:
         conn.execute("UPDATE contacts SET basic_info_json = ?, updated_at = ? WHERE id = ?", (json.dumps(c_info), now, cr["id"]))
 
@@ -685,6 +701,8 @@ def _resync_promoted_contact_row(conn: sqlite3.Connection, cr: sqlite3.Row, c_in
 def _restore_snapshot_row(conn: sqlite3.Connection, cur: dict[str, Any], snap: dict[str, Any], snaps: dict[str, Any], t_num: int, now: float) -> dict[str, Any]:
     rest_res_unlocked = int(bool(snap.get("residence_unlocked", cur["residence_unlocked"])))
     rest_home = str(snap.get("home_node_id", cur["home_node_id"]) or "")
+    rest_workplace = str(snap.get("workplace_node_id", cur.get("workplace_node_id") or "") or "")
+    rest_hangout = str(snap.get("hangout_node_id", cur.get("hangout_node_id") or "") or "")
     rest_slots = _merge_discovered_slots({}, snap.get("discovered_slots") if isinstance(snap.get("discovered_slots"), dict) else {})
     rest_basic = dict(snap["basic_info"]) if isinstance(snap.get("basic_info"), dict) else dict(cur.get("basic_info") or {})
     _update_roster_columns(
@@ -696,13 +714,123 @@ def _restore_snapshot_row(conn: sqlite3.Connection, cur: dict[str, Any], snap: d
             "first_met_turn": snap.get("first_met_turn", cur.get("first_met_turn")),
             "staff_status": str(snap.get("staff_status") or cur["staff_status"]),
             "staff_status_day": int(snap.get("staff_status_day", cur["staff_status_day"])),
-            "residence_unlocked": rest_res_unlocked, "home_node_id": rest_home,
+            "residence_unlocked": rest_res_unlocked,
+            "home_node_id": rest_home,
+            "workplace_node_id": rest_workplace,
+            "hangout_node_id": rest_hangout,
             "residence_unlock_reason": str(snap.get("residence_unlock_reason", cur["residence_unlock_reason"]) or ""),
             "discovered_slots_json": json.dumps(rest_slots), "basic_info_json": json.dumps(rest_basic),
             "turn_snapshots_json": json.dumps(snaps), "turn_updated": min(int(cur.get("turn_updated") or 0), t_num), "updated_at": now,
         },
     )
-    return {"discovered_slots": rest_slots, "residence_unlocked": bool(rest_res_unlocked), "home_node_id": rest_home}
+    return {
+        "discovered_slots": rest_slots,
+        "residence_unlocked": bool(rest_res_unlocked),
+        "home_node_id": rest_home,
+        "workplace_node_id": rest_workplace,
+        "hangout_node_id": rest_hangout,
+        "basic_info": rest_basic,
+    }
+
+
+def apply_world_roster_autonomy_mutations(
+    session_id: int,
+    mutations: list[dict[str, Any]],
+    *,
+    turn_number: int,
+    conn: sqlite3.Connection | None = None,
+) -> dict[str, int]:
+    """Applies boundary-tick NPC schedule overrides, anchor shifts, pings, or replacement hires atomically with turn snapshots (`D8`, `D10`, `F3`)."""
+    if not session_id or not mutations:
+        return {"updated": 0, "created": 0}
+    sid, t_num, now = int(session_id), int(turn_number), time.time()
+
+    def _run(c: sqlite3.Connection) -> dict[str, int]:
+        _ensure_world_roster_table(c)
+        updated, created = 0, 0
+        for mut in mutations:
+            if not isinstance(mut, dict):
+                continue
+            rep = mut.get("replacement_npc")
+            if isinstance(rep, dict) and (rep.get("name") or rep.get("npc_id")):
+                rep_payload = dict(rep)
+                rep_payload.setdefault("origin", "replacement_hire")
+                res = upsert_world_roster_npc(sid, rep_payload, turn_number=t_num, conn=c)
+                if res:
+                    created += 1
+                continue
+            target_key = str(mut.get("npc_id") or mut.get("npc_key") or mut.get("name") or "").strip()
+            if not target_key:
+                continue
+            loaded = _load_and_snapshot(c, sid, target_key, t_num, materialize=True)
+            if loaded is None:
+                continue
+            cur, snaps = loaded
+            new_workplace = str(mut["workplace_node_id"]).strip() if "workplace_node_id" in mut else str(cur.get("workplace_node_id") or "")
+            new_home = str(mut["home_node_id"]).strip() if "home_node_id" in mut else str(cur.get("home_node_id") or "")
+            new_hangout = str(mut["hangout_node_id"]).strip() if "hangout_node_id" in mut else str(cur.get("hangout_node_id") or "")
+            new_staff = _pick_allowed(str(mut.get("staff_status") or "").strip().lower(), cur.get("staff_status"), ALLOWED_STAFF_STATUSES, "active")
+            new_staff_day = _opt_int(mut.get("staff_status_day"))
+            staff_day_val = new_staff_day if new_staff_day is not None else int(cur.get("staff_status_day") or 0)
+
+            b_info = dict(cur.get("basic_info") or {})
+            if "autonomy_override" in mut:
+                ov = mut["autonomy_override"]
+                if isinstance(ov, dict) and ov:
+                    b_info["autonomy_override"] = dict(ov)
+                else:
+                    b_info.pop("autonomy_override", None)
+            if mut.get("clear_autonomy_override"):
+                b_info.pop("autonomy_override", None)
+            if "pending_hangout_ping" in mut:
+                ping = mut["pending_hangout_ping"]
+                if isinstance(ping, dict) and ping:
+                    b_info["pending_hangout_ping"] = dict(ping)
+                else:
+                    b_info.pop("pending_hangout_ping", None)
+            if mut.get("clear_pending_hangout_ping"):
+                b_info.pop("pending_hangout_ping", None)
+            if isinstance(mut.get("basic_info_updates"), dict):
+                b_info = merge_dict_safely(b_info, mut["basic_info_updates"])
+            b_info = mirror_anchors_into_basic_info(
+                b_info, new_workplace, new_home, new_hangout,
+                str(cur.get("shift_profile") or "day"), bool(cur.get("residence_unlocked")),
+            )
+
+            cols_update: dict[str, Any] = {
+                "workplace_node_id": new_workplace,
+                "home_node_id": new_home,
+                "hangout_node_id": new_hangout,
+                "staff_status": new_staff,
+                "staff_status_day": staff_day_val,
+                "basic_info_json": json.dumps(b_info),
+                "turn_snapshots_json": json.dumps(snaps),
+                "turn_updated": t_num,
+                "updated_at": now,
+            }
+            if mut.get("origin"):
+                cols_update["origin"] = _pick_allowed(mut.get("origin"), cur.get("origin"), ALLOWED_ROSTER_ORIGINS, "venue_seed")
+            _update_roster_columns(c, int(cur["id"]), cols_update)
+            updated += 1
+
+            def _sync_contact(c_info: dict[str, Any]) -> None:
+                c_info["workplace_node_id"] = new_workplace
+                c_info["home_node_id"] = new_home
+                c_info["hangout_node_id"] = new_hangout
+                if "autonomy_override" in b_info:
+                    c_info["autonomy_override"] = json.loads(json.dumps(b_info["autonomy_override"]))
+                else:
+                    c_info.pop("autonomy_override", None)
+                if "pending_hangout_ping" in b_info:
+                    c_info["pending_hangout_ping"] = json.loads(json.dumps(b_info["pending_hangout_ping"]))
+                else:
+                    c_info.pop("pending_hangout_ping", None)
+
+            _update_matching_contacts_basic_info(c, sid, cur["npc_id"], cur["name"], _sync_contact, now)
+        return {"updated": updated, "created": created}
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
 
 
 def rollback_world_roster_after_turn(

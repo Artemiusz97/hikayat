@@ -1074,6 +1074,7 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
             "grudges_restored": 0,
             "pact_gear_pruned": 0,
             "world_roster_rolled_back": 0,
+            "epistemic_rolled_back": 0,
         }
     import mechanics.social.relationship_graph as rg
     from mechanics.social.persona.intimacy.ledger import delete_intimate_events_after_turn
@@ -1084,6 +1085,7 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
     from .properties import rollback_player_properties_after_turn
     from .contracts import rollback_entity_contracts_after_turn
     from .roster import rollback_world_roster_after_turn
+    from .epistemic import rollback_epistemic_state_after_turn
 
     t_num = int(turn_number)
     with UnitOfWork() as conn:
@@ -1096,6 +1098,7 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         prop_res = rollback_player_properties_after_turn(session_id, t_num, conn=conn)
         pact_res = rollback_entity_contracts_after_turn(session_id, t_num, conn=conn)
         roster_res = rollback_world_roster_after_turn(session_id, t_num, conn=conn)
+        ep_res = rollback_epistemic_state_after_turn(session_id, t_num, conn=conn)
         from mechanics.world.locations.folklore_veil import rollback_folklore_veil_state_after_turn
         veil_res = rollback_folklore_veil_state_after_turn(session_id, t_num, conn=conn)
         intimate_cnt = delete_intimate_events_after_turn(session_id, t_num, conn=conn)
@@ -1379,6 +1382,12 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
             roster_res.get("roster_deleted", 0)
             + roster_res.get("roster_restored", 0)
             + roster_res.get("promoted_contacts_reverted", 0)
+        ),
+        "epistemic_rolled_back": (
+            ep_res.get("facts_deleted", 0)
+            + ep_res.get("facts_restored", 0)
+            + ep_res.get("knowledge_deleted", 0)
+            + ep_res.get("knowledge_restored", 0)
         ),
     }
 
