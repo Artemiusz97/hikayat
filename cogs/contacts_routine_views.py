@@ -1,0 +1,652 @@
+"""Discord Progressive Schedule & Acquaintances presentation and O(1) context helpers.
+
+Provides read-only batch context preloading, 5-block Weekday/Weekend routine
+formatting for Discord embed field limits (<= 1024 chars), and Acquaintances
+embeds parity-matched with the React Web SPA.
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from typing import Any, Callable, Dict, List, Mapping, Optional, Set, Tuple
+
+import discord
+
+import db
+from mechanics.social import relationship_graph as rg
+from mechanics.social.factions import get_anomalous_faction_state
+from mechanics.social.relationships import (
+    can_player_dm_contact,
+    enrich_contact_dossier,
+    get_relationship_tier,
+    is_unlocked_contact,
+    safe_get_contacts,
+)
+from mechanics.world.routine_disclosure import (
+    ROUTINE_BLOCKS,
+    build_known_routine_payload,
+    format_known_routine_summary,
+)
+from scenario_data import is_anomalous_incursions_scenario
+
+_BLOCK_LABELS: Dict[str, str] = {
+    "morning": "Morning",
+    "lunch": "Lunch",
+    "afternoon": "Afternoon",
+    "evening": "Evening",
+    "night": "Night",
+}
+
+_SHORT_BLOCK_LABELS: Dict[str, str] = {
+    "morning": "AM",
+    "lunch": "Lunch",
+    "afternoon": "PM",
+    "evening": "Eve",
+    "night": "Night",
+}
+
+_DISCORD_EMBED_FIELD_MAX = 1024
+_NON_TRIVIAL_PRELOAD_ERRORS = (sqlite3.Error, AttributeError, TypeError, ValueError)
+
+
+def _format_day_section(
+    header: str,
+    slots: Mapping[str, Any],
+    labels: Mapping[str, str],
+    slot_cap: int = 80,
+) -> str:
+    """Format one Weekday or Weekend 5-block section."""
+    lines = [f"**{header}**"]
+    for block in ROUTINE_BLOCKS:
+        raw = str(slots.get(block) or "???").strip() or "???"
+        if len(raw) > slot_cap:
+            raw = raw[: max(1, slot_cap - 3)].rstrip() + "..."
+        lines.append(f"• {labels[block]}: {raw}")
+    return "\n".join(lines)
+
+
+def format_discord_known_routine_value(
+    known_routine: Optional[Mapping[str, Any]],
+    legacy_sched: str = "",
+    *,
+    include_weekend: bool = True,
+) -> str:
+    """Render a 5-block Weekday/Weekend known routine strictly within 1024 chars."""
+    if isinstance(known_routine, Mapping) and (
+        isinstance(known_routine.get("weekday"), Mapping)
+        or isinstance(known_routine.get("weekend"), Mapping)
+    ):
+        weekday = known_routine.get("weekday")
+        weekend = known_routine.get("weekend")
+        weekday_map: Mapping[str, Any] = weekday if isinstance(weekday, Mapping) else {}
+        weekend_map: Mapping[str, Any] = weekend if isinstance(weekend, Mapping) else {}
+
+        for labels, cap in (
+            (_BLOCK_LABELS, 80),
+            (_BLOCK_LABELS, 52),
+            (_SHORT_BLOCK_LABELS, 36),
+            (_SHORT_BLOCK_LABELS, 24),
+        ):
+            parts = [_format_day_section("Weekday", weekday_map, labels, slot_cap=cap)]
+            if include_weekend:
+                parts.append(_format_day_section("Weekend", weekend_map, labels, slot_cap=cap))
+            candidate = "\n".join(parts)
+            if len(candidate) <= _DISCORD_EMBED_FIELD_MAX:
+                return candidate
+
+        fallback = _format_day_section("Weekday", weekday_map, _SHORT_BLOCK_LABELS, slot_cap=24)
+        if len(fallback) <= _DISCORD_EMBED_FIELD_MAX:
+            return fallback
+        return fallback[: _DISCORD_EMBED_FIELD_MAX - 3].rstrip() + "..."
+
+    cleaned = str(legacy_sched or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) > _DISCORD_EMBED_FIELD_MAX - 2:
+        cleaned = cleaned[: _DISCORD_EMBED_FIELD_MAX - 5].rstrip() + "..."
+    return f"`{cleaned}`"
+
+
+def _parse_json_list(raw: Any) -> List[str]:
+    """Parse list or JSON array safely into non-empty strings."""
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(x).strip() for x in parsed if str(x).strip()]
+    return []
+
+
+def _extract_last_name(full_name: str) -> str:
+    """Return multi-word surname if present."""
+    parts = str(full_name or "").strip().split()
+    return parts[-1] if len(parts) > 1 else ""
+
+
+def _build_acquaintance_workplace(
+    row: Mapping[str, Any],
+    nodes_by_id: Optional[Mapping[str, Mapping[str, Any]]] = None,
+) -> str:
+    """Resolve readable workplace/role subtitle for an acquaintance card."""
+    raw_basic = row.get("basic_info") if isinstance(row.get("basic_info"), Mapping) else {}
+    work_nid = str(row.get("workplace_node_id") or raw_basic.get("workplace_node_id") or "").strip()
+    node_name = ""
+    if work_nid and isinstance(nodes_by_id, Mapping):
+        w_node = nodes_by_id.get(work_nid)
+        if isinstance(w_node, Mapping):
+            node_name = str(w_node.get("name") or "").strip()
+    work_name = str(
+        node_name or row.get("work_node_name") or row.get("workplace_label") or ""
+    ).strip()
+    role = str(row.get("job_title") or row.get("role") or raw_basic.get("role") or "").strip()
+    if role and work_name and work_name.lower() not in role.lower():
+        return f"{role} ({work_name})"
+    return role or work_name
+
+
+def _index_contacts_and_roster(
+    contacts: List[dict],
+    roster_rows: List[dict],
+) -> Tuple[Dict[str, dict], Dict[str, dict], Dict[str, dict], Dict[str, dict]]:
+    """Build canonical key and name lookup maps without extra DB calls."""
+    contacts_by_key: Dict[str, dict] = {}
+    contacts_by_name: Dict[str, dict] = {}
+    for contact in contacts:
+        if not isinstance(contact, Mapping):
+            continue
+        c_dict = dict(contact)
+        ck = db.canon_social_npc_id(c_dict.get("npc_id") or c_dict.get("npc_key") or c_dict.get("name") or "")
+        cn = db.canon_social_npc_id(c_dict.get("name") or "")
+        if ck:
+            contacts_by_key[ck] = c_dict
+        if cn:
+            contacts_by_name[cn] = c_dict
+
+    roster_by_key: Dict[str, dict] = {}
+    roster_by_name: Dict[str, dict] = {}
+    for row in roster_rows:
+        if not isinstance(row, Mapping):
+            continue
+        r_dict = dict(row)
+        rk = db.canon_social_npc_id(r_dict.get("npc_id") or r_dict.get("npc_key") or r_dict.get("name") or "")
+        rn = db.canon_social_npc_id(r_dict.get("name") or "")
+        if rk:
+            roster_by_key[rk] = r_dict
+        if rn:
+            roster_by_name[rn] = r_dict
+
+    return contacts_by_key, contacts_by_name, roster_by_key, roster_by_name
+
+
+def preload_discord_social_context(
+    session_id: int,
+    character_id: int,
+    scenario_key: str,
+    *,
+    user_id: int = 0,
+    preloaded_contacts: Optional[List[dict]] = None,
+    preloaded_party_npcs: Optional[List[dict]] = None,
+) -> Dict[str, Any]:
+    """Preload all session social/world state in O(1) batch SQLite reads."""
+    sid = int(session_id or 0)
+    cid = int(character_id or 0)
+    scen = str(scenario_key or "fantasy")
+
+    reveal_debug = False
+    ui_lang = "en"
+    player_last_name = ""
+    if user_id:
+        try:
+            user_settings = db.get_settings(user_id) or {}
+            reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
+            ui_lang = str(user_settings.get("ui_language") or "en")
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            reveal_debug = False
+            ui_lang = "en"
+        try:
+            char_row = db.get_character(user_id) or {}
+            if not cid and char_row.get("id"):
+                cid = int(char_row["id"])
+            player_last_name = _extract_last_name(str(char_row.get("name") or ""))
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            player_last_name = ""
+
+    contacts: List[dict] = (
+        list(preloaded_contacts)
+        if preloaded_contacts is not None
+        else (safe_get_contacts(sid, cid or None, ensure_scene=False) if sid else [])
+    )
+
+    roster_rows: List[dict] = []
+    nodes_by_id: Dict[str, dict] = {}
+    primary_property: Optional[dict] = None
+    person_ties: List[dict] = []
+    party_npcs: List[dict] = []
+    discoveries_by_npc: Dict[str, List[dict]] = {}
+    party_npc_keys: Set[str] = set()
+    kin_npc_keys: Set[str] = set()
+    romantic_npc_keys: Set[str] = set()
+    faction_state: Optional[dict] = None
+
+    if sid:
+        try:
+            roster_rows = list(db.get_world_roster(sid, include_legacy_rosters=True) or [])
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            roster_rows = []
+        try:
+            for node in db.get_session_world_nodes(sid) or []:
+                if isinstance(node, Mapping) and str(node.get("node_id") or "").strip():
+                    nodes_by_id[str(node["node_id"])] = dict(node)
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            nodes_by_id = {}
+        try:
+            primary_property = db.get_primary_property(sid)
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            primary_property = None
+        try:
+            if hasattr(rg, "get_person_ties"):
+                person_ties = list(rg.get_person_ties(sid, "player") or [])
+            elif hasattr(rg, "get_ties"):
+                person_ties = list(rg.get_ties(sid, "player") or [])
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            person_ties = []
+        try:
+            if preloaded_party_npcs is not None:
+                party_npcs = list(preloaded_party_npcs)
+            else:
+                party_npcs = list(db.get_session_party_npcs(sid) or [])
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            party_npcs = []
+        try:
+            discoveries_by_npc = dict(db.get_contact_dossier_discoveries_batch(sid, cid) or {})
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            discoveries_by_npc = {}
+        try:
+            ex_sets = db.get_player_fow_exemption_sets(sid) or {}
+            if isinstance(ex_sets, Mapping):
+                party_npc_keys = set(ex_sets.get("party_npc_keys") or set())
+                kin_npc_keys = set(ex_sets.get("kin_npc_keys") or set())
+                romantic_npc_keys = set(ex_sets.get("romantic_npc_keys") or set())
+            elif isinstance(ex_sets, (tuple, list)) and len(ex_sets) >= 3:
+                party_npc_keys = set(ex_sets[0] or set())
+                kin_npc_keys = set(ex_sets[1] or set())
+                romantic_npc_keys = set(ex_sets[2] or set())
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            party_npc_keys, kin_npc_keys, romantic_npc_keys = set(), set(), set()
+        try:
+            if is_anomalous_incursions_scenario(scen):
+                f_state = get_anomalous_faction_state(sid)
+                faction_state = dict(f_state) if isinstance(f_state, dict) else {}
+        except _NON_TRIVIAL_PRELOAD_ERRORS:
+            faction_state = None
+
+    c_by_key, c_by_name, r_by_key, r_by_name = _index_contacts_and_roster(contacts, roster_rows)
+    party_names = {
+        str(p.get("name") or "").strip().lower()
+        for p in party_npcs
+        if isinstance(p, Mapping) and p.get("name")
+    }
+
+    return {
+        "session_id": sid,
+        "character_id": cid,
+        "scenario_key": scen,
+        "reveal_debug": reveal_debug,
+        "ui_lang": ui_lang,
+        "player_last_name": player_last_name,
+        "contacts": contacts,
+        "roster_rows": roster_rows,
+        "nodes_by_id": nodes_by_id,
+        "primary_property": primary_property,
+        "person_ties": person_ties,
+        "party_npcs": party_npcs,
+        "party_names": party_names,
+        "discoveries_by_npc": discoveries_by_npc,
+        "party_npc_keys": party_npc_keys,
+        "kin_npc_keys": kin_npc_keys,
+        "romantic_npc_keys": romantic_npc_keys,
+        "faction_state": faction_state,
+        "household_cache": {},
+        "contacts_by_key": c_by_key,
+        "contacts_by_name": c_by_name,
+        "roster_by_key": r_by_key,
+        "roster_by_name": r_by_name,
+    }
+
+
+def _discoveries_for_npc(
+    discoveries_by_npc: Mapping[str, List[dict]],
+    npc_key: str,
+    npc_name: str,
+) -> List[dict]:
+    """Lookup preloaded dossier discovery rows by canonical key or name."""
+    seen_ids: Set[int] = set()
+    rows: List[dict] = []
+    for candidate in (
+        str(npc_key or "").strip().lower(),
+        str(npc_name or "").strip().lower(),
+        db.canon_social_npc_id(npc_key),
+        db.canon_social_npc_id(npc_name),
+    ):
+        if not candidate:
+            continue
+        for item in discoveries_by_npc.get(candidate) or ():
+            row_id = item.get("id")
+            if row_id is not None:
+                int_id = int(row_id)
+                if int_id in seen_ids:
+                    continue
+                seen_ids.add(int_id)
+            rows.append(dict(item))
+    return rows
+
+
+def enrich_discord_npc_with_routine(
+    npc: Mapping[str, Any],
+    fow_context: Mapping[str, Any],
+    *,
+    is_acquaintance: bool = False,
+) -> dict:
+    """Enrich a Contact or read-only Acquaintance using preloaded O(1) context."""
+    sid = int(fow_context.get("session_id") or 0)
+    cid = int(fow_context.get("character_id") or 0)
+    scen = str(fow_context.get("scenario_key") or "fantasy")
+    ui_lang = str(fow_context.get("ui_lang") or "en")
+    reveal_debug = bool(fow_context.get("reveal_debug"))
+
+    npc_in = dict(npc)
+    if cid and not npc_in.get("character_id"):
+        npc_in["character_id"] = cid
+    if sid and not npc_in.get("session_id"):
+        npc_in["session_id"] = sid
+
+    ck = db.canon_social_npc_id(npc_in.get("npc_id") or npc_in.get("npc_key") or npc_in.get("name") or "")
+    cn = db.canon_social_npc_id(npc_in.get("name") or "")
+    disc_rows = _discoveries_for_npc(
+        fow_context.get("discoveries_by_npc") or {},
+        str(npc_in.get("npc_id") or npc_in.get("npc_key") or ""),
+        str(npc_in.get("name") or ""),
+    )
+
+    enriched = enrich_contact_dossier(
+        npc_in,
+        sid,
+        scen,
+        debug_reveal_all=reveal_debug,
+        preloaded_discoveries=disc_rows,
+        lang=ui_lang,
+        party_npc_keys=fow_context.get("party_npc_keys"),
+        kin_npc_keys=fow_context.get("kin_npc_keys"),
+        romantic_npc_keys=fow_context.get("romantic_npc_keys"),
+        read_only=True,
+        preloaded_party_npcs=fow_context.get("party_npcs"),
+        preloaded_faction_state=fow_context.get("faction_state"),
+    )
+
+    roster_row = (
+        (fow_context.get("roster_by_key") or {}).get(ck)
+        or (fow_context.get("roster_by_name") or {}).get(cn)
+    )
+    contact_row = (
+        None
+        if is_acquaintance
+        else (
+            (fow_context.get("contacts_by_key") or {}).get(ck)
+            or (fow_context.get("contacts_by_name") or {}).get(cn)
+            or npc_in
+        )
+    )
+
+    routine = build_known_routine_payload(
+        enriched,
+        session_id=sid,
+        scen_key=scen,
+        lang=ui_lang,
+        debug_reveal_all=reveal_debug,
+        nodes_by_id=fow_context.get("nodes_by_id"),
+        roster_row=roster_row,
+        contact_row=contact_row,
+        primary_property=fow_context.get("primary_property"),
+        contacts=fow_context.get("contacts"),
+        person_ties=fow_context.get("person_ties"),
+        household_cache=fow_context.get("household_cache"),
+        player_last_name=fow_context.get("player_last_name"),
+        party_npc_keys=fow_context.get("party_npc_keys"),
+        kin_npc_keys=fow_context.get("kin_npc_keys"),
+        romantic_npc_keys=fow_context.get("romantic_npc_keys"),
+        discovered_dossier_rows=disc_rows,
+        character_id=cid,
+        preloaded=True,
+    )
+    summary_text = format_known_routine_summary(routine, lang=ui_lang)
+    enriched["known_routine"] = routine
+    if summary_text:
+        enriched["known_schedule"] = summary_text
+    enriched["schedule_revealed"] = bool(
+        routine.get("full_schedule_unlocked") or int(routine.get("discovered_count") or 0) > 0
+    )
+
+    party_names = fow_context.get("party_names") or set()
+    if is_acquaintance:
+        enriched["can_dm"] = False
+        enriched["is_acquaintance"] = True
+        enriched["tier_status"] = "acquaintance"
+    else:
+        enriched["can_dm"] = can_player_dm_contact(enriched, party_names, scenario=scen)
+
+    return enriched
+
+
+def load_discord_contacts_and_acquaintances(
+    session_id: int,
+    character_id: int,
+    scenario_key: str,
+    *,
+    user_id: int = 0,
+    party_names: Optional[Set[str]] = None,
+    party_npcs: Optional[List[dict]] = None,
+    filter_unlocked_fn: Optional[Callable[[List[dict], Set[str], str], List[dict]]] = None,
+) -> Tuple[List[dict], List[dict], Dict[str, Any]]:
+    """Load and enrich Contacts + read-only deduplicated Acquaintances in O(1)."""
+    fow_context = preload_discord_social_context(
+        session_id,
+        character_id,
+        scenario_key,
+        user_id=user_id,
+        preloaded_party_npcs=party_npcs,
+    )
+    eff_party_names = party_names if party_names is not None else set(fow_context.get("party_names") or ())
+    fow_context["party_names"] = eff_party_names
+
+    raw_contacts = list(fow_context.get("contacts") or [])
+    if filter_unlocked_fn is not None:
+        unlocked_raw = list(filter_unlocked_fn(raw_contacts, eff_party_names, scenario_key))
+    else:
+        unlocked_raw = [c for c in raw_contacts if is_unlocked_contact(c, eff_party_names)]
+
+    enriched_contacts = [
+        enrich_discord_npc_with_routine(c, fow_context, is_acquaintance=False)
+        for c in unlocked_raw
+    ]
+
+    excluded_keys: Set[str] = set()
+    excluded_names: Set[str] = set()
+    for c in raw_contacts:
+        ck = db.canon_social_npc_id(c.get("npc_id") or c.get("npc_key") or c.get("name") or "")
+        cn = db.canon_social_npc_id(c.get("name") or "")
+        if ck:
+            excluded_keys.add(ck)
+        if cn:
+            excluded_names.add(cn)
+
+    nodes_by_id = fow_context.get("nodes_by_id") or {}
+    seen_acq_keys: Set[str] = set()
+    acquaintances: List[dict] = []
+    for row in fow_context.get("roster_rows") or []:
+        if not isinstance(row, Mapping):
+            continue
+        if str(row.get("tier_status") or "").strip().lower() != "acquaintance":
+            continue
+        npc_name = str(row.get("name") or "").strip()
+        npc_key = db.canon_social_npc_id(row.get("npc_id") or row.get("npc_key") or npc_name)
+        canon_name = db.canon_social_npc_id(npc_name)
+        if not npc_name or not npc_key:
+            continue
+        if npc_key in excluded_keys or (canon_name and canon_name in excluded_names):
+            continue
+        if npc_key in seen_acq_keys:
+            continue
+        seen_acq_keys.add(npc_key)
+
+        workplace_label = _build_acquaintance_workplace(row, nodes_by_id=nodes_by_id)
+        raw_aff = row.get("affinity_score")
+        if raw_aff is None:
+            raw_aff = row.get("affinity") if row.get("affinity") is not None else (row.get("affection") or 0)
+        affinity = int(raw_aff)
+        raw_basic = row.get("basic_info") if isinstance(row.get("basic_info"), Mapping) else {}
+        acq_seed = {
+            "id": f"acq_{npc_key}",
+            "session_id": int(session_id or 0),
+            "character_id": int(fow_context.get("character_id") or 0),
+            "npc_id": str(row.get("npc_id") or npc_key),
+            "npc_key": npc_key,
+            "name": npc_name,
+            "role": str(row.get("job_title") or row.get("role") or workplace_label or "Acquaintance"),
+            "workplace_label": workplace_label,
+            "origin": str(row.get("origin") or "Unknown"),
+            "affection": affinity,
+            "affinity": affinity,
+            "relationship_score": affinity,
+            "known_status": str(row.get("staff_status") or row.get("status") or "Active"),
+            "tier_status": "acquaintance",
+            "is_acquaintance": True,
+            "can_dm": False,
+            "basic_info": dict(raw_basic),
+            "appearance": dict(row.get("appearance") or {}) if isinstance(row.get("appearance"), Mapping) else {},
+            "traits": list(row.get("traits") or []) if isinstance(row.get("traits"), list) else [],
+            "promotion_hint": "Ask for their number or connect via PeerPulse to add as a Contact.",
+        }
+        enriched_acq = enrich_discord_npc_with_routine(acq_seed, fow_context, is_acquaintance=True)
+        enriched_acq["id"] = f"acq_{npc_key}"
+        enriched_acq["workplace_label"] = workplace_label
+        enriched_acq["origin"] = acq_seed["origin"]
+        enriched_acq["promotion_hint"] = acq_seed["promotion_hint"]
+        enriched_acq["can_dm"] = False
+        enriched_acq["is_acquaintance"] = True
+        enriched_acq["tier_status"] = "acquaintance"
+        acquaintances.append(enriched_acq)
+
+    return enriched_contacts, acquaintances, fow_context
+
+
+def build_acquaintances_list_embed(
+    acquaintances: List[dict],
+    scenario_key: str,
+    char_name: str,
+) -> discord.Embed:
+    """Build the Discord embed listing read-only Acquaintances."""
+    if not acquaintances:
+        embed = discord.Embed(
+            title=f"👥 {char_name}'s Acquaintances (0)",
+            description=(
+                "No casual acquaintances spotted yet.\n"
+                "People you meet briefly or spot around town appear here until "
+                "you exchange contact info or connect via PeerPulse."
+            ),
+            color=0x64748B,
+        )
+        embed.set_footer(text="Acquaintances are read-only until promoted to Contacts.")
+        return embed
+
+    lines: List[str] = []
+    for acq in acquaintances[:25]:
+        name = str(acq.get("name") or "Unknown")
+        workplace = str(acq.get("workplace_label") or acq.get("role") or "Acquaintance")
+        aff = int(acq.get("affection") or acq.get("affinity") or 0)
+        tier_info = get_relationship_tier(aff, track="platonic", scenario=scenario_key or "default")
+        tier_name = str((tier_info or {}).get("name") or "Acquaintance")
+        lines.append(f"• **{name}** — *{workplace}* | {tier_name} ({aff:+d}) | 🔒 DM Locked")
+
+    extra = f"\n*...and {len(acquaintances) - 25} more*" if len(acquaintances) > 25 else ""
+    embed = discord.Embed(
+        title=f"👥 {char_name}'s Acquaintances ({len(acquaintances)})",
+        description="\n".join(lines) + extra,
+        color=0x64748B,
+    )
+    embed.set_footer(text="Select an acquaintance below to inspect their profile & known routine.")
+    return embed
+
+
+def build_acquaintance_detail_embed(
+    acquaintance: Mapping[str, Any],
+    scenario_key: str,
+    char_name: str,
+    reveal_debug: bool = False,
+) -> discord.Embed:
+    """Build the Discord detail embed for a single read-only Acquaintance."""
+    name = str(acquaintance.get("name") or "Unknown")
+    workplace = str(acquaintance.get("workplace_label") or acquaintance.get("role") or "Acquaintance")
+    origin = str(acquaintance.get("origin") or "Unknown")
+    aff = int(acquaintance.get("affection") or acquaintance.get("affinity") or 0)
+    tier_info = get_relationship_tier(aff, track="platonic", scenario=scenario_key or "default")
+    tier_name = str((tier_info or {}).get("name") or "Acquaintance")
+
+    embed = discord.Embed(
+        title=f"👥 {name} (Acquaintance)",
+        description=f"*{workplace}*\nOrigin: `{origin}` | Standing: **{tier_name}** (`{aff:+d}`)",
+        color=0x64748B,
+    )
+
+    if not acquaintance.get("can_dm"):
+        hint = str(
+            acquaintance.get("promotion_hint")
+            or "Ask for number in person or connect via PeerPulse."
+        )
+        embed.add_field(
+            name="🔒 DM Locked",
+            value=f"Ask for number in person or connect via PeerPulse.\n_{hint}_",
+            inline=False,
+        )
+
+    traits = _parse_json_list(
+        acquaintance.get("unlocked_traits")
+        if acquaintance.get("unlocked_traits") is not None
+        else acquaintance.get("personality_traits")
+    )
+    likes = _parse_json_list(
+        acquaintance.get("preferences")
+        if acquaintance.get("preferences") is not None
+        else acquaintance.get("likes")
+    )
+    dislikes = _parse_json_list(acquaintance.get("dislikes"))
+    traits_str = ", ".join(traits[:3]) if traits else "???"
+    likes_str = ", ".join(likes[:3]) if likes else "???"
+    dislikes_str = ", ".join(dislikes[:3]) if dislikes else "???"
+
+    embed.add_field(
+        name="📋 Observed Profile",
+        value=f"**Traits:** {traits_str}\n**Likes:** {likes_str}\n**Dislikes:** {dislikes_str}",
+        inline=False,
+    )
+
+    routine_val = format_discord_known_routine_value(
+        acquaintance.get("known_routine"),
+        str(acquaintance.get("known_schedule") or ""),
+    )
+    if routine_val:
+        embed.add_field(
+            name="🕒 Schedule & Routine",
+            value=routine_val,
+            inline=False,
+        )
+
+    footer = f"{char_name}'s Acquaintances (Read-Only)"
+    if reveal_debug:
+        footer += " | Debug Reveal ON"
+    embed.set_footer(text=footer)
+    return embed

@@ -902,7 +902,17 @@
     "preferred_likes": "Preferred / Likes",
     "aversions_dislikes": "Aversions / Dislikes",
     "virgin_history": "• Virgin (No prior intimate history before meeting you)",
-    "romantic_milestones": "Shared Romantic Milestones"
+    "romantic_milestones": "Shared Romantic Milestones",
+    "tab_contacts": "Contacts",
+    "tab_acquaintances": "Acquaintances",
+    "acquaintances_count": "{{count}} Met",
+    "no_acquaintances": "No met acquaintances yet.",
+    "acquaintances_hint": "Characters you briefly meet or converse with appear here until your bond deepens enough for Saved Contacts.",
+    "acquaintance_badge": "Acquaintance",
+    "promotion_hint": "Promote to Saved Contacts by reaching +15 Affinity, -10 Rivalry, exchanging numbers in person, forming a quest link, or recruiting them into your party.",
+    "dm_locked_badge": "DM Locked",
+    "dm_locked_tooltip": "Direct Messaging is locked. Ask for their number in person or connect via PeerPulse first; Affinity alone does not unlock DMs.",
+    "search_acquaintances": "Search Acquaintances..."
   },
   "phone": {
     "alerts_dispatch": "Alerts / Dispatch",
@@ -1288,7 +1298,18 @@
       "rival_sparked": "Rivalry Sparked",
       "cold_shoulder": "Cold Shoulder",
       "focus_on_road": "Focused on the Road"
-    }
+    },
+    "routine_weekday": "Weekday",
+    "routine_weekend": "Weekend",
+    "routine_blocks": {
+      "morning": "Morning",
+      "lunch": "Lunch",
+      "afternoon": "Afternoon",
+      "evening": "Evening",
+      "night": "Night"
+    },
+    "routine_unlock_hint": "Full weekly routine unlocks at Affinity 40+ or by observing or asking about their schedule.",
+    "residence_fog_hint": "Private residence unlocks at Friend standing (100+) or when invited home."
   },
   "contracts": {
     "nav_label": "Contracts",

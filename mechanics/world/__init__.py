@@ -35,6 +35,11 @@ from .presence_resolver import (
     resolve_node_presence,
     check_doorbell_etiquette,
 )
+from .routine_disclosure import (
+    build_known_routine_payload,
+    format_known_routine_summary,
+    get_residential_fog_label,
+)
 
 __all__ = [
     "SCENARIO_WORLD_SCHEDULES",
@@ -66,4 +71,7 @@ __all__ = [
     "format_venue_crowd_flavor",
     "resolve_node_presence",
     "check_doorbell_etiquette",
+    "build_known_routine_payload",
+    "format_known_routine_summary",
+    "get_residential_fog_label",
 ]

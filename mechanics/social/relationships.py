@@ -1787,6 +1787,10 @@ def enrich_contact_dossier(
     party_npc_keys: set[str] | None = None,
     kin_npc_keys: set[str] | None = None,
     romantic_npc_keys: set[str] | None = None,
+    *,
+    read_only: bool = False,
+    preloaded_party_npcs: list[dict] | None = None,
+    preloaded_faction_state: dict | None = None,
 ) -> dict:
     """Shared deterministic NPC Contact Dossier enrichment for both Web Codex/Phone and Discord embeds."""
     import mechanics.social.persona
@@ -1870,9 +1874,20 @@ def enrich_contact_dossier(
 
     # 1. Synchronize & format Relations, Romantic Standing, and Family Tree
     try:
-        relations = mechanics.social.genealogy.ensure_contact_relations(
-            c, session_id=session_id, scenario=scen_key
-        )
+        existing_rels = c.get("relations")
+        if (
+            read_only
+            and isinstance(existing_rels, dict)
+            and (existing_rels.get("family") is not None or existing_rels.get("romance") is not None)
+        ):
+            relations = existing_rels
+        else:
+            rel_probe = ({k: v for k, v in c.items() if k != "session_id"} if read_only else c)
+            relations = mechanics.social.genealogy.ensure_contact_relations(
+                rel_probe,
+                session_id=(0 if read_only else session_id),
+                scenario=scen_key,
+            )
     except Exception:
         relations = c.get("relations") if isinstance(c.get("relations"), dict) else {}
 
@@ -1971,7 +1986,7 @@ def enrich_contact_dossier(
         except Exception:
             past_history = []
 
-    if c.get("id") and past_history and isinstance(c.get("intimate_memories"), list):
+    if not read_only and c.get("id") and past_history and isinstance(c.get("intimate_memories"), list):
         existing_past = [
             str(m).replace("Past History:", "").strip()
             for m in c["intimate_memories"]
@@ -2235,11 +2250,22 @@ def enrich_contact_dossier(
             from mechanics.social.factions import get_anomalous_faction_state
             in_party_companion = False
             comp_level = 1
-            if session_id:
+            c_name_low = str(c_name or "").strip().lower()
+            if preloaded_party_npcs is not None:
+                for p_npc in preloaded_party_npcs:
+                    if str((p_npc or {}).get("name") or "").strip().lower() == c_name_low:
+                        in_party_companion = True
+                        comp_level = max(1, int((p_npc or {}).get("level") or 1))
+                        break
+            elif party_npc_keys is not None and c_name_low:
+                canon_name_key = re.sub(r"[^a-z0-9]+", "_", c_name_low).strip("_")
+                if canon_name_key in party_npc_keys or c_name_low in party_npc_keys:
+                    in_party_companion = True
+            elif session_id and not read_only:
                 try:
-                    import db
-                    for p_npc in (db.get_session_party_npcs(session_id) or []):
-                        if str(p_npc.get("name") or "").strip().lower() == str(c_name or "").strip().lower():
+                    import db as _db_party
+                    for p_npc in (_db_party.get_session_party_npcs(session_id) or []):
+                        if str(p_npc.get("name") or "").strip().lower() == c_name_low:
                             in_party_companion = True
                             comp_level = max(1, int(p_npc.get("level") or 1))
                             break
@@ -2247,7 +2273,7 @@ def enrich_contact_dossier(
                     pass
             anom_prof = hydrate_anomalous_npc_profile(
                 c,
-                session_id=session_id,
+                session_id=(0 if read_only else session_id),
                 scen_key=scen_key,
                 player_level=comp_level,
                 is_party_companion=in_party_companion,
@@ -2279,10 +2305,14 @@ def enrich_contact_dossier(
 
             same_faction_colleague = False
             if anom_prof["anomalous_npc_tag"] == TAG_SPECIAL_AGENT:
-                if session_id:
+                if preloaded_faction_state is not None or (session_id and not read_only):
                     try:
-                        p_fstate = get_anomalous_faction_state(session_id)
-                        p_fid = str(p_fstate.get("faction_archetype_key") or "").strip()
+                        p_fstate = (
+                            preloaded_faction_state
+                            if preloaded_faction_state is not None
+                            else get_anomalous_faction_state(session_id)
+                        )
+                        p_fid = str((p_fstate or {}).get("faction_archetype_key") or "").strip()
                         if p_fid and p_fid != "freelancer" and p_fid == anom_prof.get("faction_id"):
                             same_faction_colleague = True
                     except Exception:

@@ -902,7 +902,17 @@
     "preferred_likes": "钟爱偏好",
     "aversions_dislikes": "排斥反感",
     "virgin_history": "• 处子之身（在与你相识前没有任何亲密经历）",
-    "romantic_milestones": "共同情爱里程碑"
+    "romantic_milestones": "共同情爱里程碑",
+    "tab_contacts": "联系人",
+    "tab_acquaintances": "点头之交",
+    "acquaintances_count": "已结识 {{count}} 位",
+    "no_acquaintances": "尚未结识任何点头之交。",
+    "acquaintances_hint": "你曾短暂照面或交谈的角色会显示在这里，待羁绊加深后即可升入已保存联系人。",
+    "acquaintance_badge": "初识",
+    "promotion_hint": "通过达成 +15 好感、-10 敌对、当面交换联系方式、建立任务关联或邀请入队，即可升入已保存联系人。",
+    "dm_locked_badge": "私信未解锁",
+    "dm_locked_tooltip": "私信功能尚未解锁。请先当面索取联系方式或通过 PeerPulse 建立连接；仅靠好感度无法解锁私信。",
+    "search_acquaintances": "搜索初识人物..."
   },
   "phone": {
     "alerts_dispatch": "警报 / 调度通知",
@@ -1288,7 +1298,18 @@
       "rival_sparked": "燃起劲敌意识",
       "cold_shoulder": "冷淡疏远",
       "focus_on_road": "专注于旅途"
-    }
+    },
+    "routine_weekday": "工作日",
+    "routine_weekend": "周末",
+    "routine_blocks": {
+      "morning": "清晨",
+      "lunch": "午间",
+      "afternoon": "午后",
+      "evening": "傍晚",
+      "night": "夜间"
+    },
+    "routine_unlock_hint": "完整周常作息将在好感度达到 40+ 或通过观察、打听对方日程后解锁。",
+    "residence_fog_hint": "私人住所将在达到“友人”（100+）关系或受邀做客后解锁。"
   },
   "contracts": {
     "nav_label": "契约",

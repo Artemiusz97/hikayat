@@ -902,7 +902,17 @@
     "preferred_likes": "Pilihan / Kegemaran",
     "aversions_dislikes": "Kebencian / Ketidaksukaan",
     "virgin_history": "• Dara/Teruna (Tiada sejarah intim sebelum bertemu anda)",
-    "romantic_milestones": "Pencapaian Romantis Bersama"
+    "romantic_milestones": "Pencapaian Romantis Bersama",
+    "tab_contacts": "Kenalan",
+    "tab_acquaintances": "Kenalan Sekilas",
+    "acquaintances_count": "{{count}} Ditemui",
+    "no_acquaintances": "Belum ada kenalan yang ditemui.",
+    "acquaintances_hint": "Watak yang anda temui atau berbual seketika akan muncul di sini sehingga ikatan cukup erat untuk Kenalan Tersimpan.",
+    "acquaintance_badge": "Kenalan Sekilas",
+    "promotion_hint": "Naikkan ke Kenalan Tersimpan dengan mencapai +15 Kemesraan, -10 Perseteruan, bertukar nombor secara bersemuka, pautan misi, atau menyertai kumpulan.",
+    "dm_locked_badge": "DM Dikunci",
+    "dm_locked_tooltip": "Mesej terus dikunci. Minta nombor secara bersemuka atau sambung melalui PeerPulse dahulu; kemesraan sahaja tidak membuka kunci DM.",
+    "search_acquaintances": "Cari Kenalan Sekilas..."
   },
   "phone": {
     "alerts_dispatch": "Amaran / Siaran",
@@ -1288,7 +1298,18 @@
       "rival_sparked": "Persaingan Tercetus",
       "cold_shoulder": "Layanan Dingin",
       "focus_on_road": "Fokus Pada Perjalanan"
-    }
+    },
+    "routine_weekday": "Hari Bekerja",
+    "routine_weekend": "Hujung Minggu",
+    "routine_blocks": {
+      "morning": "Pagi",
+      "lunch": "Tengah Hari",
+      "afternoon": "Petang",
+      "evening": "Senja",
+      "night": "Malam"
+    },
+    "routine_unlock_hint": "Jadual mingguan penuh dibuka pada Kemesraan 40+ atau dengan memerhati dan bertanya tentang rutin mereka.",
+    "residence_fog_hint": "Kediaman peribadi dibuka pada tahap Sahabat (100+) atau apabila dijemput pulang."
   },
   "contracts": {
     "nav_label": "Perjanjian",

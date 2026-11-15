@@ -52,6 +52,19 @@ def filter_unlocked_contacts(contacts: list[dict], party_names: set[str], scenar
     return unlocked
 
 
+from cogs.contacts_routine_views import (
+    build_acquaintance_detail_embed,
+    build_acquaintances_list_embed,
+    enrich_discord_npc_with_routine,
+    format_discord_known_routine_value,
+    load_discord_contacts_and_acquaintances,
+)
+from mechanics.world.routine_disclosure import (
+    build_known_routine_payload,
+    format_known_routine_summary,
+)
+
+
 class ContactSelect(discord.ui.Select):
     def __init__(self, page_contacts: list[dict], all_contacts: list[dict], scenario_key: str, page: int = 0, total_pages: int = 1,
                  session_id: int = 0, cog = None, from_phone: bool = False, party_names: set[str] | None = None):
@@ -329,11 +342,75 @@ class WorldCodexView(discord.ui.View):
         return True
 
 
+class AcquaintanceSelect(discord.ui.Select):
+    def __init__(
+        self,
+        page_acquaintances: list[dict],
+        parent_view: "ContactView",
+    ):
+        self.parent_view = parent_view
+        self.page_acquaintances = list(page_acquaintances)
+        options = []
+        for idx, acq in enumerate(self.page_acquaintances):
+            name = str(acq.get("name") or "Unknown NPC")
+            workplace = str(acq.get("workplace_label") or acq.get("role") or "Acquaintance")
+            aff = int(acq.get("affection") or acq.get("affinity") or 0)
+            desc = f"{workplace} | Aff {aff:+d} | DM Locked"
+            options.append(discord.SelectOption(
+                label=name[:100],
+                value=f"acq_idx_{idx}",
+                description=desc[:100],
+                emoji="👥",
+            ))
+        super().__init__(
+            placeholder=f"Inspect acquaintance... (Page {parent_view.acq_page + 1}/{parent_view.acq_total_pages})",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=0,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        chosen_val = self.values[0]
+        chosen = None
+        if chosen_val.startswith("acq_idx_"):
+            try:
+                idx = int(chosen_val.split("_")[-1])
+            except (TypeError, ValueError):
+                idx = -1
+            if 0 <= idx < len(self.page_acquaintances):
+                chosen = self.page_acquaintances[idx]
+        if chosen is None:
+            await interaction.response.send_message("Acquaintance not found.", ephemeral=True)
+            return
+
+        pv = self.parent_view
+        reveal_debug = bool((pv.fow_context or {}).get("reveal_debug"))
+        new_view = pv._clone_view(
+            mode="acquaintances",
+            active_contact=None,
+            active_acquaintance=chosen,
+        )
+        embed = build_acquaintance_detail_embed(
+            chosen,
+            pv.scenario_key,
+            pv.char_name,
+            reveal_debug=reveal_debug,
+        )
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+
 class ContactView(discord.ui.View):
     def __init__(self, contacts: list[dict], scenario_key: str, user_id: int,
                  active_contact: dict = None, page: int = 0,
                  session_id: int = 0, cog = None, from_phone: bool = False,
-                 party_names: set[str] | None = None):
+                 party_names: set[str] | None = None,
+                 acquaintances: list[dict] | None = None,
+                 mode: str = "contacts",
+                 fow_context: dict | None = None,
+                 active_acquaintance: dict | None = None,
+                 acq_page: int = 0,
+                 char_name: str = "Hero"):
         super().__init__(timeout=180)
         self.user_id = user_id
         self.contacts = contacts
@@ -343,7 +420,16 @@ class ContactView(discord.ui.View):
         self.session_id = session_id
         self.cog = cog
         self.from_phone = from_phone
-        if party_names is None and from_phone and session_id:
+        self.fow_context = fow_context
+        self.acquaintances = list(acquaintances or [])
+        self.mode = mode if mode in ("contacts", "acquaintances") else "contacts"
+        self.active_acquaintance = active_acquaintance
+        self.acq_page = acq_page
+        self.char_name = str(char_name or "Hero")
+
+        if party_names is None and fow_context and fow_context.get("party_names") is not None:
+            party_names = fow_context.get("party_names")
+        elif party_names is None and from_phone and session_id:
             party_rows = db.get_session_party_npcs(session_id) or []
             party_names = {
                 str(p.get("name") or "").strip().lower()
@@ -357,6 +443,48 @@ class ContactView(discord.ui.View):
         )
         self.page_size = 25
         self.total_pages = max(1, (len(contacts) + self.page_size - 1) // self.page_size)
+        self.acq_total_pages = max(1, (len(self.acquaintances) + self.page_size - 1) // self.page_size)
+
+        if self.mode == "acquaintances":
+            self._populate_acquaintances_mode()
+        else:
+            self._populate_contacts_mode()
+
+    def _clone_view(
+        self,
+        *,
+        active_contact: dict | None = None,
+        page: int | None = None,
+        mode: str | None = None,
+        active_acquaintance: dict | None = None,
+        acq_page: int | None = None,
+    ) -> "ContactView":
+        return ContactView(
+            self.contacts,
+            self.scenario_key,
+            self.user_id,
+            active_contact=active_contact,
+            page=self.page if page is None else page,
+            session_id=self.session_id,
+            cog=self.cog,
+            from_phone=self.from_phone,
+            party_names=self.party_names,
+            acquaintances=self.acquaintances,
+            mode=self.mode if mode is None else mode,
+            fow_context=self.fow_context,
+            active_acquaintance=active_acquaintance,
+            acq_page=self.acq_page if acq_page is None else acq_page,
+            char_name=self.char_name,
+        )
+
+    def _populate_contacts_mode(self):
+        contacts = self.contacts
+        scenario_key = self.scenario_key
+        user_id = self.user_id
+        active_contact = self.active_contact
+        session_id = self.session_id
+        cog = self.cog
+        from_phone = self.from_phone
 
         start = self.page * self.page_size
         end = start + self.page_size
@@ -388,6 +516,15 @@ class ContactView(discord.ui.View):
                 session_id=session_id, scenario_key=scenario_key, user_id=user_id,
                 contacts=contacts, cog=cog, from_phone=from_phone, row=1
             ))
+
+        acq_btn = discord.ui.Button(
+            label=f"Acquaintances ({len(self.acquaintances)})",
+            emoji="👥",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+        )
+        acq_btn.callback = self._on_open_acquaintances
+        self.add_item(acq_btn)
 
         # Phone-specific navigation items
         if from_phone and session_id:
@@ -424,14 +561,9 @@ class ContactView(discord.ui.View):
                 )
                 async def _on_back_list(inter: discord.Interaction):
                     char = await adb(db.get_character, user_id)
-                    char_name = char.get("name", "Hero") if char else "Player"
+                    char_name = char.get("name", "Hero") if char else self.char_name
                     list_embed = build_contact_list_embed(contacts, scenario_key, char_name)
-                    list_view = ContactView(
-                        contacts, scenario_key, user_id,
-                        active_contact=None, page=self.page,
-                        session_id=session_id, cog=cog, from_phone=True,
-                        party_names=self.party_names,
-                    )
+                    list_view = self._clone_view(active_contact=None, mode="contacts")
                     await inter.response.edit_message(embed=list_embed, view=list_view)
                 back_list_btn.callback = _on_back_list
                 self.add_item(back_list_btn)
@@ -463,28 +595,147 @@ class ContactView(discord.ui.View):
             next_btn.callback = self._on_next
             self.add_item(next_btn)
 
+    def _populate_acquaintances_mode(self):
+        start = self.acq_page * self.page_size
+        end = start + self.page_size
+        page_acqs = self.acquaintances[start:end]
+
+        if page_acqs:
+            self.add_item(AcquaintanceSelect(page_acqs, self))
+
+        contacts_btn = discord.ui.Button(
+            label=f"Contacts ({len(self.contacts)})",
+            emoji="💬",
+            style=discord.ButtonStyle.primary,
+            row=1,
+        )
+        contacts_btn.callback = self._on_open_contacts
+        self.add_item(contacts_btn)
+
+        if self.active_acquaintance:
+            acq_list_btn = discord.ui.Button(
+                label="Acquaintance List",
+                emoji="👥",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            acq_list_btn.callback = self._on_open_acquaintances
+            self.add_item(acq_list_btn)
+
+        if self.session_id and not self.from_phone:
+            self.add_item(WorldCodexButton(
+                session_id=self.session_id,
+                scenario_key=self.scenario_key,
+                user_id=self.user_id,
+                contacts=self.contacts,
+                cog=self.cog,
+                from_phone=self.from_phone,
+                row=1,
+            ))
+
+        if self.active_acquaintance or (self.from_phone and self.session_id):
+            action_row = 2
+            if self.active_acquaintance:
+                locked_btn = discord.ui.Button(
+                    label="DM Locked (Acquaintance)",
+                    emoji="🔒",
+                    style=discord.ButtonStyle.secondary,
+                    disabled=True,
+                    row=action_row,
+                )
+                self.add_item(locked_btn)
+            if self.from_phone and self.session_id:
+                home_btn = discord.ui.Button(
+                    label="Phone Home",
+                    emoji="📱",
+                    style=discord.ButtonStyle.secondary,
+                    row=action_row,
+                )
+                async def _on_home(inter: discord.Interaction):
+                    from mechanics.system.phone import PhoneMainView, build_phone_home_embed
+                    home_embed = build_phone_home_embed(self.session_id, self.user_id)
+                    home_view = PhoneMainView(self.cog, self.session_id, self.user_id)
+                    await inter.response.edit_message(embed=home_embed, view=home_view)
+                home_btn.callback = _on_home
+                self.add_item(home_btn)
+
+        page_row = 3 if (self.active_acquaintance or (self.from_phone and self.session_id)) else 2
+        if self.acq_total_pages > 1:
+            prev_btn = discord.ui.Button(label="◀️ Prev", style=discord.ButtonStyle.secondary, disabled=(self.acq_page == 0), row=page_row)
+            prev_btn.callback = self._on_acq_prev
+            self.add_item(prev_btn)
+
+            page_label = discord.ui.Button(label=f"Page {self.acq_page + 1}/{self.acq_total_pages} ({len(self.acquaintances)} total)", style=discord.ButtonStyle.secondary, disabled=True, row=page_row)
+            self.add_item(page_label)
+
+            next_btn = discord.ui.Button(label="Next ▶️", style=discord.ButtonStyle.secondary, disabled=(self.acq_page >= self.acq_total_pages - 1), row=page_row)
+            next_btn.callback = self._on_acq_next
+            self.add_item(next_btn)
+
+    async def _on_open_acquaintances(self, interaction: discord.Interaction):
+        new_view = self._clone_view(
+            mode="acquaintances",
+            active_contact=None,
+            active_acquaintance=None,
+        )
+        embed = build_acquaintances_list_embed(self.acquaintances, self.scenario_key, self.char_name)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def _on_open_contacts(self, interaction: discord.Interaction):
+        new_view = self._clone_view(
+            mode="contacts",
+            active_contact=None,
+            active_acquaintance=None,
+        )
+        embed = build_contact_list_embed(self.contacts, self.scenario_key, self.char_name)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def _on_acq_prev(self, interaction: discord.Interaction):
+        new_page = max(0, self.acq_page - 1)
+        new_view = self._clone_view(
+            mode="acquaintances",
+            active_contact=None,
+            active_acquaintance=None,
+            acq_page=new_page,
+        )
+        embed = build_acquaintances_list_embed(self.acquaintances, self.scenario_key, self.char_name)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
+    async def _on_acq_next(self, interaction: discord.Interaction):
+        new_page = min(self.acq_total_pages - 1, self.acq_page + 1)
+        new_view = self._clone_view(
+            mode="acquaintances",
+            active_contact=None,
+            active_acquaintance=None,
+            acq_page=new_page,
+        )
+        embed = build_acquaintances_list_embed(self.acquaintances, self.scenario_key, self.char_name)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+
     async def _on_prev(self, interaction: discord.Interaction):
         new_page = max(0, self.page - 1)
-        new_view = ContactView(
-            self.contacts, self.scenario_key, self.user_id,
-            active_contact=self.active_contact, page=new_page,
-            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
-            party_names=self.party_names,
-        )
+        new_view = self._clone_view(active_contact=self.active_contact, page=new_page, mode="contacts")
         start = new_view.page * new_view.page_size
-        embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
+        embed = await adb(
+            build_contact_detail_embed,
+            self.contacts[start],
+            self.scenario_key,
+            user_id=self.user_id,
+            fow_context=self.fow_context,
+        )
         await interaction.response.edit_message(embed=embed, view=new_view)
 
     async def _on_next(self, interaction: discord.Interaction):
         new_page = min(self.total_pages - 1, self.page + 1)
-        new_view = ContactView(
-            self.contacts, self.scenario_key, self.user_id,
-            active_contact=self.active_contact, page=new_page,
-            session_id=self.session_id, cog=self.cog, from_phone=self.from_phone,
-            party_names=self.party_names,
-        )
+        new_view = self._clone_view(active_contact=self.active_contact, page=new_page, mode="contacts")
         start = new_view.page * new_view.page_size
-        embed = await adb(build_contact_detail_embed, self.contacts[start], self.scenario_key, user_id=self.user_id)
+        embed = await adb(
+            build_contact_detail_embed,
+            self.contacts[start],
+            self.scenario_key,
+            user_id=self.user_id,
+            fow_context=self.fow_context,
+        )
         await interaction.response.edit_message(embed=embed, view=new_view)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -652,14 +903,19 @@ def build_relations_embed(contact: dict, scenario_key: str = "fantasy", user_id:
     return embed
 
 
-def _resolve_discord_masked_dossier(contact: dict, scenario_key: str, user_id: int = 0) -> tuple[dict, bool, str]:
-    """Runs shared enrich_contact_dossier + Fog-of-War masking for Discord contact embeds."""
+def _resolve_discord_masked_dossier(
+    contact: dict,
+    scenario_key: str,
+    user_id: int = 0,
+    fow_context: dict | None = None,
+) -> tuple[dict, bool, str]:
+    """Runs shared enrich_contact_dossier + Fog-of-War masking + known_routine for Discord."""
     from mechanics.social.relationships import enrich_contact_dossier
 
     c_in = dict(contact or {})
-    reveal_debug = False
-    ui_lang = "en"
-    if user_id:
+    reveal_debug = bool((fow_context or {}).get("reveal_debug"))
+    ui_lang = str((fow_context or {}).get("ui_lang") or "en")
+    if user_id and fow_context is None:
         user_settings = db.get_settings(user_id) or {}
         reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
         ui_lang = str(user_settings.get("ui_language") or "en")
@@ -667,13 +923,40 @@ def _resolve_discord_masked_dossier(contact: dict, scenario_key: str, user_id: i
             char_row = db.get_character(user_id)
             if char_row and char_row.get("id"):
                 c_in["character_id"] = int(char_row["id"])
-    sess_id = int(c_in.get("session_id") or 0)
+    sess_id = int(c_in.get("session_id") or (fow_context or {}).get("session_id") or 0)
+
+    if fow_context is not None:
+        enriched = enrich_discord_npc_with_routine(
+            c_in,
+            fow_context,
+            is_acquaintance=bool(c_in.get("is_acquaintance")),
+        )
+        return enriched, reveal_debug, ui_lang
+
     enriched = enrich_contact_dossier(
         c_in,
         sess_id,
         scenario_key or "fantasy",
         debug_reveal_all=reveal_debug,
         lang=ui_lang,
+    )
+    if sess_id <= 0 and isinstance(c_in.get("known_routine"), dict):
+        routine = dict(c_in["known_routine"])
+    else:
+        routine = build_known_routine_payload(
+            enriched,
+            session_id=sess_id,
+            scen_key=scenario_key or "fantasy",
+            lang=ui_lang,
+            debug_reveal_all=reveal_debug,
+            character_id=int(c_in.get("character_id") or 0),
+        )
+    enriched["known_routine"] = routine
+    summary = format_known_routine_summary(routine, lang=ui_lang)
+    if summary:
+        enriched["known_schedule"] = summary
+    enriched["schedule_revealed"] = bool(
+        routine.get("full_schedule_unlocked") or int(routine.get("discovered_count") or 0) > 0
     )
     return enriched, reveal_debug, ui_lang
 
@@ -902,7 +1185,12 @@ def build_contact_list_embed(contacts: list[dict], scenario_key: str, char_name:
     return embed
 
 
-def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 0) -> discord.Embed:
+def build_contact_detail_embed(
+    contact: dict,
+    scenario_key: str,
+    user_id: int = 0,
+    fow_context: dict | None = None,
+) -> discord.Embed:
     score = contact.get("relationship_score", 0)
     track = contact.get("track", "platonic")
     tier = get_relationship_tier(score, track, scenario_key)
@@ -914,12 +1202,14 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
     basic = contact.get("basic_info", {})
     unlocked_traits = list(contact.get("unlocked_traits") or contact.get("traits") or [])
     preferences = list(contact.get("preferences") or [])
-    enriched_c, _fow_reveal_debug, _ = _resolve_discord_masked_dossier(contact, scenario_key, user_id)
+    enriched_c, _fow_reveal_debug, _ = _resolve_discord_masked_dossier(
+        contact, scenario_key, user_id, fow_context=fow_context
+    )
     info_level = get_unlocked_info_level(score)
 
-    reveal_debug = False
-    if user_id:
-        user_settings = db.get_settings(user_id)
+    reveal_debug = _fow_reveal_debug
+    if user_id and fow_context is None:
+        user_settings = db.get_settings(user_id) or {}
         reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
 
     revealed_flags = dict(contact.get("revealed_flags", {}))
@@ -1141,11 +1431,14 @@ def build_contact_detail_embed(contact: dict, scenario_key: str, user_id: int = 
         inline=True,
     )
 
-    sched_val = str(enriched_c.get("known_schedule") or "").strip()
-    if sched_val:
+    routine_val = format_discord_known_routine_value(
+        enriched_c.get("known_routine"),
+        str(enriched_c.get("known_schedule") or ""),
+    )
+    if routine_val:
         embed.add_field(
             name="🕒 Schedule & Routine",
-            value=f"`{sched_val}`" if not enriched_c.get("schedule_revealed") else f"• {sched_val}",
+            value=routine_val,
             inline=False,
         )
 
@@ -1476,12 +1769,30 @@ class ContactsCog(commands.Cog):
             await interaction.followup.send("❌ The Contact List / Relationship mechanic is disabled for this scenario.", ephemeral=True)
             return
 
-        contacts = await adb(db.get_contacts, session_id=session_id, character_id=character["id"])
         party_npcs = await adb(db.get_session_party_npcs, session_id)
-        party_names = {p.get("name", "").lower() for p in (party_npcs or [])}
-        unlocked_contacts = filter_unlocked_contacts(contacts, party_names, scenario_key)
+        party_names = {p.get("name", "").lower() for p in (party_npcs or []) if p.get("name")}
+        unlocked_contacts, acquaintances, fow_context = await adb(
+            load_discord_contacts_and_acquaintances,
+            session_id,
+            character["id"],
+            scenario_key,
+            user_id=interaction.user.id,
+            party_names=party_names,
+            party_npcs=party_npcs,
+            filter_unlocked_fn=filter_unlocked_contacts,
+        )
         embed = build_contact_list_embed(unlocked_contacts, scenario_key, character["name"])
-        view = ContactView(unlocked_contacts, scenario_key, interaction.user.id, session_id=session_id, cog=self, party_names=party_names)
+        view = ContactView(
+            unlocked_contacts,
+            scenario_key,
+            interaction.user.id,
+            session_id=session_id,
+            cog=self,
+            party_names=party_names,
+            acquaintances=acquaintances,
+            fow_context=fow_context,
+            char_name=character["name"],
+        )
 
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 

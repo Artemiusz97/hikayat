@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Smartphone, Users, Heart, Search, MessageCircle, MapPin,
+  Smartphone, Users, Heart, Search, MessageCircle, MapPin, Lock,
   ChevronDown, ChevronRight, User, UserPlus, UserMinus, Sparkles, Scroll, ShieldAlert
 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import { formatCleanLocation } from '../../utils/locationFormat';
+import KnownRoutineCard from './KnownRoutineCard';
+import AcquaintancesView from './AcquaintancesView';
 
 const isStudentNpc = (npc, basic) => {
   if (npc?.is_student !== undefined) return Boolean(npc.is_student);
@@ -125,7 +127,8 @@ const ContactsPanel = ({
   targetContactPulse,
 }) => {
   const { t } = useTranslation();
-  const { contacts = [], lorebook = {}, loading } = codexHook || {};
+  const { contacts = [], acquaintances = [], lorebook = {}, loading } = codexHook || {};
+  const [activeSubTab, setActiveSubTab] = useState('contacts');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedNpc, setExpandedNpc] = useState(null);
   const [highlightedNpcKey, setHighlightedNpcKey] = useState(null);
@@ -143,6 +146,7 @@ const ContactsPanel = ({
   useEffect(() => {
     if (targetContactName) {
       setSearchQuery('');
+      setActiveSubTab('contacts');
       const targetLow = String(targetContactName ?? '').trim().toLowerCase();
       const matched = personalContacts.find(c =>
         String(c.name ?? '').trim().toLowerCase() === targetLow ||
@@ -211,6 +215,21 @@ const ContactsPanel = ({
       return name.includes(q) || role.includes(q) || faction.includes(q) || grade.includes(q) || club.includes(q) || anomTag.includes(q);
     });
   }, [personalContacts, searchQuery]);
+
+  const filteredAcquaintances = useMemo(() => {
+    const list = Array.isArray(acquaintances) ? acquaintances : [];
+    const q = searchQuery.toLowerCase().trim();
+    if (!q) return list;
+    return list.filter(a => {
+      const name = (a.name || '').toLowerCase();
+      const role = (a.public_role || a.basic_info?.role || a.role || '').toLowerCase();
+      const workplace = (a.workplace_label || '').toLowerCase();
+      const origin = (a.origin || '').toLowerCase();
+      const faction = (a.faction_affiliation || a.basic_info?.faction || a.faction || '').toLowerCase();
+      const anomTag = (a.anomalous_tag_label || a.anomalous_npc_tag || a.basic_info?.anomalous_npc_tag || '').toLowerCase();
+      return name.includes(q) || role.includes(q) || workplace.includes(q) || origin.includes(q) || faction.includes(q) || anomTag.includes(q);
+    });
+  }, [acquaintances, searchQuery]);
 
   const allDiscoveredPersons = useMemo(() => {
     const list = [...personalContacts];
@@ -308,24 +327,70 @@ const ContactsPanel = ({
     <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5 min-h-full flex-1 flex flex-col">
       {/* Header & Search */}
       <div className="space-y-2 border-b border-fantasy-border pb-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Smartphone size={16} className="text-fantasy-accent" />
-            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">
-              {t('contacts.title', 'Contacts')}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Smartphone size={16} className="text-fantasy-accent shrink-0" />
+            <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider truncate">
+              {activeSubTab === 'acquaintances'
+                ? t('contacts.tab_acquaintances', 'Acquaintances')
+                : t('contacts.title', 'Contacts')}
             </h3>
           </div>
-          <span className="text-[10px] font-mono text-gray-400">
-            {t('contacts.count', { count: filteredContacts.length, defaultValue: `${filteredContacts.length} Saved` })}
+          <span className="text-[10px] font-mono text-gray-400 shrink-0">
+            {activeSubTab === 'acquaintances'
+              ? t('contacts.acquaintances_count', { count: filteredAcquaintances.length, defaultValue: `${filteredAcquaintances.length} Met` })
+              : t('contacts.count', { count: filteredContacts.length, defaultValue: `${filteredContacts.length} Saved` })}
           </span>
+        </div>
+
+        {/* Contacts | Acquaintances Segmented Toggle */}
+        <div
+          role="tablist"
+          aria-label={t('contacts.title', 'Contacts')}
+          className="grid grid-cols-2 gap-1 p-0.5 rounded-md bg-black/60 border border-fantasy-border/60"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab === 'contacts'}
+            onClick={() => setActiveSubTab('contacts')}
+            className={`py-1 px-2 rounded text-[11px] font-bold transition-all cursor-pointer truncate ${
+              activeSubTab === 'contacts'
+                ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
+                : 'text-gray-400 hover:text-gray-200 border border-transparent'
+            }`}
+          >
+            {t('contacts.tab_contacts', 'Contacts')} ({filteredContacts.length})
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeSubTab === 'acquaintances'}
+            onClick={() => setActiveSubTab('acquaintances')}
+            className={`py-1 px-2 rounded text-[11px] font-bold transition-all cursor-pointer truncate ${
+              activeSubTab === 'acquaintances'
+                ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 shadow-sm'
+                : 'text-gray-400 hover:text-gray-200 border border-transparent'
+            }`}
+          >
+            {t('contacts.tab_acquaintances', 'Acquaintances')} ({filteredAcquaintances.length})
+          </button>
         </div>
 
         <div className="relative">
           <Search size={12} className="absolute left-2.5 top-2 text-gray-500" />
           <input
             type="text"
-            aria-label={t('contacts.search_placeholder', 'Search Contacts...')}
-            placeholder={t('contacts.search_placeholder', 'Search Contacts...')}
+            aria-label={
+              activeSubTab === 'acquaintances'
+                ? t('contacts.search_acquaintances', 'Search Acquaintances...')
+                : t('contacts.search_placeholder', 'Search Contacts...')
+            }
+            placeholder={
+              activeSubTab === 'acquaintances'
+                ? t('contacts.search_acquaintances', 'Search Acquaintances...')
+                : t('contacts.search_placeholder', 'Search Contacts...')
+            }
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             className="w-full bg-black/60 border border-fantasy-border/60 pl-7 pr-2.5 py-1 rounded text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-fantasy-accent/50"
@@ -353,7 +418,14 @@ const ContactsPanel = ({
       )}
 
       {/* Content View */}
-      {loading && personalContacts.length === 0 ? (
+      {activeSubTab === 'acquaintances' ? (
+        <AcquaintancesView
+          acquaintances={filteredAcquaintances}
+          loading={loading}
+          searchQuery={searchQuery}
+          t={t}
+        />
+      ) : loading && personalContacts.length === 0 ? (
         <p className="text-xs text-gray-500 italic text-center py-8">{t('contacts.loading', 'Loading saved contacts...')}</p>
       ) : filteredContacts.length === 0 ? (
         <div className="text-center py-8 px-3 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
@@ -622,31 +694,43 @@ const ContactsPanel = ({
                           {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
                         </span>
                       )}
-                      {onMessageContact && (
-                        <button
-                          type="button"
-                          disabled={isBlocked || isDeceased}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!isBlocked && !isDeceased) onMessageContact(npc);
-                          }}
-                          title={
-                            isDeceased
-                              ? t('codex.deceased', 'Deceased')
-                              : isBlocked
-                                ? t('phone.blocked_notice', 'This contact has blocked your number due to hostility. Reconcile with them in person first.')
-                                : `${t('contacts.message_btn', 'Message')} ${npc.name}`
-                          }
-                          className={`flex items-center gap-1 py-1 px-2.5 rounded text-[11px] font-bold border transition-all select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400 ${
-                            isBlocked || isDeceased
-                              ? 'opacity-45 cursor-not-allowed bg-neutral-900/60 border-neutral-700/50 text-gray-500'
-                              : 'bg-cyan-950/50 hover:bg-cyan-900/60 border-cyan-700/60 text-cyan-200 cursor-pointer'
-                          }`}
-                        >
-                          <MessageCircle size={12} />
-                          <span>{isBlocked ? t('contacts.blocked_badge', 'Blocked') : t('contacts.message_btn', 'Message')}</span>
-                        </button>
-                      )}
+                      {onMessageContact && (() => {
+                        const isDmLocked = npc.can_dm === false;
+                        const cannotDm = isBlocked || isDeceased || isDmLocked;
+                        return (
+                          <button
+                            type="button"
+                            disabled={cannotDm}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!cannotDm) onMessageContact(npc);
+                            }}
+                            title={
+                              isDeceased
+                                ? t('codex.deceased', 'Deceased')
+                                : isBlocked
+                                  ? t('phone.blocked_notice', 'This contact has blocked your number due to hostility. Reconcile with them in person first.')
+                                  : isDmLocked
+                                    ? t('contacts.dm_locked_tooltip', 'Direct Messaging is locked. Ask for their number in person or connect via PeerPulse first; Affinity alone does not unlock DMs.')
+                                    : `${t('contacts.message_btn', 'Message')} ${npc.name}`
+                            }
+                            className={`flex items-center gap-1 py-1 px-2.5 rounded text-[11px] font-bold border transition-all select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cyan-400 ${
+                              cannotDm
+                                ? 'opacity-45 cursor-not-allowed bg-neutral-900/60 border-neutral-700/50 text-gray-500'
+                                : 'bg-cyan-950/50 hover:bg-cyan-900/60 border-cyan-700/60 text-cyan-200 cursor-pointer'
+                            }`}
+                          >
+                            {isDmLocked && !isBlocked && !isDeceased ? <Lock size={12} /> : <MessageCircle size={12} />}
+                            <span>
+                              {isBlocked
+                                ? t('contacts.blocked_badge', 'Blocked')
+                                : isDmLocked
+                                  ? t('contacts.dm_locked_badge', 'DM Locked')
+                                  : t('contacts.message_btn', 'Message')}
+                            </span>
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -1038,16 +1122,7 @@ const ContactsPanel = ({
                               </div>
                             )}
 
-                            {(npc.known_schedule || npc.schedule_summary) && (
-                              <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
-                                <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                                  🕒 {t('social.schedule_header', 'Schedule & Routine')}
-                                </span>
-                                <span className={npc.schedule_revealed === false || String(npc.known_schedule || npc.schedule_summary).includes('???') ? 'font-mono text-gray-500 italic' : 'text-gray-200'}>
-                                  {npc.known_schedule || npc.schedule_summary}
-                                </span>
-                              </div>
-                            )}
+                            <KnownRoutineCard npc={npc} t={t} />
 
                             {traits.length > 0 && (
                               <div>
