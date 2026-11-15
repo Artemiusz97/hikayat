@@ -82,6 +82,16 @@ def format_discord_known_routine_value(
         weekday_map: Mapping[str, Any] = weekday if isinstance(weekday, Mapping) else {}
         weekend_map: Mapping[str, Any] = weekend if isinstance(weekend, Mapping) else {}
 
+        override = known_routine.get("current_day_override")
+        override_line = ""
+        if isinstance(override, Mapping) and (
+            known_routine.get("full_schedule_unlocked")
+            or int(known_routine.get("discovered_count") or 0) > 0
+        ):
+            ov_lbl = str(override.get("label") or "").strip()
+            if ov_lbl:
+                override_line = f"\n📌 **Today:** {ov_lbl[:90]}"
+
         for labels, cap in (
             (_BLOCK_LABELS, 80),
             (_BLOCK_LABELS, 52),
@@ -91,9 +101,12 @@ def format_discord_known_routine_value(
             parts = [_format_day_section("Weekday", weekday_map, labels, slot_cap=cap)]
             if include_weekend:
                 parts.append(_format_day_section("Weekend", weekend_map, labels, slot_cap=cap))
-            candidate = "\n".join(parts)
+            candidate = "\n".join(parts) + override_line
             if len(candidate) <= _DISCORD_EMBED_FIELD_MAX:
                 return candidate
+            base_candidate = "\n".join(parts)
+            if override_line and len(base_candidate) <= _DISCORD_EMBED_FIELD_MAX:
+                return base_candidate
 
         fallback = _format_day_section("Weekday", weekday_map, _SHORT_BLOCK_LABELS, slot_cap=24)
         if len(fallback) <= _DISCORD_EMBED_FIELD_MAX:

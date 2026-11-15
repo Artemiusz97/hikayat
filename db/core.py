@@ -3563,6 +3563,7 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 "npc_type", "social_role_type", "sapience", "temperament",
                 "quest_id", "incursion_id", "disposition",
                 "activity_key", "activity_id", "activity_tag", "activity_mode",
+                "secondary_tag", "npc_id", "person_key",
                 "paired_with", "paired_with_name", "spotted_fact_key", "epistemic_tag",
             ):
                 if npc.get(k):
@@ -3570,10 +3571,12 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
             for bool_k in (
                 "is_anomalous_entity", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
-                "activity_is_telltale",
+                "activity_is_telltale", "telltale_revealed",
             ):
                 if bool_k in npc and npc.get(bool_k) is not None:
                     clean_entry[bool_k] = bool(npc.get(bool_k))
+            if npc.get("visible_tell_text"):
+                clean_entry["visible_tell_text"] = str(npc["visible_tell_text"]).strip()[:200]
             if npc.get("focus_dc_mod") is not None:
                 clean_entry["focus_dc_mod"] = _safe_int_db(npc.get("focus_dc_mod"), 0)
             if isinstance(npc.get("join_activity_seed"), dict) and npc["join_activity_seed"]:
@@ -3627,7 +3630,9 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 "is_anomalous_entity", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
                 "activity_key", "activity_id", "activity_tag", "activity_mode",
-                "activity_is_telltale", "paired_with", "paired_with_name",
+                "secondary_tag", "npc_id", "person_key",
+                "activity_is_telltale", "telltale_revealed", "visible_tell_text",
+                "paired_with", "paired_with_name",
                 "join_activity_seed", "focus_dc_mod", "sdxl_pose_tags",
                 "spotted_fact_key", "epistemic_tag",
             ):

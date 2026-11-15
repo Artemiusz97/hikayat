@@ -891,49 +891,73 @@ class TurnService:
             cand_tgt = str(raw_dc.get("target_npc") or cleaned.get("target_npc") or "").strip()
             cand_tgt_k = cand_tgt.lower().replace(" ", "_")
             fact_row = db.get_epistemic_fact(session_id, cand_fkey) if (session_id and cand_fkey) else None
-            severity_val = int((fact_row or {}).get("severity") or 1)
-            extra_dc = 0
-            if eff_sub in ("hush_bribe", "threaten_silence", "discretion_request") and fact_row and cand_tgt_k:
-                subj_k = str(fact_row.get("subject_actor_key") or "").strip().lower().replace(" ", "_")
-                if subj_k:
-                    from mechanics.social import relationship_graph as _rg_ep
-                    from mechanics.social.epistemic_engine import _is_kin_roommate_or_best_friend
-                    _ties = _rg_ep.get_ties(session_id, cand_tgt_k) if session_id else []
-                    _contacts = db.get_contacts(session_id) if session_id else []
-                    if _is_kin_roommate_or_best_friend(
-                        subj_k, cand_tgt_k, social_ties=_ties, contacts=_contacts
-                    ):
-                        extra_dc = 2
-            req_gold = 0
-            if eff_sub == "hush_bribe":
-                req_gold = max(25, 25 * max(1, severity_val))
-                client_gold = int(raw_dc.get("hush_gold") or 0)
-                if client_gold > req_gold:
-                    req_gold = client_gold
-                char_gold = int((char or {}).get("gold") or 0)
-                if char_gold < req_gold:
-                    raise ValueError(f"Insufficient gold for hush bribe ({char_gold}g < {req_gold}g)")
-            if eff_sub == "threaten_silence":
-                e_stat, base_dc = "STR", 7
-            elif eff_sub in ("present_proof", "destroy_proof"):
-                e_stat, base_dc = "INT", 6
+            _tgt_rows = (
+                db.get_epistemic_knowledge_rows(session_id, fact_key=cand_fkey, holder_actor_key=cand_tgt_k)
+                if (fact_row and cand_tgt_k)
+                else []
+            )
+            _tgt_know = _tgt_rows[0] if _tgt_rows else None
+            _forged_hidden = bool(
+                eff_sub in ("hush_bribe", "threaten_silence", "discretion_request", "deny")
+                and isinstance(_tgt_know, dict)
+                and int(_tgt_know.get("player_aware") or 0) == 0
+            )
+            if not fact_row or _forged_hidden:
+                for _ek in (
+                    "intent",
+                    "sub_intent",
+                    "fact_key",
+                    "target_npc",
+                    "hush_gold",
+                    "hush_gold_override",
+                    "effective_dc_mod",
+                    "_epistemic_verified",
+                ):
+                    cleaned.pop(_ek, None)
             else:
-                e_stat, base_dc = "CHA", 6 + (1 if eff_sub == "use_leverage" else 0)
-            cleaned.update({
-                "stat": e_stat,
-                "requirement": max(5, min(14, base_dc + extra_dc)),
-                "mp_cost": 0,
-                "intent": "epistemic_containment",
-                "sub_intent": eff_sub,
-                "fact_key": cand_fkey,
-                "target_npc": cand_tgt,
-                "hush_gold": req_gold,
-                "effective_dc_mod": extra_dc,
-                "_epistemic_verified": True,
-                "action_category": "social",
-                "label": raw_lbl or f"{eff_sub.replace('_', ' ').title()}",
-            })
-            return cleaned
+                severity_val = int((fact_row or {}).get("severity") or 1)
+                extra_dc = 0
+                if eff_sub in ("hush_bribe", "threaten_silence", "discretion_request") and fact_row and cand_tgt_k:
+                    subj_k = str(fact_row.get("subject_actor_key") or "").strip().lower().replace(" ", "_")
+                    if subj_k:
+                        from mechanics.social import relationship_graph as _rg_ep
+                        from mechanics.social.epistemic_engine import _is_kin_roommate_or_best_friend
+                        _ties = _rg_ep.get_ties(session_id, cand_tgt_k) if session_id else []
+                        _contacts = db.get_contacts(session_id) if session_id else []
+                        if _is_kin_roommate_or_best_friend(
+                            subj_k, cand_tgt_k, social_ties=_ties, contacts=_contacts
+                        ):
+                            extra_dc = 2
+                req_gold = 0
+                if eff_sub == "hush_bribe":
+                    req_gold = max(25, 25 * max(1, severity_val))
+                    client_gold = int(raw_dc.get("hush_gold") or 0)
+                    if client_gold > req_gold:
+                        req_gold = client_gold
+                    char_gold = int((char or {}).get("gold") or 0)
+                    if char_gold < req_gold:
+                        raise ValueError(f"Insufficient gold for hush bribe ({char_gold}g < {req_gold}g)")
+                if eff_sub == "threaten_silence":
+                    e_stat, base_dc = "STR", 7
+                elif eff_sub in ("present_proof", "destroy_proof"):
+                    e_stat, base_dc = "INT", 6
+                else:
+                    e_stat, base_dc = "CHA", 6 + (1 if eff_sub == "use_leverage" else 0)
+                cleaned.update({
+                    "stat": e_stat,
+                    "requirement": max(5, min(14, base_dc + extra_dc)),
+                    "mp_cost": 0,
+                    "intent": "epistemic_containment",
+                    "sub_intent": eff_sub,
+                    "fact_key": cand_fkey,
+                    "target_npc": cand_tgt,
+                    "hush_gold": req_gold,
+                    "effective_dc_mod": extra_dc,
+                    "_epistemic_verified": True,
+                    "action_category": "social",
+                    "label": raw_lbl or f"{eff_sub.replace('_', ' ').title()}",
+                })
+                return cleaned
 
         # 7. UI Tactical/Stealth/Dialogue Fallback Cards & Unmatched Payloads -> Deterministic Rolled Check (DC >= 6, NEVER FREE/NONE)
         act_cat_hint = str(cleaned.get("action_category") or "").strip().lower()

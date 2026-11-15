@@ -533,7 +533,17 @@
     "turn_number": "Runde #{{number}}",
     "latest_outcome": "Neuestes Ergebnis • Runde #{{number}}",
     "excitement": "Erregung",
-    "uncanny_stranger": "Unheimlicher Fremder"
+    "uncanny_stranger": "Unheimlicher Fremder",
+    "activity_prefix": "Aktiv",
+    "visible_tell_prefix": "Auffälliges Indiz",
+    "epistemic_watch": "Geheimnis-Überwachung",
+    "leak_risk_low": "Leck-Risiko: Niedrig",
+    "leak_risk_medium": "Leck-Risiko: Mittel",
+    "leak_risk_high": "Leck-Risiko: Hoch",
+    "spotted_witnesses": "Entdeckte Zeugen",
+    "known_witnesses": "Bekannte Zeugen",
+    "active_alibis": "Aktive Alibis",
+    "held_secrets": "Gehaltene Geheimnisse"
   },
   "conditions": {
     "aroused": "Erregt",
@@ -1312,7 +1322,8 @@
       "night": "Nacht"
     },
     "routine_unlock_hint": "Der vollständige Wochenablauf wird bei Zuneigung 40+ oder durch Beobachten und Nachfragen freigeschaltet.",
-    "residence_fog_hint": "Privatwohnung wird ab Freundschaft (100+) oder nach einer Einladung nach Hause freigeschaltet."
+    "residence_fog_hint": "Privatwohnung wird ab Freundschaft (100+) oder nach einer Einladung nach Hause freigeschaltet.",
+    "routine_override_today": "Heutige Abweichung"
   },
   "contracts": {
     "nav_label": "Pakte",

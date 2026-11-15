@@ -359,6 +359,10 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
 
     intent = entity.get("intent")
     intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if intent else ""
+    act_tag = str(entity.get("activity_tag") or "").strip()
+    act_badge = f" | 🎯 *{act_tag}*" if act_tag else ""
+    tell_txt = str(entity.get("visible_tell_text") or "").strip() if bool(entity.get("telltale_revealed")) else ""
+    tell_line = f"\n   ↳ 👁️ *Tell: {tell_txt}*" if tell_txt else ""
 
     status_items = _format_status_list_for_embed(status)
     if mood and str(mood).strip() and str(mood).strip() not in status_items:
@@ -431,11 +435,11 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
             bar = ("█" * filled) + ("░" * (5 - filled))
             state_lbl = "Breaking!" if s_pct >= 65 else "Charging"
             line += f"\n   ↳ ⚠️ **CHARGING: {sk_name}** [Stagger {bar} {s_pct}% — {state_lbl}]"
-        line += intent_line
+        line += f"{act_badge}{intent_line}{tell_line}"
         return line
     else:
         status_text = ", ".join(status_items) if status_items else "Neutral"
-        return f"{conv_prefix}**{name}**{tier_badge}{role_str} | Status: {status_text}{intent_line}"
+        return f"{conv_prefix}**{name}**{tier_badge}{role_str} | Status: {status_text}{act_badge}{intent_line}{tell_line}"
 
 
 def _tracker_group_text(entities: list, max_len: int = 1000, dialogue_partners: list = None, show_vitals: bool = True) -> str:
@@ -1047,6 +1051,44 @@ def prepare_discord_image(image_val) -> tuple[str | None, discord.File | None]:
     return None, None
 
 
+def _format_epistemic_watch_text(session: dict) -> str:
+    """Format strictly Fog-of-War-safe player_aware==1 epistemic status for Discord embeds."""
+    ep_hud = session.get("epistemic_hud")
+    if not isinstance(ep_hud, dict) and session.get("id"):
+        try:
+            ep_hud = db.build_player_fog_of_war_summary(int(session["id"]))
+        except Exception:
+            ep_hud = {}
+    if not isinstance(ep_hud, dict) or not ep_hud:
+        return ""
+    leak_risk = str(ep_hud.get("leak_risk") or "none").lower()
+    spotted = list(ep_hud.get("spotted_witnesses") or [])
+    known_w = list(ep_hud.get("known_witnesses") or [])
+    alibis = list(ep_hud.get("active_alibis") or [])
+    secrets = list(ep_hud.get("held_npc_secrets") or [])
+    if leak_risk == "none" and not spotted and not known_w and not alibis and not secrets:
+        return ""
+    lines = []
+    if leak_risk != "none":
+        risk_icon = {"high": "🔴", "medium": "🟠", "low": "🟡"}.get(leak_risk, "🟡")
+        lines.append(f"{risk_icon} **Leak Risk:** `{leak_risk.upper()}`")
+    if spotted:
+        names = ", ".join(
+            str(w.get("holder_actor_key") or w.get("subject_actor_key") or "Someone").replace("_", " ").title()
+            for w in spotted[:4]
+            if isinstance(w, dict)
+        )
+        if names:
+            lines.append(f"👀 **Spotted:** {names}")
+    if known_w:
+        lines.append(f"👤 **Known Witnesses:** {len(known_w)}")
+    if alibis:
+        lines.append(f"🎭 **Alibis Active:** {len(alibis)}")
+    if secrets:
+        lines.append(f"🗝️ **Secrets Held:** {len(secrets)}")
+    return "\n".join(lines)[:1024]
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
@@ -1128,6 +1170,10 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         vitals_header = _tracker_header("📊", "Player", "Players", len(session.get("turn_order", [])))
     _safe_add_field(dash_embed, name=vitals_header,
                      value=_party_vitals_text(session), inline=False)
+
+    ep_watch = _format_epistemic_watch_text(session)
+    if ep_watch:
+        _safe_add_field(dash_embed, name="🕵️ Epistemic Watch", value=ep_watch, inline=False)
 
     return [story_embed, dash_embed]
 
@@ -1214,6 +1260,10 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         vitals_header = _tracker_header("📊", "Player", "Players", len(session.get("turn_order", [])))
     _safe_add_field(dash_embed, name=vitals_header,
                      value=_party_vitals_text(session), inline=False)
+
+    ep_watch = _format_epistemic_watch_text(session)
+    if ep_watch:
+        _safe_add_field(dash_embed, name="🕵️ Epistemic Watch", value=ep_watch, inline=False)
 
     if waiting_on:
         mentions = ", ".join(f"<@{uid}>" for uid in waiting_on)

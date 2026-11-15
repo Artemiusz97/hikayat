@@ -533,7 +533,17 @@
     "turn_number": "Turn #{{number}}",
     "latest_outcome": "Latest Outcome • Turn #{{number}}",
     "excitement": "Excitement",
-    "uncanny_stranger": "Uncanny Stranger"
+    "uncanny_stranger": "Uncanny Stranger",
+    "activity_prefix": "Doing",
+    "visible_tell_prefix": "Noticeable Tell",
+    "epistemic_watch": "Epistemic Watch",
+    "leak_risk_low": "Leak Risk: Low",
+    "leak_risk_medium": "Leak Risk: Medium",
+    "leak_risk_high": "Leak Risk: High",
+    "spotted_witnesses": "Spotted Witnesses",
+    "known_witnesses": "Known Witnesses",
+    "active_alibis": "Active Alibis",
+    "held_secrets": "Secrets Held"
   },
   "conditions": {
     "aroused": "Aroused",
@@ -1312,7 +1322,8 @@
       "night": "Night"
     },
     "routine_unlock_hint": "Full weekly routine unlocks at Affinity 40+ or by observing or asking about their schedule.",
-    "residence_fog_hint": "Private residence unlocks at Friend standing (100+) or when invited home."
+    "residence_fog_hint": "Private residence unlocks at Friend standing (100+) or when invited home.",
+    "routine_override_today": "Today's Override"
   },
   "contracts": {
     "nav_label": "Contracts",

@@ -533,7 +533,17 @@
     "turn_number": "Giliran #{{number}}",
     "latest_outcome": "Hasil Terkini • Giliran #{{number}}",
     "excitement": "Keterujaan",
-    "uncanny_stranger": "Orang Asing Ganjil"
+    "uncanny_stranger": "Orang Asing Ganjil",
+    "activity_prefix": "Sedang",
+    "visible_tell_prefix": "Petunjuk Ketara",
+    "epistemic_watch": "Pantauan Rahsia",
+    "leak_risk_low": "Risiko Bocor: Rendah",
+    "leak_risk_medium": "Risiko Bocor: Sederhana",
+    "leak_risk_high": "Risiko Bocor: Tinggi",
+    "spotted_witnesses": "Saksi Dikesan",
+    "known_witnesses": "Saksi Diketahui",
+    "active_alibis": "Alibi Aktif",
+    "held_secrets": "Rahsia Dipegang"
   },
   "conditions": {
     "aroused": "Terangsang",
@@ -1312,7 +1322,8 @@
       "night": "Malam"
     },
     "routine_unlock_hint": "Jadual mingguan penuh dibuka pada Kemesraan 40+ atau dengan memerhati dan bertanya tentang rutin mereka.",
-    "residence_fog_hint": "Kediaman peribadi dibuka pada tahap Sahabat (100+) atau apabila dijemput pulang."
+    "residence_fog_hint": "Kediaman peribadi dibuka pada tahap Sahabat (100+) atau apabila dijemput pulang.",
+    "routine_override_today": "Pindaan Hari Ini"
   },
   "contracts": {
     "nav_label": "Perjanjian",

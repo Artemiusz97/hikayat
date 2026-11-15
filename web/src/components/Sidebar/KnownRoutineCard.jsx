@@ -109,6 +109,14 @@ const KnownRoutineCard = ({ npc, t }) => {
         </div>
       </div>
 
+      {routine?.current_day_override?.label && (fullUnlocked || Number(routine?.discovered_count || 0) > 0) && (
+        <div className="px-2 py-1 rounded bg-amber-950/40 border border-amber-600/35 text-[11px] text-amber-200 flex items-center gap-1.5">
+          <span aria-hidden="true">📌</span>
+          <span className="font-semibold shrink-0">{t('social.routine_override_today', "Today's Override")}:</span>
+          <span className="truncate">{routine.current_day_override.label}</span>
+        </div>
+      )}
+
       <div className="space-y-1">
         {BLOCK_ORDER.map(({ key, fallback, icon }) => {
           const rawVal = slotsMap[key] || maskedPlaceholder;

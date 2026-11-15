@@ -533,7 +533,17 @@
     "turn_number": "Tura #{{number}}",
     "latest_outcome": "Najnowszy Wynik • Tura #{{number}}",
     "excitement": "Podekscytowanie",
-    "uncanny_stranger": "Niepokojący Nieznajomy"
+    "uncanny_stranger": "Niepokojący Nieznajomy",
+    "activity_prefix": "Zajęcie",
+    "visible_tell_prefix": "Widoczny Sygnał",
+    "epistemic_watch": "Czujność Tajemnic",
+    "leak_risk_low": "Ryzyko przecieku: Niskie",
+    "leak_risk_medium": "Ryzyko przecieku: Średnie",
+    "leak_risk_high": "Ryzyko przecieku: Wysokie",
+    "spotted_witnesses": "Zauważeni Świadkowie",
+    "known_witnesses": "Znani Świadkowie",
+    "active_alibis": "Aktywne Alibi",
+    "held_secrets": "Znane Sekrety"
   },
   "conditions": {
     "aroused": "Podekscytowany",
@@ -1312,7 +1322,8 @@
       "night": "Noc"
     },
     "routine_unlock_hint": "Pełny plan tygodnia odblokuje się przy Sympatii 40+ lub przez obserwację i pytanie o rutynę.",
-    "residence_fog_hint": "Prywatne mieszkanie odblokuje się na poziomie Przyjaciel (100+) lub po zaproszeniu."
+    "residence_fog_hint": "Prywatne mieszkanie odblokuje się na poziomie Przyjaciel (100+) lub po zaproszeniu.",
+    "routine_override_today": "Dzisiejsza Zmiana"
   },
   "contracts": {
     "nav_label": "Pakty",

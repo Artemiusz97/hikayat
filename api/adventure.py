@@ -751,6 +751,12 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 except Exception:
                     pass
 
+            # F1 Server-Side Fog-of-War: never serialize internal/unrevealed telltale tags
+            n_dict.pop("telltale_tag", None)
+            n_dict.pop("cover_tag", None)
+            if not bool(n_dict.get("telltale_revealed")):
+                n_dict.pop("visible_tell_text", None)
+
             return n_dict
 
         enriched_npcs = []
@@ -836,6 +842,12 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 session["realty"] = build_realty_payload(int(session["id"]), user_id)
         except Exception as e_rl:
             logger.debug(f"Could not enrich realty for session: {e_rl}")
+
+        # B7 Epistemic Fog-of-War HUD (strictly excludes player_aware == 0 secrets/hops)
+        try:
+            session["epistemic_hud"] = db.build_player_fog_of_war_summary(int(session["id"]))
+        except Exception as e_ep:
+            logger.debug(f"Could not enrich epistemic_hud for session: {e_ep}")
 
     return session
 

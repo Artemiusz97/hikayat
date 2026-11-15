@@ -533,7 +533,17 @@
     "turn_number": "第 {{number}} 回合",
     "latest_outcome": "最新结算 • 第 {{number}} 回合",
     "excitement": "兴奋度",
-    "uncanny_stranger": "诡异陌生人"
+    "uncanny_stranger": "诡异陌生人",
+    "activity_prefix": "当前动作",
+    "visible_tell_prefix": "外显破绽",
+    "epistemic_watch": "秘密风声监控",
+    "leak_risk_low": "泄密风险：低",
+    "leak_risk_medium": "泄密风险：中",
+    "leak_risk_high": "泄密风险：高",
+    "spotted_witnesses": "已察觉目击者",
+    "known_witnesses": "已知目击者",
+    "active_alibis": "有效不在场证明",
+    "held_secrets": "掌握的把柄"
   },
   "conditions": {
     "aroused": "动情",
@@ -1312,7 +1322,8 @@
       "night": "夜间"
     },
     "routine_unlock_hint": "完整周常作息将在好感度达到 40+ 或通过观察、打听对方日程后解锁。",
-    "residence_fog_hint": "私人住所将在达到“友人”（100+）关系或受邀做客后解锁。"
+    "residence_fog_hint": "私人住所将在达到“友人”（100+）关系或受邀做客后解锁。",
+    "routine_override_today": "今日日程变动"
   },
   "contracts": {
     "nav_label": "契约",
