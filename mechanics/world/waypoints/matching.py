@@ -141,6 +141,8 @@ def get_waypoint_npc_schedule_info(
         scen_key = str(session.get("scenario") or "fantasy")
         from mechanics.world.world_schedule import get_scenario_wake_minute
         from mechanics.world.npc_schedule import get_npc_scheduled_location, get_detailed_npc_time_phase
+        from mechanics.world.anchor_schedule import is_npc_on_active_shift, resolve_anchor_schedule_nodes
+        from mechanics.world.schedule_blocks import get_time_block_key
         wake_min = int(get_scenario_wake_minute(scen_key) or 420)
         safe_min = int(curr_min or 0) % 1440
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=curr_day, scen_key=scen_key)
@@ -155,14 +157,64 @@ def get_waypoint_npc_schedule_info(
                 contact = find_special_agent_by_name(session_id, target_npc, scen_key=scen_key)
             except Exception:
                 contact = None
-        affinity = int((contact or {}).get("relationship_score") or 0)
+
+        roster_npc = db.get_world_roster_npc(session_id, target_npc, include_legacy_rosters=False)
+        npc_record: Optional[dict] = None
+        if contact or roster_npc:
+            npc_record = dict(contact or {})
+            if isinstance(roster_npc, dict):
+                r_basic = roster_npc.get("basic_info") if isinstance(roster_npc.get("basic_info"), dict) else {}
+                c_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
+                merged_basic = dict(c_basic)
+                merged_basic.update(r_basic)
+                npc_record["basic_info"] = merged_basic
+                for r_key in (
+                    "npc_key", "npc_id", "name", "origin", "shift_profile",
+                    "workplace_node_id", "hangout_node_id", "home_node_id",
+                    "roaming_route", "is_unique_proprietor", "residence_unlocked",
+                    "staff_status", "affinity_score",
+                ):
+                    r_val = roster_npc.get(r_key)
+                    if r_val not in (None, "", []):
+                        npc_record[r_key] = r_val
+
+        score_cands = []
+        for rec_s, key_s in (
+            (contact, "relationship_score"),
+            (contact, "interaction_score"),
+            (roster_npc, "affinity_score"),
+        ):
+            if isinstance(rec_s, dict) and rec_s.get(key_s) not in (None, ""):
+                try:
+                    score_cands.append(int(rec_s[key_s]))
+                except (TypeError, ValueError):
+                    pass
+        affinity = max(score_cands) if score_cands else 0
+
+        if npc_record:
+            rec_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
+            rec_status = str(npc_record.get("staff_status") or rec_basic.get("staff_status") or "active").strip().lower()
+            if rec_status in ("dead", "arrested", "deceased") or npc_record.get("is_deceased") or npc_record.get("alive") is False:
+                return {
+                    "effective_location": static_loc,
+                    "static_location": static_loc,
+                    "scheduled_location": static_loc,
+                    "is_off_duty": True,
+                    "schedule_phase": phase_key,
+                    "status_label": "Unavailable",
+                    "wait_until_morning_minutes": 0,
+                    "wake_clock": format_clock(wake_min),
+                    "wake_minute": wake_min,
+                }
 
         # Check if waypoint explicitly expects Night/Midnight
         v_phases = [str(p).lower() for p in (wp.get("valid_time_phases") or [])]
         night_allowed = any(p in ("night", "midnight") for p in v_phases)
-        if not night_allowed and contact:
+        if not night_allowed and npc_record:
             from mechanics.world.schedules import is_npc_nocturnal_or_night_shift
-            night_allowed = is_npc_nocturnal_or_night_shift(contact, scen_key=scen_key, current_day=curr_day)
+            night_allowed = is_npc_nocturnal_or_night_shift(
+                npc_record, scen_key=scen_key, current_day=curr_day, session_id=session_id
+            )
 
         is_night = (safe_min >= 1200 or safe_min < wake_min)
         if is_night and not night_allowed and affinity < 40:
@@ -181,9 +233,52 @@ def get_waypoint_npc_schedule_info(
                 "wake_minute": wake_min,
             }
 
-        # Only override static_loc with dynamic schedule if contact exists in DB
-        if contact:
-            npc_dict = dict(contact)
+        # Shift-aware gating for closed-world roster workers during off-shift / closed hours
+        if npc_record:
+            rec_basic = npc_record.get("basic_info") if isinstance(npc_record.get("basic_info"), dict) else {}
+            origin_low = str(npc_record.get("origin") or rec_basic.get("origin") or "").strip().lower()
+            shift_prof = str(npc_record.get("shift_profile") or rec_basic.get("shift_profile") or "").strip().lower()
+            is_closed_world_worker = (
+                origin_low in ("venue_seed", "replacement_hire", "roaming_merchant", "role_slot_fill")
+                or (roster_npc is not None and origin_low != "legacy_adapter" and bool(shift_prof))
+            )
+            if is_closed_world_worker and not night_allowed and affinity < 40:
+                on_shift, _ = is_npc_on_active_shift(
+                    npc_record, safe_min, current_day=curr_day, scen_key=scen_key, session_id=session_id
+                )
+                if not on_shift:
+                    anchor_nodes = resolve_anchor_schedule_nodes(
+                        npc_record,
+                        current_day=curr_day,
+                        scen_key=scen_key,
+                        session_id=session_id,
+                        current_minute=safe_min,
+                    )
+                    sched_nid_now = str((anchor_nodes or {}).get(get_time_block_key(safe_min)) or "").strip()
+                    wp_node_id = str(wp.get("target_node_id") or "").strip()
+                    if not wp_node_id and static_loc:
+                        wp_node_id = str(db.resolve_node_id_from_location(session_id, static_loc, prefer_facility=True) or "").strip()
+                    work_nid = str(npc_record.get("workplace_node_id") or "").strip()
+                    at_pinned_venue = bool(wp_node_id and sched_nid_now and sched_nid_now == wp_node_id)
+                    if (wp_node_id and not at_pinned_venue) or (not wp_node_id and work_nid and sched_nid_now != work_nid):
+                        wait_mins = (wake_min - safe_min) % 1440
+                        if wait_mins == 0:
+                            wait_mins = 60
+                        return {
+                            "effective_location": static_loc,
+                            "static_location": static_loc,
+                            "scheduled_location": static_loc,
+                            "is_off_duty": True,
+                            "schedule_phase": phase_key,
+                            "status_label": "Off-Duty: Closed",
+                            "wait_until_morning_minutes": wait_mins,
+                            "wake_clock": format_clock(wake_min),
+                            "wake_minute": wake_min,
+                        }
+
+        # Only override static_loc with dynamic schedule if contact/roster exists in DB
+        if npc_record:
+            npc_dict = dict(npc_record)
             if not npc_dict.get("name"):
                 npc_dict["name"] = target_npc
             sched_loc = get_npc_scheduled_location(

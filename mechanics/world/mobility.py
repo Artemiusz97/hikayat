@@ -739,23 +739,28 @@ def is_character_mobile(npc_name: str, contact_data: dict = None, scen_key: str 
     return any(mr in role for mr in mobile_roles)
 
 
-def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = None, new_loc: str = "") -> bool:
+def _extract_npc_match_candidates(npc_name: str) -> tuple[str, set[str]]:
+    import namegen
+    n_low = str(npc_name or "").lower().strip()
+    n_first = n_low.split()[0] if n_low else ""
+    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
+    first_candidates = {
+        tok
+        for tok in (n_first, n_given)
+        if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS
+    }
+    return n_low, first_candidates
+
+
+def is_action_targeting_present_npc_meetup(npc_name: str, actions: list = None) -> bool:
     """
-    Checks if an NPC is the intended target of:
-    1. A player travel/meetup action (e.g. 'Travel to gym to meet Sofia Anderson')
-    2. An active Story Quest or Side Bounty waypoint at new_loc (e.g. 'Convene meeting with Sofia')
-    3. A phone appointment at new_loc
+    Checks if the player's current action explicitly names a travel-to-meet
+    intent toward an NPC who is already confirmed present in the scene.
     """
     if not npc_name:
         return False
 
-    import namegen
-    n_low = npc_name.lower().strip()
-    n_first = n_low.split()[0] if n_low else ""
-    n_given = namegen.extract_first_and_last_name(npc_name)[0].lower().strip()
-    first_candidates = {tok for tok in (n_first, n_given) if len(tok) >= 3 and tok not in namegen.NAME_PARTICLES_AND_HONORIFICS}
-
-    # 1. Inspect player actions (travel-to-meet actions ONLY)
+    n_low, first_candidates = _extract_npc_match_candidates(npc_name)
     travel_meetup_verbs = (
         "meet ", "meet with ", "convene with ", "convene meeting with ",
         "rendezvous with ", "catch up with "
@@ -767,72 +772,104 @@ def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = 
             if n_low in lbl or any(f" {fc}" in f" {lbl}" for fc in first_candidates):
                 if any(mv in lbl for mv in travel_meetup_verbs) or "meet" in lbl or "rendezvous" in lbl:
                     return True
+    return False
 
-    # 2. Inspect active Story Quest and Side Quests in database
-    if session_id:
-        try:
-            from mechanics.world.waypoints import check_location_matches_waypoint
-            sess = db.get_session(session_id)
-            sess_node = sess.get("current_node_id", "") if sess else ""
 
-            def _check_loc_or_node_match(target_location_str: str, target_node: str = "") -> bool:
-                if not target_location_str and not target_node:
-                    return True
-                resolved_node = target_node or (db.resolve_node_id_from_location(session_id, target_location_str) if target_location_str else "")
-                if sess_node and resolved_node:
-                    return db.is_descendant_of(session_id, sess_node, resolved_node) or db.is_descendant_of(session_id, resolved_node, sess_node)
-                if not new_loc or not target_location_str:
-                    return True
-                return check_location_matches_waypoint(new_loc, target_location_str) or check_location_matches_waypoint(target_location_str, new_loc)
+def is_rendezvous_target(npc_name: str, actions: list = None, session_id: int = None, new_loc: str = "") -> bool:
+    """
+    Checks if an NPC is the intended target of a confirmed DB rendezvous:
+    1. An active Story Quest or Side Bounty waypoint at new_loc (e.g. 'Convene meeting with Sofia')
+    2. A confirmed phone appointment / commitment at new_loc
 
-            # Check all active quest waypoints
-            active_wps = db.get_all_session_active_waypoints(session_id)
-            for wp in active_wps:
-                wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')} {wp.get('stage_label', '')} {wp.get('target_npc', '')}".lower()
-                wp_loc = wp.get("target_location") or wp.get("location") or ""
-                wp_node = wp.get("target_node_id") or ""
-                if _check_loc_or_node_match(wp_loc, wp_node):
-                    if n_low in wp_text or any(f" {fc}" in f" {wp_text}" for fc in first_candidates):
+    Never honors bare unconfirmed 'travel to meet <NPC>' player action verbs.
+    """
+    _ = actions
+    if not npc_name or not session_id:
+        return False
+
+    n_low, first_candidates = _extract_npc_match_candidates(npc_name)
+    from mechanics.world.presence_resolver import is_node_descendant_in_memory, resolve_node_id_in_memory
+    from mechanics.world.waypoints import check_location_matches_waypoint
+
+    sess = db.get_session(session_id)
+    sess_node = str(sess.get("current_node_id", "") if sess else "")
+    world_nodes = db.get_session_world_nodes(session_id) or []
+    nodes_by_id = {
+        str(n["node_id"]): n for n in world_nodes if isinstance(n, dict) and n.get("node_id")
+    }
+    loc_cache: dict[tuple[str, bool], str] = {}
+    probe_node = (
+        resolve_node_id_in_memory(new_loc, nodes_by_id, prefer_facility=False, cache=loc_cache)
+        if (new_loc and nodes_by_id)
+        else ("" if new_loc else sess_node)
+    )
+
+    def _check_loc_or_node_match(target_location_str: str, target_node: str = "") -> bool:
+        if not target_location_str and not target_node:
+            return True
+        resolved_node = str(target_node or "").strip()
+        if not resolved_node and target_location_str and nodes_by_id:
+            resolved_node = resolve_node_id_in_memory(
+                target_location_str, nodes_by_id, prefer_facility=False, cache=loc_cache
+            )
+        if probe_node and resolved_node:
+            return (
+                is_node_descendant_in_memory(probe_node, resolved_node, nodes_by_id)
+                or is_node_descendant_in_memory(resolved_node, probe_node, nodes_by_id)
+            )
+        if not new_loc or not target_location_str:
+            return True
+        return (
+            check_location_matches_waypoint(new_loc, target_location_str)
+            or check_location_matches_waypoint(target_location_str, new_loc)
+        )
+
+    # 1. Inspect all active quest waypoints
+    active_wps = db.get_all_session_active_waypoints(session_id) or []
+    for wp in active_wps:
+        wp_text = f"{wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')} {wp.get('stage_label', '')} {wp.get('target_npc', '')}".lower()
+        wp_loc = wp.get("target_location") or wp.get("location") or ""
+        wp_node = wp.get("target_node_id") or ""
+        if _check_loc_or_node_match(wp_loc, wp_node):
+            if n_low in wp_text or any(f" {fc}" in f" {wp_text}" for fc in first_candidates):
+                return True
+
+    # 2. Inspect active story quest sub-objectives
+    sq = db.get_active_story_quest(session_id)
+    if sq:
+        sq_loc = sq.get("target_location") or sq.get("location") or ""
+        sq_node = sq.get("target_node_id") or ""
+        sub_objs = sq.get("sub_objectives") or []
+        has_active_sub = False
+        for so in sub_objs:
+            if isinstance(so, dict) and not so.get("completed"):
+                has_active_sub = True
+                so_text = f"{so.get('text', '')} {so.get('stage_label', '')} {so.get('target_npc', '')}".lower()
+                so_loc = so.get("target_location") or so.get("location") or sq_loc
+                so_node = so.get("target_node_id") or sq_node
+                if _check_loc_or_node_match(so_loc, so_node):
+                    if n_low in so_text or any(f" {fc}" in f" {so_text}" for fc in first_candidates):
                         return True
 
-            # Check active story quest sub-objectives
-            sq = db.get_active_story_quest(session_id)
-            if sq:
-                sq_loc = sq.get("target_location") or sq.get("location") or ""
-                sq_node = sq.get("target_node_id") or ""
-                sub_objs = sq.get("sub_objectives") or []
-                has_active_sub = False
-                for so in sub_objs:
-                    if isinstance(so, dict) and not so.get("completed"):
-                        has_active_sub = True
-                        so_text = f"{so.get('text', '')} {so.get('stage_label', '')} {so.get('target_npc', '')}".lower()
-                        so_loc = so.get("target_location") or so.get("location") or sq_loc
-                        so_node = so.get("target_node_id") or sq_node
-                        if _check_loc_or_node_match(so_loc, so_node):
-                            if n_low in so_text or any(f" {fc}" in f" {so_text}" for fc in first_candidates):
-                                return True
-
-                if not has_active_sub:
-                    if _check_loc_or_node_match(sq_loc, sq_node):
-                        sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}".lower()
-                        if n_low in sq_text or any(f" {fc}" in f" {sq_text}" for fc in first_candidates):
-                            return True
-
-            # 3. Inspect phone appointments (only pending appointments or ongoing arrived meetups)
-            pending_appts = db.get_phone_appointments(session_id, status="pending")
-            arrived_appts = [
-                a for a in db.get_phone_appointments(session_id, status="arrived")
-                if any(str((x.get("name") or x.get("npc_name")) if isinstance(x, dict) else x).strip().lower() == a.get("npc_name", "").strip().lower() for x in (sess.get("current_npcs") or []))
-                or str(sess.get("dialogue_partner") or "").strip().lower() == a.get("npc_name", "").strip().lower()
-            ] if sess else []
-            for appt in (pending_appts + arrived_appts):
-                a_npc = str(appt.get("npc_name", "")).lower().strip()
-                a_loc = str(appt.get("rendezvous_location", ""))
-                a_node = str(appt.get("target_node_id", "") or "")
-                if (n_low in a_npc or a_npc in n_low) and _check_loc_or_node_match(a_loc, a_node):
+        if not has_active_sub:
+            if _check_loc_or_node_match(sq_loc, sq_node):
+                sq_text = f"{sq.get('title', '')} {sq.get('objective', '')}".lower()
+                if n_low in sq_text or any(f" {fc}" in f" {sq_text}" for fc in first_candidates):
                     return True
-        except Exception:
-            pass
+
+    # 3. Inspect phone appointments / commitments_ledger (pending/approaching or ongoing arrived meetups)
+    pending_appts = db.get_phone_appointments(session_id, status="pending") or []
+    arrived_appts = [
+        a for a in (db.get_phone_appointments(session_id, status="arrived") or [])
+        if any(str((x.get("name") or x.get("npc_name")) if isinstance(x, dict) else x).strip().lower() == a.get("npc_name", "").strip().lower() for x in (sess.get("current_npcs") or []))
+        or str(sess.get("dialogue_partner") or "").strip().lower() == a.get("npc_name", "").strip().lower()
+    ] if sess else []
+    for appt in (pending_appts + arrived_appts):
+        a_npc = str(appt.get("npc_name", "")).lower().strip()
+        a_loc = str(appt.get("rendezvous_location", ""))
+        a_node = str(appt.get("target_node_id", "") or "")
+        if a_npc and (n_low in a_npc or a_npc in n_low) and _check_loc_or_node_match(a_loc, a_node):
+            return True
 
     return False
 
@@ -1202,40 +1239,16 @@ def has_narrative_continuity_bridge(npc_name: str, session: dict = None, actions
                         return True
 
         # Allow cross-zone / destination arrival ONLY if the NPC was NOT an uninvited patron in old_npcs
-        # and recent history (last 3 turns) records an explicit meetup/hangout/date agreement with them.
+        # and holds an active confirmed rendezvous/quest pin at new_loc.
         if session:
             was_in_old_npcs = any(
                 str((on.get("name") or on.get("npc_name")) if isinstance(on, dict) else on).strip().lower() == n_low
                 for on in (session.get("current_npcs") or [])
             )
             if not was_in_old_npcs:
-                hist_raw = session.get("history") or session.get("history_json") or []
-                if isinstance(hist_raw, str):
-                    try:
-                        hist_list = json.loads(hist_raw)
-                    except Exception:
-                        hist_list = [hist_raw]
-                elif isinstance(hist_raw, list):
-                    hist_list = hist_raw
-                else:
-                    hist_list = []
-                recent_hist = hist_list[-3:] if len(hist_list) > 3 else hist_list
-                split_patterns = (
-                    r"\b(?:split|separate|divide)\s+(?:up|the|our|tasks?|investigation)\b",
-                    r"\bgo\s+(?:our\s+)?separate\s+ways\b",
-                )
-                has_split_up = any(
-                    any(re.search(pat, _extract_history_text(h).lower()) for pat in split_patterns)
-                    for h in recent_hist
-                )
-                if not has_split_up:
-                    name_pat = r"\b" + re.escape(n_low) + r"\b"
-                    for fc in first_candidates:
-                        name_pat += r"|\b" + re.escape(fc) + r"\b"
-                    for h in recent_hist:
-                        h_text = _extract_history_text(h).lower()
-                        if h_text and re.search(name_pat, h_text) and _has_meetup_intent_keyword(h_text):
-                            return True
+                sess_id = session.get("id")
+                if sess_id and is_rendezvous_target(npc_name, actions=None, session_id=sess_id, new_loc=new_loc):
+                    return True
         return False
 
     # 2. Same location (no movement): dialogue partner or co-located bystander retains continuity

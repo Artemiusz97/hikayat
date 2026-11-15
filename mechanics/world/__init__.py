@@ -31,6 +31,10 @@ from .venue_seeder import (
     evaluate_shop_staff_availability,
     format_venue_crowd_flavor,
 )
+from .presence_resolver import (
+    resolve_node_presence,
+    check_doorbell_etiquette,
+)
 
 __all__ = [
     "SCENARIO_WORLD_SCHEDULES",
@@ -60,4 +64,6 @@ __all__ = [
     "slot_fill_custom_action_role",
     "evaluate_shop_staff_availability",
     "format_venue_crowd_flavor",
+    "resolve_node_presence",
+    "check_doorbell_etiquette",
 ]

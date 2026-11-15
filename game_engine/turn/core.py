@@ -2637,11 +2637,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             # If the player explicitly traveled to meet / speak with a named NPC and that NPC is present on arrival,
             # deterministically engage them in dialogue (unless stealth is active or player exited conversation)
             if not has_exited_convo and not cast_plan.has_exited_convo and not cast_plan.stealth_active:
-                from mechanics.world.mobility import is_rendezvous_target
+                from mechanics.world.mobility import is_action_targeting_present_npc_meetup
                 for _pn_obj in cast_plan.present_npcs:
                     _pn_nm = game_engine._get_npc_name(_pn_obj).strip()
                     if _pn_nm and _pn_nm not in new_partners:
-                        if is_rendezvous_target(_pn_nm.lower(), actions=actions, session_id=None, new_loc=new_loc):
+                        if is_action_targeting_present_npc_meetup(_pn_nm, actions=actions):
                             new_partners.append(_pn_nm)
             if new_partners:
                 for np_nm in new_partners:
