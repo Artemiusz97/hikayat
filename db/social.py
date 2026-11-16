@@ -4373,4 +4373,5 @@ from .social_pacing import (
     upsert_character_social_daily,
     upsert_npc_social_composure,
     upsert_social_topic_state,
+    upsert_wardrobe_preset_discoveries_batch,
 )

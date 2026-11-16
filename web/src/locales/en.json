@@ -1352,7 +1352,14 @@
     },
     "routine_unlock_hint": "Full weekly routine unlocks at Affinity 40+ or by observing or asking about their schedule.",
     "residence_fog_hint": "Private residence unlocks at Friend standing (100+) or when invited home.",
-    "routine_override_today": "Today's Override"
+    "routine_override_today": "Today's Override",
+    "wardrobe_header": "Known Wardrobe",
+    "currently_wearing": "Currently Wearing",
+    "wardrobe_duty": "Main / Duty",
+    "wardrobe_casual": "Casual",
+    "wardrobe_sleepwear": "Sleepwear",
+    "wardrobe_gifted": "Gifted",
+    "wardrobe_unlock_hint": "Meet them at work, off-duty, or at home to witness their outfits."
   },
   "contracts": {
     "nav_label": "Contracts",

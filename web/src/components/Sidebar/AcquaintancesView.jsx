@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { getRelationshipTier } from './CodexPanel';
 import KnownRoutineCard from './KnownRoutineCard';
+import KnownWardrobeCard from './KnownWardrobeCard';
 
 const formatItemText = (item) => {
   if (!item) return '';
@@ -192,6 +193,8 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                     {desc}
                   </div>
                 )}
+
+                <KnownWardrobeCard npc={acq} t={t} />
 
                 <KnownRoutineCard npc={acq} t={t} />
 

@@ -1352,7 +1352,14 @@
     },
     "routine_unlock_hint": "Der vollständige Wochenablauf wird bei Zuneigung 40+ oder durch Beobachten und Nachfragen freigeschaltet.",
     "residence_fog_hint": "Privatwohnung wird ab Freundschaft (100+) oder nach einer Einladung nach Hause freigeschaltet.",
-    "routine_override_today": "Heutige Abweichung"
+    "routine_override_today": "Heutige Abweichung",
+    "wardrobe_header": "Bekannte Garderobe",
+    "currently_wearing": "Trägt aktuell",
+    "wardrobe_duty": "Alltag / Dienst",
+    "wardrobe_casual": "Freizeit",
+    "wardrobe_sleepwear": "Schlafkleidung",
+    "wardrobe_gifted": "Geschenkt",
+    "wardrobe_unlock_hint": "Triff sie bei der Arbeit, in der Freizeit oder zu Hause, um ihre Kleidung zu sehen."
   },
   "contracts": {
     "nav_label": "Pakte",

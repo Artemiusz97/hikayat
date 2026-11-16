@@ -2285,13 +2285,58 @@ def enrich_contact_dossier(
     c["is_nsfw"] = is_nsfw_scenario(scen_key)
     c["recent_memories"] = recent_mems
 
+    debug_kw: dict[str, Any] = {}
     try:
         from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key
-        phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
+        eff_sess_w = preloaded_session if isinstance(preloaded_session, dict) else {}
+        eff_phys_w = phys_st if isinstance(phys_st, dict) else (
+            eff_sess_w.get("physical_state") if isinstance(eff_sess_w.get("physical_state"), dict) else {}
+        )
+        phys_actors = (eff_phys_w.get("actors") or {}) if isinstance(eff_phys_w, dict) else {}
         c_name_str = str(c.get("name") or "").strip()
         m_act_key = _match_actor_key(c_name_str, phys_actors) if c_name_str else ""
         n_act_data = phys_actors.get(m_act_key) or {}
         c["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=c_gender)
+
+        is_coloc_w = bool(
+            m_act_key
+            and n_act_data
+            and str(n_act_data.get("actor_type") or "").lower() != "player"
+        )
+        if not is_coloc_w and c_name_str and isinstance(eff_sess_w.get("current_npcs"), list):
+            c_low_w = c_name_str.lower()
+            for _cn_w in eff_sess_w["current_npcs"]:
+                _nm_w = (_cn_w.get("name") if isinstance(_cn_w, dict) else str(_cn_w)).strip().lower()
+                if _nm_w and _nm_w == c_low_w:
+                    is_coloc_w = True
+                    break
+
+        from mechanics.social.wardrobe.dossier import build_known_wardrobe_payload
+
+        _w_day = int(eff_sess_w.get("current_day") or 1)
+        _w_min = int(eff_sess_w.get("current_minute") if eff_sess_w.get("current_minute") is not None else 480)
+        c["known_wardrobe"] = build_known_wardrobe_payload(
+            c,
+            phys_actor_state=n_act_data or None,
+            discovered_facts=preloaded_discoveries or [],
+            is_colocated=is_coloc_w,
+            reveal_debug=bool(debug_reveal_all),
+            session=eff_sess_w or None,
+            scen_key=scen_key,
+            current_day=_w_day,
+            current_minute=_w_min,
+        )
+        debug_kw = build_known_wardrobe_payload(
+            c,
+            phys_actor_state=n_act_data or None,
+            discovered_facts=preloaded_discoveries or [],
+            is_colocated=is_coloc_w,
+            reveal_debug=True,
+            session=eff_sess_w or None,
+            scen_key=scen_key,
+            current_day=_w_day,
+            current_minute=_w_min,
+        )
     except Exception:
         c.setdefault("clothing_status", "Fully Clothed 👕")
 
@@ -2509,6 +2554,7 @@ def enrich_contact_dossier(
         "past_intimate_entries": past_history if isinstance(past_history, list) else ([str(past_history)] if past_history else []),
         "shared_romantic_milestones": c.get("shared_romantic_milestones") or [],
         "recent_memories": c.get("recent_memories") or [],
+        "known_wardrobe": debug_kw or (c.get("known_wardrobe") or {}),
         "info_level": 3,
         "debug_revealed": True,
     }

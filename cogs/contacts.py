@@ -77,6 +77,7 @@ from cogs.contacts_routine_views import (
     build_acquaintances_list_embed,
     enrich_discord_npc_with_routine,
     format_discord_known_routine_value,
+    format_discord_known_wardrobe_value,
     load_discord_contacts_and_acquaintances,
 )
 from mechanics.world.routine_disclosure import (
@@ -1536,8 +1537,12 @@ def build_contact_detail_embed(
         unlocked_traits = [t for t in (enriched_c.get("unlocked_traits") or []) if "?" not in str(t)]
         contact = {**contact, "appearance": enriched_c.get("appearance", {})}
         revealed_flags = dict(enriched_c.get("revealed_flags") or revealed_flags)
+    _app_for_embed = dict(contact.get("appearance") or {})
+    if enriched_c.get("known_wardrobe"):
+        for _ok in ("outfit_style", "attire", "clothing"):
+            _app_for_embed.pop(_ok, None)
     app_fields = format_persona_embed_fields(
-        contact.get("appearance", {}),
+        _app_for_embed,
         gender=gender_val,
         race=race_val,
         scen_key=scenario_key,
@@ -1599,6 +1604,17 @@ def build_contact_detail_embed(
         embed.add_field(
             name="🕒 Schedule & Routine",
             value=routine_val,
+            inline=False,
+        )
+
+    wardrobe_val = format_discord_known_wardrobe_value(
+        enriched_c.get("known_wardrobe"),
+        lang=str((fow_context or {}).get("ui_lang") or "en"),
+    )
+    if wardrobe_val:
+        embed.add_field(
+            name="👔 Known Wardrobe",
+            value=wardrobe_val,
             inline=False,
         )
 

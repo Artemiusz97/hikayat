@@ -3053,22 +3053,45 @@ def resolve_post_turn_stage_delta(
             retained_names_lower.add(tok)
             retained_token_owner.setdefault(tok, cand_dict)
 
-    # 4. Ensure all retained NPCs have micro_blocking initialized
+    # 4. Ensure all retained NPCs have micro_blocking and pre-turn wardrobe preview initialized
+    _pre_w_day = int(session.get("current_day", 1) or 1) if session else 1
+    _pre_w_min = int(session.get("current_minute", 480) if session and session.get("current_minute") is not None else 480)
+    _pre_w_loc = new_loc or (session.get("current_location", "") if session else "")
+    _pre_w_nid = str(session.get("current_node_id") or "") if session else ""
     for n in retained_stage:
-        if isinstance(n, dict) and "micro_blocking" not in n:
-            n_name = _get_npc_name(n)
-            n_low = n_name.lower().strip()
-            matched_contact = contacts_map.get(n_low)
-            merged_n = dict(matched_contact) if matched_contact else dict(n)
-            for k, v in n.items():
-                merged_n[k] = v
+        if not isinstance(n, dict):
+            continue
+        n_name = _get_npc_name(n)
+        n_low = n_name.lower().strip()
+        matched_contact = contacts_map.get(n_low)
+        merged_n = dict(matched_contact) if matched_contact else dict(n)
+        for k, v in n.items():
+            merged_n[k] = v
+        if "micro_blocking" not in n:
             eff_ts = (session.get("time_slot") or get_time_block_key(int(session.get("current_minute", 480) or 480))) if session else "morning"
             n["micro_blocking"] = derive_initial_micro_blocking(
                 npc=merged_n,
-                current_location=new_loc or (session.get("current_location", "") if session else ""),
+                current_location=_pre_w_loc,
                 time_slot=eff_ts,
                 stage_role=n.get("stage_role", "room_bystander"),
             )
+        if "_resolved_wardrobe" not in n:
+            try:
+                from mechanics.social.wardrobe.resolver import resolve_actor_wardrobe_state
+
+                n["_resolved_wardrobe"] = resolve_actor_wardrobe_state(
+                    merged_n,
+                    session=session,
+                    scen_key=scenario_key,
+                    location_str=_pre_w_loc,
+                    node_id=_pre_w_nid,
+                    current_day=_pre_w_day,
+                    current_minute=_pre_w_min,
+                    is_colocated_with_player=True,
+                    viewer_relationship=matched_contact,
+                )
+            except Exception:
+                pass
 
     # Update session pre_turn_stage_npcs so subsequent operations/turns have fresh state
     if session is not None and isinstance(session, dict):

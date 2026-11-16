@@ -1352,7 +1352,14 @@
     },
     "routine_unlock_hint": "完整周常作息将在好感度达到 40+ 或通过观察、打听对方日程后解锁。",
     "residence_fog_hint": "私人住所将在达到“友人”（100+）关系或受邀做客后解锁。",
-    "routine_override_today": "今日日程变动"
+    "routine_override_today": "今日日程变动",
+    "wardrobe_header": "已知着装档案",
+    "currently_wearing": "当前穿着",
+    "wardrobe_duty": "主服 / 制服",
+    "wardrobe_casual": "日常便服",
+    "wardrobe_sleepwear": "睡衣",
+    "wardrobe_gifted": "赠礼服饰",
+    "wardrobe_unlock_hint": "在工作场所、休闲时段或居家时见面即可解锁对方完整着装。"
   },
   "contracts": {
     "nav_label": "契约",

@@ -3009,6 +3009,78 @@ def resolve_pre_turn_social_and_disclosures(
                     f"(Outcome: {'PASSED' if is_check_success(_a_ep.get('check'), default_if_none=True) else 'FAILED'})."
                 )
 
+    pending_outfit_requests: List[Dict[str, Any]] = []
+    try:
+        from mechanics.social.wardrobe.requests import detect_outfit_request_intent, evaluate_outfit_request_compliance
+
+        _req_scen = str(session.get("scenario") or "fantasy")
+        _req_day = int(session.get("current_day", 1) or 1)
+        _req_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
+        _req_turn = int(session.get("turn_count") or 0) + 1
+        _seen_req_targets: set[str] = set()
+        for _a_req in norm_actions:
+            _a_req_txt = str(_a_req.get("label") or _a_req.get("action") or _a_req.get("text") or "").strip()
+            _req_intent = detect_outfit_request_intent(_a_req_txt)
+            if not _req_intent.get("detected"):
+                continue
+            _req_tgt = str(_a_req.get("target_npc") or primary_target or (sess_dps[0] if sess_dps else "")).strip()
+            if not _req_tgt or _req_tgt.lower() in _seen_req_targets:
+                continue
+            _seen_req_targets.add(_req_tgt.lower())
+            _req_contact = db.get_contact(session_id, _req_tgt, first_char_id) if session_id else None
+            if not isinstance(_req_contact, dict) and session_id and session.get("character_id"):
+                _req_contact = db.get_contact(session_id, _req_tgt, int(session.get("character_id") or 0))
+            if not isinstance(_req_contact, dict) and session_id:
+                try:
+                    _req_contact = db.get_world_roster_npc(session_id, _req_tgt)
+                except Exception:
+                    _req_contact = None
+            if not isinstance(_req_contact, dict):
+                _req_contact = {"name": _req_tgt}
+            _phys_sess = (session.get("_physical_state") or session.get("physical_state") or {}) if isinstance(session, dict) else {}
+            if not _phys_sess and session_id:
+                try:
+                    _phys_sess = db.get_session_physical_state(session_id) or {}
+                except Exception:
+                    _phys_sess = {}
+            _phys_actors = (_phys_sess.get("actors") or {}) if isinstance(_phys_sess, dict) else {}
+            _live_act = next(
+                (
+                    v
+                    for k, v in _phys_actors.items()
+                    if isinstance(v, dict) and str(v.get("actor_name") or k).strip().lower() == _req_tgt.lower()
+                ),
+                {},
+            )
+            _req_eval = evaluate_outfit_request_compliance(
+                _req_contact,
+                _req_intent,
+                scen_key=_req_scen,
+                session=session,
+                location_str=str(session.get("current_location") or ""),
+                node_id=str(session.get("current_node_id") or ""),
+                current_day=_req_day,
+                current_minute=_req_min,
+                relationship=_req_contact,
+                current_turn=_req_turn,
+                is_dm=False,
+                current_clothing=_live_act.get("clothing") if isinstance(_live_act, dict) else None,
+            )
+            if _req_eval.get("directive_text"):
+                directives.append(_req_eval["directive_text"])
+            if _req_eval.get("pending_request_payload") or _req_eval.get("clothing_override"):
+                pending_outfit_requests.append(
+                    {
+                        "npc_name": _req_tgt,
+                        "pending_request": _req_eval.get("pending_request_payload"),
+                        "clothing_override": _req_eval.get("clothing_override"),
+                        "requested_preset": _req_intent.get("requested_preset"),
+                        "is_violation": bool(_req_eval.get("dress_code_violation")),
+                    }
+                )
+    except Exception:
+        pass
+
     # Deterministic witness detection
     witness_res = evaluate_pre_turn_witness_detection(
         session=session,
@@ -3033,6 +3105,7 @@ def resolve_pre_turn_social_and_disclosures(
         "directives": directives,
         "witness_detection": witness_res,
         "containment_ops": containment_ops,
+        "pending_outfit_requests": pending_outfit_requests,
     }
     session["_pre_turn_social_res"] = res
     return res

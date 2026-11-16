@@ -1260,7 +1260,30 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
             except Exception:
                 cd_item["relations"] = {}
             mat = rg.materialize_relations(session_id, cd_item, conn=conn)
-            conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(mat), cd_item["id"]))
+            basic_changed = False
+            basic_obj = None
+            try:
+                basic_raw = cd_item.get("basic_info_json") or "{}"
+                basic_obj = json.loads(basic_raw) if isinstance(basic_raw, str) else dict(basic_raw or {})
+                if isinstance(basic_obj, dict):
+                    pend_req = basic_obj.get("pending_outfit_request")
+                    if isinstance(pend_req, dict):
+                        if int(pend_req.get("turn_requested") or 0) > t_num:
+                            basic_obj.pop("pending_outfit_request", None)
+                            basic_changed = True
+                        elif str(pend_req.get("status") or "") == "fulfilled" and int(pend_req.get("turn_fulfilled") or 0) > t_num:
+                            pend_req["status"] = "deferred_to_venue_or_date"
+                            pend_req.pop("turn_fulfilled", None)
+                            basic_changed = True
+            except Exception:
+                basic_changed = False
+            if basic_changed and isinstance(basic_obj, dict):
+                conn.execute(
+                    "UPDATE contacts SET relations_json = ?, basic_info_json = ? WHERE id = ?",
+                    (json.dumps(mat), json.dumps(basic_obj), cd_item["id"]),
+                )
+            else:
+                conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(mat), cd_item["id"]))
 
         snap_row = conn.execute(
             "SELECT last_turn_snapshot_json, extra_json FROM sessions WHERE id = ?",

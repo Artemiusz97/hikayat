@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.2.0** | 2026-11-16 | Minor | Dynamic NPC Wardrobe & Continuity Engine (`mechanics/social/wardrobe/`), SDXL Attire Prompt Synthesis, `KnownWardrobeCard` Fog-of-War UI & 5-Language Parity. |
 | **v3.1.0** | 2026-11-16 | Minor | Anomalous Sites Package (36 Pacifiable Wild Sites, Spatial Puzzles & Harvesting), School Club & Rival Turf Hardening, Private Residence Access Gates & UI Parity. |
 | **v3.0.0** | 2026-11-15 | **MAJOR** | Living World NPC Autonomy, Epistemic Asymmetry Matrix (`epistemic_facts` / `epistemic_knowledge`), Venue Activity Tags, Boundary UoW Tick & Server Fog-of-War Parity. |
 | **v2.13.0** | 2026-11-15 | Minor | Closed-World NPC Engine (`world_roster`), Anchor-Node Schedules, Residential Fog-of-War, 6-Tier Presence Resolver, Progressive Routine Disclosure & Contacts/Acquaintances UI. |
@@ -54,6 +55,18 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.2.0] - 2026-11-16
+
+#### Added & Enhanced
+- **Dynamic NPC Wardrobe Engine (`mechanics/social/wardrobe/`)**:
+  - Added cohesive `catalog.py`, `constants.py`, `dossier.py`, `requests.py`, and `resolver.py` modules governing core wardrobe presets (`duty`, `casual`, `sleepwear`), contextual activity kits (`swim`, `sport`, `dojo`, `bath`, `tactical`, `secret_faction`), overlays (`apron`, `lab_coat`, `modesty_robe`), wearable gift routing (`route_wearable_gift_to_preset`), and outfit request compliance (`evaluate_outfit_request_compliance`, `resolve_viewer_sleepwear_modesty`).
+- **Physical State & Database Continuity (`mechanics/social/physical_state.py`, `game_engine/state/reducers.py`, `db/`)**:
+  - Extended `actor_physical_states` (`db/core.py`) with turn rollback parity (`db/sessions.py`), batched witnessed wardrobe persistence (`upsert_wardrobe_preset_discoveries_batch` in `db/social_pacing.py`), and state reducer updates across `reducers.py`, `state/social.py`, and `stage_manager.py`.
+- **SDXL Wardrobe Visual Continuity (`mechanics/narrative/image_prompt_composer.py`)**:
+  - Added `_synthesize_sdxl_wardrobe_tags` and synchronized `format_npc_appearance_tags` + `compose_turn_image_prompt` with live NPC wardrobe states.
+- **Omnichannel Known Wardrobe Dossier & 5-Language Parity (`web/`, `cogs/`, `mechanics/social/locales.py`)**:
+  - Added `KnownWardrobeCard.jsx` (`ContactsPanel.jsx`, `AcquaintancesView.jsx`) showing co-located `Currently Wearing` badges and Fog-of-War masked presets, paired with `format_discord_known_wardrobe_value` (`cogs/contacts_routine_views.py`, `cogs/contacts.py`), 5-locale translations (`en`, `pl`, `ms`, `de`, `zh`), and rebuilt `web/dist/` production assets.
 
 ### [v3.1.0] - 2026-11-16
 

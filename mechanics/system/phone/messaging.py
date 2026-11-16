@@ -446,6 +446,59 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         f"- Current In-Game Time & Schedule: {time_str} [{world_sched.get('period_label', '')}]. "
         f"Reflect the current setting and time of day in your reply when natural (e.g. discreetly texting during class, mentioning club activities, chatting on weekends, or winding down for bed).\n"
     )
+    try:
+        from mechanics.social.wardrobe import (
+            format_wardrobe_summary,
+            detect_outfit_request_intent,
+            evaluate_outfit_request_compliance,
+            resolve_actor_wardrobe_state,
+        )
+
+        offscreen_w = resolve_actor_wardrobe_state(
+            contact,
+            session=session,
+            scen_key=scen_key,
+            location_str=str(current_loc or ""),
+            current_day=curr_day_val,
+            current_minute=curr_min_val,
+            is_colocated_with_player=False,
+            viewer_relationship={"track": track, "affinity": score},
+        )
+        off_preset = str(offscreen_w.get("active_outfit_preset") or "").strip()
+        off_sum = format_wardrobe_summary(offscreen_w.get("clothing"))
+        if off_sum and off_preset != "natural":
+            time_schedule_hint += (
+                f"- Current Off-Screen Attire ({off_preset}): {off_sum}. "
+                f"When sending casual selfies or mentioning what you're currently wearing at this hour, stay consistent with this outfit.\n"
+            )
+        dm_req = detect_outfit_request_intent(user_message, target_npc_name=contact_name)
+        if dm_req.get("detected"):
+            dm_eval = evaluate_outfit_request_compliance(
+                contact,
+                dm_req,
+                scen_key=scen_key,
+                session=session,
+                location_str=str(current_loc or ""),
+                current_day=curr_day_val,
+                current_minute=curr_min_val,
+                relationship={"track": track, "affinity": score},
+                current_turn=int(session.get("turn_count") or 0),
+                is_dm=True,
+            )
+            if dm_eval.get("directive_text"):
+                time_schedule_hint += dm_eval["directive_text"] + "\n"
+            if check_result.succeeded and dm_eval.get("pending_request_payload"):
+                upd_basic = dict(basic)
+                upd_basic["pending_outfit_request"] = dm_eval["pending_request_payload"]
+                db.upsert_contact(
+                    session_id=session_id,
+                    character_id=player_char.get("id", 0),
+                    npc_id=str(contact.get("npc_id") or clean_npc_id),
+                    name=contact_name,
+                    basic_info=upd_basic,
+                )
+    except Exception:
+        pass
 
     # Contextual knowledge hints (Read-only from active quest & gossip feed)
     active_sq = db.get_active_story_quest(session_id)

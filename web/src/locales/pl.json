@@ -1352,7 +1352,14 @@
     },
     "routine_unlock_hint": "Pełny plan tygodnia odblokuje się przy Sympatii 40+ lub przez obserwację i pytanie o rutynę.",
     "residence_fog_hint": "Prywatne mieszkanie odblokuje się na poziomie Przyjaciel (100+) lub po zaproszeniu.",
-    "routine_override_today": "Dzisiejsza Zmiana"
+    "routine_override_today": "Dzisiejsza Zmiana",
+    "wardrobe_header": "Znana Garderoba",
+    "currently_wearing": "Obecnie nosi",
+    "wardrobe_duty": "Strój główny",
+    "wardrobe_casual": "Codzienny",
+    "wardrobe_sleepwear": "Strój nocny",
+    "wardrobe_gifted": "Podarowane",
+    "wardrobe_unlock_hint": "Spotkaj postać w pracy, po godzinach lub w domu, aby poznać jej garderobę."
   },
   "contracts": {
     "nav_label": "Pakty",

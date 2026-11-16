@@ -1352,7 +1352,14 @@
     },
     "routine_unlock_hint": "Jadual mingguan penuh dibuka pada Kemesraan 40+ atau dengan memerhati dan bertanya tentang rutin mereka.",
     "residence_fog_hint": "Kediaman peribadi dibuka pada tahap Sahabat (100+) atau apabila dijemput pulang.",
-    "routine_override_today": "Pindaan Hari Ini"
+    "routine_override_today": "Pindaan Hari Ini",
+    "wardrobe_header": "Koleksi Pakaian Diketahui",
+    "currently_wearing": "Sedang Dipakai",
+    "wardrobe_duty": "Utama / Tugas",
+    "wardrobe_casual": "Kasual",
+    "wardrobe_sleepwear": "Pakaian Tidur",
+    "wardrobe_gifted": "Hadiah",
+    "wardrobe_unlock_hint": "Temui mereka di tempat kerja, waktu santai, atau di rumah untuk melihat pakaian mereka."
   },
   "contracts": {
     "nav_label": "Perjanjian",

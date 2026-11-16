@@ -1482,6 +1482,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         first_char_id = _extract_char_uid(party[0], session) or 0
     if not first_char_id and session:
         first_char_id = (session.get("turn_order") or [0])[0]
+    _lead_char_obj = (party[0][0] if isinstance(party[0], (tuple, list)) else party[0]) if (party and isinstance(party, list) and party[0]) else {}
+    _lead_char_pk = int(
+        (_lead_char_obj.get("id") if isinstance(_lead_char_obj, dict) else 0)
+        or (session.get("character_id") if isinstance(session, dict) else 0)
+        or 0
+    )
 
     pre_intimate_dict = outcome.get("_pre_turn_intimacy") if isinstance(outcome, dict) and isinstance(outcome.get("_pre_turn_intimacy"), dict) else {}
     current_phys = (
@@ -1530,6 +1536,89 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     # (purges old location-bound room props and resets travel postures before merging new scene state)
     old_loc = session.get("current_location", "") if session else ""
     new_loc = outcome.get("location") or old_loc
+    _w_time_info = outcome.get("_time_info") if isinstance(outcome, dict) and isinstance(outcome.get("_time_info"), dict) else {}
+    _w_sleep_info = outcome.get("_sleep_info") if isinstance(outcome, dict) and isinstance(outcome.get("_sleep_info"), dict) else {}
+    _w_new_day = int((session.get("current_day") if session else 1) or 1)
+    _w_new_min = int((session.get("current_minute") if session and session.get("current_minute") is not None else 480))
+    _w_old_day = int(_w_time_info.get("old_day") or _w_sleep_info.get("old_day") or _w_new_day)
+    _w_old_min = int(
+        _w_time_info["old_minute"]
+        if _w_time_info.get("old_minute") is not None
+        else (_w_sleep_info["old_minute"] if _w_sleep_info.get("old_minute") is not None else _w_new_min)
+    )
+    _w_skip_mins = max(
+        [int((a.get("skip_minutes") or 0) if isinstance(a, dict) else 0) for a in (actions or [])] + [0]
+    )
+    _w_sleep_mode = ""
+    for _wa in (actions or []):
+        if isinstance(_wa, dict) and _wa.get("sleep_mode"):
+            _w_sleep_mode = str(_wa["sleep_mode"]).strip().lower()
+            break
+    if not _w_sleep_mode and _w_sleep_info:
+        _w_sleep_mode = "nap" if "nap_minutes" in _w_sleep_info else "sleep"
+
+    _w_old_nid = str((session.get("current_node_id") if session else "") or "")
+    _w_new_nid = str(outcome.get("node_id") or outcome.get("new_node_id") or "")
+    if not _w_new_nid and session_id and new_loc and new_loc != old_loc:
+        try:
+            _w_new_nid = str(db.resolve_node_id_from_location(session_id, new_loc) or "")
+        except Exception:
+            _w_new_nid = ""
+    if not _w_new_nid:
+        _w_new_nid = _w_old_nid
+
+    _contacts_by_name: dict = {}
+    _all_session_contacts: list = []
+    _roster_rows: list = []
+    _wardrobe_npcs_by_name: dict = {}
+    _wardrobe_witness_candidates: list = []
+    _active_commitments: list = []
+    if session_id:
+        try:
+            _c_primary = db.get_contacts(session_id, first_char_id, resolve_relations=False, ensure_scene=False) or []
+            _c_extra = (
+                db.get_contacts(session_id, _lead_char_pk, resolve_relations=False, ensure_scene=False) or []
+                if (_lead_char_pk and _lead_char_pk != first_char_id)
+                else []
+            )
+            _seen_c_keys: set[str] = set()
+            for _sc in list(_c_primary) + list(_c_extra):
+                if not isinstance(_sc, dict):
+                    continue
+                _ckey = str(_sc.get("npc_id") or _sc.get("name") or _sc.get("id") or "").strip().lower()
+                if _ckey and _ckey in _seen_c_keys:
+                    continue
+                if _ckey:
+                    _seen_c_keys.add(_ckey)
+                _all_session_contacts.append(_sc)
+                if _sc.get("name"):
+                    _contacts_by_name[str(_sc["name"]).strip().lower()] = _sc
+        except Exception:
+            _all_session_contacts = []
+        try:
+            _roster_rows = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+            for _rr in _roster_rows:
+                if isinstance(_rr, dict) and _rr.get("name"):
+                    _wardrobe_npcs_by_name[str(_rr["name"]).strip().lower()] = _rr
+        except Exception:
+            _roster_rows = []
+        _wardrobe_npcs_by_name.update(_contacts_by_name)
+        _wardrobe_witness_candidates = list(_all_session_contacts) + [
+            r
+            for r in _roster_rows
+            if isinstance(r, dict) and str(r.get("name") or "").strip().lower() not in _contacts_by_name
+        ]
+        try:
+            _active_commitments = db.get_active_commitments(session_id) or []
+        except Exception:
+            _active_commitments = []
+
+    _wardrobe_session = dict(session or {})
+    if session_id:
+        _wardrobe_session["id"] = session_id
+    _wardrobe_session["scenario_key"] = scen_key
+    _wardrobe_session["_active_commitments"] = _active_commitments
+
     if new_loc != old_loc:
         from mechanics.world.mobility import get_session_dialogue_partners
         retained = set(get_session_dialogue_partners(session))
@@ -1541,7 +1630,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                 retained.add(npc["name"])
             elif isinstance(npc, str) and npc.strip():
                 retained.add(npc.strip())
-        current_phys = handle_location_transition(current_phys, party=party, retained_names=retained)
+        current_phys = handle_location_transition(
+            current_phys,
+            party=party,
+            retained_names=retained,
+            session_id=session_id,
+        )
         party_uids = [
             (char["user_id"] if isinstance(char, dict) else char[0]["user_id"])
             for char in party if char and (isinstance(char, dict) or (isinstance(char, (tuple, list)) and len(char) > 0 and isinstance(char[0], dict)))
@@ -1554,8 +1648,31 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             actions=actions or []
         ))
 
+    def _is_actor_soiled_snapshot(a_entry: Any) -> bool:
+        if not isinstance(a_entry, dict):
+            return False
+        if a_entry.get("is_wet") or a_entry.get("is_bloodied"):
+            return True
+        c_map = a_entry.get("clothing")
+        if isinstance(c_map, dict):
+            probe = " ".join(str(v) for v in c_map.values()).lower()
+            return any(tok in probe for tok in ("disheveled", "pulled_aside", "torn", "soaked", "stained"))
+        return False
+
+    _pre_soiled_names = {
+        str(k).strip().lower()
+        for k, v in ((current_phys.get("actors") if isinstance(current_phys, dict) else {}) or {}).items()
+        if _is_actor_soiled_snapshot(v)
+    }
+
     # 2. Merge delta updates from this turn (postures, clothing, props in the new room, intimate stage)
     updated_phys = merge_physical_state_updates(current_phys, phys_updates, party=party, scen_key=scen_key)
+
+    _newly_soiled_names = {
+        str(k).strip().lower()
+        for k, v in ((updated_phys.get("actors") if isinstance(updated_phys, dict) else {}) or {}).items()
+        if _is_actor_soiled_snapshot(v) and str(k).strip().lower() not in _pre_soiled_names
+    }
 
     # 3. Handle NPC departures: remove departed characters from active scene actors
     departures = outcome.get("npc_departures") or []
@@ -1566,10 +1683,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             if k.strip().lower() not in dep_names_lower
         }
 
-    # 4. Ensure any new NPCs present have baseline physical grounding
+    # 4. Ensure any new NPCs present have baseline physical grounding & resolved schedule wardrobe
     present_npcs = outcome.get("npcs_present") or []
     if isinstance(present_npcs, list) and isinstance(updated_phys.get("actors"), dict):
         from mechanics.social.physical_state import _match_actor_key
+        from mechanics.social.wardrobe.resolver import resolve_actor_wardrobe_state
+
         for npc in present_npcs:
             if isinstance(npc, dict) and (
                 npc.get("is_anomalous_entity")
@@ -1586,22 +1705,49 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
             if n_name:
                 matched_k = _match_actor_key(n_name, updated_phys["actors"])
                 if matched_k not in updated_phys["actors"]:
-                    u_top, u_bot = _infer_initial_undergarments_state(
-                        npc if isinstance(npc, dict) else {"name": n_name},
-                        scen_key=scen_key,
-                        session_id=session_id
-                    )
-                    updated_phys["actors"][n_name] = {
-                        "posture": "Standing nearby",
-                        "holding": "Empty hands",
-                        "clothing": {
-                            "top": "Clothed",
-                            "bottom": "Clothed",
-                            "under_top": u_top,
-                            "under_bottom": u_bot,
-                        },
-                        "stance": "Neutral",
-                    }
+                    base_c = _wardrobe_npcs_by_name.get(n_name.strip().lower()) or _contacts_by_name.get(n_name.strip().lower())
+                    npc_obj = dict(base_c) if isinstance(base_c, dict) else {"name": n_name}
+                    if isinstance(npc, dict):
+                        npc_obj.update(npc)
+                    try:
+                        rw = resolve_actor_wardrobe_state(
+                            npc_obj,
+                            session=_wardrobe_session,
+                            scen_key=scen_key,
+                            location_str=new_loc,
+                            node_id=_w_new_nid,
+                            current_day=_w_new_day,
+                            current_minute=_w_new_min,
+                            is_colocated_with_player=True,
+                            viewer_relationship=base_c,
+                            active_incursion=_wardrobe_session.get("active_incursion"),
+                        )
+                        updated_phys["actors"][n_name] = {
+                            "posture": "Standing nearby",
+                            "holding": "Empty hands",
+                            "clothing": dict(rw["clothing"]),
+                            "canonical_outfit": dict(rw["canonical_outfit"]),
+                            "active_outfit_preset": rw["active_outfit_preset"],
+                            "wardrobe_meta": dict(rw["wardrobe_meta"]),
+                            "stance": "Neutral",
+                        }
+                    except Exception:
+                        u_top, u_bot = _infer_initial_undergarments_state(
+                            npc if isinstance(npc, dict) else {"name": n_name},
+                            scen_key=scen_key,
+                            session_id=session_id
+                        )
+                        updated_phys["actors"][n_name] = {
+                            "posture": "Standing nearby",
+                            "holding": "Empty hands",
+                            "clothing": {
+                                "top": "Clothed",
+                                "bottom": "Clothed",
+                                "under_top": u_top,
+                                "under_bottom": u_bot,
+                            },
+                            "stance": "Neutral",
+                        }
 
     # 5. Combat vs Intimate mutual exclusion & Vitals synchronization
     import game_engine
@@ -3042,6 +3188,149 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
                             updated_phys["actors"][lead_key].pop("tether", None)
                             updated_phys["actors"][lead_key]["tether_type"] = "none"
                             updated_phys["actors"][lead_key]["tether_partner"] = ""
+
+    # 11.5 Dynamic Wardrobe State Transitions, Pending Request Commits, Player Cosmetic Sync & Dossier Discovery
+    try:
+        from mechanics.social.wardrobe import (
+            ACTIVITY_KITS,
+            CORE_WARDROBE_PRESETS,
+            evaluate_turn_wardrobe_transitions,
+            prepare_witnessed_wardrobe_entries,
+            sync_player_cosmetic_slice_of_life_attire,
+        )
+        from mechanics.social.physical_state import _match_actor_key, is_erotic_intimate_contact
+
+        _w_turn = int(outcome.get("_target_turn") or (session.get("turn_count") if session else 0) or 0)
+        _pre_soc = outcome.get("_pre_turn_social") if isinstance(outcome, dict) and isinstance(outcome.get("_pre_turn_social"), dict) else {}
+        _por_list = _pre_soc.get("pending_outfit_requests") or []
+        _newly_deferred_this_turn: set[str] = set()
+        for _por in _por_list:
+            if not isinstance(_por, dict) or not _por.get("npc_name"):
+                continue
+            _por_name = str(_por["npc_name"]).strip()
+            _por_low = _por_name.lower()
+            _c_row = _contacts_by_name.get(_por_low)
+            _pr_payload = _por.get("pending_request")
+            if isinstance(_c_row, dict) and session_id and isinstance(_pr_payload, dict):
+                _pr_st = str(_pr_payload.get("status") or "").strip().lower()
+                _c_cid = int(_c_row.get("character_id") if _c_row.get("character_id") is not None else (_lead_char_pk or first_char_id))
+                _b_up = dict(_c_row.get("basic_info") or {})
+                if _pr_st == "deferred_to_venue_or_date":
+                    _b_up["pending_outfit_request"] = _pr_payload
+                    _newly_deferred_this_turn.add(_por_low)
+                    _c_row["basic_info"] = _b_up
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=_c_cid,
+                        npc_id=str(_c_row.get("npc_id") or _por_low.replace(" ", "_")),
+                        name=str(_c_row.get("name") or _por_name),
+                        basic_info=_b_up,
+                    )
+                elif _pr_st in ("complied_immediate", "complied_violation") and isinstance(_b_up.get("pending_outfit_request"), dict):
+                    _old_pr = dict(_b_up["pending_outfit_request"])
+                    if str(_old_pr.get("status") or "").strip().lower() == "deferred_to_venue_or_date":
+                        _old_pr["status"] = "fulfilled"
+                        _old_pr["turn_fulfilled"] = _w_turn
+                        _b_up["pending_outfit_request"] = _old_pr
+                        _c_row["basic_info"] = _b_up
+                        db.upsert_contact(
+                            session_id=session_id,
+                            character_id=_c_cid,
+                            npc_id=str(_c_row.get("npc_id") or _por_low.replace(" ", "_")),
+                            name=str(_c_row.get("name") or _por_name),
+                            basic_info=_b_up,
+                        )
+
+        _ic_now = str(updated_phys.get("intimate_contact") or "none")
+        if not is_erotic_intimate_contact(_ic_now) or bool(_w_sleep_mode):
+            updated_phys = evaluate_turn_wardrobe_transitions(
+                updated_phys,
+                session=_wardrobe_session,
+                party=party,
+                npcs_by_name=_wardrobe_npcs_by_name or _contacts_by_name,
+                old_loc=old_loc,
+                new_loc=new_loc,
+                old_node_id=_w_old_nid,
+                new_node_id=_w_new_nid,
+                old_day=_w_old_day,
+                old_min=_w_old_min,
+                new_day=_w_new_day,
+                new_min=_w_new_min,
+                skip_minutes=_w_skip_mins,
+                sleep_mode=_w_sleep_mode,
+                active_incursion=_wardrobe_session.get("active_incursion"),
+                location_changed=(new_loc != old_loc),
+                relationships_by_name=_contacts_by_name,
+                newly_soiled_actors=_newly_soiled_names,
+            )
+
+        for _por in _por_list:
+            if not isinstance(_por, dict) or not _por.get("npc_name"):
+                continue
+            if isinstance(_por.get("clothing_override"), dict) and isinstance(updated_phys.get("actors"), dict):
+                _mk = _match_actor_key(str(_por["npc_name"]).strip(), updated_phys["actors"])
+                if _mk in updated_phys["actors"] and isinstance(updated_phys["actors"][_mk], dict):
+                    updated_phys["actors"][_mk]["clothing"] = dict(_por["clothing_override"])
+                    updated_phys["actors"][_mk]["canonical_outfit"] = dict(_por["clothing_override"])
+                    _rp = str(_por.get("requested_preset") or "").strip().lower()
+                    if _rp in CORE_WARDROBE_PRESETS or _rp in ACTIVITY_KITS:
+                        updated_phys["actors"][_mk]["active_outfit_preset"] = _rp
+
+        # Q1 One-shot fulfillment cleanup: mark deferred pending_outfit_request as fulfilled once adopted
+        if session_id and isinstance(updated_phys.get("actors"), dict):
+            for _act_k, _act_v in updated_phys["actors"].items():
+                if not isinstance(_act_v, dict):
+                    continue
+                _act_wmeta = _act_v.get("wardrobe_meta")
+                if not (isinstance(_act_wmeta, dict) and _act_wmeta.pop("fulfilled_pending_request", False)):
+                    continue
+                _act_low = str(_act_v.get("actor_name") or _act_k).strip().lower()
+                if not _act_low or _act_low in _newly_deferred_this_turn:
+                    continue
+                _c_row = _contacts_by_name.get(_act_low)
+                if not isinstance(_c_row, dict):
+                    continue
+                _b_fin = dict(_c_row.get("basic_info") or {})
+                _pend_fin = _b_fin.get("pending_outfit_request")
+                if isinstance(_pend_fin, dict) and str(_pend_fin.get("status") or "").strip().lower() == "deferred_to_venue_or_date":
+                    _pend_done = dict(_pend_fin)
+                    _pend_done["status"] = "fulfilled"
+                    _pend_done["turn_fulfilled"] = _w_turn
+                    _b_fin["pending_outfit_request"] = _pend_done
+                    _c_row["basic_info"] = _b_fin
+                    _c_cid = int(_c_row.get("character_id") if _c_row.get("character_id") is not None else (_lead_char_pk or first_char_id))
+                    db.upsert_contact(
+                        session_id=session_id,
+                        character_id=_c_cid,
+                        npc_id=str(_c_row.get("npc_id") or _act_low.replace(" ", "_")),
+                        name=str(_c_row.get("name") or _act_k),
+                        basic_info=_b_fin,
+                    )
+
+        updated_phys = sync_player_cosmetic_slice_of_life_attire(
+            updated_phys,
+            session=_wardrobe_session,
+            party=party,
+            scen_key=scen_key,
+            location_str=new_loc,
+            node_id=_w_new_nid,
+            current_day=_w_new_day,
+            current_minute=_w_new_min,
+            sleep_mode=_w_sleep_mode,
+        )
+
+        _w_cands = _wardrobe_witness_candidates or _all_session_contacts
+        if session_id and isinstance(updated_phys.get("actors"), dict) and _w_cands:
+            _w_entries = prepare_witnessed_wardrobe_entries(_w_cands, updated_phys["actors"])
+            if _w_entries:
+                db.upsert_wardrobe_preset_discoveries_batch(
+                    session_id,
+                    _lead_char_pk or first_char_id,
+                    _w_entries,
+                    turn_number=_w_turn,
+                )
+    except Exception:
+        pass
 
     db.update_session_physical_state(session_id, updated_phys)
     outcome["_physical_state"] = updated_phys

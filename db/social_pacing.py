@@ -1025,3 +1025,57 @@ def get_player_fow_exemption_sets(session_id: int) -> dict[str, set[str]]:
         "kin_npc_keys": kin_npc_keys,
         "romantic_npc_keys": romantic_npc_keys,
     }
+
+
+def upsert_wardrobe_preset_discoveries_batch(
+    session_id: int,
+    character_id: int,
+    entries: Iterable[dict[str, Any]],
+    *,
+    turn_number: int = 0,
+    discovery_source: str = "scene",
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """
+    Batch-inserts witnessed wardrobe preset discoveries into `contact_dossier_discoveries`
+    (`fact_category = 'wardrobe_preset'`) for Fog-of-War dossier display & rollback parity.
+    """
+    if not session_id:
+        return 0
+    sid = int(session_id)
+    cid = int(character_id or 0)
+    t_num = int(turn_number or 0)
+    src = str(discovery_source or "scene").strip() or "scene"
+    now = time.time()
+
+    rows: list[tuple[int, int, str, str, str, str, int, str, float]] = []
+    for item in (entries or []):
+        if not isinstance(item, dict):
+            continue
+        raw_nid = str(item.get("npc_id") or item.get("contact_name") or "").strip()
+        nid = canon_social_npc_id(raw_nid)
+        fkey = str(item.get("fact_key") or "").strip()
+        fval = str(item.get("fact_value") or "").strip()
+        fcat = str(item.get("fact_category") or "wardrobe_preset").strip() or "wardrobe_preset"
+        if not nid or not fkey:
+            continue
+        rows.append((sid, cid, nid, fcat, fkey, fval, t_num, src, now))
+
+    if not rows:
+        return 0
+
+    def _run(c: sqlite3.Connection) -> int:
+        c.executemany(
+            """INSERT OR IGNORE INTO contact_dossier_discoveries (
+                session_id, character_id, npc_id, fact_category, fact_key,
+                fact_value, discovered_turn, discovery_source, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        return len(rows)
+
+    if conn is not None:
+        return _run(conn)
+    with get_conn() as c:
+        return _run(c)
+

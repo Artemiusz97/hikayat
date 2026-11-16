@@ -361,25 +361,49 @@ def init_default_physical_state(session_id: int, party: list, scen_key: str = "f
             for n in npcs[:4]:
                 if isinstance(n, dict) and n.get("name"):
                     n_name = n["name"]
-                    npc_wardrobe = resolve_canonical_wardrobe(n, scen_key=scen_key, session_id=session_id)
-                    u_top, u_bot = _infer_initial_undergarments_state(n, scen_key, session_id=session_id)
-                    n_top = npc_wardrobe[SLOT_TOP]["item_name"] or "Clothed"
-                    n_bot = npc_wardrobe[SLOT_BOTTOM]["item_name"] or "Clothed"
-                    n_out = npc_wardrobe[SLOT_OUTERWEAR]["item_name"] or "none"
-                    n_canon = {
-                        SLOT_OUTERWEAR: n_out,
-                        SLOT_TOP: n_top,
-                        SLOT_BOTTOM: n_bot,
-                        SLOT_UNDER_TOP: u_top,
-                        SLOT_UNDER_BOTTOM: u_bot,
-                        SLOT_FOOTWEAR: "Worn",
-                    }
+                    n_active_preset = ""
+                    n_wmeta: Dict[str, Any] = {}
+                    n_canon = None
+                    if any(
+                        n.get(k) for k in ("role", "clique", "faction_id", "club", "grade", "social_role_type", "is_student", "is_special_agent")
+                    ):
+                        try:
+                            from mechanics.social.wardrobe.resolver import resolve_actor_wardrobe_state
+
+                            s_row = db.get_session(session_id) if session_id else None
+                            rw = resolve_actor_wardrobe_state(
+                                n,
+                                session=s_row if isinstance(s_row, dict) else {"id": session_id, "scenario_key": scen_key},
+                                scen_key=scen_key,
+                                is_colocated_with_player=True,
+                            )
+                            n_canon = dict(rw["clothing"])
+                            n_active_preset = str(rw.get("active_outfit_preset") or "")
+                            n_wmeta = dict(rw.get("wardrobe_meta") or {})
+                        except Exception:
+                            n_canon = None
+                    if n_canon is None:
+                        npc_wardrobe = resolve_canonical_wardrobe(n, scen_key=scen_key, session_id=session_id)
+                        u_top, u_bot = _infer_initial_undergarments_state(n, scen_key, session_id=session_id)
+                        n_top = npc_wardrobe[SLOT_TOP]["item_name"] or "Clothed"
+                        n_bot = npc_wardrobe[SLOT_BOTTOM]["item_name"] or "Clothed"
+                        n_out = npc_wardrobe[SLOT_OUTERWEAR]["item_name"] or "none"
+                        n_canon = {
+                            SLOT_OUTERWEAR: n_out,
+                            SLOT_TOP: n_top,
+                            SLOT_BOTTOM: n_bot,
+                            SLOT_UNDER_TOP: u_top,
+                            SLOT_UNDER_BOTTOM: u_bot,
+                            SLOT_FOOTWEAR: npc_wardrobe[SLOT_FOOTWEAR]["item_name"] or "Worn",
+                        }
                     actors[n_name] = {
                         "actor_type": "npc",
                         "posture": "Standing nearby",
                         "holding": "Empty hands",
                         "clothing": dict(n_canon),
                         "canonical_outfit": dict(n_canon),
+                        "active_outfit_preset": n_active_preset,
+                        "wardrobe_meta": n_wmeta,
                         "stance": "Neutral",
                         "composure": COMPOSURE_COMPOSED,
                         "is_wet": False,
@@ -1384,6 +1408,11 @@ def get_actor_physical_state(session_id: int, actor_name: str, conn: Optional[sq
             res["canonical_outfit"] = json.loads(res.get("canonical_outfit_json") or "{}")
         except Exception:
             res["canonical_outfit"] = {}
+        try:
+            res["wardrobe_meta"] = json.loads(res.get("wardrobe_meta_json") or "{}")
+        except Exception:
+            res["wardrobe_meta"] = {}
+        res["active_outfit_preset"] = str(res.get("active_outfit_preset") or "")
         return res
 
 
@@ -1440,6 +1469,11 @@ def get_all_actor_physical_states(session_id: int, conn: Optional[sqlite3.Connec
                 res["canonical_outfit"] = json.loads(res.get("canonical_outfit_json") or "{}")
             except Exception:
                 res["canonical_outfit"] = {}
+            try:
+                res["wardrobe_meta"] = json.loads(res.get("wardrobe_meta_json") or "{}")
+            except Exception:
+                res["wardrobe_meta"] = {}
+            res["active_outfit_preset"] = str(res.get("active_outfit_preset") or "")
             result.append(res)
         return result
 
@@ -1552,6 +1586,17 @@ def upsert_actor_physical_state(
         else:
             canonical_outfit_json = ex.get("canonical_outfit_json") or "{}"
 
+        active_outfit_preset = (
+            str(state_data["active_outfit_preset"])
+            if "active_outfit_preset" in state_data and state_data["active_outfit_preset"] is not None
+            else str(ex.get("active_outfit_preset") or "")
+        )
+        wmeta_raw = state_data.get("wardrobe_meta_json") or state_data.get("wardrobe_meta")
+        if wmeta_raw is not None:
+            wardrobe_meta_json = json.dumps(wmeta_raw) if isinstance(wmeta_raw, dict) else str(wmeta_raw)
+        else:
+            wardrobe_meta_json = ex.get("wardrobe_meta_json") or "{}"
+
         existing_garments_rows = c.execute(
             "SELECT slot, state, item_name, layer_depth FROM actor_garments WHERE session_id=? AND actor_key=?",
             (session_id, c_key),
@@ -1608,8 +1653,8 @@ def upsert_actor_physical_state(
                 session_id, actor_name, canonical_key, actor_type, posture, posture_qualifier,
                 relative_target, relative_relation, holding, stance, tether_type, tether_partner,
                 composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                active_outfit_preset, wardrobe_meta_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id, canonical_key) DO UPDATE SET
                 actor_name=excluded.actor_name,
                 actor_type=excluded.actor_type,
@@ -1627,12 +1672,14 @@ def upsert_actor_physical_state(
                 climax_count=excluded.climax_count,
                 in_refractory=excluded.in_refractory,
                 canonical_outfit_json=excluded.canonical_outfit_json,
+                active_outfit_preset=excluded.active_outfit_preset,
+                wardrobe_meta_json=excluded.wardrobe_meta_json,
                 updated_at=excluded.updated_at
         """, (
             session_id, actor_name, c_key, actor_type, posture, posture_qualifier,
             relative_target, relative_relation, holding, stance, tether_type, tether_partner,
             composure, is_wet, is_bloodied, climax_count, in_refractory, canonical_outfit_json,
-            now, now
+            active_outfit_preset, wardrobe_meta_json, now, now
         ))
 
         for slot, st, item_name, layer_depth in resolved_garment_rows:
@@ -1723,6 +1770,10 @@ def materialize_session_physical_state(session_id: int, conn: Optional[sqlite3.C
                 actor_entry["tether"] = a["tether_partner"]
             if a.get("canonical_outfit"):
                 actor_entry["canonical_outfit"] = a["canonical_outfit"]
+            if a.get("active_outfit_preset"):
+                actor_entry["active_outfit_preset"] = str(a["active_outfit_preset"])
+            if a.get("wardrobe_meta"):
+                actor_entry["wardrobe_meta"] = a["wardrobe_meta"]
             actors_dict[a_name] = actor_entry
 
         res = {
@@ -1919,7 +1970,15 @@ def check_venue_indecency_exposure(
     private = is_private_venue(location_or_name)
     top_val = str(cloth.get("top", ""))
     bot_val = str(cloth.get("bottom", ""))
-    is_provocative = "[provocative]" in top_val.lower() or "[provocative]" in bot_val.lower() or "provocative" in str(cloth.get("social_flags", [])).lower()
+    flags_str = str(cloth.get("social_flags", [])).lower()
+    is_provocative = (
+        "[provocative]" in top_val.lower()
+        or "[provocative]" in bot_val.lower()
+        or "[dress_code_violation]" in top_val.lower()
+        or "[dress_code_violation]" in bot_val.lower()
+        or "provocative" in flags_str
+        or "dress_code_violation" in flags_str
+    )
     if not is_exposed:
         if is_provocative and not private:
             return {
@@ -1947,7 +2006,8 @@ def check_venue_indecency_exposure(
 def resolve_canonical_wardrobe(
     char_or_npc: Dict[str, Any],
     scen_key: str = "fantasy",
-    session_id: int = 0
+    session_id: int = 0,
+    preset_key: Optional[str] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Invariant 3: Three-Tier Deterministic Wardrobe Resolution.
@@ -1980,6 +2040,60 @@ def resolve_canonical_wardrobe(
             }
             for slot in ALL_GARMENT_SLOTS
         }
+    if preset_key:
+        try:
+            from mechanics.social.wardrobe.catalog import build_npc_wardrobe_presets
+
+            bundle = build_npc_wardrobe_presets(char_or_npc, scen_key=scen_key, session_id=session_id)
+            chosen_slots = (
+                bundle["presets"].get(preset_key)
+                or bundle["activity_kits"].get(preset_key)
+                or bundle["presets"]["duty"]
+            )
+            p_outer = str(chosen_slots.get(SLOT_OUTERWEAR) or "").strip()
+            p_utop = str(chosen_slots.get(SLOT_UNDER_TOP) or STATE_NONE)
+            p_ubot = str(chosen_slots.get(SLOT_UNDER_BOTTOM) or STATE_NONE)
+            return {
+                SLOT_OUTERWEAR: {
+                    "slot": SLOT_OUTERWEAR,
+                    "state": STATE_NONE if p_outer.lower() in ("", "none") else STATE_WORN,
+                    "item_name": "" if p_outer.lower() == "none" else p_outer,
+                    "layer_depth": 3,
+                },
+                SLOT_TOP: {
+                    "slot": SLOT_TOP,
+                    "state": STATE_WORN,
+                    "item_name": str(chosen_slots.get(SLOT_TOP) or "Clothed"),
+                    "layer_depth": 2,
+                },
+                SLOT_BOTTOM: {
+                    "slot": SLOT_BOTTOM,
+                    "state": STATE_WORN,
+                    "item_name": str(chosen_slots.get(SLOT_BOTTOM) or "Clothed"),
+                    "layer_depth": 2,
+                },
+                SLOT_UNDER_TOP: {
+                    "slot": SLOT_UNDER_TOP,
+                    "state": STATE_NONE if "none" in p_utop.lower() else STATE_WORN,
+                    "item_name": p_utop if "worn (" in p_utop.lower() else "",
+                    "layer_depth": 1,
+                },
+                SLOT_UNDER_BOTTOM: {
+                    "slot": SLOT_UNDER_BOTTOM,
+                    "state": STATE_NONE if "none" in p_ubot.lower() else STATE_WORN,
+                    "item_name": p_ubot if "worn (" in p_ubot.lower() else "",
+                    "layer_depth": 1,
+                },
+                SLOT_FOOTWEAR: {
+                    "slot": SLOT_FOOTWEAR,
+                    "state": STATE_WORN,
+                    "item_name": str(chosen_slots.get(SLOT_FOOTWEAR) or "Boots"),
+                    "layer_depth": 1,
+                },
+            }
+        except Exception:
+            pass
+
     attire_desc = str(app.get("attire") or "")
     u_top, u_bot = _infer_initial_undergarments_state(char_or_npc, scen_key, session_id)
 
@@ -2025,6 +2139,20 @@ def resolve_canonical_wardrobe(
 
     if gifted.get("Accessory") and eq_top and str(gifted["Accessory"]) not in eq_top:
         eq_top = f"{eq_top} (wearing {gifted['Accessory']})"
+
+    if not eq_top and not eq_bot and not attire_desc and any(
+        char_or_npc.get(k) for k in ("role", "clique", "faction_id", "club", "grade", "social_role_type", "is_student", "is_special_agent")
+    ):
+        try:
+            from mechanics.social.wardrobe.catalog import build_npc_wardrobe_presets
+
+            duty_fb = build_npc_wardrobe_presets(char_or_npc, scen_key=scen_key, session_id=session_id)["presets"]["duty"]
+            eq_outer = eq_outer or ("" if str(duty_fb.get(SLOT_OUTERWEAR, "")).lower() == "none" else str(duty_fb.get(SLOT_OUTERWEAR) or ""))
+            eq_top = str(duty_fb.get(SLOT_TOP) or "Clothed")
+            eq_bot = str(duty_fb.get(SLOT_BOTTOM) or "Clothed")
+            eq_foot = eq_foot or str(duty_fb.get(SLOT_FOOTWEAR) or "Boots")
+        except Exception:
+            pass
 
     top_name = eq_top or "Clothed"
     bot_name = eq_bot or "Clothed"
@@ -2522,15 +2650,22 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
             scen_key=scen_key,
             session_id=session_id,
         )
-        if not canon_outfit and isinstance(npc_contact, dict):
-            w_npc = resolve_canonical_wardrobe(npc_contact, scen_key=scen_key, session_id=session_id)
+        active_preset = str(a_data.get("active_outfit_preset") or "").strip()
+        if not canon_outfit and (isinstance(npc_contact, dict) or (active_preset and a_data.get("wardrobe_meta"))):
+            target_obj = npc_contact if isinstance(npc_contact, dict) else {"name": a_key, "gender": a_data.get("gender", "female")}
+            w_npc = resolve_canonical_wardrobe(
+                target_obj,
+                scen_key=scen_key,
+                session_id=session_id,
+                preset_key=active_preset or None,
+            )
             canon_outfit = {
                 "outerwear": w_npc[SLOT_OUTERWEAR]["item_name"] or "none",
                 "top": w_npc[SLOT_TOP]["item_name"] or "Clothed",
                 "bottom": w_npc[SLOT_BOTTOM]["item_name"] or "Clothed",
-                "under_top": u_top_def,
-                "under_bottom": u_bot_def,
-                "footwear": "Worn",
+                "under_top": STATE_NONE if w_npc[SLOT_UNDER_TOP]["state"] == STATE_NONE else (w_npc[SLOT_UNDER_TOP]["item_name"] or u_top_def),
+                "under_bottom": STATE_NONE if w_npc[SLOT_UNDER_BOTTOM]["state"] == STATE_NONE else (w_npc[SLOT_UNDER_BOTTOM]["item_name"] or u_bot_def),
+                "footwear": w_npc[SLOT_FOOTWEAR]["item_name"] or "Worn",
             }
 
         if isinstance(cloth, dict):
@@ -2567,8 +2702,26 @@ def restore_equipped_outfit(current_state: dict, party: list, scen_key: str = "f
     return current_state
 
 
-def handle_location_transition(current_state: dict, party: list = None,
-                               retained_names: set | list = None, session_id: int = 0) -> dict:
+def handle_location_transition(
+    current_state: dict,
+    party: list = None,
+    retained_names: set | list = None,
+    session_id: int = 0,
+    *,
+    session: Optional[Dict[str, Any]] = None,
+    npcs_by_name: Optional[Dict[str, Any]] = None,
+    old_loc: str = "",
+    new_loc: str = "",
+    old_node_id: str = "",
+    new_node_id: str = "",
+    old_day: int = 1,
+    old_min: int = 480,
+    new_day: int = 1,
+    new_min: int = 480,
+    skip_minutes: int = 0,
+    sleep_mode: str = "",
+    active_incursion: Any = None,
+) -> dict:
     """Purges location-bound room furniture/props while preserving actor postures, garments, and personal gear."""
     if not isinstance(current_state, dict):
         return {"actors": {}, "props": {}, "intimate_contact": "none", "combat_focus": "none"}
@@ -2668,7 +2821,33 @@ def handle_location_transition(current_state: dict, party: list = None,
         new_state["excitement"] = exc_copy
     
     # Auto-redress upon transitioning locations
-    new_state = restore_equipped_outfit(new_state, party, session_id=session_id)
+    resolved_scen = str((session or {}).get("scenario_key") or "fantasy")
+    new_state = restore_equipped_outfit(new_state, party, scen_key=resolved_scen, session_id=session_id)
+    if session is not None or new_loc or old_loc or new_node_id:
+        try:
+            from mechanics.social.wardrobe.resolver import evaluate_turn_wardrobe_transitions
+
+            new_state = evaluate_turn_wardrobe_transitions(
+                new_state,
+                session=session,
+                party=party,
+                npcs_by_name=npcs_by_name,
+                old_loc=old_loc,
+                new_loc=new_loc,
+                old_node_id=old_node_id,
+                new_node_id=new_node_id,
+                old_day=old_day,
+                old_min=old_min,
+                new_day=new_day,
+                new_min=new_min,
+                skip_minutes=skip_minutes,
+                sleep_mode=sleep_mode,
+                retained_names=retained_names,
+                active_incursion=active_incursion,
+                location_changed=True if (new_loc and new_loc != old_loc) or (new_node_id and new_node_id != old_node_id) else None,
+            )
+        except Exception:
+            pass
     return new_state
 
 
@@ -2933,14 +3112,17 @@ def classify_wearable_gift_slot(
     if (
         itype_low == "outerwear"
         or slot_low == "outerwear"
-        or any(k in name_low for k in ("coat", "blazer", "jacket", "cardigan", "parka", "overcoat", "cape"))
+        or any(k in name_low for k in ("coat", "blazer", "jacket", "cardigan", "parka", "overcoat", "cape", "bathrobe"))
     ):
         return "Outerwear"
 
     if (
         itype_low == "top"
         or slot_low == "top"
-        or any(k in name_low for k in ("blouse", "shirt", "sweater", "hoodie", "tunic", "vest", "dress", "sundress", "gown", "camisole"))
+        or any(k in name_low for k in (
+            "blouse", "shirt", "sweater", "hoodie", "tunic", "vest", "dress", "sundress", "gown", "camisole",
+            "pajama", "pyjama", "nightgown", "nightie", "sleepwear", "sleep shirt", "sleep shorts", "nightshirt", "silk slip",
+        ))
     ):
         return "Top"
 
@@ -2971,7 +3153,7 @@ def classify_wearable_gift_slot(
     ):
         return "Accessory"
 
-    if itype_low == "clothing":
+    if itype_low in ("clothing", "apparel", "garment", "outfit", "sleepwear"):
         return "Top"
 
     return None
@@ -2983,11 +3165,17 @@ def apply_wearable_gift_to_npc(
     npc_name: str,
     item_dict: Optional[Dict[str, Any]] = None,
     item_name: str = "",
+    *,
+    scen_key: str = "",
+    location_str: str = "",
+    node_id: str = "",
+    current_day: Optional[int] = None,
+    current_minute: Optional[int] = None,
 ) -> Optional[str]:
     """
     Persists a gifted wearable garment/accessory/lingerie into the recipient NPC's
-    `basic_info.gifted_wardrobe` and updates their live `physical_state` wardrobe
-    so they equip/wear the gift immediately.
+    `basic_info.gifted_wardrobe_by_preset` + legacy `gifted_wardrobe`, and updates their
+    live `physical_state` wardrobe only when venue/preset-appropriate.
     """
     if not session_id or not npc_name:
         return None
@@ -3005,13 +3193,53 @@ def apply_wearable_gift_to_npc(
         slug = npc_name.lower().strip().replace(" ", "_")
         contact = db.get_contact(session_id, slug, character_id) or db.get_contact(session_id, slug, 0)
 
-    binfo = dict((contact or {}).get("basic_info") or {})
-    gw = dict(binfo.get("gifted_wardrobe") or {})
-    gw[slot_cat] = clean_item
-    binfo["gifted_wardrobe"] = gw
+    s_row = {}
+    if session_id and (not location_str or current_day is None or current_minute is None or not scen_key):
+        try:
+            s_row = db.get_session(session_id) or {}
+        except Exception:
+            s_row = {}
+
+    loc_val = str(location_str or s_row.get("current_location") or "")
+    nid_val = str(node_id or s_row.get("current_node_id") or "")
+    scen_val = str(scen_key or s_row.get("scenario_key") or "fantasy")
+    day_val = int(current_day if current_day is not None else (s_row.get("current_day") or 1))
+    min_val = int(current_minute if current_minute is not None else (s_row.get("current_minute") if s_row.get("current_minute") is not None else 480))
+
+    npc_disp = str((contact or {}).get("name") or npc_name).strip()
+    state = db.get_session_physical_state(session_id)
+    cur_active_preset = ""
+    matched_key = ""
+    if isinstance(state, dict) and isinstance(state.get("actors"), dict):
+        matched_key = _match_actor_key(npc_disp, state["actors"])
+        if matched_key in state["actors"] and isinstance(state["actors"][matched_key], dict):
+            cur_active_preset = str(state["actors"][matched_key].get("active_outfit_preset") or "")
+
+    try:
+        from mechanics.social.wardrobe.requests import route_wearable_gift_to_preset
+
+        routed = route_wearable_gift_to_preset(
+            item_dict,
+            clean_item,
+            contact or {"name": npc_disp},
+            scen_key=scen_val,
+            location_str=loc_val,
+            node_id=nid_val,
+            current_day=day_val,
+            current_minute=min_val,
+            current_active_preset=cur_active_preset,
+        )
+        binfo = routed["basic_info"]
+        should_equip_now = bool(routed.get("should_equip_now"))
+        slot_cat = routed.get("slot_category") or slot_cat
+    except Exception:
+        binfo = dict((contact or {}).get("basic_info") or {})
+        gw = dict(binfo.get("gifted_wardrobe") or {})
+        gw[slot_cat] = clean_item
+        binfo["gifted_wardrobe"] = gw
+        should_equip_now = True
 
     npc_id_val = str((contact or {}).get("npc_id") or npc_name.lower().strip().replace(" ", "_"))
-    npc_disp = str((contact or {}).get("name") or npc_name).strip()
     db.upsert_contact(
         session_id=session_id,
         character_id=character_id,
@@ -3020,48 +3248,45 @@ def apply_wearable_gift_to_npc(
         basic_info=binfo,
     )
 
-    try:
-        state = db.get_session_physical_state(session_id)
-        if isinstance(state, dict) and isinstance(state.get("actors"), dict):
-            actors = state["actors"]
-            matched_key = _match_actor_key(npc_disp, actors)
-            if matched_key in actors and isinstance(actors[matched_key], dict):
-                actor = actors[matched_key]
-                cloth = dict(actor.get("clothing") or {})
-                canon = dict(actor.get("canonical_outfit") or {})
-                if slot_cat == "Outerwear":
-                    cloth[SLOT_OUTERWEAR] = clean_item
-                    canon[SLOT_OUTERWEAR] = clean_item
-                elif slot_cat == "Top":
-                    cloth[SLOT_TOP] = clean_item
-                    canon[SLOT_TOP] = clean_item
-                elif slot_cat == "Bottom":
-                    cloth[SLOT_BOTTOM] = clean_item
-                    canon[SLOT_BOTTOM] = clean_item
-                elif slot_cat == "Footwear":
-                    cloth[SLOT_FOOTWEAR] = clean_item
-                    canon[SLOT_FOOTWEAR] = clean_item
-                elif slot_cat == "Lingerie":
-                    is_male_actor = "none (n/a)" in str(cloth.get(SLOT_UNDER_TOP, "")).lower()
-                    if not is_male_actor:
-                        cloth[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
-                        canon[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
-                    cloth[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
-                    canon[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
-                elif slot_cat == "Accessory":
-                    cur_top = str(cloth.get(SLOT_TOP) or "Clothed")
-                    if clean_item.lower() not in cur_top.lower():
-                        cloth[SLOT_TOP] = f"{cur_top} (wearing {clean_item})"
-                    cur_canon_top = str(canon.get(SLOT_TOP) or cur_top)
-                    if clean_item.lower() not in cur_canon_top.lower():
-                        canon[SLOT_TOP] = f"{cur_canon_top} (wearing {clean_item})"
-                actor["clothing"] = cloth
-                actor["canonical_outfit"] = canon
-                actors[matched_key] = actor
-                state["actors"] = actors
-                db.update_session_physical_state(session_id, state)
-                sync_state_dict_to_db(session_id, state)
-    except Exception:
-        pass
+    if should_equip_now:
+        try:
+            if isinstance(state, dict) and isinstance(state.get("actors"), dict) and matched_key in state["actors"]:
+                actor = state["actors"][matched_key]
+                if isinstance(actor, dict):
+                    cloth = dict(actor.get("clothing") or {})
+                    canon = dict(actor.get("canonical_outfit") or {})
+                    if slot_cat == "Outerwear":
+                        cloth[SLOT_OUTERWEAR] = clean_item
+                        canon[SLOT_OUTERWEAR] = clean_item
+                    elif slot_cat == "Top":
+                        cloth[SLOT_TOP] = clean_item
+                        canon[SLOT_TOP] = clean_item
+                    elif slot_cat == "Bottom":
+                        cloth[SLOT_BOTTOM] = clean_item
+                        canon[SLOT_BOTTOM] = clean_item
+                    elif slot_cat == "Footwear":
+                        cloth[SLOT_FOOTWEAR] = clean_item
+                        canon[SLOT_FOOTWEAR] = clean_item
+                    elif slot_cat == "Lingerie":
+                        is_male_actor = "none (n/a)" in str(cloth.get(SLOT_UNDER_TOP, "")).lower()
+                        if not is_male_actor:
+                            cloth[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
+                            canon[SLOT_UNDER_TOP] = f"Worn ({clean_item})"
+                        cloth[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
+                        canon[SLOT_UNDER_BOTTOM] = f"Worn ({clean_item})"
+                    elif slot_cat == "Accessory":
+                        cur_top = str(cloth.get(SLOT_TOP) or "Clothed")
+                        if clean_item.lower() not in cur_top.lower():
+                            cloth[SLOT_TOP] = f"{cur_top} (wearing {clean_item})"
+                        cur_canon_top = str(canon.get(SLOT_TOP) or cur_top)
+                        if clean_item.lower() not in cur_canon_top.lower():
+                            canon[SLOT_TOP] = f"{cur_canon_top} (wearing {clean_item})"
+                    actor["clothing"] = cloth
+                    actor["canonical_outfit"] = canon
+                    state["actors"][matched_key] = actor
+                    db.update_session_physical_state(session_id, state)
+                    sync_state_dict_to_db(session_id, state)
+        except Exception:
+            pass
 
     return slot_cat
