@@ -20,8 +20,27 @@ import db
 from mechanics.world.world_events.social_hooks import _KIN_AND_PARTNER_TOKENS, _WATCH_ROLE_TOKENS
 
 _CONCEALING_GARMENT_TOKENS: tuple[str, ...] = (
-    "mask", "veil", "balaclava", "hood_down", "concealed_face", "visor", "domino",
+    "mask",
+    "veil",
+    "balaclava",
+    "hood_down",
+    "hood pulled",
+    "lowered hood",
+    "concealed_face",
+    "visor",
+    "domino",
+    "face_scarf",
+    "bandana_mask",
 )
+_REMOVED_GARMENT_PREFIXES: tuple[str, ...] = ("removed", "none (", "stripped")
+_CONCEALABLE_EQUIP_SLOTS: frozenset[str] = frozenset({
+    "headwear",
+    "head",
+    "mask",
+    "face",
+    "accessory",
+    "outerwear",
+})
 
 
 def _norm_key(val: Any) -> str:
@@ -68,15 +87,165 @@ def _is_watch_role(npc: Mapping[str, Any]) -> bool:
     return any(tok in blob for tok in _WATCH_ROLE_TOKENS)
 
 
+def _is_active_concealing_slot_value(val: Any) -> bool:
+    """Returns True only when a garment slot/item string actively conceals the face."""
+    if isinstance(val, Mapping):
+        st = str(val.get("state") or "").strip().lower()
+        if st in ("removed", "none", "stripped"):
+            return False
+        text = " ".join(str(x or "") for x in (val.get("item_name"), val.get("name"), st)).strip().lower()
+    else:
+        text = str(val or "").strip().lower()
+    if not text or text == "none" or text.startswith(_REMOVED_GARMENT_PREFIXES):
+        return False
+    return any(tok in text for tok in _CONCEALING_GARMENT_TOKENS)
+
+
+def extract_player_concealment_garments(
+    session: Mapping[str, Any],
+    *,
+    session_id: int = 0,
+    phys_state: Mapping[str, Any] | None = None,
+    party: Sequence[Any] | None = None,
+) -> dict[str, str]:
+    """Extracts active player garment slots and equipped headwear/mask items for B13 witness anonymization."""
+    sess = session if isinstance(session, Mapping) else {}
+    sid = int(session_id or sess.get("id") or 0)
+    out: dict[str, str] = {}
+
+    party_src = party if party is not None else sess.get("party")
+    party_arg = list(party_src) if isinstance(party_src, (list, tuple)) else None
+
+    ps = phys_state if isinstance(phys_state, Mapping) else sess.get("physical_state")
+    if (not isinstance(ps, Mapping) or not isinstance(ps.get("actors"), Mapping)) and sid > 0:
+        loaded_ps = db.get_session_physical_state(sid)
+        if isinstance(loaded_ps, Mapping):
+            ps = loaded_ps
+
+    if isinstance(ps, Mapping) and isinstance(ps.get("actors"), Mapping):
+        actors_map = ps["actors"]
+        player_entry: Mapping[str, Any] | None = None
+        for actor_val in actors_map.values():
+            if isinstance(actor_val, Mapping) and _norm_key(actor_val.get("actor_type")) == "player":
+                player_entry = actor_val
+                break
+        if player_entry is None:
+            from mechanics.social.physical_state import find_player_actor_key
+
+            p_key = find_player_actor_key(dict(actors_map), party=party_arg, session_id=sid)
+            if p_key and isinstance(actors_map.get(p_key), Mapping):
+                player_entry = actors_map[p_key]
+        if player_entry is None and isinstance(actors_map.get("player"), Mapping):
+            player_entry = actors_map["player"]
+        if isinstance(player_entry, Mapping):
+            clothing = player_entry.get("clothing")
+            if isinstance(clothing, Mapping):
+                for slot_k, slot_v in clothing.items():
+                    s_text = str(slot_v or "").strip()
+                    s_low = s_text.lower()
+                    if not s_text or s_low == "none" or s_low.startswith(_REMOVED_GARMENT_PREFIXES):
+                        continue
+                    out[str(slot_k)] = s_text
+
+    inv_items: list[Mapping[str, Any]] = []
+    if isinstance(party_src, (list, tuple)) and party_src:
+        for idx, entry in enumerate(party_src):
+            if isinstance(entry, (list, tuple)) and len(entry) >= 2 and isinstance(entry[1], (list, tuple)):
+                char_head = entry[0] if isinstance(entry[0], Mapping) else {}
+                is_companion_npc = bool(
+                    idx > 0 and (
+                        char_head.get("is_npc")
+                        or _norm_key(char_head.get("actor_type")) == "npc"
+                        or char_head.get("npc_id")
+                    ) and not char_head.get("user_id")
+                )
+                if is_companion_npc:
+                    continue
+                for item in entry[1]:
+                    if isinstance(item, Mapping):
+                        inv_items.append(item)
+            elif isinstance(entry, Mapping):
+                is_companion_npc = bool(
+                    idx > 0 and (
+                        entry.get("is_npc")
+                        or _norm_key(entry.get("actor_type")) == "npc"
+                        or entry.get("npc_id")
+                    ) and not entry.get("user_id")
+                )
+                if is_companion_npc:
+                    continue
+                if isinstance(entry.get("inventory"), (list, tuple)):
+                    for item in entry["inventory"]:
+                        if isinstance(item, Mapping):
+                            inv_items.append(item)
+                elif isinstance(entry.get("equipment"), Mapping):
+                    for eq_slot, eq_item in entry["equipment"].items():
+                        if isinstance(eq_item, Mapping):
+                            item_copy = dict(eq_item)
+                            item_copy.setdefault("slot", eq_slot)
+                            item_copy.setdefault("equipped", True)
+                            inv_items.append(item_copy)
+                elif entry.get("slot") is not None and (entry.get("name") or entry.get("item_name")):
+                    inv_items.append(entry)
+    elif party is None and not party_src and (sess.get("character_id") or sess.get("host_user_id")):
+        char_id = int(sess.get("character_id") or 0)
+        host_uid = int(sess.get("host_user_id") or 0)
+        char_row = db.get_character_by_id(char_id) if char_id > 0 else None
+        effective_uid = host_uid or int((char_row or {}).get("user_id") or 0)
+        if effective_uid or char_row:
+            for item in db.get_inventory(effective_uid, char=char_row) or ():
+                if isinstance(item, Mapping):
+                    inv_items.append(item)
+
+    for item in inv_items:
+        if "equipped" in item and not bool(item.get("equipped")):
+            continue
+        if item.get("equipped") is False:
+            continue
+        slot_low = str(item.get("slot") or "").strip().lower()
+        if slot_low in _CONCEALABLE_EQUIP_SLOTS:
+            item_name = str(item.get("name") or item.get("item_name") or "").strip()
+            if item_name:
+                eq_key = f"equipped_{slot_low}"
+                out[eq_key] = f"{out[eq_key]}, {item_name}" if eq_key in out else item_name
+
+    return out
+
+
 def _is_face_concealed(session: Mapping[str, Any], act_payload: Mapping[str, Any]) -> bool:
     if act_payload.get("culprit_masked") or act_payload.get("face_concealed"):
         return True
-    for container in (act_payload.get("actor_garments"), session.get("actor_garments")):
+    containers: list[Any] = []
+    if act_payload.get("actor_garments"):
+        containers.append(act_payload.get("actor_garments"))
+    if session.get("actor_garments"):
+        containers.append(session.get("actor_garments"))
+    if not containers:
+        extracted = extract_player_concealment_garments(session, session_id=int(session.get("id") or 0))
+        if extracted:
+            containers.append(extracted)
+    for container in containers:
+        if isinstance(container, str) and not container.strip().startswith("{"):
+            if _is_active_concealing_slot_value(container):
+                return True
+            continue
         garments = _parse_dict(container)
         player_g = garments.get("player") if isinstance(garments.get("player"), Mapping) else garments
-        blob = json.dumps(player_g, default=str).lower() if player_g else ""
-        if any(tok in blob for tok in _CONCEALING_GARMENT_TOKENS):
-            return True
+        if isinstance(player_g, Mapping):
+            for slot_v in player_g.values():
+                if isinstance(slot_v, Mapping):
+                    if "state" in slot_v or "item_name" in slot_v:
+                        if _is_active_concealing_slot_value(slot_v):
+                            return True
+                    else:
+                        for nested_v in slot_v.values():
+                            if _is_active_concealing_slot_value(nested_v):
+                                return True
+                elif isinstance(slot_v, (list, tuple)):
+                    if any(_is_active_concealing_slot_value(x) for x in slot_v):
+                        return True
+                elif _is_active_concealing_slot_value(slot_v):
+                    return True
     return False
 
 

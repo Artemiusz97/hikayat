@@ -74,7 +74,7 @@ def package_release(dry_run: bool = False) -> str:
                 continue
             if 'hikayat.db' in file:
                 continue
-            if file.startswith('simulate_') or file.startswith('.testmon'):
+            if file.startswith(('simulate_', '.testmon', 'probe_')):
                 continue
 
             filepath = os.path.join(root, file)

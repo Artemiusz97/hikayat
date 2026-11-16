@@ -171,6 +171,17 @@ def finalize_post_combat_state(
             llm_outcome["nearby_enemies"] = []
             lead_char = party[0][0] if (party and party[0] and isinstance(party[0][0], dict)) else {}
             lead_uid = lead_char.get("user_id") or (session.get("host_user_id") if isinstance(session, dict) else 0)
+            try:
+                from mechanics.world.anomalous_sites import collapse_anomalous_site_on_extraction
+                collapse_anomalous_site_on_extraction(
+                    int(session_id or 0),
+                    str(session.get("current_node_id") or ""),
+                    str(session.get("current_location") or ""),
+                    int(session.get("current_day", 1) or 1),
+                    len(session.get("history") or []) + 1,
+                )
+            except Exception:
+                pass
             from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
             ext = resolve_anomalous_emergency_extraction(int(session_id or 0), int(lead_uid or 0), apply_vitals_to_db=False)
             session["current_location"] = ext["destination_location"]

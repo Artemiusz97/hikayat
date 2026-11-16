@@ -228,7 +228,7 @@ def _infer_class_archetype_profile(char_class: str, class_description: str = "",
             profile["top_archetype"] = _rand.choice(["jacket", "school_uniform_top"])
             profile["bottom_archetype"] = _rand.choice(["trousers", "slacks"])
             profile["shoes"] = "light_sneakers"
-        elif _has("athlete", "varsity", "runner", "sports", "gym"):
+        elif _has("athlete", "varsity", "runner", "sports", "gym") and not _has("esport", "e-sport", "gamer", "gaming"):
             profile["top_archetype"] = _rand.choice(["jacket", "tank_top"])
             profile["bottom_archetype"] = _rand.choice(["shorts", "sweatpants"])
             profile["shoes"] = "light_sneakers"

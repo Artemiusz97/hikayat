@@ -211,13 +211,17 @@ def is_nsfw_faction_hq_node(
     location_str: str = "",
     node_id: str = ""
 ) -> bool:
-    """Returns True if the specific node is the restricted NSFW Faction HQ (`Velvet Basement Salon`)."""
-    own_parts = [str(location_str or "")]
+    """Returns True if the specific node belongs to the restricted NSFW Faction HQ (`Velvet Basement Salon`)."""
+    own_parts = [str(location_str or ""), str(node_id or "")]
     if isinstance(node, dict):
         own_parts.append(str(node.get("node_id") or ""))
+        own_parts.append(str(node.get("parent_id") or ""))
         own_parts.append(str(node.get("name") or ""))
     own_combined = " ".join(own_parts).lower()
-    return any(m in own_combined for m in ("loc_nsfw_faction_hq", "velvet basement salon", "velvet basement"))
+    return any(
+        m in own_combined
+        for m in ("loc_nsfw_faction_hq", "loc_nsfw_club_facility", "loc_nsfw_", "velvet basement salon", "velvet basement")
+    )
 
 
 def is_abandoned_school_node(
@@ -267,6 +271,9 @@ def is_abandoned_school_node(
         "dark_equipment_room",
         "sub_dark_equipment_room",
         "loc_abandoned_boiler_cellar",
+        "loc_delinquent_boiler_den",
+        "abandoned wing boiler-room den",
+        "boiler-room den",
         "boiler cellar", "loc_abandoned_school_wing", "sub_custodian_boiler_locker", "custodian's boiler-room locker",
     )
     return any(m in combined for m in abandoned_markers)
@@ -348,7 +355,13 @@ def is_campus_node_or_location(
         "loc_student_council", "loc_auditorium_stage", "loc_auditorium",
         "loc_old_east_music_room", "loc_old_music_room", "loc_fine_arts_studio", "loc_art_studio",
         "loc_broadcasting_room", "loc_broadcast_room", "loc_clubroom_corridor", "loc_clubroom_wing",
-        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq", "zone_school_campus", "loc_main_academic", "loc_school_commons", "loc_school_club_annex", "loc_abandoned_school_wing", "loc_13th_stairwell", "sub_custodian_boiler_locker", "loc_school_rooftop",
+        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq",
+        "loc_student_council_facility", "loc_drama_club_facility", "loc_sports_club_facility", "loc_nsfw_club_facility",
+        "loc_stuco_", "loc_drama_", "loc_athletics_", "loc_nsfw_",
+        "loc_gaming_clubroom", "esports & gaming clubroom",
+        "loc_delinquent_boiler_den", "abandoned wing boiler-room den",
+        "zone_school_campus", "loc_main_academic", "loc_school_commons", "loc_school_club_annex",
+        "loc_abandoned_school_wing", "loc_13th_stairwell", "sub_custodian_boiler_locker", "loc_school_rooftop",
     )
     if any(m in combined for m in campus_markers):
         return True
@@ -824,6 +837,10 @@ def evaluate_world_schedule_node_access(
                 "loc_greenhouse", "botanical glasshouse", "greenhouse",
                 "loc_gardening_shed", "gardening shed",
                 "loc_janitor_alcove", "utility alcove",
+                "loc_student_council_facility", "loc_drama_club_facility", "loc_sports_club_facility",
+                "loc_nsfw_club_facility", "loc_stuco_", "loc_drama_", "loc_athletics_",
+                "loc_gaming_clubroom", "esports & gaming", "loc_old_storage_3b", "old storage room 3-b",
+                "loc_delinquent_boiler_den", "boiler-room den",
             )
             # Restricted sub-rooms inside club wing still keep their own lock (e.g. Council Archives & Safe)
             if any(r in combined for r in ("council_archives", "archive files & safe", "soundproof_closet")):

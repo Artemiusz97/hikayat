@@ -83,9 +83,14 @@ from mechanics.social.factions import (
     join_or_transfer_anomalous_faction,
     infer_anomalous_faction_archetype,
     ANOMALOUS_DISTRUSTED_ARCHETYPES,
+    validate_major_club_subroom_action,
+    check_rival_or_hostile_turf_block,
+    is_nsfw_salon_faction,
+    validate_club_quartermaster_hours,
+    resolve_board_club_faction_for_location,
 )
 from mechanics.narrative.clues import evaluate_clue_deduction
-from mechanics.world.locations import location_has_bounty_board, get_notice_board_label
+from mechanics.world.locations import location_has_bounty_board, get_notice_board_label, reveal_hidden_club_facility
 from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
 from mechanics.combat.loadouts import build_combatant_stat_sheet, compute_companion_vitals, ensure_combatant_loadout
 from mechanics.world.world_events.engine import build_client_world_pulse_payload
@@ -1611,12 +1616,18 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
 
     import scenario_data
     is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    current_loc_str = str(session.get("current_location") or "")
+    subroom_err = await adb(validate_major_club_subroom_action, session_id, faction, action, current_loc_str, scen_key)
+    if subroom_err:
+        raise HTTPException(status_code=400, detail=subroom_err)
 
     if action in ("join", "transfer"):
         if is_anom:
             res = await adb(join_or_transfer_anomalous_faction, session_id, faction["faction_id"], req.user_id)
             if not res.get("success"):
                 raise HTTPException(status_code=400, detail=res.get("error", "Cannot join this faction."))
+            if is_nsfw_salon_faction(faction):
+                await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
             return {
                 "success": True,
@@ -1631,6 +1642,8 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             )
         rank_1_title = get_rank_title(template, 1)
         await adb(db.set_character_faction_membership, char_id, faction["faction_id"], 1, rank_1_title)
+        if is_nsfw_salon_faction(faction):
+            await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
         return {
             "success": True,
@@ -1665,6 +1678,9 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         }
 
     if action == "rest":
+        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, req.user_id, session)
+        if turf_block:
+            raise HTTPException(status_code=403, detail=turf_block)
         from mechanics.social.factions import is_school_club_faction
         is_club = is_school_club_faction(faction)
         if is_anom and not is_club:
@@ -1707,6 +1723,9 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         }
 
     if action == "quartermaster":
+        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, req.user_id, session)
+        if turf_block:
+            raise HTTPException(status_code=403, detail=turf_block)
         fac_arch = ""
         from mechanics.social.factions import is_school_club_faction
         is_club = is_school_club_faction(faction)
@@ -1739,6 +1758,9 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                     detail=f"{faction.get('name', 'This organization')} Quartermaster access is restricted exclusively to contracted operatives of this organization."
                 )
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
+        hours_err = validate_club_quartermaster_hours(faction, current_minute)
+        if hours_err:
+            raise HTTPException(status_code=403, detail=hours_err)
         merchant = session.setdefault("merchant", {})
         faction_key = (
             f"faction_{faction['faction_id']}:monastic_daily"
@@ -2329,6 +2351,7 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
     """Generates or refreshes the Bounty Board contracts for the session."""
     session, _ = await verify_session_participant(request, session_id, req.user_id)
 
+    scoped_club_faction = None
     async with distributed_session_lock(session_id):
         if req.faction_id:
             factions = await adb(db.get_factions, session_id)
@@ -2338,10 +2361,21 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
             else:
                 bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
         else:
-            bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+            scoped_club_faction = await adb(
+                resolve_board_club_faction_for_location,
+                session_id,
+                str(session.get("current_location") or ""),
+                str(session.get("scenario") or ""),
+            )
+            if scoped_club_faction:
+                bounties = await game_engine.generate_faction_bounty_board(
+                    session, scoped_club_faction, force_refresh=req.force_refresh
+                )
+            else:
+                bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
 
     payload = await adb(_build_quests_payload, session_id, req.user_id)
-    resp_bounties = bounties if req.faction_id and bounties else (payload.get("available_bounties") or [])
+    resp_bounties = bounties if (req.faction_id or scoped_club_faction) and bounties else (payload.get("available_bounties") or [])
     return _serializable_action({
         "success": True,
         "bounties": [dict(b) for b in resp_bounties if b],

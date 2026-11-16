@@ -1230,9 +1230,45 @@ def compute_pre_turn_stage(
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
                 movement_dest_str = effective_location
+                _spatial_loop_rerouted = False
+
+                if sess_id and curr_nid and effective_node_id:
+                    try:
+                        from mechanics.world.anomalous_sites.domain_rules import evaluate_spatial_loop_travel
+                        _sl_res = evaluate_spatial_loop_travel(
+                            sess_id,
+                            session,
+                            curr_nid,
+                            effective_node_id,
+                            party=party,
+                            actions=actions,
+                            persist_db=persist_db,
+                        )
+                        if _sl_res.get("stage_directive"):
+                            stage_directives.append(_sl_res["stage_directive"])
+                        if _sl_res.get("rerouted"):
+                            _spatial_loop_rerouted = True
+                            effective_node_id = _sl_res["reroute_node_id"]
+                            if _sl_res.get("reroute_location"):
+                                effective_location = _sl_res["reroute_location"]
+                            movement_dest_str = effective_location
+                            session["current_location"] = effective_location
+                            session["current_node_id"] = effective_node_id
+                            route_res["travel_minutes"] = int(route_res.get("travel_minutes") or 0) + int(_sl_res.get("extra_minutes") or 15)
+                            if persist_db and _sl_res.get("composure_shift"):
+                                from mechanics.social.physical_state import find_player_actor_key, upsert_actor_physical_state
+                                _phys_sl = db.get_session_physical_state(sess_id)
+                                if isinstance(_phys_sl, dict) and isinstance(_phys_sl.get("actors"), dict):
+                                    _pk_sl = find_player_actor_key(_phys_sl["actors"], party=party, session_id=sess_id)
+                                    if _pk_sl:
+                                        upsert_actor_physical_state(sess_id, _pk_sl, {"composure": _sl_res["composure_shift"]})
+                    except (NameError, UnboundLocalError, ImportError):
+                        raise
+                    except Exception as _sl_err:
+                        log.warning("Spatial loop check error: %s", _sl_err)
 
                 # Ensure explicit target_location on privacy/relocation actions is never regressed by parent room hierarchy
-                if is_privacy_action and privacy_check_passed and priv_nudge_act:
+                if not _spatial_loop_rerouted and is_privacy_action and privacy_check_passed and priv_nudge_act:
                     dest_loc = priv_nudge_act.get("target_location") or target_loc_candidate
                     dest_nid = priv_nudge_act.get("target_node_id") or target_nid
                     dest_focal = priv_nudge_act.get("focal_point")
@@ -1253,7 +1289,7 @@ def compute_pre_turn_stage(
                         f"[STAGE DIRECTION — SECLUDED RELOCATION]: Stepped into {effective_location} with {privacy_partner_name} for privacy. "
                         f"Both characters are now situated in {effective_location}."
                     )
-                elif target_loc_candidate and target_loc_candidate != effective_location:
+                elif not _spatial_loop_rerouted and target_loc_candidate and target_loc_candidate != effective_location:
                     effective_location = target_loc_candidate
                     movement_dest_str = target_loc_candidate
                     session["current_location"] = target_loc_candidate

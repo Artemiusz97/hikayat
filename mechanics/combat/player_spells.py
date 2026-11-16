@@ -155,9 +155,24 @@ def resolve_player_spell_action(
         if str(m.get("physicality") or "").lower() == "non_corporeal" and sp_dmg_t in ("physical", "ballistic", "slash", "blunt", "thrust"):
             return 0, m_armor, m_attrs
         elem_mult = get_elemental_multiplier({sp_dmg_t: 1.0}, m_armor, m_attrs)
+        if is_anom_combat and isinstance(session, dict):
+            try:
+                from mechanics.world.anomalous_sites.domain_rules import (
+                    apply_domain_modifiers_to_combat_attrs,
+                    evaluate_turn_domain_effects,
+                )
+                dom_sp = session.get("_active_anomalous_domain")
+                if not isinstance(dom_sp, dict) and session.get("current_location"):
+                    dom_sp = evaluate_turn_domain_effects(
+                        int(session.get("id") or 0), session, [(acting_char_data, [])], persist_db=False, is_retry=True
+                    )
+                if isinstance(dom_sp, dict) and dom_sp.get("active"):
+                    apply_domain_modifiers_to_combat_attrs(player_attrs, dom_sp)
+            except Exception:
+                pass
         amp_map = player_attrs.get("elemental_amp") or {}
         if isinstance(amp_map, dict) and sp_dmg_t in amp_map:
-            elem_mult *= (1.0 + max(0.0, float(amp_map[sp_dmg_t])))
+            elem_mult *= (1.0 + min(0.60, max(0.0, float(amp_map[sp_dmg_t]))))
         base_dmg = calculate_spell_damage(
             player_attrs.get("matk", 20),
             eff_spell,

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import db
+import scenario_data
 
 _log = logging.getLogger(__name__)
 
@@ -368,6 +369,7 @@ def select_canonical_folklore_entry(
     force_sapience: Optional[str] = None,
     force_physicality: Optional[str] = None,
     force_element: Optional[str] = None,
+    sapient_weight_mult: float = 1.0,
 ) -> Optional[Dict[str, Any]]:
     """
     Hybrid router for Track B (Canonical Folklore Codex):
@@ -439,6 +441,8 @@ def select_canonical_folklore_entry(
             w *= 2.2
         if is_furry and e.get("is_therian_native"):
             w *= 2.5
+        if sapient_weight_mult != 1.0 and str(e.get("sapience") or "").lower() == "sapient":
+            w *= float(sapient_weight_mult or 1.0)
         weights.append(w)
 
     chosen = rng.choices(pool, weights=weights, k=1)[0]
@@ -934,6 +938,17 @@ def build_encyclopedia_payload(
         field_log.append(fl_entry)
     vault_log = list(reversed(list(sess.get("contained_anomalies_log") or sess.get("anomalous_vault_log") or [])))
     requisitions = list(sess.get("anomalous_vault_requisitions") or [])
+    site_registry: Dict[str, Any] = {}
+    if scenario_data.is_anomalous_incursions_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
+        try:
+            from mechanics.world.anomalous_sites.domain_rules import build_site_registry_payload
+            site_registry = build_site_registry_payload(
+                session_id=session_id,
+                lang=eff_lang,
+                debug_reveal_all=debug_reveal_all,
+            )
+        except Exception:
+            site_registry = {}
 
     return {
         "scenario": scen_key,
@@ -946,4 +961,5 @@ def build_encyclopedia_payload(
         "field_log": field_log,
         "vault_log": vault_log,
         "vault_requisitions": requisitions,
+        "site_registry": site_registry,
     }

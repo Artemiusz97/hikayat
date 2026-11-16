@@ -308,7 +308,10 @@ class SubLocationSelectView(SessionRestrictedView):
                 )
                 emoji = "📍" if rd.get("is_current_room") else ("🔒" if r_locked else "🚪")
                 props = rd.get("props") or []
+                room_badges = [b for b in (rd.get("badges") or []) if b]
                 desc_bits = [f"[{r_eta}]"]
+                if room_badges:
+                    desc_bits.insert(0, " ".join(room_badges))
                 if r_locked:
                     desc_bits.append(r_badge)
                 if props:

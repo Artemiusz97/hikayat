@@ -741,6 +741,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     _pre_turn_incursion_notice = ""
     _pre_turn_incursion_directive = ""
     _skip_precompute_for_incursion = False
+    _pre_turn_site_items_by_uid: dict[int, list[str]] = {}
     if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")) and actions and session.get("id"):
         first_inc_act = actions[0] if isinstance(actions[0], dict) else {}
         inc_lbl_low = str(first_inc_act.get("label") or "").strip().lower()
@@ -782,7 +783,69 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                                 inc_action_key = "question_trap_freeform"
                     except Exception:
                         pass
-        if inc_action_key:
+        site_action_key = str(first_inc_act.get("site_action") or "").strip().lower()
+        if first_inc_act.get("intent") == "anomalous_site_action" and site_action_key in ("puzzle_step", "harvest", "overdraw"):
+            try:
+                from mechanics.world.anomalous_sites import (
+                    resolve_anomalous_site_puzzle_step,
+                    resolve_site_harvest_action,
+                )
+                party_uids_s = [uid for uid in party_uids if uid]
+                lead_s_uid = party_uids_s[0] if party_uids_s else session.get("host_user_id")
+                site_id_s = str(first_inc_act.get("site_id") or session.get("current_node_id") or "").strip()
+                turn_num_s = len(session.get("history") or []) + 1
+                scen_s = str(session.get("scenario") or "anomalous_incursions")
+                chk_s = first_inc_act.get("check") or first_inc_act.get("check_result")
+                if site_action_key == "puzzle_step":
+                    site_res = await adb(
+                        resolve_anomalous_site_puzzle_step,
+                        int(session["id"]),
+                        int(lead_s_uid or 1),
+                        site_id_s,
+                        step_index=first_inc_act.get("step_index"),
+                        stat_used=str(first_inc_act.get("stat") or ""),
+                        pre_rolled_check=chk_s,
+                        use_ward=bool(first_inc_act.get("use_ward")),
+                        ward_item_name=str(first_inc_act.get("ward_item_name") or ""),
+                        session=session,
+                        party=party,
+                        scen_key=scen_s,
+                        turn_number=turn_num_s,
+                    )
+                else:
+                    site_res = await adb(
+                        resolve_site_harvest_action,
+                        int(session["id"]),
+                        int(lead_s_uid or 1),
+                        site_id_s,
+                        mode=site_action_key,
+                        pre_rolled_check=chk_s,
+                        scen_key=scen_s,
+                        turn_number=turn_num_s,
+                    )
+                fresh_site_sess = await adb(db.get_session, int(session["id"])) or {}
+                session["nearby_enemies"] = fresh_site_sess.get("nearby_enemies", [])
+                if lead_s_uid:
+                    fresh_lead_char = await adb(db.get_character, int(lead_s_uid))
+                    if isinstance(fresh_lead_char, dict) and party and isinstance(party[0], (tuple, list)) and isinstance(party[0][0], dict):
+                        party[0][0].update(fresh_lead_char)
+                if site_res.get("items_gained_names") and lead_s_uid:
+                    _pre_turn_site_items_by_uid.setdefault(int(lead_s_uid), []).extend(
+                        str(x) for x in site_res["items_gained_names"] if x
+                    )
+                if site_res.get("composure_shift") and isinstance(session.get("physical_state"), dict):
+                    _p_actors_s = session["physical_state"].get("actors")
+                    if isinstance(_p_actors_s, dict) and isinstance(_p_actors_s.get("player"), dict):
+                        _p_actors_s["player"]["composure"] = site_res["composure_shift"]
+                if site_res.get("directive"):
+                    _pre_turn_incursion_directive = str(site_res["directive"])
+                if site_res.get("message"):
+                    _pre_turn_incursion_notice = str(site_res["message"])
+                if site_res.get("combat_started") or site_res.get("resolved") or site_res.get("pacified"):
+                    _skip_precompute_for_incursion = True
+            except Exception as _site_err:
+                log.warning("Failed pre-turn anomalous site action: %s", _site_err)
+        elif inc_action_key:
             try:
                 from mechanics.world.anomalous_events import (
                     resolve_non_hostile_incursion_action,
@@ -1012,6 +1075,43 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     directive_note += f"\n{hs_dir}\n"
     except Exception as _hs_ev_err:
         log.warning("Failed evaluating High School turn events: %s", _hs_ev_err)
+
+    _anom_domain_res: dict = {}
+    try:
+        from mechanics.world.anomalous_sites.domain_rules import evaluate_turn_domain_effects
+        _dom_node = None
+        if session.get("id"):
+            _dom_nid = str(stage_info.get("effective_node_id") or session.get("current_node_id") or "")
+            if _dom_nid:
+                _dom_node = db.get_world_node(int(session["id"]), _dom_nid)
+        _anom_domain_res = evaluate_turn_domain_effects(
+            int(session.get("id") or 0),
+            session,
+            party,
+            curr_node=_dom_node,
+            actions=actions,
+            persist_db=True,
+            is_retry=is_retry,
+        )
+        for _dd in (_anom_domain_res.get("stage_directives") or []):
+            if _dd and _dd not in directive_note:
+                directive_note += f"\n{_dd}\n"
+        if (_anom_domain_res.get("composure_shift") or _anom_domain_res.get("wet_flag")) and session.get("id"):
+            from mechanics.social.physical_state import find_player_actor_key, upsert_actor_physical_state
+            _phys_dom = db.get_session_physical_state(int(session["id"]))
+            if isinstance(_phys_dom, dict) and isinstance(_phys_dom.get("actors"), dict):
+                _pk_dom = find_player_actor_key(_phys_dom["actors"], party=party, session_id=int(session["id"]))
+                if _pk_dom:
+                    _u_dom = {}
+                    if _anom_domain_res.get("composure_shift"):
+                        _u_dom["composure"] = _anom_domain_res["composure_shift"]
+                    if _anom_domain_res.get("wet_flag"):
+                        _u_dom["is_wet"] = True
+                    upsert_actor_physical_state(int(session["id"]), _pk_dom, _u_dom)
+    except (NameError, UnboundLocalError, ImportError):
+        raise
+    except Exception as _dom_err:
+        log.warning("Failed evaluating anomalous domain effects: %s", _dom_err)
 
     pre_intimate_res = None
     if _should_run_pre_intimacy:
@@ -1291,26 +1391,41 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         and not _random_ambush_on_cooldown
         and not _peaceful_dialogue_action
         and scenario_data.is_mechanic_enabled(scen_key, "tactical_combat")
-        and not is_hub_location(_enc_loc)
+        and (
+            (scenario_data.is_anomalous_incursions_scenario(scen_key) and _turn_now > 1)
+            or (not scenario_data.is_anomalous_incursions_scenario(scen_key) and not is_hub_location(_enc_loc))
+        )
     ):
         from mechanics.combat.enemies import generate_balanced_encounter, should_allow_random_encounter
+        _cur_min_enc = int(session.get("current_minute", 720) or 720)
         allow_enc, enc_prob = should_allow_random_encounter(
             scen_key=scen_key,
             location_name=_enc_loc,
             location_id=_enc_nid,
-            current_minute=int(session.get("current_minute", 720) or 720),
+            current_minute=_cur_min_enc,
             session_id=int(session.get("id") or 0),
+            turn_count=_turn_now,
         )
         if allow_enc and random.random() < enc_prob:
             party_dicts = [char for char, _ in party] if party else []
-            cur_chapter = session.get("current_chapter", 1)
+            cur_chapter = int(session.get("current_chapter", 1) or 1)
+            _is_tp_wp = (
+                scenario_data.is_anomalous_incursions_scenario(scen_key)
+                and (0 <= (_cur_min_enc % 1440) < 180)
+                and any(k in f"{_enc_nid} {_enc_loc}".lower() for k in ("loc_theme_park", "loc_tp_", "theme park", "amusement resort"))
+            )
+            eff_chapter = cur_chapter + 1 if _is_tp_wp else cur_chapter
             new_monsters, xp_mult = generate_balanced_encounter(
-                party_dicts, scen_key, _enc_loc or "area", cur_chapter,
-                language=session.get("narration_language") or session.get("language", "en")
+                party_dicts, scen_key, _enc_loc or "area", eff_chapter,
+                language=session.get("narration_language") or session.get("language", "en"),
+                current_minute=_cur_min_enc,
             )
             for _m in new_monsters:
                 if isinstance(_m, dict):
                     _m["is_random_encounter"] = True
+                    if _is_tp_wp:
+                        _m["is_witching_peak"] = True
+                        _m["anomalous_loot_bonus"] = 0.20
             # Pre-inject them into session so they appear in prompt
             session["nearby_enemies"] = new_monsters
             ambush_triggered = True
@@ -2087,6 +2202,30 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                             )
                             if inc_done_res and inc_done_res.get("message"):
                                 msg += f"\n{inc_done_res['message']}"
+                    dot_locus_bosses = [
+                        d for d in dot_dead_dicts
+                        if isinstance(d, dict) and d.get("is_site_locus_boss") and not d.get("requires_non_lethal_subdue")
+                    ]
+                    if dot_locus_bosses and session.get("id"):
+                        from mechanics.world.anomalous_sites import complete_site_pacification
+                        lead_dot_uid_sb = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                        seen_dot_sites: set[str] = set()
+                        for d_sb in dot_locus_bosses:
+                            sid_dot = str(d_sb.get("anomalous_site_id") or session.get("current_node_id") or "").strip()
+                            if not sid_dot or sid_dot in seen_dot_sites:
+                                continue
+                            seen_dot_sites.add(sid_dot)
+                            pac_dot = complete_site_pacification(
+                                int(session["id"]),
+                                sid_dot,
+                                user_id=int(lead_dot_uid_sb or 1),
+                                method="locus_boss_slain",
+                                scen_key=str(session.get("scenario") or "anomalous_incursions"),
+                                current_day=int(session.get("current_day", 1) or 1),
+                                turn_number=len(session.get("history") or []) + 1,
+                            )
+                            if isinstance(pac_dot, dict) and pac_dot.get("message"):
+                                msg += f"\n{pac_dot['message']}"
                 except Exception:
                     pass
 
@@ -2941,6 +3080,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     is_combat=is_combat_active,
                     session_id=session["id"]
                 )
+                time_delta += int(_anom_domain_res.get("time_slip_min") or 0)
                 time_report = advance_time(session["id"], time_delta, party_uids=party_uids)
                 if isinstance(res, dict):
                     res["_time_info"] = time_report
@@ -3098,6 +3238,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
         if scenario_data.is_anomalous_incursions_scenario(scen_key):
             # Daily Anomalous Incursions & Quest Non-Hostile Containment Choices
+            dp_end = ""
             try:
                 from mechanics.world.anomalous_events import (
                     get_active_incursion_at_location,
@@ -3329,6 +3470,60 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             except Exception as _inc_ch_err:
                 log.warning("Failed anomalous incursion choice injection: %s", _inc_ch_err)
 
+            try:
+                if (
+                    session.get("id")
+                    and not game_engine.get_active_enemies(res)
+                    and not game_engine.get_active_enemies(session)
+                    and not dp_end
+                ):
+                    from mechanics.world.anomalous_sites import (
+                        build_site_harvest_choices,
+                        build_site_puzzle_choices,
+                        has_quest_or_breach_priority_at_node,
+                    )
+                    _site_loc_end = str(res.get("location") or session.get("current_location") or "")
+                    _site_nid_end = str(res.get("current_node_id") or session.get("current_node_id") or "")
+                    _site_inv_end = (party[0][1] if (party and isinstance(party[0], (tuple, list)) and len(party[0]) > 1) else [])
+                    try:
+                        _site_day_end, _site_min_end, _ = db.get_session_time(int(session["id"]))
+                    except Exception:
+                        _site_day_end = int(session.get("current_day", 1) or 1)
+                        _site_min_end = int(session.get("current_minute", 720) or 720)
+                    _has_site_prio = has_quest_or_breach_priority_at_node(
+                        int(session["id"]),
+                        location_str=_site_loc_end,
+                        node_id=_site_nid_end,
+                    )
+                    if not _has_site_prio:
+                        _puz_opts = build_site_puzzle_choices(
+                            int(session["id"]),
+                            location_str=_site_loc_end,
+                            node_id=_site_nid_end,
+                            scen_key=scen_key,
+                            current_day=int(_site_day_end or 1),
+                            current_minute=int(_site_min_end or 720),
+                            inventory=_site_inv_end,
+                            has_priority_event=False,
+                            session=session,
+                        )
+                        _har_opts = build_site_harvest_choices(
+                            int(session["id"]),
+                            location_str=_site_loc_end,
+                            node_id=_site_nid_end,
+                            scen_key=scen_key,
+                            current_day=int(_site_day_end or 1),
+                            has_priority_event=False,
+                        )
+                        _site_opts = _puz_opts + _har_opts
+                        if _site_opts:
+                            _existing_site_lbls = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
+                            _new_site_opts = [o for o in _site_opts if o.get("label") not in _existing_site_lbls]
+                            if _new_site_opts:
+                                hybrid_choices = _new_site_opts + hybrid_choices[: max(1, 5 - len(_new_site_opts))]
+            except Exception as _site_ch_err:
+                log.warning("Failed anomalous site choice injection: %s", _site_ch_err)
+
         if hs_turn_events:
             if hs_turn_events.get("override_location"):
                 res["location"] = hs_turn_events["override_location"]
@@ -3357,6 +3552,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         res["choices"] = hybrid_choices
         res["next_choices"] = hybrid_choices
         res["_hybrid_choices_built"] = True
+
+    if _pre_turn_site_items_by_uid and isinstance(res, dict):
+        res["_site_items_gained"] = _pre_turn_site_items_by_uid
 
     if isinstance(res, dict):
         if "focal_point" in stage_info:

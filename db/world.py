@@ -455,8 +455,34 @@ def save_world_node(
     return True
 
 
+_SCHOOL_CLUB_NODE_ID_FALLBACKS: dict[str, tuple[str, ...]] = {
+    "loc_sports_club_facility": ("loc_school_athletics", "bld_school_athletics"),
+    "sub_student_council": ("loc_student_council",),
+    "loc_auditorium": ("loc_auditorium_stage",),
+    "sub_old_storage_3b": ("loc_old_storage_3b",),
+    "sub_occult_clubroom": ("loc_old_storage_3b",),
+    "sub_custodian_boiler_locker": ("loc_delinquent_boiler_den",),
+    "sub_gym_foyer": ("loc_athletics_foyer",),
+    "sub_gym_court": ("loc_gymnasium",),
+}
+
+
+def _resolve_school_fallback_row(conn, session_id: int, node_id: str, select_cols: str = "*"):
+    candidates = _SCHOOL_CLUB_NODE_ID_FALLBACKS.get(str(node_id or "").lower())
+    if not candidates:
+        return None, ""
+    for cand in candidates:
+        row = conn.execute(
+            f"SELECT {select_cols} FROM world_nodes WHERE session_id = ? AND node_id = ?",
+            (session_id, cand),
+        ).fetchone()
+        if row:
+            return row, cand
+    return None, ""
+
+
 def get_world_node(session_id: int, node_id: str) -> dict | None:
-    """Retrieves a single node by node_id for a session."""
+    """Retrieves a single world_node row by node_id."""
     if not node_id:
         return None
     with get_conn() as conn:
@@ -469,6 +495,8 @@ def get_world_node(session_id: int, node_id: str) -> dict | None:
                 "SELECT * FROM world_nodes WHERE session_id = ? AND node_id = ?",
                 (session_id, _LEGACY_NODE_ID_ALIASES[node_id])
             ).fetchone()
+        if not row:
+            row, _ = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="*")
         return dict(row) if row else None
 
 
@@ -486,6 +514,8 @@ def get_world_node_state(session_id: int, node_id: str) -> dict:
                 "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
                 (session_id, _LEGACY_NODE_ID_ALIASES[node_id])
             ).fetchone()
+        if not row:
+            row, _ = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="state_json")
         if not row or not row["state_json"]:
             return {}
         try:
@@ -506,6 +536,10 @@ def update_world_node_state(session_id: int, node_id: str, updates: dict) -> dic
         ).fetchone()
         if not exists and node_id in _LEGACY_NODE_ID_ALIASES:
             target_id = _LEGACY_NODE_ID_ALIASES[node_id]
+        elif not exists:
+            fb_row, fb_id = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="1")
+            if fb_row and fb_id:
+                target_id = fb_id
     cur_state = get_world_node_state(session_id, target_id)
     cur_state.update(updates or {})
     new_json = json.dumps(cur_state)
@@ -805,17 +839,19 @@ def is_descendant_of(session_id: int, node_id: str, ancestor_id: str) -> bool:
 
 
 def is_node_or_parent_transit_hub(session_id: int, node_id: str) -> bool:
-    """Checks if the node itself or any of its parent facilities/zones is a transit hub."""
+    """Checks if the node itself or any of its non-zone parent facilities is a transit hub."""
     if not session_id or not node_id:
         return False
     curr = get_world_node(session_id, node_id)
     if curr and curr.get("is_transit_hub"):
         return True
     ancestors = get_node_ancestors(session_id, node_id)
-    return any(bool(a.get("is_transit_hub")) for a in ancestors)
+    return any(bool(a.get("is_transit_hub")) for a in ancestors if a.get("node_type") != "ZONE")
 
 
 _LEGACY_NODE_ID_ALIASES: dict[str, str] = {
+    "loc_nsfw_Boiler_stair": "loc_nsfw_boiler_stair",
+    "loc_sports_club_facility": "bld_school_athletics",
     "zone_school_athletics": "bld_school_athletics",
     "zone_school_commons": "bld_school_commons",
     "zone_school_arts": "bld_school_arts",
@@ -1452,6 +1488,13 @@ def resolve_node_id_from_location(session_id: int, location_str: str, prefer_fac
         aliased = get_world_node(session_id, alias_id)
         if aliased:
             return aliased["node_id"]
+
+    fb_candidates = _SCHOOL_CLUB_NODE_ID_FALLBACKS.get(loc_clean.lower())
+    if fb_candidates:
+        for fb_id in fb_candidates:
+            fb_node = get_world_node(session_id, fb_id)
+            if fb_node:
+                return fb_node["node_id"]
 
     nodes = get_session_world_nodes(session_id)
     if not nodes:

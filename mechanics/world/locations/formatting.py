@@ -9,7 +9,49 @@ import scenario_data
 from .seeds import *
 from .seeds import _load_seeds, _slugify, _SEED_PATH
 
-def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, current_day: int, current_minute: int, scen_key: str = "") -> str:
+def _is_npc_aware_of_secret_residue(
+    npc: Any,
+    *,
+    participants_low: set[str],
+    origin_nid_low: str,
+    curr_nid_low: str,
+    by_holder: dict[str, list[dict[str, Any]]],
+    facts_by_key: dict[str, dict[str, Any]],
+) -> bool:
+    if not isinstance(npc, dict):
+        return True
+    aliases = {
+        str(npc.get(f) or "").strip().lower()
+        for f in ("name", "npc_id", "person_key", "npc_key")
+        if str(npc.get(f) or "").strip()
+    }
+    if not aliases or "player" in aliases:
+        return True
+    if aliases & participants_low:
+        return True
+    target_locs = {x for x in (origin_nid_low, curr_nid_low) if x}
+    for alias in aliases:
+        for kr in (by_holder.get(alias) or ()):
+            if str(kr.get("containment_state") or "").strip().lower() == "wiped":
+                continue
+            fact = facts_by_key.get(str(kr.get("fact_key") or "")) or {}
+            if str(fact.get("category") or "").strip().lower() not in ("affair", "crime", "secret"):
+                continue
+            f_loc = str(fact.get("location_node_id") or "").strip().lower()
+            if not f_loc or f_loc in target_locs:
+                return True
+    return False
+
+
+def build_node_sensory_and_memory_block(
+    session_id: int,
+    curr_node: dict,
+    current_day: int,
+    current_minute: int,
+    scen_key: str = "",
+    *,
+    present_npcs: list | None = None,
+) -> str:
     """Synthesizes indoor/outdoor time-of-day lighting, acoustics, curfew tension, and persistent room memory."""
     from mechanics.world.schedules import get_time_block_key
     from mechanics.world.locations.access_gate import is_curfew_active, get_node_effective_access_info
@@ -25,7 +67,11 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
         scen_key = "high_school_drama"
 
     is_hs = is_high_school_setting(scen_key)
-    is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scen_key)
+    is_anomalous_scen = (
+        scenario_data.is_anomalous_incursions_scenario(scen_key)
+        or scenario_data.is_anomalous_high_school_scenario(scen_key)
+    )
+    is_gore_scen = scenario_data.is_gore_scenario(scen_key)
     safe_min = int(current_minute or 0) % 1440
     time_block = get_time_block_key(current_minute)
     is_enc = int(curr_node.get("is_enclosed", 1))
@@ -37,6 +83,18 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
         k in node_probe for k in ("zone_theme_park", "loc_theme_park", "theme park", "amusement resort", "loc_tp_")
     )
     is_tp_anomalous_shift = is_theme_park and (safe_min >= 1320 or safe_min < 480)
+    is_tp_witching_peak = is_tp_anomalous_shift and (0 <= safe_min < 180)
+    curr_nid = str(curr_node.get("node_id") or "")
+
+    from mechanics.world.anomalous_sites.catalog import (
+        THEME_PARK_EPICENTER_IDS,
+        THEME_PARK_SITE_ID,
+        get_anomalous_site_spec,
+        is_site_dormant_by_schedule,
+        is_site_pacified,
+        resolve_anomalous_site,
+    )
+    anom_spec = resolve_anomalous_site(curr_node=curr_node) if is_anomalous_scen else None
 
     # Time-of-day sensory profiles (respecting 20:00-07:00 campus lockdown, weekend quiet, & 22:00 Theme Park Anomalous Shift)
     if is_tp_anomalous_shift:
@@ -94,29 +152,133 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
             "and security footsteps echo down distant halls. Staying on campus during these hours is considered trespassing; maintain a hushed, illicit after-hours atmosphere."
         )
     elif is_tp_anomalous_shift:
-        lines.append(
-            "- [THEME PARK ANOMALOUS SHIFT (22:00–08:00) — ACTIVE NIGHTTIME MANIFESTATION]: "
-            "The Theme Park & Amusement Resort has closed to the public at 10:00 PM and entered its nightly Anomalous Shift! "
-            "All mundane tourists and park staff are gone; rides turn on by themselves with reversed calliope music, mirror reflections move independently, "
-            "and hostile spatial/cognitohazard entities prowl the fog-drenched midway until 08:00 AM."
-        )
+        tp_spec = get_anomalous_site_spec(THEME_PARK_SITE_ID) or {}
+        tp_base = str(tp_spec.get("base_horror_sensory") or (
+            "The Theme Park & Amusement Resort has closed to the public at night and entered its Anomalous Shift; "
+            "all mundane tourists and park staff are gone, rides turn on by themselves, and mirror reflections move independently."
+        ))
+        tp_line = f"- [THEME PARK ANOMALOUS SHIFT — CARNIVAL NIGHTMARE]: {tp_base}"
+        if is_gore_scen and tp_spec.get("gore_horror_sensory"):
+            tp_line += f" {tp_spec['gore_horror_sensory']}"
+        if is_tp_witching_peak and tp_spec.get("witching_peak_sensory"):
+            tp_line += f" {tp_spec['witching_peak_sensory']}"
+        lines.append(tp_line)
+        tp_rule = tp_spec.get("domain_rule") if isinstance(tp_spec.get("domain_rule"), dict) else {}
+        if tp_rule.get("name") and tp_rule.get("hazard_cue"):
+            lines.append(f"- [ACTIVE DOMAIN RULE — {tp_rule['name']}]: {tp_rule['hazard_cue']}")
     elif is_theme_park and 1290 <= safe_min < 1320:
         lines.append(
-            "- [THEME PARK CLOSING WARNING (21:30–22:00) — PRE-SHIFT EVACUATION]: "
-            "Park loudspeakers broadcast final closing chimes urging families toward the exits before 10:00 PM, "
-            "while faint ozone static and flickering ride lights foreshadow the impending 22:00 Anomalous Shift."
+            "- [THEME PARK CLOSING WARNING — PRE-SHIFT EVACUATION]: "
+            "Park loudspeakers broadcast final closing chimes urging families toward the exits before nightfall, "
+            "while faint ozone static and flickering ride lights foreshadow the impending Anomalous Shift."
         )
+    elif is_theme_park and curr_nid.lower() in THEME_PARK_EPICENTER_IDS:
+        tp_spec = get_anomalous_site_spec(THEME_PARK_SITE_ID) or {}
+        if tp_spec.get("daytime_cordon_sensory"):
+            lines.append(f"- [CORDONED DURING PUBLIC HOURS — BUREAU WARNING]: {tp_spec['daytime_cordon_sensory']}")
 
-    # Room memory / scene residue check
+    if is_anomalous_scen and anom_spec and anom_spec.get("site_type") != "theme_park_night":
+        if is_site_dormant_by_schedule(anom_spec, scen_key=scen_key, current_minute=safe_min, node_id=curr_nid):
+            lines.append(
+                "- [ANOMALOUS SITE DORMANT (DAYTIME HOURS) — DUSTY STILLNESS]: "
+                "Daylight keeps the site's darker spatial phenomenon dormant for now; only stale dust and faint chill linger along untouched masonry."
+            )
+        elif session_id and is_site_pacified(session_id, site_id=anom_spec["site_id"], node_id=curr_nid):
+            pac_txt = str(anom_spec.get("pacified_sensory") or "The lethal anomaly has been contained into eerie quiet.")
+            amb_txt = str((anom_spec.get("domain_rule") or {}).get("ambient_summary") or "").strip()
+            lines.append(
+                f"- [STABILIZED ANOMALOUS SITE — PERSISTENT AMBIENT EFFECT]: {pac_txt}"
+                + (f" (Ambient Resonance: {amb_txt})" if amb_txt else "")
+            )
+        else:
+            grade_r = str(anom_spec.get("threat_grade_roman") or "I")
+            subgenre = str(anom_spec.get("horror_subgenre") or "Anomalous Hazard")
+            sensory_txt = str(anom_spec.get("base_horror_sensory") or "")
+            if is_gore_scen and anom_spec.get("gore_horror_sensory"):
+                sensory_txt = f"{sensory_txt} {anom_spec['gore_horror_sensory']}".strip()
+            lines.append(f"- [ANOMALOUS SITE HORROR — GRADE {grade_r} ({subgenre})]: {sensory_txt}")
+            rule = anom_spec.get("domain_rule") if isinstance(anom_spec.get("domain_rule"), dict) else {}
+            if rule.get("name") and rule.get("hazard_cue"):
+                lines.append(f"- [ACTIVE DOMAIN RULE — {rule['name']}]: {rule['hazard_cue']}")
+
+    # Room memory / scene residue check (with Z2 epistemic privacy guard when unaware NPCs are present)
     access_info = get_node_effective_access_info(session_id, curr_node["node_id"], current_day=current_day, current_minute=current_minute, scen_key=scen_key)
-    res_log = access_info.get("scene_residue_log") or []
-    if res_log:
+    res_log = list(access_info.get("scene_residue_log") or [])
+    fallback_residue = str(access_info.get("scene_residue") or "")
+    if not res_log and fallback_residue:
+        res_log = [{
+            "text": fallback_residue,
+            "is_secret_residue": any(tok in fallback_residue.lower() for tok in ("intimate encounter", "bypassed security")),
+            "participants": [],
+            "origin_node_id": "",
+        }]
+
+    curr_node_type = str(curr_node.get("node_type") or "").strip().upper()
+    curr_nid_low = curr_nid.strip().lower()
+    epistemic_matrix: dict[str, Any] = {}
+    has_secret_entry = any(
+        isinstance(m, dict)
+        and (
+            bool(m.get("is_secret_residue"))
+            or any(tok in str(m.get("text") or "").lower() for tok in ("intimate encounter", "bypassed security"))
+        )
+        for m in res_log
+    )
+    if res_log and present_npcs and has_secret_entry and session_id:
+        epistemic_matrix = db.preload_epistemic_matrix(session_id)
+
+    by_holder = epistemic_matrix.get("by_holder") or {}
+    facts_by_key = epistemic_matrix.get("facts_by_key") or {}
+    visible_log: list[dict[str, Any]] = []
+    guard_unaware_names: list[str] = []
+
+    for m in res_log:
+        if not isinstance(m, dict) or not m.get("text"):
+            continue
+        m_txt_low = str(m.get("text") or "").lower()
+        is_secret_m = bool(m.get("is_secret_residue")) or any(
+            tok in m_txt_low for tok in ("intimate encounter", "bypassed security")
+        )
+        origin_nid = str(m.get("origin_node_id") or "").strip().lower()
+        if is_secret_m and present_npcs:
+            parts_low = {str(p or "").strip().lower() for p in (m.get("participants") or ()) if str(p or "").strip()}
+            unaware_here: list[str] = []
+            for p_npc in present_npcs:
+                if not isinstance(p_npc, dict):
+                    continue
+                p_name = str(p_npc.get("name") or "").strip()
+                if not p_name:
+                    continue
+                if not _is_npc_aware_of_secret_residue(
+                    p_npc,
+                    participants_low=parts_low,
+                    origin_nid_low=origin_nid,
+                    curr_nid_low=curr_nid_low,
+                    by_holder=by_holder,
+                    facts_by_key=facts_by_key,
+                ):
+                    if p_name not in unaware_here:
+                        unaware_here.append(p_name)
+
+            if unaware_here and curr_node_type == "FACILITY" and (not origin_nid or origin_nid != curr_nid_low):
+                continue
+            for uname in unaware_here:
+                if uname not in guard_unaware_names:
+                    guard_unaware_names.append(uname)
+
+        visible_log.append(m)
+
+    if visible_log:
         lines.append("- PERSISTENT ROOM MEMORY (Past Moments Recorded in this Space):")
-        for m in res_log:
+        for m in visible_log:
             lines.append(f"  * {m['text']}")
+        if guard_unaware_names:
+            lines.append(
+                f"  * [EPISTEMIC PRIVACY GUARD]: Present NPC(s) ({', '.join(guard_unaware_names)}) "
+                "were NOT part of and do NOT know about this private/illicit room memory—"
+                "do NOT have them react to or reference it unless explicitly told."
+            )
         lines.append("  (Subtly weave this history or emotional residue into your narration when relevant.)")
-    elif access_info.get("scene_residue"):
-        lines.append(f"- PERSISTENT ROOM MEMORY: \"{access_info['scene_residue']}\" (Subtly acknowledge this history/atmosphere when relevant).")
 
     if access_info.get("is_unlocked") and access_info.get("access_tier") in ("restricted", "private"):
         lines.append("- ACCESS PERMISSION: Door unlocked (access granted for this session/day).")
@@ -146,7 +308,14 @@ def build_node_sensory_and_memory_block(session_id: int, curr_node: dict, curren
     return "\n".join(lines)
 
 
-def format_llm_location_context(session_id: int, current_location_raw: str, scenario_key: str, char_name: str = "") -> str:
+def format_llm_location_context(
+    session_id: int,
+    current_location_raw: str,
+    scenario_key: str,
+    char_name: str = "",
+    *,
+    present_npcs: list | None = None,
+) -> str:
     """Formats the location context string and real-time movement rules for the LLM prompt."""
 
     if not is_location_engine_enabled(scenario_key):
@@ -290,7 +459,7 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
 
         campus_rules = (
 
-            f"- CAMPUS ZONE & BUILDING TOPOGRAPHY: The school campus is unified under the Zone '{campus_name}', which contains 5 primary building complexes (Tier 2): 'Main Campus Building' (Academic rooms, Homeroom, Library, Staff Room, Main Gates), '{athletics_name}' (Gymnasium, Track, Pool, Dojo), '{commons_name}' (Central Courtyard, Cafeteria, Botanical Glasshouse), '{arts_name}' (Student Council, Auditorium, Music/Art Studios, Clubrooms), and '{abandoned_name}' (Old Campus & Mystery rooms). Place specific rooms/facilities in Tier 3, and use `focal_point` for room furniture/micro-spots.\n"
+            f"- CAMPUS ZONE & BUILDING TOPOGRAPHY: The school campus is unified under the Zone '{campus_name}', which contains dedicated Tier 2 building complexes: 'Main Campus Building' (Academic classrooms, Homeroom, Library, Staff Room, Main Gates), '{athletics_name}' (Gymnasium & Varsity Court, Track, Pool, Dojo, Behind-Gym Sheds), '{commons_name}' (Central Courtyard, Cafeteria, Botanical Glasshouse), 'Student Council Office' (dedicated council suite, directive board, requisition counter & archive vault), 'Campus Auditorium & Drama Theater' (proscenium stage, box office, callboard, costume wardrobe & dressing suite), '{arts_name}' (Music/Art Studios, Media Room, Occult Room 3-B & Esports Clubroom), and '{abandoned_name}' (Old Campus, Boiler-Room Den & hidden underground wings). Place specific rooms/facilities in Tier 3, and use `focal_point` for room furniture/micro-spots.\n"
 
             f"- CHARACTER'S DESK RULE: A student character's personal desk (e.g. 'Player's Desk' / '<Name>'s Desk') ONLY exists in their designated homeroom classroom. In the Student Council Office, use 'President's Desk', 'Meeting Table', or 'Archive Files & Safe'—NEVER place or generate a student's personal homeroom desk in the council office or other rooms.\n"
 
@@ -434,7 +603,14 @@ def format_llm_location_context(session_id: int, current_location_raw: str, scen
         is_thub = db.is_node_or_parent_transit_hub(session_id, curr_node_id)
         thub_note = " [Transit Hub Fast-Travel Enabled]" if is_thub else ""
 
-        sensory_memory_text = build_node_sensory_and_memory_block(session_id, curr_node, curr_day, curr_min, scen_key=scenario_key)
+        sensory_memory_text = build_node_sensory_and_memory_block(
+            session_id,
+            curr_node,
+            curr_day,
+            curr_min,
+            scen_key=scenario_key,
+            present_npcs=present_npcs,
+        )
 
         graph_section = (
             f"SPATIAL GRAPH TOPOGRAPHY & DIRECTLY CONNECTED EDGES:\n"
@@ -591,11 +767,18 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
 
 
-    # Fetch atmosphere for each zone from session_locations
+    # Fetch atmosphere for each zone, preferring authoritative ZONE world_nodes before session_locations
 
     rows = db.get_session_locations(session_id)
 
     zone_atm_map: dict[str, str] = {}
+
+    try:
+        for zn in (db.get_session_world_nodes(session_id) or []):
+            if zn.get("node_type") == "ZONE" and zn.get("name") and zn.get("atmosphere"):
+                zone_atm_map[zn["name"]] = zn["atmosphere"]
+    except Exception:
+        pass
 
     for r in rows:
 
@@ -603,9 +786,13 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
         atm = r.get("atmosphere")
 
-        if z and atm and z not in zone_atm_map:
-
-            zone_atm_map[z] = atm
+        if z and atm:
+            existing_atm = zone_atm_map.get(z, "")
+            if not existing_atm or (
+                existing_atm.startswith("The dedicated headquarters of ")
+                and str(atm).strip().startswith("{")
+            ):
+                zone_atm_map[z] = atm
 
 
 
@@ -788,6 +975,19 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             contacts = db.get_contacts(session_id) or []
             roster = db.get_school_roster(session_id) if hasattr(db, "get_school_roster") else []
             all_nodes = db.get_session_world_nodes(session_id) or []
+            _is_anom_atlas = (
+                scenario_data.is_anomalous_incursions_scenario(scen_key)
+                or scenario_data.is_anomalous_high_school_scenario(scen_key)
+            )
+            _anom_res_stat = None
+            if _is_anom_atlas:
+                try:
+                    from mechanics.world.anomalous_sites.domain_rules import get_resonator_charges_status
+                    _anom_res_stat = get_resonator_charges_status(
+                        session_id, world_nodes=all_nodes, current_day=curr_day, session=sess_row
+                    )
+                except Exception:
+                    _anom_res_stat = None
 
             occ_by_node: dict[str, dict] = {}
             def _get_occ(nid: str):
@@ -890,10 +1090,18 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 else curr_node_id
             )
 
+            from .seeding import has_player_nsfw_salon_membership_or_standing, reveal_hidden_club_facility
+            has_nsfw_club_access = has_player_nsfw_salon_membership_or_standing(
+                session_id,
+                session=sess_row if isinstance(sess_row, dict) else None,
+                for_atlas_visibility=True,
+            )
+
             for z_item in summary_list:
                 z_nm = z_item["zone_name"]
                 is_same_z = bool(z_item.get("is_current"))
                 zone_min_candidates = []
+                visible_primaries = []
                 for p_item in z_item.get("primary_locations", []):
                     p_nm = p_item["name"]
                     val_str = f"{z_nm} ➔ {p_nm}"
@@ -931,9 +1139,26 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                         p_item["schedule_locked"] = acc.get("schedule_locked", False)
                         p_item["is_trespassing"] = acc.get("is_trespassing", False)
                         p_item["is_unlocked"] = acc.get("is_unlocked", False)
-                        p_item["scene_residue"] = acc.get("scene_residue")
+                        p_item["scene_residue"] = acc.get("scene_residue") or p_item.get("scene_residue") or ""
                         p_item["known_npcs_here"] = p_occ["known_npcs"][:3]
                         p_item["unmet_activity_count"] = p_occ["unmet_count"]
+                        if _is_anom_atlas:
+                            try:
+                                from mechanics.world.anomalous_sites.catalog import resolve_anomalous_site
+                                from mechanics.world.anomalous_sites.domain_rules import build_site_map_meta
+                                _p_anom_spec = resolve_anomalous_site(node_id=pnid, location_str=val_str, session_nodes=all_nodes)
+                                if _p_anom_spec and _p_anom_spec.get("site_type") != "embedded_wing":
+                                    p_item["anomalous_site_meta"] = build_site_map_meta(
+                                        session_id,
+                                        _p_anom_spec,
+                                        current_minute=curr_min,
+                                        current_day=curr_day,
+                                        scen_key=scen_key,
+                                        world_nodes=all_nodes,
+                                        resonator_status=_anom_res_stat,
+                                    )
+                            except Exception:
+                                pass
 
                         from .residences import is_unpurchased_realty_node
                         unbought_realty = is_unpurchased_realty_node(session_id, pnid, session=sess_row)
@@ -970,6 +1195,64 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                             cr_occ = occ_by_node.get(cr_id, {"known_npcs": [], "unmet_count": 0})
                             if not p_item.get("scene_residue") and cr_acc.get("scene_residue"):
                                 p_item["scene_residue"] = cr_acc.get("scene_residue")
+                            cr_meta: dict[str, Any] = {}
+                            if cr.get("state_json"):
+                                try:
+                                    raw_cr_st = cr["state_json"]
+                                    cr_meta = json.loads(raw_cr_st) if isinstance(raw_cr_st, str) else dict(raw_cr_st)
+                                except Exception:
+                                    cr_meta = {}
+                            cr_is_transit = bool(cr.get("is_transit_hub") or cr_meta.get("is_transit_hub"))
+                            cr_is_faction_hq = bool(
+                                cr_meta.get("is_faction_hq")
+                                or location_has_faction_hq(cr_name, session_id=session_id)
+                            )
+                            cr_is_minor_hq = bool(cr_meta.get("is_minor_club_hq"))
+                            cr_has_board = bool(
+                                cr_meta.get("has_bounty_board")
+                                or cr_is_minor_hq
+                                or location_has_bounty_board(cr_name, scen_key=scen_key)
+                            )
+                            cr_has_shop = bool(
+                                cr_meta.get("has_merchant_shop")
+                                or cr_is_minor_hq
+                                or location_has_merchant_shop(cr_name, scen_key=scen_key)
+                            )
+                            cr_is_discreet = bool(
+                                cr_meta.get("is_discreet")
+                                or cr_meta.get("is_private_intimate")
+                                or cr.get("privacy_level") == "private"
+                            )
+                            cr_badges: list[str] = []
+                            if cr_is_faction_hq:
+                                cr_badges.append("🏛️")
+                            if cr_has_board:
+                                _, cr_nb_emoji = get_notice_board_label(scen_key)
+                                cr_badges.append(cr_nb_emoji)
+                            if cr_has_shop:
+                                cr_badges.append("🛍️")
+                            if cr_is_transit:
+                                cr_badges.append("🚀")
+                            if cr_is_discreet:
+                                cr_badges.append("🤫")
+                            cr_sub_meta = None
+                            if _is_anom_atlas:
+                                try:
+                                    from mechanics.world.anomalous_sites.catalog import resolve_anomalous_site
+                                    from mechanics.world.anomalous_sites.domain_rules import build_site_map_meta
+                                    _cr_spec = resolve_anomalous_site(node_id=cr_id, location_str=cr_name, session_nodes=all_nodes)
+                                    if _cr_spec and _cr_spec.get("site_type") == "embedded_wing":
+                                        cr_sub_meta = build_site_map_meta(
+                                            session_id,
+                                            _cr_spec,
+                                            current_minute=curr_min,
+                                            current_day=curr_day,
+                                            scen_key=scen_key,
+                                            world_nodes=all_nodes,
+                                            resonator_status=_anom_res_stat,
+                                        )
+                                except Exception:
+                                    cr_sub_meta = None
                             sub_details.append({
                                 "node_id": cr_id,
                                 "name": cr_name,
@@ -983,8 +1266,42 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                                 "scene_residue": cr_acc.get("scene_residue") or "",
                                 "known_npcs_here": cr_occ["known_npcs"][:3],
                                 "unmet_activity_count": cr_occ["unmet_count"],
+                                "is_transit_hub": cr_is_transit,
+                                "is_faction_hq": cr_is_faction_hq,
+                                "is_minor_club_hq": cr_is_minor_hq,
+                                "has_bounty_board": cr_has_board,
+                                "has_merchant_shop": cr_has_shop,
+                                "is_discreet": cr_is_discreet,
+                                "badges": cr_badges,
+                                "anomalous_site_meta": cr_sub_meta,
                             })
                         p_item["sub_location_details"] = sub_details
+
+                    p_node_obj = node_by_id.get(pnid) if pnid else None
+                    p_state_meta = {}
+                    if p_node_obj and p_node_obj.get("state_json"):
+                        try:
+                            raw_st = p_node_obj["state_json"]
+                            p_state_meta = json.loads(raw_st) if isinstance(raw_st, str) else dict(raw_st)
+                        except Exception:
+                            p_state_meta = {}
+                    if p_state_meta.get("is_hidden") and not p_state_meta.get("discovered"):
+                        is_club_revealed = bool(
+                            is_here_place
+                            or p_item.get("quest_markers")
+                            or (pnid and (pnid == "loc_nsfw_club_facility" or p_state_meta.get("nsfw_only")) and (has_nsfw_club_access or p_item.get("is_unlocked")))
+                        )
+                        if not is_club_revealed:
+                            continue
+                        if pnid and session_id:
+                            try:
+                                reveal_hidden_club_facility(session_id, pnid)
+                            except Exception:
+                                pass
+                    visible_primaries.append(p_item)
+                if len(visible_primaries) != len(z_item.get("primary_locations", [])):
+                    z_item["primary_locations"] = visible_primaries
+                    z_item["places_count"] = len(visible_primaries)
 
                 if is_same_z:
                     z_item["travel_minutes"] = 0

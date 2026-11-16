@@ -3,6 +3,13 @@ import logging
 import discord
 import db
 from db import adb
+from mechanics.social.factions import (
+    check_rival_or_hostile_turf_block,
+    is_nsfw_salon_faction,
+    validate_club_quartermaster_hours,
+    validate_major_club_subroom_action,
+)
+from mechanics.world.locations import reveal_hidden_club_facility
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +53,17 @@ class FactionMixin:
         import scenario_data
 
         session = (await adb(db.get_session, session_id)) or {}
+        subroom_err = await adb(
+            validate_major_club_subroom_action,
+            session_id,
+            faction,
+            "join",
+            session.get("current_location", ""),
+            session.get("scenario", ""),
+        )
+        if subroom_err:
+            await interaction.response.send_message(subroom_err, ephemeral=True)
+            return
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
             from mechanics.social.factions import infer_anomalous_faction_archetype, join_or_transfer_anomalous_faction
 
@@ -61,6 +79,8 @@ class FactionMixin:
                     ephemeral=True,
                 )
                 return
+            if is_nsfw_salon_faction(faction):
+                await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
             await interaction.response.send_message(
                 res.get("message") or f"Welcome to **{faction.get('name', 'the faction')}**!",
                 ephemeral=True,
@@ -74,9 +94,27 @@ class FactionMixin:
             
         # Join faction logic
         await adb(db.set_character_faction_membership, char["id"], faction["faction_id"], 1, "Initiate")
+        if is_nsfw_salon_faction(faction):
+            await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
         await interaction.response.send_message(f"Welcome to **{faction.get('name', 'the faction')}**! You are now a member.", ephemeral=True)
 
     async def faction_rest(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
+        session = (await adb(db.get_session, session_id)) or {}
+        subroom_err = await adb(
+            validate_major_club_subroom_action,
+            session_id,
+            faction,
+            "rest",
+            session.get("current_location", ""),
+            session.get("scenario", ""),
+        )
+        if subroom_err:
+            await interaction.response.send_message(subroom_err, ephemeral=True)
+            return
+        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, user_id, session)
+        if turf_block:
+            await interaction.response.send_message(turf_block, ephemeral=True)
+            return
         rep = faction.get("reputation_score", 0)
         from mechanics.social.factions import get_faction_tier
         tier = get_faction_tier(rep)
@@ -95,6 +133,25 @@ class FactionMixin:
         
         session = await adb(db.get_session, session_id)
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
+        subroom_err = await adb(
+            validate_major_club_subroom_action,
+            session_id,
+            faction,
+            "quartermaster",
+            (session or {}).get("current_location", ""),
+            (session or {}).get("scenario", ""),
+        )
+        if subroom_err:
+            await interaction.followup.send(subroom_err, ephemeral=True)
+            return
+        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, user_id, session)
+        if turf_block:
+            await interaction.followup.send(turf_block, ephemeral=True)
+            return
+        hours_err = validate_club_quartermaster_hours(faction, current_minute)
+        if hours_err:
+            await interaction.followup.send(hours_err, ephemeral=True)
+            return
         merchant = session.setdefault("merchant", {})
         faction_id = faction.get("faction_id") or faction.get("id") or faction.get("name", "default")
         faction_key = f"faction_{faction_id}"
@@ -163,6 +220,17 @@ class FactionMixin:
             await interaction.response.defer(ephemeral=True)
             
         session = await adb(db.get_session, session_id)
+        subroom_err = await adb(
+            validate_major_club_subroom_action,
+            session_id,
+            faction,
+            "bounty",
+            (session or {}).get("current_location", ""),
+            (session or {}).get("scenario", ""),
+        )
+        if subroom_err:
+            await interaction.followup.send(subroom_err, ephemeral=True)
+            return
         from mechanics.narrative.bounty import generate_faction_bounty_board, get_faction_rep_reward_from_quest
         from cogs.adventure.views.quests import BountyBoardView
         bounties = await generate_faction_bounty_board(session, faction, force_refresh=False)
@@ -224,6 +292,17 @@ class FactionMixin:
         import scenario_data
 
         session = (await adb(db.get_session, session_id)) or {}
+        subroom_err = await adb(
+            validate_major_club_subroom_action,
+            session_id,
+            faction,
+            "promote",
+            session.get("current_location", ""),
+            session.get("scenario", ""),
+        )
+        if subroom_err:
+            await interaction.response.send_message(subroom_err, ephemeral=True)
+            return
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
             from mechanics.social.factions import get_anomalous_faction_state
 

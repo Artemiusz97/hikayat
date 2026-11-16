@@ -325,7 +325,7 @@ def resolve_pre_turn_vitals_and_resources(
                         )
                 except Exception:
                     pass
-        elif succeeded and not is_social_act and any(
+        elif succeeded and intent != "anomalous_site_action" and not is_social_act and any(
             kw in lbl_low for kw in ("pick up", "take the", "grab the", "collect the", "gather ", "forage ", "harvest ")
         ):
             phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or (
@@ -442,6 +442,7 @@ def resolve_pre_turn_vitals_and_resources(
             not succeeded
             and not is_non_combat_scen
             and not is_social_act
+            and intent != "anomalous_site_action"
             and stat in ("STR", "AGI", "END")
             and tier in ("fail", "failure", "crit_fail", "critical_failure")
         ):
@@ -943,6 +944,10 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         first_char_id = party[0][0]["id"] if party else 0
         first_char_name = party[0][0].get("name", "Player") if party else "Player"
         _reduce_vitals_and_inventory(session_id, session, party, outcome, mp_already_spent, scen_key, is_combat, items_gained_by_user, actions=actions)
+        if isinstance(outcome, dict) and isinstance(outcome.get("_site_items_gained"), dict):
+            for _suid, _sitems in outcome["_site_items_gained"].items():
+                if _sitems:
+                    items_gained_by_user.setdefault(int(_suid), []).extend(str(x) for x in _sitems if x)
 
         # ── Entity Contracts Post-Turn Toll, Lethal Overdraw, Breaches & Exorcisms ──
         try:

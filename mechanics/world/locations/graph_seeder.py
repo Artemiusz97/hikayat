@@ -60,6 +60,7 @@ from .seeding import (
     get_session_cultural_arts_name,
     get_session_abandoned_campus_name,
     get_session_agency_hq_name,
+    get_session_agency_residence_name,
     get_session_planet_name,
 )
 from .hierarchy import resolve_session_location_tokens
@@ -79,6 +80,8 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
         "sub_townhouse_", "sub_condo_", "sub_bungalow_", "sub_villa_", "sub_mansion_",
     )):
         return "residential"
+    if "student council" in low:
+        return "academic"
     if z_id in ("zone_commercial", "zone_downtown") or p_id.lower() in (
         "loc_cafe", "loc_arcade", "loc_karaoke", "loc_convenience_store",
         "loc_restaurant", "loc_clothing_store", "loc_brand_clothing_store",
@@ -141,13 +144,49 @@ def infer_is_enclosed(node_type: str, node_id: str, name: str, explicit_meta: di
     return 1
 
 
-def infer_is_transit_hub(node_type: str, z_id: str, p_id: str, name: str, is_zone_hub: bool = False) -> int:
-    """Flags nodes that permit World Map Fast Travel."""
-    low = f"{z_id} {p_id} {name}".lower()
+def infer_is_transit_hub(
+    node_type: str,
+    z_id: str,
+    p_id: str,
+    name: str,
+    is_zone_hub: bool = False,
+    explicit_meta: dict[str, Any] | None = None,
+) -> int:
+    """Flags nodes that permit World Map Fast Travel (Zones, Transit Facilities, and Arrival/Gate Rooms)."""
+    p_low = str(p_id or "").strip().lower()
+    name_low = str(name or "").strip().lower()
+    meta = explicit_meta if isinstance(explicit_meta, dict) else {}
+
     if node_type == "ZONE":
         return 1 if is_zone_hub else 0
+
+    if node_type == "ROOM":
+        # Folklore veil rooms remain non-transit until spiritual attunement unlocks them.
+        if meta.get("veil_village_key") or p_low.startswith(("sub_kitsune_", "sub_bunian_", "loc_kitsune_", "loc_bunian_")):
+            return 0
+        if "is_transit_hub" in meta and meta["is_transit_hub"] is not None:
+            return 1 if meta["is_transit_hub"] else 0
+        if meta.get("is_entrance") and not meta.get("is_hidden"):
+            return 1
+        if p_low in (
+            "sub_school_gates", "sub_bus_stop", "sub_courtyard_fountain",
+            "sub_main_foyer", "loc_school_gates", "loc_bus_stop",
+        ):
+            return 1
+        room_transit_keywords = (
+            "transit", "bus stop", "station platform", "ticket concourse",
+            "shuttle", "ferry", "docking bay", "school gates", "front gates",
+            "entrance foyer", "main foyer", "reception foyer", "box-office & velvet foyer",
+            "gymnasium foyer", "security lobby", "main lobby", "courtyard & fountain",
+            "central courtyard", "city square", "town square", "grand marble steps", "arrival",
+        )
+        if any(k in name_low for k in room_transit_keywords):
+            return 1
+        return 0
+
     if node_type == "FACILITY":
-        p_low = str(p_id or "").strip().lower()
+        if "is_transit_hub" in meta and meta["is_transit_hub"] is not None:
+            return 1 if meta["is_transit_hub"] else 0
         if p_low in (
             "fac_agency_residence", "fac_downtown_walkup", "fac_temple_residence",
             "loc_player_house", "fac_suburbs_townhouse", "fac_tenement_flat",
@@ -156,7 +195,23 @@ def infer_is_transit_hub(node_type: str, z_id: str, p_id: str, name: str, is_zon
             "fac_sovereign_mansion",
         ) or p_low.startswith("fac_npc_res_"):
             return 0
-        if any(k in low for k in ("gates", "gate", "courtyard", "fountain", "station", "terminal", "shuttle", "central plaza", "city square", "loc_city_square", "entrance foyer", "town square", "harbor pier", "corridor", "annex", "lobby", "atrium", "hallway")):
+        if p_low in (
+            "loc_school_gates", "bld_school_gates", "loc_bus_stop", "loc_city_square",
+            "loc_station", "loc_train_station", "loc_metro_station", "loc_subway_station",
+            "loc_spaceport", "loc_starport", "loc_airship_dock", "loc_ferry_terminal",
+            "loc_harbor_pier", "loc_airport", "bld_school_commons", "loc_school_courtyard",
+        ):
+            return 1
+        fac_transit_keywords = (
+            "transit hub", "bus stop", "bus terminal", "train station",
+            "metro station", "subway station", "monorail", "shuttle bay",
+            "ferry terminal", "harbor pier", "spaceport", "starport",
+            "airship dock", "teleporter", "portal nexus", "waypoint",
+            "school gates", "main gates", "front gates", "city square",
+            "central plaza", "town square", "courtyard & fountain",
+            "central courtyard",
+        )
+        if any(k in name_low for k in fac_transit_keywords):
             return 1
     return 0
 
@@ -166,13 +221,13 @@ def infer_access_tier(node_type: str, z_id: str, node_id: str, name: str, catego
     if explicit_tier:
         return explicit_tier
     low = f"{z_id} {node_id} {name}".lower()
-    if "nsfw_faction_hq" in low or "velvet basement" in low:
+    if "nsfw_faction_hq" in low or "loc_nsfw_" in low or "velvet basement" in low:
         return "restricted"
     # Special Condition: Abandoned School Building zone is always accessible 24/7
     # (nobody bothers to lock the doors or check the area for anyone)
     if any(k in low for k in (
         "zone_abandoned_school", "bld_abandoned_school", "abandoned old campus", "loc_old_storage_3b",
-        "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
+        "loc_delinquent_boiler_den", "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
         "overgrown hallway", "dark_equipment_room"
     )):
         return "open"
@@ -202,7 +257,7 @@ def infer_curfew_window(node_type: str, z_id: str, node_id: str, name: str, cate
     # Special Condition: Abandoned School Building zone has no curfew or lock checks
     if any(k in low for k in (
         "zone_abandoned_school", "bld_abandoned_school", "abandoned old campus", "loc_old_storage_3b",
-        "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
+        "loc_delinquent_boiler_den", "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
         "overgrown hallway", "dark_equipment_room"
     )):
         return None, None
@@ -420,6 +475,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
     arts_name = get_session_cultural_arts_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
     abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
     agency_hq_name = get_session_agency_hq_name(session_id, scenario_key)
+    agency_res_name = get_session_agency_residence_name(session_id, scenario_key)
 
     transit_hubs: list[str] = []
     facility_entrance_map: dict[str, str] = {}
@@ -533,16 +589,18 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
 
             if classroom_name and (primary_name == "Homeroom Classroom" or p_id == "loc_homeroom"):
                 primary_name = classroom_name
-            elif p_id == "bld_school_athletics" or primary_name == "School Grounds & Athletics":
-                primary_name = athletics_name or "School Grounds & Athletics"
+            elif primary_name == "School Grounds & Athletics":
+                primary_name = athletics_name or "Varsity Athletic Directorate & Gymnasium"
             elif p_id == "bld_school_commons" or primary_name == "Student Commons & Central Plaza":
                 primary_name = commons_name or "Student Commons & Central Plaza"
-            elif p_id == "bld_school_arts" or primary_name == "Cultural Arts & Student Union":
-                primary_name = arts_name or "Cultural Arts & Student Union"
+            elif primary_name == "Cultural Arts & Student Union":
+                primary_name = arts_name or "Cultural & Student Clubroom Wing"
             elif p_id == "bld_abandoned_school" or primary_name == "Abandoned Old Campus Building":
                 primary_name = abandoned_name or "Abandoned Old Campus Building"
             elif p_id == "loc_agency_hq" or "{session_agency_hq}" in primary_name:
                 primary_name = agency_hq_name
+            elif p_id == "fac_agency_residence" or primary_name == "Public Agency Residential Hall" or "{session_agency_residence}" in primary_name:
+                primary_name = agency_res_name
             elif primary_name == "Player's House" or p_id == "loc_player_house":
                 from .realty_catalog import is_anomalous_realty_scenario
                 from mechanics.social.origin_mode import is_student_operative
@@ -558,20 +616,25 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             elif primary_name == "Friend's House" or p_id == "loc_friend_house":
                 continue
 
-            pass
             from .realty_catalog import ALL_STATIC_RESIDENTIAL_FACILITY_IDS
             if is_urban_anomalous_scenario(scenario_key) and p_id not in ALL_STATIC_RESIDENTIAL_FACILITY_IDS:
                 primary_name = get_session_urban_facility_name(session_id, z_id, p_id, primary_name, scenario_key, char_name)
             true_primary_name = resolve_session_location_tokens(session_id, primary_name, scenario_key, char_name)
-            primary_name = (
-                resolve_session_location_tokens(session_id, str(primary.get("mundane_name") or primary_name), scenario_key, char_name)
-                if primary.get("is_hidden")
-                else true_primary_name
-            )
+            if primary.get("is_hidden") and primary.get("mundane_name"):
+                primary_name = resolve_session_location_tokens(session_id, str(primary["mundane_name"]), scenario_key, char_name)
+            else:
+                primary_name = true_primary_name
 
             p_seed_meta = {
                 k: primary[k]
-                for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key", "veil_token_item", "is_anomalous", "mundane_name")
+                for k in (
+                    "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
+                    "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only",
+                    "is_hidden", "discovered", "veil_village_key", "veil_token_item",
+                    "is_anomalous", "mundane_name", "is_faction_hq", "is_minor_club_hq",
+                    "has_bounty_board", "has_merchant_shop", "is_transit_hub",
+                    "club_tier", "faction_name",
+                )
                 if k in primary
             }
             if primary.get("is_hidden"):
@@ -579,7 +642,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             p_category = infer_node_category(z_id, p_id, primary_name, parent_category=z_category)
             p_privacy = infer_node_privacy("FACILITY", p_id, primary_name, explicit_meta=p_seed_meta)
             p_enclosed = infer_is_enclosed("FACILITY", p_id, primary_name)
-            p_transit = infer_is_transit_hub("FACILITY", z_id, p_id, primary_name)
+            p_transit = infer_is_transit_hub("FACILITY", z_id, p_id, primary_name, explicit_meta=p_seed_meta)
             p_access = infer_access_tier("FACILITY", z_id, p_id, primary_name, p_category, primary.get("access_tier", ""))
             p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", z_id, p_id, primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
             if p_transit:
@@ -638,7 +701,14 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
 
                 s_seed_meta = {
                     k: sub[k]
-                    for k in ("privacy_level", "is_discreet", "is_private_intimate", "is_enclosed", "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive", "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key", "veil_token_item", "is_anomalous")
+                    for k in (
+                        "privacy_level", "is_discreet", "is_private_intimate", "is_enclosed",
+                        "is_entrance", "parent_sub_id", "gender_restriction", "grade_exclusive",
+                        "suite_fee", "nsfw_only", "is_hidden", "discovered", "veil_village_key",
+                        "veil_token_item", "is_anomalous", "is_faction_hq", "is_minor_club_hq",
+                        "has_bounty_board", "has_merchant_shop", "is_transit_hub",
+                        "club_tier", "faction_name",
+                    )
                     if k in sub
                 }
                 s_privacy = infer_node_privacy("ROOM", s_id, sub_name, explicit_meta=s_seed_meta) or p_privacy
@@ -675,6 +745,10 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                 room_locked_map[s_id] = bool(sub.get("is_locked", False))
                 room_parent_sub_map[s_id] = sub.get("parent_sub_id")
 
+                s_transit = infer_is_transit_hub("ROOM", z_id, s_id, sub_name, explicit_meta=s_seed_meta)
+                if s_transit:
+                    transit_hubs.append(s_id)
+
                 db.save_world_node(
                     session_id=session_id,
                     node_id=s_id,
@@ -684,7 +758,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                     category=p_category,
                     privacy_level=s_privacy,
                     is_enclosed=s_enclosed,
-                    is_transit_hub=0,
+                    is_transit_hub=s_transit,
                     access_tier=s_access,
                     curfew_start_min=s_curfew_start,
                     curfew_end_min=s_curfew_end,

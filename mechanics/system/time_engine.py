@@ -189,6 +189,32 @@ def get_location_sleep_context(
             scenario = str((db.get_session(int(session_id)) or {}).get("scenario") or "")
         except Exception:
             scenario = ""
+    try:
+        from mechanics.world.anomalous_sites.domain_rules import is_sleep_blocked_in_anomalous_zone
+        cur_min_sleep = 720
+        if session_id:
+            try:
+                cur_min_sleep = int(db.get_session_time(int(session_id))[1] or 720)
+            except Exception:
+                cur_min_sleep = 720
+        blocked_sleep, sleep_block_reason = is_sleep_blocked_in_anomalous_zone(
+            session_id=int(session_id or 0),
+            location_name=location_name,
+            node_id=node_id or "",
+            current_minute=cur_min_sleep,
+            scen_key=scenario or "fantasy",
+        )
+        if blocked_sleep:
+            return {
+                "surface": "none",
+                "can_sleep": False,
+                "recovery_ratio": 0.0,
+                "surface_label": "Quarantine Hazard",
+                "blocked_by_anomaly": True,
+                "reason": sleep_block_reason,
+            }
+    except Exception:
+        pass
     if scenario_allows_camp_sleep(scenario):
         return {
             "surface": "camp",
@@ -436,7 +462,9 @@ def calculate_action_time_cost(
     if is_dialogue or any(kw in lbl for kw in ["talk", "speak", "discuss", "chat", "ask", "inquire", "whisper", "comfort", "tease", "flirt", "confess"]):
         return 2
 
-    # 5. Investigation / Search / Examination
+    # 5. Investigation / Search / Examination / Anomalous Site Puzzle or Harvest
+    if isinstance(action, dict) and str(action.get("intent") or "").strip().lower() == "anomalous_site_action" and not is_combat:
+        return 10
     if any(kw in lbl for kw in ["search", "investigate", "inspect", "examine", "study", "read", "scavenge", "loot", "look around", "survey"]):
         return 10
 

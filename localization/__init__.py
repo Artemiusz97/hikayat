@@ -195,6 +195,16 @@ def get_pact_ui_label(key: str, language: str = "en") -> str:
     return getattr(en, "PACT_UI_LABELS", {}).get(key, key)
 
 
+def get_anomalous_site_ui_label(key: str, language: str = "en") -> str:
+    """Return a localized Anomalous Site Registry / Map UI label with English fallback."""
+    lang = (language or "en").lower().strip()[:2]
+    mod = LOCALES.get(lang, en)
+    labels = getattr(mod, "ANOMALOUS_SITE_UI_LABELS", {}) or {}
+    if key in labels:
+        return labels[key]
+    return getattr(en, "ANOMALOUS_SITE_UI_LABELS", {}).get(key, key)
+
+
 __all__ = [
     "SUPPORTED_LOCALES",
     "LOCALES",
@@ -217,6 +227,7 @@ __all__ = [
     "get_folklore_sanctuary_label",
     "get_quest_ui_label",
     "get_pact_ui_label",
+    "get_anomalous_site_ui_label",
     "en",
     "pl",
     "ms",

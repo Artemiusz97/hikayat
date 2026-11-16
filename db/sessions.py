@@ -1101,6 +1101,10 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         ep_res = rollback_epistemic_state_after_turn(session_id, t_num, conn=conn)
         from mechanics.world.locations.folklore_veil import rollback_folklore_veil_state_after_turn
         veil_res = rollback_folklore_veil_state_after_turn(session_id, t_num, conn=conn)
+        from mechanics.world.locations import rollback_hidden_club_discoveries_after_turn
+        hidden_clubs_reverted = rollback_hidden_club_discoveries_after_turn(session_id, t_num, conn=conn)
+        from mechanics.world.anomalous_sites.lifecycle import rollback_anomalous_sites_after_turn
+        anomalous_sites_reverted = rollback_anomalous_sites_after_turn(session_id, t_num, conn=conn)
         intimate_cnt = delete_intimate_events_after_turn(session_id, t_num, conn=conn)
         cur_cm = conn.execute(
             "DELETE FROM commitments_ledger WHERE session_id = ? AND turn_created > ?",
@@ -1375,6 +1379,8 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         "folklore_forms_reverted": veil_res.get("forms_reverted", 0),
         "folklore_tokens_reverted": veil_res.get("tokens_reverted", 0),
         "folklore_companions_pruned": veil_res.get("companions_pruned", 0),
+        "hidden_clubs_reverted": hidden_clubs_reverted,
+        "anomalous_sites_reverted": anomalous_sites_reverted,
         "contracts_restored": pact_res.get("contracts_restored", 0),
         "grudges_restored": pact_res.get("grudges_restored", 0),
         "pact_gear_pruned": pact_res.get("pact_gear_pruned", 0),

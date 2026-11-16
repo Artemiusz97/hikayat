@@ -176,7 +176,6 @@ def get_enemy_weapon_profile(archetype: str) -> dict:
 # ---------------------------------------------------------------------------
 
 ANOMALOUS_TIER2_FACILITY_IDS = {
-    "loc_hq_containment_sector",
     "loc_platform_zero",
     "loc_inverted_skybridge",
     "loc_endless_dept_store",
@@ -191,6 +190,7 @@ ANOMALOUS_TIER2_FACILITY_IDS = {
     "loc_reactor_silo_7",
     "loc_ghost_freighter",
     "loc_abyssal_drydock",
+    "loc_cul_de_sac_9",
     "loc_hilltop_shrine",
     "loc_haunted_manor",
     "loc_abandoned_school_wing",
@@ -199,10 +199,7 @@ ANOMALOUS_TIER2_FACILITY_IDS = {
     "loc_singing_sea_grotto",
     "loc_crooked_monolith",
     "loc_woods_staircase",
-    "loc_tp_mirror_labyrinth",
-    "loc_tp_midnight_carousel",
     "loc_et_weeping_statues",
-    "loc_et_fox_torii_tunnel",
     "loc_ap_ghost_runway",
     "loc_ap_baggage_void",
     "loc_hosp_floor_13",
@@ -217,31 +214,65 @@ ANOMALOUS_TIER2_FACILITY_IDS = {
     "loc_bz_tank_nine",
     "loc_cult_sanctum_hq",
     "loc_clandestine_syndicate_hq",
-    "sub_cult_threshold",
+    "sub_cult_entrance",
+    "sub_cult_cloister",
     "sub_cult_altar",
+    "sub_cult_cells",
     "sub_cult_reliquary",
-    "sub_cult_catacombs",
-    "sub_cult_scriptorium",
     "sub_cult_sanctum",
-    "sub_synd_loading",
-    "sub_synd_auction",
+    "sub_synd_entrance",
+    "sub_synd_guardroom",
+    "sub_synd_floor",
+    "sub_synd_pens",
+    "sub_synd_lab",
     "sub_synd_vault",
-    "sub_synd_chop_shop",
-    "sub_synd_ledger",
-    "sub_synd_penthouse",
 }
 
 ANOMALOUS_FACILITY_NAME_KEYWORDS = (
     "anomaly", "quarantined", "platform zero", "inverted skybridge", "endless department",
     "static cinema", "whispering paleontology", "weeping bell-tower", "weeping crypt",
     "crimson masquerade", "glass mirage", "room 404", "flesh-stitched", "reactor silo",
-    "ghost freighter", "abyssal drydock", "haunted hill", "13th stairwell", "abandoned old campus",
-    "fog-locked lighthouse", "singing sea grotto", "crooked monolith", "staircase in the woods",
-    "hall of mirrors", "reversed calliope", "weeping statues", "fox-spirit torii",
-    "ghost flight", "endless baggage", "floor 13", "operating theater 0", "parapsychology lab",
+    "ghost freighter", "abyssal drydock", "cul-de-sac no. 9", "haunted hill",
+    "13th stairwell", "abandoned old campus", "fog-locked lighthouse", "singing sea grotto",
+    "crooked monolith", "staircase in the woods", "weeping statues", "ghost flight",
+    "endless baggage", "floor 13", "operating theater 0", "parapsychology lab",
     "non-euclidean", "paper-effigy", "blood-jade", "bone-ossuary", "obsidian monolith",
-    "carnivorous flora", "tank 9", "containment & quarantine sector",
+    "carnivorous flora", "tank 9",
 )
+
+_SAFE_EXCLUSION_KEYWORDS = (
+    "containment & quarantine sector",
+    "fox-spirit torii",
+    "thousand-torii fox",
+)
+
+_THEME_PARK_ID_TOKENS = ("zone_theme_park", "loc_theme_park", "loc_tp_")
+_THEME_PARK_NAME_TOKENS = (
+    "theme park", "amusement park", "amusement resort", "carnival", "wonderland",
+    "funfair", "ferris wheel", "roller coaster", "carousel", "midway",
+    "hall of mirrors", "reversed calliope",
+)
+_THEME_PARK_EPICENTER_NAME_TOKENS = (
+    "hall of mirrors", "mirror labyrinth", "reversed calliope", "midnight carousel",
+)
+
+
+def _is_theme_park_probe(loc_id_low: str, loc_name_low: str, session_id: int = 0, scen_key: str = "anomalous_incursions") -> bool:
+    if any(k in loc_id_low for k in _THEME_PARK_ID_TOKENS):
+        return True
+    if any(k in loc_name_low for k in _THEME_PARK_NAME_TOKENS):
+        return True
+    if session_id:
+        try:
+            from mechanics.world.locations.seeds import get_session_urban_facility_name
+            tp_name = get_session_urban_facility_name(
+                session_id, "zone_seaside_beach", "loc_theme_park", "Theme Park & Amusement Resort", scen_key
+            ).lower()
+            if tp_name and tp_name in loc_name_low:
+                return True
+        except Exception:
+            pass
+    return False
 
 
 def is_anomalous_danger_zone(
@@ -250,13 +281,72 @@ def is_anomalous_danger_zone(
     current_minute: int = 720,
     session_id: int = 0,
     scen_key: str = "anomalous_incursions",
+    turn_count: int | None = None,
 ) -> bool:
     """
-    Returns True ONLY when the player is inside one of the 40 Anomalous Tier-2 Facilities
-    OR inside the Theme Park Zone (`zone_theme_park`) during its 22:00-08:00 Anomalous Shift.
+    Return True ONLY when inside an active un-pacified anomalous danger zone
+    (36 wild sites respecting schedule dormancy, 2 hostile HQs, or Theme Park
+    during its 22:00–08:00 Anomalous Shift), excluding safe sanctuaries and Turn 1.
     """
+    if turn_count is not None and int(turn_count) <= 1:
+        return False
+
     loc_id_low = str(location_id or "").strip().lower()
     loc_name_low = str(location_name or "").strip().lower()
+    tod = int(current_minute or 0) % 1440
+
+    from mechanics.world.anomalous_sites.catalog import (
+        AHS_PROTECTED_SUB_IDS,
+        SAFE_EXCLUSION_SITE_IDS,
+        is_site_dormant_by_schedule,
+        is_site_pacified,
+        resolve_anomalous_site,
+    )
+
+    if loc_id_low in SAFE_EXCLUSION_SITE_IDS or loc_id_low in AHS_PROTECTED_SUB_IDS:
+        return False
+    if any(ex in loc_name_low for ex in _SAFE_EXCLUSION_KEYWORDS):
+        return False
+
+    # Theme Park complex: ALWAYS safe during daytime 08:00–21:59 (even inner rides with "Anomaly" in name).
+    is_anomalous_shift = (tod >= 1320 or tod < 480)
+    if _is_theme_park_probe(loc_id_low, loc_name_low, session_id=session_id, scen_key=scen_key):
+        return is_anomalous_shift
+
+    world_nodes = None
+    if session_id:
+        try:
+            import db as _db
+            world_nodes = _db.get_session_world_nodes(session_id) or []
+        except Exception:
+            world_nodes = None
+
+    spec = resolve_anomalous_site(
+        node_id=location_id,
+        location_str=location_name,
+        session_nodes=world_nodes,
+    )
+    if spec is not None:
+        if is_site_dormant_by_schedule(spec, scen_key=scen_key, current_minute=current_minute, node_id=location_id):
+            return False
+        if session_id and is_site_pacified(
+            session_id, site_id=spec["site_id"], location_name=location_name, node_id=location_id, world_nodes=world_nodes
+        ):
+            return False
+        return True
+
+    # Legacy/stateless fallback for synthetic test strings without seeded world_nodes
+    is_ahs_campus_match = (
+        any(fid in loc_id_low for fid in ("loc_abandoned_school_wing", "loc_13th_stairwell", "sub_old_wing", "sub_old_storage", "sub_clock_tower", "sub_4th_floor_landing", "sub_mirror_washroom", "sub_13th_step"))
+        or any(kw in loc_name_low for kw in ("13th stairwell", "abandoned old campus", "mirror washroom", "clock tower belfry"))
+    )
+    if is_ahs_campus_match:
+        try:
+            from scenario_data import is_anomalous_high_school_scenario as _is_ahs
+            if _is_ahs(scen_key) and (360 <= tod < 1200):
+                return False
+        except Exception:
+            pass
 
     if any(fid in loc_id_low for fid in ANOMALOUS_TIER2_FACILITY_IDS):
         return True
@@ -264,34 +354,13 @@ def is_anomalous_danger_zone(
     if any(kw in loc_name_low for kw in ANOMALOUS_FACILITY_NAME_KEYWORDS):
         return True
 
-    if session_id:
-        try:
-            import db
-            nodes = db.get_session_world_nodes(session_id) or []
-            for n in nodes:
-                nid = str(n.get("node_id") or "").lower()
-                nname = str(n.get("name") or "").lower()
-                pid = str(n.get("parent_id") or "").lower()
-                if (nid in ANOMALOUS_TIER2_FACILITY_IDS or pid in ANOMALOUS_TIER2_FACILITY_IDS) and nname and nname in loc_name_low:
-                    return True
-        except Exception:
-            pass
-
-    tod = int(current_minute or 0) % 1440
-    is_anomalous_shift = (tod >= 1320 or tod < 480)
-    if is_anomalous_shift:
-        if any(k in loc_id_low for k in ("zone_theme_park", "loc_theme_park", "loc_tp_")):
-            return True
-        if any(k in loc_name_low for k in ("theme park", "amusement park", "carnival", "wonderland", "funfair", "ferris wheel", "roller coaster", "carousel", "midway")):
-            return True
-        if session_id:
-            try:
-                from mechanics.world.locations.seeds import get_session_urban_facility_name
-                tp_name = get_session_urban_facility_name(session_id, "zone_seaside_beach", "loc_theme_park", "Theme Park & Amusement Resort", scen_key).lower()
-                if tp_name and tp_name in loc_name_low:
-                    return True
-            except Exception:
-                pass
+    if world_nodes:
+        for n in world_nodes:
+            nid = str(n.get("node_id") or "").lower()
+            nname = str(n.get("name") or "").lower()
+            pid = str(n.get("parent_id") or "").lower()
+            if (nid in ANOMALOUS_TIER2_FACILITY_IDS or pid in ANOMALOUS_TIER2_FACILITY_IDS) and nname and nname in loc_name_low:
+                return True
 
     return False
 
@@ -302,11 +371,14 @@ def should_allow_random_encounter(
     location_id: str = "",
     current_minute: int = 720,
     session_id: int = 0,
+    turn_count: int | None = None,
 ) -> Tuple[bool, float]:
     """Determines whether random encounters can occur and at what probability."""
     try:
         from scenario_data import is_anomalous_incursions_scenario
         if is_anomalous_incursions_scenario(scen_key):
+            if turn_count is not None and int(turn_count) <= 1:
+                return False, 0.0
             if session_id:
                 try:
                     from mechanics.world.anomalous_events import get_active_incursion_at_location
@@ -324,7 +396,19 @@ def should_allow_random_encounter(
                 current_minute=current_minute,
                 session_id=session_id,
                 scen_key=scen_key,
+                turn_count=turn_count,
             ):
+                loc_id_low = str(location_id or "").strip().lower()
+                loc_name_low = str(location_name or "").strip().lower()
+                tod = int(current_minute or 0) % 1440
+                if _is_theme_park_probe(loc_id_low, loc_name_low, session_id=session_id, scen_key=scen_key):
+                    if 0 <= tod < 180:  # Witching Peak 00:00–03:00
+                        return True, 0.40
+                    if loc_id_low in ("loc_tp_mirror_labyrinth", "loc_tp_midnight_carousel") or any(
+                        tok in loc_name_low for tok in _THEME_PARK_EPICENTER_NAME_TOKENS
+                    ):
+                        return True, 0.35
+                    return True, 0.25
                 return True, 0.25
             return False, 0.0
     except Exception:

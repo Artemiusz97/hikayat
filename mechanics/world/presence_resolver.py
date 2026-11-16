@@ -844,9 +844,29 @@ def resolve_node_presence(
         if jp_s:
             joined_partners_set.add(jp_s)
 
+    raw_phys = ctx.session_dict.get("physical_state") or (
+        db.get_session_physical_state(ctx.sid) if (ctx.sid > 0 and present_list) else {}
+    )
+    phys_actors_by_low: dict[str, Mapping[str, Any]] = {}
+    if isinstance(raw_phys, Mapping) and isinstance(raw_phys.get("actors"), Mapping):
+        for ak, av in raw_phys["actors"].items():
+            if isinstance(av, Mapping):
+                ak_low = str(ak or "").strip().lower()
+                if ak_low:
+                    phys_actors_by_low[ak_low] = av
+                ak_slug = slugify_key(ak_low)
+                if ak_slug and ak_slug not in phys_actors_by_low:
+                    phys_actors_by_low[ak_slug] = av
+
     for npc_entry in present_list:
         n_low = str(npc_entry.get("name") or "").strip().lower()
         nid_low = str(npc_entry.get("npc_id") or "").strip().lower()
+        pk_low = str(npc_entry.get("person_key") or "").strip().lower()
+        actor_phys = (
+            phys_actors_by_low.get(n_low)
+            or phys_actors_by_low.get(nid_low)
+            or phys_actors_by_low.get(pk_low)
+        )
         is_dp = bool(
             n_low in ctx.active_dialogue_partners
             or nid_low in ctx.active_dialogue_partners
@@ -877,6 +897,7 @@ def resolve_node_presence(
             lang=lang_code,
             session_id=ctx.sid,
             day=ctx.safe_day,
+            actor_physical_state=actor_phys,
         )
         npc_entry.update(bundle)
 

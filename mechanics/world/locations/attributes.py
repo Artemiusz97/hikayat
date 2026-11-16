@@ -794,6 +794,20 @@ def get_location_archetype(primary_name: str, zone_name: str = "", scen_key: str
 
     return ("Landmark / Area", "🗺️")
 
+
+DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS = (
+    "science & robotics lab",
+    "traditional martial arts dojo",
+    "art & design studio",
+    "newspaper & media room",
+    "music wing rehearsal hall",
+    "home economics & culinary kitchen",
+    "rooftop astronomy dome",
+    "library annex reading room",
+    "indoor aquatics center",
+)
+
+
 def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
 
     """Checks if a location string contains notice board, guild hall, student council, or bounty hub keywords."""
@@ -803,15 +817,34 @@ def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
         return False
 
     loc_lower = location_str.lower()
-    from scenario_data import is_anomalous_incursions_scenario
+    from scenario_data import is_anomalous_incursions_scenario, has_school_campus_mechanics
 
-    if scen_key and is_school_scenario(scen_key):
-        school_board_keywords = (
-            "student council", "council office", "notice board", "bulletin board",
+    raw_parts = [p.strip() for p in re.split(r"➔|->", str(location_str)) if p.strip()]
+    leaf_lower = raw_parts[-1].lower() if raw_parts else loc_lower
+    is_room_level = len(raw_parts) >= 3
+
+    if scen_key and (is_school_scenario(scen_key) or has_school_campus_mechanics(scen_key)):
+        school_room_board_keywords = (
+            "campus directive & petition board", "petition board", "directive & petition board",
+            "backstage casting & production callboard", "production callboard", "callboard",
+            "tournament roster & challenge board", "challenge board", "tournament roster",
+            "whispered favors & secret ledger", "secret ledger", "velvet request",
+            "notice board", "bulletin board", "bounty board",
             "school gate", "main gate", "front gate", "entrance foyer", "main foyer",
             "central courtyard", "main courtyard",
+            "old storage room 3-b", "esports & gaming clubroom",
+            "behind gym storage sheds", "abandoned wing boiler-room den",
+            *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
         )
-        return any(k in loc_lower for k in school_board_keywords)
+        check_leaf = leaf_lower if is_room_level else loc_lower
+        if any(k in check_leaf for k in school_room_board_keywords) and not (
+            "reception foyer" in check_leaf or ("council office" in check_leaf and "foyer" in check_leaf)
+        ):
+            return True
+        if "clubroom" in check_leaf and "clubroom wing" not in check_leaf:
+            return True
+        if not is_anomalous_incursions_scenario(scen_key):
+            return False
 
     if scen_key and is_anomalous_incursions_scenario(scen_key):
         anom_board_keywords = (
@@ -849,7 +882,7 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     from mechanics.combat.merchant import MERCHANT_ARCHETYPES
 
-    from scenario_data import is_nsfw_scenario
+    from scenario_data import is_nsfw_scenario, has_school_campus_mechanics
 
 
 
@@ -912,8 +945,22 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
         if any(k in loc_lower for k in ["quiet alley", "underpass"]) and location_has_merchant_shop(location_str, scen_key):
             stores.append({"type": "student_merchant", **MERCHANT_ARCHETYPES["student_merchant"]})
 
-        if any(k in loc_lower for k in ["club room", "gang", "hideout", "hangout", "clubhouse"]) and location_has_merchant_shop(location_str, scen_key):
+        if is_nsfw and any(k in loc_lower for k in ["silk & curio", "apothecary counter", "velvet basement"]) and location_has_merchant_shop(location_str, scen_key):
+            if not any(s["type"] == "adult_store_merchant" for s in stores):
+                stores.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
             stores.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
+
+        club_merchant_keywords = (
+            "club room", "gang", "hideout", "hangout", "clubhouse",
+            "quartermaster", "requisition & supply", "supply counter",
+            "prop quartermaster", "training quartermaster", "apothecary counter",
+            "old storage room 3-b", "esports & gaming clubroom",
+            "behind gym storage sheds", "abandoned wing boiler-room den",
+            *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
+        )
+        if (any(k in loc_lower for k in club_merchant_keywords) or ("clubroom" in loc_lower and "clubroom wing" not in loc_lower)) and location_has_merchant_shop(location_str, scen_key):
+            if not any(s["type"] == "club_merchant" for s in stores):
+                stores.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
 
         # Specific matched shop venues take precedence before generic Downtown/City Square hub fallback
         if stores:
@@ -1060,6 +1107,23 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
                 found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
         if is_nsfw and any(k in target_lower for k in ["adult", "brothel", "pleasure", "cyber-den", "erotic", "novelty", "afterdark", "velvet mirage", "red-lantern"]):
             found.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
+        if scen_key and has_school_campus_mechanics(scen_key) and location_has_merchant_shop(location_str, scen_key):
+            if is_nsfw and any(k in target_lower for k in ("silk & curio", "apothecary counter", "velvet boutique")):
+                if not any(s["type"] == "adult_store_merchant" for s in found):
+                    found.append({"type": "adult_store_merchant", **MERCHANT_ARCHETYPES["adult_store_merchant"]})
+                if not any(s["type"] == "club_merchant" for s in found) and "club_merchant" in MERCHANT_ARCHETYPES:
+                    found.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
+            school_club_kws = (
+                "club room", "gang", "hideout", "hangout", "clubhouse",
+                "council requisition", "requisition & supply", "supply counter",
+                "prop quartermaster", "training quartermaster",
+                "old storage room 3-b", "esports & gaming clubroom",
+                "behind gym storage sheds", "abandoned wing boiler-room den",
+                *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
+            )
+            if (any(k in target_lower for k in school_club_kws) or ("clubroom" in target_lower and "clubroom wing" not in target_lower)) and "club_merchant" in MERCHANT_ARCHETYPES:
+                if not any(s["type"] == "club_merchant" for s in found):
+                    found.append({"type": "club_merchant", **MERCHANT_ARCHETYPES["club_merchant"]})
         return found
 
     stores = _collect_specialist_stores(match_lower)
@@ -1088,69 +1152,62 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
 
 
-    # Extract Tier 2 Primary place if full string is passed
-
-    target = location_str
-
-    if "➔" in location_str:
-
-        parts = [p.strip() for p in location_str.split("➔") if p.strip()]
-
-        if len(parts) >= 2:
-
-            target = parts[1]
-
-    elif "->" in location_str:
-
-        parts = [p.strip() for p in location_str.split("->") if p.strip()]
-
-        if len(parts) >= 2:
-
-            target = parts[1]
-
-
+    # Extract Tier 2 Primary place & Tier 3 leaf if multi-tier string is passed
+    raw_parts = [p.strip() for p in re.split(r"➔|->", str(location_str)) if p.strip()]
+    is_room_level = len(raw_parts) >= 3
+    target = raw_parts[1] if len(raw_parts) >= 2 else (raw_parts[0] if raw_parts else location_str)
+    leaf_target = raw_parts[-1] if raw_parts else target
 
     p_lower = target.lower()
+    leaf_lower = leaf_target.lower()
+    school_check_lower = leaf_lower if is_room_level else p_lower
 
+    from scenario_data import is_anomalous_incursions_scenario, has_school_campus_mechanics
+    is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False
 
-
-    # School & Modern Academic Scenarios: only legitimate commercial/food spots
-
-    if scen_key and is_school_scenario(scen_key):
+    # School & Modern Academic Scenarios: dedicated quartermaster rooms, Minor Club HQs, and legitimate shops
+    if scen_key and (is_school_scenario(scen_key) or has_school_campus_mechanics(scen_key)):
+        school_quartermaster_or_minor_shops = (
+            "council requisition & supply counter", "requisition & supply", "supply counter",
+            "costume wardrobe & prop quartermaster", "prop quartermaster",
+            "varsity gear & training quartermaster", "training quartermaster",
+            "silk & curio apothecary counter", "apothecary counter",
+            "velvet boutique",
+            "old storage room 3-b", "esports & gaming clubroom",
+            "behind gym storage sheds", "abandoned wing boiler-room den",
+            *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
+        )
+        if any(k in school_check_lower for k in school_quartermaster_or_minor_shops):
+            return True
+        if "clubroom" in school_check_lower and "clubroom wing" not in school_check_lower:
+            return True
 
         non_shop_school_places = (
-
             "classroom", "homeroom", "library", "office", "council",
-
             "lockers", "gym", "gymnasium", "rooftop", "lounge", "staff room",
-
             "infirmary", "dorm", "desk", "corridor", "foyer", "stairs", "alcove"
-
         )
+        if not is_anom_scen or any(nsp in school_check_lower for nsp in non_shop_school_places):
+            if any(nsp in school_check_lower for nsp in non_shop_school_places):
+                if not is_anom_scen or not any(
+                    hq_w in leaf_lower
+                    for hq_w in ("armory", "ordnance", "requisition", "outfitter", "tailoring", "apothecary", "cleansing bay")
+                ):
+                    return False
 
-        if any(nsp in p_lower for nsp in non_shop_school_places):
-
+        school_shop_keywords = (
+            "cafeteria", "canteen", "café", "cafe", "convenience", "store", "bakery",
+            "kiosk", "vending", "co-op", "food court", "shopping", "bakeshop",
+            "sweet shop", "restaurant", "diner", "conbini", "stall", "market", "boutique", "gift"
+        )
+        if any(k in school_check_lower for k in school_shop_keywords):
+            return True
+        if not is_anom_scen:
             return False
 
 
 
-        school_shop_keywords = (
-
-            "cafeteria", "canteen", "café", "cafe", "convenience", "store", "bakery",
-
-            "kiosk", "vending", "co-op", "food court", "shopping", "bakeshop",
-
-            "sweet shop", "restaurant", "diner", "conbini", "stall", "market", "boutique", "gift"
-
-        )
-
-        return any(k in p_lower for k in school_shop_keywords)
-
-
-
     # General Scenarios (Fantasy, Cyberpunk, Sci-Fi, etc.)
-    from scenario_data import is_anomalous_incursions_scenario
-    is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False
 
     raw_parts = [
         pt.strip()
@@ -1220,32 +1277,61 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
     return any(re.search(rf"\b{re.escape(k)}\b", p_lower) or re.search(rf"\b{re.escape(k)}\b", full_lower) for k in shop_keywords)
 
 def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
-
-    """Checks if the given location is registered as a Faction HQ."""
-
+    """Checks if the given location (Tier 2 Facility or Tier 3 Room) is registered as a Faction HQ."""
     if not location_str:
+        return False
 
+    raw_parts = [p.strip() for p in re.split(r"➔|->", str(location_str)) if p.strip()]
+    leaf_lower = (raw_parts[-1] if raw_parts else str(location_str)).lower()
+    is_room_level = len(raw_parts) >= 3
+
+    excluded_parent_wings = (
+        "cultural & student clubroom wing",
+        "general student clubroom wing",
+        "cultural arts & student union",
+        "abandoned old campus building",
+        "abandoned old campus wing",
+        "abandoned old campus wing & clock tower",
+    )
+    if len(raw_parts) <= 2 and any(leaf_lower == w or w in leaf_lower for w in excluded_parent_wings):
         return False
 
     if session_id:
-
         try:
-
             faction = db.get_faction_by_hq(session_id, location_str)
-
             if faction:
-
                 return True
-
         except Exception:
-
             pass
 
-    loc_lower = location_str.lower()
-
-    keywords = ["faction hq", "headquarters", "council office", "command center", "guild master"]
-
-    return any(k in loc_lower for k in keywords)
+    target_lower = leaf_lower if is_room_level else str(location_str).lower()
+    keywords = (
+        "faction hq", "headquarters", "command center", "guild master",
+        "executive council chamber", "main auditorium stage",
+        "main gymnasium & varsity court", "main velvet salon",
+        "old storage room 3-b", "esports & gaming clubroom",
+        "behind gym storage sheds", "abandoned wing boiler-room den",
+        *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
+    )
+    if any(k in target_lower for k in keywords):
+        return True
+    if (
+        not is_room_level
+        and "reception foyer" not in leaf_lower
+        and any(
+            k in target_lower
+            for k in (
+                "student council office", "council office",
+                "campus auditorium & drama theater",
+                "varsity athletic directorate & gymnasium",
+                "velvet basement salon",
+            )
+        )
+    ):
+        return True
+    if "clubroom" in leaf_lower and not any(w in leaf_lower for w in excluded_parent_wings):
+        return True
+    return False
 
 def get_location_emoji(location_name: str, zone_name: str = "", waypoint_markers: dict = None, session_id: int = None, scen_key: str = None, char_name: str = "") -> str:
 

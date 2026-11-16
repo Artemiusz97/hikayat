@@ -49,6 +49,7 @@ _ACTIVITY_LOCALES: dict[str, dict[str, str]] = {
     "telltale_unblinking": {"en": "Unblinking Watch", "pl": "Patrzy bez mrugnięcia", "ms": "Renungan Kaku", "de": "Starrt reglos", "zh": "一动不动地凝视"},
     "telltale_earpiece": {"en": "Checking Earpiece", "pl": "Poprawia słuchawkę", "ms": "Memeriksa Alat Telinga", "de": "Prüft Ohrhörer", "zh": "轻触隐蔽耳麦"},
     "telltale_shadow": {"en": "Shadow Out of Step", "pl": "Nieswój cień", "ms": "Bayang Ganjil", "de": "Seltsamer Schatten", "zh": "影子微微错位"},
+    "telltale_disheveled": {"en": "Flustered & Disheveled", "pl": "Zmieszanie i nieład", "ms": "Gugup & Kusut", "de": "Zerzaust & Verlegen", "zh": "衣衫微乱"},
 }
 
 _DEEP_FOCUS_KEYS = frozenset({
@@ -93,6 +94,7 @@ _ACTIVITY_SPECS: dict[str, tuple[str, int, tuple[str, ...]]] = {
     "telltale_unblinking": ("PER", 8, ("unnaturally still posture", "intense stare")),
     "telltale_earpiece": ("PER", 8, ("hand near ear", "scanning room calmly")),
     "telltale_shadow": ("PER", 8, ("dim lighting", "subtle uncanny stillness")),
+    "telltale_disheveled": ("PER", 8, ("slightly disheveled attire", "flushed composure")),
 }
 
 _VENUE_CATALOGS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -295,8 +297,14 @@ def _select_role_or_venue_key(
     return choices[int(digest[:8], 16) % len(choices)]
 
 
-def _detect_disguised_telltale_key(npc: Mapping[str, Any]) -> str:
-    """Returns a telltale activity key ONLY when the NPC actually holds a hidden disguise/anomaly/agent nature."""
+def _detect_disguised_telltale_key(
+    npc: Mapping[str, Any],
+    *,
+    actor_physical_state: Mapping[str, Any] | None = None,
+    location: str = "",
+    venue: str = "",
+) -> str:
+    """Returns a telltale activity key for hidden disguises/anomalies or non-locker dishevelment."""
     basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), Mapping) else {}
     flags = " ".join(
         str(x or "").lower()
@@ -322,6 +330,15 @@ def _detect_disguised_telltale_key(npc: Mapping[str, Any]) -> str:
         return "telltale_shadow"
     if "stalker" in flags:
         return "telltale_unblinking"
+    if isinstance(actor_physical_state, Mapping):
+        comp = str(actor_physical_state.get("composure") or "").strip().lower()
+        loc_low = str(location or "").strip().lower()
+        if (
+            comp == "disheveled"
+            and venue != "gym"
+            and not any(tok in loc_low for tok in ("shower", "locker", "bath", "onsen", "jacuzzi", "pool"))
+        ):
+            return "telltale_disheveled"
     return ""
 
 
@@ -345,6 +362,7 @@ def resolve_actor_activity_bundle(
     lang: str = "en",
     session_id: int = 0,
     day: int = 1,
+    actor_physical_state: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Computes server-evaluated actor activity tag, focus DC modifier, SDXL poses, and F1 telltale gating."""
     if is_combat or is_erotic:
@@ -389,7 +407,12 @@ def resolve_actor_activity_bundle(
         base_key = "packing_up"
 
     # F1: Strict server-side PER telltale check (NEVER leak telltale_tag / cover_tag keys).
-    telltale_key = _detect_disguised_telltale_key(npc)
+    telltale_key = _detect_disguised_telltale_key(
+        npc,
+        actor_physical_state=actor_physical_state,
+        location=location,
+        venue=venue,
+    )
     telltale_spotted = bool(telltale_key and int(max_party_per) >= TELLTALE_PER_DC)
     effective_key = telltale_key if telltale_spotted else base_key
 

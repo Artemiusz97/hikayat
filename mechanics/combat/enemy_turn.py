@@ -419,9 +419,24 @@ def resolve_enemy_combat_phase(ctx: Dict[str, Any]) -> None:
         base_hit = 50 + (enemy_atk_attrs.get("acc", 66) - (target_attrs.get("eva", 11) - optics_bonus))
         if t_user_id == acting_user_id and action.get("tier") in ("fail", "failure", "crit_fail"):
             base_hit += 25
+        e_crit_roll_max = 10
+        dom_ctx = session.get("_active_anomalous_domain") if isinstance(session, dict) else None
+        if isinstance(dom_ctx, dict) and dom_ctx.get("active") and not dom_ctx.get("pacified"):
+            dom_cmods = dom_ctx.get("combat_modifiers") if isinstance(dom_ctx.get("combat_modifiers"), dict) else {}
+            if float(dom_cmods.get("enemy_crit_bonus") or 0.0) > 0:
+                e_crit_roll_max += int(round(float(dom_cmods["enemy_crit_bonus"]) * 100))
+            if float(dom_cmods.get("enemy_regen_pct") or 0.0) > 0 and enemy.get("hp", 0) > 0:
+                regen_amt = max(1, int(round(int(enemy.get("max_hp", 20) or 20) * float(dom_cmods["enemy_regen_pct"]))))
+                enemy["hp"] = min(int(enemy.get("max_hp", 20) or 20), int(enemy["hp"]) + regen_amt)
+            e_amp_map = dom_cmods.get("enemy_element_amp") if isinstance(dom_cmods.get("enemy_element_amp"), dict) else {}
+            if e_amp_map:
+                e_amp_cur = dict(enemy_atk_attrs.get("elemental_amp") or {})
+                for ek, ev in e_amp_map.items():
+                    e_amp_cur[str(ek).lower()] = min(0.60, round(float(e_amp_cur.get(str(ek).lower(), 0.0) or 0.0) + float(ev or 0.0), 3))
+                enemy_atk_attrs["elemental_amp"] = e_amp_cur
         hit_chance = max(20, min(95, base_hit))
         roll = random.randint(1, 100)
-        e_tier = "crit_success" if roll <= 10 else ("success" if roll <= hit_chance else "fail")
+        e_tier = "crit_success" if roll <= e_crit_roll_max else ("success" if roll <= hit_chance else "fail")
 
         e_res = calculate_tactical_damage(
             attacker_attrs=enemy_atk_attrs,
@@ -475,6 +490,14 @@ def resolve_enemy_combat_phase(ctx: Dict[str, Any]) -> None:
                 combat_log=combat_log,
                 is_anom_combat=is_anom_combat,
             )
+            if actual_dmg > 0 and isinstance(dom_ctx, dict) and dom_ctx.get("active") and not dom_ctx.get("pacified"):
+                dom_cm_e = dom_ctx.get("combat_modifiers") or {}
+                ls_pct = float(dom_cm_e.get("enemy_lifesteal") or 0.0)
+                if ls_pct > 0 and enemy.get("hp", 0) > 0:
+                    ls_heal = max(1, int(round(actual_dmg * ls_pct)))
+                    enemy["hp"] = min(int(enemy.get("max_hp", 20) or 20), int(enemy["hp"]) + ls_heal)
+                if dom_cm_e.get("bio_rot") and chosen_target.get("hp", 0) > 0 and random.random() < 0.25:
+                    try_inflict_status(chosen_target, target_attrs, "Poisoned [2 turns]", combat_log)
 
             if target_name in player_names:
                 if enemy["name"] not in attackers_against_player:

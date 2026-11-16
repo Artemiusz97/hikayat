@@ -597,6 +597,16 @@ async def get_merchant_shop(
     is_shop_open = True
     shop_closed_reason = ""
     staff_keeper_name = ""
+    valid_loc_types: list[str] = []
+    if not is_phone_shop and not explicit_merchant_type and not bool(merchant.get("is_faction_quartermaster")):
+        loc_stores_init = get_available_merchant_types_for_location(loc, scen_key=scen_key) or []
+        valid_loc_types = [
+            str(s.get("type") or "").strip()
+            for s in loc_stores_init
+            if s.get("type") and not (is_anom_scen and s.get("type") in ("spellbook_merchant", "magic_merchant"))
+        ]
+        if valid_loc_types and m_type not in valid_loc_types:
+            m_type = valid_loc_types[0]
     if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
         turn_no = int(session.get("turn_count") or 0)
         shop_avail = await adb(
@@ -640,6 +650,9 @@ async def get_merchant_shop(
             elif venue_avail.get("reason"):
                 shop_avail = venue_avail
 
+        if shop_avail and shop_avail.get("reason") == "club_quartermaster" and valid_loc_types and m_type not in valid_loc_types:
+            m_type = "club_merchant" if "club_merchant" in valid_loc_types else valid_loc_types[0]
+
         is_shop_open = bool(shop_avail.get("available"))
         if not is_shop_open:
             shop_closed_reason = str(shop_avail.get("reason") or "no_merchant")
@@ -659,21 +672,27 @@ async def get_merchant_shop(
     )
 
     stock_field = "phone_stock" if is_phone_shop else "stock"
+    moved_store = bool(
+        not is_phone_shop
+        and not is_monastic_member_shrine
+        and merchant.get("active_store_key")
+        and store_key != merchant.get("active_store_key")
+    )
     catalogue, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, cur_day, cur_min)
-    if is_shop_open and needs_restock and (switched_store or not merchant.get(stock_field)):
+    if is_shop_open and needs_restock and (switched_store or moved_store or not merchant.get(stock_field)):
         inv = await adb(db.get_inventory, user_id)
         party = [(dict(char), inv)]
         arch_meta = MERCHANT_ARCHETYPES.get(m_type, MERCHANT_ARCHETYPES.get("general_merchant", {}))
         restock_name = (
             "Express E-Shop Delivery"
             if is_phone_shop
-            else (staff_keeper_name or (arch_meta.get("title") if switched_store else (merchant.get("flavor_name") or arch_meta.get("title") or "Local Merchant")))
+            else (staff_keeper_name or (arch_meta.get("title") if (switched_store or moved_store) else (merchant.get("flavor_name") or arch_meta.get("title") or "Local Merchant")))
         )
         try:
             shop_data = await generate_merchant_shop(
                 party=party,
                 merchant_name=restock_name,
-                merchant_description="Instant drone & courier delivery straight to your location." if is_phone_shop else (arch_meta.get("intro_template") if switched_store else (merchant.get("flavor_description") or "")),
+                merchant_description="Instant drone & courier delivery straight to your location." if is_phone_shop else (arch_meta.get("intro_template") if (switched_store or moved_store) else (merchant.get("flavor_description") or "")),
                 session=session,
                 is_phone_shop=is_phone_shop,
                 merchant_type=m_type
@@ -713,7 +732,7 @@ async def get_merchant_shop(
             merchant["discount_pct"] = catalogue.get("discount_pct", 0)
             merchant["available"] = True
         await adb(db.save_merchant_state, session_id, merchant)
-    elif is_shop_open and catalogue and (switched_store or not merchant.get(stock_field)):
+    elif is_shop_open and catalogue and (switched_store or moved_store or not merchant.get(stock_field)):
         merchant[stock_field] = catalogue.get("stock", [])
         if not is_phone_shop:
             merchant["merchant_type"] = m_type
@@ -724,7 +743,7 @@ async def get_merchant_shop(
             merchant["haggle_attempts"] = catalogue.get("haggle_attempts", merchant.get("haggle_attempts", 0))
             merchant["discount_pct"] = catalogue.get("discount_pct", merchant.get("discount_pct", 0))
             merchant["available"] = True
-            if switched_store:
+            if switched_store or moved_store:
                 await adb(db.save_merchant_state, session_id, merchant)
 
     # If phone shop stock has fewer than 6 items, supplement with diverse catalog items
@@ -846,7 +865,7 @@ async def get_merchant_shop(
 
     arch_info = MERCHANT_ARCHETYPES.get(m_type, {})
     merchant_name = "Express E-Shop" if is_phone_shop else (
-        staff_keeper_name or (arch_info.get("title") if switched_store else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant"))
+        staff_keeper_name or (arch_info.get("title") if (switched_store or moved_store) else (merchant.get("flavor_name") or arch_info.get("title") or "Traveling Merchant"))
     )
     if is_phone_shop:
         merchant_desc = "Order snacks, gifts, and gear for immediate delivery."

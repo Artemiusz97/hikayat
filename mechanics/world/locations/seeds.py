@@ -112,7 +112,12 @@ def get_scenario_seed_data(scenario_key: str) -> dict:
         scen_data = data.get("fantasy") or data.get("high_school_drama") or {}
     out = dict(scen_data)
     if "zones" in out:
-        out["zones"] = _filter_seed_zones_for_nsfw(out.get("zones") or [], allow_nsfw)
+        filtered = _filter_seed_zones_for_nsfw(out.get("zones") or [], allow_nsfw)
+        out["zones"] = ensure_school_club_topology_in_zones(
+            filtered,
+            scenario_key=scenario_key or "",
+            allow_nsfw=allow_nsfw,
+        )
     return out
 
 
@@ -229,6 +234,21 @@ def is_school_scenario(scenario_key: str) -> bool:
 def get_session_school_name(session_id: int = 0, scenario_key: str = "high_school_drama") -> str:
     """Retrieves or deterministically generates the unique dynamic school name for a session."""
     if session_id:
+        try:
+            wnodes = db.get_session_world_nodes(session_id) or []
+            for n in wnodes:
+                if (
+                    n.get("node_type") == "ZONE"
+                    and n.get("node_id") in ("zone_school_campus", "zone_school_main", "zone_school", "zone_campus")
+                ):
+                    z_node_name = str(n.get("name") or "").strip()
+                    if z_node_name and "{" not in z_node_name and z_node_name not in (
+                        "Main Academy Campus", "Main Academy Building", "World Region"
+                    ):
+                        return z_node_name
+        except Exception:
+            pass
+
         existing = db.get_session_locations(session_id)
         for r in existing:
             z = r.get("zone_name") or ""
@@ -237,10 +257,15 @@ def get_session_school_name(session_id: int = 0, scenario_key: str = "high_schoo
                 "School Grounds & Athletics", "Local Park & Waterfront", "World Region",
                 "Starting Zone", "Main Area", "Seaside & Coastal Bay", "Recreational Mountain Park", "Recreational Park"
             ):
+                loc_id = r.get("location_id") or ""
                 p_name = r.get("primary_name") or ""
                 s_name = r.get("sub_name") or ""
                 if (
-                    p_name in (
+                    loc_id in ("sub_school_gate", "sub_homeroom", "sub_student_council", "loc_student_council", "loc_homeroom")
+                    or "Main Academic Building" in p_name
+                    or "Student Council & Clubroom Wing" in p_name
+                    or "Student Council Executive Office" in s_name
+                    or p_name in (
                         "Main Campus Building", "Homeroom Classroom", "Empty Classroom", "School Hallways", "2F Hallway",
                         "Teachers' Staff Room", "School Library", "Chemistry & Science Lab",
                         "School Rooftop", "Gymnasium", "Main Gymnasium", "School Main Gates"
@@ -419,6 +444,14 @@ def get_session_agency_hq_name(session_id: int = 0, scenario_key: str = "urban_a
     from namegen import generate_agency_hq_name
     h_val = int(session_id) if session_id else None
     return generate_agency_hq_name(scenario=scenario_key, hash_val=h_val)
+
+def get_session_agency_residence_name(session_id: int = 0, scenario_key: str = "anomalous_incursions") -> str:
+    """Generates a dynamic agency residential hall facility name matching the agency acronym."""
+    from namegen import generate_agency_name, format_org_acronym
+    h_val = int(session_id) if session_id else None
+    agency = generate_agency_name(scenario=scenario_key, hash_val=h_val)
+    acronym = format_org_acronym(agency)
+    return f"{acronym} Residential Hall" if acronym else f"{agency} Residential Hall"
 
 
 def get_session_private_agency_name(session_id: int = 0, scenario_key: str = "anomalous_incursions", agency_index: int = 1) -> str:
@@ -1127,13 +1160,183 @@ def get_session_player_desk_name(session_id: int = 0, char_name: str = "") -> st
         return f"{clean_name}'s Desk"
     return "Player's Desk"
 
+_SCHOOL_CAMPUS_HQ_KEYWORDS = (
+    "student council", "stuco", "school council", "council office", "student union",
+    "clubroom", "school auditorium", "campus auditorium", "drama theater", "auditorium stage",
+    "homeroom", "classroom", "school library", "library annex", "science & robotics lab",
+    "martial arts dojo", "music wing", "culinary kitchen", "rooftop astronomy", "school rooftop",
+    "behind gym", "main gymnasium", "varsity athletic", "athletic directorate", "athletics pavilion",
+    "old storage room 3-b", "esports", "gaming club", "boiler-room den", "boiler room",
+    "velvet basement salon", "abandoned old campus",
+    "drama club", "occult & mystery club", "disciplinary committee", "prefect",
+)
+
+_MAJOR_SCHOOL_CLUB_FACILITY_MAP = [{'id': 'loc_student_council_facility', 'name': 'Student Council Office', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'theme': 'Executive Student Governance Suite & Council Chambers', 'features': 'Glass notice cases, polished oak council desks, petition boxes, requisition window', 'sensory': 'Quiet scratch of fountain pens, muffled printer hum, faint scent of cedar polish', 'sub_locations': [{'id': 'loc_stuco_foyer', 'name': 'Council Office Reception Foyer', 'is_entrance': 1, 'props': ['Polished Bulletin Glass Case', 'Receptionist Counter Desk', 'Framed Charter of Student Governance', 'Velvet Rope Waiting Bench']}, {'id': 'loc_student_council', 'name': 'Executive Council Chamber', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Presidential Oak Desk', 'Council Conference Table', 'Campus Budget Ledger Cabinet', 'Crest-Carved Dais']}, {'id': 'loc_stuco_notice_board', 'name': 'Campus Directive & Petition Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Cork Directive Board', 'Club Charter Petition Box', 'Disciplinary Docket Clipboard', 'Brass Stamp Carousel']}, {'id': 'loc_stuco_quartermaster', 'name': 'Council Requisition & Supply Counter', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Locked Supply Cage', 'Stationery & Permit Ledger', 'Campus Event Permit Terminal', 'Requisition Stamp Press']}, {'id': 'loc_stuco_archive_vault', 'name': 'Soundproof Presidential Archive Vault', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Steel Combination Filing Vault', 'Confidential Student Dossiers', 'Leather Corner Settee', 'Heavy Acoustic Oak Door']}]}, {'id': 'loc_drama_club_facility', 'name': 'Campus Auditorium & Drama Theater', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'theme': 'Grand Collegiate Proscenium Theater & Backstage Wing', 'features': 'Crimson stage curtains, footlight troughs, backstage callboards, costume racks', 'sensory': 'Warm dust in spotlight beams, faint greasepaint and cedarwood scent, hushed stage echoes', 'sub_locations': [{'id': 'loc_drama_foyer', 'name': 'Theater Box-Office & Velvet Foyer', 'is_entrance': 1, 'props': ['Brass Box-Office Window', 'Framed Premiere Playbills', 'Crimson Velvet Rope Barrier', 'Ornate Lobby Chandelier']}, {'id': 'loc_auditorium_stage', 'name': 'Main Auditorium Stage & Orchestra Pit', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Stage Footlight Troughs', 'Heavy Velvet Proscenium Curtains', "Director's Blocking Chair", 'Tiered Velvet Seating']}, {'id': 'loc_drama_callboard', 'name': 'Backstage Casting & Production Callboard', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Cork Callboard with Audition Slips', 'Rehearsal Call-Sheet Clipboard', 'Stage Crew Task Schedule', 'Script Revision Shelf']}, {'id': 'loc_drama_wardrobe', 'name': 'Costume Wardrobe & Prop Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Rolling Period Costume Racks', 'Theatrical Makeup & Wig Counter', 'Stage-Prop Workbench', 'Tailoring Mannequins']}, {'id': 'loc_drama_dressing_room', 'name': 'Starlet Private Dressing Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Bulb-Lit Vanity Mirror', 'Velvet Chaise Lounge', 'Full-Length Tri-Fold Screen', 'Lockable Brass Dressing Latch']}]}, {'id': 'loc_nsfw_club_facility', 'name': 'Velvet Basement Salon', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'is_hidden': True, 'discovered': False, 'access_tier': 'restricted', 'theme': 'Hidden Underground Velvet Salon & After-Hours Boudoir', 'features': 'Soundproof iron cellar doors, brass sconces, chandelier lounge, curtained alcoves', 'sensory': 'Velvet-muffled music, amber perfume and spiced tea, warm candlelit haze', 'sub_locations': [{'id': 'loc_nsfw_boiler_stair', 'name': 'Locked Cellar Door & Velvet Stairwell', 'is_entrance': 1, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Concealed Heavy Iron Cellar Door', 'Crimson Stairwell Carpet', 'Brass Keyhole Escutcheon', 'Dim Amber Wall Sconce']}, {'id': 'loc_nsfw_faction_hq', 'name': 'Main Velvet Salon & Chandelier Lounge', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'access_tier': 'restricted', 'is_private_intimate': True, 'privacy_level': 'private', 'props': ['Concealed Rotating Bookcase', 'Plush Crimson Velvet Loungers', 'Candelabra Refreshment Bar', 'Low Smoked-Glass Table']}, {'id': 'loc_nsfw_request_board', 'name': 'Whispered Favors & Secret Ledger', 'has_bounty_board': True, 'nsfw_only': True, 'is_discreet': True, 'access_tier': 'restricted', 'props': ['Wax-Sealed Velvet Request Board', 'Leatherbound Pledge Ledger', 'Scented Invitation Parchments', 'Privacy Bell Chime']}, {'id': 'loc_nsfw_boutique', 'name': 'Silk & Curio Apothecary Counter', 'has_merchant_shop': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Display Cabinet of Silk Goods', 'Amber Apothecary Phials', 'Perfume & Massage Oil Tray', 'Discrete Counter Screen']}, {'id': 'loc_nsfw_alcoves', 'name': 'Soundproof Curtain Boudoir Alcoves', 'is_discreet': True, 'is_private_intimate': True, 'privacy_level': 'private', 'is_enclosed': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Floor-to-Ceiling Velvet Drapes', 'Tufted Satin Daybeds', 'Warm Indirect Candlelight', 'Acoustic-Padded Alcove Walls']}]}]
+
+_SCHOOL_ATHLETICS_REQUIRED_ROOMS = [{'id': 'loc_athletics_foyer', 'name': 'Trophy Hall & Gymnasium Foyer', 'is_entrance': 1, 'props': ['Illuminated Silver Trophy Case', 'Varsity Championship Banners', 'Equipment Check-Out Counter', 'Rubber-Matted Athletics Foyer']}, {'id': 'loc_gymnasium', 'name': 'Main Gymnasium & Varsity Court', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Polished Hardwood Basketball Court', 'Scoreboard Control Table', 'Equipment & Gym Storeroom', 'Upper Concourse Bleachers']}, {'id': 'loc_athletics_board', 'name': 'Tournament Roster & Challenge Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Inter-School Match Bracket Board', 'Varsity Time-Trial Leaderboard', "Coach's Conditioning Noticeboard", 'Sign-Up Clipboard Bench']}, {'id': 'loc_athletics_equipment', 'name': 'Varsity Gear & Training Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Varsity Apparel & Gear Rack', 'Sports Electrolyte Chiller', 'Protective Tape & Brace Shelf', 'Quartermaster Issue Window']}, {'id': 'loc_athletics_hydro_room', 'name': 'Locked Physio & Hydrotherapy Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Stainless Hydrotherapy Tub', 'Padded Sports Massage Table', 'Frosted Medical Glass Door', 'Towel & Ice-Pack Warmer']}]
+
+_SCHOOL_MINOR_ROOM_SPECS = {
+    "behind_gym": {'id': 'loc_behind_gym_sheds', 'name': 'Behind Gym Storage Sheds', 'is_discreet': True, 'privacy_level': 'semi_private', 'is_faction_hq': True, 'is_minor_club_hq': True, 'has_bounty_board': True, 'has_merchant_shop': True, 'club_tier': 'minor', 'props': ['Exterior Concrete Buttress', 'Brawler Hangout Benches', 'Behind Equipment Shed', 'Graffiti Brick Wall']},
+    "occult": {'id': 'loc_old_storage_3b', 'name': 'Old Storage Room 3-B', 'is_discreet': True, 'privacy_level': 'semi_private', 'is_faction_hq': True, 'is_minor_club_hq': True, 'has_bounty_board': True, 'has_merchant_shop': True, 'club_tier': 'minor', 'faction_name': 'Occult & Mystery Club', 'props': ['Chalk-Traced Ritual Worktable', 'Cork Board of Urban Legends', 'Locked Curio & Talisman Trunk', 'Cardboard Stacks of Old Yearbooks']},
+    "gaming": {'id': 'loc_gaming_clubroom', 'name': 'Esports & Gaming Clubroom', 'privacy_level': 'public', 'is_faction_hq': True, 'is_minor_club_hq': True, 'has_bounty_board': True, 'has_merchant_shop': True, 'club_tier': 'minor', 'faction_name': 'Esports & Gaming Club', 'props': ['Glow-Lit LAN Rig Desks', 'Retro Arcade & Console Corner', 'Tournament Bracket Whiteboard', 'Snack Fridge & Hardware Counter']},
+    "boiler": {'id': 'loc_delinquent_boiler_den', 'name': 'Abandoned Wing Boiler-Room Den', 'is_discreet': True, 'privacy_level': 'semi_private', 'is_faction_hq': True, 'is_minor_club_hq': True, 'has_bounty_board': True, 'has_merchant_shop': True, 'club_tier': 'minor', 'props': ['Idle Cast-Iron Boiler Tank', 'Crate & Carpet Hangout Sofas', 'Chalk-Marked Turf & Favor Board', 'Hidden Contraband Locker']},
+}
+
+
+def is_major_school_club(faction_name: str, hq_name: str = "") -> bool:
+    """Returns True only for the 4 designated Major School Clubs (dedicated Tier 2 facilities)."""
+    combined = f"{faction_name or ''} {hq_name or ''}".lower().strip()
+    if not combined:
+        return False
+    if any(k in combined for k in ("esport", "e-sport", "gaming club", "video game")):
+        return False
+    return any(
+        kw in combined
+        for kw in (
+            "student council",
+            "executive council chamber",
+            "loc_student_council",
+            "stuco",
+            "drama club",
+            "drama theater",
+            "campus auditorium",
+            "auditorium stage",
+            "loc_drama_club",
+            "loc_auditorium",
+            "varsity athletic",
+            "athletic directorate",
+            "sports club",
+            "main gymnasium",
+            "loc_sports_club",
+            "velvet basement",
+            "nsfw_club",
+            "loc_nsfw_club",
+            "loc_nsfw_faction_hq",
+            "hedonist",
+        )
+    )
+
+
+def ensure_school_club_topology_in_zones(
+    zones: list[dict],
+    session_id: int = 0,
+    scenario_key: str = "",
+    allow_nsfw: bool | None = None,
+) -> list[dict]:
+    """
+    Normalizes school-campus zones in memory so Major School Clubs always own
+    dedicated Tier 2 facilities (each with 5 core functional Tier 3 rooms) and
+    Minor School Clubs inhabit single all-in-one Tier 3 rooms inside parent wings.
+    No-op for non-school scenarios (including Anomalous Incursions).
+    """
+    if not zones:
+        return []
+    scen = str(scenario_key or "")
+    try:
+        import scenario_data
+        is_school = is_school_scenario(scen) or scenario_data.is_anomalous_high_school_scenario(scen)
+        is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scen)
+        if allow_nsfw is None:
+            allow_nsfw = bool(scenario_data.is_nsfw_scenario(scen))
+    except Exception:
+        low_s = scen.lower()
+        is_anom_hs = "anomalous_high_school" in low_s
+        is_school = is_school_scenario(scen) or is_anom_hs
+        if allow_nsfw is None:
+            allow_nsfw = "nsfw" in low_s
+    if not is_school:
+        return [dict(z) for z in zones]
+
+    import copy as _copy
+    out_zones: list[dict] = []
+    for z in zones:
+        z_copy = _copy.deepcopy(z)
+        z_id = z_copy.get("id", "")
+        if z_id not in ("zone_school_main", "zone_school_campus"):
+            out_zones.append(z_copy)
+            continue
+
+        is_anom_zone = is_anom_hs or z_id == "zone_school_campus"
+        athletics_id = "loc_school_athletics" if is_anom_zone else "bld_school_athletics"
+        clubs_id = "loc_school_clubs" if is_anom_zone else "bld_school_arts"
+        abandoned_id = "loc_abandoned_school_wing" if is_anom_zone else "bld_abandoned_school"
+
+        raw_prims = z_copy.get("primary_locations") or []
+        major_ids = {"loc_student_council_facility", "loc_drama_club_facility", "loc_nsfw_club_facility"}
+        prims = [p for p in raw_prims if p.get("id") not in major_ids]
+        new_prims: list[dict] = []
+        inserted_majors = False
+
+        def _append_majors() -> None:
+            for mf in _MAJOR_SCHOOL_CLUB_FACILITY_MAP:
+                if mf.get("nsfw_only") and not allow_nsfw:
+                    continue
+                new_prims.append(_copy.deepcopy(mf))
+
+        for p in prims:
+            pid = p.get("id", "")
+            if pid == athletics_id:
+                p["name"] = "Varsity Athletic Directorate & Gymnasium"
+                p["is_faction_hq"] = True
+                p["club_tier"] = "major"
+                p["faction_name"] = "Varsity Athletic Directorate"
+                req_ids = {r["id"] for r in _SCHOOL_ATHLETICS_REQUIRED_ROOMS} | {"loc_behind_gym_sheds", "sub_gym_foyer", "sub_gym_court"}
+                kept = [s for s in (p.get("sub_locations") or []) if s.get("id") not in req_ids]
+                p["sub_locations"] = _copy.deepcopy(_SCHOOL_ATHLETICS_REQUIRED_ROOMS) + kept + [_copy.deepcopy(_SCHOOL_MINOR_ROOM_SPECS["behind_gym"])]
+                new_prims.append(p)
+            elif pid == clubs_id:
+                p["name"] = "General Student Clubroom Wing" if is_anom_zone else "Cultural & Student Clubroom Wing"
+                drop_ids = {"loc_student_council", "sub_student_council", "loc_auditorium_stage", "sub_occult_clubroom", "loc_old_storage_3b", "loc_gaming_clubroom"}
+                kept = [s for s in (p.get("sub_locations") or []) if s.get("id") not in drop_ids]
+                p["sub_locations"] = kept + [
+                    _copy.deepcopy(_SCHOOL_MINOR_ROOM_SPECS["occult"]),
+                    _copy.deepcopy(_SCHOOL_MINOR_ROOM_SPECS["gaming"]),
+                ]
+                new_prims.append(p)
+                _append_majors()
+                inserted_majors = True
+            elif pid == abandoned_id:
+                drop_ids = {"loc_nsfw_faction_hq", "loc_old_storage_3b", "loc_delinquent_boiler_den"}
+                kept = [s for s in (p.get("sub_locations") or []) if s.get("id") not in drop_ids]
+                p["sub_locations"] = kept + [_copy.deepcopy(_SCHOOL_MINOR_ROOM_SPECS["boiler"])]
+                new_prims.append(p)
+            else:
+                new_prims.append(p)
+
+        if not inserted_majors:
+            _append_majors()
+
+        z_copy["primary_locations"] = new_prims
+        out_zones.append(z_copy)
+    return out_zones
+_SCHOOL_CLUB_CATEGORIES = frozenset({
+    "council", "club", "delinquents", "sports", "nsfw_club", "school_club", "discipline"
+})
+
+
+def _is_school_campus_hq(faction_name: str, primary_hq: str, scen_key: str = "", session_id: int = 0) -> bool:
+    """Returns True when a faction HQ belongs inside the school campus zone."""
+    if is_school_scenario(scen_key):
+        return True
+    combined = f"{faction_name or ''} {primary_hq or ''}".lower()
+    if any(k in combined for k in _SCHOOL_CAMPUS_HQ_KEYWORDS):
+        return True
+    if session_id and faction_name:
+        try:
+            fac_row = db.get_faction(session_id, faction_name)
+            if fac_row and str(fac_row.get("category") or "").strip().lower() in _SCHOOL_CLUB_CATEGORIES:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen_key: str = "high_school_drama", hq_name: str = "") -> str:
     """
     Provisions a distinct, sensible Tier 2 Primary Location (and rich Tier 3 Sub-Areas)
     in SQLite for a newly discovered or created faction HQ.
     Returns the clean Tier 2 Primary Location name.
     """
-    import db
     from scenario_data import has_tag
     from mechanics.social.factions import infer_default_hq_location
     
@@ -1152,8 +1355,139 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
         except Exception:
             seeded_zones = []
 
-    if is_school_scenario(scen_key):
-        target_zone = get_session_school_name(session_id, scen_key) or (seeded_zones[0] if seeded_zones else "Westlake Academy")
+    is_school_hq = _is_school_campus_hq(faction_name, primary_hq, scen_key, session_id=session_id)
+    if is_school_hq:
+        target_zone = get_session_school_name(session_id, scen_key)
+        if seeded_zones and target_zone not in seeded_zones:
+            school_seeded = next(
+                (
+                    z for z in seeded_zones
+                    if any(k in z.lower() for k in ("academy", "high school", "school campus", "institute"))
+                    and "university" not in z.lower()
+                ),
+                None,
+            )
+            if school_seeded:
+                target_zone = school_seeded
+        if not target_zone:
+            target_zone = seeded_zones[0] if seeded_zones else "Westlake Academy"
+
+        existing_locs_check = db.get_session_locations(session_id) or [] if session_id else []
+        if not is_major_school_club(faction_name, primary_hq):
+            # Minor school clubs live as single all-in-one Tier 3 rooms inside an existing campus wing
+            try:
+                wnodes_check = db.get_session_world_nodes(session_id) or []
+            except Exception:
+                wnodes_check = []
+            for wn in wnodes_check:
+                if wn.get("node_type") == "ROOM" and (wn.get("name") or "").strip().lower() == hq_low:
+                    if session_id and faction_name:
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
+                                (primary_hq, wn.get("node_id") or "", session_id, faction_name),
+                            )
+                            conn.commit()
+                    return primary_hq
+            for loc_row in existing_locs_check:
+                if (loc_row.get("sub_name") or "").strip().lower() == hq_low:
+                    if session_id and faction_name:
+                        matched_nid = db.resolve_node_id_from_location(session_id, primary_hq, prefer_facility=False) or ""
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
+                                (primary_hq, matched_nid, session_id, faction_name),
+                            )
+                            conn.commit()
+                    return primary_hq
+
+            # Resolve parent wing facility (General Student Clubroom Wing / Cultural & Student Clubroom Wing)
+            wing_node = next(
+                (
+                    wn for wn in wnodes_check
+                    if wn.get("node_type") == "FACILITY"
+                    and wn.get("node_id") in ("loc_school_clubs", "bld_school_arts")
+                ),
+                None,
+            )
+            wing_name = (
+                wing_node["name"]
+                if wing_node
+                else next(
+                    (
+                        r.get("primary_name")
+                        for r in existing_locs_check
+                        if any(k in (r.get("primary_name") or "").lower() for k in ("clubroom wing", "student union", "cultural"))
+                    ),
+                    "General Student Clubroom Wing",
+                )
+            )
+            wing_loc_zone = (
+                next((r.get("zone_name") for r in existing_locs_check if r.get("primary_name") == wing_name), None)
+                or target_zone
+            )
+            room_id = f"loc_{_slugify(wing_loc_zone)}_{_slugify(primary_hq)}"
+            if not any((r.get("location_id") == room_id) or ((r.get("sub_name") or "").strip().lower() == hq_low) for r in existing_locs_check):
+                db.save_session_location(
+                    session_id=session_id,
+                    location_id=room_id,
+                    zone_name=wing_loc_zone,
+                    primary_name=wing_name,
+                    sub_name=primary_hq,
+                    atmosphere=f"The dedicated minor clubroom of {faction_name}.",
+                    is_dynamic=0,
+                )
+            created_room_nid = ""
+            if wing_node:
+                room_node_id = f"sub_club_{_slugify(primary_hq)}"
+                created_room_nid = room_node_id
+                if not any(wn.get("node_id") == room_node_id for wn in wnodes_check):
+                    db.save_world_node(
+                        session_id=session_id,
+                        node_id=room_node_id,
+                        parent_id=wing_node["node_id"],
+                        name=primary_hq,
+                        node_type="ROOM",
+                        category=wing_node.get("category") or "academic",
+                        privacy_level="public",
+                        is_enclosed=1,
+                        is_transit_hub=0,
+                        access_tier="open",
+                        curfew_start_min=wing_node.get("curfew_start_min"),
+                        curfew_end_min=wing_node.get("curfew_end_min"),
+                        atmosphere=wing_node.get("atmosphere") or f"Clubroom of {faction_name}.",
+                        is_dynamic=0,
+                        state_json={
+                            "is_faction_hq": True,
+                            "is_minor_club_hq": True,
+                            "has_bounty_board": True,
+                            "has_merchant_shop": True,
+                            "club_tier": "minor",
+                            "faction_name": faction_name,
+                            "is_discreet": False,
+                        },
+                    )
+                    db.save_world_edge(
+                        session_id,
+                        wing_node["node_id"],
+                        room_node_id,
+                        travel_minutes=1,
+                        edge_type="pathway",
+                        is_bidirectional=1,
+                    )
+            if session_id and faction_name:
+                matched_nid = created_room_nid or (db.resolve_node_id_from_location(session_id, primary_hq, prefer_facility=False) or "")
+                with db.get_conn() as conn:
+                    conn.execute(
+                        "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
+                        (primary_hq, matched_nid, session_id, faction_name),
+                    )
+                    conn.commit()
+            return primary_hq
+
+        # Major School Club: if already seeded cleanly with sub-locations, do not append duplicate rooms
+        if any((r.get("primary_name") or "").strip().lower() == hq_low for r in existing_locs_check):
+            return primary_hq
     elif seeded_zones:
         hub_match = next(
             (z for z in seeded_zones if any(k in z.lower() for k in ("city center", "capital", "downtown", "settlement", "station", "clocktower", "scavenger", "arcade"))),
@@ -1243,7 +1577,8 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
 
 ENTRANCE_KEYWORDS = (
     "entrance", "door", "foyer", "gate", "archway", "porch", "turnstile",
-    "vestibule", "threshold", "portal", "entryway", "airlock", "hatch", "checkpoint"
+    "vestibule", "threshold", "portal", "entryway", "airlock", "hatch", "checkpoint",
+    "lobby", "reception", "concourse", "plaza", "courtyard", "stairwell"
 )
 
 
@@ -1302,9 +1637,11 @@ def get_facility_entrance_name(fac_name: str) -> str:
         return "Lounge Reception Entrance"
     if "convenience" in low or "store" in low or "shop" in low:
         return "Shop Front Entrance Door"
-    if "house" in low or "residence" in low or "home" in low:
+    if "residen" in low or "dorm" in low or "quarters" in low or "barracks" in low:
+        return "Residential Security Lobby"
+    if "house" in low or "home" in low or "villa" in low or "condo" in low or "bungalow" in low or "mansion" in low:
         return "Front Door & Genkan Entrance"
-    if "tavern" in low or "inn" in low or "pub" in low:
+    if re.search(r"\b(tavern|inn|pub)\b", low):
         return "Tavern Heavy Oak Door"
     if "temple" in low or "shrine" in low or "chapel" in low or "church" in low or "sanctuary" in low:
         return "Sanctuary Grand Archway"
@@ -1376,7 +1713,7 @@ def get_contextual_interior_name(fac_name: str) -> str:
         return "Cash Register & Aisles"
     if "house" in low or "residence" in low or "home" in low:
         return "Living Room"
-    if "tavern" in low or "inn" in low or "pub" in low:
+    if re.search(r"\b(tavern|inn|pub)\b", low):
         return "Common Room & Hearth"
     if "temple" in low or "shrine" in low or "chapel" in low:
         return "Main Sanctuary"

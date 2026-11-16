@@ -748,7 +748,7 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                           or st == "CHA"
                           or is_intimate_action_label(a_lbl)
                       )
-                      if not succ and not is_soc and st in ("STR", "AGI", "END"):
+                      if not succ and not is_soc and a_int != "anomalous_site_action" and st in ("STR", "AGI", "END"):
                           tier_str = str(getattr(c, "tier", None) or (c.get("tier") if isinstance(c, dict) else "")).lower()
                           pct = 0.10 if "crit" in tier_str else 0.05
                           auth_hazard_dmg -= max(1, min(25, int(round(char.get("max_hp", 100) * pct))))

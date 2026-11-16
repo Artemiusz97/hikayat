@@ -446,6 +446,24 @@ def is_node_staffable(node: dict[str, Any] | None, scen_key: str = "fantasy") ->
     if any(kw in name for kw in PRIVATE_RESIDENCE_KEYWORDS):
         return False
 
+    # Never seed mundane shopkeepers/staff inside quarantined anomalous sites, Hostile HQs,
+    # or cordoned Theme Park epicenter rides (protecting AHS minor club dens).
+    from mechanics.world.anomalous_sites.catalog import (
+        AHS_PROTECTED_SUB_IDS,
+        SAFE_EXCLUSION_SITE_IDS,
+        THEME_PARK_EPICENTER_IDS,
+        resolve_anomalous_site,
+    )
+    if node_id not in SAFE_EXCLUSION_SITE_IDS and node_id not in AHS_PROTECTED_SUB_IDS and not state_json.get("is_minor_club_hq"):
+        if node_id in THEME_PARK_EPICENTER_IDS:
+            return False
+        if bool(state_json.get("is_anomalous")):
+            return False
+        parent_id = str(node.get("parent_id") or "").strip().lower()
+        spec = resolve_anomalous_site(node_id=node_id, parent_id=parent_id, location_str=name, curr_node=node)
+        if spec is not None and spec.get("site_type") != "theme_park_night":
+            return False
+
     has_hospitality = any(kw in name for kw in HOSPITALITY_OUTPOST_OVERRIDE_KEYWORDS)
     has_staffed_kw = any(kw in name for kw in STAFFED_VENUE_OVERRIDE_KEYWORDS)
 
@@ -597,9 +615,30 @@ def resolve_slot_fill_role_spec(
 
 def get_crowd_flavor_text(location_str: str, scen_key: str, block_key: str, category: str = "") -> str:
     """Return concise unnamed atmospheric background prose with zero stats, DCs, or JSON tags."""
-    sc_norm = _SCENARIO_FLAVOR_ALIASES.get(str(scen_key or "fantasy").strip().lower(), "fantasy")
+    from mechanics.world.anomalous_sites.catalog import (
+        get_site_crowd_stillness_text,
+        resolve_anomalous_site,
+    )
+    import scenario_data as _sc_data
+
+    eff_scen_raw = str(scen_key or "fantasy").strip().lower()
+    sc_norm = _SCENARIO_FLAVOR_ALIASES.get(eff_scen_raw, "fantasy")
     low = str(location_str or "").strip().lower()
     cat = str(category or "").strip().lower()
+
+    if _sc_data.is_anomalous_incursions_scenario(eff_scen_raw):
+        spec = resolve_anomalous_site(location_str=location_str)
+        if spec:
+            if spec.get("site_type") == "theme_park_night":
+                if block_key == "night" or any(t in low for t in ("hall of mirrors", "mirror labyrinth", "reversed calliope", "midnight carousel")):
+                    still = str(spec.get("crowd_stillness_prose") or "").strip()
+                    if still:
+                        return still
+            else:
+                probe_min = 1380 if block_key == "night" else 720
+                still = get_site_crowd_stillness_text(location_str=location_str, scen_key=eff_scen_raw, current_minute=probe_min)
+                if still:
+                    return still
 
     bucket = "default"
     if any(k in low for k in ("market", "bazaar", "plaza", "mall", "shop", "store", "konbini", "alley", "street", "district")) or cat == "commercial":

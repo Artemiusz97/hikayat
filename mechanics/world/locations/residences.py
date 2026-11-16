@@ -259,6 +259,11 @@ def is_excluded_from_random_incursions(
                 for v in list(STARTER_QUARTERS_MAP.values()) + list(iter_session_realty_catalog(session_id or None))
                 if v.get("name")
             }
+            dyn_pub_res = str(
+                (resolve_starter_quarters_spec("public_agency", session_or_id=session_id or None) or {}).get("name") or ""
+            ).strip().lower()
+            if dyn_pub_res:
+                static_names.add(dyn_pub_res)
             static_names.update(
                 {
                     "special agents' residential tower",
@@ -432,13 +437,15 @@ def resolve_agent_residence_blueprint(
             else f"{first_name}'s Private Billet (Unit {unit_num})"
         )
         bed_nid = f"sub_agency_unit_{slug_npc}"
+        from .seeds import get_session_agency_residence_name
+        fac_name = get_session_agency_residence_name(session_id, scen_key or "anomalous_incursions")
         return {
             "npc_id": npc_id,
             "npc_name": full_name,
             "zone_id": "zone_city_center",
             "zone_name": "City Center",
             "facility_node_id": "fac_agency_residence",
-            "facility_name": "Public Agency Residential Hall",
+            "facility_name": fac_name,
             "entrance_node_id": "sub_agency_res_lobby",
             "entrance_name": "Residential Security Lobby & Mailboxes",
             "extra_rooms": [],
@@ -446,7 +453,7 @@ def resolve_agent_residence_blueprint(
             "bedroom_name": room_title,
             "reuse_existing_facility": True,
             "cohabiting_family": False,
-            "residence_display": f"City Center ➔ Public Agency Residential Hall ➔ {room_title}",
+            "residence_display": f"City Center ➔ {fac_name} ➔ {room_title}",
         }
 
     if fac_id == "monastic_order":
@@ -1104,9 +1111,14 @@ def build_realty_payload(
     for row in raw_props:
         pid = str(row.get("property_id") or "")
         if row.get("is_starter"):
-            spec = next(
+            matched_raw = next(
                 (v for v in STARTER_QUARTERS_MAP.values() if v["property_id"] == pid),
-                starter_spec,
+                None,
+            )
+            spec = (
+                resolve_starter_quarters_spec(matched_raw["faction_key"], session_or_id=sess)
+                if matched_raw
+                else starter_spec
             ) or {}
             starter_payload = {
                 **row,

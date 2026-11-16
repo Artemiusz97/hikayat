@@ -951,6 +951,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     if is_autonomy_ping_decline:
         affinity_delta = max(0, affinity_delta)
 
+    _pre_resolve_intent = intent
     resolved_rendezvous, intent = resolve_rendezvous_location(
         session_id=session_id,
         contact_name=contact_name,
@@ -966,6 +967,29 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         history_rows=history_rows,
         scenario=scen_key,
     )
+    if _pre_resolve_intent == "meetup" and intent == "chat" and not resolved_rendezvous:
+        reply_text = (
+            (reply_text.rstrip() + "\n\n" if reply_text.strip() else "")
+            + "*(Quarantine Refusal: Civilian contacts decline meetups inside active anomalous quarantine zones.)*"
+        )
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.world.anomalous_sites import compute_domain_skill_check_modifiers
+            _dom_msg_mod = await db.adb(
+                compute_domain_skill_check_modifiers,
+                session_id,
+                session,
+                int((player_char or {}).get("user_id") or 0),
+                player_char,
+                "INT",
+            )
+            if _dom_msg_mod.get("jam_comms"):
+                reply_text = (
+                    (reply_text.rstrip() + "\n\n" if reply_text.strip() else "")
+                    + "*(Numbers-Station Interference: Subterranean Faraday jamming distorts carrier signal with rhythmic static.)*"
+                )
+        except Exception:
+            pass
 
     # Save messages to SQLite
     await db.adb(db.save_phone_message, session_id, npc_id, sender="player", message=user_message, intent=intent)

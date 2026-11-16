@@ -259,11 +259,11 @@ def _resolve_school_faculty_class_station(
     if re.search(r"\b(?:science|chem\w*|robotics|physics|lab|labs)\b", comb):
         return "loc_science_lab", "Main Academy Campus ➔ Main Campus Building ➔ Chemistry & Science Lab"
     if any(k in comb for k in ("coach", "pe ", "p.e.", "physical")):
-        return "loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"
+        return "loc_gymnasium", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Main Gymnasium & Varsity Court"
     if "music" in comb:
-        return "loc_old_east_music_room", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Old East Wing Music Room"
+        return "loc_old_east_music_room", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Old East Wing Music Room"
     if re.search(r"\b(?:art|arts|fine arts)\b", comb) and "martial" not in comb:
-        return "loc_fine_arts_studio", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Fine Arts Studio"
+        return "loc_fine_arts_studio", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Fine Arts Studio"
     if "homeroom" in comb:
         return "loc_homeroom", "Main Academy Campus ➔ Main Campus Building ➔ Homeroom Classroom"
     return "loc_staff_room", "Main Academy Campus ➔ Main Campus Building ➔ Teachers' Staff Room"
@@ -285,38 +285,44 @@ def _resolve_school_extracurricular_node(
     sport_probe = f"{club} {role} {primary_fac}".lower()
     if "coach" in role.lower():
         if int(current_day or 1) % 2 == 0:
-            return "loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"
-        return "loc_sports_field", "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field"
-    if clique.lower() == "hedonists" or "velvet basement salon" in sport_probe or role.startswith("salon "):
-        return "loc_nsfw_faction_hq", "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Velvet Basement Salon"
+            return "loc_gymnasium", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Main Gymnasium & Varsity Court"
+        return "loc_sports_field", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Athletic Field"
+    if clique.lower() == "hedonists" or "velvet basement salon" in sport_probe or role.lower().startswith("salon "):
+        return "loc_nsfw_faction_hq", "Main Academy Campus ➔ Velvet Basement Salon ➔ Main Velvet Salon & Chandelier Lounge"
     if "nurse" in role or ("infirmary" in sport_probe and "boarded" not in sport_probe):
         return "loc_school_infirmary", "Main Academy Campus ➔ Main Campus Building ➔ School Infirmary"
     if "swim" in sport_probe or "swimming pool" in sport_probe:
-        return "loc_pool", "Main Academy Campus ➔ School Grounds & Athletics ➔ Swimming Pool Facility"
+        return "loc_pool", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Swimming Pool Facility"
     if any(c in sport_probe for c in ("kendo", "martial", "judo", "karate", "aikido", "fencing", "dojo")):
-        return "loc_martial_arts_dojo", "Main Academy Campus ➔ School Grounds & Athletics ➔ Martial Arts Dojo"
+        return "loc_martial_arts_dojo", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Martial Arts Dojo"
     if any(c in sport_probe for c in ("track", "soccer", "football", "baseball", "tennis", "running", "sprinter", "athletic field", "sports_field")):
-        return "loc_sports_field", "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field"
+        return "loc_sports_field", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Athletic Field"
+    if any(k in sport_probe for k in ("boiler", "abandoned wing", "rust-pipe", "scrapyard")):
+        return "loc_delinquent_boiler_den", "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Abandoned Wing Boiler-Room Den"
+    if any(k in sport_probe for k in ("behind gym", "shed", "bleacher")):
+        return "loc_behind_gym_sheds", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Behind Gym Storage Sheds"
+    if any(c in club for c in ("esports", "e-sports", "gaming", "video game")) or clique.lower() == "gamers":
+        return "loc_gaming_clubroom", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Esports & Gaming Clubroom"
     if any(c in club for c in ("gym", "basketball", "volleyball", "athletics", "sports", "badminton", "cheer")):
-        return "loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"
+        return "loc_gymnasium", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Main Gymnasium & Varsity Court"
     if any(c in club for c in ("drama", "theater", "theatre", "acting", "stage")):
-        return "loc_auditorium_stage", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ School Auditorium Stage"
-    if any(c in club for c in ("art", "drawing", "sculpture", "painting", "manga", "photography")):
-        return "loc_fine_arts_studio", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Fine Arts Studio"
-    if any(c in club for c in ("music", "band", "orchestra", "choir", "jazz", "guitar", "piano")):
-        return "loc_old_east_music_room", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Old East Wing Music Room"
+        return "loc_auditorium_stage", "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Main Auditorium Stage & Orchestra Pit"
+    if re.search(r"\barts?\b", club) or any(c in club for c in ("drawing", "sculpture", "painting", "manga", "photography")):
+        return "loc_fine_arts_studio", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Fine Arts Studio"
+    if re.search(r"\bband\b", club) or any(c in club for c in ("music", "orchestra", "choir", "jazz", "guitar", "piano")):
+        return "loc_old_east_music_room", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Old East Wing Music Room"
     if any(c in club for c in ("science", "chem", "biology", "astronomy", "robotics", "physics")):
         return "loc_science_lab", "Main Academy Campus ➔ Main Campus Building ➔ Chemistry & Science Lab"
     if any(c in club for c in ("council", "president", "treasurer", "vice president", "secretary")):
-        return "loc_student_council", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Student Council Office"
+        return "loc_student_council", "Main Academy Campus ➔ Student Council Office ➔ Executive Council Chamber"
     if any(c in club for c in ("library", "book", "literature", "literary", "poetry", "reading")):
         return "loc_library", "Main Academy Campus ➔ Main Campus Building ➔ School Library"
     if any(c in club for c in ("broadcast", "newspaper", "media", "journalism", "radio", "press")):
-        return "loc_broadcasting_room", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Campus Media & Broadcasting Room"
+        return "loc_broadcasting_room", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Campus Media & Broadcasting Room"
     if any(c in club for c in ("garden", "botany", "plant", "floral", "horticulture")):
         return "loc_greenhouse", "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Botanical Glasshouse"
     if any(c in club for c in ("occult", "paranormal", "tarot", "mystery", "supernatural")):
-        return "loc_old_storage_3b", "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Old Storage Room 3-B"
+        return "loc_old_storage_3b", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Old Storage Room 3-B"
 
     # Trait / Role fallbacks when no explicit club string is set
     if any(w in role for w in ("custodian", "groundskeeper", "janitor")):
@@ -327,12 +333,14 @@ def _resolve_school_extracurricular_node(
         return "loc_staff_room", "Main Academy Campus ➔ Main Campus Building ➔ Teachers' Staff Room"
     if "librarian" in role:
         return "loc_library", "Main Academy Campus ➔ Main Campus Building ➔ School Library"
-    if any(t in trait_names for t in ("delinquent", "brawler", "rebel", "truant")) or "delinquent" in role:
-        return "loc_behind_gym_sheds", "Main Academy Campus ➔ School Grounds & Athletics ➔ Behind Gym Storage Sheds"
+    if any(t in trait_names for t in ("delinquent", "brawler", "rebel", "truant")) or "delinquent" in role.lower():
+        if seed_val % 2 == 1:
+            return "loc_delinquent_boiler_den", "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Abandoned Wing Boiler-Room Den"
+        return "loc_behind_gym_sheds", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Behind Gym Storage Sheds"
     if any(t in trait_names for t in ("jock", "athletic", "sporty", "runner", "swimmer")) or any(w in role for w in ("jock", "athlete", "captain")):
         sport_opts = [
-            ("loc_gymnasium", "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium"),
-            ("loc_sports_field", "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field"),
+            ("loc_gymnasium", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Main Gymnasium & Varsity Court"),
+            ("loc_sports_field", "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Athletic Field"),
         ]
         return sport_opts[seed_val % len(sport_opts)]
 
@@ -340,7 +348,7 @@ def _resolve_school_extracurricular_node(
         ("loc_library", "Main Academy Campus ➔ Main Campus Building ➔ School Library"),
         ("loc_courtyard", "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Central Courtyard"),
         ("loc_vending_pavilion", "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Vending Machine Pavilion"),
-        ("loc_clubroom_corridor", "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Student Clubroom Corridor"),
+        ("loc_clubroom_corridor", "Main Academy Campus ➔ General Student Clubroom Wing ➔ Student Clubroom Corridor"),
     ]
     return default_opts[seed_val % len(default_opts)]
 
@@ -605,25 +613,47 @@ _HS_NODE_FALLBACK_PATHS: Dict[str, str] = {
     "loc_science_lab": "Main Academy Campus ➔ Main Campus Building ➔ Chemistry & Science Lab",
     "loc_staff_room": "Main Academy Campus ➔ Main Campus Building ➔ Teachers' Staff Room",
     "loc_school_rooftop": "Main Academy Campus ➔ Main Campus Building ➔ School Rooftop",
-    "loc_gymnasium": "Main Academy Campus ➔ School Grounds & Athletics ➔ Main Gymnasium",
-    "loc_sports_field": "Main Academy Campus ➔ School Grounds & Athletics ➔ Athletic Field",
-    "loc_pool": "Main Academy Campus ➔ School Grounds & Athletics ➔ Swimming Pool Facility",
-    "loc_martial_arts_dojo": "Main Academy Campus ➔ School Grounds & Athletics ➔ Martial Arts Dojo",
-    "loc_male_shower_room": "Main Academy Campus ➔ School Grounds & Athletics ➔ Men's Locker & Shower Room",
-    "loc_female_shower_room": "Main Academy Campus ➔ School Grounds & Athletics ➔ Women's Locker & Shower Room",
-    "loc_behind_gym_sheds": "Main Academy Campus ➔ School Grounds & Athletics ➔ Behind Gym Storage Sheds",
+    "loc_gymnasium": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Main Gymnasium & Varsity Court",
+    "loc_athletics_foyer": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Trophy Hall & Gymnasium Foyer",
+    "loc_athletics_board": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Tournament Roster & Challenge Board",
+    "loc_athletics_equipment": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Varsity Gear & Training Quartermaster",
+    "loc_athletics_hydro_room": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Locked Physio & Hydrotherapy Suite",
+    "loc_sports_field": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Athletic Field",
+    "loc_pool": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Swimming Pool Facility",
+    "loc_martial_arts_dojo": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Martial Arts Dojo",
+    "loc_male_shower_room": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Men's Locker & Shower Room",
+    "loc_female_shower_room": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Women's Locker & Shower Room",
+    "loc_behind_gym_sheds": "Main Academy Campus ➔ Varsity Athletic Directorate & Gymnasium ➔ Behind Gym Storage Sheds",
     "loc_courtyard": "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Central Courtyard",
     "loc_cafeteria": "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Campus Dining Hall & Cafeteria",
     "loc_vending_pavilion": "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Vending Machine Pavilion",
     "loc_greenhouse": "Main Academy Campus ➔ Student Commons & Central Plaza ➔ Botanical Glasshouse",
-    "loc_student_council": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Student Council Office",
-    "loc_auditorium_stage": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ School Auditorium Stage",
-    "loc_fine_arts_studio": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Fine Arts Studio",
-    "loc_old_east_music_room": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Old East Wing Music Room",
-    "loc_broadcasting_room": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Campus Media & Broadcasting Room",
-    "loc_clubroom_corridor": "Main Academy Campus ➔ Cultural Arts & Student Union ➔ Student Clubroom Corridor",
-    "loc_old_storage_3b": "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Old Storage Room 3-B",
-    "loc_nsfw_faction_hq": "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Velvet Basement Salon",
+    "loc_student_council_facility": "Main Academy Campus ➔ Student Council Office",
+    "loc_stuco_foyer": "Main Academy Campus ➔ Student Council Office ➔ Council Office Reception Foyer",
+    "loc_student_council": "Main Academy Campus ➔ Student Council Office ➔ Executive Council Chamber",
+    "loc_stuco_notice_board": "Main Academy Campus ➔ Student Council Office ➔ Campus Directive & Petition Board",
+    "loc_stuco_quartermaster": "Main Academy Campus ➔ Student Council Office ➔ Council Requisition & Supply Counter",
+    "loc_stuco_archive_vault": "Main Academy Campus ➔ Student Council Office ➔ Soundproof Presidential Archive Vault",
+    "loc_drama_club_facility": "Main Academy Campus ➔ Campus Auditorium & Drama Theater",
+    "loc_drama_foyer": "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Theater Box-Office & Velvet Foyer",
+    "loc_auditorium_stage": "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Main Auditorium Stage & Orchestra Pit",
+    "loc_drama_callboard": "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Backstage Casting & Production Callboard",
+    "loc_drama_wardrobe": "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Costume Wardrobe & Prop Quartermaster",
+    "loc_drama_dressing_room": "Main Academy Campus ➔ Campus Auditorium & Drama Theater ➔ Starlet Private Dressing Suite",
+    "loc_fine_arts_studio": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Fine Arts Studio",
+    "loc_old_east_music_room": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Old East Wing Music Room",
+    "loc_broadcasting_room": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Campus Media & Broadcasting Room",
+    "loc_clubroom_corridor": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Student Clubroom Corridor",
+    "loc_old_storage_3b": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Old Storage Room 3-B",
+    "loc_gaming_clubroom": "Main Academy Campus ➔ General Student Clubroom Wing ➔ Esports & Gaming Clubroom",
+    "loc_delinquent_boiler_den": "Main Academy Campus ➔ Abandoned Old Campus Building ➔ Abandoned Wing Boiler-Room Den",
+    "loc_nsfw_club_facility": "Main Academy Campus ➔ Velvet Basement Salon",
+    "loc_nsfw_boiler_stair": "Main Academy Campus ➔ Velvet Basement Salon ➔ Locked Cellar Door & Velvet Stairwell",
+    "loc_nsfw_Boiler_stair": "Main Academy Campus ➔ Velvet Basement Salon ➔ Locked Cellar Door & Velvet Stairwell",
+    "loc_nsfw_faction_hq": "Main Academy Campus ➔ Velvet Basement Salon ➔ Main Velvet Salon & Chandelier Lounge",
+    "loc_nsfw_request_board": "Main Academy Campus ➔ Velvet Basement Salon ➔ Whispered Favors & Secret Ledger",
+    "loc_nsfw_boutique": "Main Academy Campus ➔ Velvet Basement Salon ➔ Silk & Curio Apothecary Counter",
+    "loc_nsfw_alcoves": "Main Academy Campus ➔ Velvet Basement Salon ➔ Soundproof Curtain Boudoir Alcoves",
 }
 
 
@@ -1627,7 +1657,12 @@ def get_npc_schedule(
             schedule["lunch"] = p_path if (not weekend and seed_val % 2 == 0) else s_path
             schedule["afternoon"] = (s_path if field_patrol else p_path) if not weekend else (p_path if on_weekend_duty else s_path)
             schedule["evening"] = s_path
-            schedule["night"] = p_path if night_watch else (home_loc or ("City Center ➔ Public Agency Residential Hall" if fac_id == "public_agency" else "Downtown ➔ Private Apartment"))
+            if not night_watch and not home_loc and fac_id == "public_agency":
+                from .locations import get_session_agency_residence_name
+                _dyn_res_name = get_session_agency_residence_name(int(session_id or 0), scen_key)
+                schedule["night"] = f"Downtown Central City Center ➔ {_dyn_res_name}"
+            else:
+                schedule["night"] = p_path if night_watch else (home_loc or "Downtown ➔ Private Apartment")
 
         schedule.setdefault("commute", schedule.get("morning", p_path))
         schedule.setdefault("class_afternoon", schedule.get("afternoon", p_path))

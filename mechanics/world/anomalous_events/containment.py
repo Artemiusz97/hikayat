@@ -826,11 +826,34 @@ def resolve_anomalous_combat_containment(
     else:
         follow_note = ""
 
+    site_pac_res = None
+    if isinstance(target_enemy, dict) and target_enemy.get("is_site_locus_boss") and target_enemy.get("anomalous_site_id"):
+        try:
+            from mechanics.world.anomalous_sites import complete_site_pacification
+            _t_num_pac = _resolve_session_turn_number(session_id, sess)
+            try:
+                _day_pac, _, _ = db.get_session_time(session_id)
+            except Exception:
+                _day_pac = int(sess.get("current_day", 1) or 1)
+            site_pac_res = complete_site_pacification(
+                int(session_id),
+                str(target_enemy["anomalous_site_id"]),
+                user_id=lead_uid,
+                method=method_str,
+                scen_key=scen_key,
+                current_day=int(_day_pac or 1),
+                turn_number=int(_t_num_pac or 1),
+                party_user_ids=p_uids,
+            )
+        except Exception:
+            site_pac_res = None
+
     live_bonus_suffix = f" *(+{bonus_xp_awarded} Live-Capture Bonus XP & +5 Promotion Rep)*" if is_born_hostile else ""
     refund_q_suffix = f" {refund_res_q['notice']}" if refund_res_q.get("notice") else ""
     conv_suffix = f" {converted_res['notice']}" if converted_res else ""
+    pac_suffix = f"\n{site_pac_res['message']}" if isinstance(site_pac_res, dict) and site_pac_res.get("message") else ""
     icon_used = "🗣️" if act == "combat_persuade" else "🛡️"
-    return {
+    out_payload = {
         "success": True,
         "resolved": True,
         "subdued": True,
@@ -843,9 +866,12 @@ def resolve_anomalous_combat_containment(
         "vault_entry": vault_entry,
         "message": (
             f"{icon_used} Contained **{ent_name}** alive and sealed it into a containment unit!{live_bonus_suffix} "
-            f"Logged to {vault_entry['vault_facility']}.{follow_note}{refund_q_suffix}{conv_suffix}"
+            f"Logged to {vault_entry['vault_facility']}.{follow_note}{refund_q_suffix}{conv_suffix}{pac_suffix}"
         ),
     }
+    if site_pac_res is not None:
+        out_payload["site_pacification"] = site_pac_res
+    return out_payload
 
 
 def handle_killed_non_hostile_entity(

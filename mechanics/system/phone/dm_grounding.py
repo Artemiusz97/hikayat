@@ -381,6 +381,58 @@ def select_npc_preferred_meetup_venue(
     return ""
 
 
+def _is_civilian_quarantined_meetup_loc(
+    session_id: int,
+    contact_name: str,
+    loc_str: str,
+    scenario: str = "",
+    node_id: str = "",
+) -> bool:
+    """
+    Return True if `loc_str`/`node_id` is an active anomalous danger zone/HQ
+    (or Night-Shift Theme Park) AND the contact is a `TAG_CIVILIAN` (`"civilian"`).
+    Special Agents and Folklore Villagers remain eligible for field meetups.
+    """
+    import scenario_data as _dm_sd
+
+    eff_scen = str(scenario or "").strip()
+    if not eff_scen and session_id:
+        try:
+            eff_scen = str((db.get_session(int(session_id)) or {}).get("scenario") or "")
+        except Exception:
+            eff_scen = ""
+    if not (_dm_sd.is_anomalous_incursions_scenario(eff_scen) or _dm_sd.is_anomalous_high_school_scenario(eff_scen)):
+        return False
+
+    from mechanics.social.anomalous_npc_tags import classify_anomalous_npc_tag
+    from mechanics.world.anomalous_sites.catalog import (
+        THEME_PARK_SITE_ID,
+        is_site_dormant_by_schedule,
+        resolve_anomalous_site,
+    )
+
+    npc_tag = classify_anomalous_npc_tag(contact_name, session_id=int(session_id or 0), scen_key=eff_scen)
+    if npc_tag != "civilian":
+        return False
+
+    spec = resolve_anomalous_site(node_id=node_id, location_str=loc_str)
+    if not spec:
+        return False
+    cur_min = 720
+    if session_id:
+        try:
+            cur_min = int(db.get_session_time(int(session_id))[1] or 720)
+        except Exception:
+            cur_min = 720
+    if spec.get("site_type") == "theme_park_night" and 480 <= (cur_min % 1440) < 1320:
+        return False
+    if is_site_dormant_by_schedule(spec, scen_key=eff_scen, current_minute=cur_min, node_id=node_id):
+        return False
+    if spec.get("site_id") == THEME_PARK_SITE_ID and 480 <= (cur_min % 1440) < 1320:
+        return False
+    return True
+
+
 def build_meetup_candidates_and_hint(
     session_id: int,
     session: dict | None,
@@ -438,10 +490,13 @@ def build_meetup_candidates_and_hint(
                 return False
         return True
 
+    c_name_hint = str((contact or {}).get("name") or "") if isinstance(contact, dict) else ""
     public_locs: list[dict] = []
     for loc in all_locs:
         loc_label = " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower()
         if any(pk in loc_label for pk in _MEETUP_EXCLUDED_KEYWORDS):
+            continue
+        if _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, loc_label, scenario=scen_key):
             continue
         if not _is_loc_schedule_accessible(loc):
             continue
@@ -475,6 +530,8 @@ def build_meetup_candidates_and_hint(
                 if not (is_disc or is_lh_or_club):
                     continue
                 h_str = format_node_hierarchy(session_id, nid)
+                if _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, h_str, scenario=scen_key, node_id=nid):
+                    continue
                 parts = [p.strip() for p in h_str.split("➔") if p.strip()]
                 if len(parts) >= 2:
                     row_d = {
@@ -492,12 +549,14 @@ def build_meetup_candidates_and_hint(
         public_locs = [
             loc for loc in all_locs
             if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _MEETUP_EXCLUDED_KEYWORDS)
+            and not _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])), scenario=scen_key)
             and _is_loc_schedule_accessible(loc)
         ]
     if not public_locs:
         public_locs = [
             loc for loc in all_locs
             if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _MEETUP_EXCLUDED_KEYWORDS)
+            and not _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])), scenario=scen_key)
         ]
 
     combined_locs = (discreet_loc_rows + public_locs) if (is_nsfw and is_bold) else (public_locs + discreet_loc_rows)
@@ -632,6 +691,17 @@ def resolve_rendezvous_location(
     Validates, snaps to canonical session_locations / world_nodes, or seeds an open-world rendezvous location.
     Returns (resolved_rendezvous, intent).
     """
+    if known_locations:
+        known_locations = [
+            loc for loc in known_locations
+            if not _is_civilian_quarantined_meetup_loc(
+                session_id,
+                contact_name,
+                " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])),
+                scenario=scenario,
+            )
+        ]
+
     # Fallback: If meetup intent and check succeeded but rendezvous was left blank, check if reply_text named a known location or world_node
     if intent == "meetup" and not rendezvous and check_succeeded:
         for loc in (known_locations or []):
@@ -812,6 +882,16 @@ def resolve_rendezvous_location(
                 )
             except Exception:
                 pass
+
+    if resolved_rendezvous and intent == "meetup":
+        if _is_civilian_quarantined_meetup_loc(session_id, contact_name, resolved_rendezvous, scenario=scenario):
+            log.info(
+                "[phone] Blocked civilian meetup at quarantined anomalous site '%s' for contact '%s'",
+                resolved_rendezvous,
+                contact_name,
+            )
+            resolved_rendezvous = ""
+            intent = "chat"
 
     if resolved_rendezvous and intent == "meetup" and session_id:
         low_rv = resolved_rendezvous.lower()

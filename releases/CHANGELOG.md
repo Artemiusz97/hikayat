@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.1.0** | 2026-11-16 | Minor | Anomalous Sites Package (36 Pacifiable Wild Sites, Spatial Puzzles & Harvesting), School Club & Rival Turf Hardening, Private Residence Access Gates & UI Parity. |
 | **v3.0.0** | 2026-11-15 | **MAJOR** | Living World NPC Autonomy, Epistemic Asymmetry Matrix (`epistemic_facts` / `epistemic_knowledge`), Venue Activity Tags, Boundary UoW Tick & Server Fog-of-War Parity. |
 | **v2.13.0** | 2026-11-15 | Minor | Closed-World NPC Engine (`world_roster`), Anchor-Node Schedules, Residential Fog-of-War, 6-Tier Presence Resolver, Progressive Routine Disclosure & Contacts/Acquaintances UI. |
 | **v2.12.0** | 2026-11-14 | Minor | Combat Submodule Extraction, Boss Telegraph Sanitization, Crash Replay & LLM Tapes, Shielded Rollback & Web/Bot Parity. |
@@ -53,6 +54,19 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.1.0] - 2026-11-16
+
+#### Added & Enhanced
+- **Anomalous Sites Package & 36 Pacifiable Wild Sites (`mechanics/world/anomalous_sites/`, `data/anomalous_sites_catalog.json`)**:
+  - Added modular `catalog.py`, `domain_rules.py`, `puzzles.py`, `harvest.py`, and `lifecycle.py` engines governing 36 pacifiable wild sites plus hostile HQ sites (`loc_cult_sanctum_hq`, `loc_clandestine_syndicate_hq`).
+  - Implemented spatial loop travel checks, element-mapped ward/flare mitigation, multi-step site puzzle resolution (`resolve_anomalous_site_puzzle_step`), midnight site re-knitting (`lazy_midnight_reknit_site`), turn rollback parity, and site pacification harvesting (`complete_site_pacification`).
+- **School Clubs, Rival Turf & Hidden Venue Hardening (`mechanics/social/factions.py`, `mechanics/world/locations/`)**:
+  - Added school club subroom validation (`validate_major_club_subroom_action`), rival/hostile turf blocking (`check_rival_or_hostile_turf_block`), quartermaster hours gating (`validate_club_quartermaster_hours`), hidden club reveal/rollback (`reveal_hidden_club_facility`, `rollback_hidden_club_discoveries_after_turn`), HQ location healing, and expanded `data/locations_seed.json`.
+- **Private Residence Access Gates, DM Grounding & Bounty Parity (`mechanics/world/locations/access_gate.py`, `mechanics/system/phone/dm_grounding.py`, `mechanics/narrative/bounty.py`)**:
+  - Added NPC private residence node enforcement, phone DM grounding improvements, school club fallback bounties (`_build_school_club_fallback_bounties`), and combat/enemy/turn pipeline fixes (`mechanics/combat/`, `game_engine/turn/core.py`, `services/turn_service.py`).
+- **Web, Discord & 5-Language Parity (`web/`, `cogs/`, `localization/`)**:
+  - Updated `EncyclopediaSubTab.jsx` with `folklore` | `sites` | `field_log` views, `WorldMapModal.jsx`, `MerchantModal.jsx`, `api/codex_phone.py`, `cogs/contacts.py`, `cogs/adventure/faction_mixin.py`, 5-language translations (`en`, `pl`, `ms`, `de`, `zh`), and rebuilt `web/dist/` production assets.
 
 ### [v3.0.0] - 2026-11-15
 

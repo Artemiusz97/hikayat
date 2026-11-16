@@ -187,12 +187,15 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
             show_merchant = False
             shop_closed_reason = str(shop_avail.get("reason") or "")
             shop_closed_message = str(shop_avail.get("reason_message") or "")
+        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
+            show_merchant = True
+            merchant_label = "Visit Club Quartermaster"
         elif is_school:
             if has_shop_loc:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            roamer_on_site = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            roamer_on_site = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
             if merchant_state.get("available") or merchant_state.get("active") or has_shop_loc or merchant_npc_name or roamer_on_site:
                 show_merchant = True
                 flavor_name = (
@@ -1872,11 +1875,13 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
 
     session = db.get_session(session_id)
     curr_node_id = session.get("current_node_id") if session else None
-    curr_node = db.get_world_node(session_id, curr_node_id) if (session_id and curr_node_id) else None
+    resolved_loc_nid = db.resolve_node_id_from_location(session_id, current_loc, prefer_facility=False) if (session_id and current_loc) else None
+    eff_curr_node_id = resolved_loc_nid or curr_node_id
+    curr_node = db.get_world_node(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else None
     all_nodes = db.get_session_world_nodes(session_id) if session_id else []
-    outgoing_edges = db.get_outgoing_edges(session_id, curr_node_id) if (session_id and curr_node_id) else []
+    outgoing_edges = db.get_outgoing_edges(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else []
     adjacent_node_ids = {e["to_node_id"] for e in outgoing_edges}
-    player_at_transit_hub = db.is_node_or_parent_transit_hub(session_id, curr_node_id) if (session_id and curr_node_id) else False
+    player_at_transit_hub = db.is_node_or_parent_transit_hub(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else False
 
     from mechanics.world.schedules import get_npc_scheduled_node_id
     from mechanics.world.locations.access_gate import get_node_effective_access_info
@@ -1966,7 +1971,8 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
 
             p_node_id = db.resolve_node_id_from_location(session_id, f"{z_name} ➔ {p_copy.get('name', '')}", prefer_facility=True)
             node = next((n for n in all_nodes if n["node_id"] == p_node_id), None) if p_node_id else None
-            is_transit_hub = db.is_node_or_parent_transit_hub(session_id, p_node_id) if p_node_id else False
+            is_transit_hub = bool(node and node.get("is_transit_hub"))
+            can_transit_travel = db.is_node_or_parent_transit_hub(session_id, p_node_id) if p_node_id else False
             is_adjacent = bool(
                 p_node_id and (
                     p_node_id in adjacent_node_ids or
@@ -1975,7 +1981,7 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             )
             can_travel = bool(
                 p_copy["is_current_place"]
-                or (not player_restrained and (bool(p_node_id) or is_adjacent or (player_at_transit_hub and is_transit_hub) or not all_nodes))
+                or (not player_restrained and (bool(p_node_id) or is_adjacent or (player_at_transit_hub and can_transit_travel) or not all_nodes))
             )
 
             if p_copy["is_current_place"]:
@@ -1987,7 +1993,7 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                     from mechanics.world.locations.formatting import format_travel_eta_tag
                     t_mins = int(p_copy.get("travel_minutes") or (4 if is_same_zone else 15))
                     eta_tag = format_travel_eta_tag(t_mins, is_same_zone=is_same_zone, scen_key=scen_key, is_here=False)
-                if player_at_transit_hub and is_transit_hub and not is_same_zone and "transit" not in eta_tag.lower():
+                if player_at_transit_hub and can_transit_travel and not is_same_zone and "transit" not in eta_tag.lower():
                     p_copy["travel_tag"] = f"Transit • {eta_tag}"
                 else:
                     p_copy["travel_tag"] = eta_tag

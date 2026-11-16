@@ -287,6 +287,7 @@ def generate_anomaly_blueprint(
     force_codex_id: Optional[str] = None,
     force_procedural: bool = False,
     folklore_spawn_chance: float = 0.40,
+    sapient_weight_mult: Optional[float] = None,
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
@@ -317,6 +318,25 @@ def generate_anomaly_blueprint(
     scen_low = str(scenario or "anomalous_incursions").lower()
     is_gore = "gore" in scen_low
     is_furry = "furry" in scen_low
+    if sapient_weight_mult is not None:
+        eff_sap_mult = float(sapient_weight_mult)
+    else:
+        _loc_low_wp = location.lower()
+        _tod_wp = int(current_minute or 0) % 1440
+        _is_wp_loc = (0 <= _tod_wp < 180) and any(
+            k in _loc_low_wp
+            for k in (
+                "loc_theme_park",
+                "loc_tp_",
+                "theme park",
+                "amusement park",
+                "amusement resort",
+                "carnival",
+                "mirror labyrinth",
+                "midnight carousel",
+            )
+        )
+        eff_sap_mult = 1.5 if _is_wp_loc else 1.0
 
     biome, t_bucket = infer_location_biome_and_time(location, current_minute=current_minute, time_of_day=time_of_day)
 
@@ -338,6 +358,7 @@ def generate_anomaly_blueprint(
         force_sapience=force_sapience,
         force_physicality=force_physicality,
         force_element=force_element,
+        sapient_weight_mult=eff_sap_mult,
     )
     if codex_entry is not None:
         bp_c = build_blueprint_from_codex_entry(
@@ -434,7 +455,12 @@ def generate_anomaly_blueprint(
         if not (force_disposition and str(force_disposition).strip().lower() in ("passive", "reactive")):
             eff_disposition = "reactive" if non_hostile_temperament == "volatile" else "passive"
 
-    eff_sapience = force_sapience if force_sapience in SAPIENCE_TYPES else rng.choice(motif["preferred_sapience"])
+    if force_sapience in SAPIENCE_TYPES:
+        eff_sapience = force_sapience
+    else:
+        pref_sap = list(motif.get("preferred_sapience") or ["instinctual"])
+        sap_weights = [(eff_sap_mult if s == "sapient" else 1.0) for s in pref_sap]
+        eff_sapience = rng.choices(pref_sap, weights=sap_weights, k=1)[0]
 
     primary_elem = normalize_anomaly_element(
         force_element if force_element else rng.choice(motif["preferred_elements"])

@@ -62,6 +62,18 @@ def resolve_anomalous_emergency_extraction(
     from mechanics.world.locations.seeds import get_session_urban_zone_name, get_session_urban_facility_name
 
     sess = db.get_session(session_id) or {}
+    if session_id:
+        try:
+            from mechanics.world.anomalous_sites import collapse_anomalous_site_on_extraction
+            collapse_anomalous_site_on_extraction(
+                int(session_id),
+                str(sess.get("current_node_id") or ""),
+                str(sess.get("current_location") or ""),
+                int(sess.get("current_day", 1) or 1),
+                len(sess.get("history") or []) + 1,
+            )
+        except Exception:
+            pass
     scen_key = str(sess.get("scenario") or "anomalous_incursions")
     char = db.get_character(user_id) or {}
     fac_state = get_anomalous_faction_state(session_id, user_id=user_id)
