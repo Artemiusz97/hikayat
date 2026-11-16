@@ -1986,14 +1986,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 scenario=scen_key, narrative_text=scene_narrative,
                 preloaded_enrichment=enrichment_ctx,
             )
-            if False and enriched_info != raw_info and d.get("id"):
-                try:
-                    conn.execute(
-                        "UPDATE contacts SET basic_info_json=? WHERE id=?",
-                        (json.dumps(enriched_info), d["id"])
-                    )
-                except Exception:
-                    pass
+            # Keep get_contacts() read-only; do not persist enriched_info back on read.
             d["basic_info"] = enriched_info
             try:
                 raw_traits = json.loads(d.get("unlocked_traits_json") or "[]")
@@ -3209,13 +3202,6 @@ def get_character_faction_membership(character_id: int) -> dict:
     return {"joined_faction_id": r["joined_faction_id"] or "",
             "faction_rank": r["faction_rank"] or 0,
             "faction_title": r["faction_title"] or ""}
-
-def set_faction_reinforcements_used(session_id: int, used: bool = True) -> None:
-    """Mark/unmark the faction reinforcements perk as used for this session."""
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE sessions SET faction_reinforcements_used=? WHERE id=?",
-            (1 if used else 0, session_id))
 
 def _resolve_phone_contact_keys(conn: sqlite3.Connection, session_id: int, contact_npc_id: str) -> tuple[str, list[str]]:
     raw = str(contact_npc_id or "").strip()

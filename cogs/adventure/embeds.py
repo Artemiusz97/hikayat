@@ -23,7 +23,7 @@ import game_engine
 import image_client
 from character_data import (
     XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, format_item_with_icon, get_class_templates, get_starting_weapons,
+    get_item_icon, get_class_templates, get_starting_weapons,
     get_starter_gear_by_class, get_starting_items
 )
 from cogs.character import build_character_sheet_embed

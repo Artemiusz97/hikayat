@@ -1369,52 +1369,7 @@ def get_active_perks(faction: Dict[str, Any], player_rank: int, reputation_score
         perks.append("Safehouse Rest: Free HP/MP recovery at HQ (0 ambush risk)")
     if tier_level >= 3:
         perks.append("Social Advantage: +2 to skill checks with fellow members")
-    if player_rank >= 3 and tier_level >= 4:
-        perks.append("Call Reinforcements: Summon faction patrol in combat (1x per session)")
     return perks
-
-
-# ---------------------------------------------------------------- Combat Reinforcement Generator
-def generate_faction_patrol(faction: Dict[str, Any], avg_party_level: int,
-                             scen_key: str) -> List[Dict[str, Any]]:
-    """
-    Generate 1-2 scaled faction patrol NPCs for injection into current_npcs as friendly allies.
-    """
-    from scenario_data import has_tag
-    cat = faction.get("category", "guild")
-    name = faction.get("name", "Faction")
-    level = max(1, avg_party_level)
-    hp = 20 + level * 8
-    mp = 10 + level * 4
-
-    if has_tag(scen_key, "cyberpunk") or has_tag(scen_key, "space") or has_tag(scen_key, "sci_fi"):
-        patrol_names = [f"{name} Strike Operative", f"{name} Tactical Unit"]
-        stats = {"STR": 5, "PER": 7, "END": 5, "CHA": 4, "INT": 6, "AGI": 8, "LUK": 5}
-    elif is_school_scenario(scen_key):
-        patrol_names = [f"{name} Senior Member", f"{name} Enforcer"]
-        stats = {"STR": 6, "PER": 5, "END": 6, "CHA": 5, "INT": 5, "AGI": 5, "LUK": 5}
-    elif cat == "delinquents":
-        patrol_names = [f"{name} Brawler", f"{name} Muscle"]
-        stats = {"STR": 8, "PER": 4, "END": 7, "CHA": 3, "INT": 4, "AGI": 5, "LUK": 4}
-    else:
-        patrol_names = [f"{name} Veteran", f"{name} Enforcer"]
-        stats = {"STR": 7, "PER": 5, "END": 6, "CHA": 4, "INT": 5, "AGI": 6, "LUK": 5}
-
-    scaled = {k: min(12, v + level // 3) for k, v in stats.items()}
-    patrols = []
-    for patrol_name in patrol_names[:2]:
-        patrols.append({
-            "name": patrol_name,
-            "level": level,
-            "hp": hp,
-            "max_hp": hp,
-            "mp": mp,
-            "max_mp": mp,
-            "stats": scaled,
-            "status_effects": [],
-            "faction_patrol": True,
-        })
-    return patrols
 
 
 # ---------------------------------------------------------------- Discord UI Views

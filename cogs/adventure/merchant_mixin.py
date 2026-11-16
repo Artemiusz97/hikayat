@@ -8,8 +8,6 @@ from skill_check import resolve_check
 from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     build_merchant_embed as _merchant_embed,
-    discounted_price as _discounted_price,
-    sell_bonus_price as _sell_bonus_price,
     compute_item_resale_payout,
     MerchantView,
     BuySelectView,

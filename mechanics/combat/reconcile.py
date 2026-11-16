@@ -21,7 +21,6 @@ from .sparring import (
     is_sparring_monster,
     resolve_sparring_defeat,
     make_sparring_monster,
-    call_faction_reinforcements,
 )
 from .status_effects import normalize_status_effect
 from .post_combat import (

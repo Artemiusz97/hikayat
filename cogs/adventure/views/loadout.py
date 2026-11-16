@@ -14,7 +14,7 @@ import game_engine
 import image_client
 from character_data import (
     XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, format_item_with_icon, get_class_templates, get_starting_weapons,
+    get_item_icon, get_class_templates, get_starting_weapons,
     get_starter_gear_by_class, get_starting_items, inventory_capacity
 )
 from cogs.character import build_character_sheet_embed
@@ -23,8 +23,6 @@ from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resol
 from skill_check import resolve_check, success_chance, CheckResult
 from mechanics.combat.merchant import (
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
-    discounted_price as _discounted_price,
-    sell_bonus_price as _sell_bonus_price,
 )
 from .merchant import (
     handle_talk_to_merchant as _handle_talk_to_merchant,

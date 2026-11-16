@@ -1169,7 +1169,7 @@ def _fast_path_classify_ambient_action(action_text: str, ctx: Any = None, parsed
 
 async def classify_custom_action(session: dict, char: dict, inventory: list, action_text: str) -> dict:
 
-    from mechanics.narrative.intent import classify_action_intent, is_free_ambient_action, IntentCategory, IntentContext
+    from mechanics.narrative.intent import classify_action_intent, IntentCategory, IntentContext
     from mechanics.system.input_sanitizer import fence_player_action
 
     cur_npcs = [game_engine._get_npc_name(n) for n in (session.get("current_npcs") or []) if n]

@@ -21,7 +21,7 @@ from services.turn_service import TurnService
 import image_client
 from character_data import (
     XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, format_item_with_icon, get_class_templates, get_starting_weapons,
+    get_item_icon, get_class_templates, get_starting_weapons,
     get_starter_gear_by_class, get_starting_items, inventory_capacity
 )
 from cogs.character import build_character_sheet_embed
@@ -35,8 +35,6 @@ from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # 
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
     handle_talk_to_merchant as _handle_talk_to_merchant,
     build_merchant_embed as _merchant_embed,
-    discounted_price as _discounted_price,
-    sell_bonus_price as _sell_bonus_price,
     MerchantView,
     MerchantVoteView,
     BuySelectView,
@@ -54,7 +52,7 @@ from .embeds import (
     MODE_LABELS, build_world_map_embed, prepare_discord_image, scene_embed, sync_scene_embed,
     _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
     _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
-    _build_main_quest_embed, _build_quest_log_embed, _choice_button_label,
+    _build_main_quest_embed, _build_quest_log_embed,
     _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
     _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
     _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,

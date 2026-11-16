@@ -18,7 +18,6 @@ from .formulas import (
     try_inflict_status,
 )
 from .sparring import (
-    call_faction_reinforcements,
     is_sparring_monster,
     make_sparring_monster,
     resolve_sparring_defeat,
@@ -159,7 +158,6 @@ __all__ = [
     "get_elemental_multiplier",
     "tick_status_timers",
     "try_inflict_status",
-    "call_faction_reinforcements",
     "is_sparring_monster",
     "make_sparring_monster",
     "resolve_sparring_defeat",

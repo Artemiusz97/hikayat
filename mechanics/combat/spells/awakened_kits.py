@@ -122,10 +122,7 @@ MEDIUM_META: Dict[str, Dict[str, str]] = {
     },
 }
 
-from mechanics.world.anomaly_engine import (
-    _ELEMENT_ALIAS_MAP as _ATTRIBUTE_ALIASES,
-    normalize_anomaly_element,
-)
+from mechanics.world.anomaly_engine import normalize_anomaly_element
 
 
 def normalize_anomalous_attribute(attr: Optional[str], fallback: str = "physical") -> str:
