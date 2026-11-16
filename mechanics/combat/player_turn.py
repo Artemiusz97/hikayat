@@ -103,6 +103,25 @@ def resolve_player_combat_phase(ctx: Dict[str, Any]) -> None:
                 player_attrs["elemental_amp"] = dict(anom_passives["elemental_amp"])
         except Exception:
             anom_passives = {}
+    if is_anom_combat and isinstance(session, dict):
+        try:
+            from mechanics.world.anomalous_sites.domain_rules import (
+                apply_domain_modifiers_to_combat_attrs,
+                evaluate_turn_domain_effects,
+            )
+            domain_res_p = session.get("_active_anomalous_domain")
+            if not isinstance(domain_res_p, dict) and session.get("current_location"):
+                domain_res_p = evaluate_turn_domain_effects(
+                    int(session.get("id") or 0),
+                    session,
+                    [(acting_char_data, [])],
+                    persist_db=False,
+                    is_retry=True,
+                )
+            if isinstance(domain_res_p, dict) and domain_res_p.get("active"):
+                apply_domain_modifiers_to_combat_attrs(player_attrs, domain_res_p)
+        except Exception:
+            pass
 
     action = actions[0] if actions else {"choice_type": "MELEE_ATTACK", "label": "Attack"}
     is_hidden_now = bool(is_actor_hidden(session, acting_user_id) or action.get("is_stealth") or action.get("stance") == "stealth")

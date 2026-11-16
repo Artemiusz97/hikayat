@@ -212,3 +212,14 @@ PACT_UI_LABELS = {
     "contracted_badge": "Contracted",
     "currently_bound": "Bound",
 }
+
+ANOMALOUS_SITE_UI_LABELS = {
+    "unreconnoitered_badge": "[UNRECONNOITERED — Grade {grade}]",
+    "unreconnoitered_summary": "Enter this quarantine zone to reconnoiter its Domain Rule, elemental signature, and stabilization anchors.",
+    "milestone_10_title": "Outer Cordon Reclamation (10 Sites)",
+    "milestone_10_reward": "+15 Faction Promotion Rep & +250G Hazard Grant",
+    "milestone_22_title": "Metropolitan Grid Stabilization (22 Sites)",
+    "milestone_22_reward": "Field Resonator Upgrade (4 Daily Charges)",
+    "milestone_36_title": "Metropolitan Warden Commendation (36/36 Sites)",
+    "milestone_36_reward": "+30 Rep, 5 Daily Charges & Warden's Aether Chronometer Relic"
+}

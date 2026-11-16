@@ -514,7 +514,24 @@
     "virgin_history": "• Dziewica/prawiczek (brak wcześniejszych doświadczeń intymnych przed spotkaniem z tobą)",
     "ranks_range": "Rangi 1–4",
     "faction_bounties": "📋 Zlecenia frakcji",
-    "verification_tooltip": "Wcześniejsza weryfikacja zmniejsza wymaganie wskazówek Etapu 1 o 1 przy kolejnych spotkaniach"
+    "verification_tooltip": "Wcześniejsza weryfikacja zmniejsza wymaganie wskazówek Etapu 1 o 1 przy kolejnych spotkaniach",
+    "quarantine_sites": "Strefy Kwarantanny",
+    "site_registry_title": "Siatka Odzyskiwania Stref Kwarantanny",
+    "resonator_charges": "Ładunki Rezonatora Polowego",
+    "milestones_header": "Kamienie Milowe Reklamacji Miasta",
+    "filter_all_sites": "Wszystkie",
+    "filter_stabilized": "Ustabilizowane",
+    "filter_uncontained": "Niezabezpieczone",
+    "filter_unvisited": "Niezbadane",
+    "site_status_stabilized": "Ustabilizowana",
+    "site_status_uncontained": "Niezabezpieczona",
+    "site_status_unvisited": "Niezbadana",
+    "site_status_night_shift": "Nocna Zmiana",
+    "site_status_hostile_hq": "Wroga Twierdza",
+    "harvest_ready": "Gotowe do Zbioru",
+    "puzzle_step_progress": "Etap Kotwicy {{step}}/3",
+    "domain_rule_label": "Zasada Domeny",
+    "ambient_effect_label": "Trwały Rezonans"
   },
   "scene": {
     "title": "Scena i Świat",
@@ -1166,10 +1183,18 @@
     "badge_merchant_shop": "🛍️ Sklep Kupca",
     "badge_faction_hq": "🏛️ Kwatera Frakcji",
     "badge_home": "🏠 Dom",
+    "sub_tag_hq": "Kwatera Klubu",
+    "sub_tag_board": "Tablica Ogłoszeń",
+    "sub_tag_shop": "Sklep / Kwatermistrz",
+    "sub_tag_transit": "Węzeł Podróży",
+    "sub_tag_discreet": "Dyskretne",
     "memory_prefix": "Wspomnienie:",
     "meetup": "• Spotkanie",
     "travel_failed": "Szybka podróż nie powiodła się. Serwer lub modele AI mogą być chwilowo niedostępne.",
-    "load_failed": "Nie udało się wczytać mapy świata."
+    "load_failed": "Nie udało się wczytać mapy świata.",
+    "anomalous_threat": "Telemetria Zagrożenia",
+    "anomalous_stabilized": "Ustabilizowana",
+    "anomalous_harvest_ready": "Gotowe do Zbioru"
   },
   "merchant": {
     "title_fallback": "Emporium Kupieckie",
@@ -1327,7 +1352,14 @@
     },
     "routine_unlock_hint": "Pełny plan tygodnia odblokuje się przy Sympatii 40+ lub przez obserwację i pytanie o rutynę.",
     "residence_fog_hint": "Prywatne mieszkanie odblokuje się na poziomie Przyjaciel (100+) lub po zaproszeniu.",
-    "routine_override_today": "Dzisiejsza Zmiana"
+    "routine_override_today": "Dzisiejsza Zmiana",
+    "wardrobe_header": "Znana Garderoba",
+    "currently_wearing": "Obecnie nosi",
+    "wardrobe_duty": "Strój główny",
+    "wardrobe_casual": "Codzienny",
+    "wardrobe_sleepwear": "Strój nocny",
+    "wardrobe_gifted": "Podarowane",
+    "wardrobe_unlock_hint": "Spotkaj postać w pracy, po godzinach lub w domu, aby poznać jej garderobę."
   },
   "contracts": {
     "nav_label": "Pakty",

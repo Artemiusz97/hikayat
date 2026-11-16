@@ -1272,6 +1272,261 @@ FACTION_BOUNTY_SYSTEM_PROMPT = (
 )
 
 
+def _build_school_club_fallback_bounties(
+    *,
+    session_id: int,
+    scen_key: str,
+    faction: dict,
+    default_loc: str,
+    candidate_locations: list[str] | None = None,
+    is_anom: bool = False,
+    is_occult: bool = False,
+) -> list[dict]:
+    """Builds 3 school/social/turf club commissions (plus 1 low-tier occult investigation for Occult Club in Anomalous HS)."""
+    from mechanics.world.locations import (
+        format_clean_location_prose,
+        get_discovered_primary_locations,
+        get_session_school_name,
+    )
+
+    faction_name = str(faction.get("name") or "School Club").strip()
+    fac_low = faction_name.lower()
+    cat_low = str(faction.get("category") or faction.get("hierarchy_template") or "").strip().lower()
+    zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
+    school_zone = get_session_school_name(session_id, scen_key) if session_id else "Westlake Academy"
+
+    campus_cands: list[str] = []
+    town_cands: list[str] = []
+    for z, prims in zones_dict.items():
+        z_low = str(z).lower()
+        for p in (prims or []):
+            full = f"{z} ➔ {p}"
+            if z == school_zone or any(k in z_low for k in ("academy", "high school", "school campus", "institute")):
+                campus_cands.append(full)
+            else:
+                town_cands.append(full)
+
+    campus_tgt = next((c for c in campus_cands if c.lower() != default_loc.lower()), None) or f"{school_zone} ➔ Central Courtyard"
+    town_tgt = next((c for c in town_cands if any(k in c.lower() for k in ("cafe", "café", "bookstore", "arcade", "convenience", "square"))), None) or (town_cands[0] if town_cands else campus_tgt)
+    c_short = format_clean_location_prose(campus_tgt, include_zone=False)
+    t_short = format_clean_location_prose(town_tgt, include_zone=False)
+    hq_short = format_clean_location_prose(default_loc or faction_name, include_zone=False)
+
+    if cat_low == "delinquents" or any(k in fac_low for k in ("delinquent", "gang", "brawler", "wildcat", "stray")):
+        entries = [
+            {
+                "quest_type": "Turf Patrol",
+                "title": f"{faction_name}: Perimeter Check",
+                "objective": f"Sweep around {c_short} and make sure rival crews stay off {faction_name}'s turf.",
+                "client_npc": f"{faction_name} Lookout",
+                "client_location": default_loc,
+                "reward_xp": 120,
+                "reward_gold": 40,
+                "reward_item": "Wrapped Knuckle Tape",
+                "faction_rep_reward": 12,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Check turf boundary at {c_short}", "target_location": campus_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Supply Stash Run",
+                "title": "Convenience Run for the Crew",
+                "objective": f"Pick up canned coffee and bandages near {t_short} and bring them back to {hq_short}.",
+                "client_npc": f"{faction_name} Quartermaster",
+                "client_location": default_loc,
+                "reward_xp": 110,
+                "reward_gold": 35,
+                "reward_item": "Black Coffee Pack",
+                "faction_rep_reward": 10,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Pick up supplies near {t_short}", "target_location": town_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Rumor Watch",
+                "title": "Intercept Rival Gossip",
+                "objective": f"Keep an ear out near {c_short} for plans brewing among rival delinquents.",
+                "client_npc": f"{faction_name} Second-in-Command",
+                "client_location": default_loc,
+                "reward_xp": 140,
+                "reward_gold": 45,
+                "reward_item": "Brass Zippo Lighter",
+                "faction_rep_reward": 15,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Scout rumors at {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            },
+        ]
+    elif cat_low == "nsfw_club" or "velvet" in fac_low:
+        entries = [
+            {
+                "quest_type": "Salon Errand",
+                "title": "Discreet Perfumery Pickup",
+                "objective": f"Collect custom silk ribbons and scented oils near {t_short} without drawing hall monitors' attention.",
+                "client_npc": f"{faction_name} Steward",
+                "client_location": default_loc,
+                "reward_xp": 120,
+                "reward_gold": 45,
+                "reward_item": "Velvet Silk Ribbon",
+                "faction_rep_reward": 12,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Retrieve sealed parcel near {t_short}", "target_location": town_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Private Invitation",
+                "title": "Deliver Wax-Sealed Invite",
+                "objective": f"Slip a wax-sealed salon card to a vetted upperclassman near {c_short}.",
+                "client_npc": f"{faction_name} Host",
+                "client_location": default_loc,
+                "reward_xp": 130,
+                "reward_gold": 50,
+                "reward_item": "Wax Seal Stamp",
+                "faction_rep_reward": 14,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Hand off invitation near {c_short}", "target_location": campus_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Secret Favor",
+                "title": "After-Hours Alibi Cover",
+                "objective": f"Check the cellar approaches around {c_short} to ensure evening guests arrive undisturbed.",
+                "client_npc": f"{faction_name} Confidant",
+                "client_location": default_loc,
+                "reward_xp": 140,
+                "reward_gold": 55,
+                "reward_item": "Amber Phial",
+                "faction_rep_reward": 15,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Verify cellar approach around {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            },
+        ]
+    elif "council" in fac_low:
+        entries = [
+            {
+                "quest_type": "Student Governance",
+                "title": "Collect Club Budget Petitions",
+                "objective": f"Gather signed budget forms around {c_short} ahead of the Student Council review.",
+                "client_npc": "Student Council Secretary",
+                "client_location": default_loc,
+                "reward_xp": 120,
+                "reward_gold": 35,
+                "reward_item": "Stamped Council Seal",
+                "faction_rep_reward": 10,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Collect forms near {c_short}", "target_location": campus_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Campus Outreach",
+                "title": "Print & Post Festival Notices",
+                "objective": f"Pick up calligraphy supplies near {t_short} for upcoming student assembly announcements.",
+                "client_npc": "Student Council Treasurer",
+                "client_location": default_loc,
+                "reward_xp": 115,
+                "reward_gold": 40,
+                "reward_item": "Archival Stationery Set",
+                "faction_rep_reward": 12,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Pick up stationery at {t_short}", "target_location": town_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Disciplinary Mediation",
+                "title": "Resolve Locker Hall Dispute",
+                "objective": f"Mediate an inter-club room reservation clash near {c_short} cleanly.",
+                "client_npc": "Student Council President",
+                "client_location": default_loc,
+                "reward_xp": 145,
+                "reward_gold": 50,
+                "reward_item": "Executive Hall Pass",
+                "faction_rep_reward": 15,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Mediate near {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            },
+        ]
+    elif is_occult:
+        entries = [
+            {
+                "quest_type": "Campus Mystery",
+                "title": "Seven Wonders Note Verification",
+                "objective": f"Compare old yearbook margin notes near {c_short} against rumors heard on campus.",
+                "client_npc": f"{faction_name} Archivist",
+                "client_location": default_loc,
+                "reward_xp": 125,
+                "reward_gold": 35,
+                "reward_item": "Pressed Tarot Card",
+                "faction_rep_reward": 12,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Check archive notes at {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            },
+            {
+                "quest_type": "Folklore Dare",
+                "title": "Recover Missing Candle Ledger",
+                "objective": f"Track down a borrowed folklore almanac near {t_short} before the evening club circle.",
+                "client_npc": f"{faction_name} President",
+                "client_location": default_loc,
+                "reward_xp": 120,
+                "reward_gold": 35,
+                "reward_item": "Antique Brass Charm",
+                "faction_rep_reward": 10,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Recover almanac near {t_short}", "target_location": town_tgt, "completion_trigger": "arrival"}],
+            },
+        ]
+        if is_anom:
+            campus_anom_cands = [
+                c for c in (candidate_locations or [])
+                if school_zone.lower() in c.lower() or any(k in c.lower() for k in ("abandoned", "clock tower", "academy", "rooftop", "infirmary"))
+            ] or campus_cands or candidate_locations
+            anom_one = _build_anomalous_fallback_bounties(
+                session_id=session_id,
+                board_key="freelance_app",
+                default_loc=campus_tgt,
+                candidate_locations=campus_anom_cands,
+                faction_name=faction_name,
+                seed_offset=sum(ord(ch) for ch in faction_name) + 7,
+            )[:1]
+            if anom_one:
+                entries.extend(anom_one)
+        if len(entries) < 3:
+            entries.append({
+                "quest_type": "Late-Night Dare",
+                "title": "Midnight Bell Acoustic Test",
+                "objective": f"Record eerie draft echoes near {c_short} and log findings for Room 3-B.",
+                "client_npc": f"{faction_name} Investigator",
+                "client_location": default_loc,
+                "reward_xp": 140,
+                "reward_gold": 45,
+                "reward_item": "Tape Recorder Cassette",
+                "faction_rep_reward": 15,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Investigate drafts near {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            })
+        return entries[:3]
+    else:
+        entries = [
+            {
+                "quest_type": "Club Prep",
+                "title": f"{faction_name}: Showcase Prep",
+                "objective": f"Deliver rehearsal schedules and gear requisitions across {c_short}.",
+                "client_npc": f"{faction_name} Officer",
+                "client_location": default_loc,
+                "reward_xp": 120,
+                "reward_gold": 35,
+                "reward_item": "Club Activity Pass",
+                "faction_rep_reward": 10,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Deliver schedules at {c_short}", "target_location": campus_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Supply Courier",
+                "title": f"Equipment Run for {faction_name}",
+                "objective": f"Pick up fresh spare parts, snacks, and posters near {t_short} for {hq_short}.",
+                "client_npc": f"{faction_name} Manager",
+                "client_location": default_loc,
+                "reward_xp": 115,
+                "reward_gold": 35,
+                "reward_item": "Club Supply Kit",
+                "faction_rep_reward": 12,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Collect gear near {t_short}", "target_location": town_tgt, "completion_trigger": "arrival"}],
+            },
+            {
+                "quest_type": "Member Recruitment",
+                "title": f"Recruit New Blood for {faction_name}",
+                "objective": f"Pitch club sign-ups to interested students hanging around {c_short}.",
+                "client_npc": f"{faction_name} Captain",
+                "client_location": default_loc,
+                "reward_xp": 140,
+                "reward_gold": 45,
+                "reward_item": "Enamel Club Pin",
+                "faction_rep_reward": 15,
+                "waypoints": [{"stage_index": 1, "stage_label": f"Recruit students at {c_short}", "target_location": campus_tgt, "completion_trigger": "skill_check"}],
+            },
+        ]
+    return entries
+
+
 async def generate_faction_bounty_board(session: dict, faction: dict,
                                          force_refresh: bool = False) -> list[dict]:
     """
@@ -1312,11 +1567,38 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     loc = faction.get("hq_location_id") or session.get("current_location", "the faction HQ")
     scen_key = session.get("scenario")
 
+    from mechanics.social.factions import is_school_club_faction
+    is_club_fac = is_school_club_faction(faction)
+    is_occult_club = bool(
+        is_club_fac
+        and any(k in faction_name.lower() for k in ("occult", "mystery", "paranormal", "supernatural"))
+    )
     is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     f_arch = ""
     anom_fac_hints = ""
     candidate_locations = []
-    if is_anom:
+    if is_club_fac:
+        raw_club_cat = str(faction.get("category") or faction.get("hierarchy_template") or "").strip().lower()
+        f_arch = (
+            raw_club_cat
+            if raw_club_cat in ("school_club", "club", "council", "delinquents", "sports", "nsfw_club", "discipline")
+            else "school_club"
+        )
+        if is_anom:
+            candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+            if is_occult_club:
+                anom_fac_hints = (
+                    "HYBRID CAMPUS MYSTERY & OCCULT BOARD RULES:\n"
+                    "- Generate 2 grounded campus mystery / folklore investigation requests and 1 low-tier anomalous campus investigation.\n"
+                    "- NEVER use numeric threat grades (e.g. never say 'Grade-4').\n\n"
+                )
+            else:
+                anom_fac_hints = (
+                    f"HIGH SCHOOL CLUB COMMISSION RULES ({faction_name}):\n"
+                    "- Generate mundane high school club, social, supply-run, rehearsal/tournament, council governance, or turf tasks appropriate for teenagers.\n"
+                    "- Do NOT generate supernatural anomaly containment or military/agency protocols for this club.\n\n"
+                )
+    elif is_anom:
         from mechanics.social.factions import infer_anomalous_faction_archetype, ANOMALOUS_DISTRUSTED_ARCHETYPES
         f_arch = infer_anomalous_faction_archetype(faction)
         if f_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
@@ -1361,7 +1643,17 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         bounties_raw = []
 
     if not bounties_raw:
-        if is_anom:
+        if is_club_fac:
+            bounties_raw = _build_school_club_fallback_bounties(
+                session_id=session_id,
+                scen_key=str(scen_key or "high_school_drama"),
+                faction=faction,
+                default_loc=loc,
+                candidate_locations=candidate_locations,
+                is_anom=is_anom,
+                is_occult=is_occult_club,
+            )
+        elif is_anom:
             bounties_raw = _build_anomalous_fallback_bounties(
                 session_id=session_id,
                 board_key=f_arch or "public_agency",
@@ -1466,8 +1758,18 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 seed_str=b_id,
             )
 
-            q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (is_anom and f_arch) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
-            if is_anom:
+            q_notes = f"faction:{faction_id}|board_source:{f_arch}|rep_reward:{faction_rep_reward}" if (f_arch and (is_anom or is_club_fac)) else f"faction:{faction_id}|rep_reward:{faction_rep_reward}"
+            should_attach_anom_bp = is_anom and (
+                not is_club_fac
+                or (
+                    is_occult_club
+                    and (
+                        isinstance(b.get("anomaly_blueprint"), dict)
+                        or any(k in str(q_type or "").lower() for k in ("anomal", "entity", "relic", "phenomenon", "containment"))
+                    )
+                )
+            )
+            if should_attach_anom_bp:
                 from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
                 is_nh_fb = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
                 bp_fb = b.get("anomaly_blueprint")
@@ -2508,9 +2810,15 @@ def should_confiscate_anomalous_combat_loot(
     if str(fac_state.get("faction_archetype_key") or "") != "public_agency":
         return False
 
-    # 1. Check if combat came from a Daily Anomaly Breach or Random Encounter (player keeps loot!)
+    # 1. Check if combat came from a Daily Anomaly Breach, Site Locus/Remnant, or Random Encounter (player keeps loot!)
     for e in (defeated_enemies or []):
-        if isinstance(e, dict) and (e.get("breach_id") or e.get("incursion_id") or e.get("is_random_encounter")):
+        if isinstance(e, dict) and (
+            e.get("breach_id")
+            or e.get("incursion_id")
+            or e.get("is_random_encounter")
+            or e.get("is_site_locus_boss")
+            or e.get("is_remnant_manifestation")
+        ):
             return False
     try:
         from mechanics.world.anomalous_events import get_active_incursion_at_location

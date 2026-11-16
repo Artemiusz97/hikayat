@@ -3,6 +3,7 @@ from __future__ import annotations
 Post-LLM combat reconciliation, defeat routing, loot distribution, and session state cleanup.
 """
 import logging
+import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import db
@@ -356,6 +357,51 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                     )
                     if inc_done_res and inc_done_res.get("message"):
                         llm_outcome["_combat_resolved_notice"] += f"\n{inc_done_res['message']}"
+            if isinstance(session, dict) and session.get("id"):
+                from mechanics.world.anomalous_sites import complete_site_pacification
+                _lead_uid_sb = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                _party_uids_sb = [p[0].get("user_id") for p in (party or []) if isinstance(p, (tuple, list)) and isinstance(p[0], dict) and p[0].get("user_id")]
+                _scen_sb = str(session.get("scenario") or "anomalous_incursions")
+                _day_sb = int(session.get("current_day", 1) or 1)
+                _turn_sb = len(session.get("history") or []) + 1
+                _seen_sites_sb: set[str] = set()
+                for _d_sb in dead_dicts:
+                    if not isinstance(_d_sb, dict) or _d_sb.get("requires_non_lethal_subdue"):
+                        continue
+                    if not _d_sb.get("is_site_locus_boss"):
+                        continue
+                    _sid_sb = str(_d_sb.get("anomalous_site_id") or session.get("current_node_id") or "").strip()
+                    if not _sid_sb or _sid_sb in _seen_sites_sb:
+                        continue
+                    _seen_sites_sb.add(_sid_sb)
+                    _pac_sb = complete_site_pacification(
+                        int(session["id"]),
+                        _sid_sb,
+                        user_id=int(_lead_uid_sb or 1),
+                        method="locus_boss_slain",
+                        scen_key=_scen_sb,
+                        current_day=_day_sb,
+                        turn_number=_turn_sb,
+                        party_user_ids=_party_uids_sb or None,
+                    )
+                    if isinstance(_pac_sb, dict) and _pac_sb.get("message"):
+                        llm_outcome["_combat_resolved_notice"] += f"\n{_pac_sb['message']}"
+                _wp_bonus_rec = max((float(d.get("anomalous_loot_bonus") or 0.0) for d in dead_dicts if isinstance(d, dict)), default=0.0)
+                if _wp_bonus_rec > 0 and not confiscate_anomalous_loot and _lead_uid_sb and random.random() < _wp_bonus_rec:
+                    from mechanics.combat.items import generate_random_equipment
+                    _wp_tier = 1 if random.random() < 0.35 else 2
+                    _wp_slot = random.choice(("Weapon", "Armor", "Shield", "Accessory 1"))
+                    _wp_eq = generate_random_equipment(scenario=_scen_sb, slot=_wp_slot, tier=_wp_tier, force_anomalous=True)
+                    if isinstance(_wp_eq, dict) and _wp_eq.get("name"):
+                        db.add_item(
+                            int(_lead_uid_sb),
+                            name=str(_wp_eq["name"]),
+                            item_type=str(_wp_eq.get("item_type") or "equipment").lower(),
+                            effect=str(_wp_eq.get("effect") or _wp_eq.get("description") or ""),
+                            slot_cost=int(_wp_eq.get("slot_cost") or 1),
+                            force=True,
+                        )
+                        llm_outcome["_combat_resolved_notice"] += f"\n🎡 **Witching Peak Relic Salvage:** Recovered **`{_wp_eq['name']}`**!"
             if isinstance(session, dict) and session.get("id"):
                 from mechanics.world.anomalous_events import handle_secured_object_anomaly_conversion
                 lead_uid_obj = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")

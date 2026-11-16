@@ -1374,6 +1374,13 @@ def build_zone_places_embed(session_id: int, zone_name: str, scen_key: str, curr
                         access_str = f" `[{access_badge}]`"
 
                 line = f"• {arch_emoji} **{p['name']}**{badge_str}{eta_str}{access_str}"
+                anom_meta = p.get("anomalous_site_meta") if isinstance(p.get("anomalous_site_meta"), dict) else None
+                if anom_meta and anom_meta.get("badge"):
+                    line += f" `{anom_meta['badge']}`"
+                for sub_d in (p.get("sub_location_details") or []):
+                    sub_m = sub_d.get("anomalous_site_meta") if isinstance(sub_d, dict) else None
+                    if isinstance(sub_m, dict) and sub_m.get("badge"):
+                        line += f"\n  ↳ 🧭 {sub_d.get('name', 'Wing')}: `{sub_m['badge']}`"
 
                 # Live Occupancy (Known contacts, rendezvous partners, unmet roster students)
                 occ_parts = []

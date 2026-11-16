@@ -227,3 +227,14 @@ PACT_UI_LABELS = {
     "contracted_badge": "Vertrag Geschlossen",
     "currently_bound": "Gebunden",
 }
+
+ANOMALOUS_SITE_UI_LABELS = {
+    "unreconnoitered_badge": "[UNERKUNDET — Grad {grade}]",
+    "unreconnoitered_summary": "Betritt diese Quarantänezone, um Domänenregel, Elementsignatur und Stabilisierungsanker zu erkunden.",
+    "milestone_10_title": "Rückeroberung des Außenkordons (10 Stätten)",
+    "milestone_10_reward": "+15 Fraktions-Beförderungsruf & +250G Gefahrenzulage",
+    "milestone_22_title": "Stabilisierung des Stadtnetzes (22 Stätten)",
+    "milestone_22_reward": "Feldresonator-Upgrade (4 tägliche Ladungen)",
+    "milestone_36_title": "Auszeichnung des Stadtwächters (36/36 Stätten)",
+    "milestone_36_reward": "+30 Ruf, 5 tägliche Ladungen & Äther-Chronometer-Relikt"
+}

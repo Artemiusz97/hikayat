@@ -537,12 +537,15 @@ class ChoiceView(SessionRestrictedView):
 
         if shop_avail is not None and not shop_avail.get("available"):
             show_merchant = False
+        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
+            show_merchant = True
+            merchant_label = "Visit Club Quartermaster"
         elif is_school:
             if has_shop:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
             if self.merchant.get("available") or has_shop or roamer_or_bypass:
                 show_merchant = True
                 if has_shop:
@@ -1083,7 +1086,18 @@ class ChoiceView(SessionRestrictedView):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        bounties = await game_engine.generate_bounty_board(session)
+        from mechanics.social.factions import resolve_board_club_faction_for_location
+        board_club = await adb(
+            resolve_board_club_faction_for_location,
+            self.session_id,
+            str(session.get("current_location") or ""),
+            str(session.get("scenario") or ""),
+        )
+        bounties = (
+            await game_engine.generate_faction_bounty_board(session, board_club)
+            if board_club
+            else await game_engine.generate_bounty_board(session)
+        )
         embed = _build_bounty_board_embed(session, bounties)
         view = BountyBoardView(session, bounties)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -1314,12 +1328,15 @@ class SyncChoiceView(SessionRestrictedView):
 
         if shop_avail is not None and not shop_avail.get("available"):
             show_merchant = False
+        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
+            show_merchant = True
+            merchant_label = "Visit Club Quartermaster"
         elif is_school:
             if has_shop:
                 show_merchant = True
                 merchant_label = "Visit Shop / Café"
         else:
-            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
+            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
             if self.merchant.get("available") or has_shop or roamer_or_bypass:
                 show_merchant = True
                 if has_shop:
@@ -1561,7 +1578,18 @@ class SyncChoiceView(SessionRestrictedView):
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        bounties = await game_engine.generate_bounty_board(session)
+        from mechanics.social.factions import resolve_board_club_faction_for_location
+        board_club = await adb(
+            resolve_board_club_faction_for_location,
+            self.session_id,
+            str(session.get("current_location") or ""),
+            str(session.get("scenario") or ""),
+        )
+        bounties = (
+            await game_engine.generate_faction_bounty_board(session, board_club)
+            if board_club
+            else await game_engine.generate_bounty_board(session)
+        )
         embed = _build_bounty_board_embed(session, bounties)
         view = BountyBoardView(session, bounties)
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)

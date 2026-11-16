@@ -386,7 +386,8 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
                             custom_archetype: str = None, custom_primary: list = None, custom_forbidden: list = None,
                             exact_tier: int = None, exact_extra_points: int = None,
                             exact_level: int = None,
-                            language: str = "en") -> dict:
+                            language: str = "en",
+                            current_minute: int = 1200) -> dict:
     scenario_lower = _resolve_enemy_scenario_key(scenario)
     
     template = None
@@ -532,6 +533,7 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
                 preserve_custom = bool(custom_name and str(custom_name).strip().lower() not in pool_names)
                 bp = generate_anomaly_blueprint(
                     location_str=str(location or ""),
+                    current_minute=current_minute,
                     disposition="hostile",
                     tier_rank=tier_rank,
                     scen_key=str(scenario or "anomalous_incursions"),
@@ -555,7 +557,7 @@ def generate_scenario_enemy(scenario: str, location: str, chapter: int, custom_n
 generate_scenario_monster = generate_scenario_enemy
 
 
-def generate_balanced_encounter(party_members: list, scenario: str, location: str, chapter: int, language: str = "en") -> tuple[list, float]:
+def generate_balanced_encounter(party_members: list, scenario: str, location: str, chapter: int, language: str = "en", current_minute: int = 1200) -> tuple[list, float]:
     if not party_members:
         party_members = [{"level": 1, "str_": 2, "per_": 2, "end_": 2, "cha": 1, "int_": 2, "agi": 2, "luk": 1}]
 
@@ -643,7 +645,8 @@ def generate_balanced_encounter(party_members: list, scenario: str, location: st
             custom_name=base_name, custom_archetype=arch_name,
             exact_tier=tier_rank, exact_extra_points=extra_pts,
             exact_level=enemy_level,
-            language=language
+            language=language,
+            current_minute=current_minute,
         )
         if scenario_lower == "anomalous_incursions" and not e_obj.get("anomaly_blueprint") and not e_obj.get("is_human_operative"):
             try:

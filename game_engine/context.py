@@ -728,7 +728,7 @@ def _scene_context_text(session_id: int, current_location: str,
     history_lower = (history_text or "").lower()
 
     if is_location_engine_enabled(scen_key):
-        loc_header = format_llm_location_context(session_id, current_location, scen_key)
+        loc_header = format_llm_location_context(session_id, current_location, scen_key, present_npcs=current_npcs)
         lines = [loc_header]
     else:
         lines = [f"Current location: {current_location or '(not yet established)'}"]

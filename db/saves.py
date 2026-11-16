@@ -1094,6 +1094,12 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         pass
 
     try:
+        from mechanics.world.locations import _heal_agency_residence_and_entrances
+        _heal_agency_residence_and_entrances(new_session_id, sess_data.get("scenario", ""))
+    except Exception:
+        pass
+
+    try:
         import game_engine
         game_engine.heal_session_quests_on_load(new_session_id)
     except Exception:

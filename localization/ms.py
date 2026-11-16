@@ -230,3 +230,14 @@ PACT_UI_LABELS = {
     "contracted_badge": "Pernah Diikat",
     "currently_bound": "Terikat",
 }
+
+ANOMALOUS_SITE_UI_LABELS = {
+    "unreconnoitered_badge": "[BELUM DITEROKAI — Gred {grade}]",
+    "unreconnoitered_summary": "Masuki zon kuarantin ini untuk meninjau Peraturan Domain, unsur teras, dan sauh penstabilan.",
+    "milestone_10_title": "Pemulihan Kordon Luar (10 Tapak)",
+    "milestone_10_reward": "+15 Rep. Kenaikan Pangkat & Geran Bahaya +250G",
+    "milestone_22_title": "Penstabilan Grid Metropolitan (22 Tapak)",
+    "milestone_22_reward": "Naik Taraf Resonator Medan (4 Caj Harian)",
+    "milestone_36_title": "Pujian Penjaga Metropolitan (36/36 Tapak)",
+    "milestone_36_reward": "+30 Rep., 5 Caj Harian & Relik Kronometer Aether Warden"
+}

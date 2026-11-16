@@ -405,7 +405,28 @@ def resolve_starter_quarters_spec(
     if fk == "student_freelancer":
         return dict(STARTER_QUARTERS_MAP["student_freelancer"])
     if fk in STARTER_QUARTERS_MAP:
-        return dict(STARTER_QUARTERS_MAP[fk])
+        spec = dict(STARTER_QUARTERS_MAP[fk])
+        if fk == "public_agency":
+            sess_id = 0
+            scen_key = "anomalous_incursions"
+            if isinstance(session_or_id, int) and session_or_id > 0:
+                sess_id = int(session_or_id)
+                try:
+                    import db as _db
+                    _s = _db.get_session(sess_id) or {}
+                    scen_key = str(_s.get("scenario") or scen_key)
+                except Exception:
+                    pass
+            elif isinstance(session_or_id, Mapping):
+                try:
+                    sess_id = int(session_or_id.get("session_id") or session_or_id.get("id") or 0)
+                except Exception:
+                    sess_id = 0
+                scen_key = str(session_or_id.get("scenario") or scen_key)
+            if sess_id > 0:
+                from .seeds import get_session_agency_residence_name
+                spec["name"] = get_session_agency_residence_name(sess_id, scen_key)
+        return spec
     # Fallback: Covert/unaffiliated operatives rent the Downtown walk-up
     spec = dict(STARTER_QUARTERS_MAP["freelancer"])
     spec["faction_key"] = fk

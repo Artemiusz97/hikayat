@@ -115,6 +115,59 @@ MASKED_PLACEHOLDERS: dict[str, dict[str, str]] = {
     "zh": {"slot": "???", "fact": "???", "schedule": "???（作息未知）", "intimate": "???（私密）"},
 }
 
+WARDROBE_LABELS: dict[str, dict[str, str]] = {
+    "en": {
+        "header": "Known Wardrobe",
+        "currently_wearing": "Currently Wearing",
+        "duty": "Main / Duty",
+        "casual": "Casual",
+        "sleepwear": "Sleepwear",
+        "gifted": "Gifted",
+        "hint": "Meet them at work, off-duty, or at home to witness their outfits.",
+    },
+    "pl": {
+        "header": "Znana Garderoba",
+        "currently_wearing": "Obecnie nosi",
+        "duty": "Strój główny",
+        "casual": "Codzienny",
+        "sleepwear": "Strój nocny",
+        "gifted": "Podarowane",
+        "hint": "Spotkaj postać w pracy, po godzinach lub w domu, aby poznać jej garderobę.",
+    },
+    "ms": {
+        "header": "Koleksi Pakaian Diketahui",
+        "currently_wearing": "Sedang Dipakai",
+        "duty": "Utama / Tugas",
+        "casual": "Kasual",
+        "sleepwear": "Pakaian Tidur",
+        "gifted": "Hadiah",
+        "hint": "Temui mereka di tempat kerja, waktu santai, atau di rumah untuk melihat pakaian mereka.",
+    },
+    "de": {
+        "header": "Bekannte Garderobe",
+        "currently_wearing": "Trägt aktuell",
+        "duty": "Alltag / Dienst",
+        "casual": "Freizeit",
+        "sleepwear": "Schlafkleidung",
+        "gifted": "Geschenkt",
+        "hint": "Triff sie bei der Arbeit, in der Freizeit oder zu Hause, um ihre Kleidung zu sehen.",
+    },
+    "zh": {
+        "header": "已知着装档案",
+        "currently_wearing": "当前穿着",
+        "duty": "主服 / 制服",
+        "casual": "日常便服",
+        "sleepwear": "睡衣",
+        "gifted": "赠礼服饰",
+        "hint": "在工作场所、休闲时段或居家时见面即可解锁对方完整着装。",
+    },
+}
+
+
+def get_wardrobe_labels(lang: str = "en") -> dict[str, str]:
+    norm_lang = normalize_social_lang(lang)
+    return dict(WARDROBE_LABELS.get(norm_lang, WARDROBE_LABELS["en"]))
+
 
 def normalize_social_lang(lang: str | None) -> str:
     code = str(lang or "en").strip().lower().split("-")[0].split("_")[0]

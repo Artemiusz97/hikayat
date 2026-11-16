@@ -5,8 +5,10 @@ Core access control, curfew enforcement, threshold barriers, private residence i
 and rolling room memory (scene residue) for Hikayat's Relational Spatial Graph.
 """
 from __future__ import annotations
+import hashlib
 import json
 import logging
+import random
 import re
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -468,7 +470,11 @@ def record_node_unlock(
     if not node:
         return False
 
+    cur_state = db.get_world_node_state(session_id, node_id)
     updates: dict[str, Any] = {"last_unlock_reason": reason}
+    if "unlocked_turn" not in cur_state:
+        sess_cur = db.get_session(session_id) or {}
+        updates["unlocked_turn"] = int(sess_cur.get("turn_count") or 0)
     if unlock_type == "permanent":
         updates["unlocked_permanent"] = True
     else:
@@ -694,6 +700,48 @@ def evaluate_anomalous_hq_access(
     }
 
 
+def _is_npc_private_residence_node(
+    node: dict | None,
+    fac_node: dict | None,
+    low_id: str,
+    display_name: str,
+) -> bool:
+    """Returns True when a private-tier node belongs to an NPC residence rather than player quarters."""
+    if not isinstance(node, dict) or str(node.get("access_tier") or "").strip().lower() != "private":
+        return False
+    disp_low = str(display_name or "").strip().lower()
+    if low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in disp_low:
+        return False
+    if any(tok in low_id for tok in ("house", "residence", "apartment")):
+        return True
+    if any(tok in disp_low for tok in ("house", "residence", "apartment")):
+        return True
+    if low_id.startswith(("sub_npc_res_", "fac_npc_res_", "npc_res_")):
+        return True
+    if str(node.get("category") or "").strip().lower() == "residential":
+        return True
+    if isinstance(fac_node, dict) and str(fac_node.get("category") or "").strip().lower() == "residential":
+        return True
+    return False
+
+
+def _parse_basic_info_dict(row: dict | None) -> dict[str, Any]:
+    if not isinstance(row, dict):
+        return {}
+    raw = row.get("basic_info")
+    if isinstance(raw, dict):
+        return raw
+    raw_json = row.get("basic_info_json")
+    if isinstance(raw_json, str) and raw_json.strip():
+        try:
+            parsed = json.loads(raw_json)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            return {}
+    return {}
+
+
 def evaluate_node_access_gate(
     session_id: int,
     target_node_id: str,
@@ -824,12 +872,7 @@ def evaluate_node_access_gate(
                 target_on_campus = False
 
         # Preserve direct NPC private residence intercom tests while enforcing truancy on all other off-campus destinations
-        is_npc_private_home = (
-            str(node.get("access_tier") or "").lower() == "private"
-            and ("house" in low_id or "residence" in low_id)
-            and low_id not in ("loc_player_house", "sub_player_bedroom")
-            and "player's house" not in display_name.lower()
-        )
+        is_npc_private_home = _is_npc_private_residence_node(node, fac_node, low_id, display_name)
 
         if player_on_campus and not target_on_campus and not is_npc_private_home:
             from mechanics.social.origin_mode import is_student_operative
@@ -1070,27 +1113,35 @@ def evaluate_node_access_gate(
                 "barrier_choices": lobby_choices,
             }
 
-    # 1c. NSFW Secret Society HQ (`loc_nsfw_faction_hq` / `Velvet Basement Salon`) Speakeasy Gate
-    if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
-        if isinstance(session, dict) and (
-            session.get("nsfw_faction_member")
-            or int(session.get("nsfw_faction_invited_day") or 0) >= curr_day
-        ):
-            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="nsfw_faction_invite")
-            return {"gated": False, "unlocked_by": "nsfw_faction_invite"}
-        try:
-            for fac in (db.get_factions(session_id) or []):
-                f_cat = str(fac.get("category") or "").lower()
-                f_hq = str(fac.get("hq_location_id") or "").lower()
-                if f_cat == "nsfw_club" or "velvet basement" in f_hq or "loc_nsfw_faction_hq" in f_hq:
-                    f_rep = int(fac.get("reputation_score") or fac.get("reputation") or 0)
-                    p_rank = int(fac.get("player_rank") or 0)
-                    f_rank = str(fac.get("player_title") or fac.get("member_rank") or "").strip().lower()
-                    if bool(fac.get("is_member")) or p_rank > 0 or f_rank not in ("", "none", "outsider", "non-member") or f_rep >= 25:
-                        record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="nsfw_faction_standing")
-                        return {"gated": False, "unlocked_by": "nsfw_faction_standing"}
-        except Exception:
-            pass
+    # 1c. NSFW Secret Society HQ (`loc_nsfw_club_facility` / `loc_nsfw_faction_hq` / `Velvet Basement Salon`) Speakeasy Gate
+    is_nsfw_salon_target = (
+        low_id == "loc_nsfw_faction_hq"
+        or low_id.startswith("loc_nsfw_")
+        or (fac_node and fac_node.get("node_id") == "loc_nsfw_club_facility")
+        or "velvet basement" in display_name.lower()
+    )
+    if is_nsfw_salon_target:
+        from .seeding import has_player_nsfw_salon_membership_or_standing, reveal_hidden_club_facility
+        has_salon_access = has_player_nsfw_salon_membership_or_standing(
+            session_id,
+            session=session if isinstance(session, dict) else None,
+            current_day=curr_day,
+            for_atlas_visibility=False,
+        )
+        if has_salon_access:
+            invited_ok = isinstance(session, dict) and (
+                session.get("nsfw_faction_member")
+                or int(session.get("nsfw_faction_invited_day") or 0) >= curr_day
+            )
+            unlock_reason = "nsfw_faction_invite" if invited_ok else "nsfw_faction_standing"
+            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason=unlock_reason)
+            if fac_node and fac_node.get("node_id") == "loc_nsfw_club_facility":
+                record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason=unlock_reason)
+            try:
+                reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
+            except Exception:
+                pass
+            return {"gated": False, "unlocked_by": unlock_reason}
 
     # 1d. Hidden Folklore Villages Veil Gate & Sanctuary Treaty (must run BEFORE Step 2 open check & Step 3 \bkey\b regex)
     from .folklore_veil import evaluate_folklore_veil_gate
@@ -1186,43 +1237,196 @@ def evaluate_node_access_gate(
                 "illicit_rendezvous_npc": appt.get("npc_name", "your partner")
             }
 
-    # 6. Check Private Residence Intercom Gate (Edge Case 5)
-    if (unbought_realty is None) and tier == "private" and ("house" in low_id or "residence" in low_id):
+    # 6. Check Private Residence Intercom Gate (Edge Case 5) + Living World Doorbell & Spare Keys (Seam 2)
+    intercom_reason_code = ""
+    intercom_reason_label = ""
+    if (unbought_realty is None) and _is_npc_private_residence_node(node, fac_node, low_id, display_name):
+        world_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
         contacts = db.get_contacts(session_id) or []
         disp_low = display_name.lower()
-        resident_contact = None
-        for c in contacts:
-            if not isinstance(c, dict) or not c.get("name"):
-                continue
-            c_name = c["name"].strip()
-            c_low = c_name.lower()
-            tokens = [t for t in re.split(r"[\s_]+", c_low) if len(t) >= 3]
-            if c_low in disp_low or any(t in disp_low for t in tokens):
-                resident_contact = c
-                break
+        target_node_ids = {str(target_node_id or "").strip().lower()}
+        if isinstance(fac_node, dict) and fac_node.get("node_id"):
+            target_node_ids.add(str(fac_node["node_id"]).strip().lower())
 
-        if resident_contact:
-            score = int(resident_contact.get("relationship_score", 0) or 0)
-            track = str(resident_contact.get("track", "")).lower()
-            is_high_bond = (score >= 40) or (track == "romantic")
-            if is_high_bond and safe_min < 1320:
-                record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="resident_welcome")
-                return {"gated": False, "unlocked_by": "resident_welcome", "resident_name": resident_contact.get("name")}
+        def _matches_display(name_val: Any) -> bool:
+            c_low = str(name_val or "").strip().lower()
+            if not c_low:
+                return False
+            tokens = [t for t in re.split(r"[\s_]+", c_low) if len(t) >= 3]
+            return (c_low in disp_low) or any(t in disp_low for t in tokens)
+
+        def _row_aliases(row_obj: dict[str, Any]) -> set[str]:
+            return {
+                str(row_obj.get(f) or "").strip().lower()
+                for f in ("npc_id", "person_key", "npc_key", "name")
+                if str(row_obj.get(f) or "").strip()
+            }
+
+        roster_row = None
+        for r in world_roster:
+            if not isinstance(r, dict):
+                continue
+            r_basic_probe = _parse_basic_info_dict(r)
+            r_home = str(r.get("home_node_id") or r_basic_probe.get("home_node_id") or "").strip().lower()
+            if r_home and r_home in target_node_ids:
+                roster_row = r
+                break
+        if roster_row is None:
+            for r in world_roster:
+                if isinstance(r, dict) and _matches_display(r.get("name")):
+                    roster_row = r
+                    break
+
+        resident_contact = None
+        if roster_row is not None:
+            r_aliases = _row_aliases(roster_row)
+            for c in contacts:
+                if isinstance(c, dict) and (_row_aliases(c) & r_aliases):
+                    resident_contact = c
+                    break
+        if resident_contact is None:
+            for c in contacts:
+                if isinstance(c, dict) and c.get("name") and _matches_display(c.get("name")):
+                    resident_contact = c
+                    break
+        if roster_row is None and resident_contact is not None:
+            c_aliases = _row_aliases(resident_contact)
+            for r in world_roster:
+                if isinstance(r, dict) and (_row_aliases(r) & c_aliases):
+                    roster_row = r
+                    break
+
+        res_name = str((roster_row or {}).get("name") or (resident_contact or {}).get("name") or "").strip()
+        if roster_row is not None or resident_contact is not None:
+            r_basic = _parse_basic_info_dict(roster_row)
+            c_basic = _parse_basic_info_dict(resident_contact)
+            has_spare_key = any(
+                bool(src.get("player_has_spare_key") or src.get("spare_key_granted"))
+                for src in (roster_row or {}, r_basic, resident_contact or {}, c_basic)
+                if isinstance(src, dict)
+            )
+            is_cohabitant = False
+            if not has_spare_key:
+                from mechanics.world.presence_doorbell import is_verified_household_cohabitant
+
+                merged_res = {**(resident_contact or {}), **(roster_row or {})}
+                is_cohabitant = is_verified_household_cohabitant(
+                    session_id,
+                    merged_res,
+                    resident_contact,
+                    {},
+                    None,
+                    "",
+                )
+            if has_spare_key or is_cohabitant:
+                if persist_db:
+                    record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="spare_key")
+                return {"gated": False, "unlocked_by": "spare_key", "resident_name": res_name}
+
+            from mechanics.world.presence_graph import is_deceased_or_arrested
+
+            merged_res_check = {**(resident_contact or {}), **(roster_row or {})}
+            if is_deceased_or_arrested(merged_res_check):
+                intercom_reason_code = "private_intercom"
+                intercom_reason_label = f"No Answer at Intercom — {res_name or 'Resident'} Unavailable"
+            else:
+                raw_score = (resident_contact or {}).get("relationship_score")
+                if raw_score is None and roster_row is not None:
+                    raw_score = roster_row.get("affinity_score")
+                score = int(raw_score or 0)
+                track = str((resident_contact or {}).get("track") or "").lower()
+                is_high_bond = (
+                    (score >= 40)
+                    or (track == "romantic")
+                    or bool(roster_row and (roster_row.get("is_romantic") or r_basic.get("is_romantic")))
+                )
+
+                has_anchored_schedule = bool(
+                    roster_row
+                    and (
+                        str(roster_row.get("home_node_id") or r_basic.get("home_node_id") or "").strip()
+                        or str(roster_row.get("workplace_node_id") or r_basic.get("workplace_node_id") or "").strip()
+                        or isinstance(roster_row.get("autonomy_override"), dict)
+                        or isinstance(r_basic.get("autonomy_override"), dict)
+                    )
+                )
+                if has_anchored_schedule and roster_row is not None:
+                    from mechanics.world.npc_autonomy import resolve_autonomy_node_override
+                    from mechanics.world.presence_doorbell import check_doorbell_etiquette
+
+                    ov = resolve_autonomy_node_override(
+                        roster_row,
+                        session_id=session_id,
+                        day=curr_day,
+                        block=get_time_block_key(safe_min),
+                        scen_key=scen_key,
+                    )
+                    dbell = check_doorbell_etiquette(
+                        session_id,
+                        roster_row,
+                        target_node_id,
+                        current_day=curr_day,
+                        current_minute=safe_min,
+                        scen_key=scen_key,
+                        session=session if isinstance(session, dict) else None,
+                        roster_row=roster_row,
+                        roster_loaded=True,
+                        contact_row=resident_contact,
+                        contacts=contacts,
+                        contacts_loaded=True,
+                        autonomy_override=ov,
+                    )
+                    if dbell.get("applicable") and not dbell.get("allowed"):
+                        if dbell.get("doorbell_status") == "not_home":
+                            intercom_reason_code = "resident_not_home"
+                            intercom_reason_label = f"No Answer at Intercom — {res_name or 'Resident'} Is Out"
+                        else:
+                            intercom_reason_code = "private_intercom"
+                            intercom_reason_label = "No Answer at Intercom — Late Night"
+                    elif dbell.get("doorbell_status") == "unavailable":
+                        intercom_reason_code = "private_intercom"
+                        intercom_reason_label = f"No Answer at Intercom — {res_name or 'Resident'} Unavailable"
+                    elif is_high_bond and safe_min < 1320:
+                        if persist_db:
+                            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="resident_welcome")
+                        return {"gated": False, "unlocked_by": "resident_welcome", "resident_name": res_name}
+                else:
+                    if is_high_bond and safe_min < 1320:
+                        if persist_db:
+                            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="resident_welcome")
+                        return {"gated": False, "unlocked_by": "resident_welcome", "resident_name": res_name}
 
     # 7. Check Current Action Check Result (Breach / Persuasion Attempt & Escalating Complication)
     state = db.get_world_node_state(session_id, target_node_id)
     failed_block_tag = f"{curr_day}_{time_block}"
     is_lock_jammed = state.get("failed_block") == failed_block_tag
 
+    _is_intercom_ring_only = (
+        any(w in current_action_label for w in ("ring the intercom", "buzz", "ring the bell", "intercom"))
+        and not any(w in current_action_label for w in ("sneak", "pick", "lockpick", "climb", "scale", "force", "break in", "bypass"))
+    )
+    if tier == "private" and _is_intercom_ring_only and (
+        intercom_reason_code == "resident_not_home" or (not has_check and not action_check_tier)
+    ):
+        is_breach_action = False
+
     if is_breach_action:
         is_success_tier = action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
         is_crit_fail_tier = action_check_tier in ("critical_failure", "crit_fail")
         if is_success_tier:
             record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="skill_check")
+            if is_nsfw_salon_target:
+                record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason="skill_check")
+                try:
+                    from .seeding import reveal_hidden_club_facility
+                    reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
+                except Exception:
+                    pass
             return {"gated": False, "unlocked_by": "skill_check"}
         else:
             # Action Failed: lock out for this time block and evict to nearest open public node
-            db.update_world_node_state(session_id, target_node_id, {"failed_block": failed_block_tag})
+            if persist_db:
+                db.update_world_node_state(session_id, target_node_id, {"failed_block": failed_block_tag})
             from .pathfinding import resolve_safe_open_eviction_destination
             evict_nid, evict_loc = resolve_safe_open_eviction_destination(
                 session_id,
@@ -1235,7 +1439,7 @@ def evaluate_node_access_gate(
                 k in current_action_label for k in ("sneak", "infiltrate", "slip", "creep", "climb", "scale")
             )
             patrol_confrontation = bool(is_crit_fail_tier or curfew_active or is_trespassing or is_covert_sneak_attempt)
-            if isinstance(session, dict):
+            if persist_db and isinstance(session, dict):
                 try:
                     from mechanics.stealth import break_stealth, get_session_stealth_state, set_session_stealth_state
                     break_stealth(session, reason="caught_at_restricted_gate", break_all=True)
@@ -1250,31 +1454,84 @@ def evaluate_node_access_gate(
                 except Exception:
                     pass
             patrol_npc = None
+            chosen = None
             if patrol_confrontation:
-                # Try pulling an existing authority figure from contacts / school roster (User Decision #1)
-                roster = db.get_school_roster(session_id) or []
-                contacts = db.get_contacts(session_id) or []
-                authority_cands = []
-                if not (curfew_active or is_trespassing):
+                from mechanics.social.epistemic_propagation import _is_watch_role
+                from mechanics.world.presence_graph import is_deceased_or_arrested
+
+                world_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+                watch_cands: list[dict[str, Any]] = []
+                authority_cands: list[dict[str, Any]] = []
+
+                def _has_patrol_authority(cand: dict[str, Any]) -> bool:
+                    cand_basic = _parse_basic_info_dict(cand)
+                    r_txt = str(cand.get("role") or cand_basic.get("role") or "").lower()
+                    c_txt = str(cand.get("club") or cand_basic.get("club") or "").lower()
+                    return (
+                        _is_watch_role(cand)
+                        or any(k in r_txt for k in ("teacher", "staff", "guidance", "counselor", "principal", "vice principal", "prefect", "hall monitor", "discipline", "security", "guard", "officer"))
+                        or any(k in c_txt for k in ("student council", "disciplinary"))
+                    )
+
+                for w in world_roster:
+                    if not isinstance(w, dict) or not w.get("name"):
+                        continue
+                    if is_deceased_or_arrested(w) or str(w.get("staff_status") or "active").strip().lower() in ("dead", "deceased", "arrested", "wiped", "removed"):
+                        continue
+                    if _is_watch_role(w):
+                        watch_cands.append(w)
+                    elif not (curfew_active or is_trespassing) and _has_patrol_authority(w):
+                        authority_cands.append(w)
+
+                if not watch_cands and not authority_cands and not (curfew_active or is_trespassing):
+                    roster = db.get_school_roster(session_id) or []
+                    contacts = db.get_contacts(session_id) or []
                     for c in (contacts + roster):
-                        if not isinstance(c, dict):
+                        if not isinstance(c, dict) or not c.get("name"):
                             continue
-                        r_txt = str(c.get("role") or (c.get("basic_info") or {}).get("role") or "").lower()
-                        c_txt = str(c.get("club") or (c.get("basic_info") or {}).get("club") or "").lower()
-                        if any(k in r_txt for k in ("teacher", "staff", "guidance", "counselor", "principal", "vice principal", "prefect", "hall monitor", "discipline")) or any(k in c_txt for k in ("student council", "disciplinary")):
+                        if is_deceased_or_arrested(c):
+                            continue
+                        if _has_patrol_authority(c):
                             authority_cands.append(c)
-                if authority_cands:
-                    chosen = authority_cands[0]
-                    c_role = chosen.get("role") or "Campus Authority"
+
+                all_real_cands = watch_cands or authority_cands
+                if all_real_cands:
+                    chosen = all_real_cands[0]
+                    c_role = str(chosen.get("role") or "Campus Authority")
                     patrol_npc = {
                         "name": chosen.get("name"),
                         "role": f"{c_role} (Hall Monitor)" if "hall monitor" not in c_role.lower() else c_role,
                         "stage_role": "active_partner",
                         "attention_ring": "ring_1_primary",
-                        "status_effects": ["Alerted"]
+                        "status_effects": ["Alerted"],
                     }
+                    if persist_db:
+                        from mechanics.social.epistemic_engine import detect_scene_witnesses
+
+                        witness_rec = dict(chosen)
+                        witness_rec["stage_role"] = "patrol_authority"
+                        witness_rec["in_party"] = False
+                        sess_dict = session if isinstance(session, dict) else {}
+                        turn_num = int(sess_dict.get("turn_count") or len(sess_dict.get("history") or []) + 1)
+                        detect_scene_witnesses(
+                            int(session_id),
+                            sess_dict,
+                            present_npcs=[witness_rec],
+                            nearby_npcs=[],
+                            act_payload={
+                                "intent": "stealth_covert",
+                                "category": "crime",
+                                "is_crime": True,
+                                "is_secret_deed": True,
+                                "force_spotted": True,
+                                "location_node_id": target_node_id,
+                                "summary": f"Caught attempting unauthorized breach of {display_name}",
+                                "turn": turn_num,
+                            },
+                            rng=random,
+                            turn=turn_num,
+                        )
                 else:
-                    import hashlib
                     officer_pool = ["Officer Takahashi", "Officer Miller", "Officer Sato", "Officer Vance", "Officer Henderson"]
                     s_idx = int(hashlib.md5(f"patrol_{session_id}_{target_node_id}_{curr_day}".encode()).hexdigest(), 16) % len(officer_pool)
                     chosen_officer = officer_pool[s_idx]
@@ -1283,7 +1540,7 @@ def evaluate_node_access_gate(
                         "role": "Night Security Officer" if (curfew_active or is_trespassing) else "Campus Hall Monitor",
                         "stage_role": "active_partner",
                         "attention_ring": "ring_1_primary",
-                        "status_effects": ["Alerted"]
+                        "status_effects": ["Alerted"],
                     }
             evict_note = f" You are forced back to {evict_loc}." if evict_loc else ""
             return {
@@ -1328,9 +1585,9 @@ def evaluate_node_access_gate(
         reason_code = "curfew"
         reason_label = sched_reason_label or f"Curfew in Effect ({access_info['curfew_label']})"
     elif tier == "private":
-        reason_code = "private_intercom"
-        reason_label = "Private Residence Gate"
-    elif low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
+        reason_code = intercom_reason_code or "private_intercom"
+        reason_label = intercom_reason_label or "Private Residence Gate"
+    elif is_nsfw_salon_target:
         reason_code = "speakeasy_restricted"
         reason_label = "Secret Society Speakeasy Door (Membership, Invite, or Audition Required)"
     else:
@@ -1394,7 +1651,7 @@ def evaluate_node_access_gate(
             ),
             "barrier_choices": barrier_choices,
         }
-    if low_id == "loc_nsfw_faction_hq" or "velvet basement" in display_name.lower():
+    if is_nsfw_salon_target:
         if not is_lock_jammed:
             barrier_choices.append(Phase2Choice(
                 f"[AGI] Slip quietly through the cellar service grate into {display_name}",
@@ -1596,12 +1853,20 @@ def record_turn_scene_residue(
     log_list = list(state.get("scene_residue_log") or [])
 
     # Deduplicate and append
+    is_secret_residue = bool(priority == 3 or unlocked_by in ("skill_check", "illicit_rendezvous"))
+    participants: list[str] = ["player"]
+    if priority == 3 and lead_partner and str(lead_partner).strip() and str(lead_partner).strip() != "a partner":
+        participants.append(str(lead_partner).strip())
+
     filtered_log = [m for m in log_list if m.get("text") != new_memory_text]
     filtered_log.append({
         "day": curr_day,
         "minute": curr_min,
         "text": new_memory_text[:140],
-        "priority": priority
+        "priority": priority,
+        "is_secret_residue": is_secret_residue,
+        "participants": participants,
+        "origin_node_id": str(node_id),
     })
 
     # Keep rolling 3 entries

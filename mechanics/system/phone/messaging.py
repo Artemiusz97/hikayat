@@ -446,6 +446,59 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         f"- Current In-Game Time & Schedule: {time_str} [{world_sched.get('period_label', '')}]. "
         f"Reflect the current setting and time of day in your reply when natural (e.g. discreetly texting during class, mentioning club activities, chatting on weekends, or winding down for bed).\n"
     )
+    try:
+        from mechanics.social.wardrobe import (
+            format_wardrobe_summary,
+            detect_outfit_request_intent,
+            evaluate_outfit_request_compliance,
+            resolve_actor_wardrobe_state,
+        )
+
+        offscreen_w = resolve_actor_wardrobe_state(
+            contact,
+            session=session,
+            scen_key=scen_key,
+            location_str=str(current_loc or ""),
+            current_day=curr_day_val,
+            current_minute=curr_min_val,
+            is_colocated_with_player=False,
+            viewer_relationship={"track": track, "affinity": score},
+        )
+        off_preset = str(offscreen_w.get("active_outfit_preset") or "").strip()
+        off_sum = format_wardrobe_summary(offscreen_w.get("clothing"))
+        if off_sum and off_preset != "natural":
+            time_schedule_hint += (
+                f"- Current Off-Screen Attire ({off_preset}): {off_sum}. "
+                f"When sending casual selfies or mentioning what you're currently wearing at this hour, stay consistent with this outfit.\n"
+            )
+        dm_req = detect_outfit_request_intent(user_message, target_npc_name=contact_name)
+        if dm_req.get("detected"):
+            dm_eval = evaluate_outfit_request_compliance(
+                contact,
+                dm_req,
+                scen_key=scen_key,
+                session=session,
+                location_str=str(current_loc or ""),
+                current_day=curr_day_val,
+                current_minute=curr_min_val,
+                relationship={"track": track, "affinity": score},
+                current_turn=int(session.get("turn_count") or 0),
+                is_dm=True,
+            )
+            if dm_eval.get("directive_text"):
+                time_schedule_hint += dm_eval["directive_text"] + "\n"
+            if check_result.succeeded and dm_eval.get("pending_request_payload"):
+                upd_basic = dict(basic)
+                upd_basic["pending_outfit_request"] = dm_eval["pending_request_payload"]
+                db.upsert_contact(
+                    session_id=session_id,
+                    character_id=player_char.get("id", 0),
+                    npc_id=str(contact.get("npc_id") or clean_npc_id),
+                    name=contact_name,
+                    basic_info=upd_basic,
+                )
+    except Exception:
+        pass
 
     # Contextual knowledge hints (Read-only from active quest & gossip feed)
     active_sq = db.get_active_story_quest(session_id)
@@ -951,6 +1004,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     if is_autonomy_ping_decline:
         affinity_delta = max(0, affinity_delta)
 
+    _pre_resolve_intent = intent
     resolved_rendezvous, intent = resolve_rendezvous_location(
         session_id=session_id,
         contact_name=contact_name,
@@ -966,6 +1020,29 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         history_rows=history_rows,
         scenario=scen_key,
     )
+    if _pre_resolve_intent == "meetup" and intent == "chat" and not resolved_rendezvous:
+        reply_text = (
+            (reply_text.rstrip() + "\n\n" if reply_text.strip() else "")
+            + "*(Quarantine Refusal: Civilian contacts decline meetups inside active anomalous quarantine zones.)*"
+        )
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.world.anomalous_sites import compute_domain_skill_check_modifiers
+            _dom_msg_mod = await db.adb(
+                compute_domain_skill_check_modifiers,
+                session_id,
+                session,
+                int((player_char or {}).get("user_id") or 0),
+                player_char,
+                "INT",
+            )
+            if _dom_msg_mod.get("jam_comms"):
+                reply_text = (
+                    (reply_text.rstrip() + "\n\n" if reply_text.strip() else "")
+                    + "*(Numbers-Station Interference: Subterranean Faraday jamming distorts carrier signal with rhythmic static.)*"
+                )
+        except Exception:
+            pass
 
     # Save messages to SQLite
     await db.adb(db.save_phone_message, session_id, npc_id, sender="player", message=user_message, intent=intent)

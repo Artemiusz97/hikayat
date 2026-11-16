@@ -648,6 +648,17 @@ class TurnService:
             for _inc_k in ("incursion_action", "incursion_id", "breach_id"):
                 cleaned.pop(_inc_k, None)
 
+        _site_act_ok = (
+            isinstance(session, dict)
+            and not session.get("nearby_enemies")
+            and str(cleaned.get("intent") or "").strip().lower() == "anomalous_site_action"
+            and str(cleaned.get("site_action") or "").strip().lower() in {"puzzle_step", "harvest", "overdraw"}
+            and bool(cleaned.get("site_id"))
+        )
+        if not _site_act_ok:
+            for _sk_k in ("site_action", "site_id", "step_index", "use_ward", "ward_item_name"):
+                cleaned.pop(_sk_k, None)
+
         inventory = await adb(db.get_inventory, user_id) or []
 
         # 2. Match against server-generated Tactical Combat Deck when enemies are present
@@ -959,6 +970,60 @@ class TurnService:
                 })
                 return cleaned
 
+        # 6D. Server-side Anomalous Site Puzzle / Harvest Reconciliation
+        if (
+            not active_enemies
+            and session_id
+            and raw_intent == "anomalous_site_action"
+            and str(cleaned.get("site_action") or "").strip().lower() in ("puzzle_step", "harvest", "overdraw")
+            and cleaned.get("site_id")
+        ):
+            try:
+                from mechanics.world.anomalous_sites import build_site_harvest_choices, build_site_puzzle_choices
+                _cur_day_s = int((session or {}).get("current_day", 1) or 1)
+                _cur_min_s = int((session or {}).get("current_minute", 720) or 720)
+                _cur_loc_s = str((session or {}).get("current_location") or "")
+                _cur_nid_s = str((session or {}).get("current_node_id") or "")
+                _cur_scen_s = str((session or {}).get("scenario") or "anomalous_incursions")
+                _cand_cards_s = (
+                    build_site_puzzle_choices(
+                        int(session_id),
+                        location_str=_cur_loc_s,
+                        node_id=_cur_nid_s,
+                        scen_key=_cur_scen_s,
+                        current_day=_cur_day_s,
+                        current_minute=_cur_min_s,
+                        inventory=inventory,
+                        session=session,
+                    )
+                    + build_site_harvest_choices(
+                        int(session_id),
+                        location_str=_cur_loc_s,
+                        node_id=_cur_nid_s,
+                        scen_key=_cur_scen_s,
+                        current_day=_cur_day_s,
+                    )
+                )
+                _req_sa = str(cleaned.get("site_action") or "").strip().lower()
+                _req_sid = str(cleaned.get("site_id") or "").strip().lower()
+                _req_ward = bool(cleaned.get("use_ward"))
+                _matched_s = next(
+                    (
+                        c for c in _cand_cards_s
+                        if str(c.get("site_action") or "").lower() == _req_sa
+                        and str(c.get("site_id") or "").lower() == _req_sid
+                        and (_req_sa != "puzzle_step" or bool(c.get("use_ward")) == _req_ward)
+                    ),
+                    None,
+                )
+                if _matched_s:
+                    cleaned.update(_matched_s)
+                    return cleaned
+            except Exception:
+                pass
+            for _sk_k in ("site_action", "site_id", "step_index", "use_ward", "ward_item_name"):
+                cleaned.pop(_sk_k, None)
+
         # 7. UI Tactical/Stealth/Dialogue Fallback Cards & Unmatched Payloads -> Deterministic Rolled Check (DC >= 6, NEVER FREE/NONE)
         act_cat_hint = str(cleaned.get("action_category") or "").strip().lower()
         choice_type_hint = str(cleaned.get("choice_type") or "").strip().lower()
@@ -1132,6 +1197,7 @@ class TurnService:
 
         chosen: Dict[str, Any] = {}
         classification: Dict[str, Any] = {}
+        inventory: Optional[List[Dict[str, Any]]] = None
         is_custom = False
         is_standalone_direct_choice = False
         action_type = "choice"
@@ -1200,6 +1266,16 @@ class TurnService:
                 if not _combat_tactic_ok:
                     for _inc_k in ("incursion_action", "incursion_id", "breach_id"):
                         chosen.pop(_inc_k, None)
+                _site_act_ok_t = (
+                    isinstance(session, dict)
+                    and not session.get("nearby_enemies")
+                    and str(chosen.get("intent") or "").strip().lower() == "anomalous_site_action"
+                    and str(chosen.get("site_action") or "").strip().lower() in {"puzzle_step", "harvest", "overdraw"}
+                    and bool(chosen.get("site_id"))
+                )
+                if not _site_act_ok_t:
+                    for _sk_k in ("site_action", "site_id", "step_index", "use_ward", "ward_item_name"):
+                        chosen.pop(_sk_k, None)
                 if chosen.get("spell_id"):
                     try:
                         from mechanics.combat.spells.registry import get_spell
@@ -1239,10 +1315,37 @@ class TurnService:
                 chosen["text"] = custom_text
             else:
                 inventory = await adb(db.get_inventory, user_id)
-                classification = await game_engine.classify_custom_action(session, char, inventory, custom_text)
-                if not isinstance(classification, dict):
-                    classification = dict(classification) if hasattr(classification, "items") else {}
-                chosen = dict(classification)
+                _matched_site_free = None
+                if (
+                    isinstance(session, dict)
+                    and session.get("id")
+                    and scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+                    and not game_engine.get_active_enemies(session)
+                ):
+                    try:
+                        from mechanics.world.anomalous_sites import match_freeform_puzzle_action
+                        _matched_site_free = await adb(
+                            match_freeform_puzzle_action,
+                            int(session["id"]),
+                            custom_text,
+                            location_str=str(session.get("current_location") or ""),
+                            node_id=str(session.get("current_node_id") or ""),
+                            scen_key=str(session.get("scenario") or "anomalous_incursions"),
+                            current_day=int(session.get("current_day", 1) or 1),
+                            current_minute=int(session.get("current_minute", 720) or 720),
+                            inventory=inventory,
+                            session=session,
+                        )
+                    except Exception:
+                        _matched_site_free = None
+                if _matched_site_free:
+                    classification = dict(_matched_site_free)
+                    chosen = dict(_matched_site_free)
+                else:
+                    classification = await game_engine.classify_custom_action(session, char, inventory, custom_text)
+                    if not isinstance(classification, dict):
+                        classification = dict(classification) if hasattr(classification, "items") else {}
+                    chosen = dict(classification)
                 if not classification.get("fast_path") and not classification.get("_verified_ambient_intent"):
                     if str(chosen.get("stat") or "").upper() not in db.STAT_COLUMN:
                         chosen["stat"] = "PER"
@@ -1334,6 +1437,20 @@ class TurnService:
                 raise
             except Exception:
                 pass
+
+        _sleep_mode_chk = str(req_sleep_mode or chosen.get("sleep_mode") or "").strip().lower()
+        _sleep_int_chk = str(chosen.get("intent") or req_intent or "").strip().lower()
+        if _sleep_mode_chk in ("sleep", "nap") or _sleep_int_chk == "rest_sleep":
+            from mechanics.world.anomalous_sites.domain_rules import is_sleep_blocked_in_anomalous_zone
+            _blocked_slp, _slp_reason = is_sleep_blocked_in_anomalous_zone(
+                session_id=int(session_id or 0),
+                location_name=str(session.get("current_location") or "") if isinstance(session, dict) else "",
+                node_id=str(session.get("current_node_id") or "") if isinstance(session, dict) else "",
+                current_minute=int(session.get("current_minute", 720) or 720) if isinstance(session, dict) else 720,
+                scen_key=str(session.get("scenario") or "") if isinstance(session, dict) else "",
+            )
+            if _blocked_slp:
+                raise ValueError(_slp_reason or "You cannot sleep or nap inside an active anomalous quarantine zone!")
 
         # ── Awakened Resonance 3-Pip Ultimate Gate, 0-MP Basic Strike & Entity Contracts ─
         chosen_spell_id = str(chosen.get("spell_id") or "").strip()
@@ -1598,6 +1715,7 @@ class TurnService:
                 except Exception as _soc_m_err:
                     log.debug("Social custom metering skipped: %s", _soc_m_err)
 
+        _domain_stat_bonus = 0
         if isinstance(session, dict) and session.get("id") and stat not in ("NONE", "FREE", "ITEM") and req_val > 0:
             try:
                 from mechanics.world.world_events.modifiers import (
@@ -1636,6 +1754,23 @@ class TurnService:
                         )
             except Exception as _pact_dc_err:
                 log.debug("Pact field DC modifier skipped: %s", _pact_dc_err)
+            try:
+                import scenario_data as _ts_dom_sd
+                if _ts_dom_sd.is_anomalous_incursions_scenario(session.get("scenario", "")):
+                    from mechanics.world.anomalous_sites import compute_domain_skill_check_modifiers
+                    _dom_chk = await adb(
+                        compute_domain_skill_check_modifiers,
+                        int(session["id"]),
+                        session,
+                        int(user_id or 0),
+                        char,
+                        stat,
+                        inventory,
+                    )
+                    req_val += int(_dom_chk.get("dc_penalty") or 0)
+                    _domain_stat_bonus = int(_dom_chk.get("stat_bonus") or 0)
+            except Exception as _dom_dc_err:
+                log.debug("Anomalous domain DC modifier skipped: %s", _dom_dc_err)
 
         if isinstance(chosen, dict) and (chosen.get("intent") == "break_the_news" or chosen.get("_is_break_the_news")):
             try:
@@ -1735,7 +1870,7 @@ class TurnService:
             )
             rate = 100
         else:
-            stat_val = char.get(stat_col, 5)
+            stat_val = max(1, int(char.get(stat_col, 5) or 5) + _domain_stat_bonus)
             luk_val = char.get("luk", 3)
             rate = skill_check.success_chance(stat_val, req_val, check_mode=check_mode)
             res = skill_check.resolve_check(stat_val, req_val, luk_val, check_mode=check_mode)
@@ -1994,6 +2129,11 @@ class TurnService:
             "is_direct_reply": bool(chosen.get("is_direct_reply")),
             "is_cruel": bool(chosen.get("is_cruel")),
             "_topic_locked_attempt": bool(chosen.get("_topic_locked_attempt")),
+            "site_action": str(chosen.get("site_action") or ""),
+            "site_id": str(chosen.get("site_id") or ""),
+            "step_index": chosen.get("step_index"),
+            "use_ward": bool(chosen.get("use_ward")),
+            "ward_item_name": str(chosen.get("ward_item_name") or ""),
         })
         if not action.get("active_recall") and isinstance(session, dict) and session.get("id") and label_text:
             from game_engine.turn.generation import extract_deterministic_recall_query
@@ -2298,6 +2438,11 @@ class TurnService:
                 "is_lethal_overdraw": bool(a.get("is_lethal_overdraw", False)),
                 "_pact_cast_meta": dict(a["_pact_cast_meta"]) if isinstance(a.get("_pact_cast_meta"), dict) else None,
                 "incursion_action": a.get("incursion_action") or "",
+                "site_action": a.get("site_action") or "",
+                "site_id": a.get("site_id") or "",
+                "step_index": a.get("step_index"),
+                "use_ward": bool(a.get("use_ward", False)),
+                "ward_item_name": a.get("ward_item_name") or "",
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
                 "stage_index": a.get("stage_index"),

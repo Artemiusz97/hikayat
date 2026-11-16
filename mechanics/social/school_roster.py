@@ -79,7 +79,7 @@ FACULTY_TEMPLATES = [
         "club": "Orchestra & Choir Director",
         "clique": "Faculty",
         "primary_facility": "{arts_name} ➔ Old East Wing Music Room ➔ Upright Piano Alcove",
-        "secondary_facility": "{arts_name} ➔ School Auditorium Stage ➔ Auditorium Stage",
+        "secondary_facility": "Campus Auditorium & Drama Theater ➔ Main Auditorium Stage & Orchestra Pit",
         "personality_summary": "Passionate, expressive, and easily moved by creative talent."
     },
     {
@@ -98,7 +98,7 @@ FACULTY_TEMPLATES = [
         "gender": "male",
         "club": "Athletic Directorate",
         "clique": "Faculty",
-        "primary_facility": "{athletics_name} ➔ Main Gymnasium ➔ Basketball Court",
+        "primary_facility": "{athletics_name} ➔ Main Gymnasium & Varsity Court",
         "secondary_facility": "{athletics_name} ➔ Athletic Field ➔ Running Track",
         "personality_summary": "Booming voice, intense disciplinarian with a fierce commitment to victory."
     },
@@ -109,7 +109,7 @@ FACULTY_TEMPLATES = [
         "club": "Science & Robotics Club",
         "clique": "Faculty",
         "primary_facility": "{school_name} ➔ Chemistry & Science Lab ➔ Lab Workbenches",
-        "secondary_facility": "{abandoned_name} ➔ Old Storage Room 3-B ➔ Club Meeting Table",
+        "secondary_facility": "{arts_name} ➔ Esports & Gaming Clubroom",
         "personality_summary": "Caffeinated tech mentor who treats students like fellow software engineers."
     },
     {
@@ -119,7 +119,7 @@ FACULTY_TEMPLATES = [
         "club": "School Administration",
         "clique": "Administration",
         "primary_facility": "{school_name} ➔ Teachers' Staff Room ➔ Print Room",
-        "secondary_facility": "{arts_name} ➔ School Auditorium Stage ➔ Auditorium Stage",
+        "secondary_facility": "Campus Auditorium & Drama Theater ➔ Main Auditorium Stage & Orchestra Pit",
         "personality_summary": "Authoritative, dignified, and fiercely protective of the academy's reputation."
     },
     {
@@ -204,20 +204,20 @@ HOMEROOM_TEMPLATES = [
 ]
 
 UPPERCLASSMEN_TEMPLATES = [
-    {"role": "Student Council President", "grade": "Senior", "club": "Student Council", "facility": "{arts_name} ➔ Student Council Office ➔ President's Desk", "summary": "Commanding, articulate, and fiercely protective of student rights and campus traditions."},
-    {"role": "Student Council Vice-President", "grade": "Senior", "club": "Student Council", "facility": "{arts_name} ➔ Student Council Office ➔ Meeting Table", "summary": "Poised, ambitious, handles club funding disputes with a sharp gavel."},
-    {"role": "Student Council Treasurer", "grade": "Senior", "club": "Student Council", "facility": "{arts_name} ➔ Student Council Office ➔ Archives & Filing Cabinets", "summary": "Meticulous with numbers, strict about club receipts and equipment requests."},
+    {"role": "Student Council President", "grade": "Senior", "club": "Student Council", "facility": "Student Council Office ➔ Executive Council Chamber", "summary": "Commanding, articulate, and fiercely protective of student rights and campus traditions."},
+    {"role": "Student Council Vice-President", "grade": "Senior", "club": "Student Council", "facility": "Student Council Office ➔ Executive Council Chamber", "summary": "Poised, ambitious, handles club funding disputes with a sharp gavel."},
+    {"role": "Student Council Treasurer", "grade": "Senior", "club": "Student Council", "facility": "Student Council Office ➔ Soundproof Presidential Archive Vault", "summary": "Meticulous with numbers, strict about club receipts and equipment requests."},
     {"role": "Varsity Swim Captain", "grade": "Senior", "club": "Swim & Dive Team", "facility": "{athletics_name} ➔ Swimming Pool Facility ➔ Poolside Deck", "summary": "Disciplined athlete with a relentless early-morning training regimen."},
     {"role": "Varsity Martial Arts Lead", "grade": "Senior", "club": "Martial Arts & Kendo Club", "facility": "{athletics_name} ➔ Martial Arts Dojo ➔ Polished Hardwood Sparring Floor", "summary": "Stoic martial artist who commands quiet respect across the athletic wing."},
     {"role": "Journalism Chief Editor", "grade": "Senior", "club": "Journalism & Media", "facility": "{arts_name} ➔ Campus Media & Broadcasting Room ➔ PA Announcement Console", "summary": "Fiercely independent student editor pursuing big investigative campus headlines."},
     {"role": "Robotics Senior Lead", "grade": "Senior", "club": "Science & Robotics Club", "facility": "{school_name} ➔ Chemistry & Science Lab ➔ Lab Workbenches", "summary": "Brilliant mechanical builder preparing an automated prototype for nationals."},
-    {"role": "Drama Senior Director", "grade": "Senior", "club": "Arts & Drama Society", "facility": "{arts_name} ➔ School Auditorium Stage ➔ Backstage Dressing Area", "summary": "Demanding director with an eye for stage lighting and theatrical blocking."},
+    {"role": "Drama Senior Director", "grade": "Senior", "club": "Arts & Drama Society", "facility": "Campus Auditorium & Drama Theater ➔ Main Auditorium Stage & Orchestra Pit", "summary": "Demanding director with an eye for stage lighting and theatrical blocking."},
     {"role": "Botanical Club President", "grade": "Senior", "club": "Gardening & Botany Club", "facility": "{commons_name} ➔ Botanical Glasshouse ➔ Tropical Atrium Walk", "summary": "Serene senior horticulturist who cross-breeds rare orchids and brews calming mint infusions for stressed clubmates."},
     {"role": "Debate Team Captain", "grade": "Junior", "club": "Debate Society", "facility": "{school_name} ➔ School Library ➔ Study Tables", "summary": "Fast-talking rhetorician who can dismantle any argument in seconds."},
     {"role": "Cross-Country Runner", "grade": "Junior", "club": "Track & Field Club", "facility": "{athletics_name} ➔ Athletic Field ➔ Running Track", "summary": "Endurance runner known for pacing miles around the campus perimeter."},
-    {"role": "Occult Mystery Investigator", "grade": "Junior", "club": "Occult & Mystery Club", "facility": "{abandoned_name} ➔ Old Storage Room 3-B ➔ Tarot & Divination Corner", "summary": "Deeply fascinated by the academy's founding lore and ghost rumors."},
-    {"role": "Broadcast Tech Lead", "grade": "Junior", "club": "Journalism & Media", "facility": "{arts_name} ➔ Campus Media & Broadcasting Room ➔ PA Announcement Console", "summary": "Operates the morning announcement PA system and campus livestream cameras."},
-    {"role": "Varsity Basketball Guard", "grade": "Junior", "club": "Varsity Basketball Team", "facility": "{athletics_name} ➔ Main Gymnasium ➔ Basketball Court", "summary": "Flashy playmaker with quick reflexes and an easygoing swagger."},
+    {"role": "Occult Mystery Investigator", "grade": "Junior", "club": "Occult & Mystery Club", "facility": "{arts_name} ➔ Old Storage Room 3-B", "summary": "Deeply fascinated by the academy's founding lore and ghost rumors."},
+    {"role": "Boiler-Room Delinquent Lead", "grade": "Junior", "club": "Abandoned Wing Delinquents", "facility": "{abandoned_name} ➔ Abandoned Wing Boiler-Room Den", "summary": "Territorial street brawler who claims the rusted old-wing boiler den and trades contraband hardware."},
+    {"role": "Varsity Basketball Guard", "grade": "Junior", "club": "Varsity Basketball Team", "facility": "{athletics_name} ➔ Main Gymnasium & Varsity Court", "summary": "Flashy playmaker with quick reflexes and an easygoing swagger."},
     {"role": "Student Hallway Monitor", "grade": "Junior", "club": "Student Council", "facility": "{school_name} ➔ School Hallways ➔ Outside the Classroom Door", "summary": "Diligent hall monitor who checks hall passes with earnest dedication."},
     {"role": "Archery & Kendo Co-Captain", "grade": "Junior", "club": "Martial Arts & Kendo Club", "facility": "{athletics_name} ➔ Martial Arts Dojo ➔ Polished Hardwood Sparring Floor", "summary": "Composed traditionalist with posture like a drawn bowstring and an unshakeable sense of fair play."}
 ]
@@ -225,20 +225,20 @@ UPPERCLASSMEN_TEMPLATES = [
 UNDERCLASSMEN_TEMPLATES = [
     {"role": "JV Track Sprinter", "grade": "Sophomore", "club": "Track & Field Club", "facility": "{athletics_name} ➔ Athletic Field ➔ Field Bleachers", "summary": "Eager sprinter working hard to qualify for the varsity relay roster."},
     {"role": "Science Lab Assistant", "grade": "Sophomore", "club": "Science & Robotics Club", "facility": "{school_name} ➔ Chemistry & Science Lab ➔ Chemical Storage Closet", "summary": "Assists Dr. Thorne with chemical prep and organizing glassware."},
-    {"role": "Theater Set Painter", "grade": "Sophomore", "club": "Arts & Drama Society", "facility": "{arts_name} ➔ School Auditorium Stage ➔ Prop & Costume Storeroom", "summary": "Talented painter who builds wooden flats and painted backdrops for school plays."},
-    {"role": "Student Council Junior Aide", "grade": "Sophomore", "club": "Student Council", "facility": "{arts_name} ➔ Student Council Office ➔ Meeting Table", "summary": "Handles flyer printing, stamping forms, and distributing council notices."},
-    {"role": "Cafeteria Gamer", "grade": "Sophomore", "club": "Esports & Gaming Club", "facility": "{commons_name} ➔ Campus Dining Hall & Cafeteria ➔ Corner Booths", "summary": "Plays handheld card games and mobile battles during lunch periods."},
+    {"role": "Theater Set Painter", "grade": "Sophomore", "club": "Arts & Drama Society", "facility": "Campus Auditorium & Drama Theater ➔ Costume Wardrobe & Prop Quartermaster", "summary": "Talented painter who builds wooden flats and painted backdrops for school plays."},
+    {"role": "Student Council Junior Aide", "grade": "Sophomore", "club": "Student Council", "facility": "Student Council Office ➔ Executive Council Chamber", "summary": "Handles flyer printing, stamping forms, and distributing council notices."},
+    {"role": "Cafeteria Gamer", "grade": "Sophomore", "club": "Esports & Gaming Club", "facility": "{arts_name} ➔ Esports & Gaming Clubroom", "summary": "Plays handheld card games, retro fighters, and scrims between classes in the clubroom."},
     {"role": "Courtyard Gossip Informant", "grade": "Sophomore", "club": "None", "facility": "{commons_name} ➔ Central Courtyard ➔ Vending Machines Area", "summary": "Social butterfly who knows who is crushing on whom across all four grades."},
     {"role": "Sophomore Swim Relay Ace", "grade": "Sophomore", "club": "Swim & Dive Team", "facility": "{athletics_name} ➔ Swimming Pool Facility ➔ Starting Blocks", "summary": "Chlorine-scented sprint swimmer chasing the school's butterfly stroke record before junior year."},
-    {"role": "Sophomore Occult Zine Writer", "grade": "Sophomore", "club": "Occult & Mystery Club", "facility": "{abandoned_name} ➔ Old Storage Room 3-B ➔ Club Meeting Table", "summary": "Publishes photocopied supernatural zines cataloging eerie footsteps and urban legends around town."},
-    {"role": "Freshman Track Novice", "grade": "Freshman", "club": "Track & Field Club", "facility": "{athletics_name} ➔ Athletic Field ➔ Running Track", "summary": "Enthusiastic freshman eager to prove themselves on the athletic squad."},
+    {"role": "Sophomore Occult Zine Writer", "grade": "Sophomore", "club": "Occult & Mystery Club", "facility": "{arts_name} ➔ Old Storage Room 3-B", "summary": "Publishes photocopied supernatural zines cataloging eerie footsteps and urban legends around town."},
+    {"role": "Abandoned Wing Truant Delinquent", "grade": "Freshman", "club": "Abandoned Wing Delinquents", "facility": "{abandoned_name} ➔ Abandoned Wing Boiler-Room Den", "summary": "Defiant freshman brawler loyal to the abandoned-wing gang and fiercest rival of the gym-shed crew."},
     {"role": "Freshman Transfer Student", "grade": "Freshman", "club": "None", "facility": "{school_name} ➔ Entrance Foyer & Shoe Lockers ➔ Shoe Lockers", "summary": "Still learning their way around the campus and locker bays."},
     {"role": "Band Clarinetist", "grade": "Freshman", "club": "Arts & Music Wing", "facility": "{arts_name} ➔ Old East Wing Music Room ➔ Velvet Lounge Couch", "summary": "Diligent musician practicing scales during morning homeroom."},
     {"role": "Robotics Apprentice", "grade": "Freshman", "club": "Science & Robotics Club", "facility": "{school_name} ➔ Chemistry & Science Lab ➔ Lab Workbenches", "summary": "Learning solder techniques and basic Python code from upperclassmen."},
     {"role": "Freshman Cub Reporter", "grade": "Freshman", "club": "Journalism & Media", "facility": "{commons_name} ➔ Central Courtyard ➔ Old Cherry Tree", "summary": "Eagerly notebook-in-hand, interviewing students about campus life."},
     {"role": "Library Page Assistant", "grade": "Freshman", "club": "Library Archives", "facility": "{school_name} ➔ School Library ➔ Book Aisles", "summary": "Shelves returned books and knows the quietest study spots in the library."},
     {"role": "Freshman Fine Arts Prodigy", "grade": "Freshman", "club": "Fine Arts Guild", "facility": "{arts_name} ➔ Fine Arts Studio ➔ Easel & Canvas Circle", "summary": "Quietly intense oil painter with cobalt-blue smudges on their sleeves and startling visual memory."},
-    {"role": "Freshman Tennis & Badminton Rookie", "grade": "Freshman", "club": "Varsity Basketball & Court Club", "facility": "{athletics_name} ➔ Main Gymnasium ➔ Basketball Court", "summary": "Cheerful racket-sport rookie with blister-taped palms who volunteers to gather stray shuttlecocks after practice."}
+    {"role": "Freshman Tennis & Badminton Rookie", "grade": "Freshman", "club": "Varsity Basketball & Court Club", "facility": "{athletics_name} ➔ Main Gymnasium & Varsity Court", "summary": "Cheerful racket-sport rookie with blister-taped palms who volunteers to gather stray shuttlecocks after practice."}
 ]
 
 NSFW_FACTION_TEMPLATES = [
@@ -1315,8 +1315,10 @@ def _matches_student_facility_schedule(
 
     # 1. NIGHT CURFEW (20:00 - 07:00 / safe_minute >= 1200 or < 420)
     if phase == "night":
+        if any(k in loc_low for k in ("boiler-room den", "loc_delinquent_boiler_den")):
+            return bool("delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low or "boiler" in prim_fac)
         if is_abandoned and not is_velvet_salon:
-            return bool("occult" in club_low or "occult" in role_low or "paranormal" in role_low or "delinquent" in role_low or "delinquent" in clique_low)
+            return bool("occult" in club_low or "occult" in role_low or "paranormal" in role_low or "delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low)
         if any(k in loc_low for k in ("behind gym", "shed", "roof")):
             return bool("delinquent" in role_low or "delinquent" in clique_low or "rebel" in clique_low)
         if any(k in loc_low for k in ("staff room", "staff_room", "teachers' staff room")):
@@ -1344,6 +1346,12 @@ def _matches_student_facility_schedule(
                 if "gym" in loc_low and "behind gym" not in loc_low and any(c in f"{role_low} {club_low} {prim_fac}" for c in ("main gymnasium", "basketball", "volleyball", "badminton", "tennis", "cheer")):
                     return True
                 if any(k in loc_low for k in ("dojo", "martial")) and any(c in f"{role_low} {club_low} {prim_fac}" for c in ("martial", "kendo", "judo", "karate", "dojo")):
+                    return True
+                if "storage room 3-b" in loc_low and ("occult" in club_low or "occult" in role_low):
+                    return True
+                if any(k in loc_low for k in ("esports & gaming", "gaming clubroom", "loc_gaming_clubroom")) and ("esports" in club_low or "gaming" in club_low or "gamer" in clique_low or "gamer" in role_low):
+                    return True
+                if any(k in loc_low for k in ("boiler-room den", "behind gym", "loc_delinquent_boiler_den", "loc_behind_gym_sheds")) and ("delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low):
                     return True
                 if is_abandoned and not is_velvet_salon and "occult" in club_low:
                     return True
@@ -1474,9 +1482,9 @@ def _matches_student_facility_schedule(
                 return True
             return False
 
-        # Behind Gym Storage Sheds during class hours (occasional truants/delinquents)
-        if any(k in loc_low for k in ("behind gym", "shed")):
-            return bool("delinquent" in role_low or "delinquent" in clique_low or "rebel" in clique_low)
+        # Behind Gym Storage Sheds & Boiler-Room Den during class hours (occasional truants/delinquents)
+        if any(k in loc_low for k in ("behind gym", "shed", "boiler-room den", "loc_delinquent_boiler_den")):
+            return bool("delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low or "rebel" in clique_low)
 
         # Athletic facilities during class (Coach handled in 0B.5; unsupervised sports rooms are empty during class)
         if any(k in loc_low for k in ("gym", "pool", "field", "track", "dojo")):
@@ -1540,10 +1548,16 @@ def _matches_student_facility_schedule(
                 return bool(any(c in club_low for c in ("broadcast", "newspaper", "media", "journalism")))
             if any(k in loc_low for k in ("greenhouse", "glasshouse", "garden", "botany")) and "shed" not in loc_low:
                 return bool(any(c in club_low for c in ("garden", "botany", "plant")) or "custodian" in role_low or "groundskeeper" in role_low)
-            if (is_abandoned and not is_velvet_salon) or "storage room 3-b" in loc_low:
-                return bool("occult" in club_low or "delinquent" in role_low)
+            if any(k in loc_low for k in ("esports & gaming", "gaming clubroom", "loc_gaming_clubroom")):
+                return bool("esports" in club_low or "gaming" in club_low or "gamer" in role_low or "gamer" in clique_low)
+            if "storage room 3-b" in loc_low:
+                return bool("occult" in club_low or "occult" in role_low or "paranormal" in role_low)
+            if any(k in loc_low for k in ("boiler-room den", "loc_delinquent_boiler_den")):
+                return bool("delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low or "boiler" in prim_fac)
+            if is_abandoned and not is_velvet_salon:
+                return bool("occult" in club_low or "delinquent" in role_low or "delinquent" in club_low)
             if any(k in loc_low for k in ("behind gym", "shed")):
-                return bool("delinquent" in role_low or "delinquent" in clique_low)
+                return bool("delinquent" in role_low or "delinquent" in club_low or "delinquent" in clique_low)
             if "roof" in loc_low:
                 return bool("roof" in sec_fac or any(c in f"{role_low} {clique_low}" for c in ("delinquent", "loner", "quiet", "rebel")))
             if any(k in loc_low for k in ("staff room", "staff_room")):
@@ -1840,6 +1854,12 @@ def generate_student_schedule_activity(
 
     if "roof" in loc_low:
         return "Leaning against the safety fence with an iced canned drink"
+
+    if any(k in loc_low for k in ("boiler-room den", "loc_delinquent_boiler_den")):
+        return "Slouching by rusted boiler manifolds with gang rivals on lookout"
+
+    if any(k in loc_low for k in ("esports & gaming", "gaming clubroom", "loc_gaming_clubroom")):
+        return "Running competitive team scrims and tweaking strategy on dual-monitor rigs"
 
     if any(k in loc_low for k in ("shed", "behind gym")):
         return "Loitering in the shadows away from campus hall monitors"

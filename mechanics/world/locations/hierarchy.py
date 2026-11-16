@@ -711,6 +711,8 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
                     p_name = get_session_abandoned_campus_name(session_id, scenario_key)
             if p_id == "loc_agency_hq" or "{session_agency_hq}" in p_name:
                 p_name = get_session_agency_hq_name(session_id, scenario_key)
+            elif p_id == "fac_agency_residence" or p_name == "Public Agency Residential Hall" or "{session_agency_residence}" in p_name:
+                p_name = get_session_agency_residence_name(session_id, scenario_key)
             elif raw_p_name and is_urban_anomalous_scenario(scenario_key):
                 p_name = get_session_urban_facility_name(session_id, z.get("id", ""), p_id, raw_p_name, scenario_key)
             if p_name:
@@ -759,7 +761,13 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
                     continue
 
                 # Skip known corrupted residential entries (school facilities under residential or commercial zone)
-                if ("residential" in z_name.lower() or "commercial" in z_name.lower()) and any(k in p_name.lower() for k in ("classroom", "homeroom", "science lab", "library", "staff room", "student council", "gymnasium", "glasshouse", "greenhouse", "botanical", "promenade", "commons")):
+                if (
+                    ("residential" in z_name.lower() or "commercial" in z_name.lower())
+                    and any(k in p_name.lower() for k in ("classroom", "homeroom", "science lab", "library", "staff room", "student council", "gymnasium", "glasshouse", "greenhouse", "botanical", "promenade", "commons"))
+                ) or (
+                    any(zk in z_name.lower() for zk in ("residential", "commercial", "downtown", "city center"))
+                    and any(k in p_name.lower() for k in ("student council", "homeroom", "classroom"))
+                ):
                     continue
 
                 # Skip incongruous containers or tier demotions in dynamic entries
@@ -1249,7 +1257,16 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
         except Exception:
             pass
 
-    school_name = get_session_school_name(session_id, scenario_key) if (is_school_scenario(scenario_key) or "Main Academy Building" in str(raw_location or "")) else None
+    school_name = (
+        get_session_school_name(session_id, scenario_key)
+        if (
+            is_school_scenario(scenario_key)
+            or "anomalous_high_school" in str(scenario_key or "").lower()
+            or "student council" in str(raw_location or "").lower()
+            or "Main Academy Building" in str(raw_location or "")
+        )
+        else None
+    )
     classroom_name = get_session_classroom_name(session_id, scenario_key) if (is_school_scenario(scenario_key) or "Homeroom" in str(raw_location or "")) else None
     player_desk = get_session_player_desk_name(session_id, char_name)
     player_house = get_session_player_house_name(session_id, char_name, scenario_key)
@@ -1416,6 +1433,11 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
                     z = primaries_idx[p_low][0]
                 elif commercial_name:
                     z = commercial_name
+
+    if school_name and "student council" in str(p or "").lower():
+        z_low_sc = str(z or "").lower()
+        if any(zk in z_low_sc for zk in ("downtown", "city center", "commercial", "residential", "world region", "starting zone")):
+            z = school_name
 
     if p in ("Player's House", "Player House", "loc_player_house", "My House", "Your House"):
 

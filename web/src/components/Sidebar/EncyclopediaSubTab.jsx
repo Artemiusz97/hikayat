@@ -36,9 +36,10 @@ const formatTag = (val) => {
 
 const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
   const { t } = useTranslation();
-  const [viewMode, setViewMode] = useState('folklore'); // 'folklore' | 'field_log'
+  const [viewMode, setViewMode] = useState('folklore'); // 'folklore' | 'sites' | 'field_log'
   const [traditionFilter, setTraditionFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all'); // 'all' | 'discovered' | 'contained' | 'undiscovered'
+  const [siteFilter, setSiteFilter] = useState('all'); // 'all' | 'stabilized' | 'uncontained' | 'unvisited'
   const [expandedId, setExpandedId] = useState(null);
 
   const codexEntries = Array.isArray(encyclopedia?.folklore_codex) ? encyclopedia.folklore_codex : [];
@@ -46,6 +47,13 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
   const fieldLog = Array.isArray(encyclopedia?.field_log) ? encyclopedia.field_log : [];
   const vaultLog = Array.isArray(encyclopedia?.vault_log) ? encyclopedia.vault_log : [];
   const vaultReqs = Array.isArray(encyclopedia?.vault_requisitions) ? encyclopedia.vault_requisitions : [];
+  const siteRegistry = encyclopedia?.site_registry || null;
+  const siteCards = Array.isArray(siteRegistry?.sites) ? siteRegistry.sites : [];
+  const stabCount = Number(siteRegistry?.stabilized_count || 0);
+  const totalSiteCount = Number(siteRegistry?.total_sites || 36);
+  const chargesUsed = Number(siteRegistry?.resonator_charges_used || 0);
+  const chargesMax = Number(siteRegistry?.resonator_charges_max || 3);
+  const siteMilestones = Array.isArray(siteRegistry?.milestones) ? siteRegistry.milestones : [];
 
   const totalCount = encyclopedia?.total_folklore_count || codexEntries.length || 50;
   const discoveredCount = encyclopedia?.discovered_count || 0;
@@ -113,6 +121,20 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
     });
   }, [vaultLog, qNorm]);
 
+  const filteredSites = useMemo(() => {
+    return siteCards.filter((s) => {
+      if (siteFilter === 'stabilized' && !s.pacified) return false;
+      if (siteFilter === 'uncontained' && (s.pacified || !s.visited)) return false;
+      if (siteFilter === 'unvisited' && s.visited) return false;
+      if (!qNorm) return true;
+      const hay = [s.name, s.horror_subgenre, s.domain_rule_name, s.element, s.badge]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return hay.includes(qNorm);
+    });
+  }, [siteCards, siteFilter, qNorm]);
+
   if (!encyclopedia) {
     return (
       <div className="p-4 rounded-lg bg-black/40 border border-fantasy-border/50 text-center text-xs text-gray-400">
@@ -154,9 +176,119 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
             {t('codex.field_log_vault', 'Field Log & Vault')} [{fieldLog.length + vaultLog.length}]
           </span>
         </button>
+
+        {siteCards.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setViewMode('sites')}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold uppercase tracking-wider transition-colors cursor-pointer ${
+              viewMode === 'sites'
+                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-600/50'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <AlertTriangle size={12} />
+            <span>
+              {t('codex.quarantine_sites', 'Quarantine Sites')} [{stabCount}/{totalSiteCount}]
+            </span>
+          </button>
+        )}
       </div>
 
-      {viewMode === 'folklore' ? (
+      {viewMode === 'sites' ? (
+        <div className="space-y-2.5">
+          <div className="p-2.5 rounded-lg bg-gradient-to-r from-emerald-950/30 via-black/60 to-amber-950/25 border border-emerald-700/40 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px]">
+              <span className="font-bold text-emerald-200 uppercase tracking-wider flex items-center gap-1.5">
+                <Shield size={12} className="text-emerald-400" />
+                <span>{t('codex.site_registry_title', 'Quarantine Site Reclamation Grid')}</span>
+              </span>
+              <span className="font-mono text-gray-300">
+                <span className="text-emerald-300 font-bold">{stabCount}</span>/{totalSiteCount}
+              </span>
+            </div>
+            <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-emerald-900/50">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-emerald-400 transition-all duration-500"
+                style={{ width: `${Math.min(100, Math.round((stabCount / Math.max(1, totalSiteCount)) * 100))}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-[10px] font-mono text-gray-400">
+              <span>✨ {t('codex.resonator_charges', 'Field Resonator Charges')}: {Math.max(0, chargesMax - chargesUsed)}/{chargesMax}</span>
+              <span>🛡️ {stabCount}/{totalSiteCount}</span>
+            </div>
+            {siteMilestones.length > 0 && (
+              <div className="flex flex-wrap gap-1 pt-1">
+                {siteMilestones.map((m) => (
+                  <span
+                    key={m.threshold}
+                    title={m.reward}
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-mono border ${
+                      m.unlocked
+                        ? 'bg-emerald-950/70 text-emerald-300 border-emerald-500/60 font-bold'
+                        : 'bg-black/50 text-gray-500 border-neutral-800'
+                    }`}
+                  >
+                    {m.unlocked ? '✓ ' : ''}{m.threshold}/{totalSiteCount}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-1 text-[10px] font-mono">
+            {[
+              { id: 'all', label: t('codex.filter_all_sites', 'All Sites') },
+              { id: 'stabilized', label: t('codex.filter_stabilized', 'Stabilized') },
+              { id: 'uncontained', label: t('codex.filter_uncontained', 'Uncontained') },
+              { id: 'unvisited', label: t('codex.filter_unvisited', 'Unreconnoitered') },
+            ].map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => setSiteFilter(f.id)}
+                className={`flex-1 py-0.5 px-1 rounded border transition-colors cursor-pointer truncate ${
+                  siteFilter === f.id
+                    ? 'bg-emerald-950/60 text-emerald-300 border-emerald-600/60 font-bold'
+                    : 'bg-black/40 text-gray-400 border-neutral-800 hover:text-gray-200'
+                }`}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {filteredSites.map((s) => (
+              <div
+                key={s.site_id}
+                className={`p-2.5 rounded-lg border space-y-1 text-xs ${
+                  s.pacified
+                    ? 'bg-emerald-950/15 border-emerald-700/50'
+                    : s.status === 'night_shift'
+                      ? 'bg-fuchsia-950/15 border-fuchsia-700/50'
+                      : s.visited
+                        ? 'bg-amber-950/15 border-amber-700/50'
+                        : 'bg-black/40 border-neutral-800/80 opacity-85'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="font-bold text-gray-100 leading-tight">{s.name}</span>
+                  <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-black/60 border border-neutral-700 text-gray-200 shrink-0">
+                    {s.badge}
+                  </span>
+                </div>
+                <div className="text-[10.5px] text-amber-300/90 font-mono">
+                  {t('codex.domain_rule_label', 'Domain Rule')}: {s.domain_rule_name}
+                </div>
+                {s.ambient_summary && (
+                  <div className="text-[11px] text-gray-300 leading-snug">{s.ambient_summary}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : viewMode === 'folklore' ? (
         <div className="space-y-2.5">
           {/* Account-Wide Progress Card */}
           <div className="p-2.5 rounded-lg bg-gradient-to-r from-amber-950/30 via-black/60 to-cyan-950/25 border border-amber-700/40 space-y-1.5">

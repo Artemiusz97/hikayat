@@ -1230,9 +1230,45 @@ def compute_pre_turn_stage(
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
                 movement_dest_str = effective_location
+                _spatial_loop_rerouted = False
+
+                if sess_id and curr_nid and effective_node_id:
+                    try:
+                        from mechanics.world.anomalous_sites.domain_rules import evaluate_spatial_loop_travel
+                        _sl_res = evaluate_spatial_loop_travel(
+                            sess_id,
+                            session,
+                            curr_nid,
+                            effective_node_id,
+                            party=party,
+                            actions=actions,
+                            persist_db=persist_db,
+                        )
+                        if _sl_res.get("stage_directive"):
+                            stage_directives.append(_sl_res["stage_directive"])
+                        if _sl_res.get("rerouted"):
+                            _spatial_loop_rerouted = True
+                            effective_node_id = _sl_res["reroute_node_id"]
+                            if _sl_res.get("reroute_location"):
+                                effective_location = _sl_res["reroute_location"]
+                            movement_dest_str = effective_location
+                            session["current_location"] = effective_location
+                            session["current_node_id"] = effective_node_id
+                            route_res["travel_minutes"] = int(route_res.get("travel_minutes") or 0) + int(_sl_res.get("extra_minutes") or 15)
+                            if persist_db and _sl_res.get("composure_shift"):
+                                from mechanics.social.physical_state import find_player_actor_key, upsert_actor_physical_state
+                                _phys_sl = db.get_session_physical_state(sess_id)
+                                if isinstance(_phys_sl, dict) and isinstance(_phys_sl.get("actors"), dict):
+                                    _pk_sl = find_player_actor_key(_phys_sl["actors"], party=party, session_id=sess_id)
+                                    if _pk_sl:
+                                        upsert_actor_physical_state(sess_id, _pk_sl, {"composure": _sl_res["composure_shift"]})
+                    except (NameError, UnboundLocalError, ImportError):
+                        raise
+                    except Exception as _sl_err:
+                        log.warning("Spatial loop check error: %s", _sl_err)
 
                 # Ensure explicit target_location on privacy/relocation actions is never regressed by parent room hierarchy
-                if is_privacy_action and privacy_check_passed and priv_nudge_act:
+                if not _spatial_loop_rerouted and is_privacy_action and privacy_check_passed and priv_nudge_act:
                     dest_loc = priv_nudge_act.get("target_location") or target_loc_candidate
                     dest_nid = priv_nudge_act.get("target_node_id") or target_nid
                     dest_focal = priv_nudge_act.get("focal_point")
@@ -1253,7 +1289,7 @@ def compute_pre_turn_stage(
                         f"[STAGE DIRECTION — SECLUDED RELOCATION]: Stepped into {effective_location} with {privacy_partner_name} for privacy. "
                         f"Both characters are now situated in {effective_location}."
                     )
-                elif target_loc_candidate and target_loc_candidate != effective_location:
+                elif not _spatial_loop_rerouted and target_loc_candidate and target_loc_candidate != effective_location:
                     effective_location = target_loc_candidate
                     movement_dest_str = target_loc_candidate
                     session["current_location"] = target_loc_candidate
@@ -3017,22 +3053,45 @@ def resolve_post_turn_stage_delta(
             retained_names_lower.add(tok)
             retained_token_owner.setdefault(tok, cand_dict)
 
-    # 4. Ensure all retained NPCs have micro_blocking initialized
+    # 4. Ensure all retained NPCs have micro_blocking and pre-turn wardrobe preview initialized
+    _pre_w_day = int(session.get("current_day", 1) or 1) if session else 1
+    _pre_w_min = int(session.get("current_minute", 480) if session and session.get("current_minute") is not None else 480)
+    _pre_w_loc = new_loc or (session.get("current_location", "") if session else "")
+    _pre_w_nid = str(session.get("current_node_id") or "") if session else ""
     for n in retained_stage:
-        if isinstance(n, dict) and "micro_blocking" not in n:
-            n_name = _get_npc_name(n)
-            n_low = n_name.lower().strip()
-            matched_contact = contacts_map.get(n_low)
-            merged_n = dict(matched_contact) if matched_contact else dict(n)
-            for k, v in n.items():
-                merged_n[k] = v
+        if not isinstance(n, dict):
+            continue
+        n_name = _get_npc_name(n)
+        n_low = n_name.lower().strip()
+        matched_contact = contacts_map.get(n_low)
+        merged_n = dict(matched_contact) if matched_contact else dict(n)
+        for k, v in n.items():
+            merged_n[k] = v
+        if "micro_blocking" not in n:
             eff_ts = (session.get("time_slot") or get_time_block_key(int(session.get("current_minute", 480) or 480))) if session else "morning"
             n["micro_blocking"] = derive_initial_micro_blocking(
                 npc=merged_n,
-                current_location=new_loc or (session.get("current_location", "") if session else ""),
+                current_location=_pre_w_loc,
                 time_slot=eff_ts,
                 stage_role=n.get("stage_role", "room_bystander"),
             )
+        if "_resolved_wardrobe" not in n:
+            try:
+                from mechanics.social.wardrobe.resolver import resolve_actor_wardrobe_state
+
+                n["_resolved_wardrobe"] = resolve_actor_wardrobe_state(
+                    merged_n,
+                    session=session,
+                    scen_key=scenario_key,
+                    location_str=_pre_w_loc,
+                    node_id=_pre_w_nid,
+                    current_day=_pre_w_day,
+                    current_minute=_pre_w_min,
+                    is_colocated_with_player=True,
+                    viewer_relationship=matched_contact,
+                )
+            except Exception:
+                pass
 
     # Update session pre_turn_stage_npcs so subsequent operations/turns have fresh state
     if session is not None and isinstance(session, dict):

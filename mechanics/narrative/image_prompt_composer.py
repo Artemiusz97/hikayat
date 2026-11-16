@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import db
 
@@ -162,6 +162,64 @@ def format_species_tags(race: str = "", species: str = "", bio: str = "") -> str
     return "human"
 
 
+
+def _synthesize_sdxl_wardrobe_tags(
+    clothing_state: Mapping[str, Any] | Dict[str, Any],
+    active_preset: str,
+    fallback_outfit: str,
+    *,
+    intimate_context: bool = False,
+    gender: str = "",
+) -> list[str]:
+    """Converts 6-slot wardrobe state & preset key into clean Danbooru/SDXL visual tags."""
+    out: list[str] = []
+    if not isinstance(clothing_state, dict) or not clothing_state:
+        if fallback_outfit:
+            out.append(fallback_outfit)
+        return out
+
+    preset = str(active_preset or "").strip().lower()
+    outer = str(clothing_state.get("outerwear") or "").strip()
+    top = str(clothing_state.get("top") or "").strip()
+    bot = str(clothing_state.get("bottom") or "").strip()
+    utop = str(clothing_state.get("under_top") or "").strip()
+    ubot = str(clothing_state.get("under_bottom") or "").strip()
+    foot = str(clothing_state.get("footwear") or "").strip()
+
+    preset_tags = {
+        "activity:sport": "tracksuit, athletic sportswear, running shorts",
+        "activity:swim": "swimwear",
+        "activity:bath": "bath towel wrapped around body, bare shoulders",
+        "activity:dojo": "martial arts gi, hakama",
+        "activity:tactical": "tactical coat, combat harness",
+        "sleepwear": "pajamas, loungewear",
+    }
+    if preset in preset_tags:
+        out.append(preset_tags[preset])
+
+    for piece in (outer, top, bot, foot):
+        low = piece.lower()
+        if not piece or low in ("none", "clothed", "worn", "removed"):
+            continue
+        cleaned = piece.replace("[provocative]", "").replace("[dress_code_violation]", "").strip()
+        if cleaned and cleaned not in out:
+            out.append(cleaned)
+
+    if intimate_context:
+        g_low = str(gender or "").strip().lower()
+        is_male_g = g_low in ("male", "m", "man", "boy")
+        is_water_kit = preset in ("activity:swim", "activity:bath")
+        utop_low = utop.lower()
+        ubot_low = ubot.lower()
+        if not is_male_g and not is_water_kit and ("bra-less" in utop_low or ("none" in utop_low and "n/a" not in utop_low)):
+            out.append("no bra")
+        if not is_water_kit and ("commando" in ubot_low or ("none" in ubot_low and "n/a" not in ubot_low)):
+            out.append("no underwear" if is_male_g else "no panties")
+
+    if not out and fallback_outfit:
+        out.append(fallback_outfit)
+    return out
+
 def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool = False) -> str:
     """Extracts physical Danbooru tags for an NPC from their appearance dictionary."""
     app = npc_data.get("appearance") or {}
@@ -238,8 +296,16 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
     # 6. Outfit & Clothing State
     outfit = app.get("outfit_style") or ""
     clothing_state = npc_data.get("_clothing_state") or {}
-    top_state = clothing_state.get("top", "clothed")
-    bot_state = clothing_state.get("bottom", "clothed")
+    active_preset = str(npc_data.get("_active_outfit_preset") or "")
+    top_state = str(clothing_state.get("top", "clothed")).lower()
+    bot_state = str(clothing_state.get("bottom", "clothed")).lower()
+    live_wardrobe_tags = _synthesize_sdxl_wardrobe_tags(
+        clothing_state,
+        active_preset,
+        outfit,
+        intimate_context=intimate_context,
+        gender=str(npc_data.get("gender") or ""),
+    )
 
     if is_myobu_fox:
         if outfit and any(kw in outfit.lower() for kw in ("collar", "bell", "suzu", "shimenawa", "ribbon")):
@@ -254,22 +320,19 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
             if not any(bad_w in t.lower() for bad_w in ("chubby", "plump", "overweight", "fat", "heavy build"))
         ]
 
-    if top_state == "off" and bot_state == "off":
+    if top_state in ("off", "removed") and bot_state in ("off", "removed"):
         tags.append("nude")
-    elif top_state == "disheveled" or bot_state == "disheveled":
+    elif "disheveled" in top_state or "disheveled" in bot_state:
         tags.append("disheveled clothes, messy outfit")
-        if outfit:
-            tags.append(outfit)
-    elif top_state == "off":
+        tags.extend(live_wardrobe_tags)
+    elif top_state in ("off", "removed"):
         tags.append("topless, bare chest")
-        if outfit:
-            tags.append(outfit)
-    elif bot_state == "off":
+        tags.extend(live_wardrobe_tags)
+    elif bot_state in ("off", "removed"):
         tags.append("bottomless")
-        if outfit:
-            tags.append(outfit)
-    elif outfit:
-        tags.append(outfit)
+        tags.extend(live_wardrobe_tags)
+    elif live_wardrobe_tags:
+        tags.extend(live_wardrobe_tags)
     else:
         if is_bunian:
             is_male_b = str(npc_data.get("gender") or "").strip().lower() in ("male", "m", "man", "boy")
@@ -960,7 +1023,9 @@ def compose_turn_image_prompt(
     if len(valid_npcs) == 1:
         focal_name = valid_npcs[0]
         profile = _get_npc_profile(session_id, focal_name, session)
-        profile["_clothing_state"] = actor_clothes.get(focal_name, {}).get("clothing", {})
+        _f_actor = actor_clothes.get(focal_name, {})
+        profile["_clothing_state"] = _f_actor.get("clothing", {})
+        profile["_active_outfit_preset"] = _f_actor.get("active_outfit_preset", "")
 
         gender_raw = str(profile.get("gender") or "female").lower()
         if str(profile.get("race") or "").strip().lower() == "kitsune:myobu_fox":
@@ -995,8 +1060,12 @@ def compose_turn_image_prompt(
     npc1_name, npc2_name = valid_npcs[0], valid_npcs[1]
     p1 = _get_npc_profile(session_id, npc1_name, session)
     p2 = _get_npc_profile(session_id, npc2_name, session)
-    p1["_clothing_state"] = actor_clothes.get(npc1_name, {}).get("clothing", {})
-    p2["_clothing_state"] = actor_clothes.get(npc2_name, {}).get("clothing", {})
+    _a1 = actor_clothes.get(npc1_name, {})
+    _a2 = actor_clothes.get(npc2_name, {})
+    p1["_clothing_state"] = _a1.get("clothing", {})
+    p2["_clothing_state"] = _a2.get("clothing", {})
+    p1["_active_outfit_preset"] = _a1.get("active_outfit_preset", "")
+    p2["_active_outfit_preset"] = _a2.get("active_outfit_preset", "")
 
     g1 = "girl" if str(p1.get("gender", "female")).lower() in ("female", "f", "woman", "girl") else "boy"
     g2 = "girl" if str(p2.get("gender", "female")).lower() in ("female", "f", "woman", "girl") else "boy"

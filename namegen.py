@@ -2706,6 +2706,9 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
             "name": "Student Council",
             "hierarchy_template": "council",
             "category": "council",
+            "club_tier": "major",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_student_council_facility",
             "hq_location_id": "Student Council Office",
             "notes": "The executive student governing body overseeing school affairs, budget allocation, campus events, and discipline policies."
         })
@@ -2713,30 +2716,66 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
             "name": "Drama Club",
             "hierarchy_template": "club",
             "category": "club",
-            "hq_location_id": "School Auditorium Stage",
+            "club_tier": "major",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_drama_club_facility",
+            "hq_location_id": "Campus Auditorium & Drama Theater",
             "notes": "The theatrical club known for dramatic stage productions, expressive personalities, and lively campus social gossip."
-        })
-        factions.append({
-            "name": "Occult & Mystery Club",
-            "hierarchy_template": "club",
-            "category": "club",
-            "hq_location_id": "Old Storage Room 3-B",
-            "notes": "An eccentric student club researching urban legends, campus ghost rumors, and unsolved school mysteries."
-        })
-        gang_name = _unique_name("delinquents", "high_school_drama")
-        factions.append({
-            "name": gang_name,
-            "hierarchy_template": "delinquents",
-            "category": "delinquents",
-            "hq_location_id": "Behind Gym Storage Sheds",
-            "notes": "A streetwise group of rebellious students and brawlers who operate outside campus rules."
         })
         factions.append({
             "name": "Varsity Athletic Directorate",
             "hierarchy_template": "council",
             "category": "sports",
-            "hq_location_id": "Main Gymnasium",
+            "club_tier": "major",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "bld_school_athletics",
+            "hq_location_id": "Varsity Athletic Directorate & Gymnasium",
             "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, team training regimens, and sports facility access."
+        })
+        factions.append({
+            "name": "Occult & Mystery Club",
+            "hierarchy_template": "club",
+            "category": "club",
+            "club_tier": "minor",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_old_storage_3b",
+            "hq_location_id": "Old Storage Room 3-B",
+            "notes": "An eccentric student club researching urban legends, campus ghost rumors, and unsolved school mysteries."
+        })
+        factions.append({
+            "name": "Esports & Gaming Club",
+            "hierarchy_template": "club",
+            "category": "club",
+            "club_tier": "minor",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_gaming_clubroom",
+            "hq_location_id": "Esports & Gaming Clubroom",
+            "notes": "A competitive student club hosting LAN tournaments, retro arcade nights, and strategy scrimmages inside the General Student Clubroom Wing."
+        })
+        gang_name = _unique_name("delinquents", "high_school_drama")
+        gang_2_name = _unique_name("delinquents", "high_school_drama")
+        if gang_2_name == gang_name:
+            gang_2_name = "Boiler Room Strays"
+            used_names.add(gang_2_name)
+        factions.append({
+            "name": gang_name,
+            "hierarchy_template": "delinquents",
+            "category": "delinquents",
+            "club_tier": "minor",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_behind_gym_sheds",
+            "hq_location_id": "Behind Gym Storage Sheds",
+            "notes": "A streetwise group of rebellious students and brawlers claiming the sheds behind the athletics complex and fiercely rivaling the abandoned-wing gang."
+        })
+        factions.append({
+            "name": gang_2_name,
+            "hierarchy_template": "delinquents",
+            "category": "delinquents",
+            "club_tier": "minor",
+            "hq_zone_id": "zone_school_main",
+            "hq_node_id": "loc_delinquent_boiler_den",
+            "hq_location_id": "Abandoned Wing Boiler-Room Den",
+            "notes": "A rival gang of outcasts and street brawlers entrenched in the Abandoned Old Campus Wing boiler room, locked in constant turf rivalry with the gym-shed crew."
         })
         if is_nsfw or scenario_data.is_nsfw_scenario(scen_key):
             nsfw_name = _unique_name("nsfw", "high_school_drama")
@@ -2744,8 +2783,12 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                 "name": nsfw_name,
                 "hierarchy_template": "club",
                 "category": "nsfw_club",
+                "club_tier": "major",
+                "nsfw_only": True,
+                "hq_zone_id": "zone_school_main",
+                "hq_node_id": "loc_nsfw_club_facility",
                 "hq_location_id": "Velvet Basement Salon",
-                "notes": "An underground campus circle gathering inside the Velvet Basement Salon beneath the Abandoned Old Campus Building for decadent secret rites and intimate trysts."
+                "notes": "A hidden underground campus circle gathering inside the Velvet Basement Salon beneath the campus for decadent secret rites and intimate trysts."
             })
 
     # 1.5A Anomalous Incursions (6 Fixed Archetype Factions with Procedural Names)
@@ -2849,14 +2892,19 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
 
         if scenario_data.is_anomalous_high_school_scenario(scen_key):
             gang_name = _unique_name("delinquents", "high_school_drama")
+            gang_2_name = _unique_name("delinquents", "high_school_drama")
+            if gang_2_name == gang_name:
+                gang_2_name = "Boiler Room Strays"
+                used_names.add(gang_2_name)
             factions.extend([
                 {
                     "name": "Student Council",
                     "hierarchy_template": "council",
                     "category": "council",
+                    "club_tier": "major",
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
-                    "hq_node_id": "loc_student_council",
+                    "hq_node_id": "loc_student_council_facility",
                     "hq_location_id": "Student Council Office",
                     "notes": "The executive student governing body overseeing school affairs, budget allocation, campus events, and discreet after-hours patrol logistics.",
                 },
@@ -2864,16 +2912,29 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                     "name": "Drama Club",
                     "hierarchy_template": "club",
                     "category": "club",
+                    "club_tier": "major",
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
-                    "hq_node_id": "loc_auditorium",
-                    "hq_location_id": "School Auditorium Stage",
+                    "hq_node_id": "loc_drama_club_facility",
+                    "hq_location_id": "Campus Auditorium & Drama Theater",
                     "notes": "The theatrical club known for dramatic stage productions, expressive personalities, and campus social intelligence.",
+                },
+                {
+                    "name": "Varsity Athletic Directorate",
+                    "hierarchy_template": "council",
+                    "category": "sports",
+                    "club_tier": "major",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_school_athletics",
+                    "hq_location_id": "Varsity Athletic Directorate & Gymnasium",
+                    "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, physical conditioning, and sports facility access.",
                 },
                 {
                     "name": "Occult & Mystery Club",
                     "hierarchy_template": "club",
                     "category": "club",
+                    "club_tier": "minor",
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
                     "hq_node_id": "loc_old_storage_3b",
@@ -2881,24 +2942,37 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                     "notes": "An eccentric student society cataloging campus ghost rumors, folklore wards, and after-hours anomalous phenomena.",
                 },
                 {
+                    "name": "Esports & Gaming Club",
+                    "hierarchy_template": "club",
+                    "category": "club",
+                    "club_tier": "minor",
+                    "faction_domain": "school_club",
+                    "hq_zone_id": "zone_school_campus",
+                    "hq_node_id": "loc_gaming_clubroom",
+                    "hq_location_id": "Esports & Gaming Clubroom",
+                    "notes": "A competitive student club hosting LAN tournaments, retro arcade nights, and digital signal monitoring inside the General Student Clubroom Wing.",
+                },
+                {
                     "name": gang_name,
                     "hierarchy_template": "delinquents",
                     "category": "delinquents",
+                    "club_tier": "minor",
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
-                    "hq_node_id": "sub_custodian_boiler_locker",
+                    "hq_node_id": "loc_behind_gym_sheds",
                     "hq_location_id": "Behind Gym Storage Sheds",
-                    "notes": "A streetwise group of rebellious students and brawlers who operate outside campus rules and guard the boiler-room drop-boxes.",
+                    "notes": "A streetwise group of rebellious students and brawlers operating from behind the gymnasium sheds and feuding constantly with the abandoned-wing gang.",
                 },
                 {
-                    "name": "Varsity Athletic Directorate",
-                    "hierarchy_template": "council",
-                    "category": "sports",
+                    "name": gang_2_name,
+                    "hierarchy_template": "delinquents",
+                    "category": "delinquents",
+                    "club_tier": "minor",
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
-                    "hq_node_id": "loc_gym",
-                    "hq_location_id": "Main Gymnasium",
-                    "notes": "The competitive varsity athletics committee coordinating inter-school tournaments, physical conditioning, and sports facility access.",
+                    "hq_node_id": "loc_delinquent_boiler_den",
+                    "hq_location_id": "Abandoned Wing Boiler-Room Den",
+                    "notes": "A rival delinquent crew entrenched in the Abandoned Old Campus Wing boiler room, locked in constant turf rivalry with the gym-shed gang.",
                 },
             ])
             if is_nsfw or scenario_data.is_nsfw_scenario(scen_key):
@@ -2907,11 +2981,13 @@ def get_scenario_starter_factions(scenario: str, is_nsfw: bool = False, hash_val
                     "name": nsfw_name,
                     "hierarchy_template": "club",
                     "category": "nsfw_club",
+                    "club_tier": "major",
+                    "nsfw_only": True,
                     "faction_domain": "school_club",
                     "hq_zone_id": "zone_school_campus",
-                    "hq_node_id": "loc_abandoned_school_wing",
+                    "hq_node_id": "loc_nsfw_club_facility",
                     "hq_location_id": "Velvet Basement Salon",
-                    "notes": "An underground campus circle gathering inside the Velvet Basement Salon beneath the Abandoned Old Campus Building for secret rites and intimate trysts.",
+                    "notes": "A hidden underground campus circle gathering inside the Velvet Basement Salon beneath the campus for secret rites and intimate trysts.",
                 })
 
     # 1.5B Generic Urban Fantasy (Non-Anomalous Incursions)

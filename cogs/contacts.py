@@ -77,6 +77,7 @@ from cogs.contacts_routine_views import (
     build_acquaintances_list_embed,
     enrich_discord_npc_with_routine,
     format_discord_known_routine_value,
+    format_discord_known_wardrobe_value,
     load_discord_contacts_and_acquaintances,
 )
 from mechanics.world.routine_disclosure import (
@@ -1536,8 +1537,12 @@ def build_contact_detail_embed(
         unlocked_traits = [t for t in (enriched_c.get("unlocked_traits") or []) if "?" not in str(t)]
         contact = {**contact, "appearance": enriched_c.get("appearance", {})}
         revealed_flags = dict(enriched_c.get("revealed_flags") or revealed_flags)
+    _app_for_embed = dict(contact.get("appearance") or {})
+    if enriched_c.get("known_wardrobe"):
+        for _ok in ("outfit_style", "attire", "clothing"):
+            _app_for_embed.pop(_ok, None)
     app_fields = format_persona_embed_fields(
-        contact.get("appearance", {}),
+        _app_for_embed,
         gender=gender_val,
         race=race_val,
         scen_key=scenario_key,
@@ -1602,6 +1607,17 @@ def build_contact_detail_embed(
             inline=False,
         )
 
+    wardrobe_val = format_discord_known_wardrobe_value(
+        enriched_c.get("known_wardrobe"),
+        lang=str((fow_context or {}).get("ui_lang") or "en"),
+    )
+    if wardrobe_val:
+        embed.add_field(
+            name="👔 Known Wardrobe",
+            value=wardrobe_val,
+            inline=False,
+        )
+
     recent_interactions = contact.get("recent_memories") or contact.get("rel_history") or (contact.get("appearance") or {}).get("recent_memories") or []
     if recent_interactions:
         rec_lines = [f"• {m}" for m in recent_interactions[-5:]]
@@ -1630,6 +1646,58 @@ def build_folklore_encyclopedia_embed(
     disc_count = int(payload.get("discovered_count", 0) or 0)
     ver_count = int(payload.get("verified_count", 0) or 0)
     cont_count = int(payload.get("contained_count", 0) or 0)
+
+    if mode == "sites":
+        site_reg = payload.get("site_registry") if isinstance(payload.get("site_registry"), dict) else {}
+        s_cards = list(site_reg.get("sites") or [])
+        stab_c = int(site_reg.get("stabilized_count", 0) or 0)
+        tot_c = int(site_reg.get("total_sites", 36) or 36)
+        ch_rem = int(site_reg.get("resonator_charges_remaining", 0) or 0)
+        ch_max = int(site_reg.get("resonator_charges_max", 3) or 3)
+        ms_parts = [
+            f"{'✓ ' if m.get('unlocked') else ''}{m.get('threshold')}/{tot_c}"
+            for m in (site_reg.get("milestones") or [])
+            if isinstance(m, dict)
+        ]
+        ms_line = " • **Milestones**: " + " | ".join(ms_parts) if ms_parts else ""
+
+        total_pages = max(1, (len(s_cards) + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start = page * page_size
+        page_items = s_cards[start : start + page_size]
+
+        embed = discord.Embed(
+            title="🛡️ Quarantine Site Reclamation Grid",
+            description=(
+                f"**Stabilized Sites**: {stab_c}/{tot_c} • **Resonator Charges**: {ch_rem}/{ch_max}"
+                f"{ms_line}"
+            ),
+            color=discord.Color.teal(),
+        )
+        if not page_items:
+            embed.add_field(
+                name="No Quarantine Sites Tracked",
+                value="Quarantine site tracking activates inside Anomalous Incursions and Anomalous High scenarios.",
+                inline=False,
+            )
+        else:
+            for sc in page_items:
+                s_name = str(sc.get("name") or sc.get("site_id") or "Site")
+                s_badge = str(sc.get("badge") or "")
+                s_rule = str(sc.get("domain_rule_name") or "")
+                s_amb = str(sc.get("ambient_summary") or "")
+                val_lines = [f"• **Status**: {s_badge}"] if s_badge else []
+                if s_rule:
+                    val_lines.append(f"• **Domain Rule**: {s_rule}")
+                if s_amb:
+                    val_lines.append(f"• {s_amb[:220]}")
+                embed.add_field(
+                    name=f"{s_name}"[:256],
+                    value="\n".join(val_lines)[:1024] or "Status pending.",
+                    inline=False,
+                )
+        embed.set_footer(text=f"Quarantine Site Grid • Page {page + 1}/{total_pages} • {len(s_cards)} Sites")
+        return embed, total_pages, s_cards
 
     if mode == "field_log":
         items = list(payload.get("field_log") or [])
@@ -1803,7 +1871,7 @@ class FolkloreEncyclopediaView(discord.ui.View):
         self.session_id = session_id
         self.cog = cog
         self.from_phone = from_phone
-        self.mode = mode if mode in ("archive", "field_log") else "archive"
+        self.mode = mode if mode in ("archive", "field_log", "sites") else "archive"
         self.tradition_key = tradition_key or "all"
         self.page_size = max(1, int(page_size or 6))
 
@@ -1850,6 +1918,16 @@ class FolkloreEncyclopediaView(discord.ui.View):
         toggle_btn.callback = self._on_toggle_mode
         self.add_item(toggle_btn)
 
+        if bool((self.payload.get("site_registry") or {}).get("sites")):
+            sites_btn = discord.ui.Button(
+                label="Quarantine Sites",
+                emoji="🛡️",
+                style=discord.ButtonStyle.success if self.mode == "sites" else discord.ButtonStyle.secondary,
+                row=nav_row,
+            )
+            sites_btn.callback = self._on_toggle_sites
+            self.add_item(sites_btn)
+
         if self.from_phone and self.session_id:
             home_btn = discord.ui.Button(
                 label="Phone Home",
@@ -1895,6 +1973,10 @@ class FolkloreEncyclopediaView(discord.ui.View):
 
     async def _on_toggle_mode(self, interaction: discord.Interaction):
         next_mode = "field_log" if self.mode == "archive" else "archive"
+        await self._refresh(interaction, mode=next_mode, page=0)
+
+    async def _on_toggle_sites(self, interaction: discord.Interaction):
+        next_mode = "archive" if self.mode == "sites" else "sites"
         await self._refresh(interaction, mode=next_mode, page=0)
 
     async def _on_phone_home(self, interaction: discord.Interaction):

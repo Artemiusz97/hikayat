@@ -640,6 +640,8 @@ CREATE TABLE IF NOT EXISTS actor_physical_states (
     climax_count        INTEGER DEFAULT 0,
     in_refractory       INTEGER DEFAULT 0,
     canonical_outfit_json TEXT DEFAULT '{}',
+    active_outfit_preset TEXT DEFAULT '',
+    wardrobe_meta_json  TEXT DEFAULT '{}',
     created_at          REAL NOT NULL,
     updated_at          REAL NOT NULL,
     UNIQUE(session_id, canonical_key)
@@ -2225,6 +2227,19 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+_WARDROBE_V56_DDL = [
+    "ALTER TABLE actor_physical_states ADD COLUMN active_outfit_preset TEXT DEFAULT ''",
+    "ALTER TABLE actor_physical_states ADD COLUMN wardrobe_meta_json TEXT DEFAULT '{}'",
+]
+
+SCHEMA_MIGRATIONS.append(
+    (
+        56,
+        "dynamic_npc_wardrobe_v56",
+        list(_WARDROBE_V56_DDL),
+    )
+)
+
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
     """Executes pending versioned schema migrations deterministically and records applied versions."""
@@ -2728,6 +2743,8 @@ def _strip_legacy_session_fk_constraints(conn: sqlite3.Connection) -> None:
                 climax_count        INTEGER DEFAULT 0,
                 in_refractory       INTEGER DEFAULT 0,
                 canonical_outfit_json TEXT DEFAULT '{}',
+                active_outfit_preset TEXT DEFAULT '',
+                wardrobe_meta_json  TEXT DEFAULT '{}',
                 created_at          REAL NOT NULL,
                 updated_at          REAL NOT NULL,
                 UNIQUE(session_id, canonical_key)

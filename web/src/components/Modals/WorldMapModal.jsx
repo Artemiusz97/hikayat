@@ -479,6 +479,26 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                       </span>
                                     );
                                   })()}
+                                  {place.anomalous_site_meta?.badge && (() => {
+                                    const tone = place.anomalous_site_meta.badge_tone || 'amber';
+                                    const pillCls = tone === 'emerald'
+                                      ? 'bg-emerald-950/75 text-emerald-300 border-emerald-500/70'
+                                      : tone === 'crimson'
+                                        ? 'bg-fuchsia-950/75 text-fuchsia-200 border-fuchsia-500/70 shadow-sm'
+                                        : tone === 'red'
+                                          ? 'bg-rose-950/75 text-rose-200 border-rose-500/70'
+                                          : tone === 'slate'
+                                            ? 'bg-slate-900/80 text-slate-300 border-slate-600/60'
+                                            : 'bg-amber-950/75 text-amber-300 border-amber-500/70';
+                                    return (
+                                      <span
+                                        className={`text-[9.5px] px-2 py-0.5 rounded font-bold border ${pillCls}`}
+                                        title={place.anomalous_site_meta.tooltip || ''}
+                                      >
+                                        {place.anomalous_site_meta.badge}
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
 
                                 {/* Facility Feature Pills (Notice Board, Merchant, Faction HQ, Home) */}
@@ -579,6 +599,14 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   const subHere = Boolean(isObj && sub.is_current_room);
                                   const subEta = isObj ? (sub.travel_tag || '') : '';
                                   const subBadge = isObj ? String(sub.access_badge || '') : '';
+                                  const subBadges = (isObj && Array.isArray(sub.badges)) ? sub.badges : [];
+                                  const subTagLabels = isObj ? [
+                                    sub.is_faction_hq ? t('atlas.sub_tag_hq', 'Club HQ') : '',
+                                    sub.has_bounty_board ? t('atlas.sub_tag_board', 'Notice Board') : '',
+                                    sub.has_merchant_shop ? t('atlas.sub_tag_shop', 'Merchant / Quartermaster') : '',
+                                    sub.is_transit_hub ? t('atlas.sub_tag_transit', 'Transit Hub') : '',
+                                    sub.is_discreet ? t('atlas.sub_tag_discreet', 'Discreet') : '',
+                                  ].filter(Boolean) : [];
                                   const subLocked = Boolean(
                                     isObj && !sub.is_unlocked && (
                                       subBadge.includes('Closed') ||
@@ -590,7 +618,13 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   const subProps = (isObj && Array.isArray(sub.props) && sub.props.length > 0)
                                     ? `In-Room: ${sub.props.join(', ')}`
                                     : '';
-                                  const tooltip = [subName, subEta, subBadge && subBadge !== 'Open' ? `[${subBadge}]` : '', subProps]
+                                  const tooltip = [
+                                    subName,
+                                    subTagLabels.length > 0 ? `[${subTagLabels.join(', ')}]` : '',
+                                    subEta,
+                                    subBadge && subBadge !== 'Open' ? `[${subBadge}]` : '',
+                                    subProps,
+                                  ]
                                     .filter(Boolean)
                                     .join(' • ');
 
@@ -610,6 +644,23 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                       } ${traveling ? 'opacity-50 cursor-not-allowed' : ''}`}
                                     >
                                       <span>{subHere ? '📍' : (subLocked ? '🔒' : '↳')} {subName}</span>
+                                      {isObj && sub.anomalous_site_meta?.badge && (
+                                        <span
+                                          className={`text-[8.5px] px-1.5 py-0.2 rounded border font-bold ${
+                                            sub.anomalous_site_meta.badge_tone === 'emerald'
+                                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/60'
+                                              : 'bg-amber-950/80 text-amber-300 border-amber-600/60'
+                                          }`}
+                                          title={sub.anomalous_site_meta.tooltip || ''}
+                                        >
+                                          {sub.anomalous_site_meta.badge}
+                                        </span>
+                                      )}
+                                      {subBadges.length > 0 && (
+                                        <span className="text-[10px] leading-none" aria-label={subTagLabels.join(', ')}>
+                                          {subBadges.join('')}
+                                        </span>
+                                      )}
                                       {!subHere && subEta && (
                                         <span className="text-[9px] font-mono text-gray-400">({subEta.replace(' walk', '').replace(' transit', '').replace(' trek', '')})</span>
                                       )}

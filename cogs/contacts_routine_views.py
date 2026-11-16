@@ -121,6 +121,56 @@ def format_discord_known_routine_value(
     return f"`{cleaned}`"
 
 
+def format_discord_known_wardrobe_value(
+    known_wardrobe: Optional[Mapping[str, Any]],
+    *,
+    lang: str = "en",
+) -> str:
+    """Format Fog-of-War masked wardrobe dossier rows within Discord's 1024-char field limit."""
+    if not isinstance(known_wardrobe, Mapping):
+        return ""
+    try:
+        from mechanics.social.locales import get_wardrobe_labels
+
+        lbl = get_wardrobe_labels(lang)
+    except Exception:
+        lbl = {
+            "currently_wearing": "Currently Wearing",
+            "duty": "Main / Duty",
+            "casual": "Casual",
+            "sleepwear": "Sleepwear",
+            "gifted": "Gifted",
+        }
+
+    lines: List[str] = []
+    cw = known_wardrobe.get("currently_wearing")
+    if known_wardrobe.get("is_colocated") and isinstance(cw, Mapping) and cw.get("summary"):
+        lines.append(f"• ✨ **{lbl['currently_wearing']}**: {str(cw['summary'])[:180]}")
+
+    presets = known_wardrobe.get("presets") or {}
+    for pkey in ("duty", "casual", "sleepwear"):
+        entry = presets.get(pkey)
+        if not isinstance(entry, Mapping):
+            continue
+        p_label = lbl.get(pkey, pkey.title())
+        gift_tag = f" *(🎁 {lbl['gifted']})*" if entry.get("has_gift") else ""
+        if entry.get("known") and entry.get("summary") and entry.get("summary") != "???":
+            lines.append(f"• **{p_label}**: {str(entry['summary'])[:160]}{gift_tag}")
+        else:
+            lines.append(f"• **{p_label}**: `???`")
+
+    kits = known_wardrobe.get("activity_kits") or {}
+    for k_name, k_entry in kits.items():
+        if isinstance(k_entry, Mapping) and k_entry.get("known") and k_entry.get("summary"):
+            pretty_k = str(k_name).replace("activity:", "").replace("_", " ").title()
+            lines.append(f"• **{pretty_k}**: {str(k_entry['summary'])[:120]}")
+
+    out = "\n".join(lines)
+    if len(out) > _DISCORD_EMBED_FIELD_MAX:
+        out = out[: _DISCORD_EMBED_FIELD_MAX - 3].rstrip() + "..."
+    return out
+
+
 def _parse_json_list(raw: Any) -> List[str]:
     """Parse list or JSON array safely into non-empty strings."""
     if isinstance(raw, list):
@@ -478,6 +528,7 @@ def enrich_discord_npc_with_routine(
         sid,
         scen,
         debug_reveal_all=reveal_debug,
+        phys_st=(fow_context.get("session") or {}).get("physical_state") if isinstance(fow_context.get("session"), Mapping) else None,
         preloaded_discoveries=disc_rows,
         lang=ui_lang,
         party_npc_keys=fow_context.get("party_npc_keys"),
@@ -533,6 +584,7 @@ def enrich_discord_npc_with_routine(
         player_home_node_id=str(fow_context.get("player_home_node_id") or ""),
     )
     apply_known_routine_to_contact(enriched, routine, lang=ui_lang)
+    enriched["ui_lang"] = ui_lang
 
     party_names = fow_context.get("party_names") or set()
     if is_acquaintance:
@@ -788,6 +840,17 @@ def build_acquaintance_detail_embed(
         embed.add_field(
             name="🕒 Schedule & Routine",
             value=routine_val,
+            inline=False,
+        )
+
+    wardrobe_val = format_discord_known_wardrobe_value(
+        acquaintance.get("known_wardrobe"),
+        lang=str(acquaintance.get("ui_lang") or "en"),
+    )
+    if wardrobe_val:
+        embed.add_field(
+            name="👔 Known Wardrobe",
+            value=wardrobe_val,
             inline=False,
         )
 

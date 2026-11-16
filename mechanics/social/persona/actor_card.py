@@ -777,8 +777,35 @@ def build_actor_direction_card(
             vis_parts.append(f"{skin} skin")
     if feat and feat.lower() not in ("none", "unknown"):
         vis_parts.append(feat)
-    if outfit and outfit.lower() not in ("none", "unknown"):
-        vis_parts.append(f"wearing {outfit}")
+
+    live_outfit = ""
+    try:
+        from mechanics.social.wardrobe.catalog import format_wardrobe_summary
+
+        phys_actors = (session.get("physical_state") or {}).get("actors") if isinstance(session, dict) else {}
+        if isinstance(phys_actors, dict):
+            matched_act = phys_actors.get(name) or next(
+                (v for k, v in phys_actors.items() if isinstance(k, str) and k.strip().lower() == name.lower()),
+                None,
+            )
+            if isinstance(matched_act, dict) and str(matched_act.get("active_outfit_preset") or "") != "natural":
+                c_live = matched_act.get("clothing")
+                if isinstance(c_live, dict) and c_live:
+                    cand_s = format_wardrobe_summary(c_live)
+                    if cand_s and cand_s.lower() != "clothed":
+                        live_outfit = cand_s
+        if not live_outfit and isinstance(npc.get("_resolved_wardrobe"), dict):
+            rw = npc["_resolved_wardrobe"]
+            if str(rw.get("active_outfit_preset") or "") != "natural" and isinstance(rw.get("clothing"), dict):
+                cand_s = format_wardrobe_summary(rw["clothing"])
+                if cand_s and cand_s.lower() != "clothed":
+                    live_outfit = cand_s
+    except Exception:
+        live_outfit = ""
+
+    final_outfit = live_outfit or outfit
+    if final_outfit and final_outfit.lower() not in ("none", "unknown"):
+        vis_parts.append(f"wearing {final_outfit}")
 
     if vis_parts:
         lines.append(f"  * Visual Presentation: {', '.join(vis_parts)}")

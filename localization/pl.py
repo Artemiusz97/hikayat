@@ -230,3 +230,14 @@ PACT_UI_LABELS = {
     "contracted_badge": "Związano Paktem",
     "currently_bound": "Aktywny Pakt",
 }
+
+ANOMALOUS_SITE_UI_LABELS = {
+    "unreconnoitered_badge": "[NIEZBADANE — Stopień {grade}]",
+    "unreconnoitered_summary": "Wejdź do strefy kwarantanny, aby rozpoznać Zasadę Domeny, żywioł i kotwice stabilizacji.",
+    "milestone_10_title": "Odzyskanie Kordonu Zewnętrznego (10 Stref)",
+    "milestone_10_reward": "+15 Rep. Awansu Frakcji i Dotacja +250G",
+    "milestone_22_title": "Stabilizacja Sieci Metropolitalnej (22 Strefy)",
+    "milestone_22_reward": "Ulepszenie Rezonatora Polowego (4 Ładunki/Dzień)",
+    "milestone_36_title": "Odznaczenie Strażnika Metropolii (36/36 Stref)",
+    "milestone_36_reward": "+30 Rep., 5 Ładunków/Dzień i Relikwia Chronometru Eteru"
+}

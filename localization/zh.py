@@ -222,3 +222,14 @@ PACT_UI_LABELS = {
     "contracted_badge": "已缔约",
     "currently_bound": "契约中",
 }
+
+ANOMALOUS_SITE_UI_LABELS = {
+    "unreconnoitered_badge": "[未勘查 —— {grade}级]",
+    "unreconnoitered_summary": "进入此隔离区以勘查其领域规则、元素属性与稳定锚点。",
+    "milestone_10_title": "外围封锁区收复（10处站点）",
+    "milestone_10_reward": "+15 阵营晋升声望与 +250G 危险津贴",
+    "milestone_22_title": "都市灵网稳态化（22处站点）",
+    "milestone_22_reward": "野外谐振器升级（每日 4 次充能）",
+    "milestone_36_title": "都市守护者勋章（36/36 站点）",
+    "milestone_36_reward": "+30 声望、每日 5 次充能与守护者以太精密时计圣遗物"
+}

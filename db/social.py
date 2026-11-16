@@ -3049,11 +3049,28 @@ def get_faction(session_id: int, faction_id_or_name: str) -> dict | None:
         return None
     return db._parse_faction_row(dict(r))
 
+_CORE_ROOM_TO_MAJOR_FAC_NODES: dict[str, tuple[str, ...]] = {
+    "loc_student_council": ("loc_student_council_facility",),
+    "sub_student_council": ("loc_student_council_facility",),
+    "loc_auditorium_stage": ("loc_drama_club_facility",),
+    "loc_gymnasium": ("bld_school_athletics", "loc_school_athletics"),
+    "loc_nsfw_faction_hq": ("loc_nsfw_club_facility",),
+}
+
+_MAJOR_CLUB_FACILITY_TO_CORE_ROOM: dict[str, tuple[str, ...]] = {
+    "student council office": ("executive council chamber", "loc_student_council", "sub_student_council"),
+    "campus auditorium & drama theater": ("main auditorium stage", "loc_auditorium_stage"),
+    "varsity athletic directorate & gymnasium": ("main gymnasium & varsity court", "main gymnasium", "loc_gymnasium"),
+    "velvet basement salon": ("main velvet salon", "loc_nsfw_faction_hq"),
+}
+
+
 def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
     """
     Return the faction whose HQ is at the given location_id, or None.
-    Handles bare location IDs, primary names, and full 3-tiered strings without
-    false-positive matching on generic parent zone names.
+    Resolves leaf room HQs (e.g. minor clubrooms inside parent wings) before
+    facility-tier HQs, supports hq_node_id matching, and enforces strict core
+    HQ chamber matching for 3-tier paths inside Major School Clubs.
     """
     if not location_id:
         return None
@@ -3063,10 +3080,13 @@ def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
         if not loc_parts:
             return None
 
-        # Fast path: exact match on hq_location_id
+        # Fast path: exact match on hq_location_id or hq_node_id (including Core HQ room -> facility node)
+        mapped_fac_nodes = _CORE_ROOM_TO_MAJOR_FAC_NODES.get(loc_clean, ())
+        exact_targets = [loc_clean, *mapped_fac_nodes]
+        placeholders = ",".join("?" for _ in exact_targets)
         r = conn.execute(
-            "SELECT * FROM factions WHERE session_id=? AND hq_location_id=?",
-            (session_id, location_id)).fetchone()
+            f"SELECT * FROM factions WHERE session_id=? AND (LOWER(hq_location_id) IN ({placeholders}) OR LOWER(hq_node_id) IN ({placeholders}))",
+            (session_id, *exact_targets, *exact_targets)).fetchone()
         if r:
             return db._parse_faction_row(dict(r))
 
@@ -3076,26 +3096,69 @@ def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
         if not rows:
             return None
 
+        parsed_rows = []
         for row in rows:
             hq_raw = (row["hq_location_id"] or "").strip()
-            if not hq_raw:
-                continue
+            hq_nid = (row["hq_node_id"] or "").strip().lower()
             hq_clean = hq_raw.lower().replace("->", "➔")
             hq_parts = [p.strip() for p in hq_clean.split("➔") if p.strip()]
+            parsed_rows.append((row, hq_clean, hq_parts, hq_nid))
+
+        leaf_clean = loc_parts[-1]
+        is_room_level = len(loc_parts) >= 3
+
+        # Pass 1: Exact full match, hq_node_id match (full or leaf), or single-segment leaf-room HQ match
+        for row, hq_clean, hq_parts, hq_nid in parsed_rows:
+            if hq_clean and hq_clean == loc_clean:
+                return db._parse_faction_row(dict(row))
+            if hq_nid and (
+                hq_nid == loc_clean
+                or hq_nid in mapped_fac_nodes
+                or hq_nid == leaf_clean
+            ):
+                return db._parse_faction_row(dict(row))
+            if len(hq_parts) == 1:
+                bare_hq = hq_parts[0]
+                if len(bare_hq) >= 4 and (
+                    bare_hq == leaf_clean
+                    or (len(bare_hq) >= 5 and bare_hq in leaf_clean)
+                    or (len(leaf_clean) >= 5 and leaf_clean in bare_hq)
+                ):
+                    return db._parse_faction_row(dict(row))
+
+        # Pass 2: Strict Major School Club core chamber check on 3-tier paths
+        # Prevents foyers, notice boards, quartermasters, or sibling facilities (e.g. Swimming Pool)
+        # from falsely inheriting Major Club HQ status via loc_parts[1].
+        if is_room_level:
+            fac_clean = loc_parts[1]
+            for maj_fac_key, allowed_core_leaves in _MAJOR_CLUB_FACILITY_TO_CORE_ROOM.items():
+                if maj_fac_key in fac_clean or fac_clean == maj_fac_key:
+                    if not any(core_k in leaf_clean for core_k in allowed_core_leaves):
+                        return None
+                    for row, hq_clean, hq_parts, hq_nid in parsed_rows:
+                        if maj_fac_key in hq_clean or any(
+                            nid_k and nid_k == hq_nid
+                            for nid_k in ("loc_student_council_facility", "loc_drama_club_facility", "bld_school_athletics", "loc_school_athletics", "loc_nsfw_club_facility")
+                            if maj_fac_key in (
+                                "student council office" if "student_council" in nid_k
+                                else "campus auditorium & drama theater" if "drama" in nid_k
+                                else "varsity athletic directorate & gymnasium" if "athletics" in nid_k
+                                else "velvet basement salon"
+                            )
+                        ):
+                            return db._parse_faction_row(dict(row))
+                    return None
+
+        # Pass 3: Multi-tier HQs (e.g. Agency HQs) and Tier 2 Facility-level lookups
+        for row, hq_clean, hq_parts, hq_nid in parsed_rows:
             if not hq_parts:
                 continue
-
-            # 1. Exact string match
-            if hq_clean == loc_clean:
+            if hq_nid and hq_nid in loc_parts[1:]:
                 return db._parse_faction_row(dict(row))
-
-            # 2. Multi-tier HQ (e.g. "Westlake Academy ➔ AV & Esports Lounge"):
-            # Every segment of hq_parts must be present in loc_parts
             if len(hq_parts) > 1:
                 if all(any(hq_seg == lp or (len(hq_seg) >= 4 and hq_seg in lp) for lp in loc_parts) for hq_seg in hq_parts):
                     return db._parse_faction_row(dict(row))
             else:
-                # 3. Single-tier / Bare HQ (e.g. "Student Council Office", "Behind Gym Storage Sheds"):
                 bare_hq = hq_parts[0]
                 if len(bare_hq) >= 4:
                     for i, lp in enumerate(loc_parts):
@@ -4310,4 +4373,5 @@ from .social_pacing import (
     upsert_character_social_daily,
     upsert_npc_social_composure,
     upsert_social_topic_state,
+    upsert_wardrobe_preset_discoveries_batch,
 )

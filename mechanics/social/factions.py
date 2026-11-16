@@ -8,7 +8,7 @@ roster generation, promotion trial directives, and NPC affiliation probability b
 """
 import random
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Mapping
 import scenario_data
 from mechanics.world.locations.seeds import is_school_scenario
 
@@ -311,8 +311,28 @@ def infer_default_hq_location(faction_name: str, scen_key: str = "") -> str:
     except Exception:
         pass
     
-    if is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
-        if any(k in name_l for k in ("esport", "gaming", "game", "video game")): return "Esports Clubroom & Media Lab"
+    is_urban_anom_org = bool(
+        scenario_data.is_anomalous_high_school_scenario(scen_key)
+        and not is_school_scenario(scen_key)
+        and (
+            any(
+                k in name_l
+                for k in (
+                    "commission", "agency", "bureau", "ministry", "corp", "holdings",
+                    "llc", "security", "monastic", "shrine", "wardens", "cathedral",
+                    "disciples", "congregation", "network", "headquarters",
+                )
+            )
+            or bool(re.search(r"\bcults?\b", name_l))
+            or ("directorate" in name_l and "athletic" not in name_l)
+            or (
+                "syndicate" in name_l
+                and not any(dk in name_l for dk in ("delinquent", "gang", "brawler", "viper", "wolves", "skulls"))
+            )
+        )
+    )
+    if (is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key)) and not is_urban_anom_org:
+        if any(k in name_l for k in ("esport", "gaming", "game", "video game")): return "Esports & Gaming Clubroom"
         if any(k in name_l for k in ("science", "robotics", "tech", "computer", "biology", "chemistry")): return "Science & Robotics Lab 2-A"
         if any(k in name_l for k in ("kendo", "martial", "judo", "karate", "budo", "boxing", "fencing", "wrestling")): return "Traditional Martial Arts Dojo"
         if re.search(r'\b(art|arts|manga|anime|drawing|painting|sculpture)\b', name_l): return "Art & Design Studio"
@@ -322,11 +342,13 @@ def infer_default_hq_location(faction_name: str, scen_key: str = "") -> str:
         if any(k in name_l for k in ("astronomy", "stargazing", "space")): return "Rooftop Astronomy Dome"
         if any(k in name_l for k in ("literature", "book", "reading", "poetry", "library")): return "Library Annex Reading Room"
         if any(k in name_l for k in ("swim", "aquatic", "water polo")): return "Indoor Aquatics Center"
-        if any(k in name_l for k in ("track", "athletic", "field", "runner")): return "Athletics Pavilion & Track"
+        if any(k in name_l for k in ("varsity", "athletic directorate", "sports")): return "Varsity Athletic Directorate & Gymnasium"
+        if any(k in name_l for k in ("track", "athletic", "field", "runner")): return "Varsity Athletic Directorate & Gymnasium"
         if any(k in name_l for k in ("council", "stuco")): return "Student Council Office"
-        if any(k in name_l for k in ("drama", "theater", "acting")): return "School Auditorium Stage"
+        if any(k in name_l for k in ("drama", "theater", "acting")): return "Campus Auditorium & Drama Theater"
         if any(k in name_l for k in ("occult", "mystery", "paranormal")): return "Old Storage Room 3-B"
         if any(k in name_l for k in ("salon", "velvet", "hedonist", "boudoir", "lust", "desire")): return "Velvet Basement Salon"
+        if any(k in name_l for k in ("boiler", "stray", "abandoned")): return "Abandoned Wing Boiler-Room Den"
         if any(k in name_l for k in ("gang", "delinquent", "rebel", "brawler", "skulls", "wolves")): return "Behind Gym Storage Sheds"
         return f"{faction_name.strip()} Clubroom"
 
@@ -781,6 +803,234 @@ def is_school_club_faction(faction: Dict[str, Any] | None) -> bool:
     if tmpl in ("council", "club", "delinquents", "discipline"):
         return True
     return False
+
+
+_MAJOR_CLUB_FACILITY_SPECS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("student council office", ("loc_student_council_facility",)),
+    ("campus auditorium & drama theater", ("loc_drama_club_facility",)),
+    ("varsity athletic directorate & gymnasium", ("bld_school_athletics", "loc_school_athletics")),
+    ("velvet basement salon", ("loc_nsfw_club_facility",)),
+)
+
+
+def validate_major_club_subroom_action(
+    session_id: int,
+    faction: Mapping[str, Any] | None,
+    action: str,
+    current_loc: str,
+    scen_key: str = "",
+) -> str | None:
+    """
+    Enforces strict sub-room specialization (D1) when the player is inside one of the
+    4 Major School Club Tier 2 facilities on a 3-tier path (Zone -> Facility -> Room).
+    Minor clubs and 2-tier paths remain unrestricted.
+    """
+    if not session_id or not isinstance(faction, Mapping) or not current_loc:
+        return None
+    curr_parts = [p.strip() for p in str(current_loc).replace("->", "➔").split("➔") if p.strip()]
+    if len(curr_parts) < 3:
+        return None
+
+    target_hq_low = str(faction.get("hq_location_id") or "").strip().lower()
+    target_hq_nid = str(faction.get("hq_node_id") or "").strip().lower()
+    curr_fac_low = curr_parts[1].lower()
+    matched_major_fac = ""
+    for fac_nm, node_ids in _MAJOR_CLUB_FACILITY_SPECS:
+        target_owns_fac = (fac_nm in target_hq_low) or (target_hq_nid in node_ids)
+        player_in_fac = (fac_nm in curr_fac_low) or (curr_fac_low == fac_nm)
+        if target_owns_fac and player_in_fac:
+            matched_major_fac = fac_nm
+            break
+    if not matched_major_fac:
+        return None
+
+    act_low = str(action or "").strip().lower()
+    if act_low in ("join", "transfer", "rest", "promote", "challenge_leader"):
+        import db
+        here_fac = db.get_faction_by_hq(session_id, current_loc)
+        target_fid = str(faction.get("faction_id") or "").strip().lower()
+        if not here_fac or str(here_fac.get("faction_id") or "").strip().lower() != target_fid:
+            return f"Move to {faction.get('name', 'this club')}'s core HQ chamber before performing HQ operations."
+        return None
+    if act_low == "quartermaster":
+        from mechanics.world.locations import location_has_merchant_shop
+        if not location_has_merchant_shop(current_loc, scen_key=scen_key):
+            return f"Move to {faction.get('name', 'this club')}'s Quartermaster / Supply Counter room to access requisition gear."
+        return None
+    if act_low == "bounty":
+        from mechanics.world.locations import location_has_bounty_board
+        if not location_has_bounty_board(current_loc, scen_key=scen_key):
+            return f"Move to {faction.get('name', 'this club')}'s Notice Board / Ledger room to browse club assignments."
+        return None
+    return None
+
+
+def check_rival_or_hostile_turf_block(
+    session_id: int,
+    faction: Mapping[str, Any] | None,
+    user_id: int | None = None,
+    session: Mapping[str, Any] | None = None,
+) -> str | None:
+    """
+    Returns an explanatory block message when a rival group member or negatively-viewed
+    character attempts to use a faction's safehouse rest or quartermaster stash.
+    """
+    if not session_id or not isinstance(faction, Mapping):
+        return None
+    import db
+
+    target_fid = str(faction.get("faction_id") or "").strip().lower()
+    target_name = str(faction.get("name") or "this group")
+    cat = str(faction.get("category") or "").strip().lower()
+    tmpl = str(faction.get("hierarchy_template") or "").strip().lower()
+    is_gang = cat == "delinquents" or tmpl == "delinquents"
+    rep = int(faction.get("reputation_score") or 0)
+    if (is_gang and rep < 0) or (not is_gang and rep <= -31):
+        return f"Hostile standing ({rep:+d} Rep) with {target_name} bars you from using their safehouse rest or supply stash."
+
+    eff_sess = dict(session) if isinstance(session, Mapping) else (db.get_session(session_id) or {})
+    lookup_uid = user_id or eff_sess.get("host_user_id")
+    player_fids: set[str] = set()
+    if lookup_uid:
+        char = db.get_character(int(lookup_uid))
+        jf = str((char or {}).get("joined_faction_id") or "").strip().lower()
+        if jf:
+            player_fids.add(jf)
+    anom_state = eff_sess.get("anomalous_faction_state") if isinstance(eff_sess.get("anomalous_faction_state"), Mapping) else {}
+    joined_club = str(anom_state.get("joined_club_name") or "").strip().lower().replace(" ", "_")
+    if joined_club:
+        player_fids.add(joined_club)
+
+    target_rivals = {str(r).strip().lower() for r in (faction.get("rival_faction_ids") or []) if r}
+    for pfid in player_fids:
+        if not pfid or pfid == target_fid:
+            continue
+        if pfid in target_rivals:
+            return f"Rival crew affiliation bars you from using {target_name}'s safehouse rest or supply stash."
+        pf = db.get_faction(session_id, pfid)
+        if pf:
+            peer_rivals = {str(r).strip().lower() for r in (pf.get("rival_faction_ids") or []) if r}
+            if target_fid in peer_rivals:
+                return f"Rival crew affiliation with {pf.get('name', pfid)} bars you from using {target_name}'s safehouse rest or supply stash."
+    return None
+
+
+def is_nsfw_salon_faction(faction: Mapping[str, Any] | None) -> bool:
+    """Returns True if `faction` represents the hidden Velvet Basement Salon NSFW club."""
+    if not isinstance(faction, Mapping):
+        return False
+    f_id = str(faction.get("faction_id") or "").strip().lower()
+    f_cat = str(faction.get("category") or "").strip().lower()
+    f_hq = str(faction.get("hq_location_id") or "").strip().lower()
+    f_hq_nid = str(faction.get("hq_node_id") or "").strip().lower()
+    return (
+        f_cat == "nsfw_club"
+        or f_hq_nid in ("loc_nsfw_club_facility", "loc_nsfw_faction_hq")
+        or "velvet basement" in f_hq
+        or "loc_nsfw_" in f_hq
+        or f_id == "velvet_basement_salon"
+    )
+
+
+def validate_club_quartermaster_hours(faction: Mapping[str, Any] | None, current_minute: int | None) -> str | None:
+    """
+    Enforces D2 operating hours for school club quartermaster access:
+    official school clubs operate 07:00–20:00 daily; Delinquent Gangs & Velvet Basement Salon operate 24/7.
+    """
+    if not isinstance(faction, Mapping) or not is_school_club_faction(dict(faction)):
+        return None
+    cat = str(faction.get("category") or "").strip().lower()
+    tmpl = str(faction.get("hierarchy_template") or "").strip().lower()
+    if cat == "delinquents" or tmpl == "delinquents" or is_nsfw_salon_faction(faction):
+        return None
+    safe_min = int(current_minute if current_minute is not None else 600) % 1440
+    if 420 <= safe_min < 1200:
+        return None
+    return f"{faction.get('name', 'Club')} Quartermaster requisition counter is closed outside campus hours (07:00–20:00)."
+
+
+def resolve_board_club_faction_for_location(
+    session_id: int,
+    location_str: str,
+    scen_key: str = "",
+) -> dict[str, Any] | None:
+    """
+    When the player is at a Major Club Notice Board sub-room or a Minor Club
+    all-in-one Tier 3 HQ room, returns that owning club faction so notice board
+    generation auto-scopes to club-specific contracts (+ Reputation rewards).
+    Returns None for general campus boards and urban Agency HQs.
+    """
+    if not session_id or not location_str:
+        return None
+    import json as _json
+    import db
+    from mechanics.world.locations.seeds import is_major_school_club
+
+    parts = [p.strip() for p in str(location_str).replace("->", "➔").split("➔") if p.strip()]
+    leaf_low = (parts[-1] if parts else str(location_str)).lower()
+    if any(
+        g in leaf_low
+        for g in (
+            "school gate", "main gate", "front gate",
+            "entrance foyer", "shoe lockers",
+            "central courtyard", "main courtyard",
+        )
+    ):
+        return None
+
+    nid = db.resolve_node_id_from_location(session_id, location_str, prefer_facility=False)
+    node = db.get_world_node(session_id, nid) if nid else None
+    node_meta: dict[str, Any] = {}
+    if node and node.get("state_json"):
+        try:
+            raw_st = node["state_json"]
+            node_meta = _json.loads(raw_st) if isinstance(raw_st, str) else dict(raw_st)
+        except Exception:
+            node_meta = {}
+
+    if node_meta.get("faction_name") and (node_meta.get("has_bounty_board") or node_meta.get("is_minor_club_hq")):
+        f = db.get_faction(session_id, str(node_meta["faction_name"]))
+        if f and is_school_club_faction(f):
+            return f
+
+    if (
+        nid == "loc_nsfw_request_board"
+        or (node and node.get("parent_id") == "loc_nsfw_club_facility" and node_meta.get("has_bounty_board"))
+        or any(k in leaf_low for k in ("whispered favors", "secret ledger", "velvet request"))
+    ):
+        for f in (db.get_factions(session_id) or []):
+            if is_nsfw_salon_faction(f):
+                return f
+
+    parent_id = str((node or {}).get("parent_id") or "").strip()
+    major_fac_ids = {
+        "loc_student_council_facility",
+        "loc_drama_club_facility",
+        "bld_school_athletics",
+        "loc_school_athletics",
+    }
+    if parent_id in major_fac_ids and node_meta.get("has_bounty_board"):
+        f = db.get_faction_by_hq(session_id, parent_id)
+        if f and is_school_club_faction(f):
+            return f
+
+    board_leaf_to_fac = (
+        (("campus directive", "petition board"), "loc_student_council_facility", "Student Council"),
+        (("production callboard", "backstage casting"), "loc_drama_club_facility", "Drama Club"),
+        (("tournament roster", "challenge board"), "bld_school_athletics", "Varsity Athletic Directorate"),
+    )
+    for kws, hq_nid, fallback_name in board_leaf_to_fac:
+        if any(k in leaf_low for k in kws):
+            f = db.get_faction_by_hq(session_id, hq_nid) or db.get_faction(session_id, fallback_name)
+            if f and is_school_club_faction(f):
+                return f
+
+    # Minor school clubs (all-in-one Tier 3 HQ rooms)
+    if len(parts) >= 3 or (nid and (nid.startswith("sub_club_") or nid in ("loc_old_storage_3b", "loc_gaming_clubroom", "loc_behind_gym_sheds", "loc_delinquent_boiler_den"))):
+        cand = (db.get_faction_by_hq(session_id, nid) if nid else None) or db.get_faction_by_hq(session_id, location_str)
+        if cand and is_school_club_faction(cand) and not is_major_school_club(cand.get("name", ""), cand.get("hq_location_id", "")):
+            return cand
+    return None
 
 
 def get_faction_category_tag(faction: Dict[str, Any] | None, scenario_key: str = "") -> Dict[str, Any]:
@@ -1433,9 +1683,17 @@ def _role_leadership_rank_weight(role_str: str) -> int:
     return 0
 
 
-def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict], template: str, category: str = "") -> list[dict]:
+def _match_school_roster_to_faction(
+    faction_name: str,
+    school_roster: list[dict],
+    template: str,
+    category: str = "",
+    exclude_names: set[str] | None = None,
+    hq_location: str = "",
+) -> list[dict]:
     tiers = get_hierarchy(template)
     fac_lower = faction_name.lower()
+    excl_low = {str(x).strip().lower() for x in (exclude_names or set()) if x}
 
     # Exclude Faculty from student clubs, councils, and gangs unless explicitly a faculty faction
     is_faculty_faction = any(k in fac_lower for k in ("faculty", "staff", "teacher", "administration", "board"))
@@ -1443,8 +1701,9 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
         c for c in school_roster
         if (str(c.get("grade", "")).strip().lower() == "faculty") == is_faculty_faction
         and str(c.get("grade", "")).strip().lower() not in ("citizen", "youth peer")
+        and str(c.get("name", "")).strip().lower() not in excl_low
     ]
-    if not pool:
+    if not pool and not excl_low:
         pool = [
             c for c in school_roster
             if str(c.get("grade", "")).strip().lower() not in ("faculty", "citizen", "youth peer")
@@ -1499,15 +1758,41 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
                 elif club in ("Literature & Book Circle", "Library Archives", "Astronomy & Physics Circle") or re.search(r"\b(bookworm|library|astronomer)\b", r_low):
                     secondary_matched.append(c)
         elif template == "delinquents" or any(w in fac_lower for w in ("delinquent", "rebel", "wildcat", "brawler", "gang", "blazer")):
+            hq_low = f"{fac_lower} {hq_location or ''}".lower()
+            is_boiler_turf = any(k in hq_low for k in ("boiler", "abandoned", "rust"))
+            is_shed_turf = any(k in hq_low for k in ("behind gym", "shed"))
+            turf_primary = []
+            general_rebel_primary = []
             for c in pool:
                 r_low = str(c.get("role", "")).lower()
                 clique = str(c.get("clique", ""))
                 fac_str = str(c.get("primary_facility", "")).lower()
+                club_str = str(c.get("club", "")).lower()
+                comb_turf = f"{fac_str} {club_str} {r_low}"
                 if clique in ("Rebels", "Slackers") or re.search(r"\b(delinquent|rebel|slacker)\b", r_low):
-                    primary_matched.append(c)
+                    if (is_boiler_turf and ("boiler" in comb_turf or "abandoned" in comb_turf)) or (
+                        is_shed_turf and ("behind gym" in comb_turf or "shed" in comb_turf)
+                    ):
+                        turf_primary.append(c)
+                    else:
+                        general_rebel_primary.append(c)
                 elif "brawler" in fac_str or "rooftop" in fac_str:
                     secondary_matched.append(c)
-        elif "athletic" in fac_lower or "varsity" in fac_lower or "sports" in fac_lower:
+            primary_matched.extend(turf_primary + general_rebel_primary)
+        elif any(w in fac_lower for w in ("esport", "gaming", "video game", "arcade")):
+            for c in pool:
+                r_low = str(c.get("role", "")).lower()
+                club_low = str(c.get("club", "")).lower()
+                clique_low = str(c.get("clique", "")).lower()
+                if (
+                    "gaming" in club_low or "esport" in club_low or "arcade" in club_low
+                    or re.search(r"\b(esports?|gamer|gaming|arcade|speedrunner|streamer|console)\b", r_low)
+                    or clique_low == "gamers"
+                ):
+                    primary_matched.append(c)
+                elif "computer" in club_low or "tech" in club_low or clique_low == "nerds":
+                    secondary_matched.append(c)
+        elif ("athletic" in fac_lower or "varsity" in fac_lower or "sports" in fac_lower) and "esport" not in fac_lower:
             for c in pool:
                 r_low = str(c.get("role", "")).lower()
                 club = str(c.get("club", ""))
@@ -1545,6 +1830,8 @@ def _match_school_roster_to_faction(faction_name: str, school_roster: list[dict]
     roster = []
     used_indices = 0
     used_names = {str(c.get("name", "")).strip() for c in school_roster if c.get("name")}
+    if exclude_names:
+        used_names.update(str(x).strip() for x in exclude_names if x)
     for tier in reversed(tiers):
         if used_indices < len(matched_sorted):
             char = matched_sorted[used_indices]
@@ -1627,6 +1914,12 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
             return True
         if "occult" in fac_low and ("occult" in club_low or "mystery" in club_low):
             return True
+        if ("esport" in fac_low or "gaming" in fac_low) and any(w in club_low for w in ("esport", "gaming", "arcade")):
+            return True
+        if ("esport" not in fac_low and "esport" not in club_low) and (
+            "athletic" in fac_low or "varsity" in fac_low or "sports" in fac_low
+        ) and any(w in club_low for w in ("athletic", "varsity", "sports")):
+            return True
         return False
 
     updated_any = False
@@ -1664,8 +1957,13 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
                         ):
                             has_invalid_member = True
                             displaced_off_roster.add(m_name_low)
+                        elif ("esport" in fac_name or "gaming" in fac_name) and (
+                            dir_entry.get("club") == "Athletic Directorate" or "varsity" in str(dir_entry.get("role", "")).lower()
+                        ):
+                            has_invalid_member = True
+                            displaced_off_roster.add(m_name_low)
                 if has_invalid_member:
-                    rebuilt = _match_school_roster_to_faction(fac_name_orig, school_roster, f.get("hierarchy_template", "club"), category=f.get("category", ""))
+                    rebuilt = _match_school_roster_to_faction(fac_name_orig, school_roster, f.get("hierarchy_template", "club"), category=f.get("category", ""), hq_location=f.get("hq_location_id", ""))
                     if rebuilt and len(rebuilt) == len(roster):
                         roster = rebuilt
                         roster_modified = True
@@ -1888,6 +2186,282 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
     return factions
 
 
+def _seed_faction_roster_lorebook(session_id: int, faction_name: str, roster: list[dict], scen_key: str) -> None:
+    """Seeds named faction roster members into the lorebook for canonical grounding."""
+    import db
+    from mechanics.social.races import normalize_race
+    from mechanics.social.persona import infer_contact_gender
+    from mechanics.social.persona.intimacy.appearance import normalize_appearance
+
+    for member in roster:
+        if member.get("is_vacant") or not member.get("name"):
+            continue
+        member_name = member["name"]
+        member_title = member.get("title", "")
+        description = f"{member_title} of {faction_name}." if member_title else f"Member of {faction_name}."
+
+        if member.get("race"):
+            member_race = normalize_race(member["race"], scen_key=scen_key, seed=member_name)
+        else:
+            fallback_race = normalize_race("", scen_key=scen_key, seed=member_name)
+            member_race = fallback_race if fallback_race != "human" else ""
+
+        member_gender = member.get("gender") or infer_contact_gender({"name": member_name}) or "female"
+        member_app = normalize_appearance({}, gender=member_gender, race=member_race, scen_key=scen_key, desc=description)
+
+        try:
+            db.upsert_lorebook_entity(
+                session_id=session_id,
+                entity_type="person",
+                name=member_name,
+                description=description,
+                disposition="neutral",
+                faction=faction_name,
+                traits=[],
+                motivation="",
+                mannerisms="",
+                race=member_race,
+                gender=member_gender,
+                appearance=member_app,
+            )
+        except Exception:
+            pass
+
+
+def _build_school_faction_roster(
+    faction_name: str,
+    school_roster: list[dict],
+    template: str,
+    category: str,
+    scen_key: str,
+    session_id: int,
+    exclude_names: set[str] | None = None,
+    hq_location: str = "",
+) -> list[dict]:
+    """Builds a school faction leadership roster from school_directory or procedural fallback."""
+    roster: list[dict] = []
+    if school_roster:
+        roster = _match_school_roster_to_faction(
+            faction_name,
+            school_roster,
+            template,
+            category=category,
+            exclude_names=exclude_names,
+            hq_location=hq_location,
+        )
+    if not roster:
+        roster = generate_procedural_leadership_roster(template, scen_key)
+        from mechanics.social.races import normalize_race
+        for r in roster:
+            if not r.get("race") and r.get("name"):
+                r["race"] = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{r['name'].lower()}")
+    return roster
+
+
+def _reconcile_school_starter_factions_and_rivals(session_id: int, scen_key: str, existing: list[dict]) -> None:
+    """
+    Backfills missing pregenerated school clubs (Esports & Gaming Club, second
+    delinquent gang), updates legacy HQ mappings to dedicated Major/Minor club
+    nodes, and ensures delinquent gangs always list each other as rivals.
+    Runs atomically inside a single `db.UnitOfWork()`.
+    """
+    import db
+    import scenario_data
+    from mechanics.world.locations import is_school_scenario
+
+    is_school = is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key)
+    if not is_school or not existing:
+        return
+
+    with db.UnitOfWork():
+        _reconcile_school_starter_factions_and_rivals_tx(session_id, scen_key, existing)
+
+
+def _reconcile_school_starter_factions_and_rivals_tx(session_id: int, scen_key: str, existing: list[dict]) -> None:
+    import db
+    import namegen
+    import scenario_data
+
+    is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scen_key)
+    athletics_node = "loc_school_athletics" if is_anom_hs else "bld_school_athletics"
+
+    school_roster: list[dict] = []
+    def _get_school_roster() -> list[dict]:
+        if not school_roster:
+            from mechanics.social.school_roster import ensure_school_directory_exists
+            school_roster.extend(ensure_school_directory_exists({"id": session_id, "scenario": scen_key}) or [])
+        return school_roster
+
+    is_seeded_starter_set = len(existing) >= 3
+    has_gaming = any(any(k in (f.get("name") or "").lower() for k in ("esport", "gaming")) for f in existing)
+    if is_seeded_starter_set and not has_gaming:
+        sr = _get_school_roster()
+        gaming_roster = _build_school_faction_roster(
+            "Esports & Gaming Club", sr, "club", "club", scen_key, session_id
+        )
+        db.upsert_faction(
+            session_id=session_id,
+            name="Esports & Gaming Club",
+            delta_score=0,
+            category="club",
+            hq_location_id="Esports & Gaming Clubroom",
+            hq_node_id="loc_gaming_clubroom",
+            notes="A competitive student club hosting LAN tournaments, retro arcade nights, and strategy scrimmages inside the General Student Clubroom Wing.",
+            hierarchy_template="club",
+            leadership_roster=gaming_roster,
+        )
+        _seed_faction_roster_lorebook(session_id, "Esports & Gaming Club", gaming_roster, scen_key)
+        existing = db.get_factions(session_id)
+
+    delinq_facs = [
+        f for f in existing
+        if f.get("category") == "delinquents" or f.get("hierarchy_template") == "delinquents"
+    ]
+    if (is_seeded_starter_set or len(delinq_facs) >= 1) and len(delinq_facs) < 2:
+        sr = _get_school_roster()
+        used_fac_names = {str(f.get("name", "")).strip() for f in existing if f.get("name")}
+        used_member_names: set[str] = set()
+        for df in delinq_facs:
+            for r in (df.get("leadership_roster") or []):
+                rn = str(r.get("name", "")).strip().lower()
+                if rn:
+                    used_member_names.add(rn)
+
+        slots_to_add = [
+            ("Behind Gym Storage Sheds", "loc_behind_gym_sheds",
+             "A streetwise group of rebellious students and brawlers claiming the sheds behind the athletics complex."),
+            ("Abandoned Wing Boiler-Room Den", "loc_delinquent_boiler_den",
+             "A rival gang of outcasts and street brawlers entrenched in the Abandoned Old Campus Wing boiler room, locked in constant turf rivalry with the gym-shed crew."),
+        ]
+        if len(delinq_facs) == 1:
+            first_hq = (delinq_facs[0].get("hq_location_id") or "").strip()
+            if first_hq == "Abandoned Wing Boiler-Room Den":
+                slots_to_add = [slots_to_add[0]]
+            else:
+                slots_to_add = [slots_to_add[1]]
+
+        for hq_name, hq_node, notes in slots_to_add:
+            new_gang_name = ""
+            for _ in range(20):
+                cand = namegen.generate_faction_name("high_school_drama", "delinquents")
+                if cand not in used_fac_names:
+                    new_gang_name = cand
+                    break
+            if not new_gang_name or new_gang_name in used_fac_names:
+                new_gang_name = "Boiler Room Strays" if "Boiler" in hq_name else "Gym Shed Wildcats"
+                if new_gang_name in used_fac_names:
+                    new_gang_name = f"{new_gang_name} Crew"
+            used_fac_names.add(new_gang_name)
+
+            gang_roster = _build_school_faction_roster(
+                new_gang_name, sr, "delinquents", "delinquents", scen_key, session_id, exclude_names=used_member_names, hq_location=hq_name
+            )
+            for r in gang_roster:
+                rn = str(r.get("name", "")).strip().lower()
+                if rn:
+                    used_member_names.add(rn)
+            db.upsert_faction(
+                session_id=session_id,
+                name=new_gang_name,
+                delta_score=0,
+                category="delinquents",
+                hq_location_id=hq_name,
+                hq_node_id=hq_node,
+                notes=notes,
+                hierarchy_template="delinquents",
+                leadership_roster=gang_roster,
+            )
+            _seed_faction_roster_lorebook(session_id, new_gang_name, gang_roster, scen_key)
+        existing = db.get_factions(session_id)
+
+    # Reconcile institutional HQ node/location IDs for existing sessions
+    delinq_idx = 0
+    for f in existing:
+        if not is_school_club_faction(f):
+            continue
+        fname = f.get("name", "")
+        flow = fname.lower()
+        cat = str(f.get("category") or "").lower()
+        tmpl = str(f.get("hierarchy_template") or "").lower()
+        hq_loc = str(f.get("hq_location_id") or "")
+        hq_node = str(f.get("hq_node_id") or "")
+
+        target_loc = ""
+        target_node = ""
+        if "student council" in flow:
+            if hq_node in ("", "loc_student_council", "sub_student_council") or not hq_loc:
+                target_loc, target_node = "Student Council Office", "loc_student_council_facility"
+        elif flow == "drama club" or "drama club" in flow:
+            if hq_loc in ("", "School Auditorium Stage") or hq_node in ("", "loc_auditorium", "loc_auditorium_stage"):
+                target_loc, target_node = "Campus Auditorium & Drama Theater", "loc_drama_club_facility"
+        elif "varsity athletic" in flow or "athletic directorate" in flow:
+            if (
+                hq_loc in ("", "Main Gymnasium")
+                or hq_node in ("", "loc_gym", "loc_sports_club_facility")
+                or (not is_anom_hs and hq_node == "loc_school_athletics")
+            ):
+                target_loc, target_node = "Varsity Athletic Directorate & Gymnasium", athletics_node
+        elif "occult" in flow:
+            if not hq_loc or hq_node in ("", "sub_old_storage_3b", "sub_occult_clubroom"):
+                target_loc, target_node = "Old Storage Room 3-B", "loc_old_storage_3b"
+        elif "esport" in flow or "gaming" in flow:
+            if hq_loc in ("", "Esports Clubroom & Media Lab") or not hq_node:
+                target_loc, target_node = "Esports & Gaming Clubroom", "loc_gaming_clubroom"
+        elif cat == "nsfw_club" or "velvet" in hq_loc.lower():
+            if not hq_loc or hq_node in ("", "loc_abandoned_school_wing", "loc_nsfw_faction_hq"):
+                target_loc, target_node = "Velvet Basement Salon", "loc_nsfw_club_facility"
+        elif cat == "delinquents" or tmpl == "delinquents":
+            if hq_loc == "Abandoned Wing Boiler-Room Den" or hq_node == "loc_delinquent_boiler_den":
+                if not hq_loc or not hq_node:
+                    target_loc, target_node = "Abandoned Wing Boiler-Room Den", "loc_delinquent_boiler_den"
+            elif hq_loc == "Behind Gym Storage Sheds" or hq_node in ("", "sub_custodian_boiler_locker"):
+                if delinq_idx == 0 or hq_loc == "Behind Gym Storage Sheds" or hq_node == "sub_custodian_boiler_locker":
+                    target_loc, target_node = "Behind Gym Storage Sheds", "loc_behind_gym_sheds"
+                else:
+                    target_loc, target_node = "Abandoned Wing Boiler-Room Den", "loc_delinquent_boiler_den"
+            elif not hq_loc or not hq_node:
+                if delinq_idx == 0:
+                    target_loc, target_node = "Behind Gym Storage Sheds", "loc_behind_gym_sheds"
+                else:
+                    target_loc, target_node = "Abandoned Wing Boiler-Room Den", "loc_delinquent_boiler_den"
+            delinq_idx += 1
+
+        if target_loc and target_node and (hq_loc != target_loc or hq_node != target_node):
+            db.upsert_faction(
+                session_id=session_id,
+                name=fname,
+                delta_score=0,
+                hq_location_id=target_loc,
+                hq_node_id=target_node,
+            )
+
+    # Always make delinquent gangs mutual rivals
+    refreshed = db.get_factions(session_id)
+    delinq_fids = [
+        f["faction_id"]
+        for f in refreshed
+        if (f.get("category") == "delinquents" or f.get("hierarchy_template") == "delinquents")
+        and f.get("faction_id")
+    ]
+    if len(delinq_fids) >= 2:
+        for df in refreshed:
+            if not (df.get("category") == "delinquents" or df.get("hierarchy_template") == "delinquents"):
+                continue
+            df_fid = df.get("faction_id", "")
+            existing_rivals = list(df.get("rival_faction_ids") or [])
+            merged = list(existing_rivals)
+            for peer_fid in delinq_fids:
+                if peer_fid and peer_fid != df_fid and peer_fid not in merged:
+                    merged.append(peer_fid)
+            if merged != existing_rivals:
+                db.upsert_faction(
+                    session_id=session_id,
+                    name=df["name"],
+                    delta_score=0,
+                    rival_faction_ids=merged,
+                )
+
+
 def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> list[dict]:
     """
     Ensures pre-discovered starter factions exist in SQLite for the session.
@@ -1902,11 +2476,12 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
     import scenario_data
     from mechanics.world.locations import is_school_scenario
 
+    scen_key = scenario_key or "fantasy"
     existing = db.get_factions(session_id)
     if existing:
+        _reconcile_school_starter_factions_and_rivals(session_id, scen_key, existing)
         return sync_faction_rosters_with_contacts(session_id)
 
-    scen_key = scenario_key or "fantasy"
     is_nsfw = scenario_data.is_nsfw_scenario(scen_key)
     is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     starters = namegen.get_scenario_starter_factions(scen_key, is_nsfw=is_nsfw, hash_val=int(session_id or 1))
@@ -1923,6 +2498,13 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
         if arch:
             arch_to_fid[arch] = fac["name"].strip().lower().replace(" ", "_")
 
+    delinquent_fids = [
+        fac["name"].strip().lower().replace(" ", "_")
+        for fac in starters
+        if fac.get("category") == "delinquents" or fac.get("hierarchy_template") == "delinquents"
+    ]
+    used_delinquent_names: set[str] = set()
+
     for fac in starters:
         name = fac["name"]
         template = fac.get("hierarchy_template", "guild")
@@ -1930,10 +2512,18 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
         category = arch_key if (is_anom and arch_key) else fac.get("category", "guild")
         hq = fac.get("hq_location_id", "")
         notes = fac.get("notes", "")
+        is_delinq_fac = (template == "delinquents" or category == "delinquents")
 
         roster = []
         if school_roster and not arch_key:
-            roster = _match_school_roster_to_faction(name, school_roster, template, category=category)
+            roster = _match_school_roster_to_faction(
+                name,
+                school_roster,
+                template,
+                category=category,
+                exclude_names=used_delinquent_names if is_delinq_fac else None,
+                hq_location=hq,
+            )
 
         if not roster:
             roster = generate_procedural_leadership_roster(template, scen_key)
@@ -1941,6 +2531,12 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
             for r in roster:
                 if not r.get("race") and r.get("name"):
                     r["race"] = normalize_race("", scen_key=scen_key, seed=f"{session_id}:officer:{r['name'].lower()}")
+
+        if is_delinq_fac:
+            for r in roster:
+                rn = str(r.get("name", "")).strip().lower()
+                if rn:
+                    used_delinquent_names.add(rn)
 
         initial_delta = 0
         allied_ids = []
@@ -1959,6 +2555,9 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
             else:
                 initial_delta = -25
                 rival_ids = [arch_to_fid[a] for a in friendly_archs if a in arch_to_fid]
+        elif is_delinq_fac and len(delinquent_fids) >= 2:
+            cur_fid = name.strip().lower().replace(" ", "_")
+            rival_ids = [fid for fid in delinquent_fids if fid != cur_fid]
 
         db.upsert_faction(
             session_id=session_id,
@@ -1979,42 +2578,7 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
         # In Anomalous scenarios, ensure_anomalous_agent_roster below replaces
         # generic placeholder officers with the canonical Special Agents roster.
         if not is_anom:
-            for member in roster:
-                if member.get("is_vacant") or not member.get("name"):
-                    continue
-                member_name = member["name"]
-                member_title = member.get("title", "")
-                description = f"{member_title} of {name}." if member_title else f"Member of {name}."
-                from mechanics.social.races import normalize_race
-                from mechanics.social.persona import infer_contact_gender
-                from mechanics.social.persona.intimacy.appearance import normalize_appearance
-
-                if member.get("race"):
-                    member_race = normalize_race(member["race"], scen_key=scen_key, seed=member_name)
-                else:
-                    fallback_race = normalize_race("", scen_key=scen_key, seed=member_name)
-                    member_race = fallback_race if fallback_race != "human" else ""
-
-                member_gender = member.get("gender") or infer_contact_gender({"name": member_name}) or "female"
-                member_app = normalize_appearance({}, gender=member_gender, race=member_race, scen_key=scen_key, desc=description)
-
-                try:
-                    db.upsert_lorebook_entity(
-                        session_id=session_id,
-                        entity_type="person",
-                        name=member_name,
-                        description=description,
-                        disposition="neutral",
-                        faction=name,
-                        traits=[],
-                        motivation="",
-                        mannerisms="",
-                        race=member_race,
-                        gender=member_gender,
-                        appearance=member_app,
-                    )
-                except Exception:
-                    pass
+            _seed_faction_roster_lorebook(session_id, name, roster, scen_key)
 
     if is_anom:
         try:

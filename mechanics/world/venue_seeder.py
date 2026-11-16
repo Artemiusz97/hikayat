@@ -280,9 +280,16 @@ def ensure_venue_staff_seeded(
 
 
 def _select_roamer_candidate_nodes(world_nodes: list[dict[str, Any]]) -> list[str]:
+    from mechanics.world.anomalous_sites.catalog import (
+        AHS_PROTECTED_SUB_IDS,
+        THEME_PARK_EPICENTER_IDS,
+        resolve_anomalous_site,
+    )
+
     ranked: list[tuple[int, str]] = []
     for n in world_nodes:
         nid = str(n.get("node_id") or "").strip()
+        pid = str(n.get("parent_id") or "").strip()
         name = str(n.get("name") or "").strip().lower()
         cat = str(n.get("category") or "").strip().lower()
         ntype = str(n.get("node_type") or "").strip().upper()
@@ -291,6 +298,12 @@ def _select_roamer_candidate_nodes(world_nodes: list[dict[str, Any]]) -> list[st
             continue
         if bool(state_json.get("is_player_residence") or state_json.get("unstaffed")) or any(b in name for b in PRIVATE_RESIDENCE_KEYWORDS):
             continue
+        if nid.lower() not in AHS_PROTECTED_SUB_IDS and not state_json.get("is_minor_club_hq"):
+            if bool(state_json.get("is_anomalous")) or nid.lower() in THEME_PARK_EPICENTER_IDS:
+                continue
+            spec = resolve_anomalous_site(node_id=nid, parent_id=pid, location_str=name, curr_node=n, session_nodes=world_nodes)
+            if spec is not None and spec.get("site_type") != "theme_park_night":
+                continue
 
         has_hub_kw = any(kw in name for kw in ROAMER_HUB_KEYWORDS)
         has_excl_kw = any(bad in name for bad in ROAMER_EXCLUDE_KEYWORDS)
@@ -699,6 +712,140 @@ def _evaluate_facility_staff(
     return None, bool(relevant_staff)
 
 
+_SCHOOL_CLUB_SHOP_NODE_IDS: frozenset[str] = frozenset({
+    "loc_stuco_quartermaster",
+    "loc_drama_wardrobe",
+    "loc_athletics_equipment",
+    "loc_nsfw_boutique",
+    "loc_old_storage_3b",
+    "loc_gaming_clubroom",
+    "loc_behind_gym_sheds",
+    "loc_delinquent_boiler_den",
+})
+
+
+def _evaluate_school_club_shop(
+    *,
+    sid: int,
+    eff_session: dict[str, Any] | None,
+    eff_scen: str,
+    eff_loc: str,
+    eff_min: int,
+    resolved_node_id: str,
+    node: dict[str, Any] | None,
+    has_shop_keyword: bool,
+) -> dict[str, Any] | None:
+    """
+    Evaluates access, rival turf locks, and campus hours for Major Club
+    quartermasters and Minor Club all-in-one HQs without requiring commercial staff.
+    """
+    if not (is_school_scenario(eff_scen) or scenario_data.has_school_campus_mechanics(eff_scen)):
+        return None
+
+    room_nid = ""
+    room_node = None
+    if sid > 0 and eff_loc:
+        room_nid = str(db.resolve_node_id_from_location(sid, eff_loc, prefer_facility=False) or "").strip()
+        if room_nid:
+            room_node = db.get_world_node(sid, room_nid)
+    active_nid = room_nid or resolved_node_id
+    active_node = room_node or node
+    active_meta = parse_node_state(active_node) if active_node else {}
+    loc_low = str(eff_loc or "").lower()
+    leaf_low = str((active_node or {}).get("name") or "").strip().lower()
+    if not leaf_low and "➔" in loc_low:
+        leaf_low = loc_low.split("➔")[-1].strip()
+
+    from mechanics.world.locations.attributes import DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS
+
+    is_club_shop = bool(
+        active_nid in _SCHOOL_CLUB_SHOP_NODE_IDS
+        or active_nid.startswith("sub_club_")
+        or active_meta.get("is_minor_club_hq")
+        or (active_meta.get("club_tier") == "major" and active_meta.get("has_merchant_shop"))
+        or (
+            has_shop_keyword
+            and (
+                any(
+                    k in (leaf_low or loc_low)
+                    for k in (
+                        "council requisition", "requisition & supply",
+                        "costume wardrobe & prop quartermaster", "prop quartermaster",
+                        "varsity gear & training quartermaster", "training quartermaster",
+                        "silk & curio apothecary", "velvet boutique",
+                        "old storage room 3-b", "esports & gaming clubroom",
+                        "behind gym storage sheds", "abandoned wing boiler-room den",
+                        *DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS,
+                    )
+                )
+                or ("clubroom" in (leaf_low or loc_low) and "clubroom wing" not in (leaf_low or loc_low))
+            )
+        )
+    )
+    if not is_club_shop:
+        return None
+
+    club_fac = None
+    if sid > 0:
+        f_name_meta = str(active_meta.get("faction_name") or "").strip()
+        if f_name_meta:
+            club_fac = db.get_faction(sid, f_name_meta)
+        if not club_fac and active_nid:
+            club_fac = db.get_faction_by_hq(sid, active_nid)
+        if not club_fac and eff_loc:
+            club_fac = db.get_faction_by_hq(sid, eff_loc)
+        if not club_fac and active_node and active_node.get("parent_id"):
+            club_fac = db.get_faction_by_hq(sid, str(active_node["parent_id"]))
+
+    if sid > 0 and club_fac:
+        from mechanics.social.factions import check_rival_or_hostile_turf_block
+        block_msg = check_rival_or_hostile_turf_block(
+            sid,
+            club_fac,
+            user_id=(eff_session or {}).get("host_user_id"),
+            session=eff_session,
+        )
+        if block_msg:
+            return _availability_result(
+                available=False,
+                reason="rival_turf_barred",
+                reason_message=block_msg,
+                facility_node_id=active_nid or resolved_node_id,
+            )
+
+    fac_cat = str((club_fac or {}).get("category") or "").strip().lower()
+    fac_tmpl = str((club_fac or {}).get("hierarchy_template") or "").strip().lower()
+    is_unregulated = bool(
+        active_nid in ("loc_behind_gym_sheds", "loc_delinquent_boiler_den", "loc_nsfw_boutique")
+        or (active_node or {}).get("parent_id") == "loc_nsfw_club_facility"
+        or fac_cat in ("delinquents", "nsfw_club")
+        or fac_tmpl == "delinquents"
+        or any(k in (leaf_low or loc_low) for k in ("behind gym", "boiler-room den", "silk & curio", "velvet basement", "apothecary counter"))
+    )
+    if is_unregulated:
+        return _availability_result(
+            available=True,
+            reason="club_quartermaster",
+            reason_message="The secret stash and barter counter are accessible.",
+            facility_node_id=active_nid or resolved_node_id,
+        )
+
+    safe_min = int(eff_min if eff_min is not None else 600) % 1440
+    if 420 <= safe_min < 1200:
+        return _availability_result(
+            available=True,
+            reason="club_quartermaster",
+            reason_message="The club quartermaster counter is open during campus hours.",
+            facility_node_id=active_nid or resolved_node_id,
+        )
+    return _availability_result(
+        available=False,
+        reason="off_shift",
+        reason_message="The club requisition counter is closed outside campus hours (07:00–20:00).",
+        facility_node_id=active_nid or resolved_node_id,
+    )
+
+
 def evaluate_shop_staff_availability(
     session_id: int,
     location_str: str = "",
@@ -734,6 +881,19 @@ def evaluate_shop_staff_availability(
 
     if is_kiosk_location(eff_loc, node=node):
         return _availability_result(available=True, reason="kiosk_bypass", reason_message="An automated self-service kiosk hums softly, ready to dispense stock.", facility_node_id=resolved_node_id)
+
+    club_shop_decision = _evaluate_school_club_shop(
+        sid=sid,
+        eff_session=eff_session,
+        eff_scen=eff_scen,
+        eff_loc=eff_loc,
+        eff_min=eff_min,
+        resolved_node_id=resolved_node_id,
+        node=node,
+        has_shop_keyword=has_shop_keyword,
+    )
+    if club_shop_decision is not None:
+        return club_shop_decision
 
     world_nodes = db.get_session_world_nodes(sid) if sid > 0 else []
     if not world_nodes:

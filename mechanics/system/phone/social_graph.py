@@ -961,6 +961,7 @@ def evaluate_pre_turn_witness_detection(
 
     if session_id and (candidate_pool or nearby_pool):
         from mechanics.social.epistemic_engine import detect_scene_witnesses
+        from mechanics.social.epistemic_propagation import extract_player_concealment_garments
         act_ctx = {
             "intent": "stealth_covert" if is_illicit else ("intimate_act" if is_romantic_or_intimate else "general_action"),
             "category": "crime" if is_illicit else ("affair" if event_kind == "secret_affair" else "secret"),
@@ -973,7 +974,11 @@ def evaluate_pre_turn_witness_detection(
             "force_spotted": bool(is_public_exposure or (bool(candidate_pool) and not is_discreet_spot)),
             "turn": len(session.get("history") or []) + 1,
             "dialogue_partners": [],
-            "actor_garments": session.get("actor_garments"),
+            "actor_garments": session.get("actor_garments") or extract_player_concealment_garments(
+                session,
+                session_id=int(session_id or 0),
+                phys_state=phys_st if isinstance(phys_st, dict) else None,
+            ),
         }
         detected_events = detect_scene_witnesses(
             int(session_id),

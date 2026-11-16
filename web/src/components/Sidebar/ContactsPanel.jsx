@@ -9,6 +9,7 @@ import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import { formatCleanLocation } from '../../utils/locationFormat';
 import KnownRoutineCard from './KnownRoutineCard';
+import KnownWardrobeCard from './KnownWardrobeCard';
 import AcquaintancesView from './AcquaintancesView';
 
 const isStudentNpc = (npc, basic) => {
@@ -960,7 +961,7 @@ const ContactsPanel = ({
                         const buildParts = [stature ? formatTitle(stature) : null, physique ? formatTitle(physique) : null].filter(Boolean);
                         const buildDesc = buildParts.join(' • ');
                         const featuresDesc = distinctiveFeatures ? formatTitle(distinctiveFeatures) : '';
-                        const outfitDesc = outfitStyle ? formatTitle(outfitStyle) : '';
+                        const outfitDesc = (!npc?.known_wardrobe && outfitStyle) ? formatTitle(outfitStyle) : '';
 
                         const canShowMaleSize = isMale && (infoLevel >= 3 || isDebugRevealed) && Boolean(appearance.penis_size) && appearance.penis_size.toLowerCase() !== 'unknown';
                         const hasPhysicalAttributes = Boolean(
@@ -1121,6 +1122,8 @@ const ContactsPanel = ({
                                 {basic.description || appearance.summary || npc.description}
                               </div>
                             )}
+
+                            <KnownWardrobeCard npc={npc} showDebug={isDebugRevealed} t={t} />
 
                             <KnownRoutineCard npc={npc} t={t} />
 

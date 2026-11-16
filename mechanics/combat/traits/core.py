@@ -147,6 +147,8 @@ def assign_npc_traits(seed_str: str, count: int = 3, role: str = "", race: str =
     role_low = str(role or "").lower()
     if any(k in role_low for k in ["council", "president", "secretary", "captain", "lead", "officer"]):
         priority_traits.extend(["diligent", "proud", "ambitious", "perfectionist"])
+    elif any(k in role_low for k in ["esport", "gamer", "gaming", "arcade", "streamer"]):
+        priority_traits.extend(["competitive", "eccentric", "playful", "diligent"])
     elif any(k in role_low for k in ["athlete", "sports", "track", "gym", "swim"]):
         priority_traits.extend(["competitive", "spirited", "warm", "diligent"])
     elif any(k in role_low for k in ["tech", "science", "robot", "engineer", "tinker", "inventor"]):

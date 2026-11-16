@@ -1,6 +1,6 @@
-# Hikayat (v3.0.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v3.2.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](releases/CHANGELOG-v3.0.0.md)
+[![Version](https://img.shields.io/badge/version-3.2.0-blue.svg)](releases/CHANGELOG-v3.2.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -88,9 +88,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What it looks like**: Real estate listings allowing you to purchase or rent apartments, cabins, and safehouses across map zones.
 * **How it plays**: Owned properties act as private bases where you can rest safely, store valuable gear away from pickpockets, set up protective wards against anomalies, and invite contacts for discreet meetings.
 
-### 9. Interactive Folklore Codex & Occult Research (`EncyclopediaSubTab.jsx`)
-* **What it looks like**: An in-game encyclopedia tab detailing local legends, mythical beasts, and occult lore.
-* **How it plays**: Exploring old ruins or investigating urban myths unlocks entries in the codex. Studying monster weaknesses and ancient rituals gives your character concrete dialogue options and tactical bonuses when facing supernatural threats.
+### 9. Interactive Folklore Codex, Anomalous Sites & Field Log (`EncyclopediaSubTab.jsx`)
+* **What it looks like**: An in-game encyclopedia tab with Folklore, Anomalous Sites, and Field Log views tracking supernatural sites, creatures, and stabilized zones.
+* **How it plays**: Exploring anomalous zones lets you solve multi-step spatial puzzles, use wards and stabilization flares to survive domain hazards, seal and reclaim 36 pacifiable wild sites (`anomalous_sites/`), and study monster weaknesses for tactical combat bonuses.
 
 ### 10. World Pulse Regional Crises & Living Factions (`/factions`)
 * **What it looks like**: A live dashboard displaying ongoing faction skirmishes, resource shortages, and seasonal events.

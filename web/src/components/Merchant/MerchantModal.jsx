@@ -12,11 +12,11 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
   const [busyKey, setBusyKey] = useState(null);
   const [feedback, setFeedback] = useState(null);
 
-  const loadShop = useCallback(async (overrideType = null) => {
+  const loadShop = useCallback(async (overrideType = undefined) => {
     if (!session?.id || !user?.user_id) return;
     setLoading(true);
     try {
-      const mType = overrideType || selectedStoreType;
+      const mType = overrideType !== undefined ? overrideType : selectedStoreType;
       const query = mType
         ? `/api/merchant/${session.id}?user_id=${user.user_id}&merchant_type=${encodeURIComponent(mType)}`
         : `/api/merchant/${session.id}?user_id=${user.user_id}`;
@@ -33,11 +33,17 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
   }, [session?.id, user?.user_id, selectedStoreType]);
 
   useEffect(() => {
+    setSelectedStoreType(null);
+    setShop(null);
+  }, [session?.current_location]);
+
+  useEffect(() => {
     if (isOpen) {
       setFeedback(null);
-      loadShop();
+      setSelectedStoreType(null);
+      loadShop('');
     }
-  }, [isOpen]);
+  }, [isOpen, session?.current_location]);
 
   if (!isOpen) return null;
 
