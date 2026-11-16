@@ -180,6 +180,23 @@ def is_erotic_intimate_contact(intimate_contact: str) -> bool:
     return any(kw in ic_low for kw in EROTIC_CONTACT_KEYWORDS)
 
 
+def is_session_in_erotic_dialogue(session: Any) -> bool:
+    """Returns True when a session is flagged or physically in an active erotic scene."""
+    if not isinstance(session, dict):
+        return False
+    if session.get("_in_active_erotic_dlg"):
+        return True
+    phys = session.get("physical_state")
+    if isinstance(phys, str):
+        try:
+            phys = json.loads(phys)
+        except Exception:
+            phys = {}
+    if not isinstance(phys, dict):
+        return False
+    return is_erotic_intimate_contact(str(phys.get("intimate_contact") or ""))
+
+
 
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Globe, Sparkles, Compass, Clock, MapPin, CheckCircle2, Radio } from 'lucide-react';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';

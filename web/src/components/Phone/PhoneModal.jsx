@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   X, Camera, Video, MessageSquare, Rss, Wifi,
   MapPin, Calendar, Sparkles, ChevronLeft, Send, User, Image as ImageIcon, Heart, ShoppingBag,
-  Search, RefreshCw, UserPlus, Users, ShieldAlert, GripHorizontal, Home, Key
+  Search, RefreshCw, UserPlus, Users, ShieldAlert, Home, Key
 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';

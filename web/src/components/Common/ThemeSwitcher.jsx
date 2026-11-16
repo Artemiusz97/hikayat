@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import AnchoredPopover from './AnchoredPopover';
 import { Palette, Check, Wand2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';

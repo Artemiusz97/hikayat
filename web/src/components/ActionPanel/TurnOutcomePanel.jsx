@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ScrollText, ChevronDown, ChevronUp, Heart, Zap, Coins, Gift, ShieldAlert, Sparkles } from 'lucide-react';
+import { ScrollText, ChevronDown, ChevronUp, Heart, Zap, Coins, Gift, ShieldAlert } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { extractTurnOutcomes, formatSocialFeedbackPill } from '../Sidebar/WorldOutcomeSidebar';
 import { parseAndTranslateStatus } from '../Sidebar/CharacterSheet';

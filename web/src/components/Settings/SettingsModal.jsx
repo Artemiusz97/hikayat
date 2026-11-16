@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Zap, BookOpen, Sliders, Check, ShieldAlert, Image as ImageIcon, Activity, RefreshCw, Terminal, HeartPulse, Skull, Globe, Monitor, Sparkles } from 'lucide-react';
 import { apiCall } from '../../api/client';

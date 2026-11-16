@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Menu, LogOut, User, Package, Users, Compass, BookOpen, X, Smartphone, Sliders, Bookmark, Map, ArrowLeft, FlagOff, ScrollText, Share2, Check, MoreVertical, Clock, Flame } from 'lucide-react';
 import { apiCall } from '../api/client';
 import CharacterSheet from '../components/Sidebar/CharacterSheet';

@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useGameSession } from './hooks/useGameSession';
 import AuthView from './views/AuthView';

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Gift, User, Package, X, Check, Loader2 } from 'lucide-react';
 

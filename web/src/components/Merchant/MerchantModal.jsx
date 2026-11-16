@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, ShoppingBag, Coins, Sparkles, Tag, MessageCircle, Package, Handshake, Ear, CheckCircle2 } from 'lucide-react';
+import { X, ShoppingBag, Coins, Tag, MessageCircle, Package, Handshake, Ear, CheckCircle2 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 
 const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, onRefreshCodex }) => {

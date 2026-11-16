@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, Heart, Zap, User, Coins, Sparkles, Plus, AlertCircle, BookOpen, X } from 'lucide-react';
+import { Shield, Heart, Zap, Coins, Sparkles, Plus, AlertCircle, BookOpen, X } from 'lucide-react';
 import { apiCall } from '../../api/client';
 
 const StatBar = ({ label, current, max, color, icon: Icon, extraText }) => {

@@ -1100,6 +1100,40 @@ def _format_epistemic_watch_text(session: dict) -> str:
     return "\n".join(lines)[:1024]
 
 
+def _append_dialogue_mood_field(
+    dash_embed: discord.Embed,
+    session: dict,
+    dialogue_partners: list,
+    enemies: list,
+    c_day: int | str,
+    c_min: int | str,
+) -> None:
+    """Appends qualitative Dialogue Mood when conversing outside combat and erotic scenes."""
+    from mechanics.social.physical_state import is_session_in_erotic_dialogue
+
+    mood_info = session.get("active_dialogue_mood")
+    if not mood_info and dialogue_partners and session.get("id") and not enemies and not is_session_in_erotic_dialogue(session):
+        try:
+            from mechanics.social import locales as _emb_loc
+            from mechanics.social import pacing as _emb_pac
+            _dp0 = str(dialogue_partners[0]).strip()
+            if _dp0:
+                _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
+                _mk, _ = _emb_pac.derive_mood_and_dc_mod(
+                    int(_comp_e.get("current_composure", 100)),
+                    int(_comp_e.get("max_composure", 100)),
+                    str(_comp_e.get("composure_state") or "composed"),
+                    clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
+                )
+                mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
+        except Exception:
+            mood_info = None
+    if isinstance(mood_info, dict) and mood_info.get("mood_label"):
+        _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
+        _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
+        _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
@@ -1149,27 +1183,7 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
-        mood_info = session.get("active_dialogue_mood")
-        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
-            try:
-                from mechanics.social import locales as _emb_loc
-                from mechanics.social import pacing as _emb_pac
-                _dp0 = str(dialogue_partners[0]).strip()
-                if _dp0:
-                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
-                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
-                        int(_comp_e.get("current_composure", 100)),
-                        int(_comp_e.get("max_composure", 100)),
-                        str(_comp_e.get("composure_state") or "composed"),
-                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
-                    )
-                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
-            except Exception:
-                mood_info = None
-        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
-            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
-            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
-            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+        _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
@@ -1239,27 +1253,7 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
-        mood_info = session.get("active_dialogue_mood")
-        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
-            try:
-                from mechanics.social import locales as _emb_loc
-                from mechanics.social import pacing as _emb_pac
-                _dp0 = str(dialogue_partners[0]).strip()
-                if _dp0:
-                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
-                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
-                        int(_comp_e.get("current_composure", 100)),
-                        int(_comp_e.get("max_composure", 100)),
-                        str(_comp_e.get("composure_state") or "composed"),
-                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
-                    )
-                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
-            except Exception:
-                mood_info = None
-        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
-            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
-            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
-            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+        _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),

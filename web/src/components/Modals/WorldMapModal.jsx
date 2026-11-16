@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Map, Compass, MapPin, Navigation, Sparkles, X, RefreshCw, ArrowRight, Target } from 'lucide-react';
 import { apiCall } from '../../api/client';

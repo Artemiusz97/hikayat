@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo, useId } from 'react';
-import { X, Sparkles, Shield, Sword, RotateCcw, Wand2, Compass, Tag, RefreshCw, Globe, Shirt, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone } from 'lucide-react';
+import { useState, useEffect, useMemo, useId } from 'react';
+import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../../api/client';
 

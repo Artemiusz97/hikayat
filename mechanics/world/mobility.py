@@ -1135,42 +1135,6 @@ THIRD_PLACE_KEYWORDS = {
     "lounge", "bar", "pub", "tavern", "commercial", "strip", "bookstore"
 }
 
-MEETUP_INTENT_KEYWORDS = (
-    "meet", "meetup", "date", "hangout", "hang out", "catch up",
-    "rendezvous", "coffee", "lunch", "dinner", "walk together",
-    "walk home", "walk back", "study together", "go together",
-    "accompany", "come with", "join me", "tag along", "head out together"
-)
-
-def _extract_history_text(h: Any) -> str:
-    """Extract narrative and dialogue text from a history entry, ignoring system metadata keys."""
-    if isinstance(h, dict):
-        parts = [
-            h.get("narrative") or "",
-            h.get("outcome_narrative") or "",
-            h.get("next_narrative") or "",
-            h.get("action") or "",
-            h.get("player_action") or "",
-            h.get("label") or "",
-            h.get("content") or "",
-        ]
-        return " ".join(str(p) for p in parts if p)
-    elif isinstance(h, str):
-        return h
-    return ""
-
-
-def _has_meetup_intent_keyword(text: str) -> bool:
-    """Check if text contains any meetup intent keyword using whole-word boundaries."""
-    if not text:
-        return False
-    t_low = text.lower()
-    for kw in MEETUP_INTENT_KEYWORDS:
-        pattern = r"\b" + re.escape(kw) + r"\b"
-        if re.search(pattern, t_low):
-            return True
-    return False
-
 SOLO_TRAVEL_PHRASES = (
     "go alone", "going alone", "travel alone", "head alone", "walk alone", "leave alone",
     "by myself", "on my own", "without you", "without her", "without him",

@@ -1,9 +1,5 @@
-import React from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Eye, EyeOff, Sparkles, Gift, Package, Clock, Smartphone,
-  Search, ShieldAlert, Target, Zap, Loader2, ArrowRight, Flame
-} from 'lucide-react';
+import { Smartphone, Flame } from 'lucide-react';
 import { isAnomalousScenarioKey } from '../../utils/session';
 
 const TacticalActionDock = ({

@@ -784,12 +784,8 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
     # Active Dialogue Mood Enrichment (qualitative only; paused during combat or erotic scenes)
     session["active_dialogue_mood"] = None
     try:
-        from mechanics.social.physical_state import is_erotic_intimate_contact as _adv_is_erotic
-        _adv_phys = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else {}
-        _adv_erotic = bool(
-            session.get("_in_active_erotic_dlg")
-            or _adv_is_erotic(str((_adv_phys or {}).get("intimate_contact") or ""))
-        )
+        from mechanics.social.physical_state import is_session_in_erotic_dialogue as _adv_is_erotic
+        _adv_erotic = _adv_is_erotic(session)
         if not in_combat and not _adv_erotic and session.get("id"):
             from mechanics.social import locales as _soc_locales
             from mechanics.social import pacing as _soc_pacing

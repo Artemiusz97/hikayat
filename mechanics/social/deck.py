@@ -20,6 +20,7 @@ from typing import Any
 import db
 from mechanics.combat.traits.core import is_gift_item
 from mechanics.social import pacing
+from mechanics.social.physical_state import is_session_in_erotic_dialogue
 from mechanics.social.relationships import is_contact_eligible
 from mechanics.world.world_events.social_hooks import (
     is_npc_aware_of_event,
@@ -274,7 +275,7 @@ def deal_social_deck_seeds(
     """Deterministically deals 4-6 contextual social topic seeds for Phase 3 prompt injection & Phase 5 reconciliation."""
     if not isinstance(session, dict) or not partners:
         return []
-    if bool(session.get("_in_active_erotic_dlg")):
+    if is_session_in_erotic_dialogue(session):
         return []
 
     clean_partners = [str(p).strip() for p in partners if str(p).strip()]

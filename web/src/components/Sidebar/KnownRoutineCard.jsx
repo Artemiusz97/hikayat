@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Clock, Lock, MapPin } from 'lucide-react';
 
 const BLOCK_ORDER = [

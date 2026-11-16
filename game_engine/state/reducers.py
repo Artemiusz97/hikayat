@@ -1618,6 +1618,17 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         _wardrobe_session["id"] = session_id
     _wardrobe_session["scenario_key"] = scen_key
     _wardrobe_session["_active_commitments"] = _active_commitments
+    if _wardrobe_session.get("active_incursion") is None and session_id and scenario_data.is_anomalous_incursions_scenario(scen_key):
+        try:
+            from mechanics.world.anomalous_events import get_active_incursion_at_location
+            _wardrobe_session["active_incursion"] = get_active_incursion_at_location(
+                session_id,
+                location_str=new_loc,
+                node_id=_w_new_nid,
+                current_minute=_w_new_min,
+            )
+        except Exception:
+            _wardrobe_session["active_incursion"] = None
 
     if new_loc != old_loc:
         from mechanics.world.mobility import get_session_dialogue_partners

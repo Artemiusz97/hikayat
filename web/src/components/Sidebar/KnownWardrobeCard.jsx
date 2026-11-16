@@ -1,5 +1,3 @@
-import React from 'react';
-
 /**
  * Fog-of-War masked Known Wardrobe dossier card rendered inside ContactsPanel's Persona subtab.
  * Displays co-located "Currently Wearing" pill strictly when present in scene alongside NPC,
