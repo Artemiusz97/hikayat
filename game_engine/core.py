@@ -16,7 +16,7 @@ import logging
 import namegen
 import scenario_data
 
-from config import ENABLE_DYNAMIC_MULTIPASS, LLM_PASS1_TIMEOUT, LLM_PASS2_TIMEOUT
+from config import ENABLE_DYNAMIC_MULTIPASS, LLM_PASS2_TIMEOUT
 from scenario_data import is_nsfw_scenario, uses_nsfw_model
 from character_data import STAT_EFFECTS, STAT_NAMES, inventory_capacity, sanitize_status_effects
 from llm_client import call_llm_json
@@ -70,7 +70,6 @@ from .prompts import *
 from .schemas import *
 from mechanics.narrative.bounty import (
     BOUNTY_BOARD_SCHEMA,
-    BOUNTY_BOARD_SYSTEM_PROMPT,
     generate_bounty_board,
     generate_faction_bounty_board,
 )

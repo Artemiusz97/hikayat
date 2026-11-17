@@ -363,6 +363,10 @@ def resolve_session_location_tokens(session_id: int = 0, template: str = "", sce
     if "{session_agency_hq}" in res:
         res = res.replace("{session_agency_hq}", get_session_agency_hq_name(session_id, scenario_key))
 
+    if "{session_city}" in res:
+        from .seeds import get_session_city_name
+        res = res.replace("{session_city}", get_session_city_name(session_id, scenario_key))
+
     if "{session_agency}" in res:
         res = res.replace("{session_agency}", get_session_agency_name(session_id, scenario_key))
 

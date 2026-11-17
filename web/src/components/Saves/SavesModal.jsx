@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Save, RotateCcw, Trash2, MapPin, Clock, Bookmark } from 'lucide-react';
 import { apiCall } from '../../api/client';

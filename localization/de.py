@@ -129,7 +129,8 @@ DIALOGUE_INIT_PREFIXES = (
 )
 
 MOVEMENT_PREFIXES = (
-    "gehe zu ", "gehe nach ", "reise nach ", "betrete ", "begib dich zu ", "zurückkehren nach "
+    "gehe zu ", "gehe nach ", "gehe durch ", "schreite durch ", "reise nach ", "reise zu ",
+    "betrete ", "begib dich zu ", "begib dich nach ", "steige hinab in ", "zurückkehren nach "
 )
 
 
@@ -201,6 +202,11 @@ QUEST_UI_LABELS = {
     "source_cold": "Kalt",
     "source_claimed": "Gesichert",
     "source_bonus": "Bonus-Spur",
+    "stage_short": "Phase",
+    "aid_active": "Hilfe Aktiv",
+    "shortcut_active": "Abkürzung Aktiv",
+    "bypassed": "Umgegangen",
+    "quest_travel_to": "Begib dich zu {dest}",
 }
 
 PACT_UI_LABELS = {

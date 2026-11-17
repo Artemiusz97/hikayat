@@ -132,7 +132,7 @@ DIALOGUE_INIT_PREFIXES = (
 
 MOVEMENT_PREFIXES = (
     "pergi ke ", "menuju ke ", "berjalan ke ", "masuk ke ", "melangkah ke ",
-    "lawati ", "kembali ke "
+    "turun ke ", "melintas ke ", "lawati ", "kembali ke "
 )
 
 
@@ -204,6 +204,11 @@ QUEST_UI_LABELS = {
     "source_cold": "Terputus",
     "source_claimed": "Diperoleh",
     "source_bonus": "Petunjuk Bonus",
+    "stage_short": "Tahap",
+    "aid_active": "Bantuan Aktif",
+    "shortcut_active": "Pintasan Aktif",
+    "bypassed": "Dipintas",
+    "quest_travel_to": "Pergi ke {dest}",
 }
 
 PACT_UI_LABELS = {

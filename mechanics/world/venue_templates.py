@@ -7,7 +7,8 @@ All runtime orchestration and persistence live in `mechanics/world/venue_seeder.
 from __future__ import annotations
 
 import json
-from typing import Any
+import re
+from typing import Any, Mapping
 
 
 NON_STAFFABLE_EXACT_IDS: frozenset[str] = frozenset({"zone_residential_abstract"})
@@ -28,7 +29,8 @@ WILDERNESS_DUNGEON_KEYWORDS: tuple[str, ...] = (
 UNSTAFFED_SUBAREA_KEYWORDS: tuple[str, ...] = (
     "alley", "alleyway", "rooftop", "bathroom", "restroom", "locker room",
     "stairwell", "basement", "storage closet", "vacant lot", "park bench",
-    "hallway", "corridor",
+    "hallway", "corridor", "bedroom", "loft", "dormitory", "dormitories",
+    "rest quarters", "sub-cellar", "evidence vault", "quarantine", "containment",
 )
 
 HOSPITALITY_OUTPOST_OVERRIDE_KEYWORDS: tuple[str, ...] = (
@@ -43,6 +45,9 @@ STAFFED_VENUE_OVERRIDE_KEYWORDS: tuple[str, ...] = (
     "inn", "bar", "pub", "club", "shrine", "temple", "office", "station",
     "blacksmith", "smithy", "forge", "apothecary", "restaurant", "diner",
     "konbini", "convenience", "cafeteria",
+    "armory", "ordnance", "requisition", "quartermaster", "outfitter",
+    "tailoring", "cleansing bay", "dispensary", "canteen", "espresso",
+    "taproom", "boutique",
 )
 
 KIOSK_BYPASS_KEYWORDS: tuple[str, ...] = (
@@ -70,6 +75,9 @@ ROAMER_EXCLUDE_KEYWORDS: tuple[str, ...] = (
     "restroom", "dungeon", "lair", "crypt", "clinic", "hospital", "infirmary",
     "library", "blacksmith", "smithy", "apothecary", "tailor", "general store",
     "potion shop", "magic shop", "weapon shop", "armor shop",
+    "hq", "headquarters", "bureau", "precinct", "watchpost", "guardhouse",
+    "lobby", "atrium", "vault", "containment", "quarantine", "sub-cellar",
+    "school", "academy", "campus",
 )
 
 FESTIVAL_EVENT_SUBTYPES: frozenset[str] = frozenset({
@@ -141,6 +149,15 @@ VENUE_ROLE_TEMPLATES: dict[str, tuple[dict[str, Any], ...]] = {
         _staff_spec("Guildmaster", "Guildmaster", "day", ("weapon_merchant", "general_merchant")),
         _staff_spec("Receptionist", "Receptionist", "day", ()),
         _staff_spec("Quartermaster", "Quartermaster", "evening", ("armor_merchant", "general_merchant")),
+    ),
+    "civic_hq": (
+        _staff_spec("Operations Supervisor", "Duty Officer", "day", ()),
+        _staff_spec("Front Desk Receptionist", "Receptionist", "day", ()),
+        _staff_spec("Evening Duty Officer", "Duty Officer", "evening", ()),
+    ),
+    "tactical_outfitter": (
+        _staff_spec("Field Outfitter", "Quartermaster", "day", ("armor_merchant", "clothes_merchant")),
+        _staff_spec("Evening Outfitter", "Quartermaster", "evening", ("armor_merchant", "clothes_merchant")),
     ),
     "tavern_inn": (
         _staff_spec("Innkeeper", "Innkeeper", "day", ("food_merchant", "general_merchant")),
@@ -454,15 +471,25 @@ def is_node_staffable(node: dict[str, Any] | None, scen_key: str = "fantasy") ->
         THEME_PARK_EPICENTER_IDS,
         resolve_anomalous_site,
     )
-    if node_id not in SAFE_EXCLUSION_SITE_IDS and node_id not in AHS_PROTECTED_SUB_IDS and not state_json.get("is_minor_club_hq"):
-        if node_id in THEME_PARK_EPICENTER_IDS:
+    parent_id = str(node.get("parent_id") or "").strip().lower()
+    if not state_json.get("is_minor_club_hq"):
+        if (
+            node_id in AHS_PROTECTED_SUB_IDS
+            or parent_id == "loc_abandoned_school_wing"
+            or any(
+                tok in name
+                for tok in ("boarded old infirmary", "old infirmary", "derelict old gymnasium", "overgrown hallway")
+            )
+        ):
             return False
-        if bool(state_json.get("is_anomalous")):
-            return False
-        parent_id = str(node.get("parent_id") or "").strip().lower()
-        spec = resolve_anomalous_site(node_id=node_id, parent_id=parent_id, location_str=name, curr_node=node)
-        if spec is not None and spec.get("site_type") != "theme_park_night":
-            return False
+        if node_id not in SAFE_EXCLUSION_SITE_IDS:
+            if node_id in THEME_PARK_EPICENTER_IDS:
+                return False
+            if bool(state_json.get("is_anomalous")):
+                return False
+            spec = resolve_anomalous_site(node_id=node_id, parent_id=parent_id, location_str=name, curr_node=node)
+            if spec is not None and spec.get("site_type") != "theme_park_night":
+                return False
 
     has_hospitality = any(kw in name for kw in HOSPITALITY_OUTPOST_OVERRIDE_KEYWORDS)
     has_staffed_kw = any(kw in name for kw in STAFFED_VENUE_OVERRIDE_KEYWORDS)
@@ -517,28 +544,36 @@ def select_venue_template(
         template_key = "convenience_konbini"
     elif any(k in low for k in ("ranger station", "trading post", "outpost", "caravan camp")):
         template_key = "ranger_outpost"
-    elif any(k in low for k in ("blacksmith", "smithy", "forge", "armory", "gunsmith", "weaponsmith", "weapon shop", "cyberware")):
+    elif any(k in low for k in ("blacksmith", "smithy", "forge", "armory", "ordnance", "gunsmith", "weaponsmith", "weapon shop", "cyberware")):
         template_key = "smithy_armory"
+    elif any(k in low for k in ("outfitter", "tactical rigging", "fitted armor")):
+        template_key = "tactical_outfitter"
     elif any(k in low for k in ("apothecary", "alchemist", "potion shop", "herb shop", "alchemy")):
         template_key = "apothecary_alchemy"
     elif any(k in low for k in ("magic shop", "arcane", "enchant", "spellbook", "curio shop", "relic shop", "occult shop")):
         template_key = "magic_arcane"
     elif any(k in low for k in ("shrine", "temple", "sanctuary", "chapel", "cathedral")):
         template_key = "shrine_temple"
-    elif any(k in low for k in ("clinic", "hospital", "infirmary", "pharmacy", "medbay", "nurse")):
+    elif (
+        any(k in low for k in ("clinic", "hospital", "infirmary", "pharmacy", "medbay", "nurse", "cleansing bay", "psychic detox", "neural recovery", "dispensary", "medical"))
+        and not any(d in low for d in ("boarded", "old infirmary", "derelict", "abandoned"))
+    ):
         template_key = "clinic_hospital"
     elif any(k in low for k in ("library", "archive", "bookshop", "bookstore", "scriptorium")):
         template_key = "library_archive"
-    elif any(k in low for k in ("guild", "watchpost", "guardhouse", "precinct", "town hall", "council", "bureau", "headquarters", "hq")):
-        template_key = "guild_civic"
-    elif any(k in low for k in ("tavern", "inn", "pub", "alehouse", "nightclub", "lounge", "roadhouse")) or " bar" in f" {low}":
-        template_key = "tavern_inn"
-    elif any(k in low for k in ("cafe", "café", "coffee", "bakery", "bistro", "diner", "restaurant", "ramen", "tea house", "cafeteria", "canteen")):
+    elif any(k in low for k in ("cafe", "café", "coffee", "bakery", "bistro", "diner", "restaurant", "ramen", "tea house", "cafeteria", "canteen", "espresso", "pour-over", "roastery", "kitchenette")):
         template_key = "cafe_restaurant"
+    elif any(k in low for k in ("tavern", "inn", "pub", "alehouse", "nightclub", "lounge", "roadhouse", "taproom")) or " bar" in f" {low}":
+        template_key = "tavern_inn"
     elif any(k in low for k in ("tailor", "clothing", "clothes", "boutique", "fashion", "apparel", "accessories", "gift shop")):
         template_key = "clothing_boutique"
     elif any(k in low for k in ("campus store", "school store", "student shop", "co-op", "academy", "school", "campus")) or cat == "academic":
         template_key = "school_campus"
+    elif any(k in low for k in ("watchpost", "guardhouse", "precinct", "town hall", "council", "bureau", "headquarters")) or bool(re.search(r"\bhq\b", low)):
+        template_key = "civic_hq"
+    elif "guild" in low:
+        import scenario_data as _sc_data
+        template_key = "civic_hq" if _sc_data.is_anomalous_incursions_scenario(sk) else "guild_civic"
     elif "market" in low or "arcade" in low:
         template_key = "bazaar_hub_school" if sk in ("high_school_drama", "slice_of_life") else "bazaar_hub"
 
@@ -558,6 +593,34 @@ def select_venue_template(
             entry["is_24h_station"] = True
         resolved.append(entry)
     return template_key, resolved
+
+
+MULTI_WING_HUB_NODE_IDS: frozenset[str] = frozenset({
+    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+    "loc_general_hospital", "loc_theme_park", "loc_eastern_temple",
+    "loc_botanical_zoo", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+    "fac_agency_residence", "fac_temple_residence",
+    "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
+})
+
+
+def is_civic_or_multi_wing_hub_node(
+    node: Mapping[str, Any] | None,
+    scen_key: str = "fantasy",
+) -> bool:
+    """Return True if a world node is a multi-wing complex or civic HQ whose rooms must never inherit parent shop counters."""
+    if not isinstance(node, Mapping):
+        return False
+    nid = str(node.get("node_id") or "").strip().lower()
+    if nid in MULTI_WING_HUB_NODE_IDS or nid.startswith("bld_school_"):
+        return True
+    ntype = str(node.get("node_type") or "").strip().upper()
+    if ntype != "FACILITY":
+        return False
+    name = str(node.get("name") or "").strip()
+    cat = str(node.get("category") or "").strip()
+    tpl_key, _ = select_venue_template(name, category=cat, scen_key=scen_key, node=dict(node))
+    return tpl_key == "civic_hq"
 
 
 def resolve_slot_fill_role_spec(

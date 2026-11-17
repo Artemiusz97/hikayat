@@ -279,12 +279,8 @@ def _enrich_quest_dict(
     quest_id = d.get("quest_id")
     all_wps: list[dict] = []
     if session_id and quest_id:
-        if preloaded_wps is not None:
-            all_wps = [
-                _hydrate_quest_waypoint_for_enrichment(session_id, wr, resolve_schedule=resolve_schedule)
-                for wr in preloaded_wps
-            ]
-        else:
+        wp_rows = preloaded_wps
+        if wp_rows is None:
             try:
                 with get_conn() as conn:
                     wp_rows = conn.execute(
@@ -293,12 +289,36 @@ def _enrich_quest_dict(
                            ORDER BY COALESCE(sub_obj_id, 0) ASC, stage_index ASC""",
                         (session_id, quest_id)
                     ).fetchall()
-                    all_wps = [
-                        _hydrate_quest_waypoint_for_enrichment(session_id, wr, resolve_schedule=resolve_schedule)
-                        for wr in wp_rows
-                    ]
             except Exception:
-                all_wps = []
+                wp_rows = []
+        raw_wp_dicts = [dict(wr) for wr in (wp_rows or [])]
+        sched_sess = None
+        sched_time = None
+        sched_contacts = None
+        if resolve_schedule and any(w.get("follow_npc_schedule") and w.get("target_npc") for w in raw_wp_dicts):
+            try:
+                from .sessions import get_session, get_session_time
+                from .social import get_contacts
+                sched_sess = get_session(session_id)
+                sched_time = get_session_time(session_id)
+                sched_contacts = {
+                    str(c.get("name") or "").strip().lower(): c
+                    for c in (get_contacts(session_id) or [])
+                    if isinstance(c, dict) and c.get("name")
+                }
+            except Exception:
+                pass
+        all_wps = [
+            _hydrate_quest_waypoint_for_enrichment(
+                session_id,
+                wr,
+                session=sched_sess,
+                session_time=sched_time,
+                contacts_cache=sched_contacts,
+                resolve_schedule=resolve_schedule,
+            )
+            for wr in raw_wp_dicts
+        ]
 
         if dossier_preloaded:
             d["dossier"] = preloaded_dossier
@@ -698,6 +718,14 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
     quest = get_quest_by_id(session_id, quest_id)
     if not quest or quest.get("reward_claimed"):
         return {"already_claimed": True}
+
+    with get_conn() as conn:
+        claim_cur = conn.execute(
+            "UPDATE quests SET reward_claimed=1, status='Completed', updated_at=? WHERE session_id=? AND quest_id=? AND COALESCE(reward_claimed, 0) = 0",
+            (time.time(), session_id, quest_id),
+        )
+        if claim_cur.rowcount == 0:
+            return {"already_claimed": True}
 
     try:
         from game_engine.quests import consume_quest_delivery_item_if_needed
@@ -1124,12 +1152,22 @@ def apply_caseboard_breakthrough_to_quests(
     }
 
     active_quests = get_session_quests(session_id, status="Active") or []
+    wps_by_key: dict[tuple[str, Any], list[dict]] = {}
+    with get_conn() as conn:
+        wp_all_rows = conn.execute(
+            "SELECT * FROM quest_waypoints WHERE session_id=? ORDER BY stage_index ASC",
+            (session_id,),
+        ).fetchall()
+        for wr in wp_all_rows:
+            wd = dict(wr)
+            wps_by_key.setdefault((str(wd.get("quest_id") or ""), wd.get("sub_obj_id")), []).append(wd)
+
     for q in active_quests:
         qid = q.get("quest_id", "")
         if not qid:
             continue
-        all_wps = get_quest_waypoints(session_id, qid, None) or []
-        active_wp = get_active_waypoint(session_id, qid, None)
+        all_wps = wps_by_key.get((qid, None), [])
+        active_wp = next((w for w in all_wps if w.get("status") == "active"), None)
 
         is_match = False
         if qid in parent_qids:
@@ -1162,8 +1200,8 @@ def apply_caseboard_breakthrough_to_quests(
                     so_id = so.get("id")
                     if so_id is None:
                         continue
-                    so_wp = get_active_waypoint(session_id, qid, so_id)
-                    so_all_wps = get_quest_waypoints(session_id, qid, so_id) or []
+                    so_all_wps = wps_by_key.get((qid, so_id), [])
+                    so_wp = next((w for w in so_all_wps if w.get("status") == "active"), None)
                     if so_wp and int(so_wp.get("stage_index", 1)) == 1 and len(so_all_wps) >= 2:
                         advance_waypoint(session_id, qid, 1, so_id)
                         if qid not in advanced_qids:
@@ -1549,9 +1587,25 @@ def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool 
                ORDER BY qw.quest_id, qw.sub_obj_id, qw.stage_index""",
             (session_id,)
         ).fetchall()
+        row_dicts = [dict(r) for r in rows]
+        sched_sess = None
+        sched_time = None
+        sched_contacts = None
+        if resolve_schedule and any(rd.get("follow_npc_schedule") and rd.get("target_npc") for rd in row_dicts):
+            try:
+                from .sessions import get_session, get_session_time
+                from .social import get_contacts
+                sched_sess = get_session(session_id)
+                sched_time = get_session_time(session_id)
+                sched_contacts = {
+                    str(c.get("name") or "").strip().lower(): c
+                    for c in (get_contacts(session_id) or [])
+                    if isinstance(c, dict) and c.get("name")
+                }
+            except Exception:
+                pass
         result = []
-        for r in rows:
-            d = dict(r)
+        for d in row_dicts:
             try:
                 vp_raw = d.get("valid_time_phases_json") or "[]"
                 d["valid_time_phases"] = json.loads(vp_raw) if isinstance(vp_raw, str) else (vp_raw or [])
@@ -1568,7 +1622,13 @@ def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool 
             if resolve_schedule and d.get("follow_npc_schedule") and d.get("target_npc"):
                 try:
                     from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
-                    eff_loc = resolve_effective_waypoint_location(session_id, d)
+                    eff_loc = resolve_effective_waypoint_location(
+                        session_id,
+                        d,
+                        session=sched_sess,
+                        session_time=sched_time,
+                        contacts_cache=sched_contacts,
+                    )
                     if eff_loc:
                         d["live_scheduled_location"] = _normalize_loc_arrow(eff_loc)
                         d["target_location"] = _normalize_loc_arrow(eff_loc)
@@ -1777,9 +1837,9 @@ def sync_quest_projection_from_dossier(
             (session_id, quest_id, len(main_stages)),
         )
 
-        all_main_stages_done = bool(resolved_main_stages) and all(s["status"] == "completed" for s in resolved_main_stages)
+        all_main_stages_done = bool(resolved_main_stages) and all(s["status"] in ("completed", "bypassed") for s in resolved_main_stages)
         main_done_final = bool(climax_done or all_main_stages_done)
-        cur_main_stage = next((s for s in resolved_main_stages if s["status"] != "completed"), resolved_main_stages[-1])
+        cur_main_stage = next((s for s in resolved_main_stages if s["status"] not in ("completed", "bypassed")), resolved_main_stages[-1])
 
         projected_sos: list[dict] = [
             {
@@ -1799,7 +1859,7 @@ def sync_quest_projection_from_dossier(
         # 2. Materialize Optional Objectives (`sub_obj_id = 1..3`, 1 stage each)
         valid_opt_ids: list[int] = []
         for idx_opt, ld in enumerate(leads_graph, start=1):
-            opt_sub_id = int(ld.get("sub_obj_id") or idx_opt)
+            opt_sub_id = int(ld["sub_obj_id"]) if ld.get("sub_obj_id") is not None else idx_opt
             valid_opt_ids.append(opt_sub_id)
             opt_role = str(ld.get("role") or "aid").lower()
             is_disc = bool(ld.get("is_discovered", True))

@@ -73,6 +73,40 @@ def is_adult_operative(session_or_id: Mapping[str, Any] | int | None) -> bool:
     return get_session_origin_mode(session_or_id) == ORIGIN_ADULT
 
 
+def resolve_authoritative_origin_session(
+    session_or_id: Mapping[str, Any] | int | None,
+    session_id: int = 0,
+    scen_key: str = "",
+) -> dict[str, Any]:
+    """Resolve session dict for origin checks, falling back to `db.get_session()` when `origin_mode` is absent."""
+    if isinstance(session_or_id, Mapping) and "origin_mode" in session_or_id:
+        merged = dict(session_or_id)
+        if scen_key and not merged.get("scenario"):
+            merged["scenario"] = scen_key
+        return merged
+    sid = int(session_id or (session_or_id.get("id") if isinstance(session_or_id, Mapping) else 0) or 0)
+    db_sess = _as_session(sid) if sid else {}
+    merged = {**db_sess, **dict(session_or_id)} if isinstance(session_or_id, Mapping) else dict(db_sess)
+    if scen_key and not merged.get("scenario"):
+        merged["scenario"] = scen_key
+    return merged
+
+
+def is_adult_ahs_operative_fail_closed(
+    session_or_id: Mapping[str, Any] | int | None,
+    session_id: int = 0,
+    scen_key: str = "",
+) -> bool:
+    """Return True ONLY when an authoritative Anomalous High session explicitly records `adult` origin."""
+    sess = resolve_authoritative_origin_session(session_or_id, session_id=session_id, scen_key=scen_key)
+    if not scenario_data.is_anomalous_high_school_scenario(str(sess.get("scenario") or "")):
+        return False
+    raw_mode = str(sess.get("origin_mode") or "").strip().lower()
+    if not raw_mode:
+        return False
+    return normalize_origin_mode(raw_mode) == ORIGIN_ADULT
+
+
 def get_session_student_grade(session_or_id: Mapping[str, Any] | int | None) -> str:
     """Returns the student PC's grade, or '' when the PC is not a student operative."""
     sess = _as_session(session_or_id)

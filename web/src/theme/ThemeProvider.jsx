@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { THEMES, DEFAULT_THEME, resolveScenarioTheme } from './themes';
 
 const STORAGE_KEY = 'hikayat_theme_mode';

@@ -108,11 +108,3 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
         log.error(f"Failed to run Tier 3 Saga Compaction: {exc}")
     finally:
         _active_compactions.discard(session_id)
-
-
-def schedule_tier3_compaction_if_needed(session_id: int):
-    """Run deterministic compaction synchronously when Tier 2 digest reaches threshold."""
-    import db as _db
-    bullets = _db.get_chapter_digest(session_id)
-    if len(bullets) >= 24:
-        _db.run_deterministic_tier3_compaction(session_id)

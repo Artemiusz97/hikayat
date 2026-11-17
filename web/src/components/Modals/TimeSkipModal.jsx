@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Clock, Moon, Sun, AlertTriangle, FastForward, Check, X, ShieldAlert, Sparkles, Users } from 'lucide-react';
+import { Clock, AlertTriangle, FastForward, X, Users } from 'lucide-react';
 
 const formatClockTime = (totalMinutes) => {
   const normalized = ((totalMinutes % 1440) + 1440) % 1440;

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Users, Heart, Zap, UserCheck, Shield, Sparkles, UserMinus, MessageSquare, Send, Share2, Check } from 'lucide-react';
 import { apiCall } from '../../api/client';

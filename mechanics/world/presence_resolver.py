@@ -18,6 +18,7 @@ from typing import Any, Mapping
 import db
 from mechanics.social.activity_tags import resolve_actor_activity_bundle
 from mechanics.world.anchor_schedule import resolve_anchor_schedule_nodes
+from mechanics.world.locations import location_has_merchant_shop
 from mechanics.world.locations.residence_fog import (
     SHARED_ABSTRACT_RESIDENCE_NODE,
     can_materialize_npc_residence,
@@ -50,6 +51,11 @@ from mechanics.world.presence_preload import (
     preload_presence_context,
 )
 from mechanics.world.venue_seeder import format_venue_crowd_flavor
+from mechanics.world.venue_templates import (
+    ROAMER_EXCLUDE_KEYWORDS,
+    is_civic_or_multi_wing_hub_node,
+    parse_node_state,
+)
 from mechanics.world.waypoints.matching import (
     get_waypoint_npc_schedule_info,
     is_hostile_or_lair_waypoint,
@@ -587,6 +593,28 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
     display_loc = format_node_display_label(ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id)
     day_kind = "weekend" if is_weekend(ctx.safe_day) else "weekday"
     protected_aliases = ctx.tier2_aliases | ctx.tier3_crisis_aliases
+    target_is_room = isinstance(ctx.target_node, Mapping) and str(ctx.target_node.get("node_type") or "").strip().upper() == "ROOM"
+    node_name_low = str((ctx.target_node or {}).get("name") or "").strip().lower()
+    eff_loc_low = str(ctx.eff_loc or display_loc or "").strip().lower()
+    allow_roamers_here = not (
+        target_is_room
+        or is_civic_or_multi_wing_hub_node(ctx.target_node, ctx.scen_key)
+        or any(bad in node_name_low or bad in eff_loc_low for bad in ROAMER_EXCLUDE_KEYWORDS)
+    )
+    room_is_shop = False
+    if target_is_room and isinstance(ctx.target_node, Mapping):
+        t_meta = parse_node_state(ctx.target_node)
+        is_priv_room = bool(t_meta.get("is_player_residence")) or str(ctx.target_node.get("privacy_level") or "").strip().lower() == "private"
+        probe_loc = display_loc or str(ctx.eff_loc or "")
+        if "➔" not in probe_loc and "->" not in probe_loc and ctx.target_node.get("parent_id"):
+            p_n = ctx.nodes_by_id.get(str(ctx.target_node["parent_id"]))
+            if isinstance(p_n, Mapping) and p_n.get("name"):
+                probe_loc = f"Zone ➔ {p_n['name']} ➔ {ctx.target_node.get('name') or ''}"
+        room_is_shop = False if t_meta.get("is_player_residence") else bool(
+            t_meta.get("has_merchant_shop")
+            or t_meta.get("has_shop")
+            or (not is_priv_room and (t_meta.get("is_minor_club_hq") or (probe_loc and location_has_merchant_shop(probe_loc, scen_key=ctx.scen_key))))
+        )
     candidates: list[dict[str, Any]] = []
 
     # Track 5A: Closed-world non-legacy `world_roster`
@@ -596,6 +624,8 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         origin_val = str(r_row.get("origin") or "").strip().lower()
         status_val = str(r_row.get("staff_status") or "active").strip().lower()
         if origin_val == "legacy_adapter" or status_val != "active":
+            continue
+        if origin_val == "roaming_merchant" and not allow_roamers_here:
             continue
         if (aliases & ctx.casualty_keys) or (aliases & ctx.blocked_sleeping_keys) or any(ak in ctx.staged_by_key for ak in aliases):
             continue
@@ -642,11 +672,24 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
             prop_at_node=ctx.prop_at_node,
             resident_home_ids=ctx.resident_home_ids,
         )
+        has_merch_arch = bool((r_row.get("basic_info") or {}).get("merchant_archetypes"))
+        if target_is_room and has_merch_arch and work_nid and work_nid != ctx.eff_node_id:
+            work_node_obj = ctx.nodes_by_id.get(work_nid)
+            if not room_is_shop or (work_node_obj is not None and is_civic_or_multi_wing_hub_node(work_node_obj, ctx.scen_key)):
+                eff_work_match = False
+                if eff_sched_nid == work_nid:
+                    sched_match = False
         if not (eff_work_match or sched_match):
             continue
 
         aff_val = int((c_row or {}).get("relationship_score") or (c_row or {}).get("affinity") or merged_npc.get("affinity") or 0)
         is_dropby = bool(isinstance(ov, Mapping) and ov.get("is_dropby"))
+        is_active_merchant = bool(
+            not ov
+            and on_shift
+            and has_merch_arch
+            and (eff_work_match or (origin_val == "roaming_merchant" and sched_match))
+        )
         extra_meta: dict[str, Any] = {}
         if isinstance(ov, Mapping):
             extra_meta["autonomy_reason"] = str(ov.get("reason") or "")
@@ -657,7 +700,7 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         candidates.append({
             "npc": merged_npc,
             "r_row": r_row,
-            "priority": (0 if is_dropby else 1, -aff_val),
+            "priority": (0 if is_dropby else (1 if is_active_merchant else 2), -aff_val),
             "extra": extra_meta,
             "aliases": aliases,
             "key": str(r_row.get("person_key") or r_row.get("npc_id") or merged_npc.get("name") or "").strip().lower(),

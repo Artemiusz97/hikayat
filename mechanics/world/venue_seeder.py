@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import re
 import sqlite3
 from typing import Any, Mapping
 
@@ -17,7 +18,11 @@ import scenario_data
 from db.roster_adapters import slugify_npc_id
 from mechanics.world.anchor_schedule import is_npc_on_active_shift
 from mechanics.social.relationships import safe_get_contacts
-from mechanics.world.locations import is_school_scenario, location_has_merchant_shop
+from mechanics.world.locations import (
+    get_available_merchant_types_for_location,
+    is_school_scenario,
+    location_has_merchant_shop,
+)
 from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
 from mechanics.world.schedule_blocks import get_time_block_key
 from mechanics.world.venue_templates import (
@@ -26,6 +31,7 @@ from mechanics.world.venue_templates import (
     ROAMER_EXCLUDE_KEYWORDS,
     ROAMER_HUB_KEYWORDS,
     get_crowd_flavor_text,
+    is_civic_or_multi_wing_hub_node,
     is_kiosk_location,
     is_node_staffable,
     parse_node_state,
@@ -240,7 +246,11 @@ def ensure_venue_staff_seeded(
     if not is_node_staffable(node, scen_key=eff_scen):
         return []
 
-    existing = db.get_world_roster(sid, workplace_node_id=nid, include_legacy_rosters=False) or []
+    existing_all = db.get_world_roster(sid, workplace_node_id=nid, include_legacy_rosters=False) or []
+    existing = [
+        r for r in existing_all
+        if str(r.get("origin") or "").strip().lower() in ("venue_seed", "replacement_hire")
+    ]
     if existing:
         return existing
 
@@ -296,6 +306,8 @@ def _select_roamer_candidate_nodes(world_nodes: list[dict[str, Any]]) -> list[st
         state_json = parse_node_state(n)
         if not nid or nid == SHARED_ABSTRACT_RESIDENCE_NODE:
             continue
+        if ntype == "ROOM" or is_civic_or_multi_wing_hub_node(n):
+            continue
         if bool(state_json.get("is_player_residence") or state_json.get("unstaffed")) or any(b in name for b in PRIVATE_RESIDENCE_KEYWORDS):
             continue
         if nid.lower() not in AHS_PROTECTED_SUB_IDS and not state_json.get("is_minor_club_hq"):
@@ -309,7 +321,7 @@ def _select_roamer_candidate_nodes(world_nodes: list[dict[str, Any]]) -> list[st
         has_excl_kw = any(bad in name for bad in ROAMER_EXCLUDE_KEYWORDS)
         if cat == "wilderness" and not any(k in name for k in ("outpost", "crossroads", "caravan", "trading post", "camp")):
             continue
-        if (cat == "residential" or has_excl_kw) and not has_hub_kw:
+        if cat == "residential" or has_excl_kw:
             continue
 
         if has_hub_kw and ntype in ("FACILITY", "ZONE"):
@@ -568,6 +580,98 @@ def _spawn_replacement_hire(
     return db.upsert_world_roster_npc(session_id, payload, turn_number=int(turn_number or 0))
 
 
+def heal_stale_civic_hq_staff(
+    session_id: int,
+    scen_key: str = "fantasy",
+    *,
+    roster: list[dict[str, Any]] | None = None,
+    nodes_by_id: Mapping[str, dict[str, Any]] | None = None,
+    contacts: list[dict[str, Any]] | None = None,
+) -> int:
+    """
+    Strip stale `merchant_archetypes` from `origin="venue_seed"` roster rows anchored on
+    civic or multi-wing HQ parent `FACILITY` nodes while preserving already-met contacts.
+    """
+    sid = int(session_id or 0)
+    if sid <= 0:
+        return 0
+    eff_roster = roster if roster is not None else (db.get_world_roster(sid, include_legacy_rosters=False) or [])
+    candidates = [
+        r for r in eff_roster
+        if isinstance(r, Mapping)
+        and str(r.get("origin") or "").strip().lower() == "venue_seed"
+        and str(r.get("workplace_node_id") or "").strip()
+        and bool((r.get("basic_info") or {}).get("merchant_archetypes"))
+    ]
+    if not candidates:
+        return 0
+
+    eff_nodes = nodes_by_id
+    if eff_nodes is None:
+        eff_nodes = {
+            str(n["node_id"]): n
+            for n in (db.get_session_world_nodes(sid) or [])
+            if isinstance(n, Mapping) and n.get("node_id")
+        }
+
+    hub_candidates: list[dict[str, Any]] = []
+    for cand in candidates:
+        w_nid = str(cand.get("workplace_node_id") or "").strip()
+        w_node = eff_nodes.get(w_nid)
+        if w_node and is_civic_or_multi_wing_hub_node(w_node, scen_key=scen_key):
+            hub_candidates.append(dict(cand))
+    if not hub_candidates:
+        return 0
+
+    eff_contacts = contacts if contacts is not None else (safe_get_contacts(sid, ensure_scene=False) or [])
+    met_keys: set[str] = set()
+    for c in eff_contacts:
+        if not isinstance(c, Mapping):
+            continue
+        for key_field in ("npc_id", "person_key", "name"):
+            val = str(c.get(key_field) or "").strip().lower()
+            if val:
+                met_keys.add(val)
+
+    healed = 0
+    for row in hub_candidates:
+        npc_id = str(row.get("npc_id") or "").strip()
+        if not npc_id:
+            continue
+        npc_name = str(row.get("name") or "").strip().lower()
+        is_met = bool(row.get("met_in_person")) or npc_id.lower() in met_keys or (npc_name and npc_name in met_keys)
+        role_cur = str(row.get("role") or "").strip()
+        if not is_met and role_cur in ("Quartermaster", "Guildmaster"):
+            new_role, new_occ = "Duty Officer", "Duty Officer"
+        else:
+            new_role, new_occ = None, None
+        if db.clear_roster_npc_merchant_archetypes(sid, npc_id, new_role=new_role, new_occupation=new_occ):
+            healed += 1
+    return healed
+
+
+def _build_room_shop_probe_location(session_id: int, node: Mapping[str, Any], eff_loc: str = "") -> str:
+    """Return a >=3-tier location string for strict leaf-room `location_has_merchant_shop` evaluation."""
+    node_name = str(node.get("name") or "").strip()
+    if eff_loc and ("➔" in eff_loc or "->" in eff_loc):
+        parts = [p.strip() for p in re.split(r"➔|->", eff_loc) if p.strip()]
+        if parts and (not node_name or parts[-1].lower() == node_name.lower()):
+            return f"Zone ➔ {' ➔ '.join(parts)}" if len(parts) == 2 else eff_loc
+    nid = str(node.get("node_id") or "").strip()
+    if session_id > 0 and nid:
+        ancestors = db.get_node_ancestors(session_id, nid) or []
+        chain = [str(a.get("name") or "").strip() for a in reversed(ancestors) if a.get("name")]
+        if node_name:
+            chain.append(node_name)
+        if len(chain) >= 3:
+            return " ➔ ".join(chain)
+        if len(chain) == 2:
+            return f"Zone ➔ {chain[0]} ➔ {chain[1]}"
+        if chain:
+            return f"Zone ➔ Hub ➔ {chain[0]}"
+    return f"Zone ➔ Hub ➔ {node_name}" if node_name else eff_loc
+
+
 def _resolve_shop_context(
     session_id: int,
     location_str: str,
@@ -596,15 +700,37 @@ def _resolve_shop_context(
     node = db.get_world_node(session_id, resolved_node_id) if (session_id > 0 and resolved_node_id) else None
     if not resolved_node_id and session_id > 0:
         if eff_loc:
-            resolved_node_id = str(db.resolve_node_id_from_location(session_id, eff_loc, prefer_facility=True) or "").strip()
+            resolved_node_id = str(db.resolve_node_id_from_location(session_id, eff_loc, prefer_facility=False) or "").strip()
         if not resolved_node_id and eff_session and (not location_str or eff_loc == str(eff_session.get("current_location") or "").strip()):
             resolved_node_id = str(eff_session.get("current_node_id") or "").strip()
+        if not resolved_node_id and eff_loc:
+            resolved_node_id = str(db.resolve_node_id_from_location(session_id, eff_loc, prefer_facility=True) or "").strip()
         if resolved_node_id:
             node = db.get_world_node(session_id, resolved_node_id)
-            if node and str(node.get("node_type") or "").upper() == "ROOM" and node.get("parent_id"):
-                parent = db.get_world_node(session_id, str(node["parent_id"]))
-                if parent and str(parent.get("node_type") or "").upper() == "FACILITY" and is_node_staffable(parent, eff_scen):
-                    node, resolved_node_id = parent, str(parent["node_id"])
+
+    if resolved_node_id and session_id > 0 and node and str(node.get("node_type") or "").upper() == "ROOM":
+        room_meta = parse_node_state(node)
+        room_probe_loc = _build_room_shop_probe_location(session_id, node, eff_loc)
+        is_priv_room = bool(room_meta.get("is_player_residence")) or str(node.get("privacy_level") or "").strip().lower() == "private"
+        explicit_room_flag = bool(room_meta.get("has_merchant_shop") or room_meta.get("has_shop") or room_meta.get("is_minor_club_hq"))
+        room_is_shop = False if room_meta.get("is_player_residence") else bool(
+            explicit_room_flag
+            or (not is_priv_room and bool(room_probe_loc) and location_has_merchant_shop(room_probe_loc, scen_key=eff_scen))
+        )
+        if room_is_shop and node.get("parent_id"):
+            parent = db.get_world_node(session_id, str(node["parent_id"]))
+            if (
+                parent
+                and str(parent.get("node_type") or "").upper() == "FACILITY"
+                and not is_civic_or_multi_wing_hub_node(parent, eff_scen)
+                and is_node_staffable(parent, eff_scen)
+                and (
+                    str(parent.get("category") or "").strip().lower() == "commercial"
+                    or location_has_merchant_shop(str(parent.get("name") or ""), scen_key=eff_scen)
+                )
+                and not db.get_world_roster(session_id, workplace_node_id=resolved_node_id, include_legacy_rosters=False)
+            ):
+                node, resolved_node_id = parent, str(parent["node_id"])
 
     return eff_session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node
 
@@ -617,8 +743,30 @@ def _find_matching_active_roamer(
     eff_day: int,
     eff_min: int,
     merchant_type: str,
+    node: Mapping[str, Any] | None = None,
+    session: Mapping[str, Any] | None = None,
 ) -> dict[str, Any] | None:
+    if isinstance(node, Mapping):
+        if str(node.get("node_type") or "").strip().upper() == "ROOM":
+            return None
+        if is_civic_or_multi_wing_hub_node(node, eff_scen):
+            return None
+    node_name_low = str((node or {}).get("name") or "").strip().lower()
+    eff_loc_low = str(eff_loc or "").strip().lower()
+    if any(bad in node_name_low or bad in eff_loc_low for bad in ROAMER_EXCLUDE_KEYWORDS):
+        return None
+
+    present_names: set[str] = set()
+    for npc in ((session or {}).get("current_npcs") or []):
+        if isinstance(npc, Mapping):
+            nm = str(npc.get("name") or "").strip().lower()
+            if nm:
+                present_names.add(nm)
+        elif isinstance(npc, str) and npc.strip():
+            present_names.add(npc.strip().lower())
+
     all_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+    fallback_hit: dict[str, Any] | None = None
     for roamer in all_roster:
         if str(roamer.get("origin") or "").lower() != "roaming_merchant" or str(roamer.get("staff_status") or "active").lower() != "active":
             continue
@@ -634,11 +782,16 @@ def _find_matching_active_roamer(
             r_name = str((r_node or {}).get("name") or "").strip().lower()
             matched = bool(r_name and r_name in eff_loc.lower())
         if matched:
-            return _availability_result(
+            hit = _availability_result(
                 available=True, reason="roaming_merchant", staff_npc=roamer, facility_node_id=active_node_id or resolved_node_id,
                 reason_message=f"{roamer.get('name') or 'A traveling merchant'} has set up a caravan display here for today's route.",
             )
-    return None
+            r_disp = str(roamer.get("name") or "").strip().lower()
+            if present_names and r_disp in present_names:
+                return hit
+            if fallback_hit is None:
+                fallback_hit = hit
+    return fallback_hit
 
 
 def _evaluate_facility_staff(
@@ -869,11 +1022,18 @@ def evaluate_shop_staff_availability(
     eff_session, eff_scen, eff_loc, eff_day, eff_min, resolved_node_id, node = _resolve_shop_context(
         sid, location_str, facility_node_id, scen_key, current_day, current_minute, session=session
     )
+    if sid > 0:
+        heal_stale_civic_hq_staff(sid, scen_key=eff_scen)
+    is_room_node = isinstance(node, Mapping) and str(node.get("node_type") or "").strip().upper() == "ROOM"
     eff_loc_name = str((node or {}).get("name") or eff_loc or "").strip()
-    has_shop_keyword = bool(
-        (eff_loc_name and location_has_merchant_shop(eff_loc_name, scen_key=eff_scen))
-        or (eff_loc and location_has_merchant_shop(eff_loc, scen_key=eff_scen))
-    )
+    if is_room_node:
+        room_probe_loc = _build_room_shop_probe_location(sid, node, eff_loc)
+        has_shop_keyword = bool(room_probe_loc and location_has_merchant_shop(room_probe_loc, scen_key=eff_scen))
+    else:
+        has_shop_keyword = bool(
+            (eff_loc_name and location_has_merchant_shop(eff_loc_name, scen_key=eff_scen))
+            or (eff_loc and location_has_merchant_shop(eff_loc, scen_key=eff_scen))
+        )
 
     event_bypass = _check_world_event_market_bypass(sid, resolved_node_id, node, eff_loc, has_shop_keyword, eff_scen)
     if event_bypass is not None:
@@ -902,6 +1062,21 @@ def evaluate_shop_staff_availability(
             return _availability_result(available=True, reason="legacy_no_graph", reason_message="A shop counter is open for trade.", facility_node_id=resolved_node_id)
         return _availability_result(available=False, reason="no_merchant", reason_message="No open shopkeeper or traveling merchant is stationed here.", facility_node_id=resolved_node_id)
 
+    if is_room_node:
+        room_meta = parse_node_state(node)
+        is_priv_room = bool(room_meta.get("is_player_residence")) or str(node.get("privacy_level") or "").strip().lower() == "private"
+        room_has_explicit_flag = bool(room_meta.get("has_merchant_shop") or room_meta.get("has_shop"))
+        room_is_shop = False if room_meta.get("is_player_residence") else bool(
+            room_has_explicit_flag or (not is_priv_room and (has_shop_keyword or room_meta.get("is_minor_club_hq")))
+        )
+        if not room_is_shop:
+            return _availability_result(
+                available=False,
+                reason="no_merchant",
+                reason_message="No open shopkeeper or traveling merchant is stationed here.",
+                facility_node_id=resolved_node_id,
+            )
+
     ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=turn_number, session=eff_session)
     m_type = str(merchant_type or "").strip()
     has_relevant_staff = False
@@ -914,12 +1089,12 @@ def evaluate_shop_staff_availability(
         )
         if decision is not None:
             if decision["reason"] == "no_merchant":
-                roamer_hit = _find_matching_active_roamer(sid, resolved_node_id, eff_loc, eff_scen, eff_day, eff_min, m_type)
+                roamer_hit = _find_matching_active_roamer(sid, resolved_node_id, eff_loc, eff_scen, eff_day, eff_min, m_type, node=node, session=eff_session)
                 if roamer_hit is not None:
                     return roamer_hit
             return decision
 
-    roamer_hit = _find_matching_active_roamer(sid, resolved_node_id, eff_loc, eff_scen, eff_day, eff_min, m_type)
+    roamer_hit = _find_matching_active_roamer(sid, resolved_node_id, eff_loc, eff_scen, eff_day, eff_min, m_type, node=node, session=eff_session)
     if roamer_hit is not None:
         return roamer_hit
 
@@ -927,6 +1102,158 @@ def evaluate_shop_staff_availability(
         return _availability_result(available=False, reason="off_shift", reason_message="The shutters are down and the counter is quiet — this shop is closed outside operating hours.", facility_node_id=resolved_node_id)
 
     return _availability_result(available=False, reason="no_merchant", reason_message="No open shopkeeper or traveling merchant is stationed here.", facility_node_id=resolved_node_id)
+
+
+_CLOSED_SHOP_REASONS: frozenset[str] = frozenset({
+    "off_shift",
+    "casualty_shuttered",
+    "turf_locked",
+    "campus_curfew",
+})
+
+_OPEN_STAFF_OR_BYPASS_REASONS: frozenset[str] = frozenset({
+    "club_quartermaster",
+    "roaming_merchant",
+    "world_event_bypass",
+    "kiosk_bypass",
+    "active_staff",
+    "replacement_hired",
+})
+
+
+def resolve_scene_merchant_ui_state(
+    session: Mapping[str, Any] | None,
+    *,
+    session_id: int | None = None,
+    in_combat: bool = False,
+    preloaded_shop_availability: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Canonical omnichannel resolver for scene-level merchant/shop UI state across
+    Web API enrichment, Discord ChoiceView/SyncChoiceView, and closed-shop indicators.
+    """
+    sess = session if isinstance(session, Mapping) else {}
+    sid = int(session_id if session_id is not None else (sess.get("id") or 0))
+    current_loc = str(sess.get("current_location") or "").strip()
+    scen_key = str(sess.get("scenario") or "fantasy").strip() or "fantasy"
+    is_school = is_school_scenario(scen_key)
+
+    if in_combat or not sess:
+        return {
+            "is_shop_venue": False,
+            "available": False,
+            "action_label": "Talk to Merchant",
+            "shop_closed_visible": False,
+            "shop_closed_reason": "",
+            "shop_closed_message": "",
+            "staff_npc": None,
+            "shop_availability": None,
+        }
+
+    has_shop_loc = bool(current_loc and location_has_merchant_shop(current_loc, scen_key=scen_key))
+    if preloaded_shop_availability is not None:
+        shop_avail = dict(preloaded_shop_availability)
+    else:
+        shop_avail = evaluate_shop_staff_availability(
+            sid,
+            location_str=current_loc,
+            merchant_type="",
+            is_phone_shop=False,
+            scen_key=scen_key,
+            current_day=sess.get("current_day"),
+            current_minute=sess.get("current_minute"),
+            turn_number=int(sess.get("turn_count") or 0),
+            session=sess,
+        )
+
+    reason = str(shop_avail.get("reason") or "")
+    staff_npc = shop_avail.get("staff_npc") if isinstance(shop_avail.get("staff_npc"), Mapping) else None
+    staff_name = str((staff_npc or {}).get("name") or "").strip()
+
+    present_names: set[str] = set()
+    for npc in (sess.get("current_npcs") or []):
+        if isinstance(npc, Mapping):
+            nm = str(npc.get("name") or "").strip().lower()
+            if nm:
+                present_names.add(nm)
+        elif isinstance(npc, str) and npc.strip():
+            present_names.add(npc.strip().lower())
+
+    # Roaming merchants in populated outdoor scenes require actual presence in current_npcs.
+    if reason == "roaming_merchant" and present_names and (not staff_name or staff_name.lower() not in present_names):
+        shop_avail = _availability_result(
+            available=False,
+            reason="no_merchant",
+            reason_message="No open shopkeeper or traveling merchant is stationed here.",
+            facility_node_id=str(shop_avail.get("facility_node_id") or ""),
+        )
+        reason = "no_merchant"
+        staff_npc = None
+        staff_name = ""
+
+    is_shop_venue = bool(
+        has_shop_loc
+        or reason in (
+            "club_quartermaster",
+            "kiosk_bypass",
+            "world_event_bypass",
+            "active_staff",
+            "replacement_hired",
+            *_CLOSED_SHOP_REASONS,
+        )
+    )
+
+    is_open = bool(shop_avail.get("available"))
+    roamer_or_staff_open = is_open and reason in _OPEN_STAFF_OR_BYPASS_REASONS
+
+    show_merchant = False
+    merchant_label = "Talk to Merchant"
+    shop_closed_visible = False
+    shop_closed_reason = ""
+    shop_closed_message = ""
+
+    if not is_open:
+        show_merchant = False
+        if reason in _CLOSED_SHOP_REASONS and is_shop_venue:
+            shop_closed_visible = True
+            shop_closed_reason = reason
+            shop_closed_message = str(shop_avail.get("reason_message") or "")
+    elif reason == "club_quartermaster":
+        show_merchant = True
+        merchant_label = "Visit Club Quartermaster"
+    elif has_shop_loc or roamer_or_staff_open:
+        show_merchant = True
+        tpl_key, _ = select_venue_template(current_loc, scen_key=scen_key)
+        loc_stores = get_available_merchant_types_for_location(current_loc, scen_key=scen_key) if current_loc else []
+        is_multi_stall = (
+            tpl_key in ("bazaar_hub", "bazaar_hub_school")
+            or (isinstance(loc_stores, list) and len(loc_stores) > 2)
+        )
+        can_name_clerk = (
+            bool(staff_name)
+            and staff_name.lower() in present_names
+            and reason not in ("kiosk_bypass", "world_event_bypass")
+            and not is_multi_stall
+        )
+        if can_name_clerk:
+            merchant_label = f"Trade with {staff_name}"
+        elif is_school:
+            merchant_label = "Visit Shop / Café"
+        elif has_shop_loc or is_shop_venue:
+            merchant_label = "Visit Market / Shop"
+        else:
+            merchant_label = "Talk to Merchant"
+
+    return {
+        "is_shop_venue": is_shop_venue,
+        "available": show_merchant,
+        "action_label": merchant_label,
+        "shop_closed_visible": shop_closed_visible,
+        "shop_closed_reason": shop_closed_reason,
+        "shop_closed_message": shop_closed_message,
+        "staff_npc": dict(staff_npc) if staff_npc is not None else None,
+        "shop_availability": shop_avail,
+    }
 
 
 def format_venue_crowd_flavor(

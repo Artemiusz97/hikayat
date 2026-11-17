@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from .catalog import (
     AHS_PROTECTED_SUB_IDS,
+    AHS_PROTECTED_SUB_NAME_TOKENS,
     HOSTILE_HQ_SITE_IDS,
     PACIFIABLE_WILD_SITE_IDS,
     SAFE_EXCLUSION_SITE_IDS,
@@ -45,6 +46,7 @@ from .harvest import (
     resolve_site_harvest_action,
 )
 from .lifecycle import (
+    backfill_anomalous_locations_integrity_v57,
     collapse_anomalous_site_on_extraction,
     lazy_midnight_reknit_site,
     rollback_anomalous_sites_after_turn,
@@ -62,6 +64,7 @@ from .puzzles import (
 
 __all__ = [
     "AHS_PROTECTED_SUB_IDS",
+    "AHS_PROTECTED_SUB_NAME_TOKENS",
     "ELIGIBLE_RELIC_SPELL_SLOTS",
     "HOSTILE_HQ_SITE_IDS",
     "PACIFIABLE_WILD_SITE_IDS",
@@ -73,6 +76,7 @@ __all__ = [
     "THEME_PARK_SITE_ID",
     "THEME_PARK_SUB_IDS",
     "apply_domain_modifiers_to_combat_attrs",
+    "backfill_anomalous_locations_integrity_v57",
     "build_site_harvest_choices",
     "build_site_map_meta",
     "build_site_puzzle_choices",

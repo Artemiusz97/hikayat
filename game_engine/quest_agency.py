@@ -578,7 +578,24 @@ def resolve_quest_turn_in_or_betrayal(
     base_xp = int(q.get("reward_xp") or 100)
     disp = str(disposition or "deliver").strip().lower()
 
+    if prev_status.lower() in ("completed", "failed", "abandoned") or int(q.get("reward_claimed") or 0) == 1:
+        return {"success": False, "status_code": 400, "reason": "This contract has already been completed or closed."}
+
     if disp == "deliver":
+        if q.get("is_story_quest"):
+            m_stages_chk = [ms for ms in (climax.get("main_stages") or []) if isinstance(ms, dict)]
+            non_climax_pending = any(
+                not ms.get("is_climax_stage") and str(ms.get("status") or "").lower() not in ("completed", "bypassed")
+                for ms in m_stages_chk
+            )
+            sub_objs_chk = q.get("sub_objectives") or []
+            sub_pending = bool(sub_objs_chk) and not db.is_quest_main_objectives_complete(sub_objs_chk)
+            if not climax.get("completed") and (non_climax_pending or sub_pending):
+                return {
+                    "success": False,
+                    "status_code": 400,
+                    "reason": "Main story stages must be completed before turning in this chapter objective.",
+                }
         eff_loc = (current_location or str(sess.get("current_location") or "")).strip()
         if t_rules.get("mode") == "direct_client" and eff_loc:
             req_loc = str(q.get("client_location") or "").strip()
@@ -593,6 +610,16 @@ def resolve_quest_turn_in_or_betrayal(
                     "client_location": req_loc,
                     "reason": f"Direct handoff required: return to {client_npc or 'the client'} at {req_loc}.",
                 }
+        if (
+            str(q.get("required_item") or "").strip()
+            and t_item.get("has_item")
+            and str(t_item.get("disposition") or "unclaimed").strip().lower() not in ("acquired", "delivered")
+        ):
+            return {
+                "success": False,
+                "status_code": 400,
+                "reason": "You must recover the quest item before delivering this contract.",
+            }
         if t_item.get("has_item") and t_item.get("name"):
             db.set_item_quest_lock(int(user_id), quest_id, locked=0)
             db.remove_item_by_name(int(user_id), str(t_item["name"]))
@@ -777,6 +804,8 @@ def resolve_quest_turn_in_or_betrayal(
     if disp in ("keep", "fence", "destroy"):
         if not t_item.get("has_item"):
             return {"success": False, "status_code": 400, "reason": "This contract has no tangible MacGuffin item."}
+        if str(t_item.get("disposition") or "unclaimed").strip().lower() != "acquired":
+            return {"success": False, "status_code": 400, "reason": "Acquire the quest item before deciding how to dispose of it."}
         item_name = str(t_item["name"])
         db.set_item_quest_lock(int(user_id), quest_id, locked=0)
 
@@ -1015,21 +1044,46 @@ def redact_quest_for_fog_of_war(
             if isinstance(st, dict)
         ]
 
+    if not climax_unlocked and not reveal_all:
+        climax_loc_raw = str(((dos or {}).get("climax_spec") or {}).get("location") or "").strip()
+        cur_tloc = str(q_out.get("target_location") or "").strip()
+        if cur_tloc and (
+            (climax_loc_raw and cur_tloc.lower() == climax_loc_raw.lower())
+            or str((fow.get("climax") or {}).get("location") or "") == "Hidden Lair"
+            and not q_out.get("climax_ready")
+            and q_out.get("has_structured_objectives")
+            and len((fow.get("main_objective") or {}).get("stages") or []) > 0
+            and str(((fow.get("main_objective") or {}).get("stages") or [])[-1].get("status") or "").lower() == "active"
+        ):
+            q_out["target_location"] = "Hidden Lair"
+            q_out["target_npc"] = ""
+
     if q_out.get("waypoints"):
-        q_out["waypoints"] = [
-            w
-            for w in q_out["waypoints"]
-            if isinstance(w, dict)
-            and (
-                reveal_all
-                or not any(
-                    isinstance(s, dict)
-                    and int(s.get("id", -99)) == int(w.get("sub_obj_id", -98) if w.get("sub_obj_id") is not None else -98)
-                    and not bool(s.get("is_discovered", True))
-                    for s in raw_subs
-                )
-            )
-        ]
+        total_main_st = len((fow.get("main_objective") or {}).get("stages") or [])
+        cleaned_wps: List[Dict[str, Any]] = []
+        for w in q_out["waypoints"]:
+            if not isinstance(w, dict):
+                continue
+            if not reveal_all and any(
+                isinstance(s, dict)
+                and int(s.get("id", -99)) == int(w.get("sub_obj_id", -98) if w.get("sub_obj_id") is not None else -98)
+                and not bool(s.get("is_discovered", True))
+                for s in raw_subs
+            ):
+                continue
+            w_c = dict(w)
+            if (
+                not climax_unlocked
+                and not reveal_all
+                and total_main_st > 0
+                and int(w_c.get("sub_obj_id", -1) if w_c.get("sub_obj_id") is not None else -1) == 0
+                and int(w_c.get("stage_index") or 0) >= total_main_st
+            ):
+                w_c["stage_label"] = "Uncover leads or Caseboard clues to expose the final confrontation"
+                w_c["target_location"] = "Hidden Lair"
+                w_c["target_npc"] = ""
+            cleaned_wps.append(w_c)
+        q_out["waypoints"] = cleaned_wps
     return q_out
 
 

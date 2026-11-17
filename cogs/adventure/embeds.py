@@ -23,7 +23,7 @@ import game_engine
 import image_client
 from character_data import (
     XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, format_item_with_icon, get_class_templates, get_starting_weapons,
+    get_item_icon, get_class_templates, get_starting_weapons,
     get_starter_gear_by_class, get_starting_items
 )
 from cogs.character import build_character_sheet_embed
@@ -37,7 +37,7 @@ from mechanics.world.locations import is_location_engine_enabled, get_discovered
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 from mechanics.combat.status_effects import format_status_badge
-from localization import get_quest_ui_label
+from localization import get_quest_ui_label, ALL_MOVEMENT_PREFIXES
 try:
     from mechanics.narrative.threat_clock import format_threat_consequence
 except ImportError:
@@ -475,7 +475,7 @@ def _strip_leading_emojis(text: str) -> str:
         return ""
     import re
     cleaned = re.sub(
-        r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+-]+\]\s*)+',
+        r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+\u2013\u2014-]+\]\s*)+',
         '',
         str(text),
     ).strip()
@@ -485,6 +485,8 @@ def _get_choice_quest_icon(choice: dict) -> str | None:
     """Returns the quest/bounty/interaction progression icon (⭐, 🎯, ⚡, 💌, 🎭, 💖, 🎲) if applicable, else None."""
     if not isinstance(choice, dict):
         return None
+    if choice.get("quest_icon"):
+        return choice["quest_icon"]
     raw_label = str(choice.get("label") or choice.get("text") or choice.get("action") or "")
     raw_l = raw_label.lower()
     qid = str(choice.get("quest_id", ""))
@@ -495,21 +497,27 @@ def _get_choice_quest_icon(choice: dict) -> str | None:
 
     if not _is_intimate:
         # 1. Story Climax
-        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or "[story climax]" in raw_l:
+        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or any(
+            k in raw_l for k in ("[story climax", "[höhepunkt der geschichte", "[kemuncak cerita", "[punkt kulminacyjny", "[剧情高潮")
+        ):
             return "⚡"
 
         # 2. Story Quest Actions
-        if "⭐" in raw_label or "[story quest]" in raw_l or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
+        if "⭐" in raw_label or any(
+            k in raw_l for k in ("[story quest", "[hauptquest", "[misi utama", "[zadanie główne", "[主线任务")
+        ) or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
             return "⭐"
 
         # 3. Bounty / Sub-Quest Actions
-        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or "[bounty]" in raw_l or "bnt-" in qid.lower() or "qst-" in qid.lower():
+        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or any(
+            k in raw_l for k in ("[bounty", "[kopfgeld", "[ganjaran", "[zlecenie", "[悬赏")
+        ) or "bnt-" in qid.lower() or "qst-" in qid.lower():
             if any(b in raw_l for b in ("contract board", "notice board", "bounty board", "bulletin board", "quest board")):
                 return None
             return "🎯"
 
     # 4. Meetup / Phone appointment
-    if "💌" in raw_label or "[meetup]" in raw_l:
+    if "💌" in raw_label or any(k in raw_l for k in ("[meetup]", "[treffen]", "[pertemuan]", "[spotkanie]", "[碰头]", "[碰面]", "[会面]")):
         return "💌"
 
     # 5. Social & Character Interaction Archetypes
@@ -574,11 +582,15 @@ def _get_choice_skill_emoji(choice: dict) -> str:
             return "⛓️"
         if any(k in raw_l for k in ("equipment", "gear", "supplies", "backpack", "pack", "prepare", "sharpen")):
             return "🎒"
-        if any(k in raw_l for k in (
+        if str(choice.get("intent") or "").lower() == "movement" or any(k in raw_l for k in (
             "travel", "head to", "head toward", "depart", "walk to", "walk toward", "exit", "leave",
             "slip out", "make your way", "return to", "step out", "step into", "go to", "move to",
-            "journey", "navigate to"
-        )) or re.search(r"\b(travel|depart|exit|leave|journey|flee)\b", raw_l):
+            "journey", "navigate to",
+            "step through", "head through", "descend into", "descend the", "cross into", "enter the",
+            "venture into", "slip into",
+        )) or any(raw_l.startswith(pfx) or f" {pfx}" in raw_l for pfx in ALL_MOVEMENT_PREFIXES) or re.search(
+            r"\b(travel|depart|exit|leave|journey|flee)\b", raw_l
+        ):
             return "🚶"
         if any(k in raw_l for k in ("scout", "delve", "forage", "track", "trail", "wilderness", "ruins", "woods", "forest", "patrol")):
             return "🧭"
@@ -1100,6 +1112,40 @@ def _format_epistemic_watch_text(session: dict) -> str:
     return "\n".join(lines)[:1024]
 
 
+def _append_dialogue_mood_field(
+    dash_embed: discord.Embed,
+    session: dict,
+    dialogue_partners: list,
+    enemies: list,
+    c_day: int | str,
+    c_min: int | str,
+) -> None:
+    """Appends qualitative Dialogue Mood when conversing outside combat and erotic scenes."""
+    from mechanics.social.physical_state import is_session_in_erotic_dialogue
+
+    mood_info = session.get("active_dialogue_mood")
+    if not mood_info and dialogue_partners and session.get("id") and not enemies and not is_session_in_erotic_dialogue(session):
+        try:
+            from mechanics.social import locales as _emb_loc
+            from mechanics.social import pacing as _emb_pac
+            _dp0 = str(dialogue_partners[0]).strip()
+            if _dp0:
+                _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
+                _mk, _ = _emb_pac.derive_mood_and_dc_mod(
+                    int(_comp_e.get("current_composure", 100)),
+                    int(_comp_e.get("max_composure", 100)),
+                    str(_comp_e.get("composure_state") or "composed"),
+                    clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
+                )
+                mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
+        except Exception:
+            mood_info = None
+    if isinstance(mood_info, dict) and mood_info.get("mood_label"):
+        _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
+        _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
+        _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
@@ -1149,27 +1195,7 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
-        mood_info = session.get("active_dialogue_mood")
-        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
-            try:
-                from mechanics.social import locales as _emb_loc
-                from mechanics.social import pacing as _emb_pac
-                _dp0 = str(dialogue_partners[0]).strip()
-                if _dp0:
-                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
-                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
-                        int(_comp_e.get("current_composure", 100)),
-                        int(_comp_e.get("max_composure", 100)),
-                        str(_comp_e.get("composure_state") or "composed"),
-                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
-                    )
-                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
-            except Exception:
-                mood_info = None
-        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
-            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
-            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
-            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+        _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
@@ -1239,27 +1265,7 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         dialogue_partners = get_session_dialogue_partners(session)
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
-        mood_info = session.get("active_dialogue_mood")
-        if not mood_info and dialogue_partners and session.get("id") and not enemies and not session.get("_in_active_erotic_dlg"):
-            try:
-                from mechanics.social import locales as _emb_loc
-                from mechanics.social import pacing as _emb_pac
-                _dp0 = str(dialogue_partners[0]).strip()
-                if _dp0:
-                    _comp_e = _emb_pac.sync_and_get_composure(int(session["id"]), _dp0, current_day=int(c_day), current_minute=int(c_min))
-                    _mk, _ = _emb_pac.derive_mood_and_dc_mod(
-                        int(_comp_e.get("current_composure", 100)),
-                        int(_comp_e.get("max_composure", 100)),
-                        str(_comp_e.get("composure_state") or "composed"),
-                        clear_the_air_required=bool(int(_comp_e.get("clear_the_air_required") or 0) == 1),
-                    )
-                    mood_info = {"npc_name": _dp0, "mood_key": _mk, "mood_label": _emb_loc.get_mood_label(_mk, lang=str(session.get("language") or "en"))}
-            except Exception:
-                mood_info = None
-        if isinstance(mood_info, dict) and mood_info.get("mood_label"):
-            _m_emoji = {"Engaged": "🟢", "Guarded": "🟡", "Drained": "⚪", "Upset": "🔴"}.get(str(mood_info.get("mood_key") or ""), "💬")
-            _m_who = f"**{mood_info['npc_name']}**: " if mood_info.get("npc_name") else ""
-            _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
+        _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
         _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
@@ -1532,13 +1538,14 @@ def _format_structured_quest_embed_fields(
         pct = int((comp_st / total_st) * 100) if total_st > 0 else 0
         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
 
-        tags = [f"`[{bar}] Stage {cur_st}/{total_st}`"]
+        stage_lbl = get_quest_ui_label('stage_short', lang)
+        tags = [f"`[{bar}] {stage_lbl} {cur_st}/{total_st}`"]
         if fow.get("is_peak_chapter"):
             tags.append(f"⚡ `{get_quest_ui_label('peak_chapter', lang)}`")
         if int(mo.get("aid_dc_reduction") or 0) > 0:
-            tags.append("🛡️ `Aid Active`")
+            tags.append(f"🛡️ `{get_quest_ui_label('aid_active', lang)}`")
         if mo.get("bypass_unlocked"):
-            tags.append("⏭️ `Shortcut Active`")
+            tags.append(f"⏭️ `{get_quest_ui_label('shortcut_active', lang)}`")
 
         mo_title = clean_narrative_location_arrows(str(mo.get("title") or mo.get("text") or redacted_q.get("objective") or ""))
         stage_lines = [f"**{mo_title}**\n" + " • ".join(tags)]
@@ -1548,14 +1555,14 @@ def _format_structured_quest_embed_fields(
             s_idx = int(st.get("stage_index") or idx_s)
             s_stat = str(st.get("status") or "locked").lower()
             s_done = bool(st.get("completed")) or s_stat in ("completed", "bypassed")
-            s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"Stage {s_idx}"))
+            s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"{stage_lbl} {s_idx}"))
             s_loc = format_clean_location_badge(str(st.get("target_location") or ""))
             s_npc = str(st.get("target_npc") or "").strip()
 
             if st.get("bypassed") or s_stat == "bypassed":
-                stage_lines.append(f"⏭️ **Stage {s_idx} (`[Bypassed]`):** *{s_lbl}*")
+                stage_lines.append(f"⏭️ **{stage_lbl} {s_idx} (`[{get_quest_ui_label('bypassed', lang)}]`):** *{s_lbl}*")
             elif s_done:
-                stage_lines.append(f"☑️ **Stage {s_idx}:** *{s_lbl}*")
+                stage_lines.append(f"☑️ **{stage_lbl} {s_idx}:** *{s_lbl}*")
                 for b_src in (st.get("clue_sources") or []):
                     if isinstance(b_src, dict) and b_src.get("bonus") and str(b_src.get("status") or "").lower() == "closed":
                         b_loc = format_clean_location_badge(str(b_src.get("location") or ""))
@@ -1566,7 +1573,7 @@ def _format_structured_quest_embed_fields(
             elif s_stat == "active" or s_idx == cur_st:
                 loc_part = f"\n   ↳ 📍 `{s_loc}`" if s_loc else ""
                 npc_part = f" • 👤 `{s_npc}`" if s_npc else ""
-                stage_lines.append(f"📍 **Stage {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
+                stage_lines.append(f"📍 **{stage_lbl} {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
                 clue_srcs = [s for s in (st.get("clue_sources") or []) if isinstance(s, dict)]
                 for c_src in clue_srcs[:4]:
                     c_stat = str(c_src.get("status") or "open").lower()

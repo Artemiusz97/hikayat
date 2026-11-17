@@ -44,7 +44,7 @@ from .schedule_blocks import (
     get_detailed_npc_time_phase,
     get_time_block_key,
 )
-from .world_schedule import is_weekend, is_high_school_setting
+from .world_schedule import is_weekend, is_high_school_setting, is_campus_node_or_location
 
 
 def is_schedule_transition_imminent(
@@ -993,7 +993,7 @@ def get_npc_schedule_node_ids(
         if _is_town_citizen_or_youth_peer(hydrated_npc):
             from mechanics.social.town_roster import get_town_citizen_schedule_nodes
             tc_nodes = get_town_citizen_schedule_nodes(
-                hydrated_npc, current_day=current_day, seed_val=seed_val, current_minute=current_minute
+                hydrated_npc, current_day=current_day, seed_val=seed_val, current_minute=current_minute, scen_key=scen_key_low
             )
             return _apply_spare_key_schedule_overrides(tc_nodes, session_id, hydrated_npc, current_day, scen_key_low)
 
@@ -1192,24 +1192,25 @@ def get_npc_schedule_node_ids(
 
         # 6. Student Part-Time Shifts (Mon/Wed/Fri or Tue/Thu 17:00–21:30 + 1 Weekend Day 12:00–17:00)
         if not is_faculty:
-            from mechanics.social.town_roster import get_student_part_time_spec, is_student_on_part_time_shift
+            from mechanics.social.town_roster import get_student_part_time_spec, is_student_on_part_time_shift, remap_town_node_for_scenario
             if current_minute is not None:
                 active_pt = is_student_on_part_time_shift(npc, current_day, current_minute, session_id=session_id or 0)
                 if active_pt:
-                    pt_nid = active_pt["venue_node_id"]
+                    pt_nid = remap_town_node_for_scenario(active_pt["venue_node_id"], scen_key_low)
                     for k_phase in ("lunch", "class_afternoon", "extracurricular", "afternoon", "evening", "night"):
                         schedule_nodes[k_phase] = pt_nid
             else:
                 pt_spec = get_student_part_time_spec(npc)
                 if pt_spec:
+                    pt_nid = remap_town_node_for_scenario(pt_spec["venue_node_id"], scen_key_low)
                     day_mod = max(1, int(current_day or 1)) % 7
                     if weekend and day_mod in pt_spec["weekend_mods"]:
-                        schedule_nodes["lunch"] = pt_spec["venue_node_id"]
-                        schedule_nodes["class_afternoon"] = pt_spec["venue_node_id"]
-                        schedule_nodes["extracurricular"] = pt_spec["venue_node_id"]
-                        schedule_nodes["afternoon"] = pt_spec["venue_node_id"]
+                        schedule_nodes["lunch"] = pt_nid
+                        schedule_nodes["class_afternoon"] = pt_nid
+                        schedule_nodes["extracurricular"] = pt_nid
+                        schedule_nodes["afternoon"] = pt_nid
                     elif not weekend and day_mod in pt_spec["weekday_mods"]:
-                        schedule_nodes["evening"] = pt_spec["venue_node_id"]
+                        schedule_nodes["evening"] = pt_nid
 
         # 7. Student Special Agent after-school / weekend field patrol & club stationing in Anomalous High School
         if is_anom_hs and (is_stu_agent or (is_spec_agent and is_teen_npc)):
@@ -1278,14 +1279,14 @@ def get_npc_schedule_node_ids(
                 "loc_hq_agent_dormitories" if fac_id == "public_agency"
                 else ("sub_priv1_quarters" if fac_id == "private_agency_1" else "sub_priv2_quarters")
             )
-            eve_hangout = canteen_nid if s_nid in ("sub_vending_alcove", "sub_athletic_track", "loc_school_rooftop") else s_nid
+            eff_hangout = canteen_nid if (s_nid in ("sub_vending_alcove", "sub_athletic_track", "loc_school_rooftop") or is_campus_node_or_location(node_id=s_nid, scen_key=scen_key_low)) else s_nid
             if not weekend:
                 schedule_nodes["morning"] = p_nid
-                schedule_nodes["lunch"] = canteen_nid if (seed_val % 2 == 0) else s_nid
+                schedule_nodes["lunch"] = canteen_nid if (seed_val % 2 == 0) else eff_hangout
                 # Tier 1-2 field operatives alternate afternoon HQ duty with metropolitan field patrol
                 field_patrol = (tier <= 2 and ((seed_val + current_day) % 2 == 0))
-                schedule_nodes["afternoon"] = s_nid if field_patrol else p_nid
-                schedule_nodes["evening"] = eve_hangout
+                schedule_nodes["afternoon"] = eff_hangout if field_patrol else p_nid
+                schedule_nodes["evening"] = eff_hangout
                 if night_watch:
                     schedule_nodes["night"] = p_nid
                 elif s_nid in ("sub_ramen_counter_hall", "sub_cabinet_aisles", "sub_subkonbini_nook", "sub_billiards_lounge", "sub_jazz_lounge") and ((seed_val + current_day) % 2 == 1):
@@ -1294,10 +1295,10 @@ def get_npc_schedule_node_ids(
                     schedule_nodes["night"] = "fac_agency_residence" if fac_id == "public_agency" else agent_home_nid
             else:
                 weekend_duty = ((seed_val + current_day) % 2 == 0)
-                schedule_nodes["morning"] = p_nid if weekend_duty else s_nid
-                schedule_nodes["lunch"] = s_nid
-                schedule_nodes["afternoon"] = p_nid if weekend_duty else s_nid
-                schedule_nodes["evening"] = eve_hangout
+                schedule_nodes["morning"] = p_nid if weekend_duty else eff_hangout
+                schedule_nodes["lunch"] = eff_hangout
+                schedule_nodes["afternoon"] = p_nid if weekend_duty else eff_hangout
+                schedule_nodes["evening"] = eff_hangout
                 schedule_nodes["night"] = p_nid if night_watch else ("fac_agency_residence" if fac_id == "public_agency" else agent_home_nid)
         else:
             # General Urban / Civilian / Freelance Contacts in Anomalous Incursions

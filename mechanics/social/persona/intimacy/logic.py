@@ -525,9 +525,6 @@ def infer_intimate_dynamic_from_traits(desc: Any = "", race: str = "human", gend
     # 5. General distribution fallback
     return INTIMATE_DYNAMIC_TEMPLATES[hash_val % len(INTIMATE_DYNAMIC_TEMPLATES)]
 
-    # 5. General distribution fallback
-    return INTIMATE_DYNAMIC_TEMPLATES[hash_val % len(INTIMATE_DYNAMIC_TEMPLATES)]
-
 def infer_erotic_openness_from_traits(desc: Any = "", race: str = "human", gender: str = "female", traits: List[str] = None, role: str = "") -> str:
     """
     Infers an Erotic Openness tier for a character (modesty, boundary, media eagerness).

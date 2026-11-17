@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Sparkles, Zap, Heart, Shield, X, Package, Loader2 } from 'lucide-react';
+import { Sparkles, Zap, Heart, X, Package, Loader2 } from 'lucide-react';
 
 const isQuickBeltItem = (item) => {
   if (!item) return false;

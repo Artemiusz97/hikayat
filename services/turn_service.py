@@ -3245,11 +3245,22 @@ class TurnService:
                 last_entry["narrative"] = new_outcome_narr
                 last_entry.pop("is_fallback", None)
                 last_entry.pop("_is_fallback_narrative", None)
-            elif is_prev_fallback:
+                if not new_next_narr and is_prev_fallback:
+                    paras = [p.strip() for p in re.split(r"\n\s*\n", new_outcome_narr) if p.strip()]
+                    if len(paras) >= 2:
+                        last_entry["outcome_narrative"] = "\n\n".join(paras[:-1])
+                        last_entry["narrative"] = last_entry["outcome_narrative"]
+                        last_entry["next_narrative"] = paras[-1]
+                        new_next_narr = paras[-1]
+                    else:
+                        last_entry["next_narrative"] = ""
+            elif is_prev_fallback and new_next_narr:
                 last_entry["outcome_narrative"] = ""
-                last_entry["narrative"] = new_next_narr or ""
+                last_entry["narrative"] = new_next_narr
                 last_entry.pop("is_fallback", None)
                 last_entry.pop("_is_fallback_narrative", None)
+            elif not new_outcome_narr and not new_next_narr and isinstance(new_outcome, dict):
+                new_outcome["_is_fallback_narrative"] = True
 
             if new_next_narr:
                 last_entry["next_narrative"] = new_next_narr

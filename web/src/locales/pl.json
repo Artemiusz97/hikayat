@@ -285,7 +285,17 @@
     "clue_tier_key": "Kluczowy Trop",
     "clue_tier_corroborating": "Potwierdzający",
     "off_hours_trace": "Ślad Poza Godzinami (+2 ST)",
-    "threat_pushed_back": "Zagrożenie Opóźnione (-1)"
+    "threat_pushed_back": "Zagrożenie Opóźnione (-1)",
+    "main_story_badge": "Główny Wątek",
+    "chapter_n": "Rozdział {{chapter}}",
+    "climax_ready": "Finał Gotowy!",
+    "completed_label": "Ukończono",
+    "active_contracts_header": "Aktywne Zlecenia i Nagrody ({{count}})",
+    "bounty_fallback": "Zlecenie",
+    "single_lead": "Pojedynczy Trop",
+    "verified_badge": "Zweryfikowano",
+    "lead_a": "Trop A",
+    "lead_b": "Trop B"
   },
   "quest": {
     "threat_clock": {
@@ -753,6 +763,9 @@
     "close_phone": "Zamknij Telefon",
     "shop": "SKLEP",
     "browse": "Przeglądaj",
+    "shop_closed_badge": "SKLEP ZAMKNIĘTY",
+    "shop_closed_default": "Zamknięte poza godzinami otwarcia.",
+    "closed_tag": "Zamknięte",
     "fallback_warning": "Dla tej tury użyto awaryjnego generowania sceny.",
     "truncated_warning": "Narracja sceny wydaje się nietypowo krótka lub ucięta.",
     "resolving": "Rozstrzyganie...",
@@ -1194,7 +1207,8 @@
     "load_failed": "Nie udało się wczytać mapy świata.",
     "anomalous_threat": "Telemetria Zagrożenia",
     "anomalous_stabilized": "Ustabilizowana",
-    "anomalous_harvest_ready": "Gotowe do Zbioru"
+    "anomalous_harvest_ready": "Gotowe do Zbioru",
+    "travel_blocked": "Szybka podróż jest obecnie niedostępna."
   },
   "merchant": {
     "title_fallback": "Emporium Kupieckie",

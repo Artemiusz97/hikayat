@@ -2193,7 +2193,9 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
             is_climax_unlocked = bool(reveal_all or (str(climax_spec_sq.get("gate_type") or climax_spec_sq.get("gate_mode") or "").lower() == "open") or climax_spec_sq.get("is_unlocked"))
             _, climax_loc = get_story_quest_climax_location(session_id)
             if climax_loc and is_climax_unlocked:
-                clean_climax = dedupe_location_stutter(climax_loc.replace(" -> ", " ➔ "))
+                clean_climax = dedupe_location_stutter(
+                    resolve_session_location_tokens(session_id, climax_loc, scen_key).replace(" -> ", " ➔ ")
+                )
                 active_sq["climax_location"] = clean_climax
                 active_sq["target_location"] = clean_climax
         except Exception:

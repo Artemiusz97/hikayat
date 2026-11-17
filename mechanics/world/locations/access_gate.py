@@ -212,7 +212,8 @@ def get_node_effective_access_info(
     node_id: str,
     current_day: int = 1,
     current_minute: int = 480,
-    scen_key: str = ""
+    scen_key: str = "",
+    session: dict | None = None,
 ) -> dict[str, Any]:
     """
     Computes effective access status, curfew status, dynamic world-schedule locks,
@@ -284,9 +285,15 @@ def get_node_effective_access_info(
     curfew_active = is_curfew_active(c_start, c_end, current_minute)
     curfew_label = f"{format_minute_to_hhmm(c_start)}–{format_minute_to_hhmm(c_end)}" if (c_start is not None and c_end is not None) else ""
 
-    from mechanics.world.world_schedule import evaluate_world_schedule_node_access
+    from mechanics.world.world_schedule import evaluate_world_schedule_node_access, is_high_school_setting
     sched_access = evaluate_world_schedule_node_access(
-        node, fac_node, scen_key=scen_key, current_day=current_day, current_minute=current_minute
+        node,
+        fac_node,
+        scen_key=scen_key,
+        current_day=current_day,
+        current_minute=current_minute,
+        session_id=session_id,
+        session=session,
     )
 
     schedule_locked = bool(sched_access.get("schedule_locked"))
@@ -294,8 +301,18 @@ def get_node_effective_access_info(
     sched_reason_code = str(sched_access.get("reason_code") or "")
     sched_reason_label = str(sched_access.get("reason_label") or "")
 
+    # Non-high-school academic zones (e.g., anomalous_incursions University/13th Stairwell) never enforce student curfew
+    if curfew_active and str(node.get("category") or "").lower() == "academic" and not is_high_school_setting(scen_key):
+        curfew_active = False
+        curfew_label = ""
+
     if sched_access.get("force_open"):
         tier = "open"
+        curfew_active = False
+        curfew_label = ""
+        schedule_locked = False
+        is_trespassing = False
+    elif sched_access.get("clear_curfew") or sched_reason_code == "after_hours_anomaly_breach":
         curfew_active = False
         curfew_label = ""
         schedule_locked = False
@@ -327,8 +344,11 @@ def get_node_effective_access_info(
         try:
             from mechanics.world.anomalous_events import get_active_incursion_at_location
             from mechanics.world.world_schedule import is_campus_node_or_location
-            active_inc = get_active_incursion_at_location(session_id, node_id=node_id, current_minute=current_minute) or (
-                get_active_incursion_at_location(session_id, node_id=str(fac_node.get("node_id") or ""), current_minute=current_minute) if fac_node else None
+            active_inc = get_active_incursion_at_location(
+                session_id,
+                location_str=str(node.get("name") or ""),
+                node_id=node_id,
+                current_minute=current_minute,
             )
             if active_inc and is_campus_node_or_location(node, fac_node, session_id=session_id, scen_key=scen_key):
                 is_unlocked = True
@@ -709,12 +729,27 @@ def _is_npc_private_residence_node(
     """Returns True when a private-tier node belongs to an NPC residence rather than player quarters."""
     if not isinstance(node, dict) or str(node.get("access_tier") or "").strip().lower() != "private":
         return False
+    if str(node.get("node_type") or "").strip().upper() == "ZONE":
+        return False
+    if bool(node.get("is_anomalous")) or bool((fac_node or {}).get("is_anomalous")):
+        return False
+    st_low = str(node.get("state_json") or "").lower()
+    fac_st_low = str((fac_node or {}).get("state_json") or "").lower()
+    if '"is_anomalous": true' in st_low or '"is_anomalous":true' in st_low:
+        return False
+    if '"is_anomalous": true' in fac_st_low or '"is_anomalous":true' in fac_st_low:
+        return False
+
     disp_low = str(display_name or "").strip().lower()
+    low_id_spaced = str(low_id or "").replace("_", " ").strip().lower()
     if low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in disp_low:
         return False
-    if any(tok in low_id for tok in ("house", "residence", "apartment")):
-        return True
-    if any(tok in disp_low for tok in ("house", "residence", "apartment")):
+
+    from .graph_seeder import COMPOUND_HOUSE_EXCLUSIONS
+    if any(c in disp_low or c in low_id_spaced for c in COMPOUND_HOUSE_EXCLUSIONS):
+        return False
+
+    if re.search(r"\b(house|residence|apartment)\b", low_id_spaced) or re.search(r"\b(house|residence|apartment)\b", disp_low):
         return True
     if low_id.startswith(("sub_npc_res_", "fac_npc_res_", "npc_res_")):
         return True
@@ -773,6 +808,7 @@ def evaluate_node_access_gate(
         is_abandoned_school_node,
         is_campus_node_or_location,
         is_high_school_setting,
+        is_university_node_or_location,
         is_weekend,
     )
     time_block = (session.get("time_slot") if isinstance(session, dict) else None) or get_time_block_key(curr_min)
@@ -873,13 +909,10 @@ def evaluate_node_access_gate(
 
         # Preserve direct NPC private residence intercom tests while enforcing truancy on all other off-campus destinations
         is_npc_private_home = _is_npc_private_residence_node(node, fac_node, low_id, display_name)
+        from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
+        _is_adult_in_ahs = is_adult_ahs_operative_fail_closed(session, session_id=session_id, scen_key=scen_key)
 
         if player_on_campus and not target_on_campus and not is_npc_private_home:
-            from mechanics.social.origin_mode import is_student_operative
-            _is_adult_in_ahs = (
-                scenario_data.is_anomalous_high_school_scenario(scen_key)
-                and not is_student_operative(session if isinstance(session, dict) else {})
-            )
             has_truancy_pass = (
                 _is_adult_in_ahs
                 or (gate_state.get("truancy_unlocked_day") or 0) >= curr_day
@@ -994,7 +1027,13 @@ def evaluate_node_access_gate(
                         Phase2Choice("Return to campus grounds", stat="NONE", requirement=0),
                     ],
                 }
-        elif (not player_on_campus) and target_on_campus and safe_min > 480:
+        elif (
+            (not player_on_campus)
+            and target_on_campus
+            and safe_min > 480
+            and not _is_adult_in_ahs
+            and not is_university_node_or_location(node, fac_node, location_str=display_name, node_id=target_node_id)
+        ):
             late_arrival_directive = (
                 f"[SYSTEM: LATE ARRIVAL TO SCHOOL ({format_minute_to_hhmm(safe_min)})]\n"
                 f"The player is arriving on campus after the 08:00 AM first bell during active class hours. "
@@ -1165,7 +1204,12 @@ def evaluate_node_access_gate(
 
     # 2. Check access info & existing unlocks
     access_info = get_node_effective_access_info(
-        session_id, target_node_id, current_day=curr_day, current_minute=curr_min, scen_key=scen_key
+        session_id,
+        target_node_id,
+        current_day=curr_day,
+        current_minute=curr_min,
+        scen_key=scen_key,
+        session=session if isinstance(session, dict) else None,
     )
     if access_info["is_unlocked"]:
         res = {"gated": False}
@@ -1931,6 +1975,22 @@ def get_privacy_nudge_choice(
 
     if not curr_node:
         return None
+
+    try:
+        from mechanics.combat.enemy_profiles import is_anomalous_danger_zone
+        c_min_nudge = int(sess_dict.get("current_minute") or 720)
+        s_key_nudge = str(sess_dict.get("scenario") or "high_school_drama")
+        if is_anomalous_danger_zone(
+            location_name=curr_loc_str or str(curr_node.get("name") or ""),
+            location_id=str(curr_node.get("node_id") or eff_nid or ""),
+            current_minute=c_min_nudge,
+            session_id=int(session_id),
+            scen_key=s_key_nudge,
+            turn_count=None,
+        ):
+            return None
+    except Exception:
+        pass
 
     priv_lvl = str(curr_node.get('privacy_level') or 'public').lower()
     if priv_lvl in ('semi_private', 'private', 'restricted') or bool(curr_node.get('is_discreet')) or priv_lvl != 'public':

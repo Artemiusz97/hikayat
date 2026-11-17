@@ -151,8 +151,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         is_dialogue_partner,
 
-        is_social_third_place,
-
         sync_contact_locations
 
     )

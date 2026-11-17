@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useId, useCallback } from 'react';
+import { useState, useEffect, useRef, useId, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Flame, ShieldAlert, Sparkles, BookOpen, RefreshCw, X, Lock,

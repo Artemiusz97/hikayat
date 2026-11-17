@@ -1369,52 +1369,7 @@ def get_active_perks(faction: Dict[str, Any], player_rank: int, reputation_score
         perks.append("Safehouse Rest: Free HP/MP recovery at HQ (0 ambush risk)")
     if tier_level >= 3:
         perks.append("Social Advantage: +2 to skill checks with fellow members")
-    if player_rank >= 3 and tier_level >= 4:
-        perks.append("Call Reinforcements: Summon faction patrol in combat (1x per session)")
     return perks
-
-
-# ---------------------------------------------------------------- Combat Reinforcement Generator
-def generate_faction_patrol(faction: Dict[str, Any], avg_party_level: int,
-                             scen_key: str) -> List[Dict[str, Any]]:
-    """
-    Generate 1-2 scaled faction patrol NPCs for injection into current_npcs as friendly allies.
-    """
-    from scenario_data import has_tag
-    cat = faction.get("category", "guild")
-    name = faction.get("name", "Faction")
-    level = max(1, avg_party_level)
-    hp = 20 + level * 8
-    mp = 10 + level * 4
-
-    if has_tag(scen_key, "cyberpunk") or has_tag(scen_key, "space") or has_tag(scen_key, "sci_fi"):
-        patrol_names = [f"{name} Strike Operative", f"{name} Tactical Unit"]
-        stats = {"STR": 5, "PER": 7, "END": 5, "CHA": 4, "INT": 6, "AGI": 8, "LUK": 5}
-    elif is_school_scenario(scen_key):
-        patrol_names = [f"{name} Senior Member", f"{name} Enforcer"]
-        stats = {"STR": 6, "PER": 5, "END": 6, "CHA": 5, "INT": 5, "AGI": 5, "LUK": 5}
-    elif cat == "delinquents":
-        patrol_names = [f"{name} Brawler", f"{name} Muscle"]
-        stats = {"STR": 8, "PER": 4, "END": 7, "CHA": 3, "INT": 4, "AGI": 5, "LUK": 4}
-    else:
-        patrol_names = [f"{name} Veteran", f"{name} Enforcer"]
-        stats = {"STR": 7, "PER": 5, "END": 6, "CHA": 4, "INT": 5, "AGI": 6, "LUK": 5}
-
-    scaled = {k: min(12, v + level // 3) for k, v in stats.items()}
-    patrols = []
-    for patrol_name in patrol_names[:2]:
-        patrols.append({
-            "name": patrol_name,
-            "level": level,
-            "hp": hp,
-            "max_hp": hp,
-            "mp": mp,
-            "max_mp": mp,
-            "stats": scaled,
-            "status_effects": [],
-            "faction_patrol": True,
-        })
-    return patrols
 
 
 # ---------------------------------------------------------------- Discord UI Views
@@ -2620,7 +2575,7 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             club_id = ""
             club_name = ""
         elif matched_fac and is_school_club_faction(matched_fac):
-            arch = "freelancer"
+            arch = "student_freelancer" if is_student else "freelancer"
             fid = matched_fac["faction_id"]
             fname = matched_fac["name"]
             club_id = matched_fac["faction_id"]
@@ -2650,8 +2605,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             "joined_club_name": club_name,
             "origin_mode": "student" if is_student else "adult",
             "promotion_rep": rep,
-            "promotion_tier": t_info["tier"] if arch != "freelancer" else 0,
-            "promotion_title": t_info["title"] if arch != "freelancer" else default_free_title,
+            "promotion_tier": t_info["tier"] if arch not in ("freelancer", "student_freelancer") else 0,
+            "promotion_title": t_info["title"] if arch not in ("freelancer", "student_freelancer") else default_free_title,
             "salary_ration_suspended": bool(state.get("salary_ration_suspended", False)),
             "shrine_free_claims_today": int(state.get("shrine_free_claims_today", 0) or 0),
             "shrine_free_max_daily": 3,
@@ -2666,8 +2621,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
         t_info = get_anomalous_promotion_tier_info(rep)
         state["promotion_rep"] = rep
         state["origin_mode"] = "student" if is_student else "adult"
-        state["promotion_tier"] = t_info["tier"] if arch != "freelancer" else 0
-        state["promotion_title"] = t_info["title"] if arch != "freelancer" else default_free_title
+        state["promotion_tier"] = t_info["tier"] if arch not in ("freelancer", "student_freelancer") else 0
+        state["promotion_title"] = t_info["title"] if arch not in ("freelancer", "student_freelancer") else default_free_title
         state.setdefault("shrine_free_max_daily", 3)
         state.setdefault("shrine_free_claims_today", 0)
         state.setdefault("salary_ration_suspended", False)
@@ -2690,7 +2645,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
     rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
     t_info = get_anomalous_promotion_tier_info(rep)
     state["promotion_rep"] = rep
-    if arch == "freelancer":
+    if arch in ("freelancer", "student_freelancer"):
         state["promotion_tier"] = 0
         state["promotion_title"] = default_free_title
         club_id = str(state.get("joined_club_id") or "").strip()
@@ -2712,7 +2667,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
         except Exception:
             pass
     if char and char.get("id"):
-        if arch == "freelancer" and state.get("joined_club_id"):
+        if arch in ("freelancer", "student_freelancer") and state.get("joined_club_id"):
             c_rank = int(state.get("club_rank") or char.get("faction_rank") or 1)
             c_title = str(state.get("club_title") or char.get("faction_title") or "Member")
             db.set_character_faction_membership(
@@ -2745,7 +2700,7 @@ def update_agent_promotion_reputation(
     and manages the salary/ration suspension flag when missing a mandatory bounty at 0 Rep.
     """
     state = get_anomalous_faction_state(session_id, user_id=user_id)
-    if not state or state.get("faction_archetype_key") == "freelancer":
+    if not state or state.get("faction_archetype_key") in ("freelancer", "student_freelancer"):
         return {"changed": False, "state": state, "message": ""}
 
     old_rep = int(state.get("promotion_rep", 0) or 0)

@@ -285,7 +285,17 @@
     "clue_tier_key": "Schlüsselhinweis",
     "clue_tier_corroborating": "Stützend",
     "off_hours_trace": "Spurensuche Außerhalb (+2 SG)",
-    "threat_pushed_back": "Bedrohung Verzögert (-1)"
+    "threat_pushed_back": "Bedrohung Verzögert (-1)",
+    "main_story_badge": "Hauptgeschichte",
+    "chapter_n": "Kapitel {{chapter}}",
+    "climax_ready": "Höhepunkt Bereit!",
+    "completed_label": "Abgeschlossen",
+    "active_contracts_header": "Aktive Aufträge & Kopfgelder ({{count}})",
+    "bounty_fallback": "Kopfgeld",
+    "single_lead": "Einzelspur",
+    "verified_badge": "Bestätigt",
+    "lead_a": "Spur A",
+    "lead_b": "Spur B"
   },
   "quest": {
     "threat_clock": {
@@ -753,6 +763,9 @@
     "close_phone": "Telefon schließen",
     "shop": "LADEN",
     "browse": "Stöbern",
+    "shop_closed_badge": "GESCHLOSSEN",
+    "shop_closed_default": "Außerhalb der Öffnungszeiten geschlossen.",
+    "closed_tag": "Zu",
     "fallback_warning": "Für diese Runde wurde eine Ausweich-Szenengenerierung verwendet.",
     "truncated_warning": "Die Szenenerzählung wirkt ungewöhnlich kurz oder abgeschnitten.",
     "resolving": "Wird aufgelöst...",
@@ -1194,7 +1207,8 @@
     "load_failed": "Weltatlas konnte nicht geladen werden.",
     "anomalous_threat": "Gefahrentelemetrie",
     "anomalous_stabilized": "Stabilisiert",
-    "anomalous_harvest_ready": "Erntebereit"
+    "anomalous_harvest_ready": "Erntebereit",
+    "travel_blocked": "Schnellreise ist derzeit nicht verfügbar."
   },
   "merchant": {
     "title_fallback": "Händler-Emporium",

@@ -397,11 +397,6 @@ def get_session_locations(session_id: int) -> list[dict]:
     return synthesized
 
 
-async def update_missing_lorebook_embeddings(session_id: int) -> None:
-    """Deprecated no-op: Lorebook retrieval uses deterministic keyword matching without external HTTP embeddings."""
-    return None
-
-
 # =========================================================================
 # Spatial Graph (world_nodes and world_edges) CRUD Operations
 # =========================================================================

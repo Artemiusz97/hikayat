@@ -2240,6 +2240,14 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+SCHEMA_MIGRATIONS.append(
+    (
+        57,
+        "anomalous_locations_integrity_v57",
+        [],
+    )
+)
+
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
     """Executes pending versioned schema migrations deterministically and records applied versions."""
@@ -2354,6 +2362,11 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
             _ensure_living_world_indexes_v55(conn)
         except Exception as e:
             print(f"[migration 55] Warning: living world index creation encountered: {e}")
+    if 57 in newly_applied:
+        try:
+            _migrate_anomalous_locations_integrity_v57(conn)
+        except Exception as e:
+            print(f"[migration 57] Warning: anomalous locations integrity backfill encountered: {e}")
 
     try:
         _strip_legacy_session_fk_constraints(conn)
@@ -2378,6 +2391,12 @@ def _migrate_zone_split_and_hidden_villages_v49(conn: sqlite3.Connection) -> int
     """Idempotently splits `zone_eastern_sanctuary` from `zone_woods_reserve` and seeds hidden folklore villages on existing saves."""
     from mechanics.world.locations.folklore_veil import backfill_zone_split_and_hidden_villages_v49
     return backfill_zone_split_and_hidden_villages_v49(conn)
+
+
+def _migrate_anomalous_locations_integrity_v57(conn: sqlite3.Connection) -> int:
+    """Idempotently repairs misparented nodes, edges, renamed rooms, and access drift."""
+    from mechanics.world.anomalous_sites.lifecycle import backfill_anomalous_locations_integrity_v57
+    return backfill_anomalous_locations_integrity_v57(conn)
 
 
 def _migrate_dynamic_social_overhaul_v50(conn: sqlite3.Connection) -> int:

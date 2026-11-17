@@ -297,6 +297,7 @@ def is_anomalous_danger_zone(
 
     from mechanics.world.anomalous_sites.catalog import (
         AHS_PROTECTED_SUB_IDS,
+        AHS_PROTECTED_SUB_NAME_TOKENS,
         SAFE_EXCLUSION_SITE_IDS,
         is_site_dormant_by_schedule,
         is_site_pacified,
@@ -304,6 +305,10 @@ def is_anomalous_danger_zone(
     )
 
     if loc_id_low in SAFE_EXCLUSION_SITE_IDS or loc_id_low in AHS_PROTECTED_SUB_IDS:
+        return False
+    if any(tok in loc_name_low for tok in AHS_PROTECTED_SUB_NAME_TOKENS) and not any(
+        tok in loc_name_low for tok in ("sub_old_wing_doors", "sub_old_storage_3b", "sub_clock_tower_gears", "padlocked heritage wing", "dusty annex clockwork archive", "clock tower belfry", "13th stairwell")
+    ):
         return False
     if any(ex in loc_name_low for ex in _SAFE_EXCLUSION_KEYWORDS):
         return False

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import AnchoredPopover from './AnchoredPopover';
 

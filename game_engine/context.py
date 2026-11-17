@@ -1345,6 +1345,9 @@ def get_session_scenario(session: dict) -> dict:
     return scenario_data.get_scenario(session.get("scenario"))
 
 def _scenario_block(session: dict) -> str:
-    return scenario_data.scenario_prompt_block(game_engine.get_session_scenario(session))
+    return scenario_data.scenario_prompt_block(
+        game_engine.get_session_scenario(session),
+        session_id=int((session or {}).get("id") or 0),
+    )
 
 

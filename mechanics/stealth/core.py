@@ -7,6 +7,7 @@ executes covert turn actions and anti-spam distractions, handles spatial
 suspicion halving/resets and quiet-turn decay, and synthesizes zero-leakage
 truth directives for LLM narration.
 """
+import re
 from typing import Dict, Any, Optional, List, Tuple
 
 from mechanics.stealth.alert_tracker import (
@@ -48,6 +49,20 @@ _HOSTILE_RESTRICTED_KEYWORDS = (
     "catacomb", "laboratory", "black site", "restricted", "bunker", "incursion",
     "breach",
     "anomaly", "rift", "prison", "cellblock", "watchtower", "barracks",
+)
+_STEALTH_TRIGGER_KEYWORDS = _HOSTILE_RESTRICTED_KEYWORDS + (
+    "staff room", "faculty lounge", "principal", "rooftop", "council archive",
+    "chemical storage", "velvet basement", "containment",
+    "classified", "after-hours", "curfew", "trespass", "trespassing",
+)
+_HOSTILE_RESTRICTED_RE = re.compile(
+    r"(?<![a-z0-9])(?:"
+    + "|".join(
+        re.escape(k).replace(r"\ ", r"[\s_-]+").replace(r"\-", r"[\s_-]+")
+        for k in _STEALTH_TRIGGER_KEYWORDS
+    )
+    + r")(?![a-z0-9])",
+    re.IGNORECASE,
 )
 
 
@@ -594,6 +609,9 @@ def is_stealth_context_warranted(
 
     # 6. Check current node access tier, curfew, and schedule lock
     w_node = node if isinstance(node, dict) else (session.get("current_world_node") if isinstance(session.get("current_world_node"), dict) else None)
+    eff_nid = ""
+    acc: Optional[Dict[str, Any]] = None
+    has_db_node = False
     if sid and (curr_nid or curr_loc):
         try:
             import db
@@ -602,8 +620,9 @@ def is_stealth_context_warranted(
             if eff_nid:
                 if is_residential_safe_zone(int(sid or 0), node_id=eff_nid, location_str=curr_loc, session=session):
                     return False
+                has_db_node = db.get_world_node(int(sid), eff_nid) is not None
                 acc = get_node_effective_access_info(
-                    int(sid), eff_nid, current_day=curr_day, current_minute=curr_min, scen_key=scen
+                    int(sid), eff_nid, current_day=curr_day, current_minute=curr_min, scen_key=scen, session=session
                 )
                 if (
                     acc.get("access_tier") in ("restricted", "private", "locked")
@@ -619,21 +638,43 @@ def is_stealth_context_warranted(
         if str(w_node.get("access_tier") or "").lower() in ("restricted", "private", "locked"):
             return True
 
-    # Explicit restricted/hostile/curfew keywords in location string
-    if any(
-        k in combined_loc
-        for k in _HOSTILE_RESTRICTED_KEYWORDS + (
-            "staff room", "faculty lounge", "principal", "rooftop", "council archive",
-            "chemical storage", "old storage", "velvet basement", "containment",
-            "classified", "after-hours", "curfew", "trespass", "cult", "syndicate",
-        )
-    ):
+    # Explicit restricted/hostile/curfew keywords in location string (word-bounded so
+    # substrings like "den" in "student"/"garden" or "cult" in "cultural" never misfire)
+    if _HOSTILE_RESTRICTED_RE.search(combined_loc):
         return True
 
     # High School Night Curfew (20:00–07:00) on campus
     try:
-        from mechanics.world.world_schedule import is_high_school_setting, is_campus_node_or_location
-        if is_high_school_setting(scen) and (safe_min >= 1200 or safe_min < 420):
+        from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
+        from mechanics.world.world_schedule import (
+            is_abandoned_school_node,
+            is_campus_node_or_location,
+            is_high_school_setting,
+            is_university_node_or_location,
+        )
+        is_adult_ahs = is_adult_ahs_operative_fail_closed(session, session_id=int(sid or 0), scen_key=scen)
+        is_uni = is_university_node_or_location(w_node, location_str=curr_loc, node_id=curr_nid)
+        is_abandoned = is_abandoned_school_node(w_node, location_str=curr_loc, node_id=curr_nid)
+        breach_open = bool(
+            has_db_node
+            and isinstance(acc, dict)
+            and (
+                acc.get("schedule_reason_code") == "after_hours_anomaly_breach"
+                or (
+                    acc.get("is_unlocked")
+                    and not acc.get("curfew_active")
+                    and acc.get("status_badge") != "Open"
+                )
+            )
+        )
+        if (
+            is_high_school_setting(scen)
+            and not is_adult_ahs
+            and not is_uni
+            and not is_abandoned
+            and not breach_open
+            and (safe_min >= 1200 or safe_min < 420)
+        ):
             if is_campus_node_or_location(w_node, location_str=curr_loc, session_id=int(sid or 0), scen_key=scen):
                 return True
     except Exception:

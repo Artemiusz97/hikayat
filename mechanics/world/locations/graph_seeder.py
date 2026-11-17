@@ -68,6 +68,16 @@ from .hierarchy import resolve_session_location_tokens
 log = logging.getLogger("hikayat.world.graph_seeder")
 
 
+COMPOUND_HOUSE_EXCLUSIONS: tuple[str, ...] = (
+    "glasshouse", "greenhouse", "boathouse", "treehouse", "powerhouse",
+    "lighthouse", "clubhouse", "courthouse", "homeroom", "coffeehouse",
+    "teahouse", "bakehouse", "steakhouse",
+    "warehouse", "warehouses", "opera house", "auction house",
+    "penthouse", "switchhouse", "roundhouse", "bathhouse",
+    "wheelhouse", "gatehouse", "shophouse", "townhouse", "killhouse",
+)
+
+
 def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = "") -> str:
     """Classifies a location node into an immutable semantic domain."""
     low = f"{z_id} {p_id} {name}".lower()
@@ -80,13 +90,16 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
         "sub_townhouse_", "sub_condo_", "sub_bungalow_", "sub_villa_", "sub_mansion_",
     )):
         return "residential"
+    if p_low in ("loc_private_hq_1", "loc_private_hq_2", "loc_agency_hq", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq"):
+        return "civic"
     if "student council" in low:
         return "academic"
     if z_id in ("zone_commercial", "zone_downtown") or p_id.lower() in (
         "loc_cafe", "loc_arcade", "loc_karaoke", "loc_convenience_store",
         "loc_restaurant", "loc_clothing_store", "loc_brand_clothing_store",
         "loc_accessories_store", "loc_gift_store", "loc_night_market",
-        "loc_nightclub", "loc_adult_store", "loc_love_hotel"
+        "loc_nightclub", "loc_adult_store", "loc_love_hotel",
+        "loc_suburb_laundry", "loc_crimson_auction_house", "loc_sky_vip_lounge",
     ):
         return "commercial"
     is_school_zone = z_id in ("zone_school", "zone_school_main", "zone_school_campus", "zone_campus") or any(w in low for w in ("school", "academy", "classroom", "homeroom", "campus"))
@@ -96,9 +109,9 @@ def infer_node_category(z_id: str, p_id: str, name: str, parent_category: str = 
         "council", "faculty", "dorm", "infirmary", "restroom", "shower"
     )):
         return "academic"
-    if any(k in low for k in ("commercial", "downtown", "cafe", "arcade", "store", "shop", "boutique", "emporium", "bazaar", "nightclub", "hotel", "karaoke", "shopping", "bakery", "restaurant", "diner", "bar", "tavern")):
+    if any(k in low for k in ("commercial", "downtown", "cafe", "arcade", "store", "shop", "boutique", "emporium", "bazaar", "nightclub", "hotel", "karaoke", "shopping", "bakery", "restaurant", "diner", "bar", "tavern", "laundry", "laundromat")):
         return "commercial"
-    if any(k in low for k in ("residential", "house", "apartment", "neighborhood", "home")) and not any(k in low for k in ("glasshouse", "greenhouse", "boathouse", "treehouse", "powerhouse", "lighthouse", "clubhouse", "courthouse", "homeroom", "coffeehouse", "teahouse", "bakehouse", "steakhouse")):
+    if (re.search(r"\b(residential|house|apartment|neighborhood|home)\b", low) or "apartment" in low or "neighborhood" in low) and not any(k in low for k in COMPOUND_HOUSE_EXCLUSIONS):
         return "residential"
     if any(k in low for k in ("theme_park", "theme park", "amusement", "carnival", "midway", "boardwalk", "pier", "civic", "park", "beach", "sakura", "picnic")) and not any(k in low for k in ("dungeon", "tundra", "swamp", "desert", "cave", "ruins", "wilds", "frontier")):
         return "civic"
@@ -117,7 +130,7 @@ def infer_node_privacy(node_type: str, p_id: str, name: str, explicit_meta: dict
     if meta.get("is_discreet"):
         return "semi_private"
     low = f"{p_id} {name}".lower()
-    if any(k in low for k in ("player_house", "bedroom", "safe", "archive", "staff room", "teachers' staff", "private", "secret", "boarded", "love_hotel_mirrored", "love_hotel_jacuzzi", "nsfw_faction_hq", "velvet basement", "fitting_room")):
+    if any(k in low for k in ("player_house", "bedroom", "archive", "staff room", "teachers' staff", "private", "secret", "boarded", "love_hotel_mirrored", "love_hotel_jacuzzi", "nsfw_faction_hq", "velvet basement", "fitting_room")) or (re.search(r"\bsafe\b", low) and "safety" not in low):
         return "private"
     if any(k in low for k in ("empty_class", "behind", "storage", "rooftop", "stairwell", "greenhouse", "glasshouse", "music room", "studio", "council", "alcove", "shed", "aisle", "aisles", "stacks", "corner", "balcony", "booth", "booths", "veranda", "terrace", "patio", "restroom", "shower_room", "infirmary", "underpass")):
         return "semi_private"
@@ -216,35 +229,56 @@ def infer_is_transit_hub(
     return 0
 
 
-def infer_access_tier(node_type: str, z_id: str, node_id: str, name: str, category: str, explicit_tier: str = "") -> str:
+def infer_access_tier(
+    node_type: str,
+    z_id: str,
+    node_id: str,
+    name: str,
+    category: str,
+    explicit_tier: str = "",
+    explicit_meta: dict | None = None,
+) -> str:
     """Infers access restriction tier: 'open', 'restricted', or 'private'."""
     if explicit_tier:
         return explicit_tier
+    if str(node_type or "").strip().upper() == "ZONE":
+        return "open"
+    meta = explicit_meta if isinstance(explicit_meta, dict) else {}
     low = f"{z_id} {node_id} {name}".lower()
     if "nsfw_faction_hq" in low or "loc_nsfw_" in low or "velvet basement" in low:
         return "restricted"
+    if meta.get("is_anomalous"):
+        return "open"
+    if node_id in (
+        "loc_sky_vip_lounge", "loc_drydock_shipyard", "loc_ap_skyline_lounge",
+        "loc_suburb_laundry", "sub_laundry_lounge", "sub_laundry_machines",
+        "sub_crisis_press_room",
+    ):
+        return "open"
     # Special Condition: Abandoned School Building zone is always accessible 24/7
     # (nobody bothers to lock the doors or check the area for anyone)
-    if any(k in low for k in (
-        "zone_abandoned_school", "bld_abandoned_school", "abandoned old campus", "loc_old_storage_3b",
-        "loc_delinquent_boiler_den", "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
-        "overgrown hallway", "dark_equipment_room"
-    )):
+    from mechanics.world.world_schedule import is_abandoned_school_node
+    _is_ahs_occult_clubroom = (node_id == "loc_old_storage_3b" and z_id == "zone_school_campus")
+    if not _is_ahs_occult_clubroom and is_abandoned_school_node(node_id=node_id, location_str=f"{z_id} {name}"):
         return "open"
     if category == "commercial" or z_id in ("zone_commercial", "zone_downtown"):
         return "open"
-    # Private homes/residences/bedrooms
-    if any(k in low for k in ("player_house", "player_bedroom", "friend_house", "residence", "bedroom", "apartment", "guest quarters", "home")) and not any(k in low for k in ("glasshouse", "greenhouse", "boathouse", "treehouse", "powerhouse", "lighthouse", "clubhouse", "courthouse", "homeroom", "coffeehouse", "teahouse", "bakehouse", "steakhouse")):
+    # Private homes/residences/bedrooms (skip compound non-residential nouns)
+    is_compound_nonres = any(k in low for k in COMPOUND_HOUSE_EXCLUSIONS)
+    if not is_compound_nonres and (
+        any(k in low for k in ("player_house", "player_bedroom", "friend_house", "guest quarters"))
+        or re.search(r"\b(residence|bedroom|apartment|home)\b", low)
+    ):
         return "private"
-    if category == "residential" and not any(k in low for k in ("park", "street", "sidewalk", "avenue")):
+    if category == "residential" and not any(k in low for k in ("park", "street", "sidewalk", "avenue", "laundry")):
         return "private"
     # Restricted spaces
     if any(k in low for k in (
         "loc_staff_room", "staff room", "teachers' staff", "teacher's desk", "print room",
         "council_archives", "archive files", "chemical_closet", "chemical storage",
         "soundproof_closet", "loc_rooftop", "school rooftop", "barracks",
-        "arcane archives", "fume hood", "safe"
-    )):
+        "arcane archives", "fume hood"
+    )) or (re.search(r"\bsafe\b", low) and "safety" not in low):
         return "restricted"
     return "open"
 
@@ -255,11 +289,9 @@ def infer_curfew_window(node_type: str, z_id: str, node_id: str, name: str, cate
         return explicit_start, explicit_end
     low = f"{z_id} {node_id} {name}".lower()
     # Special Condition: Abandoned School Building zone has no curfew or lock checks
-    if any(k in low for k in (
-        "zone_abandoned_school", "bld_abandoned_school", "abandoned old campus", "loc_old_storage_3b",
-        "loc_delinquent_boiler_den", "loc_derelict_gym", "loc_clock_tower", "loc_old_infirmary", "loc_ruined_hallway",
-        "overgrown hallway", "dark_equipment_room"
-    )):
+    from mechanics.world.world_schedule import is_abandoned_school_node
+    _is_ahs_occult_clubroom = (node_id == "loc_old_storage_3b" and z_id == "zone_school_campus")
+    if not _is_ahs_occult_clubroom and is_abandoned_school_node(node_id=node_id, location_str=low):
         return None, None
     # Academic facilities (High School campus) have after-hours lockdown/curfew 20:00 (1200) to 07:00 (420),
     # except exterior main gates and open University campuses in urban anomalous scenarios.
@@ -483,7 +515,8 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
 
     for zone in zones:
         z_id = zone.get("id") or f"zone_{_slugify(zone.get('name', 'region'))}"
-        zone_name = zone.get("name", "World Region")
+        raw_zone_name = str(zone.get("name") or "World Region")
+        zone_name = raw_zone_name
 
         if school_name and (zone_name in ("Main Academy Campus", "Main Academy Building") or z_id == "zone_school_main"):
             zone_name = school_name
@@ -555,9 +588,9 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             })
 
         is_zone_hub = bool(zone.get("is_hub"))
-        z_category = infer_node_category(z_id, "", zone_name)
-        z_access = infer_access_tier("ZONE", z_id, z_id, zone_name, z_category, zone.get("access_tier", ""))
-        z_curfew_start, z_curfew_end = infer_curfew_window("ZONE", z_id, z_id, zone_name, z_category, zone.get("curfew_start_min"), zone.get("curfew_end_min"))
+        z_category = infer_node_category(z_id, "", raw_zone_name)
+        z_access = infer_access_tier("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("access_tier", ""))
+        z_curfew_start, z_curfew_end = infer_curfew_window("ZONE", z_id, z_id, raw_zone_name, z_category, zone.get("curfew_start_min"), zone.get("curfew_end_min"))
 
         # 1. Insert Zone Node
         db.save_world_node(
@@ -569,7 +602,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             category=z_category,
             privacy_level="public",
             is_enclosed=0,
-            is_transit_hub=infer_is_transit_hub("ZONE", z_id, "", zone_name, is_zone_hub),
+            is_transit_hub=infer_is_transit_hub("ZONE", z_id, "", raw_zone_name, is_zone_hub),
             access_tier=z_access,
             curfew_start_min=z_curfew_start,
             curfew_end_min=z_curfew_end,
@@ -585,7 +618,8 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                 from mechanics.social.origin_mode import is_student_operative
                 if not is_student_operative(session_id):
                     continue
-            primary_name = primary.get("name", "Main Area")
+            raw_primary_name = str(primary.get("name") or "Main Area")
+            primary_name = raw_primary_name
 
             if classroom_name and (primary_name == "Homeroom Classroom" or p_id == "loc_homeroom"):
                 primary_name = classroom_name
@@ -639,12 +673,12 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             }
             if primary.get("is_hidden"):
                 p_seed_meta["true_name"] = true_primary_name
-            p_category = infer_node_category(z_id, p_id, primary_name, parent_category=z_category)
-            p_privacy = infer_node_privacy("FACILITY", p_id, primary_name, explicit_meta=p_seed_meta)
-            p_enclosed = infer_is_enclosed("FACILITY", p_id, primary_name)
-            p_transit = infer_is_transit_hub("FACILITY", z_id, p_id, primary_name, explicit_meta=p_seed_meta)
-            p_access = infer_access_tier("FACILITY", z_id, p_id, primary_name, p_category, primary.get("access_tier", ""))
-            p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", z_id, p_id, primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
+            p_category = infer_node_category(z_id, p_id, raw_primary_name, parent_category=z_category)
+            p_privacy = infer_node_privacy("FACILITY", p_id, raw_primary_name, explicit_meta=p_seed_meta)
+            p_enclosed = infer_is_enclosed("FACILITY", p_id, raw_primary_name)
+            p_transit = infer_is_transit_hub("FACILITY", z_id, p_id, raw_primary_name, explicit_meta=p_seed_meta)
+            p_access = infer_access_tier("FACILITY", z_id, p_id, raw_primary_name, p_category, primary.get("access_tier", ""), explicit_meta=p_seed_meta)
+            p_curfew_start, p_curfew_end = infer_curfew_window("FACILITY", z_id, p_id, raw_primary_name, p_category, primary.get("curfew_start_min"), primary.get("curfew_end_min"))
             if p_transit:
                 transit_hubs.append(p_id)
 
@@ -684,19 +718,21 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
             room_parent_sub_map: dict[str, Any] = {}
 
             for sub in subs:
-                s_id = sub.get("id") or f"sub_{_slugify(primary_name)}_{_slugify(sub.get('name', 'room'))}"
-                sub_name = sub.get("name", "Main Area")
+                s_id = sub.get("id") or f"sub_{_slugify(raw_primary_name)}_{_slugify(sub.get('name', 'room'))}"
+                raw_sub_name = str(sub.get("name") or "Main Area")
+                sub_name = raw_sub_name
 
                 if classroom_name and (sub_name == "Homeroom Classroom" or s_id == "loc_homeroom"):
                     sub_name = classroom_name
-                elif (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in primary_name.lower()):
+                elif (sub_name == "Player's Desk" or s_id == "sub_player_desk") and (p_id == "loc_homeroom" or "homeroom" in raw_primary_name.lower()):
                     sub_name = player_desk
                 elif is_urban_anomalous_scenario(scenario_key) and s_id.startswith(("loc_hq_", "sub_priv1_", "sub_priv2_")):
-                    sub_name = get_session_urban_facility_name(session_id, "zone_agency_hq", s_id, sub_name, scenario_key, char_name)
+                    sub_z_id = "zone_agency_hq" if s_id.startswith("loc_hq_") else z_id
+                    sub_name = get_session_urban_facility_name(session_id, sub_z_id, s_id, sub_name, scenario_key, char_name)
                 sub_name = resolve_session_location_tokens(session_id, sub_name, scenario_key, char_name)
 
                 is_child_or_discreet = bool(sub.get("parent_sub_id")) or sub.get("privacy_level") in ("private", "semi_private")
-                if (sub.get("is_entrance") or is_entrance_sublocation(sub_name)) and not entrance_node_id and not is_child_or_discreet:
+                if (sub.get("is_entrance") or is_entrance_sublocation(raw_sub_name)) and not entrance_node_id and not is_child_or_discreet:
                     entrance_node_id = s_id
 
                 s_seed_meta = {
@@ -711,16 +747,20 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                     )
                     if k in sub
                 }
-                s_privacy = infer_node_privacy("ROOM", s_id, sub_name, explicit_meta=s_seed_meta) or p_privacy
-                s_access = infer_access_tier("ROOM", z_id, s_id, sub_name, p_category, sub.get("access_tier", ""))
+                s_effective_meta = {
+                    **s_seed_meta,
+                    "is_anomalous": bool(s_seed_meta.get("is_anomalous") or p_seed_meta.get("is_anomalous")),
+                }
+                s_privacy = infer_node_privacy("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta) or p_privacy
+                s_access = infer_access_tier("ROOM", z_id, s_id, raw_sub_name, p_category, sub.get("access_tier", ""), explicit_meta=s_effective_meta)
                 p_sub_parent = sub.get("parent_sub_id")
-                if s_access == "open":
+                if s_access == "open" and not s_effective_meta["is_anomalous"]:
                     parent_sub_access = room_access_map.get(p_sub_parent) if p_sub_parent else None
                     if parent_sub_access in ("restricted", "private"):
                         s_access = parent_sub_access
                     elif p_access in ("restricted", "private"):
                         s_access = p_access
-                s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", z_id, s_id, sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
+                s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", z_id, s_id, raw_sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
                 if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in ("loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2"):
                     s_curfew_start, s_curfew_end = p_curfew_start, p_curfew_end
 
@@ -731,12 +771,12 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                 if "is_enclosed" in s_seed_meta and s_seed_meta["is_enclosed"] is not None:
                     s_enclosed = int(bool(s_seed_meta["is_enclosed"]))
                 elif p_id.startswith("bld_school_") or p_id in mega_complex_ids:
-                    s_enclosed = infer_is_enclosed("ROOM", s_id, sub_name, explicit_meta=s_seed_meta)
+                    s_enclosed = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
                 else:
-                    r_enc = infer_is_enclosed("ROOM", s_id, sub_name, explicit_meta=s_seed_meta)
+                    r_enc = infer_is_enclosed("ROOM", s_id, raw_sub_name, explicit_meta=s_seed_meta)
                     if r_enc == 0:
                         s_enclosed = 0
-                    elif any(k in f"{s_id} {sub_name}".lower() for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
+                    elif any(k in f"{s_id} {raw_sub_name}".lower() for k in ("cabin interior", "boathouse", "storage shed", "changing cabanas", "underpass")):
                         s_enclosed = 1
                     else:
                         s_enclosed = p_enclosed
@@ -745,9 +785,16 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                 room_locked_map[s_id] = bool(sub.get("is_locked", False))
                 room_parent_sub_map[s_id] = sub.get("parent_sub_id")
 
-                s_transit = infer_is_transit_hub("ROOM", z_id, s_id, sub_name, explicit_meta=s_seed_meta)
+                s_transit = infer_is_transit_hub("ROOM", z_id, s_id, raw_sub_name, explicit_meta=s_seed_meta)
                 if s_transit:
                     transit_hubs.append(s_id)
+
+                room_sensory = resolve_session_location_tokens(
+                    session_id,
+                    str(sub.get("sensory") or sub.get("atmosphere") or "").strip(),
+                    scenario_key,
+                    char_name,
+                )
 
                 db.save_world_node(
                     session_id=session_id,
@@ -762,7 +809,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                     access_tier=s_access,
                     curfew_start_min=s_curfew_start,
                     curfew_end_min=s_curfew_end,
-                    atmosphere=atmosphere,
+                    atmosphere=room_sensory,
                     is_dynamic=0,
                     state_json=s_seed_meta if s_seed_meta else None
                 )

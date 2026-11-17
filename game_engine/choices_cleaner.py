@@ -325,7 +325,7 @@ def deduplicate_redundant_choices(
                 winner = dict(existing)
                 loser = cand
             # Preserve verified quest / target metadata if winner lacked it
-            for k_meta in ("target_npc", "quest_id", "sub_obj_id", "stage_index", "contract_type", "clue_source_id"):
+            for k_meta in ("target_npc", "target_location", "target_node_id", "quest_id", "sub_obj_id", "stage_index", "contract_type", "clue_source_id"):
                 if not winner.get(k_meta) and loser.get(k_meta):
                     winner[k_meta] = loser[k_meta]
             for k_bool in ("is_quest_action", "is_story_quest", "is_climax_action", "is_premature_climax", "rush_climax", "off_hours_fallback", "is_bonus_clue", "_python_verified_quest", "_server_stamped", "_priority_slot"):
@@ -2651,8 +2651,11 @@ def build_hybrid_turn_choices(
     if in_active_intimate_turn:
         return _sanitize_choice_labels(cleaned[:5])
 
-    # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint in live session
-    if session_id and eff_loc and not any(isinstance(c, dict) and c.get("is_quest_action") for c in cleaned):
+    # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint (or remote Story Quest travel)
+    if session_id and eff_loc and (
+        not any(isinstance(c, dict) and c.get("is_quest_action") for c in cleaned)
+        or not any(isinstance(c, dict) and c.get("is_quest_action") and c.get("is_story_quest") and not c.get("is_premature_climax") for c in cleaned)
+    ):
         try:
             from mechanics.world.waypoints import tag_and_enrich_quest_choices
             tagged_fb = tag_and_enrich_quest_choices(

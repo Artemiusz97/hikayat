@@ -1,4 +1,3 @@
-import React from 'react';
 import { useAuth } from './hooks/useAuth';
 import { useGameSession } from './hooks/useGameSession';
 import AuthView from './views/AuthView';
@@ -90,6 +89,7 @@ function App() {
       allocateStatPoint={allocateStatPoint}
       session={session}
       setSession={setSession}
+      refreshSession={refreshSession}
       lastSyncTimestamp={lastSyncTimestamp}
       processingTurn={processingTurn}
       pendingAction={pendingAction}

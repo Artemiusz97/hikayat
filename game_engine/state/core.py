@@ -6,7 +6,6 @@ import re
 import json
 import random
 import logging
-from config import LLM_PASS1_TIMEOUT
 from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine
 from db import adb

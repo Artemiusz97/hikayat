@@ -4,7 +4,7 @@ import logging
 import asyncio
 
 import db
-from models.llm_schemas import NarrationOutcome, DeterministicTurnNarration, DeterministicCombatNarration
+from models.llm_schemas import DeterministicTurnNarration, DeterministicCombatNarration
 from llm_client import GM_SHARED_RULES, call_llm_json, call_llm_json_stream
 from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine

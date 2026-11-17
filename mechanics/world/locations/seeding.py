@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 import db
+import scenario_data
 from .seeds import *
 import sqlite3
 from .seeds import _load_seeds, _slugify, _SEED_PATH, _is_school_campus_hq, _SCHOOL_CAMPUS_HQ_KEYWORDS
@@ -214,8 +215,13 @@ def get_archetype_starting_location(
                     p_name = get_session_agency_residence_name(session_id, scenario_key)
 
                 elif p_name == "Player's House" or p_id == "loc_player_house":
-
-                    p_name = get_session_player_house_name(session_id, char_name, scenario_key)
+                    from .realty_catalog import is_anomalous_realty_scenario
+                    from mechanics.social.origin_mode import is_student_operative
+                    p_name = (
+                        "Tree-Lined Suburban House"
+                        if (is_anomalous_realty_scenario(scenario_key) and not is_student_operative(session_id))
+                        else get_session_player_house_name(session_id, char_name, scenario_key)
+                    )
 
                 elif p_name == "Neighborhood Park" or p_id == "loc_local_park":
 
@@ -254,7 +260,8 @@ def get_archetype_starting_location(
     # If preferred_hint is provided, check for a match
 
     if preferred_hint:
-
+        from .hierarchy import resolve_session_location_tokens
+        preferred_hint = resolve_session_location_tokens(session_id, preferred_hint, scenario_key, char_name)
         hint_clean = preferred_hint.lower().strip()
 
         hint_parts = [hp.strip() for hp in re.split(r"[➔\->|/]", hint_clean) if hp.strip()]
@@ -1112,9 +1119,9 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
     except Exception:
         pass
 
-    school_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
-
-    classroom_name = get_session_classroom_name(session_id, scenario_key) if is_school_scenario(scenario_key) else None
+    has_school_campus = is_school_scenario(scenario_key) or scenario_data.has_school_campus_mechanics(scenario_key)
+    school_name = get_session_school_name(session_id, scenario_key) if has_school_campus else None
+    classroom_name = get_session_classroom_name(session_id, scenario_key) if has_school_campus else None
 
     player_desk = get_session_player_desk_name(session_id, char_name)
 
@@ -1130,15 +1137,11 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
 
 
-    school_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    classroom_name = get_session_classroom_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    player_desk = get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else ""
-
+    school_name = get_session_school_name(session_id, scenario_key) if has_school_campus else ""
+    classroom_name = get_session_classroom_name(session_id, scenario_key) if has_school_campus else ""
+    player_desk = get_session_player_desk_name(session_id, char_name=char_name) if has_school_campus else ""
     player_house = get_session_player_house_name(session_id, char_name=char_name, scenario_key=scenario_key)
-
-    park_name = get_session_park_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
+    park_name = get_session_park_name(session_id, scenario_key) if has_school_campus else ""
 
     cafe_name = get_session_cafe_name(session_id, scenario_key)
 
@@ -1188,13 +1191,10 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     rec_park_name = get_session_recreation_park_name(session_id, scenario_key)
 
-    athletics_name = get_session_athletics_complex_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    commons_name = get_session_student_commons_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    arts_name = get_session_cultural_arts_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
+    athletics_name = get_session_athletics_complex_name(session_id, scenario_key) if has_school_campus else ""
+    commons_name = get_session_student_commons_name(session_id, scenario_key) if has_school_campus else ""
+    arts_name = get_session_cultural_arts_name(session_id, scenario_key) if has_school_campus else ""
+    abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if has_school_campus else ""
 
     agency_hq_name = get_session_agency_hq_name(session_id, scenario_key)
     agency_res_name = get_session_agency_residence_name(session_id, scenario_key)
@@ -1582,10 +1582,9 @@ def resolve_companion_origin_location(session_id: int, current_location: str, sc
     # Scenario-specific default safe hub fallback
 
     scen = str(scen_key).lower()
-
-    if is_school_scenario(scen):
-
-        return "Oakhaven Private Academy ➔ Main Courtyard ➔ Central Plaza"
+    if is_school_scenario(scen) or scenario_data.has_school_campus_mechanics(scen):
+        school_nm = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
+        return f"{school_nm} ➔ Central Courtyard ➔ Central Courtyard & Campus Cafeteria"
 
     elif "cyberpunk" in scen:
 

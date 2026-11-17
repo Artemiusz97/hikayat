@@ -1288,20 +1288,6 @@ def rollback_ties_after_turn(
         return deleted_count + reopened_count + restored_count
 
 
-def rollback_intimate_events_after_turn(
-    session_id: int,
-    turn: int,
-    conn: Optional[sqlite3.Connection] = None,
-) -> int:
-    """Rolls back intimacy ledger events after turn."""
-    try:
-        from mechanics.social.persona.intimacy.ledger import delete_intimate_events_after_turn
-        return delete_intimate_events_after_turn(session_id, turn, conn=conn)
-    except Exception as e:
-        logger.warning(f"Could not rollback intimate events: {e}")
-        return 0
-
-
 # --- Migration 26: Backfill Legacy Relations ---
 
 def migrate_legacy_relations(conn: Optional[sqlite3.Connection] = None) -> dict:

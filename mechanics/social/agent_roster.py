@@ -106,7 +106,7 @@ PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Heavy Ordnance & Barriers",
         "hq_room": "Tactical Armory & Ordnance Depot",
         "hq_node_id": "loc_hq_tactical_armory",
-        "city_hangout": "Industrial Zone ➔ Vulcan Heavy Steel Foundry ➔ Corrugated Iron Loading Bay",
+        "city_hangout": "Industrial Zone ➔ Heavy Steel Foundry & Mill ➔ Corrugated Iron Loading Bay",
         "hangout_node_id": "sub_foundry_loading",
         "summary": "Carries portable reality-grounding pylons like featherweight tripods and laughs off kinetic shockwaves.",
     },
@@ -172,8 +172,8 @@ PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Evidence & Vault Intake",
         "hq_room": "Main Lobby & Security Hub",
         "hq_node_id": "loc_hq_main_lobby",
-        "city_hangout": "{session_school} ➔ Central Courtyard & Campus Cafeteria ➔ Shaded Vending Machine Pavilion",
-        "hangout_node_id": "sub_vending_alcove",
+        "city_hangout": "City Center ➔ Sunken Plaza Galleria ➔ Glass Skywalk Dining Terrace",
+        "hangout_node_id": "sub_plaza_terrace",
         "summary": "Sharp-eyed rookie who meticulously tags altered objects and double-checks every containment seal.",
     },
     {
@@ -183,8 +183,8 @@ PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Field Intake Squad",
         "hq_room": "Tactical Armory & Ordnance Depot",
         "hq_node_id": "loc_hq_tactical_armory",
-        "city_hangout": "{session_school} ➔ Main Gymnasium & Athletic Field ➔ Outdoor Running Track & Bleachers",
-        "hangout_node_id": "sub_athletic_track",
+        "city_hangout": "Suburban Residential District ➔ Neighborhood Park ➔ Tree-Lined Park Entrance Path",
+        "hangout_node_id": "sub_park_archway",
         "summary": "Former urban parkour runner drafted into the Bureau after outrunning a spatial distortion hound.",
     },
 ]
@@ -277,7 +277,7 @@ PRIVATE_AGENCY_2_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Tactical Entry & Armory",
         "hq_room": "Vaulted Armory & Gunsmithing Bench",
         "hq_node_id": "sub_priv2_armory",
-        "city_hangout": "City Docks & Harbor ➔ Automated Container Pier 12 ➔ Towering Gantry Crane Operator Cab",
+        "city_hangout": "City Docks & Harbor ➔ Automated Container Pier ➔ Towering Gantry Crane Operator Cab",
         "hangout_node_id": "sub_pier_gantry",
         "summary": "Seasoned entry tactician and master gunsmith who hand-fits match barrels, tritium sights, and cold-iron loads for every specialist on the roster.",
     },
@@ -401,8 +401,8 @@ MONASTIC_ORDER_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Talisman Inscription",
         "hq_room": "Grand Torii Gate & Omikuji Talisman Stand",
         "hq_node_id": "loc_et_torii_approach",
-        "city_hangout": "{session_school} ➔ Main Academic Building & Classrooms ➔ School Rooftop",
-        "hangout_node_id": "loc_school_rooftop",
+        "city_hangout": "Sacred Mountain Sanctuary & Onsen Quarter ➔ Stone-Lantern Pilgrimage & Tea Street ➔ Votive Ema Plaque & Bell Terrace",
+        "hangout_node_id": "sub_es_ema_terrace",
         "summary": "Balances daytime academic studies with evening exorcism patrols and talisman calligraphy.",
     },
     {
@@ -426,7 +426,7 @@ OCCULT_CULT_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Inner Circle of Awakening",
         "hq_room": "Abyssal Conduit Inner Sanctum",
         "hq_node_id": "sub_cult_sanctum",
-        "city_hangout": "Uptown District ➔ St. Jude's Historic Cathedral ➔ Stained-Glass Nave & Sanctuary Altar",
+        "city_hangout": "Uptown District ➔ Historic Cathedral & Sanctuary ➔ Stained-Glass Nave & Sanctuary Altar",
         "hangout_node_id": "sub_cathedral_nave",
         "summary": "Preaches that the approaching World-Ending Anomaly is not a disaster, but humanity's overdue metamorphosis.",
     },
@@ -506,7 +506,7 @@ CLANDESTINE_SYNDICATE_BLUEPRINTS: List[Dict[str, Any]] = [
         "division": "Black-Bag Operations",
         "hq_room": "Contraband Entity Auction Pens",
         "hq_node_id": "sub_synd_pens",
-        "city_hangout": "City Docks & Harbor ➔ Blackanchor Drydock & Warehouses ➔ Fog-Shrouded Under-Pier Catwalk",
+        "city_hangout": "City Docks & Harbor ➔ Deepwater Drydock & Warehouses ➔ Fog-Shrouded Under-Pier Catwalk",
         "hangout_node_id": "sub_smuggler_pier",
         "summary": "Makes inconvenient witnesses and rogue containment leaks disappear without leaving a single forensic trace.",
     },
@@ -614,7 +614,7 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "clique": "Academics",
         "primary_node_id": "loc_senior_class",
         "secondary_node_id": "loc_student_council",
-        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Student Council Office",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Student Council Office",
         "summary": "Immaculate student council honor student who reviews budget spreadsheets by day and takes high-risk Public Agency containment bounties after the 15:00 bell.",
     },
     {
@@ -639,8 +639,8 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "club": "Drama & Theater Union",
         "clique": "Theater",
         "primary_node_id": "loc_sophomore_class",
-        "secondary_node_id": "loc_auditorium",
-        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Auditorium Stage",
+        "secondary_node_id": "loc_auditorium_stage",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Main Auditorium Stage & Orchestra Pit",
         "summary": "Unassuming backstage lighting tech who packs a folding takedown carbine in a violin case and hunts mirror-rift entities for freelance tuition money.",
     },
     {
@@ -666,7 +666,7 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "clique": "Loner",
         "primary_node_id": "loc_senior_class",
         "secondary_node_id": "loc_old_storage_3b",
-        "city_hangout": "{session_school} ➔ Abandoned Old Campus Wing ➔ Old Storage Room 3-B",
+        "city_hangout": "{session_school} ➔ General Student Clubroom Wing ➔ Old Storage Room 3-B",
         "summary": "Soft-spoken folklore archivist who keeps a consecrated silver athame tucked between pre-war town registries and catalogs campus spatial anomalies.",
     },
     {
@@ -691,8 +691,8 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "club": "Journalism & Media",
         "clique": "Media",
         "primary_node_id": "loc_freshman_class",
-        "secondary_node_id": "loc_broadcast_room",
-        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Campus Broadcast & Newspaper Room",
+        "secondary_node_id": "loc_broadcasting_room",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Campus Media & Broadcasting Room",
         "summary": "First-year broadcast technician who triangulates cognitohazard numbers stations on the school radio array and sells coordinates to Public Agency dispatch.",
     },
     {
@@ -704,8 +704,8 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "club": "Fine Arts Guild",
         "clique": "Artists",
         "primary_node_id": "loc_freshman_class",
-        "secondary_node_id": "loc_art_studio",
-        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Art Studio",
+        "secondary_node_id": "loc_fine_arts_studio",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Fine Arts Studio",
         "summary": "Charcoal-stained freshman whose automatic sketches accurately predict dimensional fracture lines hours before instruments register a spike.",
     },
     # --- 8 Junior Agency-Affiliated Student Operatives ---
@@ -810,7 +810,7 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "clique": "Artists",
         "primary_node_id": "loc_sophomore_class",
         "secondary_node_id": "loc_et_zen_tea_garden",
-        "city_hangout": "{session_school} ➔ Student Union & Cultural Arts Wing ➔ Botanical Glasshouse & Garden",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Botanical Glasshouse & Garden",
         "summary": "Disciplined sophomore calligraphy student who practices sacred blade forms at dawn and wards campus stairwells after dusk.",
     },
 ]
@@ -1294,7 +1294,7 @@ def generate_student_special_agents_roster(
         innate_abilities = build_awakened_kit_ids(ag_attr, ag_arch, ag_med)
 
         prim_nid = str(bp.get("primary_node_id") or "loc_sophomore_class").strip()
-        sec_nid = str(bp.get("secondary_node_id") or "loc_courtyard").strip()
+        sec_nid = str(bp.get("secondary_node_id") or "loc_school_courtyard").strip()
         primary_facility = grade_room_names.get(grade, f"{school_name} ➔ Main Academic Building & Classrooms ➔ Sophomore Classroom 2-A")
         secondary_facility = str(bp.get("city_hangout") or "").replace("{session_school}", school_name)
         try:

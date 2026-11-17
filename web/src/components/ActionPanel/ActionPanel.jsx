@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Send, Lock, Zap, RefreshCw, ChevronDown, ChevronUp, Smartphone, PenLine, X, Users, Loader2 } from 'lucide-react';
 import { apiCall } from '../../api/client';
@@ -22,9 +22,9 @@ const LOCALIZED_QUEST_BRACKET_RE = /^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[
 const cleanChoiceDisplayLabel = (choice, questIcon) => {
   const rawDisplayLabel = String(choice?.label || choice?.text || '');
   const hasQuestMeta = Boolean(questIcon || choice?.is_quest_action || choice?.is_story_quest || choice?.is_climax_action);
-  let stripped = rawDisplayLabel.replace(LOCALIZED_QUEST_BRACKET_RE, '');
+  let stripped = rawDisplayLabel.replace(/^[🚶🧭📍✨🔍💬🗣️🎭💖🎲📜🏕️☕🛋️🖐️🎒🚪⛓️🛡️👔🧩📱\s]+/, '').replace(LOCALIZED_QUEST_BRACKET_RE, '');
   if (hasQuestMeta) {
-    stripped = stripped.replace(/^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
+    stripped = stripped.replace(/^(?:[⭐🎯⚡💌🔹🌙⏳🤝🚶🧭📍\s]+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
   }
   return stripped.replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '').trim() || rawDisplayLabel;
 };
@@ -237,10 +237,20 @@ const getChoiceSkillEmoji = (choice) => {
       return '🎒';
     }
     if (
+      String(choice.intent || '').toLowerCase() === 'movement' ||
       [
         'travel', 'head to', 'head toward', 'depart', 'walk to', 'walk toward', 'exit', 'leave',
         'slip out', 'make your way', 'return to', 'step out', 'step into', 'go to', 'move to',
         'journey', 'navigate to',
+        'step through', 'head through', 'descend into', 'descend the', 'cross into', 'enter the',
+        'venture into', 'slip into',
+        'udaj się do', 'idź do', 'podróżuj', 'kieruj się', 'wejdź do', 'wejdź w', 'przejdź do',
+        'przejdź przez', 'zejdź do', 'wkrocz do', 'odwiedź',
+        'pergi ke', 'menuju ke', 'berjalan ke', 'masuk ke', 'melangkah ke', 'turun ke', 'melintas ke',
+        'lawati', 'kembali ke',
+        '前往', '去往', '走进', '进入', '动身前往', '返回', '穿过', '深入', '下到',
+        'gehe zu', 'gehe nach', 'gehe durch', 'schreite durch', 'reise nach', 'reise zu', 'betrete ',
+        'begib dich', 'steige hinab', 'zurückkehren nach',
       ].some((k) => rawL.includes(k)) ||
       /\b(travel|depart|exit|leave|journey|flee)\b/.test(rawL)
     ) {
@@ -267,18 +277,22 @@ const getChoiceEmoji = (choice) => {
 };
 
 const detectMerchantAvailableClient = (session, inCombat) => {
-  if (!session || inCombat) return { available: false, label: 'Talk to Merchant' };
+  if (!session || inCombat) {
+    return { available: false, label: 'Talk to Merchant', closedVisible: false, closedMessage: '' };
+  }
   if (typeof session.merchant_available === 'boolean') {
     return {
       available: session.merchant_available,
       label: session.merchant_action_label || 'Visit Market / Shop',
+      closedVisible: Boolean(!session.merchant_available && session.shop_closed_visible),
+      closedMessage: String(session.shop_closed_message || ''),
     };
   }
   const merchant = session.merchant || {};
   const loc = String(session.current_location || '').toLowerCase();
   const shopKeywords = [
     'shop', 'store', 'market', 'bazaar', 'emporium', 'café', 'cafe', 'pharmacy',
-    'armory', 'blacksmith', 'weaponsmith', 'quartermaster', 'convenience', 'boutique',
+    'armory', 'blacksmith', 'weaponsmith', 'convenience', 'boutique',
     'bakery', 'stall', 'merchant', 'trader', 'noodle bar', 'canteen', 'saloon', 'tavern',
     'inn', 'trading post', 'general store', 'guild shop', 'alchemist', 'herbalist', 'forge',
   ];
@@ -291,7 +305,7 @@ const detectMerchantAvailableClient = (session, inCombat) => {
   } else if (flavorName) {
     label = `Trade with ${flavorName}`;
   }
-  return { available: isAvailable, label };
+  return { available: isAvailable, label, closedVisible: false, closedMessage: '' };
 };
 
 const getOddsBadgeClass = (pct) => {
@@ -332,6 +346,21 @@ const ActionPanel = ({
   const [isChoicesCollapsed, setIsChoicesCollapsed] = useState(false);
   const [isCustomCollapsed, setIsCustomCollapsed] = useState(false);
   const isBusy = processing || isStreaming || Boolean(phoneOpen);
+  const isRetryBusy = processing || Boolean(phoneOpen);
+
+  const isChoicePending = (choice, idx) => {
+    if (!processing || !pendingAction) return false;
+    if (idx !== undefined && pendingAction.choice_index !== undefined && pendingAction.choice_index === idx) {
+      return true;
+    }
+    const dc = pendingAction.direct_choice;
+    if (!dc || !choice) return false;
+    if (dc === choice) return true;
+    if (dc.label && choice.label && dc.label === choice.label) return true;
+    if (dc.name && choice.name && dc.name === choice.name) return true;
+    if (dc.text && choice.text && dc.text === choice.text) return true;
+    return false;
+  };
 
   const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = new Set(
@@ -369,7 +398,12 @@ const ActionPanel = ({
     livingEnemies.find((e) => e.name === selectedCombatTarget || (e.id && String(e.id) === String(selectedCombatTarget))) || livingEnemies[0] || null;
   const selectedTargetName = activeTargetObj?.name || selectedCombatTarget || null;
 
-  const { available: merchantAvailable, label: merchantActionLabel } = detectMerchantAvailableClient(
+  const {
+    available: merchantAvailable,
+    label: merchantActionLabel,
+    closedVisible: merchantClosedVisible,
+    closedMessage: merchantClosedMessage,
+  } = detectMerchantAvailableClient(
     session,
     inCombat
   );
@@ -816,7 +850,7 @@ const ActionPanel = ({
                     {onRetry && (
                       <button
                         type="button"
-                        disabled={isBusy}
+                        disabled={isRetryBusy}
                         onClick={onRetry}
                         title="Re-generate this turn's narration & tactical choices"
                         className={`px-2 py-0.5 rounded text-[11px] font-bold flex items-center gap-1 transition-colors disabled:opacity-50 ${
@@ -825,7 +859,7 @@ const ActionPanel = ({
                             : 'bg-black/60 hover:bg-black/90 text-gray-300 hover:text-amber-200 border border-fantasy-border hover:border-amber-500/50'
                         }`}
                       >
-                        <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
+                        <RefreshCw size={11} className={processing ? "animate-spin" : ""} />
                         <span>{t('common.retry')}</span>
                       </button>
                     )}
@@ -853,16 +887,7 @@ const ActionPanel = ({
                       const choiceEmoji = getChoiceEmoji(choice);
                       const statName = String(choice.stat || 'FREE').toUpperCase();
                       const displayStat = statName === 'NONE' ? 'FREE' : statName;
-                      const isPending = Boolean(
-                        processing && pendingAction && (
-                          (pendingAction.choice_index !== undefined && pendingAction.choice_index === idx) ||
-                          (pendingAction.direct_choice && (
-                            pendingAction.direct_choice === choice ||
-                            pendingAction.direct_choice.label === choice.label ||
-                            pendingAction.direct_choice.text === choice.text
-                          ))
-                        )
-                      );
+                      const isPending = isChoicePending(choice, idx);
                       return (
                         <button
                           key={idx}
@@ -926,14 +951,7 @@ const ActionPanel = ({
                         const canAfford = item.can_afford !== false;
                         const itemStat = String(item.stat || 'STR').toUpperCase();
                         const itemEmoji = STAT_EMOJI[itemStat] || getChoiceEmoji(item);
-                        const isPending = Boolean(
-                          processing && pendingAction && pendingAction.direct_choice && (
-                            pendingAction.direct_choice === item ||
-                            pendingAction.direct_choice.label === item.label ||
-                            pendingAction.direct_choice.name === item.name ||
-                            pendingAction.direct_choice.text === item.text
-                          )
-                        );
+                        const isPending = isChoicePending(item);
                         return (
                           <button
                             key={idx}
@@ -1035,11 +1053,11 @@ const ActionPanel = ({
                     <span>⚠️ {t('actions.fallback_warning')}</span>
                     <button
                       type="button"
-                      disabled={isBusy}
+                      disabled={isRetryBusy}
                       onClick={onRetry}
                       className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/50 font-bold text-[11px] flex items-center gap-1 transition-colors"
                     >
-                      <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
+                      <RefreshCw size={11} className={processing ? "animate-spin" : ""} />
                       <span>🔄 {t('common.retry')}</span>
                     </button>
                   </div>
@@ -1052,11 +1070,11 @@ const ActionPanel = ({
                     <span>⚠️ {t('actions.truncated_warning')}</span>
                     <button
                       type="button"
-                      disabled={isBusy}
+                      disabled={isRetryBusy}
                       onClick={onRetry}
                       className="px-2 py-0.5 rounded bg-amber-600/30 hover:bg-amber-600/50 text-amber-200 border border-amber-500/50 font-bold text-[11px] flex items-center gap-1 transition-colors"
                     >
-                      <RefreshCw size={11} className={isBusy ? "animate-spin" : ""} />
+                      <RefreshCw size={11} className={processing ? "animate-spin" : ""} />
                       <span>🔄 {t('common.retry')}</span>
                     </button>
                   </div>
@@ -1076,16 +1094,7 @@ const ActionPanel = ({
                     const questBadge = getChoiceQuestBadge(questIcon, t);
                     const cleanDisplayLabel = cleanChoiceDisplayLabel(choice, questIcon);
 
-                    const isPending = Boolean(
-                      processing && pendingAction && (
-                        (pendingAction.choice_index !== undefined && pendingAction.choice_index === idx) ||
-                        (pendingAction.direct_choice && (
-                          pendingAction.direct_choice === choice ||
-                          pendingAction.direct_choice.label === choice.label ||
-                          pendingAction.direct_choice.text === choice.text
-                        ))
-                      )
-                    );
+                    const isPending = isChoicePending(choice, idx);
 
                     return (
                       <button
@@ -1181,6 +1190,27 @@ const ActionPanel = ({
                       </span>
                     </button>
                   )}
+
+                  {/* Disabled Closed-Shop Indicator shown ONLY at real shop venues that are off-shift or shuttered */}
+                  {!merchantAvailable && merchantClosedVisible && (
+                    <div
+                      role="status"
+                      aria-disabled="true"
+                      title={merchantClosedMessage || t('actions.shop_closed_default')}
+                      className="flex items-center justify-between gap-1.5 md:gap-2.5 px-2.5 md:px-3 py-1 md:py-1.5 rounded-md md:rounded-lg text-left bg-zinc-950/60 border border-zinc-700/50 opacity-75 cursor-not-allowed select-none"
+                    >
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-800/80 border border-zinc-600/50 text-[9.5px] md:text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-300 shrink-0">
+                        <span className="text-xs leading-none">🔒</span>
+                        <span>{t('actions.shop_closed_badge')}</span>
+                      </span>
+                      <span className="flex-1 min-w-0 text-xs sm:text-[13px] md:text-sm font-medium text-zinc-400 leading-snug truncate">
+                        {merchantClosedMessage || t('actions.shop_closed_default')}
+                      </span>
+                      <span className="px-1.5 py-0.5 rounded bg-zinc-900/90 border border-zinc-700/60 font-mono font-semibold text-zinc-400 uppercase text-[9.5px] md:text-[10px] shrink-0">
+                        {t('actions.closed_tag')}
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -1214,7 +1244,7 @@ const ActionPanel = ({
           {onRetry && (
             <button
               type="button"
-              disabled={isBusy}
+              disabled={isRetryBusy}
               onClick={onRetry}
               title="Re-roll / Re-generate this turn's narrative & choices"
               className={`shrink-0 inline-flex items-center gap-1 px-2 md:px-2.5 py-1 md:py-1.5 rounded-md md:rounded-lg font-mono text-[10.5px] md:text-[11px] font-bold transition-all border disabled:opacity-40 ${
@@ -1223,7 +1253,7 @@ const ActionPanel = ({
                   : 'bg-black/60 hover:bg-neutral-900 border-fantasy-border hover:border-amber-500/60 text-gray-300 hover:text-amber-300'
               }`}
             >
-              <RefreshCw size={11} className={isBusy ? "animate-spin text-amber-400" : "text-amber-400"} />
+              <RefreshCw size={11} className={processing ? "animate-spin text-amber-400" : "text-amber-400"} />
               <span className="hidden xs:inline">{t('actions.reroll')}</span>
             </button>
           )}

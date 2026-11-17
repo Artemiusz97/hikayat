@@ -34,7 +34,11 @@ from mechanics.combat.merchant import MERCHANT_ARCHETYPES
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
 from .security import verify_session_participant, verify_user_access
 from mechanics.world import evaluate_shop_staff_availability
-from mechanics.world.locations import get_available_merchant_types_for_location, is_school_scenario
+from mechanics.world.locations import (
+    get_available_merchant_types_for_location,
+    is_school_scenario,
+    location_has_faction_hq,
+)
 from skill_check import resolve_check
 import game_engine
 from .deps import (
@@ -49,6 +53,28 @@ from .deps import (
 )
 
 router = APIRouter()
+
+
+def _validate_or_clear_faction_quartermaster(session_id: int, loc: str, merchant: dict) -> tuple[bool, dict]:
+    """Verify `is_faction_quartermaster` is anchored to a Faction HQ; clear stale flags if not."""
+    if not isinstance(merchant, dict) or not merchant.get("is_faction_quartermaster"):
+        return False, dict(merchant) if isinstance(merchant, dict) else {}
+    sid = int(session_id or 0)
+    at_hq = bool(
+        sid
+        and (
+            location_has_faction_hq(loc or "", session_id=sid)
+            or db.get_faction_by_hq(sid, loc or "")
+        )
+    )
+    if at_hq:
+        return True, merchant
+    updated = dict(merchant)
+    updated["is_faction_quartermaster"] = False
+    updated.pop("quartermaster_faction_arch", None)
+    if sid:
+        db.save_merchant_state(sid, updated)
+    return False, updated
 
 
 def _is_spellbook(item: dict) -> bool:
@@ -593,12 +619,18 @@ async def get_merchant_shop(
         and pre_shop_ctx.get("player_faction_archetype") == "monastic_order"
     )
 
+    is_qm_active = False
+    if not is_phone_shop:
+        is_qm_active, updated_m = await adb(_validate_or_clear_faction_quartermaster, session_id, loc, merchant)
+        merchant.clear()
+        merchant.update(updated_m)
+
     shop_avail: dict | None = None
     is_shop_open = True
     shop_closed_reason = ""
     staff_keeper_name = ""
     valid_loc_types: list[str] = []
-    if not is_phone_shop and not explicit_merchant_type and not bool(merchant.get("is_faction_quartermaster")):
+    if not is_phone_shop and not explicit_merchant_type and not is_qm_active:
         loc_stores_init = get_available_merchant_types_for_location(loc, scen_key=scen_key) or []
         valid_loc_types = [
             str(s.get("type") or "").strip()
@@ -607,7 +639,7 @@ async def get_merchant_shop(
         ]
         if valid_loc_types and m_type not in valid_loc_types:
             m_type = valid_loc_types[0]
-    if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+    if not is_phone_shop and not is_qm_active:
         turn_no = int(session.get("turn_count") or 0)
         shop_avail = await adb(
             evaluate_shop_staff_availability,
@@ -917,7 +949,17 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
 
         merchant = dict(session.get("merchant") or {})
         is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
-        if not is_phone and not bool(merchant.get("is_faction_quartermaster")):
+        is_qm_haggle = False
+        if not is_phone:
+            is_qm_haggle, updated_m = await adb(
+                _validate_or_clear_faction_quartermaster,
+                req.session_id,
+                session.get("current_location") or "",
+                merchant,
+            )
+            merchant.clear()
+            merchant.update(updated_m)
+        if not is_phone and not is_qm_haggle:
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,
@@ -1094,7 +1136,17 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
             raise HTTPException(status_code=404, detail="Character not found")
 
         merchant = dict(session.get("merchant") or {})
-        if not bool(req.is_phone_shop) and not bool(merchant.get("is_faction_quartermaster")):
+        is_qm_buy = False
+        if not bool(req.is_phone_shop):
+            is_qm_buy, updated_m = await adb(
+                _validate_or_clear_faction_quartermaster,
+                req.session_id,
+                session.get("current_location") or "",
+                merchant,
+            )
+            merchant.clear()
+            merchant.update(updated_m)
+        if not bool(req.is_phone_shop) and not is_qm_buy:
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,
@@ -1292,7 +1344,17 @@ async def merchant_sell(req: MerchantSellRequest, request: Request = None):
 
         merchant = dict(session.get("merchant") or {})
         is_phone = bool(req.is_phone_shop or merchant.get("is_phone_shop"))
-        if not is_phone and not bool(merchant.get("is_faction_quartermaster")):
+        is_qm_haggle = False
+        if not is_phone:
+            is_qm_haggle, updated_m = await adb(
+                _validate_or_clear_faction_quartermaster,
+                req.session_id,
+                session.get("current_location") or "",
+                merchant,
+            )
+            merchant.clear()
+            merchant.update(updated_m)
+        if not is_phone and not is_qm_haggle:
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 req.session_id,

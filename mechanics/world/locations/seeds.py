@@ -10,8 +10,6 @@ import db
 _SEED_PATH = Path(__file__).resolve().parent.parent.parent.parent / "data" / "locations_seed.json"
 _LOCATION_SEEDS_CACHE: Dict[str, Any] = {}
 
-LOCATION_SCENARIOS = {"high_school_drama", "nsfw_high_school_drama", "nsfw_furry_high_school_drama", "furry_high_school_drama"}
-
 def _load_seeds() -> Dict[str, Any]:
     global _LOCATION_SEEDS_CACHE
     if not _LOCATION_SEEDS_CACHE and _SEED_PATH.exists():
@@ -27,28 +25,6 @@ def slugify_location(text: str) -> str:
     return re.sub(r"[-\s]+", "_", cleaned) or "loc"
 
 _slugify = slugify_location
-
-TAG_TO_LOCATION_SEED_KEY = {
-    "space": "sci_fi",
-    "sci_fi": "sci_fi",
-    "dark_fantasy": "dark_fantasy",
-    "isekai": "isekai_fantasy",
-    "isekai_fantasy": "isekai_fantasy",
-    "high_school": "high_school_drama",
-    "high_school_drama": "high_school_drama",
-    "slice_of_life": "slice_of_life",
-    "post_apocalypse": "nuclear_post_apocalypse",
-    "nuclear_post_apocalypse": "nuclear_post_apocalypse",
-    "cyberpunk": "cyberpunk",
-    "steampunk": "steampunk",
-    "fantasy": "fantasy",
-    "urban_fantasy": "anomalous_incursions",
-    "anomalous_incursions": "anomalous_incursions",
-    "anomalous_high_school": "anomalous_high_school",
-    "nsfw_gore_anomalous_high_school": "anomalous_high_school",
-    "furry_anomalous_high_school": "anomalous_high_school",
-    "nsfw_furry_gore_anomalous_high_school": "anomalous_high_school",
-}
 
 def _filter_seed_zones_for_nsfw(zones: list[dict], allow_nsfw: bool) -> list[dict]:
     """Filters out `nsfw_only: True` primary facilities and sub-locations when `allow_nsfw` is False."""
@@ -302,7 +278,7 @@ def get_session_park_name(session_id: int = 0, scenario_key: str = "high_school_
         existing = db.get_session_locations(session_id)
         for r in existing:
             p = r.get("primary_name") or ""
-            if p and p not in ("Neighborhood Park", "Local Park", "loc_local_park") and ("Park" in p or "Gardens" in p or "Grove" in p or "Commons" in p):
+            if p and p not in ("Neighborhood Park", "Local Park", "loc_local_park") and "university" not in p.lower() and ("Park" in p or "Gardens" in p or "Grove" in p or ("Commons" in p and "campus" not in p.lower())):
                 return p
 
     from namegen import generate_park_name
@@ -315,7 +291,7 @@ def get_session_cafe_name(session_id: int = 0, scenario_key: str = "high_school_
         existing = db.get_session_locations(session_id)
         for r in existing:
             p = r.get("primary_name") or ""
-            if p and p not in ("Local Café", "Sunny Days Café", "loc_cafe") and ("Café" in p or "Cafe" in p or "Bakery" in p or "Tea" in p):
+            if p and p not in ("Local Café", "Sunny Days Café", "loc_cafe") and "cafeteria" not in p.lower() and re.search(r"\b(?:caf[eé]|bakery|tea)\b", p, re.IGNORECASE):
                 return p
 
     from namegen import generate_cafe_name
@@ -497,6 +473,13 @@ def is_urban_anomalous_scenario(scenario_key: str = "") -> bool:
         return False
 
 
+def get_session_city_name(session_id: int = 0, scenario_key: str = "anomalous_incursions") -> str:
+    """Deterministically resolves the cohesive regional metropolis city name for a session."""
+    from namegen import generate_urban_city_name
+    h_val = int(session_id) if session_id else 1
+    return generate_urban_city_name(scenario=scenario_key, hash_val=h_val)
+
+
 def get_session_urban_zone_name(session_id: int, z_id: str, raw_zone_name: str, scenario_key: str = "anomalous_incursions") -> str:
     """Deterministically generates a procedural Tier-1 Zone name for a session."""
     from namegen import generate_urban_zone_name
@@ -575,7 +558,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "id": "sub_priv1_entrance",
                     "name": "Atrium Concierge & Biometric Turnstiles",
                     "is_entrance": 1,
-                    "props": ["Biometric Glass Turnstiles", "Granite Concierge Desk", "Tower Floor Directory", "Sculpted Atrium Waterwall"],
+                    "props": ["Biometric Glass Reader Pillars", "Granite Concierge Desk", "Tower Floor Directory", "Sculpted Atrium Waterwall"],
                 },
                 {
                     "id": "sub_priv1_dispatch",
@@ -652,7 +635,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "id": "sub_priv2_armory",
                     "name": "Vaulted Armory & Gunsmithing Bench",
                     "access_tier": "restricted",
-                    "props": ["Heavy Steel Vault Door", "Custom-Tuned Rifle Racks", "Precision Reloading & Lathe Bench", "Ultrasonic Parts Cleaner"],
+                    "props": ["Reinforced Vault Partition", "Custom-Tuned Rifle Racks", "Precision Reloading & Lathe Bench", "Ultrasonic Parts Cleaner"],
                 },
                 {
                     "id": "sub_priv2_outfitter",
@@ -694,7 +677,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "id": "sub_priv2_vault",
                     "name": "Lead-Lined Sub-Cellar Evidence Vault",
                     "access_tier": "restricted",
-                    "props": ["Combination Vault Safe Door", "Warded Cold-Iron Floor Chests", "Copper Grounding Busbar", "Hume-Shielded Specimen Lockers"],
+                    "props": ["Dial-Locked Titanium Strongbox", "Warded Cold-Iron Floor Chests", "Copper Grounding Busbar", "Hume-Shielded Specimen Lockers"],
                 },
             ],
         },
@@ -708,7 +691,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "id": "sub_cult_entrance",
                     "name": "Ward-Sealed Threshold Entrance",
                     "is_entrance": 1,
-                    "props": ["Blood-Warded Iron Door", "Occult Braziers", "Lookout Spy-Slit", "Carved Warning Stele"],
+                    "props": ["Blood-Warded Basalt Stele", "Occult Braziers", "Lookout Spy-Slit", "Carved Warning Stele"],
                 },
                 {
                     "id": "sub_cult_cloister",
@@ -877,8 +860,10 @@ def get_session_student_commons_name(session_id: int = 0, scenario_key: str = "h
     if session_id:
         existing = db.get_session_locations(session_id)
         for r in existing:
+            if str(r.get("location_id") or "").startswith(("loc_uni_", "sub_uni_")):
+                continue
             for val in (r.get("primary_name") or "", r.get("zone_name") or ""):
-                if val and any(k in val.lower() for k in ("commons", "central plaza", "courtyard & dining", "promenade & commons")):
+                if val and "university" not in val.lower() and "metropolitan" not in val.lower() and any(k in val.lower() for k in ("student commons", "central plaza", "courtyard & dining", "promenade & commons")):
                     return val
 
     from namegen import generate_school_commons_name
@@ -960,7 +945,8 @@ def get_session_zone_by_tag(session_id: int = 0, tag: str = "residential", scena
     elif tag_clean == "commercial":
         return get_session_commercial_district_name(session_id, scenario_key)
     elif tag_clean in ("campus", "school"):
-        return get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
+        import scenario_data
+        return get_session_school_name(session_id, scenario_key) if (is_school_scenario(scenario_key) or scenario_data.has_school_campus_mechanics(scenario_key)) else ""
     return ""
 
 def resolve_npc_residence(session_id: int, npc_name: str, scenario_key: str = "high_school_drama") -> tuple[str, str]:
@@ -1171,9 +1157,9 @@ _SCHOOL_CAMPUS_HQ_KEYWORDS = (
     "drama club", "occult & mystery club", "disciplinary committee", "prefect",
 )
 
-_MAJOR_SCHOOL_CLUB_FACILITY_MAP = [{'id': 'loc_student_council_facility', 'name': 'Student Council Office', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'theme': 'Executive Student Governance Suite & Council Chambers', 'features': 'Glass notice cases, polished oak council desks, petition boxes, requisition window', 'sensory': 'Quiet scratch of fountain pens, muffled printer hum, faint scent of cedar polish', 'sub_locations': [{'id': 'loc_stuco_foyer', 'name': 'Council Office Reception Foyer', 'is_entrance': 1, 'props': ['Polished Bulletin Glass Case', 'Receptionist Counter Desk', 'Framed Charter of Student Governance', 'Velvet Rope Waiting Bench']}, {'id': 'loc_student_council', 'name': 'Executive Council Chamber', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Presidential Oak Desk', 'Council Conference Table', 'Campus Budget Ledger Cabinet', 'Crest-Carved Dais']}, {'id': 'loc_stuco_notice_board', 'name': 'Campus Directive & Petition Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Cork Directive Board', 'Club Charter Petition Box', 'Disciplinary Docket Clipboard', 'Brass Stamp Carousel']}, {'id': 'loc_stuco_quartermaster', 'name': 'Council Requisition & Supply Counter', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Locked Supply Cage', 'Stationery & Permit Ledger', 'Campus Event Permit Terminal', 'Requisition Stamp Press']}, {'id': 'loc_stuco_archive_vault', 'name': 'Soundproof Presidential Archive Vault', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Steel Combination Filing Vault', 'Confidential Student Dossiers', 'Leather Corner Settee', 'Heavy Acoustic Oak Door']}]}, {'id': 'loc_drama_club_facility', 'name': 'Campus Auditorium & Drama Theater', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'theme': 'Grand Collegiate Proscenium Theater & Backstage Wing', 'features': 'Crimson stage curtains, footlight troughs, backstage callboards, costume racks', 'sensory': 'Warm dust in spotlight beams, faint greasepaint and cedarwood scent, hushed stage echoes', 'sub_locations': [{'id': 'loc_drama_foyer', 'name': 'Theater Box-Office & Velvet Foyer', 'is_entrance': 1, 'props': ['Brass Box-Office Window', 'Framed Premiere Playbills', 'Crimson Velvet Rope Barrier', 'Ornate Lobby Chandelier']}, {'id': 'loc_auditorium_stage', 'name': 'Main Auditorium Stage & Orchestra Pit', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Stage Footlight Troughs', 'Heavy Velvet Proscenium Curtains', "Director's Blocking Chair", 'Tiered Velvet Seating']}, {'id': 'loc_drama_callboard', 'name': 'Backstage Casting & Production Callboard', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Cork Callboard with Audition Slips', 'Rehearsal Call-Sheet Clipboard', 'Stage Crew Task Schedule', 'Script Revision Shelf']}, {'id': 'loc_drama_wardrobe', 'name': 'Costume Wardrobe & Prop Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Rolling Period Costume Racks', 'Theatrical Makeup & Wig Counter', 'Stage-Prop Workbench', 'Tailoring Mannequins']}, {'id': 'loc_drama_dressing_room', 'name': 'Starlet Private Dressing Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Bulb-Lit Vanity Mirror', 'Velvet Chaise Lounge', 'Full-Length Tri-Fold Screen', 'Lockable Brass Dressing Latch']}]}, {'id': 'loc_nsfw_club_facility', 'name': 'Velvet Basement Salon', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'is_hidden': True, 'discovered': False, 'access_tier': 'restricted', 'theme': 'Hidden Underground Velvet Salon & After-Hours Boudoir', 'features': 'Soundproof iron cellar doors, brass sconces, chandelier lounge, curtained alcoves', 'sensory': 'Velvet-muffled music, amber perfume and spiced tea, warm candlelit haze', 'sub_locations': [{'id': 'loc_nsfw_boiler_stair', 'name': 'Locked Cellar Door & Velvet Stairwell', 'is_entrance': 1, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Concealed Heavy Iron Cellar Door', 'Crimson Stairwell Carpet', 'Brass Keyhole Escutcheon', 'Dim Amber Wall Sconce']}, {'id': 'loc_nsfw_faction_hq', 'name': 'Main Velvet Salon & Chandelier Lounge', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'access_tier': 'restricted', 'is_private_intimate': True, 'privacy_level': 'private', 'props': ['Concealed Rotating Bookcase', 'Plush Crimson Velvet Loungers', 'Candelabra Refreshment Bar', 'Low Smoked-Glass Table']}, {'id': 'loc_nsfw_request_board', 'name': 'Whispered Favors & Secret Ledger', 'has_bounty_board': True, 'nsfw_only': True, 'is_discreet': True, 'access_tier': 'restricted', 'props': ['Wax-Sealed Velvet Request Board', 'Leatherbound Pledge Ledger', 'Scented Invitation Parchments', 'Privacy Bell Chime']}, {'id': 'loc_nsfw_boutique', 'name': 'Silk & Curio Apothecary Counter', 'has_merchant_shop': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Display Cabinet of Silk Goods', 'Amber Apothecary Phials', 'Perfume & Massage Oil Tray', 'Discrete Counter Screen']}, {'id': 'loc_nsfw_alcoves', 'name': 'Soundproof Curtain Boudoir Alcoves', 'is_discreet': True, 'is_private_intimate': True, 'privacy_level': 'private', 'is_enclosed': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Floor-to-Ceiling Velvet Drapes', 'Tufted Satin Daybeds', 'Warm Indirect Candlelight', 'Acoustic-Padded Alcove Walls']}]}]
+_MAJOR_SCHOOL_CLUB_FACILITY_MAP = [{'id': 'loc_student_council_facility', 'name': 'Student Council Office', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'theme': 'Executive Student Governance Suite & Council Chambers', 'features': 'Glass notice cases, polished oak council desks, petition boxes, requisition window', 'sensory': 'Quiet scratch of fountain pens, muffled printer hum, faint scent of cedar polish', 'sub_locations': [{'id': 'loc_stuco_foyer', 'name': 'Council Office Reception Foyer', 'is_entrance': 1, 'props': ['Polished Bulletin Glass Case', 'Receptionist Counter Desk', 'Framed Charter of Student Governance', 'Velvet Rope Waiting Bench']}, {'id': 'loc_student_council', 'name': 'Executive Council Chamber', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Presidential Oak Desk', 'Council Conference Table', 'Campus Budget Ledger Cabinet', 'Crest-Carved Dais']}, {'id': 'loc_stuco_notice_board', 'name': 'Campus Directive & Petition Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Cork Directive Board', 'Club Charter Petition Box', 'Disciplinary Docket Clipboard', 'Brass Stamp Carousel']}, {'id': 'loc_stuco_quartermaster', 'name': 'Council Requisition & Supply Counter', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Student Council', 'props': ['Locked Supply Cage', 'Stationery & Permit Ledger', 'Campus Event Permit Terminal', 'Requisition Stamp Press']}, {'id': 'loc_stuco_archive_vault', 'name': 'Soundproof Presidential Archive Vault', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Steel Combination Filing Vault', 'Confidential Student Dossiers', 'Leather Corner Settee', 'Heavy Acoustic Oak Partition']}]}, {'id': 'loc_drama_club_facility', 'name': 'Campus Auditorium & Drama Theater', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'theme': 'Grand Collegiate Proscenium Theater & Backstage Wing', 'features': 'Crimson stage curtains, footlight troughs, backstage callboards, costume racks', 'sensory': 'Warm dust in spotlight beams, faint greasepaint and cedarwood scent, hushed stage echoes', 'sub_locations': [{'id': 'loc_drama_foyer', 'name': 'Theater Box-Office & Velvet Foyer', 'is_entrance': 1, 'props': ['Brass Box-Office Window', 'Framed Premiere Playbills', 'Crimson Velvet Rope Barrier', 'Ornate Lobby Chandelier']}, {'id': 'loc_auditorium_stage', 'name': 'Main Auditorium Stage & Orchestra Pit', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Stage Footlight Troughs', 'Heavy Velvet Proscenium Curtains', "Director's Blocking Chair", 'Tiered Velvet Seating']}, {'id': 'loc_drama_callboard', 'name': 'Backstage Casting & Production Callboard', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Cork Callboard with Audition Slips', 'Rehearsal Call-Sheet Clipboard', 'Stage Crew Task Schedule', 'Script Revision Shelf']}, {'id': 'loc_drama_wardrobe', 'name': 'Costume Wardrobe & Prop Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Drama Club', 'props': ['Rolling Period Costume Racks', 'Theatrical Makeup & Wig Counter', 'Stage-Prop Workbench', 'Tailoring Mannequins']}, {'id': 'loc_drama_dressing_room', 'name': 'Starlet Private Dressing Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Bulb-Lit Vanity Mirror', 'Velvet Chaise Lounge', 'Full-Length Tri-Fold Screen', 'Lockable Brass Dressing Latch']}, {'id': 'loc_backstage_loft', 'name': 'Auditorium Backstage Prop Loft', 'is_discreet': True, 'privacy_level': 'semi_private', 'props': ['Catwalk Ladder Access', 'Velvet Stage Curtain Folds', 'Antique Sofa Prop', 'Spotlight Rigging Railing']}]}, {'id': 'loc_nsfw_club_facility', 'name': 'Velvet Basement Salon', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'is_hidden': True, 'discovered': False, 'access_tier': 'restricted', 'theme': 'Hidden Underground Velvet Salon & After-Hours Boudoir', 'features': 'Soundproof iron cellar doors, brass sconces, chandelier lounge, curtained alcoves', 'sensory': 'Velvet-muffled music, amber perfume and spiced tea, warm candlelit haze', 'sub_locations': [{'id': 'loc_nsfw_boiler_stair', 'name': 'Locked Cellar Door & Velvet Stairwell', 'is_entrance': 1, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Concealed Riveted Iron Partition', 'Crimson Stairwell Carpet', 'Brass Keyhole Escutcheon', 'Dim Amber Wall Sconce']}, {'id': 'loc_nsfw_faction_hq', 'name': 'Main Velvet Salon & Chandelier Lounge', 'is_faction_hq': True, 'club_tier': 'major', 'nsfw_only': True, 'access_tier': 'restricted', 'is_private_intimate': True, 'privacy_level': 'private', 'props': ['Concealed Rotating Bookcase', 'Plush Crimson Velvet Loungers', 'Candelabra Refreshment Bar', 'Low Smoked-Glass Table']}, {'id': 'loc_nsfw_request_board', 'name': 'Whispered Favors & Secret Ledger', 'has_bounty_board': True, 'nsfw_only': True, 'is_discreet': True, 'access_tier': 'restricted', 'props': ['Wax-Sealed Velvet Request Board', 'Leatherbound Pledge Ledger', 'Scented Invitation Parchments', 'Privacy Bell Chime']}, {'id': 'loc_nsfw_boutique', 'name': 'Silk & Curio Apothecary Counter', 'has_merchant_shop': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Display Cabinet of Silk Goods', 'Amber Apothecary Phials', 'Perfume & Massage Oil Tray', 'Discrete Counter Screen']}, {'id': 'loc_nsfw_alcoves', 'name': 'Soundproof Curtain Boudoir Alcoves', 'is_discreet': True, 'is_private_intimate': True, 'privacy_level': 'private', 'is_enclosed': True, 'nsfw_only': True, 'access_tier': 'restricted', 'props': ['Floor-to-Ceiling Velvet Drapes', 'Tufted Satin Daybeds', 'Warm Indirect Candlelight', 'Acoustic-Padded Alcove Walls']}]}]
 
-_SCHOOL_ATHLETICS_REQUIRED_ROOMS = [{'id': 'loc_athletics_foyer', 'name': 'Trophy Hall & Gymnasium Foyer', 'is_entrance': 1, 'props': ['Illuminated Silver Trophy Case', 'Varsity Championship Banners', 'Equipment Check-Out Counter', 'Rubber-Matted Athletics Foyer']}, {'id': 'loc_gymnasium', 'name': 'Main Gymnasium & Varsity Court', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Polished Hardwood Basketball Court', 'Scoreboard Control Table', 'Equipment & Gym Storeroom', 'Upper Concourse Bleachers']}, {'id': 'loc_athletics_board', 'name': 'Tournament Roster & Challenge Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Inter-School Match Bracket Board', 'Varsity Time-Trial Leaderboard', "Coach's Conditioning Noticeboard", 'Sign-Up Clipboard Bench']}, {'id': 'loc_athletics_equipment', 'name': 'Varsity Gear & Training Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Varsity Apparel & Gear Rack', 'Sports Electrolyte Chiller', 'Protective Tape & Brace Shelf', 'Quartermaster Issue Window']}, {'id': 'loc_athletics_hydro_room', 'name': 'Locked Physio & Hydrotherapy Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Stainless Hydrotherapy Tub', 'Padded Sports Massage Table', 'Frosted Medical Glass Door', 'Towel & Ice-Pack Warmer']}]
+_SCHOOL_ATHLETICS_REQUIRED_ROOMS = [{'id': 'loc_athletics_foyer', 'name': 'Trophy Hall & Gymnasium Foyer', 'is_entrance': 1, 'props': ['Illuminated Silver Trophy Case', 'Varsity Championship Banners', 'Equipment Check-Out Counter', 'Rubber-Matted Athletics Foyer']}, {'id': 'loc_gymnasium', 'name': 'Main Gymnasium & Varsity Court', 'is_faction_hq': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Polished Hardwood Basketball Court', 'Scoreboard Control Table', 'Equipment & Gym Storeroom', 'Upper Concourse Bleachers']}, {'id': 'loc_athletics_board', 'name': 'Tournament Roster & Challenge Board', 'has_bounty_board': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Inter-School Match Bracket Board', 'Varsity Time-Trial Leaderboard', "Coach's Conditioning Noticeboard", 'Sign-Up Clipboard Bench']}, {'id': 'loc_athletics_equipment', 'name': 'Varsity Gear & Training Quartermaster', 'has_merchant_shop': True, 'club_tier': 'major', 'faction_name': 'Varsity Athletic Directorate', 'props': ['Varsity Apparel & Gear Rack', 'Sports Electrolyte Chiller', 'Protective Tape & Brace Shelf', 'Quartermaster Issue Window']}, {'id': 'loc_athletics_hydro_room', 'name': 'Locked Physio & Hydrotherapy Suite', 'is_discreet': True, 'privacy_level': 'private', 'is_enclosed': True, 'props': ['Stainless Hydrotherapy Tub', 'Padded Sports Massage Table', 'Frosted Medical Glass Partition', 'Towel & Ice-Pack Warmer']}]
 
 _SCHOOL_MINOR_ROOM_SPECS = {
     "behind_gym": {'id': 'loc_behind_gym_sheds', 'name': 'Behind Gym Storage Sheds', 'is_discreet': True, 'privacy_level': 'semi_private', 'is_faction_hq': True, 'is_minor_club_hq': True, 'has_bounty_board': True, 'has_merchant_shop': True, 'club_tier': 'minor', 'props': ['Exterior Concrete Buttress', 'Brawler Hangout Benches', 'Behind Equipment Shed', 'Graffiti Brick Wall']},

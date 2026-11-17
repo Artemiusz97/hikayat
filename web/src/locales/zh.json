@@ -285,7 +285,17 @@
     "clue_tier_key": "关键线索",
     "clue_tier_corroborating": "佐证线索",
     "off_hours_trace": "非营业时间勘查 (+2 DC)",
-    "threat_pushed_back": "威胁已延缓 (-1)"
+    "threat_pushed_back": "威胁已延缓 (-1)",
+    "main_story_badge": "主线剧情",
+    "chapter_n": "第 {{chapter}} 章",
+    "climax_ready": "终局决战就绪！",
+    "completed_label": "已完成",
+    "active_contracts_header": "活跃悬赏与委托 ({{count}})",
+    "bounty_fallback": "悬赏",
+    "single_lead": "单线索推演",
+    "verified_badge": "已验证",
+    "lead_a": "线索 A",
+    "lead_b": "线索 B"
   },
   "quest": {
     "threat_clock": {
@@ -753,6 +763,9 @@
     "close_phone": "收起手机",
     "shop": "商店",
     "browse": "浏览",
+    "shop_closed_badge": "商店打烊",
+    "shop_closed_default": "非营业时间已打烊。",
+    "closed_tag": "休息中",
     "fallback_warning": "本回合使用了兜底备用场景生成。",
     "truncated_warning": "场景叙事似乎异常简短或被截断。",
     "resolving": "正在结算...",
@@ -1194,7 +1207,8 @@
     "load_failed": "加载世界地图失败。",
     "anomalous_threat": "异常威胁遥测",
     "anomalous_stabilized": "已稳定",
-    "anomalous_harvest_ready": "可采集"
+    "anomalous_harvest_ready": "可采集",
+    "travel_blocked": "当前无法使用快速传送。"
   },
   "merchant": {
     "title_fallback": "商人集市",

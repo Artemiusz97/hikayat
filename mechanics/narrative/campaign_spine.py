@@ -1155,7 +1155,8 @@ def promote_escaped_boss_to_nemesis(
     import db
 
     spine = compile_or_get_campaign_spine(session_id)
-    nemeses = list(spine.get("nemeses") or [])
+    prev_nemeses = [dict(n) for n in (spine.get("nemeses") or []) if isinstance(n, dict)]
+    nemeses = [dict(n) for n in prev_nemeses]
     b_name = str(boss_sheet.get("name") or boss_sheet.get("base_name") or "Escaped Nemesis").strip()
     slug = "".join(ch if ch.isalnum() else "_" for ch in b_name.lower()).strip("_")[:24] or "boss"
     nem_id = f"nem_{session_id}_{slug}"
@@ -1181,4 +1182,7 @@ def promote_escaped_boss_to_nemesis(
                 "boss_sheet": upgraded_sheet,
             }
         )
-    return db.upsert_campaign_spine(session_id, spine.get("scenario") or "fantasy", nemeses=nemeses)
+    saved_spine = db.upsert_campaign_spine(session_id, spine.get("scenario") or "fantasy", nemeses=nemeses)
+    if existing and hasattr(db, "append_spine_state_event"):
+        db.append_spine_state_event(session_id, int(turn_number), "nemeses", prev_nemeses, nemeses)
+    return saved_spine

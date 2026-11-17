@@ -1288,7 +1288,8 @@ def check_action_matches_waypoint(
 def does_action_target_waypoint(
     session_id: int, quest_id: str, sub_obj_id: Optional[int],
     current_location: str, action_text: str = "", narrative: str = "", sub_obj_text: str = "",
-    is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None
+    is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None,
+    action_intent: str = "", action_contract_type: str = "",
 ) -> Optional[dict]:
     """
     Checks if the player is at the active waypoint's location (or NPC present)
@@ -1298,6 +1299,14 @@ def does_action_target_waypoint(
     waypoint = db.get_active_waypoint(session_id, quest_id, sub_obj_id)
     if not waypoint:
         return None
+    _act_int = str(action_intent or "").strip().lower()
+    _act_ctype = str(action_contract_type or "").strip().lower()
+    if _act_int in ("movement", "travel", "fast_travel", "move") or _act_ctype == "travel":
+        return None
+    if action_text and str(waypoint.get("completion_trigger") or "").lower() != "arrival":
+        from mechanics.narrative.intent import is_travel_action
+        if is_travel_action(action_text):
+            return None
     is_rumor_inq_act = (
         is_quest_action
         and str(quest_id).startswith(("MNR-", "RMR-"))
@@ -1431,7 +1440,8 @@ def try_complete_on_skill_check(
     session_id: int, quest_id: str, sub_obj_id: Optional[int],
     current_location: str, check_success: bool, check_result_tier: str = "success",
     action_text: str = "", narrative: str = "", sub_obj_text: str = "",
-    is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None
+    is_quest_action: bool = False, action_quest_id: str = "", action_sub_obj_id: Optional[int] = None,
+    action_intent: str = "", action_contract_type: str = "",
 ) -> Optional[dict]:
     """Called when a choice resolves. Advances 'skill_check' trigger stages on success at target."""
     waypoint = does_action_target_waypoint(
@@ -1445,6 +1455,8 @@ def try_complete_on_skill_check(
         is_quest_action=is_quest_action,
         action_quest_id=action_quest_id,
         action_sub_obj_id=action_sub_obj_id,
+        action_intent=action_intent,
+        action_contract_type=action_contract_type,
     )
     if not waypoint:
         return None

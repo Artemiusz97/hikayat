@@ -29,6 +29,8 @@ from .venue_seeder import (
     ensure_roaming_merchants_seeded,
     slot_fill_custom_action_role,
     evaluate_shop_staff_availability,
+    heal_stale_civic_hq_staff,
+    resolve_scene_merchant_ui_state,
     format_venue_crowd_flavor,
 )
 from .presence_resolver import (
@@ -68,6 +70,8 @@ __all__ = [
     "ensure_roaming_merchants_seeded",
     "slot_fill_custom_action_role",
     "evaluate_shop_staff_availability",
+    "heal_stale_civic_hq_staff",
+    "resolve_scene_merchant_ui_state",
     "format_venue_crowd_flavor",
     "resolve_node_presence",
     "check_doorbell_etiquette",

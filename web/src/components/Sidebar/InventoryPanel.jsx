@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Shield, Sword, Sparkles, Trash2, BookOpen,
-  Coins, Camera, Video, Package, Check, X, HardHat, Footprints, Gift, User, Skull, Search, Lock, Globe
+  Coins, Camera, Video, Package, Check, X, HardHat, Footprints, User, Skull, Globe
 } from 'lucide-react';
 
 const SLOT_ICONS = {

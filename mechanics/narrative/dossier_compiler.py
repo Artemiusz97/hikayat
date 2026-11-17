@@ -125,6 +125,20 @@ SAFE_SANCTUARY_KEYWORDS: Tuple[str, ...] = (
     "operations facility", "dormitor", "dorm room", "player home", "apartment", "residence",
     "bedroom", "hospital", "infirmary", "clinic", "tavern", "inn ", "guild hall", "guildhall",
 )
+_SAFE_SANCTUARY_ROOM_BLOCKLIST: Tuple[str, ...] = (
+    "lobby", "reception", "vestibule", "dorm", "bedroom", "infirmary", "clinic",
+    "hospital", "canteen", "cafeteria", "lounge", "quarters", "apartment",
+    "residence", "player home", "tavern", "inn ", "guild hall", "guildhall",
+    "armory", "medbay", "medical", "quartermaster",
+)
+_HQ_BREACH_ROOM_RE = re.compile(
+    r"\b(?:containment(?:\s*(?:&|and)\s*quarantine)?(?:\s*(?:sector|vaults?|wings?))?|"
+    r"quarantine(?:\s*(?:sector|vaults?|wings?))?|subterranean|sub-cellar|"
+    r"evidence\s+vault|cryogenic(?:\s+\w+)*\s+vault|black-ledger\s+vault|"
+    r"sealed\s+vault|breach(?:ed)?(?:\s+airlock)?|fracture\s+altar|"
+    r"sacrificial\s+entity|holding\s+cells)\b",
+    re.I,
+)
 _INVESTIGATIVE_ENGINES: Tuple[str, ...] = ("MYSTERY_CASE", "SOCIAL_BROKERAGE", "ACQUISITION_EXCHANGE")
 _OBJECTIVE_STOPWORDS: Set[str] = {
     "the", "and", "with", "from", "into", "within", "before", "after", "their", "your", "that", "this",
@@ -135,7 +149,16 @@ _OBJECTIVE_STOPWORDS: Set[str] = {
 def is_safe_sanctuary_location(location: str) -> bool:
     """True for safe hubs (agency HQ lobbies, homes/dorms, hospitals, taverns/guild halls) that must never host quest combat."""
     low = f" {str(location or '').strip().lower()} "
-    return bool(low.strip()) and any(kw in low for kw in SAFE_SANCTUARY_KEYWORDS)
+    if not low.strip() or not any(kw in low for kw in SAFE_SANCTUARY_KEYWORDS):
+        return False
+    parts = [p.strip() for p in str(location or "").replace("->", "➔").split("➔") if p.strip()]
+    leaf_raw = " ".join(parts[2:]) if len(parts) >= 3 else (parts[-1] if parts else str(location or ""))
+    leaf_low = f" {leaf_raw.strip().lower()} "
+    if any(blk in leaf_low for blk in _SAFE_SANCTUARY_ROOM_BLOCKLIST):
+        return True
+    if _HQ_BREACH_ROOM_RE.search(leaf_raw):
+        return False
+    return True
 
 
 def select_deconflicted_climax_location(
@@ -459,11 +482,11 @@ def _build_main_objective_stages(
             mid_npc = inner_circle_ally
         else:
             mid_labels = {
-                "en": f"Shatter the inner defense nexus at {short_venue}",
-                "pl": f"Rozbij wewnętrzny węzeł obrony w: {short_venue}",
-                "ms": f"Hancurkan teras pertahanan dalaman di {short_venue}",
-                "zh": f"瓦解{short_venue}的核心内层防卫中枢",
-                "de": f"Zerschlage den inneren Verteidigungsknoten bei {short_venue}",
+                "en": f"Shatter the inner defense nexus at {short_mid}",
+                "pl": f"Rozbij wewnętrzny węzeł obrony w: {short_mid}",
+                "ms": f"Hancurkan teras pertahanan dalaman di {short_mid}",
+                "zh": f"瓦解{short_mid}的核心内层防卫中枢",
+                "de": f"Zerschlage den inneren Verteidigungsknoten bei {short_mid}",
             }
             mid_npc = ""
         eff_mid_lbl = (
@@ -939,6 +962,22 @@ def populate_stage_clue_sources(
     existing_sources = [dict(s) for s in (st.get("clue_sources") or []) if isinstance(s, dict) and _valid_room(str(s.get("location") or ""))]
     stage_leaves: Set[str] = {_leaf(s.get("location")) for s in existing_sources if _leaf(s.get("location"))}
 
+    # Prefer rooms within the stage's own target building/venue before unrelated buildings
+    _stage_venue_parts = [
+        p.strip().lower()
+        for p in str(st.get("target_location") or "").replace("->", "➔").split("➔")
+        if p.strip()
+    ]
+    _stage_venue_anchor = _stage_venue_parts[1] if len(_stage_venue_parts) >= 2 else (_stage_venue_parts[0] if _stage_venue_parts else "")
+
+    def _same_stage_venue(cand_loc: str) -> bool:
+        if not _stage_venue_anchor:
+            return False
+        parts = [p.strip().lower() for p in str(cand_loc or "").replace("->", "➔").split("➔") if p.strip()]
+        return _stage_venue_anchor in parts
+
+    ordered_pool = [r for r in pool_rooms if _same_stage_venue(r)] + [r for r in pool_rooms if not _same_stage_venue(r)]
+
     def _pick_room(preferred: str = "") -> str:
         pref_clean = str(preferred or "").strip()
         if pref_clean and _valid_room(pref_clean):
@@ -958,13 +997,13 @@ def populate_stage_clue_sources(
                 return pref_clean
         # Prefer rooms not yet used on earlier stages first
         if used_room_leaves is not None:
-            for cand in pool_rooms:
+            for cand in ordered_pool:
                 lf = _leaf(cand)
                 if lf not in stage_leaves and lf not in used_room_leaves:
                     stage_leaves.add(lf)
                     used_room_leaves.add(lf)
                     return cand
-        for cand in pool_rooms:
+        for cand in ordered_pool:
             lf = _leaf(cand)
             if lf not in stage_leaves:
                 stage_leaves.add(lf)
@@ -1075,7 +1114,8 @@ def populate_stage_clue_sources(
         )
 
     st["clue_sources"] = existing_sources
-    st["target_location"] = existing_sources[0]["location"]
+    if existing_sources and (not _valid_room(cur_tloc) or cur_tloc_is_bare_zone):
+        st["target_location"] = existing_sources[0]["location"]
     return st
 
 
@@ -1762,12 +1802,38 @@ def compile_quest_dossier(
             raw_stages = existing_q["sub_waypoints"].get(0) or existing_q["sub_waypoints"].get("0") or []
         elif isinstance(existing_q.get("sub_waypoints"), list):
             raw_stages = existing_q["sub_waypoints"]
-    if isinstance(raw_stages, list):
+        elif isinstance(existing_q.get("waypoints"), list):
+            raw_stages = [
+                w for w in existing_q["waypoints"]
+                if isinstance(w, dict) and w.get("sub_obj_id") in (0, None)
+            ]
+    eff_mid_for_stages = lead_loc
+    if isinstance(raw_stages, list) and raw_stages:
+        raw_st1_loc = str(raw_stages[0].get("target_location") or "").strip() if isinstance(raw_stages[0], dict) else ""
+        if raw_st1_loc and not is_safe_sanctuary_location(raw_st1_loc) and not stub.get("origin_location"):
+            origin_loc = raw_st1_loc
+        if len(raw_stages) >= 3 and isinstance(raw_stages[1], dict):
+            raw_st2_loc = str(raw_stages[1].get("target_location") or "").strip()
+            if (
+                raw_st2_loc
+                and not is_safe_sanctuary_location(raw_st2_loc)
+                and raw_st2_loc.lower() != origin_loc.lower()
+                and raw_st2_loc.lower() != climax_loc.lower()
+            ):
+                eff_mid_for_stages = raw_st2_loc
         for st in raw_stages:
             if isinstance(st, dict):
                 lbl = str(st.get("stage_label") or st.get("text") or "").strip()
                 if lbl and lbl != eff_obj and len(lbl) <= 120:
                     custom_stg_lbls.append(lbl)
+        # Drop custom stage labels if their bound target_locations diverge from origin_loc / eff_mid_for_stages
+        raw_st2_loc_chk = str(raw_stages[1].get("target_location") or "").strip() if len(raw_stages) > 1 and isinstance(raw_stages[1], dict) else ""
+        if custom_stg_lbls and raw_st1_loc and origin_loc and raw_st1_loc.lower() != origin_loc.lower():
+            custom_stg_lbls = []
+        elif len(custom_stg_lbls) > 1 and raw_st2_loc_chk and eff_mid_for_stages and raw_st2_loc_chk.lower() != eff_mid_for_stages.lower():
+            custom_stg_lbls = []
+    if is_safe_sanctuary_location(origin_loc) and eff_mid_for_stages and not is_safe_sanctuary_location(eff_mid_for_stages):
+        origin_loc = eff_mid_for_stages
     main_stages = _build_main_objective_stages(
         engine=engine,
         family_tier=eff_family,
@@ -1781,7 +1847,7 @@ def compile_quest_dossier(
         gate_mode=gate_mode,
         inner_circle_ally=inner_ally,
         lang=eff_lang,
-        mid_loc=lead_loc,
+        mid_loc=eff_mid_for_stages,
         custom_stage_labels=custom_stg_lbls if custom_stg_lbls else None,
     )
     from mechanics.narrative.chapter_plan import build_chapter_plan_candidates, is_clue_based_quest

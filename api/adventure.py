@@ -13,7 +13,7 @@ import character_data as cd
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
 from mechanics.social.relationships import is_contact_eligible
-from mechanics.world import evaluate_shop_staff_availability
+from mechanics.world import evaluate_shop_staff_availability, resolve_scene_merchant_ui_state
 from services.turn_service import TurnService
 from mechanics.system.concurrency import (
     distributed_adventure_lock,
@@ -77,7 +77,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
     uid = user_id or session.get("host_user_id") or 0
 
     from mechanics.combat import is_in_combat
-    from mechanics.world.locations import location_has_merchant_shop, is_school_scenario
+    from mechanics.world.locations import location_has_faction_hq
     in_combat = bool(is_in_combat(session))
     session["is_in_combat"] = in_combat
 
@@ -126,7 +126,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
     session["is_nsfw"] = is_nsfw_scenario(scen_key_check)
     session["scenario_tags"] = get_scenario_tags(scen_key_check)
     session["scenario_display_name"] = get_scenario_display_name(scen_key_check)
-    current_loc_check = session.get("current_location") or ""
+    current_loc_check = str(session.get("current_location") or "")
     from mechanics.system.time_engine import get_location_sleep_context
     session["sleep_context"] = get_location_sleep_context(
         current_loc_check,
@@ -134,86 +134,35 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
         scenario=scen_key_check,
         session_id=session.get("id"),
     )
+    sid_int = int(session.get("id") or 0)
     merchant_state = session.get("merchant") or {}
-    is_school = is_school_scenario(scen_key_check)
-    has_shop_loc = location_has_merchant_shop(current_loc_check, scen_key=scen_key_check)
+    if isinstance(merchant_state, dict) and merchant_state.get("is_faction_quartermaster") and sid_int > 0:
+        at_faction_hq = bool(
+            location_has_faction_hq(current_loc_check, session_id=sid_int)
+            or db.get_faction_by_hq(sid_int, current_loc_check)
+        )
+        if not at_faction_hq:
+            cleaned_merch = dict(merchant_state)
+            cleaned_merch["is_faction_quartermaster"] = False
+            cleaned_merch["active"] = False
+            session["merchant"] = cleaned_merch
+            try:
+                db.save_merchant_state(sid_int, cleaned_merch)
+            except Exception:
+                pass
 
-    merchant_npc_name = None
-    merchant_role_keywords = (
-        "merchant", "shopkeeper", "vendor", "trader", "peddler", "blacksmith",
-        "weaponsmith", "armorer", "apothecary", "alchemist", "herbalist",
-        "quartermaster", "innkeeper", "barkeep", "bartender", "barista", "baker",
-        "grocer", "jeweler", "tailor", "clothier", "bookseller",
+    merch_ui = resolve_scene_merchant_ui_state(
+        session,
+        session_id=sid_int,
+        in_combat=in_combat,
     )
-    for npc in (session.get("current_npcs") or []):
-        if isinstance(npc, dict):
-            n_role = str(npc.get("role") or npc.get("occupation") or "").lower()
-            n_name = str(npc.get("name") or "").strip()
-            if any(k in n_role for k in merchant_role_keywords) or any(
-                k in n_name.lower() for k in ("merchant", "shopkeeper", "vendor", "trader", "blacksmith", "apothecary")
-            ):
-                merchant_npc_name = n_name
-                break
-        elif isinstance(npc, str):
-            if any(k in npc.lower() for k in ("merchant", "shopkeeper", "vendor", "trader", "blacksmith", "apothecary")):
-                merchant_npc_name = npc.strip()
-                break
+    staff_keeper_name = str(((merch_ui.get("staff_npc") or {}).get("name")) or "").strip()
 
-    show_merchant = False
-    merchant_label = "Talk to Merchant"
-    shop_closed_reason = ""
-    shop_closed_message = ""
-    staff_keeper_name = ""
-    if not in_combat:
-        is_phone_active = bool(merchant_state.get("is_phone_shop"))
-        is_quartermaster = bool(merchant_state.get("is_faction_quartermaster"))
-        shop_avail: dict | None = None
-        if not is_phone_active and not is_quartermaster:
-            shop_avail = evaluate_shop_staff_availability(
-                int(session.get("id") or 0),
-                location_str=current_loc_check,
-                merchant_type="",
-                is_phone_shop=False,
-                scen_key=scen_key_check,
-                current_day=session.get("current_day"),
-                current_minute=session.get("current_minute"),
-                turn_number=int(session.get("turn_count") or 0),
-                session=session,
-            )
-            if shop_avail.get("staff_npc"):
-                staff_keeper_name = str(shop_avail["staff_npc"].get("name") or "").strip()
-
-        if shop_avail is not None and not shop_avail.get("available"):
-            show_merchant = False
-            shop_closed_reason = str(shop_avail.get("reason") or "")
-            shop_closed_message = str(shop_avail.get("reason_message") or "")
-        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
-            show_merchant = True
-            merchant_label = "Visit Club Quartermaster"
-        elif is_school:
-            if has_shop_loc:
-                show_merchant = True
-                merchant_label = "Visit Shop / Café"
-        else:
-            roamer_on_site = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
-            if merchant_state.get("available") or merchant_state.get("active") or has_shop_loc or merchant_npc_name or roamer_on_site:
-                show_merchant = True
-                flavor_name = (
-                    (merchant_state.get("flavor_name") if (merchant_state.get("available") or merchant_state.get("active")) else None)
-                    or merchant_npc_name
-                    or (staff_keeper_name if (not has_shop_loc and staff_keeper_name) else None)
-                )
-                if has_shop_loc and not flavor_name:
-                    merchant_label = "Visit Market / Shop"
-                elif flavor_name:
-                    merchant_label = f"Trade with {flavor_name}"
-                else:
-                    merchant_label = "Talk to Merchant"
-
-    session["merchant_available"] = show_merchant
-    session["merchant_action_label"] = merchant_label
-    session["shop_closed_reason"] = shop_closed_reason
-    session["shop_closed_message"] = shop_closed_message
+    session["merchant_available"] = bool(merch_ui["available"])
+    session["merchant_action_label"] = str(merch_ui["action_label"])
+    session["shop_closed_visible"] = bool(merch_ui["shop_closed_visible"])
+    session["shop_closed_reason"] = str(merch_ui["shop_closed_reason"])
+    session["shop_closed_message"] = str(merch_ui["shop_closed_message"])
     session["staff_keeper"] = staff_keeper_name
 
     day = int(session.get("current_day", 1) or 1)
@@ -784,12 +733,8 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
     # Active Dialogue Mood Enrichment (qualitative only; paused during combat or erotic scenes)
     session["active_dialogue_mood"] = None
     try:
-        from mechanics.social.physical_state import is_erotic_intimate_contact as _adv_is_erotic
-        _adv_phys = session.get("physical_state") if isinstance(session.get("physical_state"), dict) else {}
-        _adv_erotic = bool(
-            session.get("_in_active_erotic_dlg")
-            or _adv_is_erotic(str((_adv_phys or {}).get("intimate_contact") or ""))
-        )
+        from mechanics.social.physical_state import is_session_in_erotic_dialogue as _adv_is_erotic
+        _adv_erotic = _adv_is_erotic(session)
         if not in_combat and not _adv_erotic and session.get("id"):
             from mechanics.social import locales as _soc_locales
             from mechanics.social import pacing as _soc_pacing

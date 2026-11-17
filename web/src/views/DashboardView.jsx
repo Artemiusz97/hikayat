@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { LogOut, Play, Users, Sword, Sliders, RefreshCw, Sparkles, Trash2, Plus, LogIn, Compass, Globe } from 'lucide-react';
 import SettingsModal from '../components/Settings/SettingsModal';
 import CharacterCreatorModal from '../components/Character/CharacterCreatorModal';

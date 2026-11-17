@@ -1,6 +1,6 @@
-import React, { useState, useId } from 'react';
+import { useState, useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import { X, Sparkles, Heart, Zap, Package, RotateCcw, Check } from 'lucide-react';
+import { X, Sparkles, Heart, Zap, Package, RotateCcw } from 'lucide-react';
 
 const STAT_KEYS = [
   { key: 'str', code: 'STR', label: 'Strength', emoji: '💪' },

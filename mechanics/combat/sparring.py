@@ -1,6 +1,6 @@
 from __future__ import annotations
 """
-Non-lethal sparring duels and faction reinforcement logic.
+Non-lethal sparring duel logic.
 """
 from typing import Optional, Dict, Any, List, Tuple
 import random
@@ -44,33 +44,3 @@ def make_sparring_monster(incumbent_name: str, avg_level: int, scen_key: str) ->
         "xp_multiplier": 0.0,  # No combat XP reward (promotion gives its own reward)
         "gold_drop": 0,
     }
-
-
-# ---------------------------------------------------------------- Faction Patrol Reinforcements
-def call_faction_reinforcements(session: dict, faction: dict, party: list) -> tuple[list[dict], str]:
-    """
-    Inject 1-2 scaled faction patrol NPCs into current_npcs as friendly combat allies.
-    Returns (injected_npcs, narrative_note).
-    Must only be called once per session (tracked via session['faction_reinforcements_used']).
-
-    Usage:
-        new_npcs, note = call_faction_reinforcements(session, faction, party)
-        session['current_npcs'] = session.get('current_npcs', []) + new_npcs
-        db.update_session(session_id, current_npcs=session['current_npcs'])
-        db.set_faction_reinforcements_used(session_id, used=True)
-    """
-    from mechanics.social.factions import generate_faction_patrol
-    scen_key = session.get("scenario", "fantasy")
-    avg_level = max(1, int(sum(
-        (char[0] if isinstance(char, (tuple, list)) else char).get("level", 1)
-        for char in party
-    ) / max(1, len(party))))
-
-    patrols = generate_faction_patrol(faction, avg_level, scen_key)
-    faction_name = faction.get("name", "Faction")
-    count = len(patrols)
-    note = (
-        f"🎺 **{faction_name} Patrol Arrives!** {count} reinforcement{'s' if count > 1 else ''} "
-        f"join{'s' if count == 1 else ''} your side! *(Call Reinforcements perk used — 1× per session)*"
-    )
-    return patrols, note

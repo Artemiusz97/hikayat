@@ -83,6 +83,11 @@ def compile_campaign_spine_at_turn_zero(
             ch1_bp = (spine.get("chapters_blueprint") or {}).get("1") or {}
             feat_lt = ch1_bp.get("featured_lieutenant")
             feat_lt_name = str(feat_lt.get("name") if isinstance(feat_lt, dict) else (feat_lt or ""))
+            turn0_wps = [
+                w for w in (db.get_quest_waypoints(session_id, sq_id, sub_obj_id=0) or [])
+                if isinstance(w, dict) and str(w.get("target_location") or "").strip()
+            ]
+            pref_climax_loc = str(turn0_wps[-1]["target_location"]).strip() if turn0_wps else ""
             compile_quest_dossier(
                 session_id=session_id,
                 quest_id=sq_id,
@@ -93,6 +98,7 @@ def compile_campaign_spine_at_turn_zero(
                 chapter=int(db.get_session_chapter(session_id) or 1),
                 turn_number=0,
                 target_npc=feat_lt_name,
+                preferred_location=pref_climax_loc,
                 reward_gold=int(active_sq.get("reward_gold") or 70),
                 scen_key=eff_scen,
                 lang=eff_lang,
@@ -456,7 +462,7 @@ def heal_session_quests_on_load(session_id: int) -> bool:
             clx_q2 = dict(fresh_q2.get("climax_spec") or {})
             changed_q2 = False
             if str(fresh_q2.get("family_tier") or "") == "story":
-                ch_q2 = int(clx_q2.get("chapter") or sess_h.get("chapter") or 1)
+                ch_q2 = int(clx_q2.get("chapter") or sess_h.get("current_chapter") or sess_h.get("chapter") or 1)
                 if ch_q2 < 11 and not isinstance(clx_q2.get("threat_clock"), dict):
                     clx_q2["threat_clock"] = build_initial_threat_clock(
                         chapter=ch_q2,
@@ -1233,6 +1239,7 @@ async def prewarm_chapter_ahead(
                 chapter=target_chapter,
                 turn_number=eff_turn,
                 target_npc=target_for_ch,
+                preferred_location=cand_venue,
                 reward_gold=60 + (target_chapter * 10),
                 scen_key=scen_key,
                 lang=lang,
@@ -1295,7 +1302,12 @@ def resolve_chapter_transition(
     mm_name = str((spine.get("mastermind_profile") or {}).get("name") or "")
     qid = str(quest.get("quest_id") or "")
     dossier = db.get_quest_dossier(session_id, qid) if qid else None
-    quest_ch = int((dossier or {}).get("chapter") or quest.get("chapter") or 0)
+    quest_ch = int(
+        (dossier or {}).get("chapter")
+        or ((dossier or {}).get("climax_spec") or {}).get("chapter")
+        or quest.get("chapter")
+        or 0
+    )
 
     # Idempotency guard: prevent duplicate chapter transitions in the same turn or for an already-advanced chapter
     if qid and sess.get("_last_transition_quest_id") == qid and int(sess.get("_last_transition_turn") or -1) == eff_turn:
@@ -1471,108 +1483,115 @@ def resolve_chapter_transition(
         }
 
     next_ch = cur_ch + 1
+    # Option C Fast-Path: Consume prewarmed dossier if available
+    prewarmed = db.get_prewarmed_quest_dossier(session_id, next_ch)
+    try:
+        if prewarmed and prewarmed.get("quest_id"):
+            pre_qid = str(prewarmed["quest_id"])
+            patched_dossier = hot_swap_dossier_entities(session_id, prewarmed)
+            db.promote_prewarmed_dossier(session_id, pre_qid, turn_number=eff_turn)
+
+            stub = dict(patched_dossier.get("pitch_stub") or {})
+            climax_p = dict(patched_dossier.get("climax_spec") or {})
+            next_sq_id = pre_qid
+            next_title = sanitize_dossier_prose(str(stub.get("title") or f"Chapter #{next_ch}"))
+            next_engine = str(patched_dossier.get("engine") or "MYSTERY_CASE")
+            next_obj = sanitize_dossier_prose(
+                str(climax_p.get("main_objective_text") or climax_p.get("label") or stub.get("public_pitch") or "A new chapter unfolds...")
+            )
+
+            next_quest = db.upsert_quest(
+                session_id=session_id,
+                quest_id=next_sq_id,
+                quest_type="Story Quest",
+                title=next_title,
+                objective=next_obj,
+                progress="0/1 Main Objective",
+                current_clues="",
+                status="Active",
+                reward_xp=250 + (next_ch * 30),
+                reward_gold=60 + (next_ch * 10),
+                is_story_quest=1,
+                clues_required=1,
+                sub_objectives=[],
+                deadline_day=None,
+                deadline_minute=None,
+                engine=next_engine,
+                dossier_stage="compiled",
+            )
+            db.sync_quest_projection_from_dossier(session_id, next_sq_id, dossier=patched_dossier)
+            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
+            if is_clue_based_quest("story", next_engine) and not (patched_dossier.get("climax_spec") or {}).get("chapter_plan_applied"):
+                schedule_background_chapter_plan(session_id, next_sq_id)
+            next_dossier = patched_dossier
+            refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
+        else:
+            spine_for_next = db.get_campaign_spine(session_id) or spine
+            from mechanics.narrative.dossier_compiler import select_deconflicted_climax_location
+            cand_venue, _ = select_deconflicted_climax_location(
+                session_id, "", family_tier="story", objective_hint=f"Chapter {next_ch}", scen_key=scen_key
+            )
+            storylet = select_chapter_storylet(session_id, next_ch, spine=spine_for_next, lang=lang, venue_name=cand_venue)
+            ch_bp = (spine_for_next.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
+
+            next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+            next_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{next_ch}"))
+            next_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
+            next_obj = sanitize_dossier_prose(
+                str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
+            )
+
+            next_quest = db.upsert_quest(
+                session_id=session_id,
+                quest_id=next_sq_id,
+                quest_type="Story Quest",
+                title=next_title,
+                objective=next_obj,
+                progress="0/1 Main Objective",
+                current_clues="",
+                status="Active",
+                reward_xp=250 + (next_ch * 30),
+                reward_gold=60 + (next_ch * 10),
+                is_story_quest=1,
+                clues_required=1,
+                sub_objectives=[],
+                deadline_day=None,
+                deadline_minute=None,
+                engine=next_engine,
+                dossier_stage="compiled",
+            )
+
+            feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
+            mm_name = str((spine_for_next.get("mastermind_profile") or {}).get("name") or "")
+            target_for_ch = mm_name if next_ch == 10 else feat_lt
+
+            next_dossier = compile_quest_dossier(
+                session_id=session_id,
+                quest_id=next_sq_id,
+                tag_or_archetype=next_engine,
+                title=next_title,
+                objective=next_obj,
+                family_tier="story",
+                chapter=next_ch,
+                turn_number=eff_turn,
+                target_npc=target_for_ch,
+                preferred_location=cand_venue,
+                reward_gold=60 + (next_ch * 10),
+                scen_key=scen_key,
+                lang=lang,
+            )
+            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
+            if is_clue_based_quest("story", next_engine):
+                schedule_background_chapter_plan(session_id, next_sq_id)
+            refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
+    except Exception:
+        raise
+
     db.set_session_chapter(session_id, next_ch)
     db.update_session(
         session_id,
         extra={"_last_transition_quest_id": qid, "_last_transition_turn": eff_turn},
     )
-
-    # Option C Fast-Path: Consume prewarmed dossier if available
-    prewarmed = db.get_prewarmed_quest_dossier(session_id, next_ch)
-    if prewarmed and prewarmed.get("quest_id"):
-        pre_qid = str(prewarmed["quest_id"])
-        patched_dossier = hot_swap_dossier_entities(session_id, prewarmed)
-        db.promote_prewarmed_dossier(session_id, pre_qid)
-
-        stub = dict(patched_dossier.get("pitch_stub") or {})
-        next_sq_id = pre_qid
-        next_title = sanitize_dossier_prose(str(stub.get("title") or f"Chapter #{next_ch}"))
-        next_engine = str(patched_dossier.get("engine") or "MYSTERY_CASE")
-        next_obj = sanitize_dossier_prose(str(stub.get("public_pitch") or "A new chapter unfolds..."))
-
-        next_quest = db.upsert_quest(
-            session_id=session_id,
-            quest_id=next_sq_id,
-            quest_type="Story Quest",
-            title=next_title,
-            objective=next_obj,
-            progress="0/1 Main Objective",
-            current_clues="",
-            status="Active",
-            reward_xp=250 + (next_ch * 30),
-            reward_gold=60 + (next_ch * 10),
-            is_story_quest=1,
-            clues_required=1,
-            sub_objectives=[],
-            deadline_day=None,
-            deadline_minute=None,
-            engine=next_engine,
-            dossier_stage="compiled",
-        )
-        db.sync_quest_projection_from_dossier(session_id, next_sq_id, dossier=patched_dossier)
-        from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
-        if is_clue_based_quest("story", next_engine) and not (patched_dossier.get("climax_spec") or {}).get("chapter_plan_applied"):
-            schedule_background_chapter_plan(session_id, next_sq_id)
-        next_dossier = patched_dossier
-        refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
-    else:
-        spine_for_next = db.get_campaign_spine(session_id) or spine
-        from mechanics.narrative.dossier_compiler import select_deconflicted_climax_location
-        cand_venue, _ = select_deconflicted_climax_location(
-            session_id, "", family_tier="story", objective_hint=f"Chapter {next_ch}", scen_key=scen_key
-        )
-        storylet = select_chapter_storylet(session_id, next_ch, spine=spine_for_next, lang=lang, venue_name=cand_venue)
-        ch_bp = (spine_for_next.get("chapters_blueprint") or {}).get(str(next_ch)) or {}
-
-        next_sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-        next_title = sanitize_dossier_prose(str(storylet.get("title") or ch_bp.get("title_template") or f"Chapter #{next_ch}"))
-        next_engine = str(storylet.get("engine") or ch_bp.get("engine") or "MYSTERY_CASE")
-        next_obj = sanitize_dossier_prose(
-            str(storylet.get("objective") or ch_bp.get("pacing_directive") or "A new chapter unfolds...")
-        )
-
-        next_quest = db.upsert_quest(
-            session_id=session_id,
-            quest_id=next_sq_id,
-            quest_type="Story Quest",
-            title=next_title,
-            objective=next_obj,
-            progress="0/1 Main Objective",
-            current_clues="",
-            status="Active",
-            reward_xp=250 + (next_ch * 30),
-            reward_gold=60 + (next_ch * 10),
-            is_story_quest=1,
-            clues_required=1,
-            sub_objectives=[],
-            deadline_day=None,
-            deadline_minute=None,
-            engine=next_engine,
-            dossier_stage="compiled",
-        )
-
-        feat_lt = str(storylet.get("featured_lieutenant") or ch_bp.get("featured_lieutenant") or "")
-        mm_name = str((spine_for_next.get("mastermind_profile") or {}).get("name") or "")
-        target_for_ch = mm_name if next_ch == 10 else feat_lt
-
-        next_dossier = compile_quest_dossier(
-            session_id=session_id,
-            quest_id=next_sq_id,
-            tag_or_archetype=next_engine,
-            title=next_title,
-            objective=next_obj,
-            family_tier="story",
-            chapter=next_ch,
-            turn_number=eff_turn,
-            target_npc=target_for_ch,
-            reward_gold=60 + (next_ch * 10),
-            scen_key=scen_key,
-            lang=lang,
-        )
-        from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
-        if is_clue_based_quest("story", next_engine):
-            schedule_background_chapter_plan(session_id, next_sq_id)
-        refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
 
     res_payload: Dict[str, Any] = {
         "chapter": next_ch,
