@@ -215,7 +215,7 @@ def process_anomalous_daily_rollover(
     arch = str(state.get("faction_archetype_key") or "public_agency")
 
     # 1. Audit yesterday's Mandatory Daily Bounty (only if advancing from a previous active day)
-    if int(new_day) > last_rollover and arch != "freelancer":
+    if int(new_day) > last_rollover and arch not in ("freelancer", "student_freelancer"):
         if (
             not state.get("mandatory_bounty_completed_today", False)
             and not state.get("mandatory_bounty_penalized_today", False)
@@ -265,7 +265,7 @@ def process_anomalous_daily_rollover(
 
     # 4. Auto-dispatch Today's Mandatory Daily Bounty via Morning SMS (for faction members)
     mandatory_quest = None
-    if arch != "freelancer":
+    if arch not in ("freelancer", "student_freelancer"):
         try:
             from mechanics.narrative.bounty import dispatch_anomalous_mandatory_daily_bounty
             fac_disp_name = state.get("joined_faction_name", "Agency")

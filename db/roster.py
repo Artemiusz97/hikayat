@@ -588,6 +588,46 @@ def mark_world_roster_staff_status(
         return _run(c)
 
 
+def clear_roster_npc_merchant_archetypes(
+    session_id: int,
+    npc_id: str,
+    new_role: str | None = None,
+    new_occupation: str | None = None,
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Clear stale `merchant_archetypes` on a `world_roster` NPC row without clobbering identity or contacts."""
+    raw_nid = str(npc_id or "").strip()
+    if not session_id or not raw_nid:
+        return False
+    sid, now = int(session_id), time.time()
+
+    def _run(c: sqlite3.Connection) -> bool:
+        _ensure_world_roster_table(c)
+        row = c.execute(
+            "SELECT * FROM world_roster WHERE session_id = ? AND (npc_id = ? OR lower(npc_id) = ?) LIMIT 1",
+            (sid, raw_nid, raw_nid.lower()),
+        ).fetchone()
+        if row is None:
+            return False
+        basic_info = parse_json_dict(row["basic_info_json"])
+        basic_info["merchant_archetypes"] = []
+        role_val = str(row["role"] or "")
+        if new_role is not None and str(new_role).strip():
+            role_val = str(new_role).strip()
+            basic_info["role"] = role_val
+        if new_occupation is not None and str(new_occupation).strip():
+            basic_info["occupation"] = str(new_occupation).strip()
+        _update_roster_columns(
+            c,
+            int(row["id"]),
+            {"role": role_val, "basic_info_json": json.dumps(basic_info), "updated_at": now},
+        )
+        return True
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
+
+
 def promote_world_roster_to_contact(
     session_id: int,
     character_id: int,

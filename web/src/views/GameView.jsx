@@ -38,6 +38,7 @@ const GameView = ({
   allocateStatPoint,
   session,
   setSession,
+  refreshSession,
   lastSyncTimestamp,
   processingTurn,
   pendingAction,
@@ -84,7 +85,7 @@ const GameView = ({
   const isWide = useMediaQuery('(min-width: 1280px)');
 
   const inventory = useInventory(user);
-  const codex = useCodex(session?.id, user, session);
+  const codex = useCodex(session?.id, user, session, refreshSession);
   const phone = usePhone(session?.id, user);
   const settings = useSettings(user?.user_id);
 
@@ -248,7 +249,9 @@ const GameView = ({
     refreshAllSidebars();
   };
 
-  const activeQuestCount = (codex.activeStoryQuest ? 1 : 0) + codex.quests.filter(q => q.status !== 'Completed').length;
+  const activeQuestCount = (codex.activeStoryQuest ? 1 : 0) + (codex.quests || []).filter(
+    q => q && !(q.is_story_quest || q.quest_type === 'Story Quest' || q.quest_type === 'Main Quest') && q.status === 'Active'
+  ).length;
   const contactsCount = (codex.contacts || []).filter(c => !c.is_dispatch_channel).length || null;
   const knownWorldCount = (codex.lorebook?.entities || []).filter(e => e.is_discovered !== false).length || null;
   const hasActiveMerchant = Boolean(session?.merchant?.available || session?.merchant?.active);

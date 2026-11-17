@@ -1,9 +1,9 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../api/client';
 import { isValidSessionId, isAnomalousScenarioKey } from '../utils/session';
 
-export const useCodex = (sessionId, user, session = null) => {
+export const useCodex = (sessionId, user, session = null, onSessionRefresh = null) => {
   const [contacts, setContacts] = useState([]);
   const [acquaintances, setAcquaintances] = useState([]);
   const [factions, setFactions] = useState([]);
@@ -31,6 +31,9 @@ export const useCodex = (sessionId, user, session = null) => {
   const activeUiLang = (i18n.resolvedLanguage || i18n.language || 'en').slice(0, 2);
   const isAnomalousScenario = isAnomalousScenarioKey(session?.scenario);
 
+  const fetchSeqRef = useRef(0);
+  const abortRef = useRef(null);
+
   const fetchCodexData = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !user) {
       if (!isValidSessionId(sessionId)) {
@@ -40,21 +43,33 @@ export const useCodex = (sessionId, user, session = null) => {
       setLoading(false);
       return;
     }
+    const seq = ++fetchSeqRef.current;
+    if (abortRef.current) {
+      try {
+        abortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       setLoading(true);
       setError(null);
 
+      const reqOpts = { signal: controller.signal };
       const requests = [
-        apiCall(`/api/contacts/${sessionId}?user_id=${user.user_id}`),
-        apiCall(`/api/factions/${sessionId}?user_id=${user.user_id}`),
-        apiCall(`/api/lorebook/${sessionId}?user_id=${user.user_id}`),
-        apiCall(`/api/quests/${sessionId}?user_id=${user.user_id}`),
+        apiCall(`/api/contacts/${sessionId}?user_id=${user.user_id}`, reqOpts),
+        apiCall(`/api/factions/${sessionId}?user_id=${user.user_id}`, reqOpts),
+        apiCall(`/api/lorebook/${sessionId}?user_id=${user.user_id}`, reqOpts),
+        apiCall(`/api/quests/${sessionId}?user_id=${user.user_id}`, reqOpts),
       ];
       if (isAnomalousScenario) {
-        requests.push(apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}&lang=${encodeURIComponent(activeUiLang)}`));
+        requests.push(apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}&lang=${encodeURIComponent(activeUiLang)}`, reqOpts));
       }
 
       const [contactsRes, factionsRes, lorebookRes, questsRes, encyclopediaRes] = await Promise.allSettled(requests);
+      if (fetchSeqRef.current !== seq || controller.signal.aborted) {
+        return;
+      }
 
       if (contactsRes.status === 'fulfilled') {
         const contactsData = contactsRes.value || {};
@@ -103,15 +118,25 @@ export const useCodex = (sessionId, user, session = null) => {
         setEncyclopedia(null);
       }
     } catch (err) {
+      if (controller.signal.aborted || fetchSeqRef.current !== seq) return;
       console.error("Failed to load codex data:", err);
       setError(err.message || "Failed to load codex data");
     } finally {
-      setLoading(false);
+      if (fetchSeqRef.current === seq) {
+        setLoading(false);
+      }
     }
   }, [sessionId, user, isAnomalousScenario, activeUiLang]);
 
   useEffect(() => {
     fetchCodexData();
+    return () => {
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+      }
+    };
   }, [fetchCodexData]);
 
   useEffect(() => {
@@ -206,6 +231,7 @@ export const useCodex = (sessionId, user, session = null) => {
     });
     syncQuestPayload(data);
     await refreshEncyclopediaIfActive();
+    await onSessionRefresh?.();
     return data;
   };
 
@@ -221,6 +247,7 @@ export const useCodex = (sessionId, user, session = null) => {
       }),
     });
     syncQuestPayload(data);
+    await onSessionRefresh?.();
     return data;
   };
 
@@ -236,6 +263,7 @@ export const useCodex = (sessionId, user, session = null) => {
     });
     syncQuestPayload(data);
     await refreshEncyclopediaIfActive();
+    await onSessionRefresh?.();
     return data;
   };
 
@@ -249,6 +277,7 @@ export const useCodex = (sessionId, user, session = null) => {
       }),
     });
     syncQuestPayload(data);
+    await onSessionRefresh?.();
     return data;
   };
 

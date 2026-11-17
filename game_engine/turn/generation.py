@@ -681,7 +681,11 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
                 "opening_narrative": narrative[:500] if narrative else "",
 
-                "scene_title": (res_deep.get("scene_title") or "").strip()
+                "scene_title": (res_deep.get("scene_title") or "").strip(),
+
+                "story_quest_title": (res_deep.get("story_quest_title") or "").strip(),
+
+                "story_quest_objective": (res_deep.get("story_quest_objective") or "").strip(),
 
             }
 
@@ -689,6 +693,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 session["current_location"] = res_deep["location"]
             elif suggested_loc:
                 session["current_location"] = suggested_loc
+            if session.get("current_location"):
+                starting_hook_ctx["suggested_location"] = session["current_location"]
 
             try:
                 sq_data = await game_engine.generate_story_quest(
@@ -704,6 +710,11 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 sq_data["title"] = str(res_deep["story_quest_title"]).strip()
             if res_deep.get("story_quest_objective") and sq_data:
                 sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
+                _sub_objs_sq = sq_data.get("sub_objectives") or []
+                if _sub_objs_sq and isinstance(_sub_objs_sq[0], dict) and (
+                    _sub_objs_sq[0].get("is_main") or _sub_objs_sq[0].get("id") == 0
+                ):
+                    _sub_objs_sq[0]["text"] = sq_data["objective"]
 
             sq_title = sq_data.get("title") or "Story Quest #1: The Discovery"
 

@@ -37,7 +37,7 @@ from mechanics.world.locations import is_location_engine_enabled, get_discovered
 from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
 from mechanics.combat.items import parse_item_effect, apply_item_to_target
 from mechanics.combat.status_effects import format_status_badge
-from localization import get_quest_ui_label
+from localization import get_quest_ui_label, ALL_MOVEMENT_PREFIXES
 try:
     from mechanics.narrative.threat_clock import format_threat_consequence
 except ImportError:
@@ -475,7 +475,7 @@ def _strip_leading_emojis(text: str) -> str:
         return ""
     import re
     cleaned = re.sub(
-        r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+-]+\]\s*)+',
+        r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+\u2013\u2014-]+\]\s*)+',
         '',
         str(text),
     ).strip()
@@ -485,6 +485,8 @@ def _get_choice_quest_icon(choice: dict) -> str | None:
     """Returns the quest/bounty/interaction progression icon (⭐, 🎯, ⚡, 💌, 🎭, 💖, 🎲) if applicable, else None."""
     if not isinstance(choice, dict):
         return None
+    if choice.get("quest_icon"):
+        return choice["quest_icon"]
     raw_label = str(choice.get("label") or choice.get("text") or choice.get("action") or "")
     raw_l = raw_label.lower()
     qid = str(choice.get("quest_id", ""))
@@ -495,21 +497,27 @@ def _get_choice_quest_icon(choice: dict) -> str | None:
 
     if not _is_intimate:
         # 1. Story Climax
-        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or "[story climax]" in raw_l:
+        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or any(
+            k in raw_l for k in ("[story climax", "[höhepunkt der geschichte", "[kemuncak cerita", "[punkt kulminacyjny", "[剧情高潮")
+        ):
             return "⚡"
 
         # 2. Story Quest Actions
-        if "⭐" in raw_label or "[story quest]" in raw_l or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
+        if "⭐" in raw_label or any(
+            k in raw_l for k in ("[story quest", "[hauptquest", "[misi utama", "[zadanie główne", "[主线任务")
+        ) or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
             return "⭐"
 
         # 3. Bounty / Sub-Quest Actions
-        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or "[bounty]" in raw_l or "bnt-" in qid.lower() or "qst-" in qid.lower():
+        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or any(
+            k in raw_l for k in ("[bounty", "[kopfgeld", "[ganjaran", "[zlecenie", "[悬赏")
+        ) or "bnt-" in qid.lower() or "qst-" in qid.lower():
             if any(b in raw_l for b in ("contract board", "notice board", "bounty board", "bulletin board", "quest board")):
                 return None
             return "🎯"
 
     # 4. Meetup / Phone appointment
-    if "💌" in raw_label or "[meetup]" in raw_l:
+    if "💌" in raw_label or any(k in raw_l for k in ("[meetup]", "[treffen]", "[pertemuan]", "[spotkanie]", "[碰头]", "[碰面]", "[会面]")):
         return "💌"
 
     # 5. Social & Character Interaction Archetypes
@@ -574,11 +582,15 @@ def _get_choice_skill_emoji(choice: dict) -> str:
             return "⛓️"
         if any(k in raw_l for k in ("equipment", "gear", "supplies", "backpack", "pack", "prepare", "sharpen")):
             return "🎒"
-        if any(k in raw_l for k in (
+        if str(choice.get("intent") or "").lower() == "movement" or any(k in raw_l for k in (
             "travel", "head to", "head toward", "depart", "walk to", "walk toward", "exit", "leave",
             "slip out", "make your way", "return to", "step out", "step into", "go to", "move to",
-            "journey", "navigate to"
-        )) or re.search(r"\b(travel|depart|exit|leave|journey|flee)\b", raw_l):
+            "journey", "navigate to",
+            "step through", "head through", "descend into", "descend the", "cross into", "enter the",
+            "venture into", "slip into",
+        )) or any(raw_l.startswith(pfx) or f" {pfx}" in raw_l for pfx in ALL_MOVEMENT_PREFIXES) or re.search(
+            r"\b(travel|depart|exit|leave|journey|flee)\b", raw_l
+        ):
             return "🚶"
         if any(k in raw_l for k in ("scout", "delve", "forage", "track", "trail", "wilderness", "ruins", "woods", "forest", "patrol")):
             return "🧭"
@@ -1526,13 +1538,14 @@ def _format_structured_quest_embed_fields(
         pct = int((comp_st / total_st) * 100) if total_st > 0 else 0
         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
 
-        tags = [f"`[{bar}] Stage {cur_st}/{total_st}`"]
+        stage_lbl = get_quest_ui_label('stage_short', lang)
+        tags = [f"`[{bar}] {stage_lbl} {cur_st}/{total_st}`"]
         if fow.get("is_peak_chapter"):
             tags.append(f"⚡ `{get_quest_ui_label('peak_chapter', lang)}`")
         if int(mo.get("aid_dc_reduction") or 0) > 0:
-            tags.append("🛡️ `Aid Active`")
+            tags.append(f"🛡️ `{get_quest_ui_label('aid_active', lang)}`")
         if mo.get("bypass_unlocked"):
-            tags.append("⏭️ `Shortcut Active`")
+            tags.append(f"⏭️ `{get_quest_ui_label('shortcut_active', lang)}`")
 
         mo_title = clean_narrative_location_arrows(str(mo.get("title") or mo.get("text") or redacted_q.get("objective") or ""))
         stage_lines = [f"**{mo_title}**\n" + " • ".join(tags)]
@@ -1542,14 +1555,14 @@ def _format_structured_quest_embed_fields(
             s_idx = int(st.get("stage_index") or idx_s)
             s_stat = str(st.get("status") or "locked").lower()
             s_done = bool(st.get("completed")) or s_stat in ("completed", "bypassed")
-            s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"Stage {s_idx}"))
+            s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"{stage_lbl} {s_idx}"))
             s_loc = format_clean_location_badge(str(st.get("target_location") or ""))
             s_npc = str(st.get("target_npc") or "").strip()
 
             if st.get("bypassed") or s_stat == "bypassed":
-                stage_lines.append(f"⏭️ **Stage {s_idx} (`[Bypassed]`):** *{s_lbl}*")
+                stage_lines.append(f"⏭️ **{stage_lbl} {s_idx} (`[{get_quest_ui_label('bypassed', lang)}]`):** *{s_lbl}*")
             elif s_done:
-                stage_lines.append(f"☑️ **Stage {s_idx}:** *{s_lbl}*")
+                stage_lines.append(f"☑️ **{stage_lbl} {s_idx}:** *{s_lbl}*")
                 for b_src in (st.get("clue_sources") or []):
                     if isinstance(b_src, dict) and b_src.get("bonus") and str(b_src.get("status") or "").lower() == "closed":
                         b_loc = format_clean_location_badge(str(b_src.get("location") or ""))
@@ -1560,7 +1573,7 @@ def _format_structured_quest_embed_fields(
             elif s_stat == "active" or s_idx == cur_st:
                 loc_part = f"\n   ↳ 📍 `{s_loc}`" if s_loc else ""
                 npc_part = f" • 👤 `{s_npc}`" if s_npc else ""
-                stage_lines.append(f"📍 **Stage {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
+                stage_lines.append(f"📍 **{stage_lbl} {s_idx}:** *{s_lbl}*{loc_part}{npc_part}")
                 clue_srcs = [s for s in (st.get("clue_sources") or []) if isinstance(s, dict)]
                 for c_src in clue_srcs[:4]:
                     c_stat = str(c_src.get("status") or "open").lower()

@@ -851,8 +851,12 @@ class StreamingNarrativeExtractor:
                     finished_field = self.current_field
                     self.in_narrative = False
                     self.current_field = None
-                    # If we just finished outcome_narrative, keep scanning for next_narrative!
-                    if finished_field in ("next_narrative", "narrative"):
+                    # Stop early only once single-field `narrative` finishes OR both
+                    # `outcome_narrative` and `next_narrative` have been emitted.
+                    if finished_field == "narrative" or (
+                        "outcome_narrative" in self.emitted_fields
+                        and "next_narrative" in self.emitted_fields
+                    ):
                         self.is_done = True
                         return
                 else:

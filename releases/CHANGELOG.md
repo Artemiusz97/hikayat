@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.3.0** | 2026-11-17 | Minor | Migration v57 Anomalous Locations Integrity, Procedural Urban City Profiles, Unified Merchant UI Authority, Quest Climax & Remote Travel Guards, and Code Hygiene Sweep. |
 | **v3.2.0** | 2026-11-16 | Minor | Dynamic NPC Wardrobe & Continuity Engine (`mechanics/social/wardrobe/`), SDXL Attire Prompt Synthesis, `KnownWardrobeCard` Fog-of-War UI & 5-Language Parity. |
 | **v3.1.0** | 2026-11-16 | Minor | Anomalous Sites Package (36 Pacifiable Wild Sites, Spatial Puzzles & Harvesting), School Club & Rival Turf Hardening, Private Residence Access Gates & UI Parity. |
 | **v3.0.0** | 2026-11-15 | **MAJOR** | Living World NPC Autonomy, Epistemic Asymmetry Matrix (`epistemic_facts` / `epistemic_knowledge`), Venue Activity Tags, Boundary UoW Tick & Server Fog-of-War Parity. |
@@ -55,6 +56,20 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.3.0] - 2026-11-17
+
+#### Added & Enhanced
+- **Migration v57 & Anomalous Locations Integrity (`db/core.py`, `db/saves.py`, `mechanics/world/anomalous_sites/lifecycle.py`, `data/anomalous_sites_catalog.json`)**:
+  - Added `_migrate_anomalous_locations_integrity_v57` and `backfill_anomalous_locations_integrity_v57` across schema migrations and `load_adventure_slot` to reparent misparented anomalous sites (`loc_hilltop_shrine`, `loc_backstage_loft`), normalize `sub_hosp_isolation_cell_1309`, reconcile canonical room renames across DB tables, and clear false restricted/residential/curfew drift.
+- **Dynamic Urban City Profiles & Location Graph Seeding (`namegen.py`, `mechanics/world/`, `scenario_data.py`, `data/`)**:
+  - Added procedural per-session `get_urban_city_profile`, `generate_urban_city_name`, and `get_session_city_name` wired into `scenario_prompt_block(session_id)`, `remap_town_node_for_scenario`, `world_schedule.py` (`is_university_node_or_location`, `_node_is_anomalous_flag`), and regenerated `data/locations_seed.json` & `data/scenarios.json`.
+- **Unified Shop Staff Authority & Wardrobe Continuity (`mechanics/world/venue_seeder.py`, `db/roster.py`, `api/`, `cogs/`)**:
+  - Added `resolve_scene_merchant_ui_state`, `heal_stale_civic_hq_staff`, `clear_roster_npc_merchant_archetypes`, and `_validate_or_clear_faction_quartermaster`, alongside `is_session_in_erotic_dialogue()` (`mechanics/social/physical_state.py`) and `active_incursion` wardrobe session wiring (`game_engine/state/reducers.py`).
+- **Quest Climax Enforcement, Remote Travel & Save Parity (`game_engine/`, `db/`, `mechanics/world/waypoints/`)**:
+  - Enforced Story Quest stage completion and MacGuffin acquisition before turn-in/disposal (`quest_agency.py`, `quests.py`, `quest_lifecycle.py`), added remote quest travel injection (`_inject_or_upgrade_remote_quest_travel` in `waypoints/choices.py` + travel guards in `waypoints/matching.py`), Hidden Lair climax redaction, `bypassed` projection parity (`db/quests.py`), `compiled_at_turn`/`reward_claimed` rollback parity (`db/dossiers.py`), and `state_events_json` inventory ID remapping (`db/saves.py`).
+- **Frontend Stability, 5-Language Parity & Code Hygiene (`web/`, `localization/`, `llm_client.py`, `services/turn_service.py`)**:
+  - Added `AbortController` sequence guards in `useCodex.js`, `can_travel` gating in `WorldMapModal.jsx`, closed-shop UI (`ActionPanel.jsx`), single-lead deduction updates (`QuestLogPanel.jsx`), `StreamingNarrativeExtractor` multi-field early-stop fixes, synced all 5 locales (`en`, `pl`, `ms`, `de`, `zh`), removed dead code/unused imports across Python & React modules, and rebuilt `web/dist/`.
 
 ### [v3.2.0] - 2026-11-16
 

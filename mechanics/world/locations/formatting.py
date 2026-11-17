@@ -51,22 +51,30 @@ def build_node_sensory_and_memory_block(
     scen_key: str = "",
     *,
     present_npcs: list | None = None,
+    session: dict | None = None,
 ) -> str:
     """Synthesizes indoor/outdoor time-of-day lighting, acoustics, curfew tension, and persistent room memory."""
+    from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
     from mechanics.world.schedules import get_time_block_key
     from mechanics.world.locations.access_gate import is_curfew_active, get_node_effective_access_info
-    from mechanics.world.world_schedule import is_abandoned_school_node, is_weekend, is_high_school_setting
+    from mechanics.world.world_schedule import (
+        is_abandoned_school_node,
+        is_high_school_setting,
+        is_university_node_or_location,
+        is_weekend,
+    )
 
-    if not scen_key and session_id:
+    sess_row: dict | None = dict(session) if isinstance(session, dict) else None
+    if sess_row is None and session_id:
         try:
             sess_row = db.get_session(session_id)
-            scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
         except Exception:
-            scen_key = "high_school_drama"
-    elif not scen_key:
-        scen_key = "high_school_drama"
+            sess_row = None
+    if not scen_key:
+        scen_key = str((sess_row or {}).get("scenario") or "high_school_drama")
 
     is_hs = is_high_school_setting(scen_key)
+    is_adult_ahs = is_adult_ahs_operative_fail_closed(sess_row, session_id=session_id, scen_key=scen_key)
     is_anomalous_scen = (
         scenario_data.is_anomalous_incursions_scenario(scen_key)
         or scenario_data.is_anomalous_high_school_scenario(scen_key)
@@ -76,7 +84,43 @@ def build_node_sensory_and_memory_block(
     time_block = get_time_block_key(current_minute)
     is_enc = int(curr_node.get("is_enclosed", 1))
     is_academic = curr_node.get("category") == "academic"
-    is_after_hours_campus = is_hs and is_academic and not is_abandoned_school_node(curr_node) and (safe_min >= 1200 or safe_min < 420)
+    curr_nid = str(curr_node.get("node_id") or "")
+    has_db_node = bool(session_id and curr_nid and db.get_world_node(session_id, curr_nid))
+    parent_node = (
+        db.get_world_node(session_id, curr_node["parent_id"])
+        if (session_id and curr_node.get("parent_id"))
+        else None
+    )
+    is_abandoned_wing = is_abandoned_school_node(curr_node, parent_node)
+    is_uni_node = is_university_node_or_location(curr_node, parent_node)
+    access_info = get_node_effective_access_info(
+        session_id,
+        curr_nid,
+        current_day=current_day,
+        current_minute=current_minute,
+        scen_key=scen_key,
+        session=sess_row,
+    )
+    _breach_or_open = bool(
+        has_db_node
+        and (
+            access_info.get("schedule_reason_code") == "after_hours_anomaly_breach"
+            or (
+                access_info.get("is_unlocked")
+                and not access_info.get("curfew_active")
+                and access_info.get("status_badge") != "Open"
+            )
+        )
+    )
+    is_after_hours_campus = (
+        is_hs
+        and is_academic
+        and not is_abandoned_wing
+        and not is_uni_node
+        and not is_adult_ahs
+        and not _breach_or_open
+        and (safe_min >= 1200 or safe_min < 420)
+    )
     is_weekend_day = is_weekend(current_day)
     node_probe = f"{curr_node.get('node_id', '')} {curr_node.get('name', '')} {curr_node.get('parent_id', '')}".lower()
     is_theme_park = is_anomalous_scen and any(
@@ -84,7 +128,6 @@ def build_node_sensory_and_memory_block(
     )
     is_tp_anomalous_shift = is_theme_park and (safe_min >= 1320 or safe_min < 480)
     is_tp_witching_peak = is_tp_anomalous_shift and (0 <= safe_min < 180)
-    curr_nid = str(curr_node.get("node_id") or "")
 
     from mechanics.world.anomalous_sites.catalog import (
         THEME_PARK_EPICENTER_IDS,
@@ -136,16 +179,40 @@ def build_node_sensory_and_memory_block(
     lines = [
         f"- Physical Environment & Atmosphere: {'Enclosed Interior' if is_enc else 'Open-Air Exterior'} | {lighting} | {acoustics}."
     ]
+    raw_room_atm = str(curr_node.get("atmosphere") or "").strip()
+    if raw_room_atm and str(curr_node.get("node_type") or "").upper() == "ROOM":
+        room_sensory = raw_room_atm
+        if raw_room_atm.startswith("{"):
+            try:
+                parsed_atm = json.loads(raw_room_atm)
+                room_sensory = str(parsed_atm.get("sensory") or "").strip()
+            except Exception:
+                room_sensory = ""
+        if room_sensory and room_sensory not in lines[0]:
+            lines.append(f"- Room Atmosphere & Sensory: {room_sensory}")
 
     # Curfew & After-Hours Trespassing tension check
     c_start = curr_node.get("curfew_start_min")
     c_end = curr_node.get("curfew_end_min")
-    if is_hs and is_abandoned_school_node(curr_node):
+    _stair_breach_fallback = (
+        not has_db_node
+        and any(k in node_probe for k in ("loc_13th_stairwell", "sub_4th_floor_landing", "sub_mirror_washroom", "sub_13th_step"))
+        and (safe_min >= 1200 or safe_min < 360)
+    )
+    _curfew_warranted = (
+        bool(access_info.get("curfew_active") or access_info.get("is_trespassing"))
+        if has_db_node
+        else (
+            (is_curfew_active(c_start, c_end, current_minute) or safe_min >= 1200 or safe_min < 420)
+            and not _stair_breach_fallback
+        )
+    )
+    if is_hs and is_abandoned_wing:
         lines.append(
             "- [ABANDONED SCHOOL BUILDING — UNRESTRICTED 24/7]: "
             "Nobody bothers to lock the doors or patrol this derelict wing. It remains accessible at all hours."
         )
-    elif is_hs and (is_curfew_active(c_start, c_end, current_minute) or safe_min >= 1200 or safe_min < 420) and is_academic:
+    elif is_hs and is_academic and not is_uni_node and not is_adult_ahs and not _breach_or_open and _curfew_warranted:
         lines.append(
             "- [CAMPUS CURFEW & AFTER-HOURS TRESPASSING (20:00–07:00) — AFTER-HOURS TENSION]: "
             "All students and teachers have returned home, main corridor lights are dark, exterior doors are locked from the outside (exit remains unobstructed), "
@@ -202,7 +269,6 @@ def build_node_sensory_and_memory_block(
                 lines.append(f"- [ACTIVE DOMAIN RULE — {rule['name']}]: {rule['hazard_cue']}")
 
     # Room memory / scene residue check (with Z2 epistemic privacy guard when unaware NPCs are present)
-    access_info = get_node_effective_access_info(session_id, curr_node["node_id"], current_day=current_day, current_minute=current_minute, scen_key=scen_key)
     res_log = list(access_info.get("scene_residue_log") or [])
     fallback_residue = str(access_info.get("scene_residue") or "")
     if not res_log and fallback_residue:
@@ -389,80 +455,51 @@ def format_llm_location_context(
 
 
 
-    campus_name = get_session_school_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    athletics_name = get_session_athletics_complex_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    commons_name = get_session_student_commons_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    arts_name = get_session_cultural_arts_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
-    abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
+    has_school_campus = scenario_data.has_school_campus_mechanics(scenario_key)
+    is_ahs_scen = scenario_data.is_anomalous_high_school_scenario(scenario_key)
+    campus_name = get_session_school_name(session_id, scenario_key) if has_school_campus else ""
+    athletics_name = get_session_athletics_complex_name(session_id, scenario_key) if has_school_campus else ""
+    commons_name = get_session_student_commons_name(session_id, scenario_key) if has_school_campus else ""
+    arts_name = get_session_cultural_arts_name(session_id, scenario_key) if has_school_campus else ""
+    abandoned_name = get_session_abandoned_campus_name(session_id, scenario_key) if has_school_campus else ""
     comm_name = get_session_commercial_district_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
-
     res_name = get_session_residential_neighborhood_name(session_id, scenario_key) if is_school_scenario(scenario_key) else ""
 
-
-
     district_lines = []
-
     if is_school_scenario(scenario_key):
-
         if campus_name:
-
             district_lines.append(f"- [Campus - Academic Wing & Entrance Gate]: '{campus_name}' (Classrooms, Homeroom, Teachers' Staff Room, Library, Chemistry Lab, Rooftop, Shoe Lockers & Main Gate)")
-
         if athletics_name:
-
             district_lines.append(f"- [Campus - Athletics Complex]: '{athletics_name}' (Main Gymnasium, 400m Running Track, Stadium Field, Swimming Pool Facility, Martial Arts Dojo, Behind Gym Sheds)")
-
         if commons_name:
-
             district_lines.append(f"- [Campus - Social Commons & Dining]: '{commons_name}' (Central Courtyard Fountain, Cherry Tree, Campus Dining Hall & Cafeteria, Vending Machine Pavilion, Botanical Glasshouse)")
-
         if arts_name:
-
             district_lines.append(f"- [Campus - Cultural Arts & Student Union]: '{arts_name}' (Student Council Office, School Auditorium Stage, Music Wing Rehearsal Hall, Fine Arts Studio, Broadcasting Room, Clubrooms)")
-
         if abandoned_name:
-
             district_lines.append(f"- [Campus - Abandoned Old Campus]: '{abandoned_name}' (Decaying Clock Tower, Old Storage Room 3-B, Derelict Old Gymnasium, Boarded Old Infirmary, Overgrown Wings)")
-
+    elif is_ahs_scen and campus_name:
+        district_lines.append(
+            f"- [Campus - Unified High School Zone]: '{campus_name}' "
+            f"(Main Academic Building, Courtyard & Cafeteria, Athletics & Track, Cultural Arts & Student Union, "
+            f"and {abandoned_name or 'Abandoned Old Campus Wing'} with Dusty Annex Clockwork Archive)"
+        )
     elif campus_name:
-
         district_lines.append(f"- [Campus]: '{campus_name}' (Classrooms, Facilities, School Grounds)")
 
-
-
     if comm_name:
-
         district_lines.append(f"- [Commercial]: '{comm_name}' (Shops, Cafés, Entertainment & Arcades)")
-
     if res_name:
-
         district_lines.append(f"- [Residential]: '{res_name}' (Family Residences, Houses, Apartments, Neighborhood Parks)")
-
-
 
     regional_block = ("REGIONAL DISTRICT HIGHLIGHTS:\n" + "\n".join(district_lines) + "\n\n") if district_lines else ""
 
-
-
     res_rule = f"- RESIDENTIAL ZONE RULE: All NPC and Player houses, family residences, apartments, and residential cul-de-sacs MUST ALWAYS be placed in the zone tagged [Residential] ('{res_name}'). NEVER place a character's house inside the Commercial District or School Campus.\n- HOUSEHOLD NAMING CONVENTION: Use the family surname for character residences (e.g. '{res_name} ➔ Anderson Residence ➔ Living Room'). Sibling/family characters share the same household.\n" if res_name else ""
 
-
-
     campus_rules = ""
-
-    if is_school_scenario(scenario_key):
-
+    if has_school_campus:
         campus_rules = (
-
             f"- CAMPUS ZONE & BUILDING TOPOGRAPHY: The school campus is unified under the Zone '{campus_name}', which contains dedicated Tier 2 building complexes: 'Main Campus Building' (Academic classrooms, Homeroom, Library, Staff Room, Main Gates), '{athletics_name}' (Gymnasium & Varsity Court, Track, Pool, Dojo, Behind-Gym Sheds), '{commons_name}' (Central Courtyard, Cafeteria, Botanical Glasshouse), 'Student Council Office' (dedicated council suite, directive board, requisition counter & archive vault), 'Campus Auditorium & Drama Theater' (proscenium stage, box office, callboard, costume wardrobe & dressing suite), '{arts_name}' (Music/Art Studios, Media Room, Occult Room 3-B & Esports Clubroom), and '{abandoned_name}' (Old Campus, Boiler-Room Den & hidden underground wings). Place specific rooms/facilities in Tier 3, and use `focal_point` for room furniture/micro-spots.\n"
-
             f"- CHARACTER'S DESK RULE: A student character's personal desk (e.g. 'Player's Desk' / '<Name>'s Desk') ONLY exists in their designated homeroom classroom. In the Student Council Office, use 'President's Desk', 'Meeting Table', or 'Archive Files & Safe'—NEVER place or generate a student's personal homeroom desk in the council office or other rooms.\n"
-
         )
 
 
@@ -506,10 +543,8 @@ def format_llm_location_context(
 
 
     # Connected zones (e.g. Student Commons if in Arts, Academic, Athletics, Abandoned)
-
     connected_zones = []
-
-    if is_school_scenario(scenario_key):
+    if has_school_campus:
 
         if zone.strip().lower() == arts_name.strip().lower() and commons_name:
 

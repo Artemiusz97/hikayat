@@ -756,6 +756,13 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         except Exception:
             pass
 
+        # Backfill Migration 57 anomalous locations integrity on save load
+        try:
+            from mechanics.world.anomalous_sites.lifecycle import backfill_anomalous_locations_integrity_v57
+            backfill_anomalous_locations_integrity_v57(conn, session_id=new_session_id)
+        except Exception:
+            pass
+
         # Rebuild 3-column multilingual FTS5 index for restored session_digests
         from .memory import rebuild_session_digests_fts
         rebuild_session_digests_fts(conn, new_session_id)
@@ -1018,14 +1025,15 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 except Exception:
                     pass
 
-        # Remap tangible_item MacGuffin inventory_id inside quest_dossiers
+        # Remap tangible_item MacGuffin inventory_id inside quest_dossiers & state_events_json
         qd_rows = conn.execute(
-            "SELECT id, quest_id, tangible_item_json FROM quest_dossiers WHERE session_id = ?",
+            "SELECT id, quest_id, tangible_item_json, state_events_json FROM quest_dossiers WHERE session_id = ?",
             (new_session_id,),
         ).fetchall()
         for qd_row in qd_rows:
             try:
                 t_item = json.loads(qd_row["tangible_item_json"] or "{}")
+                t_changed = False
                 if isinstance(t_item, dict) and t_item.get("has_item"):
                     old_inv_id = t_item.get("inventory_id")
                     new_inv_id = inv_id_map.get(old_inv_id) if old_inv_id is not None else None
@@ -1037,12 +1045,24 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         ).fetchone()
                         if inv_match:
                             new_inv_id = inv_match["id"]
-                    if new_inv_id:
+                    if new_inv_id and new_inv_id != old_inv_id:
                         t_item["inventory_id"] = new_inv_id
-                        conn.execute(
-                            "UPDATE quest_dossiers SET tangible_item_json = ? WHERE id = ?",
-                            (json.dumps(t_item), qd_row["id"]),
-                        )
+                        t_changed = True
+                ev_list = json.loads(qd_row["state_events_json"] or "[]")
+                ev_changed = False
+                if isinstance(ev_list, list):
+                    for ev in ev_list:
+                        if isinstance(ev, dict) and ev.get("kind") == "tangible_item":
+                            for side in ("prev", "next"):
+                                snap = ev.get(side)
+                                if isinstance(snap, dict) and snap.get("inventory_id") in inv_id_map:
+                                    snap["inventory_id"] = inv_id_map[snap["inventory_id"]]
+                                    ev_changed = True
+                if t_changed or ev_changed:
+                    conn.execute(
+                        "UPDATE quest_dossiers SET tangible_item_json = ?, state_events_json = ? WHERE id = ?",
+                        (json.dumps(t_item), json.dumps(ev_list), qd_row["id"]),
+                    )
             except Exception:
                 pass
 

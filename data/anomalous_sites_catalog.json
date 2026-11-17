@@ -615,7 +615,8 @@
       "entrance_id": "loc_hosp_floor_13",
       "deepest_id": "loc_hosp_floor_13",
       "sub_ids": [
-        "loc_hosp_floor_13"
+        "loc_hosp_floor_13",
+        "sub_hosp_isolation_cell_1309"
       ],
       "name_keywords": [
         "floor 13",
@@ -4390,7 +4391,7 @@
       "site_id": "loc_ghost_freighter",
       "zone_id": "zone_city_docks",
       "parent_facility_id": null,
-      "name": "The Ghost Freighter MV Ouroboros",
+      "name": "The Ghost Container Freighter",
       "site_type": "wild_facility",
       "threat_grade": 3,
       "threat_grade_roman": "III",
@@ -4409,7 +4410,7 @@
         "ghost freighter",
         "mv ouroboros"
       ],
-      "base_horror_sensory": "Moored silently off Blackanchor Pier sits a freighter whose wheelhouse glass shows black mid-ocean swells instead of city docks. Cold salt bilge-fog seeps into lungs until breathing tastes like brackish lung-water, and deck compasses spin maniacally without finding north.",
+      "base_horror_sensory": "Moored silently off Deepwater Pier sits a freighter whose wheelhouse glass shows black mid-ocean swells instead of city docks. Cold salt bilge-fog seeps into lungs until breathing tastes like brackish lung-water, and deck compasses spin maniacally without finding north.",
       "gore_horror_sensory": "Below the waterline, damp cargo tarps conceal stacked crates packed full of soaked naval pea-coats—empty chests swelling gently in cold black brine while bleached fingernails scratch steadily along the inside of locked steel lids.",
       "pacified_sensory": "Harbor lights come cleanly back through cleared bridge glass; the old freighter rides flat on calm dock swells with reassuringly steady footing.",
       "crowd_stillness_prose": "Moored behind steel harbour booms, the silent rust hull rides higher than empty ballast laws allow.",
@@ -5211,7 +5212,7 @@
     },
     "loc_hilltop_shrine": {
       "site_id": "loc_hilltop_shrine",
-      "zone_id": "zone_suburbs",
+      "zone_id": "zone_woods_reserve",
       "parent_facility_id": null,
       "name": "The Overgrown Hilltop Shrine",
       "site_type": "wild_facility",
@@ -5782,7 +5783,8 @@
       ],
       "name_keywords": [
         "abandoned old campus wing",
-        "clock tower belfry"
+        "clock tower belfry",
+        "dusty annex clockwork archive"
       ],
       "base_horror_sensory": "Once twilight drains color out of the campus, the condemned Showa brick wing wakes with dry clockwork clicks. Rusted locker doors slam in rhythm three hallways away, mildewed yearbooks leak wet rust onto floorboards, and giant belfry gears groan as if tightening unseen springs.",
       "gore_horror_sensory": "Spotted across the gym mats and pinned deep inside the belfry's meshing brass teeth cling torn navy blazer cuffs still wrapping broken wristbones—relics of an after-hours dare ground slowly into rusted gear grease.",
@@ -7941,7 +7943,7 @@
       "site_id": "loc_ap_baggage_void",
       "zone_id": "zone_airport",
       "parent_facility_id": null,
-      "name": "Terminal E Endless Baggage Carousel Anomaly",
+      "name": "South Concourse Endless Baggage Carousel Anomaly",
       "site_type": "wild_facility",
       "threat_grade": 3,
       "threat_grade_roman": "III",
@@ -7964,7 +7966,7 @@
       "base_horror_sensory": "Conveyor 9 churns relentlessly past midnight without a plane at the gate—rubber slats click in harsh industrial rhythm over black abysses where tarmac bedrock ought to be. Split luggage spills wet damp clothing and snapped leather straps coiled tight enough to snare boots.",
       "gore_horror_sensory": "Through cracked fiberglass suitcase shells spill wet combed hair, loose porcelain bridgework, and damp wool coats still buttoned tightly over pale, boneless ribs packed neatly inside unclaimed carry-ons.",
       "pacified_sensory": "Rubber conveyors grind to ordinary airport stillness; unclaimed bag vaults yield surprisingly sharp eye for salvage and physical edge.",
-      "crowd_stillness_prose": "Aluminum shutters isolate Terminal E baggage belts from international arrivals; janitors hear rolling zipper-pulls through locked steel gates.",
+      "crowd_stillness_prose": "Aluminum shutters isolate South Concourse baggage belts from international arrivals; janitors hear rolling zipper-pulls through locked steel gates.",
       "domain_rule": {
         "id": "conveyor_undertow",
         "name": "Conveyor Undertow",
@@ -10065,7 +10067,7 @@
     },
     "loc_clandestine_syndicate_hq": {
       "site_id": "loc_clandestine_syndicate_hq",
-      "zone_id": "zone_city_docks",
+      "zone_id": "zone_industrial",
       "parent_facility_id": null,
       "name": "The Pale Market Black Vault",
       "site_type": "hostile_hq",

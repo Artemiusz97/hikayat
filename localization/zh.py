@@ -124,7 +124,7 @@ DIALOGUE_INIT_PREFIXES = (
 )
 
 MOVEMENT_PREFIXES = (
-    "前往", "去往", "走进", "进入", "动身前往", "返回"
+    "前往", "去往", "走进", "进入", "动身前往", "返回", "穿过", "深入", "下到"
 )
 
 
@@ -196,6 +196,11 @@ QUEST_UI_LABELS = {
     "source_cold": "已中断",
     "source_claimed": "已获取",
     "source_bonus": "额外线索",
+    "stage_short": "阶段",
+    "aid_active": "援助已激活",
+    "shortcut_active": "捷径已开启",
+    "bypassed": "已绕过",
+    "quest_travel_to": "前往{dest}",
 }
 
 PACT_UI_LABELS = {

@@ -1240,11 +1240,15 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         and _enc_loc
     ):
         try:
+            _completed_qids_pre = {
+                str(cq) for cq in ((pre_quest_res or {}).get("completed_quests") or []) if cq
+            }
+            from mechanics.world.waypoints.matching import check_location_matches_waypoint as _chk_loc_match
             _enc_loc_low = _enc_loc.strip().lower()
             _q_dossiers = db.get_session_quest_dossiers(int(session["id"]), status_stage="compiled") or []
             for _qd in _q_dossiers:
                 _qid = str(_qd.get("quest_id") or "")
-                if not _qid:
+                if not _qid or _qid in _completed_qids_pre:
                     continue
                 _q_row = db.get_quest_by_id(int(session["id"]), _qid)
                 if not _q_row or str(_q_row.get("status") or "").lower() != "active":
@@ -1281,7 +1285,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     and _climax_escalated
                     and not (_peaceful_dialogue_action and not _talking_to_target)
                     and _c_loc
-                    and (_c_loc in _enc_loc_low or _enc_loc_low in _c_loc)
+                    and _chk_loc_match(_enc_loc, str(_climax.get("location") or ""), session_id=int(session["id"]))
                 ):
                     if _is_rush_action:
                         try:

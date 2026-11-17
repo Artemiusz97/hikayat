@@ -31,7 +31,13 @@ def _resolve_session_location(session_id: int, session: dict = None, scen_key: s
                 loc = f"{dz} ➔ {dp}"
         except Exception:
             pass
-    return loc or ("Ashford Academy" if "school" in scen_key.lower() else "the Frontier")
+    if not loc and (scenario_data.is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key)):
+        try:
+            from mechanics.world.locations.seeds import get_session_school_name
+            loc = get_session_school_name(session_id, scen_key)
+        except Exception:
+            loc = ""
+    return loc or ("Main Academy Campus" if ("school" in scen_key.lower() or scenario_data.has_school_campus_mechanics(scen_key)) else "the Frontier")
 
 
 # --------------------------------------------------------------------- Taxonomy of Quest Archetypes
@@ -897,7 +903,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                 candidate_locations.append(f"{z} -> {p}")
 
     if is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key):
-        school_zone = get_session_school_name(session_id, scen_key) if session_id else "Westlake Academy"
+        school_zone = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
         athletics_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["athletics", "grounds", "sports"])), "School Grounds & Athletics")
         commons_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["commons", "plaza", "dining"])), "Student Commons & Central Plaza")
         arts_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["cultural arts", "student union", "arts & union"])), "Cultural Arts & Student Union")
@@ -915,7 +921,8 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         # 4. Cultural Arts & Student Union
         arts_facilities = zones_dict.get(arts_zone, ["Student Council Office", "School Auditorium Stage", "Music Wing Rehearsal Hall", "Fine Arts Studio", "Campus Media & Broadcasting Room", "Student Clubroom Corridor"])
         # 5. Abandoned Old Campus
-        abandoned_facilities = zones_dict.get(abandoned_zone, ["Decaying Clock Tower", "Old Storage Room 3-B", "Derelict Old Gymnasium", "Boarded Old Infirmary"])
+        _ahs_old = scenario_data.is_anomalous_high_school_scenario(scen_key)
+        abandoned_facilities = zones_dict.get(abandoned_zone, ["Decaying Clock Tower", "Dusty Annex Clockwork Archive" if _ahs_old else "Old Storage Room 3-B", "Derelict Old Gymnasium", "Boarded Old Infirmary"])
 
         # 6. Commercial hangout & shopping spots
         commercial_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["commercial", "strip", "market", "shops", "district"])), "Komorebi Commercial Strip")
@@ -1293,7 +1300,7 @@ def _build_school_club_fallback_bounties(
     fac_low = faction_name.lower()
     cat_low = str(faction.get("category") or faction.get("hierarchy_template") or "").strip().lower()
     zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
-    school_zone = get_session_school_name(session_id, scen_key) if session_id else "Westlake Academy"
+    school_zone = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
 
     campus_cands: list[str] = []
     town_cands: list[str] = []

@@ -673,6 +673,8 @@ class MerchantMixin:
         merchant["active"] = False
         merchant["available"] = False  # this encounter is resolved; a future scene rolls fresh
         merchant["is_phone_shop"] = False
+        merchant["is_faction_quartermaster"] = False
+        merchant.pop("quartermaster_faction_arch", None)
         session["merchant"] = merchant
         await adb(db.save_merchant_state, session_id, merchant)
 

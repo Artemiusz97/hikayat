@@ -404,7 +404,7 @@ FACULTY_TWISTS: Dict[str, List[str]] = {
     "School Nurse": [
         "Calming maternal presence with herbal tea, but possesses a laser-sharp lie-detector gaze for students faking stomach aches to skip class.",
         "Soft-spoken and gentle, but used to be an emergency trauma medic who rides a vintage motorcycle to school and fears nothing.",
-        "Quiet listener who acts as the unofficial therapist of Westlake Academy; knows everyone's hidden anxieties and heartbreaks."
+        "Quiet listener who acts as the unofficial campus therapist; knows everyone's hidden anxieties and heartbreaks."
     ],
     "Head Librarian": [
         "Vigilant guardian of silence who stalks the aisles like an owl, but secretly leaves mystery books with handwritten recommendation bookmarks for shy students.",
@@ -513,7 +513,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
         generate_town_roster,
         get_town_format_kwargs,
     )
-    school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
+    school_name = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
     classroom_name = get_session_classroom_name(session_id, scen_key) or "Classroom 2-B (Homeroom)"
     athletics_name = get_session_athletics_complex_name(session_id, scen_key) or "School Grounds & Athletics"
     commons_name = get_session_student_commons_name(session_id, scen_key) or "Student Commons & Central Plaza"
@@ -876,7 +876,7 @@ def generate_campus_directory(session_id: int, scen_key: str = "high_school_dram
 
     # 6. Assign 6 Alternating Student Part-Time Shifts & Append Town Characters
     town_fmt = get_town_format_kwargs(session_id, scen_key)
-    assign_student_part_time_shifts(directory, town_fmt)
+    assign_student_part_time_shifts(directory, town_fmt, scen_key=scen_key)
     town_entries = generate_town_roster(
         session_id=session_id,
         scen_key=scen_key,
@@ -951,7 +951,7 @@ def ensure_school_directory_exists(session: int | dict | str | None, player_gend
         town_fmt = get_town_format_kwargs(sess_id, scen_key)
         # 1. Non-destructively attach part-time shifts onto matching existing students
         pre_summaries = {r.get("npc_id"): r.get("personality_summary", "") for r in existing}
-        assign_student_part_time_shifts(existing, town_fmt)
+        assign_student_part_time_shifts(existing, town_fmt, scen_key=scen_key)
         modified_existing = [
             r for r in existing
             if r.get("personality_summary", "") != pre_summaries.get(r.get("npc_id"), "")
@@ -1184,7 +1184,7 @@ def generate_sibling_student_peer(
         get_session_classroom_name,
         get_session_student_commons_name
     )
-    school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
+    school_name = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
     classroom_name = get_session_classroom_name(session_id, scen_key) or "Classroom 2-B (Homeroom)"
     commons_name = get_session_student_commons_name(session_id, scen_key) or "Student Commons & Central Plaza"
 
@@ -2074,7 +2074,7 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
     sess = db.get_session(session_id)
     scen_key = sess.get("scenario", "high_school_drama") if sess else "high_school_drama"
     from mechanics.world.locations import get_session_school_name
-    school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
+    school_name = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
 
     npc_id = str(char_dict.get("npc_id") or name).strip().lower().replace(" ", "_").replace(".", "")
     role = char_dict.get("role", "Student")
@@ -2360,7 +2360,7 @@ def generate_dynamic_student_peer(session_id: int, scen_key: str = "high_school_
 
     npc_id = full_name.lower().replace(" ", "_").replace(".", "")
     from mechanics.world.locations import get_session_school_name, get_session_student_commons_name
-    school_name = get_session_school_name(session_id, scen_key) or "Westlake Academy"
+    school_name = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
     commons_name = get_session_student_commons_name(session_id, scen_key) or "Student Commons & Central Plaza"
     char_dict = {
         "session_id": session_id,

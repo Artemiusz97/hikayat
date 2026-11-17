@@ -73,6 +73,8 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   if (!isOpen) return null;
 
   const zones = mapData?.zones || [];
+  const canTravel = mapData?.can_travel !== false;
+  const travelBlockedReason = mapData?.travel_blocked_reason || '';
   const activeZoneObj = zones.find(z => z.zone_name === selectedZone) || zones[0] || null;
   const primaryPlaces = activeZoneObj?.primary_locations || [];
 
@@ -91,7 +93,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
   );
 
   const handleTravel = async (destValue) => {
-    if (!destValue || !onTravel || traveling) return;
+    if (!destValue || !onTravel || traveling || !canTravel) return;
     setTraveling(true);
     setTravelError(null);
     try {
@@ -205,13 +207,14 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                     ) : (
                       <button
                         type="button"
-                        disabled={traveling}
+                        disabled={traveling || !canTravel}
+                        title={!canTravel ? (travelBlockedReason || t('atlas.travel_blocked', 'Fast travel is currently unavailable.')) : undefined}
                         onClick={(e) => {
                           e.stopPropagation();
                           handleTravel(qd.value);
                         }}
                         className={`px-2 py-1 rounded bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border border-amber-400/60 text-[10px] font-bold shrink-0 flex items-center gap-1 transition-colors ${
-                          traveling ? 'opacity-50 cursor-not-allowed' : ''
+                          (traveling || !canTravel) ? 'opacity-50 cursor-not-allowed' : ''
                         }`}
                       >
                         <span>{traveling ? t('atlas.traveling', 'Traveling...') : (qd.travel_tag && qd.travel_tag !== 'Here' ? t('atlas.travel_with_tag', { tag: qd.travel_tag, defaultValue: `Travel (${qd.travel_tag})` }) : t('atlas.travel', 'Travel'))}</span>
@@ -256,7 +259,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                   const isSelected = activeZoneObj?.zone_name === z.zone_name;
                   const zoneQuestMarkers = Array.isArray(z.quest_markers) ? z.quest_markers : [];
                   const questTags = (z.active_tags || []).filter(t =>
-                    t.includes('Quest') || t.includes('Climax') || t.includes('Bounty') || t.includes('Meetup')
+                    t.includes('Quest') || t.includes('Climax') || t.includes('Bounty') || t.includes('Meetup') || t.includes('⭐') || t.includes('🎯')
                   );
                   const otherTags = (z.active_tags || []).filter(t => !questTags.includes(t));
                   const questCount = z.quest_count || zoneQuestMarkers.length || questTags.length;
@@ -317,9 +320,9 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                             <div
                               key={qIdx}
                               className="text-[10px] text-amber-300 bg-amber-950/60 border border-amber-600/50 rounded px-2 py-0.5 truncate font-medium"
-                              title={`${qm.place_name}: ${qm.marker}`}
+                              title={`${qm.place_name}: ${cleanProseLocations(qm.marker)}`}
                             >
-                              📍 <strong>{qm.place_name}</strong> — {qm.marker}
+                              📍 <strong>{qm.place_name}</strong> — {cleanProseLocations(qm.marker)}
                             </div>
                           ))}
                         </div>
@@ -556,10 +559,11 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                   </span>
                                 ) : (
                                   <button
-                                    disabled={traveling}
+                                    disabled={traveling || !canTravel}
+                                    title={!canTravel ? (travelBlockedReason || t('atlas.travel_blocked', 'Fast travel is currently unavailable.')) : undefined}
                                     onClick={() => handleTravel(destValue)}
                                     className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${
-                                      traveling ? 'opacity-50 cursor-not-allowed' : ''
+                                      (traveling || !canTravel) ? 'opacity-50 cursor-not-allowed' : ''
                                     } ${
                                       hasQuest
                                         ? 'bg-amber-500/25 hover:bg-amber-500/40 text-amber-200 border-amber-400/70 shadow-sm'
@@ -582,7 +586,7 @@ const WorldMapModal = ({ isOpen, onClose, session, user, onTravel, initialTarget
                                 </div>
                                 {questMarkers.map((qm, qmIdx) => (
                                   <div key={qmIdx} className="text-xs text-amber-100 font-medium leading-snug">
-                                    {qm}
+                                    {cleanProseLocations(qm)}
                                   </div>
                                 ))}
                               </div>

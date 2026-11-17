@@ -516,7 +516,7 @@ def get_scenario_dropdown_label(scenario_or_key: dict | str | None, lang: str | 
     return display
 
 
-def scenario_prompt_block(scenario: dict | str | None) -> str:
+def scenario_prompt_block(scenario: dict | str | None, session_id: int = 0) -> str:
     """Format scenario data for injection into LLM user prompts."""
     if not isinstance(scenario, dict):
         scenario = get_scenario(scenario)
@@ -543,6 +543,10 @@ def scenario_prompt_block(scenario: dict | str | None) -> str:
     mechanics_text = ", ".join(active_mechanics) or "none"
     scen_name = str(scenario.get("name", "Adventure"))
     scen_desc = str(scenario.get("description", ""))
+    if "{" in scen_desc:
+        from mechanics.world.locations.hierarchy import resolve_session_location_tokens
+        scen_key_tok = str(scenario.get("key") or scenario.get("id") or "")
+        scen_desc = resolve_session_location_tokens(int(session_id or 0), scen_desc, scenario_key=scen_key_tok)
     if str(scenario.get("key") or "").startswith("custom") or scen_name.startswith(("Custom:", "Tersuai:", "Własny:")):
         from mechanics.system.input_sanitizer import sanitize_character_name, wrap_custom_lore
         scen_name = sanitize_character_name(scen_name, max_len=80) or "Custom Adventure"

@@ -18,6 +18,7 @@ from mechanics.world.anchor_schedule import (
     is_npc_on_active_shift,
     resolve_anchor_schedule_nodes,
 )
+from mechanics.world.locations import location_has_merchant_shop
 from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
 from mechanics.world.locations.residences import get_player_owned_or_starter_property_for_node
 from mechanics.world.npc_schedule import is_high_school_setting
@@ -35,8 +36,13 @@ from mechanics.world.schedule_blocks import get_time_block_key
 from mechanics.world.venue_seeder import (
     ensure_roaming_merchants_seeded,
     ensure_venue_staff_seeded,
+    heal_stale_civic_hq_staff,
 )
-from mechanics.world.venue_templates import is_node_staffable, parse_node_state
+from mechanics.world.venue_templates import (
+    is_civic_or_multi_wing_hub_node,
+    is_node_staffable,
+    parse_node_state,
+)
 
 _PLAYER_SELF_TOKENS: frozenset[str] = frozenset({"player", "you", "mc", "protagonist"})
 
@@ -332,7 +338,9 @@ def preload_presence_context(
     }
     loc_cache: dict[tuple[str, bool], str] = {}
     if not eff_node_id and eff_loc and nodes_by_id:
-        eff_node_id = resolve_node_id_in_memory(eff_loc, nodes_by_id, prefer_facility=True, cache=loc_cache)
+        eff_node_id = resolve_node_id_in_memory(eff_loc, nodes_by_id, prefer_facility=False, cache=loc_cache)
+        if not eff_node_id:
+            eff_node_id = resolve_node_id_in_memory(eff_loc, nodes_by_id, prefer_facility=True, cache=loc_cache)
 
     eff_record_discovery = bool(record_discovery and persist_db)
     staged_roster_ops: dict[str, list[dict[str, Any]]] = {}
@@ -345,12 +353,69 @@ def preload_presence_context(
         and str(target_node.get("node_type") or "").upper() == "FACILITY"
         and is_node_staffable(target_node, scen_key=eff_scen)
     )
+    seed_node_id = ""
+    if is_staffable_facility:
+        seed_node_id = eff_node_id
+    elif sid > 0 and eff_node_id and isinstance(target_node, dict) and str(target_node.get("node_type") or "").upper() == "ROOM":
+        chain: list[str] = []
+        cur_walk: dict[str, Any] | None = target_node
+        seen_walk: set[str] = set()
+        while isinstance(cur_walk, dict):
+            w_nid = str(cur_walk.get("node_id") or "")
+            if w_nid in seen_walk:
+                break
+            seen_walk.add(w_nid)
+            if cur_walk.get("name"):
+                chain.append(str(cur_walk["name"]).strip())
+            w_pid = str(cur_walk.get("parent_id") or "").strip()
+            cur_walk = nodes_by_id.get(w_pid) if w_pid else None
+        chain.reverse()
+        probe_loc = (
+            " ➔ ".join(chain) if len(chain) >= 3
+            else (f"Zone ➔ {chain[0]} ➔ {chain[1]}" if len(chain) == 2 else (eff_loc or str(target_node.get("name") or "")))
+        )
+        t_meta = parse_node_state(target_node)
+        is_priv_room = bool(t_meta.get("is_player_residence")) or str(target_node.get("privacy_level") or "").strip().lower() == "private"
+        room_is_shop = False if t_meta.get("is_player_residence") else bool(
+            t_meta.get("has_merchant_shop")
+            or t_meta.get("has_shop")
+            or (not is_priv_room and (t_meta.get("is_minor_club_hq") or (probe_loc and location_has_merchant_shop(probe_loc, scen_key=eff_scen))))
+        )
+        parent_id = str(target_node.get("parent_id") or "").strip()
+        parent_node = nodes_by_id.get(parent_id) if parent_id else None
+        parent_is_hub = bool(parent_node and is_civic_or_multi_wing_hub_node(parent_node, scen_key=eff_scen))
+        if room_is_shop:
+            if (
+                parent_node
+                and str(parent_node.get("node_type") or "").upper() == "FACILITY"
+                and not parent_is_hub
+                and is_node_staffable(parent_node, scen_key=eff_scen)
+                and (
+                    str(parent_node.get("category") or "").strip().lower() == "commercial"
+                    or location_has_merchant_shop(str(parent_node.get("name") or ""), scen_key=eff_scen)
+                )
+            ):
+                seed_node_id = parent_id
+            elif is_node_staffable(target_node, scen_key=eff_scen):
+                seed_node_id = eff_node_id
+        elif (
+            not is_priv_room
+            and parent_node
+            and str(parent_node.get("node_type") or "").upper() == "FACILITY"
+            and not parent_is_hub
+            and is_node_staffable(parent_node, scen_key=eff_scen)
+        ):
+            seed_node_id = parent_id
+
     if persist_db:
+        if seed_node_id:
+            ensure_venue_staff_seeded(sid, seed_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
         if is_staffable_facility:
-            ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
             ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
         contacts = safe_get_contacts(sid, ensure_scene=False) if sid > 0 else []
         roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
+        if sid > 0 and heal_stale_civic_hq_staff(sid, scen_key=eff_scen, roster=roster_rows, nodes_by_id=nodes_by_id, contacts=contacts):
+            roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
     elif sid > 0:
         # Read-only pre-turn stage preview: seed inside a rolled-back SAVEPOINT and defer
         # persistent world_roster inserts until UnitOfWork commit in apply_outcome.
@@ -366,23 +431,24 @@ def preload_presence_context(
                         for r in (db.get_world_roster(sid, include_legacy_rosters=False) or [])
                         if isinstance(r, dict) and r.get("npc_id")
                     }
-                    if is_staffable_facility
+                    if (seed_node_id or is_staffable_facility)
                     else set()
                 )
+                if seed_node_id:
+                    ensure_venue_staff_seeded(sid, seed_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
                 if is_staffable_facility:
-                    ensure_venue_staff_seeded(sid, eff_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
                     ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
                 contacts = safe_get_contacts(sid, ensure_scene=False)
                 roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
-                if is_staffable_facility:
+                if seed_node_id or is_staffable_facility:
                     new_rows = [
                         r for r in roster_rows
                         if isinstance(r, dict)
                         and str(r.get("npc_id") or "").strip().lower() not in pre_keys
                     ]
-                    if any(str(r.get("origin") or "").lower() == "venue_seed" for r in new_rows):
+                    if seed_node_id and any(str(r.get("origin") or "").lower() == "venue_seed" for r in new_rows):
                         staged_roster_ops.setdefault("venue_seeds", []).append({
-                            "facility_node_id": eff_node_id,
+                            "facility_node_id": seed_node_id,
                             "scen_key": eff_scen,
                             "current_day": safe_day,
                             "turn_number": eff_turn,

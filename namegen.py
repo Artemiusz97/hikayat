@@ -2364,26 +2364,236 @@ def generate_world_ending_anomaly_profile(hash_val: int = None) -> dict:
     return dict(random.choice(profiles))
 
 
+REGIONAL_CITY_PROFILES: list[dict[str, Any]] = [
+    {
+        "id": "kanto_bay",
+        "region": "East Asia Harbor",
+        "city_names": ["Shin-Kanto Metropolis", "Tōkyō-Wan Harbor", "Musashi Metro", "Kanto Bay City"],
+    },
+    {
+        "id": "pacific_bayside",
+        "region": "Pacific Coast",
+        "city_names": ["Cascadia Bay", "Bayhaven Metro", "New Astoria", "Pacific Harbor City"],
+    },
+    {
+        "id": "vespera_atlantic",
+        "region": "Atlantic Coast",
+        "city_names": ["Vespera Metropolis", "New Meridian", "Port Halcyon", "Gramercy Metro"],
+    },
+    {
+        "id": "haneul_songdo",
+        "region": "Korean-Pacific Seaboard",
+        "city_names": ["Haneul-Songdo City", "Yeouido Metro", "Busan-Wan Harbor", "Songdo Bay"],
+    },
+]
+
+LINKED_EPITHET_PARENTS: dict[str, str] = {
+    "loc_whispering_paleontology": "loc_uptown_museum",
+    "loc_weeping_crypt": "loc_historic_cathedral",
+}
+
+
+def get_urban_city_profile(scenario: str = "anomalous_incursions", hash_val: int | None = None) -> dict[str, Any]:
+    """Deterministically selects a single coherent regional city profile per session."""
+    _ = scenario
+    if hash_val is not None:
+        return dict(REGIONAL_CITY_PROFILES[abs(int(hash_val)) % len(REGIONAL_CITY_PROFILES)])
+    return dict(random.choice(REGIONAL_CITY_PROFILES))
+
+
+def generate_urban_city_name(scenario: str = "anomalous_incursions", hash_val: int | None = None) -> str:
+    """Generates a deterministic metropolis city name aligned with the session's regional profile."""
+    profile = get_urban_city_profile(scenario=scenario, hash_val=hash_val)
+    names = profile.get("city_names") or ["Metro City"]
+    if hash_val is not None:
+        return str(names[(abs(int(hash_val)) * 13 + 7) % len(names)])
+    return str(random.choice(names))
+
+
+_PROFILE_ZONE_PREFIX_POOLS: dict[str, dict[str, list[str]]] = {
+    "kanto_bay": {
+        "zone_city_center": ["Marunouchi", "Otemachi", "Chuo", "Nihonbashi", "Toranomon", "Yaesu"],
+        "zone_downtown": ["Shinjuku", "Shibuya", "Ikebukuro", "Akihabara", "Ginza", "Ueno"],
+        "zone_uptown": ["Aoyama", "Daikanyama", "Azabu", "Shirokane", "Yotsuya", "Ginkgo Hill"],
+        "zone_ultra_rich": ["Roppongi Hills", "Den-en-chofu", "Shoto", "Yoyogi-Uehara", "Hiroo Crest", "Akasaka Terrace"],
+        "zone_low_cost_wards": ["Sanya", "Kamagasaki", "Yanaka", "Kameari", "Sumida South", "Oshiage"],
+        "zone_industrial": ["Keihin", "Kawasaki", "Tsurumi", "Ota Heavy", "Koto Canal", "Shin-Kiba"],
+        "zone_city_docks": ["Takeshiba Pier", "Yokohama Pier", "Odaiba Basin", "Harumi Wharf", "Ariake Quay", "Toyosu Channel"],
+        "zone_suburbs": ["Setagaya", "Kichijoji", "Suginami", "Nerima", "Musashino", "Mitaka"],
+        "zone_seaside_beach": ["Enoshima", "Shonan", "Kamakura Bay", "Zushi Coast", "Inage Shore", "Oiso Bay"],
+        "zone_woods_reserve": ["Mount Takao", "Mount Mitake", "Okutama", "Miyagase", "Chichibu", "Tanzawa Ridge"],
+        "zone_theme_park": ["Odaiba Joypolis", "Makuhari Bay", "Urayasu Cove", "Kanto Wonderland", "Enoshima Funland", "Kasai Marina"],
+        "zone_eastern_temple": ["Mount Ryujin", "Zojoji", "Meiji Shrine", "Tenryu Woods", "Asakusa Historic", "Jindaiji"],
+        "zone_eastern_sanctuary": ["Mount Kurama", "Arashiyama", "Kifune", "Fushimi-Inari", "Hakone-Yumoto", "Mount Koya"],
+        "zone_airport": ["Haneda Bay", "Narita West", "Tokyo Bay Air", "Chofu Airfield", "Ota International", "Kanto Gateway"],
+        "zone_hospital": ["Saiseikai", "Toranomon", "Juntendo", "Kanto Regional", "Musashi", "Sumida"],
+        "zone_university": ["Teito Metropolitan", "Waseda Central", "Kurokawa State", "Gakushuin", "Meiji Valley", "Bunkyo Collegiate"],
+        "zone_chinatown": ["Yokohama Gate", "Motomachi", "Nankinmachi", "Lantern Quarter", "Peony Street", "Jade Market"],
+        "zone_undercity": ["G-Cans Drainage", "Kanda Storm Vault", "Shuto Sub-Channel", "Nihonbashi Conduit", "Otemachi Sump", "Deep Floodway"],
+        "zone_botanical_zoo": ["Shinjuku Gyoen", "Ueno Reserve", "Kasai", "Koishikawa", "Tama Canopy", "Shinagawa Marine"],
+    },
+    "pacific_bayside": {
+        "zone_city_center": ["Market Street", "Embarcadero", "Union Square", "Civic Center", "Financial", "Bayfront"],
+        "zone_downtown": ["Geary Street", "Fillmore", "Capitol Hill", "Belltown", "Pearl District", "SOMA Row"],
+        "zone_uptown": ["Pacific Heights", "Nob Hill", "Laurelhurst", "Russian Hill", "Telegraph Hill", "Queen Anne"],
+        "zone_ultra_rich": ["Presidio Crest", "Sea Cliff", "Cascadia Terrace", "Summit Hill", "Skyline Crest", "Olympic Vista"],
+        "zone_low_cost_wards": ["Mission Flats", "Tenderloin", "Potrero Yard", "Dockside South", "East Crossing", "Old Harbor"],
+        "zone_industrial": ["Portside Heavy", "Bayside Industrial", "Terminal Island", "Oakland Rail", "Columbia Works", "Astoria Freight"],
+        "zone_city_docks": ["Fisherman's Wharf", "Port of Bayside", "South Quay", "Bayfront Pier", "Alameda Mooring", "Maritime Quay"],
+        "zone_suburbs": ["Oakridge", "Greenwood", "Maple Valley", "Montclair", "Sunnyvale", "Willow Creek"],
+        "zone_seaside_beach": ["Ocean Beach", "Laguna Shore", "Bayside Point", "Sunset Beach", "Surfside", "Marina Bay"],
+        "zone_woods_reserve": ["Redwood Ridge", "Pinecrest Reserve", "Cedar Mountain", "Silver Lake", "Cascade Woods", "Misty Peak"],
+        "zone_theme_park": ["Pacific Wave", "Silver Comet", "Crystal Cove", "Astoria Bay", "Bayside Funfair", "Boardwalk Pier"],
+        "zone_eastern_temple": ["Cascade Shrine", "Cedar Torii", "Mount Tam Sanctuary", "Jindai Sister-Grove", "Misty Bamboo", "Zen Ridge"],
+        "zone_eastern_sanctuary": ["Cascade Onsen", "Kifune Creek", "Hakone Sister-Valley", "Cedar Spring", "Cloud-Pine", "Shrine Ridge"],
+        "zone_airport": ["Cascadia Gateway", "Sky Harbor", "Bay Area Regional", "Century Field", "Columbia Jetport", "West Coast Air"],
+        "zone_hospital": ["Cascade", "Bayview", "Bayside Care", "Olympic", "Cedar Crest", "Harborview"],
+        "zone_university": ["Cascadia University", "West Coast College", "Northwestern Collegiate", "Bayside Institute", "Puget University", "Redwood State"],
+        "zone_chinatown": ["Grant Avenue", "Dragon Gate", "Waverly Place", "Peony Alley", "Chaozhou Way", "Golden Dragon"],
+        "zone_undercity": ["Bay Storm Vault", "Sub-Surface Drainage", "Central Interceptor", "Redwood Aqueduct", "Columbia Bypass", "Deep Utility Trench"],
+        "zone_botanical_zoo": ["Golden Gate Conservatory", "Cascadia Arboretum", "Bayside Marine", "Redwood Canopy", "Oceanic Research", "Coastline Habitat"],
+    },
+    "vespera_atlantic": {
+        "zone_city_center": ["Lexington", "Vanderbilt", "Federal", "West End", "Meridian", "Downtown Central"],
+        "zone_downtown": ["Broadway", "Fifth Avenue", "Crossroads", "Fulton Square", "Chelsea Row", "Hudson Yard"],
+        "zone_uptown": ["Beacon Hill", "Back Bay", "Gramercy", "Belvedere", "Kensington", "Alderwood"],
+        "zone_ultra_rich": ["Sovereign Crest", "Diamond Crest", "Upper Terrace", "Riverdale", "Grand Regency", "Windsor"],
+        "zone_low_cost_wards": ["Southside", "East End", "Riverside", "Old Town", "Red Hook Basin", "Third Ward"],
+        "zone_industrial": ["East River", "Atlas Heavy", "Continental", "Lehigh Freight", "Harbor Gate", "Ironworks"],
+        "zone_city_docks": ["South Wharf", "Tidewater", "Seaport", "Atlantic Quay", "Chelsea Wharf", "Slip Seven"],
+        "zone_suburbs": ["Maplewood", "Westchester", "Brookside", "Oakwood", "Cherry Hill", "Sunnybrook"],
+        "zone_seaside_beach": ["Atlantic Cove", "Brighton Point", "Tidal Reach", "Bay Breeze", "Cape Shore", "Lighthouse Point"],
+        "zone_woods_reserve": ["Blue Ridge", "Catskill Woods", "Timber Ridge", "Eagle Rock", "Silver Creek", "Pine Valley"],
+        "zone_theme_park": ["Starlight Park", "Coney Classic", "Crystal Bay", "Grand Atlantic", "Brighton Land", "Silver Star"],
+        "zone_eastern_temple": ["Harriman Shrine", "Blue Ridge Torii", "White-Pine Sanctuary", "Lantern Hollow", "Zen Valley", "Cypress Ridge"],
+        "zone_eastern_sanctuary": ["Catskill Onsen", "Harriman Springs", "Kiyomizu Hollow", "Autumn Maple", "Moon-Bridge", "Cedar Sanctuary"],
+        "zone_airport": ["Capital International", "Atlantic Gateway", "Trans-Oceanic", "Vespera Jetport", "Terminal Central", "Skyline Air"],
+        "zone_hospital": ["Providence", "Mercy", "Belvedere", "Metropolitan", "St. Luke", "Lexington Clinical"],
+        "zone_university": ["Vespera Institute", "Gramercy College", "Commonwealth Univ", "Meridian Tech", "Vespera University", "North Annex"],
+        "zone_chinatown": ["Mott Street", "Pell Street", "East Market", "Dragon Pavilion", "Silk Road", "Red Lantern"],
+        "zone_undercity": ["Pre-War Aqueduct", "Central Storm Vault", "Deep Tunnel System", "Sub-Level Utility", "Croton Bypass", "Lower Conduit"],
+        "zone_botanical_zoo": ["Metropolitan Conservatory", "Civic Arboretum", "Atlantic Marine", "Highland Canopy", "Conservatory Wing", "Tropical Dome"],
+    },
+    "haneul_songdo": {
+        "zone_city_center": ["Yeouido", "Gwanghwamun", "Jongno", "Euljiro", "Songdo Central", "Sinsa"],
+        "zone_downtown": ["Hongdae", "Myeongdong", "Itaewon", "Garosugil", "Sinchon", "Gangnam West"],
+        "zone_uptown": ["Hannam", "Samcheong", "Pyeongchang", "Banpo", "Ichon", "Seorae"],
+        "zone_ultra_rich": ["Seongbuk", "Hannam Hills", "Cheongdam Crest", "Gahoe Terrace", "Dogok", "Haneul Crest"],
+        "zone_low_cost_wards": ["Guro", "Mullae", "Eulji South", "Yongsan Basin", "Sindorim", "Westside Canal"],
+        "zone_industrial": ["Ulsan Heavy", "Incheon Steel", "Namdong", "Sihwa Canal", "Ansan Works", "Pyeongtaek Port"],
+        "zone_city_docks": ["Busan Pier", "Incheon Quay", "Songdo Wharf", "Yeongjong Basin", "Gamman Docks", "Suyoung Bay"],
+        "zone_suburbs": ["Pangyo", "Bundang", "Ilsan", "Wirye", "Gwangmyeong", "Suji"],
+        "zone_seaside_beach": ["Haeundae", "Gwangalli", "Songjung Shore", "Eurwangni Bay", "Wolmido Coast", "Marina Point"],
+        "zone_woods_reserve": ["Bukhansan", "Namsan Ridge", "Gwanaksan", "Dobong", "Suraksan", "Inwangsan"],
+        "zone_theme_park": ["Lotte Bay", "Songdo Starlight", "Haeundae Cove", "Moonlight World", "Silla World", "Crystal Tide"],
+        "zone_eastern_temple": ["Jogyesa", "Bongwonsa", "Bongeunsa Ridge", "Silsangsa Woods", "Samgaksan", "Lantern Sanctuary"],
+        "zone_eastern_sanctuary": ["Sorak Sanctuary", "Odaesan Torii", "Baekdamsa Onsen", "Kifune Sister-Peak", "Cedar Hot-Springs", "Moon-Stream"],
+        "zone_airport": ["Incheon Air", "Gimpo Gateway", "Songdo Skyport", "Yeongjong Air", "Seongnam Field", "East Sea Air"],
+        "zone_hospital": ["Severance", "Asan", "Sinchon", "Gangnam Regional", "Yonsei Clinical", "Haneul"],
+        "zone_university": ["Yonsei", "Korea Central", "Songdo Institute", "Sogang", "Haneul Tech", "Namsan Collegiate"],
+        "zone_chinatown": ["Incheon Chinatown", "Donganmen", "Seollindong Gate", "Chaozhou Way", "Red Lantern", "Canton Arcade"],
+        "zone_undercity": ["Han River Vault", "Cheonggyecheon Conduit", "Deep Storm Basin", "Songdo Utility Trench", "Sub-Surface Bypass", "Central Sump"],
+        "zone_botanical_zoo": ["Namsan Conservatory", "Grand Forest", "Lotte Marine", "Bukhansan Reserve", "Songdo Tropical", "Seoul Grand Canopy"],
+    },
+}
+
+_PROFILE_FACILITY_EPITHET_POOLS: dict[str, dict[str, list[str]]] = {
+    "kanto_bay": {
+        "zone_city_center": ["Marunouchi", "Otemachi", "Chuo", "Nihonbashi", "Meridian", "Civic Central"],
+        "zone_downtown": ["Shinjuku", "Midnight-Sun", "Neon-Mirage", "Lantern Row", "Akihabara", "Ginza"],
+        "zone_uptown": ["Aoyama", "Daikanyama", "Azabu", "Shirokane", "Ginkgo Terrace", "Kensington"],
+        "zone_ultra_rich": ["Roppongi Crest", "Shoto", "Imperial Gate", "Grand Regency", "Summit", "Crown Terrace"],
+        "zone_low_cost_wards": ["Sanya", "Yanaka", "Canal Side", "Old Quarter", "Sumida", "Block 4"],
+        "zone_industrial": ["Keihin", "Kawasaki", "Tsurumi", "Pacific Steel", "General Heavy", "Harbor View"],
+        "zone_city_docks": ["Takeshiba", "Yokohama Quay", "Harbor Terminal", "Breakwater", "Tidewater", "South Wharf"],
+        "zone_suburbs": ["Setagaya", "Kichijoji", "Cherry Hill", "Maple Lane", "Oakwood", "Willow Creek"],
+        "zone_school_campus": ["East Wing", "West Hall", "North Quad", "South Pavilion", "Old Brick", "Cedar Walk"],
+        "zone_seaside_beach": ["Enoshima", "Shonan", "Coastline", "Bay Breeze", "Seagull Cove", "Tidal Reach"],
+        "zone_woods_reserve": ["Mount Takao", "Okutama", "Cedar Crest", "Misty Trail", "Pine Valley", "Forest Glen"],
+        "zone_theme_park": ["Starlight", "Cosmo Bay", "Silver Comet", "Pacific Wave", "Aurora", "Crystal Harbor"],
+        "zone_eastern_temple": ["Zojoji", "Tenryu", "Stone Garden", "Cypress Gate", "Lantern Hall", "Bell Tower"],
+        "zone_eastern_sanctuary": ["Kurama", "Kifune", "Kiyomizu", "Hinoki", "Vermilion", "Moon-Bridge"],
+        "zone_airport": ["Terminal 1", "Concourse A", "Skyline", "Haneda Bay", "Runway West", "Departure Hall"],
+        "zone_hospital": ["Saiseikai", "Toranomon", "Juntendo", "Musashi", "Kanto", "Central Triage"],
+        "zone_university": ["Science Wing", "Arts Quad", "North Annex", "Faculty Hall", "Research", "Lecture Hall A"],
+        "zone_chinatown": ["Yokohama Gate", "Jade Garden", "Dragon Pavilion", "Silk Road", "Red Lantern", "Pearl Market"],
+        "zone_undercity": ["Drainage Vault 4", "Sub-Level 2", "Runoff Canal", "Pumping Station", "Utility Sump", "Service Tunnel"],
+        "zone_botanical_zoo": ["Palm Pavilion", "Greenhouse A", "Tropical Dome", "Marine Exhibit", "Aviary", "Water Lily Pond"],
+    },
+    "pacific_bayside": {
+        "zone_city_center": ["Market Street", "Embarcadero", "Federal", "Union Square", "Meridian", "Civic Central"],
+        "zone_downtown": ["Geary", "Belltown", "Crossroads", "Neon Row", "Midtown", "Capitol"],
+        "zone_uptown": ["Pacific Heights", "Nob Hill", "Laurelhurst", "Alderwood", "Heritage", "Rosewood"],
+        "zone_ultra_rich": ["Presidio Crest", "Sea Cliff", "Summit Hill", "Skyline", "Grand Vista", "Crown Terrace"],
+        "zone_low_cost_wards": ["Mission", "Canal Side", "Depot", "Riverside", "Dockside", "Third Street"],
+        "zone_industrial": ["Portside", "Bayside", "Pacific Steel", "Interstate", "General Heavy", "Atlas"],
+        "zone_city_docks": ["Bayfront", "Port Basin", "South Wharf", "Harbor Terminal", "Tidewater", "Breakwater"],
+        "zone_suburbs": ["Oakridge", "Greenfield", "Sunnybrook", "Meadow View", "Cedar Ridge", "Brookside"],
+        "zone_school_campus": ["East Wing", "West Hall", "North Quad", "South Pavilion", "Old Brick", "Ivy Courtyard"],
+        "zone_seaside_beach": ["Ocean View", "Pacific Point", "Laguna", "Surfside", "Sunset Pier", "Harbor Point"],
+        "zone_woods_reserve": ["Redwood", "Timber Ridge", "Bear Creek", "Silver Creek", "Eagle Rock", "Highland Pass"],
+        "zone_theme_park": ["Pacific Wave", "Starlight", "Cosmo Bay", "Crystal Cove", "Silver Comet", "Aurora"],
+        "zone_eastern_temple": ["Cascade Shrine", "Cedar Gate", "Lantern Hall", "Stone Garden", "Pagoda", "Bell Tower"],
+        "zone_eastern_sanctuary": ["Mist-Cedar", "Kifune Creek", "Hinoki", "Vermilion", "Stone-Lantern", "Maple Terrace"],
+        "zone_airport": ["Terminal 1", "Concourse A", "Pacific Bay", "Runway West", "Skyline", "Air Cargo"],
+        "zone_hospital": ["Cascade", "Bayview", "Providence", "Pacific", "Cedar Crest", "Harborview"],
+        "zone_university": ["Science Wing", "Arts Quad", "Engineering Hall", "Faculty Hall", "Central Quad", "West Pavilion"],
+        "zone_chinatown": ["Grant Avenue", "Golden Gate", "Dragon Pavilion", "Jade Garden", "Red Lantern", "Canton"],
+        "zone_undercity": ["Storm Vault 4", "Sub-Level 2", "Runoff Canal", "Pumping Station", "Utility Sump", "Service Tunnel"],
+        "zone_botanical_zoo": ["Palm Pavilion", "Greenhouse A", "Redwood Dome", "Marine Exhibit", "Terrarium", "Water Lily Pond"],
+    },
+    "vespera_atlantic": {
+        "zone_city_center": ["Lexington", "Grand Metro", "Federal", "Meridian", "Continental", "State Street"],
+        "zone_downtown": ["Broadway", "Fifth Avenue", "Crossroads", "Starlight", "Grand Central", "Center City"],
+        "zone_uptown": ["Belvedere", "Gramercy", "Beacon Hill", "Wellington", "Park Avenue", "Westminster"],
+        "zone_ultra_rich": ["Sovereign Crest", "Windsor", "Grand Regency", "Diamond Crest", "Highland", "Riverdale"],
+        "zone_low_cost_wards": ["East Ward", "Southside", "Old Quarter", "Station Road", "Lower Basin", "North Alley"],
+        "zone_industrial": ["East River", "Continental", "Interstate", "General Heavy", "Harbor View", "Atlas"],
+        "zone_city_docks": ["South Wharf", "Tidewater", "Seaport", "Maritime", "Port Basin", "Dockside"],
+        "zone_suburbs": ["Maplewood", "Fairview", "Pinecrest", "Highland Park", "Oakwood", "Cherry Hill"],
+        "zone_school_campus": ["East Wing", "West Hall", "North Quad", "South Pavilion", "Old Brick", "Founder's Row"],
+        "zone_seaside_beach": ["Atlantic Cove", "Tidal Reach", "Coastline", "Marina", "Seagull Cove", "Bay Breeze"],
+        "zone_woods_reserve": ["Blue Ridge", "Pine Valley", "Lookout Point", "Whispering Pines", "Highland Pass", "Cedar Crest"],
+        "zone_theme_park": ["Starlight", "Atlantic", "Aurora", "Silver Star", "Crystal Bay", "Grand Bay"],
+        "zone_eastern_temple": ["Harriman Shrine", "Stone Garden", "Cypress Gate", "Lantern Hall", "Sanctuary", "Bell Tower"],
+        "zone_eastern_sanctuary": ["Catskill", "Harriman", "Hinoki", "Vermilion", "Moon-Bridge", "Maple Terrace"],
+        "zone_airport": ["Terminal 1", "Concourse A", "Trans-Air", "Departure Hall", "Hangar 4", "Flight Deck"],
+        "zone_hospital": ["Providence", "Mercy", "Belvedere", "Metropolitan", "St. Luke", "North Clinic"],
+        "zone_university": ["Science Wing", "Arts Quad", "North Annex", "Memorial Hall", "Research Lab", "Campus Center"],
+        "zone_chinatown": ["Mott Street", "Pell Street", "Silk Road", "East River", "Grand Bazaar", "Fukien"],
+        "zone_undercity": ["Drainage Vault 4", "Sub-Level 2", "Maintenance Trench", "Flood Gate", "Ventilation Shaft", "Storage Basin"],
+        "zone_botanical_zoo": ["Orchid Wing", "Aviary", "Tropical Dome", "Marine Exhibit", "Rose Garden", "Forest Canopy"],
+    },
+    "haneul_songdo": {
+        "zone_city_center": ["Yeouido", "Gwanghwamun", "Jongno", "Euljiro", "Songdo Central", "Meridian"],
+        "zone_downtown": ["Hongdae", "Myeongdong", "Itaewon", "Neon Row", "Sinchon", "Starlight"],
+        "zone_uptown": ["Hannam", "Samcheong", "Pyeongchang", "Banpo", "Ichon", "Seorae"],
+        "zone_ultra_rich": ["Seongbuk", "Hannam Hills", "Cheongdam", "Gahoe Terrace", "Summit", "Skyline Crest"],
+        "zone_low_cost_wards": ["Guro", "Mullae", "Yongsan Basin", "Sindorim", "Canal Side", "Old Quarter"],
+        "zone_industrial": ["Ulsan Heavy", "Incheon Steel", "Namdong", "Sihwa Canal", "Bayside", "Atlas"],
+        "zone_city_docks": ["Busan Quay", "Incheon Pier", "Songdo Wharf", "Maritime", "Port Basin", "Breakwater"],
+        "zone_suburbs": ["Pangyo", "Bundang", "Ilsan", "Wirye", "Maple Lane", "Oakwood"],
+        "zone_school_campus": ["East Wing", "West Hall", "North Quad", "South Pavilion", "Bell-Side", "Cedar Walk"],
+        "zone_seaside_beach": ["Haeundae", "Gwangalli", "Songjung Shore", "Marina", "Bay Breeze", "Tidal Reach"],
+        "zone_woods_reserve": ["Bukhansan", "Namsan", "Gwanaksan", "Dobong", "Misty Trail", "Cedar Crest"],
+        "zone_theme_park": ["Lotte Bay", "Songdo Starlight", "Aurora", "Cosmo Bay", "Crystal Tide", "Silver Comet"],
+        "zone_eastern_temple": ["Jogyesa", "Bongwonsa", "Cypress Gate", "Lantern Hall", "Stone Garden", "Bell Tower"],
+        "zone_eastern_sanctuary": ["Sorak", "Odaesan", "Hinoki", "Vermilion", "Moon-Bridge", "Cedar Spring"],
+        "zone_airport": ["Incheon Terminal 1", "Concourse A", "Songdo Skyport", "Departure Hall", "Hangar 4", "Skyline"],
+        "zone_hospital": ["Severance", "Asan", "Sinchon", "Yonsei", "Haneul", "Central Triage"],
+        "zone_university": ["Yonsei Wing", "Songdo Quad", "Sogang Hall", "Engineering Hall", "Faculty Hall", "Lecture Hall A"],
+        "zone_chinatown": ["Incheon Gate", "Donganmen", "Seollindong", "Jade Garden", "Red Lantern", "Canton"],
+        "zone_undercity": ["Han River Vault", "Sub-Level 2", "Runoff Canal", "Utility Sump", "Service Tunnel", "Storage Basin"],
+        "zone_botanical_zoo": ["Namsan Canopy", "Greenhouse A", "Tropical Dome", "Marine Exhibit", "Terrarium", "Aviary"],
+    },
+}
+
 _URBAN_ZONE_PREFIX_POOLS: dict[str, list[str]] = {
-    "zone_city_center": ["Midtown", "Marunouchi", "Chuo", "Metropolitan", "Otemachi", "Civic Center", "Lexington", "Nihonbashi", "Financial District", "West End", "Downtown Central", "Toranomon"],
-    "zone_downtown": ["Shinjuku", "Broadway", "Roppongi", "Vespera", "Dotonbori", "Market Street", "Akihabara", "Uptown Broadway", "Ikebukuro", "Geary", "Fifth Avenue", "Hongdae"],
-    "zone_uptown": ["Upper East", "Aoyama", "Beacon Hill", "Ginkgo Hill", "Kensington", "Daikanyama", "Back Bay", "Shirokane", "Nob Hill", "Azabu", "Gramercy", "Hannam"],
-    "zone_ultra_rich": ["Highland Heights", "Roppongi Hills", "Bel Air", "Den-en-chofu", "Pacific Heights", "Yoyogi Uehara", "Riverdale", "Seongbuk", "Midtown Terrace", "Shoto", "Summit Hill", "Skyline Crest"],
-    "zone_low_cost_wards": ["Southside", "Kamagasaki", "East End", "Sanya", "Canal District", "Riverside", "Old Town", "Lower Basin", "Dockside South", "Bayside Flats", "Westside Crossing", "Guro"],
-    "zone_industrial": ["Keihin", "Bayside Industrial", "Dearborn", "Bayview", "Portside Heavy", "Kawasaki", "Harbor Gate", "East River", "Interstate Logistics", "Steelworks", "Tsurumi", "South Channel"],
-    "zone_city_docks": ["Pier 39", "Yokohama Pier", "Port of Bayside", "South Quay", "Harbor Wharf", "Terminal Island", "Waterfront", "Tokyo Bay Piers", "Fisherman's Wharf", "Seaport", "Drydock Channel", "Busan Port"],
-    "zone_suburbs": ["Maplewood", "Setagaya", "Oakridge", "Kichijoji", "Greenwood", "Suginami", "Fairview", "Musashino", "Riverside Park", "Nerima", "Sunnyvale", "Pangyo"],
-    "zone_seaside_beach": ["Enoshima", "Pacific Beach", "Shonan", "Ocean Beach", "Kamamura Bay", "Bayside Point", "Seaside Boulevard", "Marina Bay", "Surfside", "Sunset Beach", "Laguna", "Haeundae"],
-    "zone_woods_reserve": ["Mount Takao", "Pinecrest Reserve", "Mount Mitake", "Redwood Ridge", "Cedar Mountain", "Miyagase", "Blue Ridge", "Mount Tsukimi", "Highland Woods", "Okutama", "Silver Lake", "Bukhansan"],
-    "zone_theme_park": ["Starlight Wonder", "Grand Bay Wonderland", "Cosmo World", "Pacific Funland", "Adventure Pier", "Bayside World", "Silver Star Lagoon", "Crystal Bay Park", "Wonderland Pier", "Seaside Carnival", "Metro Joypolis", "Lotte World"],
-    "zone_eastern_temple": ["Mount Ryujin", "Zojoji", "Senso-ji", "Meiji Shrine", "Tenryu Woods", "Kiyomizu Valley", "Ginkaku Hill", "Fushimi Reserve", "Asakusa Historic", "Jindaiji", "Mount Hiei", "Jogyesa"],
-    "zone_eastern_sanctuary": ["Mount Kurama", "Arashiyama", "Kifune", "Fushimi-Inari", "Mount Hiei", "Hakone-Yumoto", "Kiyomizu", "Mount Takao", "Nikko", "Yoshino", "Kamakura", "Mount Koya"],
-    "zone_airport": ["Haneda West", "Metro International", "Pacific Gateway", "Midway", "Sky Harbor", "Narita Express", "Trans-Pacific", "Terminal Central", "Bay Area Regional", "Century Field", "Capital International", "Incheon Air"],
-    "zone_hospital": ["Metropolitan General", "St. Jude Memorial", "University Medical", "Saiseikai Central", "Presbyterian Hospital", "Toranomon Medical", "City Mercy", "Kanto Regional", "Providence Health", "Memorial Hospital", "Sinai Medical", "Severance"],
-    "zone_university": ["Teito Metropolitan", "State University", "Waseda Central", "St. Ignatius", "Metro Institute of Tech", "Northwestern Collegiate", "Kurokawa State", "City University", "Pacific Coast College", "Gakushuin", "Keio District", "Yonsei"],
-    "zone_chinatown": ["Chinatown Gate", "Donganmen", "Little Tokyo", "Koreatown Central", "Mott Street", "Yokohama Chinatown", "Chaozhou Way", "Grant Avenue", "Dragon Gate", "East Market", "Peking Square", "Fukien District"],
-    "zone_undercity": ["Metropolitan Flood Basin", "Sub-Surface Drainage Network", "G-Cans Underground", "Central Storm Vault", "Sub-Level Utility Corridor", "Deep Tunnel System", "Auxiliary Runoff Vault", "Pre-War Aqueduct", "Municipal Bypass Channel", "Lower Conduit Network", "Sewer Interceptor 4", "Deep Storage Trench"],
-    "zone_botanical_zoo": ["Metropolitan Botanical Gardens", "Shinjuku Gyoen", "Bay Aquarium", "Pacific Biosphere", "Ueno Park Reserve", "Conservatory of Flowers", "Greenhouse Pavilion", "Oceanic Research Center", "Marine World", "Civic Arboretum", "Tropical Pavilion", "Botanical Heritage Park"],
+    k: v for k, v in _PROFILE_ZONE_PREFIX_POOLS["kanto_bay"].items()
+}
+
+_URBAN_FACILITY_EPITHET_POOLS: dict[str, list[str]] = {
+    k: v for k, v in _PROFILE_FACILITY_EPITHET_POOLS["kanto_bay"].items()
 }
 
 
@@ -2404,20 +2614,21 @@ def _dedupe_stuttered_location_words(name: str) -> str:
 def generate_urban_zone_name(z_id: str, raw_zone_name: str, hash_val: int = None, scenario: str = "anomalous_incursions") -> str:
     """
     Generates a deterministic procedural `[Proper Name] [Functional Role]` for any Tier-1 urban zone,
-    preserving the base functional zone name so substring/keyword checks remain 100% intact.
+    staying strictly inside one coherent regional city profile per session while preserving the base role.
     """
     if z_id == "zone_agency_hq" or "{session_agency_hq}" in str(raw_zone_name):
         return generate_agency_hq_name(scenario, hash_val=hash_val)
     if z_id == "zone_school_campus" or "{session_school}" in str(raw_zone_name):
         return generate_school_name(scenario, hash_val=hash_val)
 
-    pool = _URBAN_ZONE_PREFIX_POOLS.get(z_id)
-    if not pool:
-        pool = _URBAN_ZONE_PREFIX_POOLS["zone_city_center"]
+    profile = get_urban_city_profile(scenario=scenario, hash_val=hash_val)
+    p_key = str(profile.get("id") or "kanto_bay")
+    zone_pools = _PROFILE_ZONE_PREFIX_POOLS.get(p_key) or _PROFILE_ZONE_PREFIX_POOLS["kanto_bay"]
+    pool = zone_pools.get(z_id) or zone_pools.get("zone_city_center") or _URBAN_ZONE_PREFIX_POOLS["zone_city_center"]
 
     z_offset = sum(ord(c) * (idx + 1) for idx, c in enumerate(str(z_id or raw_zone_name)))
     if hash_val is not None:
-        prefix = pool[(int(hash_val) * 37 + z_offset) % len(pool)]
+        prefix = pool[(abs(int(hash_val)) * 37 + z_offset) % len(pool)]
     else:
         prefix = random.choice(pool)
 
@@ -2430,30 +2641,6 @@ def generate_urban_zone_name(z_id: str, raw_zone_name: str, hash_val: int = None
     return _dedupe_stuttered_location_words(f"{prefix} {base}")
 
 
-_URBAN_FACILITY_EPITHET_POOLS: dict[str, list[str]] = {
-    "zone_city_center": ["Grand Metro", "Metropolitan", "Central Plaza", "Commerce Tower", "Federal", "Capital", "Meridian", "Union Square", "Continental", "Apex", "City Center", "State Street"],
-    "zone_downtown": ["Broadway", "Midnight-Sun", "Crossroads", "Neon-Mirage", "Midtown", "Lantern Row", "Eighth Avenue", "Sunset", "Starlight", "Grand Central", "Market", "Center City"],
-    "zone_uptown": ["Belvedere", "Kensington", "Ginkgo Terrace", "Alderwood", "St. Jude", "Rosewood", "Heritage", "Wellington", "Park Avenue", "Westminster", "Clairmont", "Highland"],
-    "zone_ultra_rich": ["Sovereign Crest", "Summit Hill", "Imperial Gate", "Grand Regency", "Skyline", "Diamond Crest", "Grand Vista", "Highland", "Crown Terrace", "Palisades", "Bel Air", "Windsor"],
-    "zone_low_cost_wards": ["Canal Side", "East Ward", "Block 4", "Dockside", "Old Quarter", "Riverside", "Depot", "Station Road", "Corner", "Bayside", "Third Street", "North Alley"],
-    "zone_industrial": ["Keihin", "Bayside", "Apex", "Pacific Steel", "Interstate", "Continental", "General Heavy", "Harbor View", "Kawasaki", "Vulcan Iron", "Metropolitan", "Atlas"],
-    "zone_city_docks": ["Pier 7", "Bayside Quay", "Harbor Terminal", "South Wharf", "Breakwater", "Tidewater", "Dockside", "Terminal 3", "Maritime", "Port Basin", "Bayfront", "Fisherman's"],
-    "zone_suburbs": ["Maple Lane", "Sunnybrook", "Cherry Hill", "Greenfield", "Willow Creek", "Oakwood", "Meadow View", "Cedar Ridge", "Brookside", "Pinecrest", "Fairview", "Highland Park"],
-    "zone_school_campus": ["East Wing", "West Hall", "Central Quad", "Science Annex", "Varsity Field", "Student Union", "Academic Hall", "Library Wing", "North Quad", "South Pavilion", "Main Concourse", "Auditorium Wing"],
-    "zone_seaside_beach": ["Ocean View", "Pacific Point", "Coastline", "Seagull Cove", "Marina", "Boardwalk", "Sunset Pier", "Tidal Reach", "Surfside", "Bay Breeze", "Laguna", "Harbor Point"],
-    "zone_woods_reserve": ["Pine Valley", "Timber Ridge", "Bear Creek", "Cedar Crest", "Silver Creek", "Redwood", "Eagle Rock", "Misty Trail", "Highland Pass", "Forest Glen", "Whispering Pines", "Lookout Point"],
-    "zone_theme_park": ["Wonder Wheel", "Starlight", "Grand Carousel", "Galaxy", "Midway", "Carnival", "Silver Star", "Boardwalk Coaster", "Adventure", "Lagoon Splash", "Sky View", "Fantasy"],
-    "zone_eastern_temple": ["Zojoji", "Tenryu", "Meiji", "Lotus", "Asakusa", "Kyoto", "Stone Garden", "Cypress Gate", "Pagoda", "Lantern Hall", "Sanctuary", "Bell Tower"],
-    "zone_eastern_sanctuary": ["Kurama", "Kifune", "Kiyomizu", "Cypress Gate", "Hinoki", "Vermilion", "Stone-Lantern", "Fushimi", "Arashiyama", "Moon-Bridge", "Hakone", "Maple Terrace"],
-    "zone_airport": ["Terminal 1", "Concourse A", "Gate 12", "Skyline", "Pacific Bay", "Trans-Air", "Hangar 4", "Runway West", "Express", "Departure Hall", "Air Cargo", "Flight Deck"],
-    "zone_hospital": ["St. Luke", "Memorial", "Mercy", "General", "Central Triage", "West Wing", "Clinic Center", "Trauma Care", "Health Pavilion", "Ambulance Bay", "North Clinic", "Community Care"],
-    "zone_university": ["Science Wing", "Arts Quad", "North Annex", "Memorial Library", "Faculty Hall", "Research Lab", "Central Quad", "Engineering Hall", "Commons", "Lecture Hall A", "Campus Center", "West Pavilion"],
-    "zone_chinatown": ["Golden Gate", "Jade Garden", "Dragon Pavilion", "Silk Road", "Red Lantern", "Lotus Blossom", "East River", "Grand Bazaar", "Pearl Market", "Fukien", "Canton", "Mott Street"],
-    "zone_undercity": ["Drainage Vault 4", "Sub-Level 2", "Runoff Canal", "Pumping Station", "Maintenance Trench", "Central Concourse", "Utility Sump", "Bypass Pipe", "Service Tunnel", "Flood Gate", "Ventilation Shaft", "Storage Basin"],
-    "zone_botanical_zoo": ["Palm Pavilion", "Greenhouse A", "Tropical Dome", "Aquatic Basin", "Rose Garden", "Forest Canopy", "Orchid Wing", "Marine Exhibit", "Terrarium", "Aviary", "Botanical Gallery", "Water Lily Pond"],
-}
-
-
 def generate_urban_facility_name(
     z_id: str,
     p_id: str,
@@ -2464,8 +2651,10 @@ def generate_urban_facility_name(
 ) -> str:
     """
     Generates a deterministic per-session procedural name for any Tier-2 Primary Facility in
-    Anomalous Incursions while preserving the full functional title for substring/keyword matching.
+    urban anomalous scenarios while staying inside the session's Regional City Profile and linking
+    sibling wing epithets (`loc_whispering_paleontology` / `loc_weeping_crypt`).
     """
+    _ = char_name
     base = str(raw_primary_name or "").strip()
     if not base or p_id in (
         "loc_player_house",
@@ -2491,28 +2680,11 @@ def generate_urban_facility_name(
     if p_id == "loc_botanical_zoo":
         return generate_urban_zone_name("zone_botanical_zoo", base, hash_val=hash_val, scenario=scenario)
 
-    p_offset = sum(ord(c) * (idx + 3) for idx, c in enumerate(str(p_id or base)))
-    h = int(hash_val if hash_val is not None else 1)
+    seed_pid = LINKED_EPITHET_PARENTS.get(p_id, p_id)
+    p_offset = sum(ord(c) * (idx + 3) for idx, c in enumerate(str(seed_pid or base)))
+    h = abs(int(hash_val)) if hash_val is not None else 1
 
-    # 1. Organization HQ & Corporate AgencyHQ Wings: Procedural Sector / Wing / Floor / Sub-Level Designation (A5)
-    if z_id == "zone_agency_hq" or p_id.startswith("loc_hq_"):
-        wing_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
-        w_let = wing_letters[(h * 17 + p_offset) % len(wing_letters)]
-        w_num = ((h * 23 + p_offset) % 9) + 1
-        if p_id == "loc_hq_main_lobby":
-            lobby_prefixes = [f"Concourse {w_let}-1", f"Central Atrium 0{w_num}", f"Gatehouse Sector {w_let}", f"Rotunda Tier {w_num}"]
-            desig = lobby_prefixes[(h * 13 + p_offset) % len(lobby_prefixes)]
-        elif p_id == "loc_hq_containment_sector":
-            sub_num = ((h * 31 + p_offset) % 12) + 4
-            vault_prefixes = [f"Sub-Level {sub_num}", f"Deep Vault {w_let}-{sub_num}", f"Quarantine Trench 0{w_num}", f"Abyssal Deck {sub_num}"]
-            desig = vault_prefixes[(h * 19 + p_offset) % len(vault_prefixes)]
-        else:
-            wing_types = [f"Wing {w_let}-{w_num}", f"Sector {w_let}-{w_num}", f"Operations Deck {w_num}", f"Division Bay {w_let}-{w_num}"]
-            desig = wing_types[(h * 29 + p_offset) % len(wing_types)]
-        if ":" in base:
-            return base
-        return f"{desig}: {base}"
-
+    # 0. Private Agency rooms get corporate/boutique floor designations BEFORE Organization HQ wing prefixes
     if p_id.startswith("sub_priv1_"):
         if ":" in base:
             return base
@@ -2539,8 +2711,30 @@ def generate_urban_facility_name(
             desig = "1st Floor" if ((h * 7 + p_offset) % 2 == 0) else "2nd Floor"
         return f"{desig}: {base}"
 
-    # 2. City & Outskirts Facilities: Prepend thematic proper epithet while keeping base functional name intact
-    pool = _URBAN_FACILITY_EPITHET_POOLS.get(z_id) or _URBAN_FACILITY_EPITHET_POOLS["zone_city_center"]
+    # 1. Organization HQ Wings: Procedural Sector / Wing / Sub-Level Designation
+    if z_id == "zone_agency_hq" or p_id.startswith("loc_hq_"):
+        wing_letters = ["A", "B", "C", "D", "E", "F", "G", "H"]
+        w_let = wing_letters[(h * 17 + p_offset) % len(wing_letters)]
+        w_num = ((h * 23 + p_offset) % 9) + 1
+        if p_id == "loc_hq_main_lobby":
+            lobby_prefixes = [f"Concourse {w_let}-1", f"Central Atrium 0{w_num}", f"Gatehouse Sector {w_let}", f"Rotunda Tier {w_num}"]
+            desig = lobby_prefixes[(h * 13 + p_offset) % len(lobby_prefixes)]
+        elif p_id == "loc_hq_containment_sector":
+            sub_num = ((h * 31 + p_offset) % 12) + 4
+            vault_prefixes = [f"Sub-Level {sub_num}", f"Deep Vault {w_let}-{sub_num}", f"Quarantine Trench 0{w_num}", f"Abyssal Deck {sub_num}"]
+            desig = vault_prefixes[(h * 19 + p_offset) % len(vault_prefixes)]
+        else:
+            wing_types = [f"Wing {w_let}-{w_num}", f"Sector {w_let}-{w_num}", f"Operations Deck {w_num}", f"Division Bay {w_let}-{w_num}"]
+            desig = wing_types[(h * 29 + p_offset) % len(wing_types)]
+        if ":" in base:
+            return base
+        return f"{desig}: {base}"
+
+    # 2. City & Outskirts Facilities: Prepend cohesive regional proper epithet
+    profile = get_urban_city_profile(scenario=scenario, hash_val=hash_val)
+    p_key = str(profile.get("id") or "kanto_bay")
+    ep_pools = _PROFILE_FACILITY_EPITHET_POOLS.get(p_key) or _PROFILE_FACILITY_EPITHET_POOLS["kanto_bay"]
+    pool = ep_pools.get(z_id) or ep_pools.get("zone_city_center") or _URBAN_FACILITY_EPITHET_POOLS["zone_city_center"]
     epithet = pool[(h * 41 + p_offset) % len(pool)].strip()
 
     if epithet.lower() in base.lower():
@@ -2659,7 +2853,7 @@ def generate_faction_name(scenario: str, category: str = "") -> str:
         pool_key = "dark_fantasy"
     elif scenario_data.has_tag(scen_key, "isekai") or scenario_data.has_tag(scen_key, "isekai_fantasy"):
         pool_key = "isekai_fantasy"
-    elif pool_key in _DATA:
+    elif scen_key in _DATA:
         pool_key = scen_key
 
     fac_pools = _DATA.get(pool_key, {}).get("factions", {})

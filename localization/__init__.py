@@ -185,6 +185,13 @@ def get_quest_ui_label(key: str, language: str = "en") -> str:
         return labels[key]
     return getattr(en, "QUEST_UI_LABELS", {}).get(key, key)
 
+
+def format_quest_travel_label(destination: str, language: str = "en") -> str:
+    """Formats a localized remote quest travel choice label (e.g. 'Travel to {dest}')."""
+    dest = str(destination or "").strip()
+    tpl = get_quest_ui_label("quest_travel_to", language)
+    return tpl.format(dest=dest) if "{dest}" in tpl else f"{tpl} {dest}".strip()
+
 def get_pact_ui_label(key: str, language: str = "en") -> str:
     """Returns a localized Entity Contracts / Devil Pacts UI string with fallback to English."""
     lang = (language or "en").lower().strip()[:2]
@@ -226,6 +233,7 @@ __all__ = [
     "get_realty_label",
     "get_folklore_sanctuary_label",
     "get_quest_ui_label",
+    "format_quest_travel_label",
     "get_pact_ui_label",
     "get_anomalous_site_ui_label",
     "en",

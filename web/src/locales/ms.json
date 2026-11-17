@@ -285,7 +285,17 @@
     "clue_tier_key": "Petunjuk Utama",
     "clue_tier_corroborating": "Penyokong",
     "off_hours_trace": "Jejak Luar Waktu (+2 DC)",
-    "threat_pushed_back": "Ancaman Ditunda (-1)"
+    "threat_pushed_back": "Ancaman Ditunda (-1)",
+    "main_story_badge": "Kisah Utama",
+    "chapter_n": "Bab {{chapter}}",
+    "climax_ready": "Kemuncak Sedia!",
+    "completed_label": "Selesai",
+    "active_contracts_header": "Kontrak & Ganjaran Aktif ({{count}})",
+    "bounty_fallback": "Ganjaran",
+    "single_lead": "Petunjuk Tunggal",
+    "verified_badge": "Disahkan",
+    "lead_a": "Petunjuk A",
+    "lead_b": "Petunjuk B"
   },
   "quest": {
     "threat_clock": {
@@ -753,6 +763,9 @@
     "close_phone": "Tutup Telefon",
     "shop": "KEDAI",
     "browse": "Lihat-lihat",
+    "shop_closed_badge": "KEDAI TUTUP",
+    "shop_closed_default": "Ditutup di luar waktu operasi.",
+    "closed_tag": "Tutup",
     "fallback_warning": "Penjanaan adegan sandaran digunakan untuk giliran ini.",
     "truncated_warning": "Penceritaan adegan kelihatan sangat singkat atau terputus.",
     "resolving": "Menyelesaikan...",
@@ -1194,7 +1207,8 @@
     "load_failed": "Gagal memuatkan peta dunia.",
     "anomalous_threat": "Telemetri Ancaman",
     "anomalous_stabilized": "Distabilkan",
-    "anomalous_harvest_ready": "Sedia Dituai"
+    "anomalous_harvest_ready": "Sedia Dituai",
+    "travel_blocked": "Perjalanan pantas tidak tersedia buat masa ini."
   },
   "merchant": {
     "title_fallback": "Emporium Saudagar",

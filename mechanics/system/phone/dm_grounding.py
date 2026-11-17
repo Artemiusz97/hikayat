@@ -253,22 +253,27 @@ def _get_public_world_node_hierarchy(session_id: int, query_str: str) -> str:
         return ""
     try:
         from mechanics.world.locations.pathfinding import format_node_hierarchy, is_node_hidden
+        cur_min_pub = 720
+        try:
+            cur_min_pub = int(db.get_session_time(int(session_id))[1] or 720)
+        except Exception:
+            cur_min_pub = 720
         nid = db.resolve_node_id_from_location(session_id, query_str)
         if nid:
             node = db.get_world_node(session_id, nid)
             if node and not is_node_hidden(node):
-                priv = str(node.get("privacy_level") or node.get("privacy") or "public").lower()
-                if priv != "private" or "love_hotel" in str(node.get("node_id") or "").lower():
-                    return format_node_hierarchy(session_id, nid)
+                h = format_node_hierarchy(session_id, nid)
+                if h and not _is_restricted_or_excluded_meetup_target(session_id, "", "", h, wn=node, curr_minute=cur_min_pub):
+                    return h
         q_low = query_str.lower().strip()
         for wn in (db.get_session_world_nodes(session_id) or []):
-            priv = str(wn.get("privacy_level") or wn.get("privacy") or "public").lower()
-            wn_id = str(wn.get("node_id") or "").lower()
-            if (priv == "private" and "love_hotel" not in wn_id) or is_node_hidden(wn):
-                continue
             wn_name = str(wn.get("name") or "").strip()
-            if wn_name and len(wn_name) > 3 and (wn_name.lower() in q_low or q_low in wn_name.lower()):
-                return format_node_hierarchy(session_id, wn["node_id"])
+            if is_node_hidden(wn) or not wn_name or len(wn_name) <= 3:
+                continue
+            if wn_name.lower() in q_low or q_low in wn_name.lower():
+                h = format_node_hierarchy(session_id, wn["node_id"])
+                if h and not _is_restricted_or_excluded_meetup_target(session_id, "", "", h, wn=wn, curr_minute=cur_min_pub):
+                    return h
     except Exception:
         pass
     return ""
@@ -278,7 +283,68 @@ _MEETUP_EXCLUDED_KEYWORDS = {
     "bedroom", "bathroom", "restroom", "shower", "your room",
     "staff only", "teachers' staff room", "faculty", "breakroom",
     "locker room", "infirmary", "velvet basement",
+    "armory", "ordnance", "dormitor", "quarters", "barracks",
+    "containment", "quarantine", "research division", "training range",
+    "training arena", "cleanroom", "sanctum", "syndicate", "cult",
+    "clandestine", "vault", "boiler-room locker", "parapsych", "substation",
 }
+_RESTRICTED_HQ_PREFIXES = (
+    "loc_cult_", "sub_cult_", "loc_clandestine_", "sub_synd_",
+    "loc_power_substation", "sub_power_", "sub_uc_power_tap",
+    "sub_priv1_quarters", "sub_priv1_armory", "sub_priv1_vault", "sub_priv1_research", "sub_priv1_training",
+    "sub_priv2_quarters", "sub_priv2_armory", "sub_priv2_vault", "sub_priv2_research", "sub_priv2_training",
+    "loc_hq_agent_dormitories", "loc_hq_tactical_armory",
+    "loc_hq_containment_sector", "loc_hq_research_division", "loc_hq_training_range",
+)
+
+
+def _is_restricted_or_excluded_meetup_target(
+    session_id: int,
+    contact_name: str,
+    scen_key: str,
+    loc_label: str,
+    *,
+    wn: dict | None = None,
+    parent: dict | None = None,
+    curr_minute: int = 720,
+) -> bool:
+    low_h = str(loc_label or "").lower()
+    if any(
+        (bool(re.search(r"\bcult(?:s|ist|ists)?\b", low_h)) if ek == "cult" else (ek in low_h))
+        for ek in _MEETUP_EXCLUDED_KEYWORDS
+    ):
+        return True
+    nid = str((wn or {}).get("node_id") or "").lower()
+    pid = str((wn or {}).get("parent_id") or (parent or {}).get("node_id") or "").lower()
+    if any(p in nid or p in pid for p in _RESTRICTED_HQ_PREFIXES):
+        return True
+    from mechanics.world.anomalous_sites.catalog import (
+        THEME_PARK_SITE_ID,
+        is_site_dormant_by_schedule,
+        is_site_pacified,
+        parse_node_state,
+        resolve_anomalous_site,
+    )
+    if isinstance(wn, dict):
+        tier = str(wn.get("access_tier") or "open").lower()
+        priv = str(wn.get("privacy_level") or wn.get("privacy") or "public").lower()
+        if tier in ("restricted", "private", "locked"):
+            return True
+        if priv == "private" and "love_hotel" not in nid:
+            return True
+        if any(bool(parse_node_state(cand).get("is_anomalous")) for cand in (wn, parent) if isinstance(cand, dict)):
+            spec = resolve_anomalous_site(node_id=nid, location_str=low_h, curr_node=wn)
+            safe_m = int(curr_minute or 0) % 1440
+            if not (
+                spec
+                and (
+                    (session_id and is_site_pacified(int(session_id), site_id=spec["site_id"], node_id=nid))
+                    or is_site_dormant_by_schedule(spec, scen_key=scen_key, current_minute=safe_m, node_id=nid)
+                    or (spec.get("site_id") == THEME_PARK_SITE_ID and 480 <= safe_m < 1320)
+                )
+            ):
+                return True
+    return _is_civilian_quarantined_meetup_loc(session_id, contact_name, loc_label, scenario=scen_key, node_id=nid)
 
 
 def is_bold_meetup_contact(contact: dict | None, openness: str = "", traits: list | None = None) -> bool:
@@ -310,6 +376,7 @@ def select_npc_preferred_meetup_venue(
     openness: str = "",
     traits: list | None = None,
     seed_salt: str = "",
+    session: dict | None = None,
 ) -> str:
     """
     Deterministically selects an accessible meetup location for an NPC.
@@ -333,6 +400,7 @@ def select_npc_preferred_meetup_venue(
 
     nodes = db.get_session_world_nodes(session_id) or []
     node_by_id = {n["node_id"]: n for n in nodes if n.get("node_id")}
+    c_name_sel = str((contact or {}).get("name") or "")
 
     for wn in nodes:
         nid = str(wn.get("node_id") or "")
@@ -343,17 +411,17 @@ def select_npc_preferred_meetup_venue(
         h_str = format_node_hierarchy(session_id, nid)
         if not h_str:
             continue
-        low_h = h_str.lower()
-        if any(ek in low_h for ek in _MEETUP_EXCLUDED_KEYWORDS):
-            continue
         priv = str(wn.get("privacy_level") or "public").lower()
-        if priv == "private" and "love_hotel" not in nid.lower():
+        if _is_restricted_or_excluded_meetup_target(
+            session_id, c_name_sel, scen_key, h_str, wn=wn, parent=parent, curr_minute=current_minute
+        ):
             continue
 
         sched = evaluate_world_schedule_node_access(
-            wn, parent, scen_key=scen_key, current_day=current_day, current_minute=current_minute
+            wn, parent, scen_key=scen_key, current_day=current_day, current_minute=current_minute,
+            session_id=session_id, session=session,
         )
-        if sched.get("schedule_locked"):
+        if sched.get("schedule_locked") or sched.get("is_trespassing"):
             continue
 
         st = db.get_world_node_state(session_id, nid)
@@ -461,29 +529,50 @@ def build_meetup_candidates_and_hint(
         is_weekend,
     )
 
+    from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
+    from mechanics.world.locations.pathfinding import format_node_hierarchy, is_node_hidden
     all_locs = db.get_session_locations(session_id) or []
     active_wps = db.get_all_session_active_waypoints(session_id) or []
     quest_occupied_locs = [wp.get("target_location", "") for wp in active_wps if wp.get("target_location")]
     player_curr_loc = (session.get("current_location") if isinstance(session, dict) else "") or ""
     safe_min_val = int(curr_min_val or 0) % 1440
+    is_adult_ahs = is_adult_ahs_operative_fail_closed(session, session_id=session_id, scen_key=scen_key)
+    w_nodes_all = db.get_session_world_nodes(session_id) or []
+    w_node_map = {n["node_id"]: n for n in w_nodes_all if isinstance(n, dict) and n.get("node_id")}
+    hier_to_node = {
+        format_node_hierarchy(session_id, n["node_id"]).lower(): n
+        for n in w_nodes_all
+        if isinstance(n, dict) and n.get("node_id")
+    }
+
+    def _resolve_wn_pair(loc_row: dict) -> tuple[dict | None, dict | None, str]:
+        z_str = str(loc_row.get("zone_name") or "")
+        p_str = str(loc_row.get("primary_name") or "")
+        s_str = str(loc_row.get("sub_name") or "")
+        full_s = f"{z_str} ➔ {p_str} ➔ {s_str}" if s_str else f"{z_str} ➔ {p_str}"
+        cand_id = str(loc_row.get("location_id") or loc_row.get("node_id") or "")
+        wn = loc_row.get("_wn") or (w_node_map.get(cand_id) if cand_id else None) or hier_to_node.get(full_s.lower())
+        parent = w_node_map.get(wn.get("parent_id")) if isinstance(wn, dict) and wn.get("parent_id") else None
+        return wn, parent, full_s
 
     def _is_loc_schedule_accessible(loc_row: dict) -> bool:
         z_str = str(loc_row.get("zone_name") or "")
         p_str = str(loc_row.get("primary_name") or "")
         s_str = str(loc_row.get("sub_name") or "")
-        full_str = f"{z_str} ➔ {p_str} ➔ {s_str}"
+        real_wn, real_parent, full_str = _resolve_wn_pair(loc_row)
         comb = f"{z_str} {p_str} {s_str}".lower()
         cat = "academic" if any(k in comb for k in ("campus", "school", "academy", "classroom", "gym", "club", "courtyard", "auditorium", "library", "cafeteria")) else (
             "commercial" if any(k in comb for k in ("downtown", "commercial", "cafe", "café", "arcade", "store", "mall", "shop", "karaoke", "ramen", "restaurant", "bookstore", "boutique", "market", "nightclub")) else "public"
         )
-        synth_node = {"node_id": s_str or p_str, "name": s_str or p_str, "node_type": "ROOM", "category": cat}
-        synth_parent = {"node_id": p_str, "name": f"{z_str} {p_str}", "node_type": "FACILITY", "category": cat}
+        synth_node = real_wn or {"node_id": s_str or p_str, "name": s_str or p_str, "node_type": "ROOM", "category": cat}
+        synth_parent = real_parent or {"node_id": p_str, "name": f"{z_str} {p_str}", "node_type": "FACILITY", "category": cat}
         access = evaluate_world_schedule_node_access(
-            synth_node, synth_parent, scen_key=scen_key, current_day=curr_day_val, current_minute=curr_min_val
+            synth_node, synth_parent, scen_key=scen_key, current_day=curr_day_val, current_minute=curr_min_val,
+            session_id=session_id, session=session,
         )
-        if access.get("schedule_locked"):
+        if access.get("schedule_locked") or access.get("is_trespassing"):
             return False
-        if is_high_school_setting(scen_key) and not is_weekend(curr_day_val) and (480 <= safe_min_val < 900) and player_curr_loc:
+        if not is_adult_ahs and is_high_school_setting(scen_key) and not is_weekend(curr_day_val) and (480 <= safe_min_val < 900) and player_curr_loc:
             p_on_campus = is_campus_node_or_location(location_str=player_curr_loc, session_id=session_id, scen_key=scen_key)
             t_on_campus = is_campus_node_or_location(synth_node, synth_parent, location_str=full_str, session_id=session_id, scen_key=scen_key)
             if p_on_campus and not t_on_campus:
@@ -491,12 +580,17 @@ def build_meetup_candidates_and_hint(
         return True
 
     c_name_hint = str((contact or {}).get("name") or "") if isinstance(contact, dict) else ""
+
+    def _loc_is_safe(loc_row: dict) -> bool:
+        loc_label = " ".join(filter(None, [loc_row.get("zone_name", ""), loc_row.get("primary_name", ""), loc_row.get("sub_name", "")])).lower()
+        wn_m, parent_m, _ = _resolve_wn_pair(loc_row)
+        return not _is_restricted_or_excluded_meetup_target(
+            session_id, c_name_hint, scen_key, loc_label, wn=wn_m, parent=parent_m, curr_minute=curr_min_val
+        )
+
     public_locs: list[dict] = []
     for loc in all_locs:
-        loc_label = " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower()
-        if any(pk in loc_label for pk in _MEETUP_EXCLUDED_KEYWORDS):
-            continue
-        if _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, loc_label, scenario=scen_key):
+        if not _loc_is_safe(loc):
             continue
         if not _is_loc_schedule_accessible(loc):
             continue
@@ -515,30 +609,31 @@ def build_meetup_candidates_and_hint(
     discreet_loc_rows: list[dict] = []
     if is_nsfw:
         try:
-            from mechanics.world.locations.pathfinding import format_node_hierarchy, is_node_hidden
-            w_nodes = db.get_session_world_nodes(session_id) or []
-            n_map = {n["node_id"]: n for n in w_nodes if n.get("node_id")}
-            for wn in w_nodes:
+            for wn in w_nodes_all:
                 nid = str(wn.get("node_id") or "")
                 if is_node_hidden(wn) or str(wn.get("node_type") or "").upper() not in ("FACILITY", "ROOM"):
                     continue
-                parent = n_map.get(wn.get("parent_id")) if wn.get("parent_id") else None
+                parent = w_node_map.get(wn.get("parent_id")) if wn.get("parent_id") else None
                 st = db.get_world_node_state(session_id, nid)
                 pst = db.get_world_node_state(session_id, parent["node_id"]) if parent else {}
                 is_disc = bool(st.get("is_discreet") or pst.get("is_discreet"))
-                is_lh_or_club = nid.lower() in ("loc_love_hotel", "loc_nightclub") and (safe_min_val >= 1080 or safe_min_val < 120)
+                is_lh_or_club = nid.lower() in ("loc_love_hotel", "loc_nightclub", "loc_velvet_mirage_club") and (safe_min_val >= 1080 or safe_min_val < 120)
                 if not (is_disc or is_lh_or_club):
                     continue
                 h_str = format_node_hierarchy(session_id, nid)
-                if _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, h_str, scenario=scen_key, node_id=nid):
+                if _is_restricted_or_excluded_meetup_target(
+                    session_id, c_name_hint, scen_key, h_str, wn=wn, parent=parent, curr_minute=curr_min_val
+                ):
                     continue
                 parts = [p.strip() for p in h_str.split("➔") if p.strip()]
                 if len(parts) >= 2:
                     row_d = {
+                        "location_id": nid,
                         "zone_name": parts[0],
                         "primary_name": parts[1],
                         "sub_name": parts[2] if len(parts) > 2 else "",
                         "_is_discreet": True,
+                        "_wn": wn,
                     }
                     if _is_loc_schedule_accessible(row_d):
                         discreet_loc_rows.append(row_d)
@@ -548,15 +643,12 @@ def build_meetup_candidates_and_hint(
     if not public_locs:
         public_locs = [
             loc for loc in all_locs
-            if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _MEETUP_EXCLUDED_KEYWORDS)
-            and not _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])), scenario=scen_key)
-            and _is_loc_schedule_accessible(loc)
+            if _loc_is_safe(loc) and _is_loc_schedule_accessible(loc)
         ]
     if not public_locs:
         public_locs = [
             loc for loc in all_locs
-            if not any(pk in " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])).lower() for pk in _MEETUP_EXCLUDED_KEYWORDS)
-            and not _is_civilian_quarantined_meetup_loc(session_id, c_name_hint, " ".join(filter(None, [loc.get("zone_name", ""), loc.get("primary_name", ""), loc.get("sub_name", "")])), scenario=scen_key)
+            if _loc_is_safe(loc)
         ]
 
     combined_locs = (discreet_loc_rows + public_locs) if (is_nsfw and is_bold) else (public_locs + discreet_loc_rows)
@@ -782,12 +874,16 @@ def resolve_rendezvous_location(
                 else:
                     from mechanics.world.mobility import is_campus_scenario
                     scen_low = str(scenario or "").lower().strip()
-                    if not scen_low and session_id:
+                    s_row: dict | None = None
+                    if session_id:
                         try:
                             s_row = db.get_session(session_id) or {}
-                            scen_low = str(s_row.get("scenario") or "").lower().strip()
+                            if not scen_low:
+                                scen_low = str(s_row.get("scenario") or "").lower().strip()
                         except Exception:
-                            scen_low = ""
+                            s_row = None
+                            if not scen_low:
+                                scen_low = ""
                     is_closed_campus = bool(
                         is_campus_scenario(scen_low)
                         or "school" in scen_low
@@ -796,6 +892,7 @@ def resolve_rendezvous_location(
                     if is_closed_campus:
                         # Closed campus/slice-of-life: prefer persona-weighted accessible venue (bold -> ~65% discreet)
                         fallback_public = ""
+                        c_min = 720
                         try:
                             c_day, c_min, _ = db.get_session_time(session_id)
                             c_obj = db.get_contact(session_id, str(contact_name or "").lower().replace(" ", "_"), 0)
@@ -805,6 +902,7 @@ def resolve_rendezvous_location(
                                 scen_low,
                                 current_day=c_day,
                                 current_minute=c_min,
+                                session=s_row,
                             )
                         except Exception:
                             fallback_public = ""
@@ -812,11 +910,13 @@ def resolve_rendezvous_location(
                             try:
                                 from mechanics.world.locations.pathfinding import format_node_hierarchy, is_node_hidden
                                 for wn in (db.get_session_world_nodes(session_id) or []):
-                                    wn_priv = str(wn.get("privacy_level") or wn.get("privacy") or "public").lower()
                                     wn_type = str(wn.get("node_type") or wn.get("tier") or "").lower()
-                                    if wn_priv != "private" and not is_node_hidden(wn) and wn_type in ("facility", "room"):
-                                        fallback_public = format_node_hierarchy(session_id, wn["node_id"])
-                                        if fallback_public:
+                                    if not is_node_hidden(wn) and wn_type in ("facility", "room"):
+                                        cand_h = format_node_hierarchy(session_id, wn["node_id"])
+                                        if cand_h and not _is_restricted_or_excluded_meetup_target(
+                                            session_id, contact_name, scen_low, cand_h, wn=wn, curr_minute=c_min
+                                        ):
+                                            fallback_public = cand_h
                                             break
                             except Exception:
                                 fallback_public = ""
@@ -878,7 +978,7 @@ def resolve_rendezvous_location(
                 c_day, c_min, _ = db.get_session_time(session_id)
                 c_obj = db.get_contact(session_id, str(contact_name or "").lower().replace(" ", "_"), 0)
                 resolved_rendezvous = select_npc_preferred_meetup_venue(
-                    session_id, c_obj, scenario, current_day=c_day, current_minute=c_min
+                    session_id, c_obj, scenario, current_day=c_day, current_minute=c_min, session=db.get_session(session_id)
                 )
             except Exception:
                 pass

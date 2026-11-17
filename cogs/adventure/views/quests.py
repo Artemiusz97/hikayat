@@ -949,7 +949,7 @@ class ContractDispositionSelect(discord.ui.Select):
                     description="Leverage incriminating twist evidence for double payout",
                     emoji="🕵️",
                 ))
-        if t_item.get("has_item"):
+        if t_item.get("has_item") and str(t_item.get("disposition") or "unclaimed").strip().lower() == "acquired":
             options.append(discord.SelectOption(
                 label=f"Keep '{t_item.get('name', 'Item')}' (Betray Client)",
                 value="keep",

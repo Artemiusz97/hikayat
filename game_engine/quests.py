@@ -77,6 +77,56 @@ def create_contextual_story_quest_data(
     danger_locs = [l for l in avail_locs_list if not is_safe_sanctuary_location(l)]
     field_locs = danger_locs if danger_locs else avail_locs_list
 
+    anchor_loc = loc
+    if (not anchor_loc or is_safe_sanctuary_location(anchor_loc)) and starting_hook_context:
+        cand_anchor = str(starting_hook_context.get("suggested_location") or "").strip()
+        if cand_anchor and "{" in cand_anchor:
+            cand_anchor = resolve_session_location_tokens(session_id, cand_anchor, scen_key)
+        if cand_anchor and not is_safe_sanctuary_location(cand_anchor):
+            anchor_loc = cand_anchor
+            loc = cand_anchor
+
+    if anchor_loc and not is_safe_sanctuary_location(anchor_loc):
+        anchor_parts = [p.strip() for p in anchor_loc.replace("->", "➔").split("➔") if p.strip()]
+        anchor_zone = anchor_parts[0].lower() if anchor_parts else ""
+        anchor_primary = anchor_parts[1].lower() if len(anchor_parts) >= 2 else ""
+        anchor_tier2 = f"{anchor_parts[0]} ➔ {anchor_parts[1]}" if len(anchor_parts) >= 2 else anchor_loc
+        keep_3tier = len(anchor_parts) >= 3 and is_safe_sanctuary_location(anchor_tier2)
+        anchor_venue = anchor_loc if keep_3tier else anchor_tier2
+
+        def _loc_rank(entry: str) -> int:
+            e_parts = [p.strip().lower() for p in str(entry or "").replace("->", "➔").split("➔") if p.strip()]
+            if anchor_primary and anchor_primary in e_parts:
+                return 0
+            if anchor_zone and e_parts and e_parts[0] == anchor_zone:
+                return 1
+            return 2
+
+        field_locs = sorted(field_locs, key=_loc_rank)
+        if (starting_hook_context or keep_3tier) and anchor_venue not in field_locs:
+            field_locs = [anchor_venue] + [fl for fl in field_locs if fl != anchor_venue]
+    elif starting_hook_context and field_locs:
+        hook_hint_blob = " ".join(
+            str(starting_hook_context.get(k) or "")
+            for k in ("story_quest_title", "story_quest_objective", "hook_text", "opening_narrative", "scene_title")
+        ).lower()
+        hook_tokens = {
+            w for w in "".join(ch if ch.isalnum() else " " for ch in hook_hint_blob).split()
+            if len(w) >= 4
+        }
+        raw_start_loc = str(sess_dict.get("current_location") or starting_hook_context.get("suggested_location") or "").strip()
+        start_zone = raw_start_loc.replace("->", "➔").split("➔")[0].strip().lower() if raw_start_loc else ""
+
+        def _hook_rank(entry: str) -> tuple[int, int]:
+            e_low = str(entry or "").lower()
+            e_zone = e_low.replace("->", "➔").split("➔")[0].strip()
+            e_tokens = {w for w in "".join(ch if ch.isalnum() else " " for ch in e_low).split() if len(w) >= 4}
+            overlap = len(hook_tokens & e_tokens)
+            same_zone = 1 if (start_zone and e_zone == start_zone) else 0
+            return (-overlap, -same_zone)
+
+        field_locs = sorted(field_locs, key=_hook_rank)
+
     if not loc or is_safe_sanctuary_location(loc):
         if field_locs:
             loc = field_locs[0]
@@ -984,45 +1034,50 @@ def apply_quest_update(session_id: int, quest_update: dict, party_user_ids: list
     # 3. Phase 2 (Climax Overcome on Turn N+1): Only when all sub-objectives were ALREADY complete before this turn started
     #    AND the player successfully overcomes the Climax Encounter (LLM returns status='Completed') does it mark Completed.
     if is_sq and sub_objs:
-        all_done = db.is_quest_main_objectives_complete(sub_objs)
-        existing_all_done = bool(
-            existing_sub_objs
-            and len(existing_sub_objs) == len(sub_objs)
-            and db.is_quest_main_objectives_complete(existing_sub_objs)
-        )
-        
-        if not all_done:
-            status = "Active"
-        elif all_done:
-            if not existing_all_done:
-                # Phase 1: 3/3 sub-objectives just completed this turn!
-                # Force status to Active so the Climax Encounter / Boss is fought and resolved.
+        raw_req_status = str(quest_update.get("status", "")).strip().lower()
+        allow_authoritative = (not from_llm) or bool(quest_update.get("_server_authoritative"))
+        if allow_authoritative and raw_req_status == "failed":
+            status = "Failed"
+        else:
+            all_done = db.is_quest_main_objectives_complete(sub_objs)
+            existing_all_done = bool(
+                existing_sub_objs
+                and len(existing_sub_objs) == len(sub_objs)
+                and db.is_quest_main_objectives_complete(existing_sub_objs)
+            )
+
+            if not all_done:
                 status = "Active"
-            else:
-                # Phase 2: All sub-objectives were already complete when the turn started.
-                # If the player overcame the climax (successful climax check) or LLM requested completion, mark Completed!
-                llm_requested_complete = (str(quest_update.get("status", "")).lower() == "completed")
-                from mechanics.social.intimate_excitement import is_intimate_action_label as _q_is_intimate_lbl
-                action_is_climax = any(
-                    not _q_is_intimate_lbl(str(a.get("label", ""))) and (
-                        bool(a.get("is_climax_action")) or
-                        str(a.get("contract_type", "")).lower() == "climax" or
-                        "[story climax]" in str(a.get("label", "")).lower() or
-                        "⚡" in str(a.get("label", "")) or
-                        "climax" in str(a.get("label", "")).lower()
-                    )
-                    for a in (actions or [])
-                )
-                action_succeeded = any(
-                    (hasattr(a.get("check"), "succeeded") and a["check"].succeeded) or
-                    (isinstance(a.get("check"), dict) and a["check"].get("succeeded")) or
-                    (a.get("stat") in ("NONE", "FREE") or a.get("requirement", 0) <= 0)
-                    for a in (actions or [])
-                )
-                if action_is_climax and action_succeeded:
-                    status = "Completed"
+            elif all_done:
+                if not existing_all_done:
+                    # Phase 1: 3/3 sub-objectives just completed this turn!
+                    # Force status to Active so the Climax Encounter / Boss is fought and resolved.
+                    status = "Active"
                 else:
-                    status = "Completed" if llm_requested_complete else "Active"
+                    # Phase 2: All sub-objectives were already complete when the turn started.
+                    # If the player overcame the climax (successful climax check) or authoritative caller requested completion, mark Completed!
+                    llm_requested_complete = allow_authoritative and (raw_req_status == "completed")
+                    from mechanics.social.intimate_excitement import is_intimate_action_label as _q_is_intimate_lbl
+                    action_is_climax = any(
+                        not _q_is_intimate_lbl(str(a.get("label", ""))) and (
+                            bool(a.get("is_climax_action")) or
+                            str(a.get("contract_type", "")).lower() == "climax" or
+                            "[story climax]" in str(a.get("label", "")).lower() or
+                            "⚡" in str(a.get("label", "")) or
+                            "climax" in str(a.get("label", "")).lower()
+                        )
+                        for a in (actions or [])
+                    )
+                    action_succeeded = any(
+                        (hasattr(a.get("check"), "succeeded") and a["check"].succeeded) or
+                        (isinstance(a.get("check"), dict) and a["check"].get("succeeded")) or
+                        (a.get("stat") in ("NONE", "FREE") or a.get("requirement", 0) <= 0)
+                        for a in (actions or [])
+                    )
+                    if action_is_climax and action_succeeded:
+                        status = "Completed"
+                    else:
+                        status = "Completed" if llm_requested_complete else "Active"
     elif not is_sq:
         raw_status = str(quest_update.get("status", "")).strip().lower()
         if raw_status == "completed":
@@ -1335,10 +1390,11 @@ def evaluate_quest_state_predicates(
                                     sub_dirty = True
                                     results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "partial_progress", "progress": new_so_prog})
             if sub_dirty:
+                cleaned_sub_objs = db._clean_sub_objectives_for_storage(sub_objs) if hasattr(db, "_clean_sub_objectives_for_storage") else sub_objs
                 with db.get_conn() as conn:
                     conn.execute(
                         "UPDATE quests SET sub_objectives_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
-                        (json.dumps(sub_objs), time.time(), session_id, qid)
+                        (json.dumps(cleaned_sub_objs), time.time(), session_id, qid)
                     )
 
         # 3. Reactive NPCStatusChanged check
@@ -2350,6 +2406,8 @@ def _resolve_pre_turn_quests_impl(
     action_quest_id = str(fa.get("quest_id") or "")
     action_sub_obj_id = fa.get("sub_obj_id")
     act_approach = str(fa.get("approach") or classify_choice_approach(action_str))
+    act_intent = str(fa.get("intent") or "").strip().lower()
+    act_contract_type = str(fa.get("contract_type") or "").strip().lower()
     act_gold_cost = int(fa.get("gold_cost") or 0)
     act_wait_minutes = int(fa.get("wait_minutes") or 0)
 
@@ -2489,6 +2547,8 @@ def _resolve_pre_turn_quests_impl(
                     is_quest_action=is_quest_action,
                     action_quest_id=action_quest_id,
                     action_sub_obj_id=action_sub_obj_id,
+                    action_intent=act_intent,
+                    action_contract_type=act_contract_type,
                 )
                 if wp_match:
                     if act_approach in ("wait_for_window", "wait_until_morning"):
@@ -2539,6 +2599,8 @@ def _resolve_pre_turn_quests_impl(
                             is_quest_action=is_quest_action,
                             action_quest_id=action_quest_id,
                             action_sub_obj_id=action_sub_obj_id,
+                            action_intent=act_intent,
+                            action_contract_type=act_contract_type,
                         )
                         if res_adv:
                             if res_adv.get("is_bonus_clue"):
@@ -2696,6 +2758,8 @@ def _resolve_pre_turn_quests_impl(
                             is_quest_action=is_quest_action,
                             action_quest_id=action_quest_id,
                             action_sub_obj_id=action_sub_obj_id,
+                            action_intent=act_intent,
+                            action_contract_type=act_contract_type,
                         )
                         if wp_match_so:
                             if act_approach in ("wait_for_window", "wait_until_morning"):
@@ -2748,6 +2812,8 @@ def _resolve_pre_turn_quests_impl(
                                     is_quest_action=is_quest_action,
                                     action_quest_id=action_quest_id,
                                     action_sub_obj_id=action_sub_obj_id,
+                                    action_intent=act_intent,
+                                    action_contract_type=act_contract_type,
                                 )
                                 if res_so:
                                     if res_so.get("is_bonus_clue"):
@@ -2852,7 +2918,7 @@ def _resolve_pre_turn_quests_impl(
                                                         source_location=cur_loc,
                                                         linked_npc=stg_npc,
                                                         quest_id=qid,
-                                                        chapter=session.get("chapter", 1) if session else 1,
+                                                        chapter=int(session.get("current_chapter") or session.get("chapter") or 1) if session else 1,
                                                     )
                                                 except Exception as _clue_err:
                                                     logger.debug("Failed adding intermediate stage clue: %s", _clue_err)
@@ -2978,7 +3044,7 @@ def _resolve_pre_turn_quests_impl(
                     if c_lead and session_id:
                         try:
                             from mechanics.narrative.clues import categorize_clue
-                            cur_ch = session.get("chapter", 1) if session else 1
+                            cur_ch = int(session.get("current_chapter") or session.get("chapter") or 1) if session else 1
                             cid = db.add_session_clue(
                                 session_id=session_id,
                                 title=f"Lead: {str(so.get('text', 'Evidence'))[:40]}",
@@ -3168,7 +3234,7 @@ def _resolve_pre_turn_quests_impl(
                         [ca["id"], cb["id"]],
                         b_title,
                         b_text,
-                        chapter=session.get("chapter", 1) if session else 1,
+                        chapter=int(session.get("current_chapter") or session.get("chapter") or 1) if session else 1,
                     )
                     for uid in party_uids:
                         try:
@@ -3188,7 +3254,7 @@ def _resolve_pre_turn_quests_impl(
 
     # Two-Phase Chapter Climax System (Phase 5 Q4)
     chapter_climax = False
-    cur_ch = session.get("chapter", 1) if session else 1
+    cur_ch = int(session.get("current_chapter") or session.get("chapter") or 1) if session else 1
     has_completed_sq = bool(completed_quests and any(q.get("is_story_quest") for q in completed_quests))
 
     if has_completed_sq and session_id:

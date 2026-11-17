@@ -132,7 +132,7 @@ DIALOGUE_INIT_PREFIXES = (
 
 MOVEMENT_PREFIXES = (
     "udaj się do ", "idź do ", "podróżuj do ", "kieruj się do ", "wejdź do ",
-    "wejdź w ", "przejdź do ", "odwiedź "
+    "wejdź w ", "przejdź do ", "przejdź przez ", "zejdź do ", "wkrocz do ", "odwiedź "
 )
 
 
@@ -204,6 +204,11 @@ QUEST_UI_LABELS = {
     "source_cold": "Wygasł",
     "source_claimed": "Zdobyty",
     "source_bonus": "Dodatkowy Trop",
+    "stage_short": "Etap",
+    "aid_active": "Wsparcie Aktywne",
+    "shortcut_active": "Skrót Aktywny",
+    "bypassed": "Ominięto",
+    "quest_travel_to": "Udaj się do {dest}",
 }
 
 PACT_UI_LABELS = {

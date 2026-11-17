@@ -735,8 +735,17 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           </div>
         )}
 
-        {allowTurnIn && questObj?.quest_id && (
+        {allowTurnIn && questObj?.quest_id && (() => {
+          const hasAcquiredItem = Boolean(tItem.has_item && tItem.disposition === 'acquired');
+          const hasUnacquiredRequiredItem = Boolean(questObj?.required_item && tItem.has_item && !hasAcquiredItem);
+          const canDeliver = !hasUnacquiredRequiredItem && (
+            fow.turn_in_rules?.mode === 'direct_client' ||
+            Boolean(fow.climax?.completed || fow.main_objective?.completed || questObj?.climax_ready || !fow.main_objective?.stages?.length)
+          );
+          if (!canDeliver && !hasAcquiredItem) return null;
+          return (
           <div className="flex flex-wrap gap-1.5 pt-1">
+            {canDeliver && (
             <button
               type="button"
               disabled={Boolean(busyAction)}
@@ -745,7 +754,8 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
             >
               📦 {t('quests.deliver_contract', 'Deliver')}
             </button>
-            {twist.is_discovered && twist.side_switch_available && (
+            )}
+            {canDeliver && twist.is_discovered && twist.side_switch_available && (
               <button
                 type="button"
                 disabled={Boolean(busyAction)}
@@ -755,7 +765,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 🤝 {t('quests.side_switch', 'Side-Switch (1.25x)')}
               </button>
             )}
-            {twist.is_discovered && twist.blackmail_available && (
+            {canDeliver && twist.is_discovered && twist.blackmail_available && (
               <button
                 type="button"
                 disabled={Boolean(busyAction)}
@@ -765,7 +775,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 🕵️ {t('quests.blackmail_client', 'Blackmail (2x)')}
               </button>
             )}
-            {tItem.has_item && (
+            {hasAcquiredItem && (
               <>
                 <button
                   type="button"
@@ -794,7 +804,8 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
               </>
             )}
           </div>
-        )}
+          );
+        })()}
       </div>
     );
   };
@@ -1076,16 +1087,16 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-[10px] px-1.5 py-0.2 bg-fantasy-accent/20 text-fantasy-accent font-bold uppercase rounded border border-fantasy-accent/30 tracking-wider">
-                          Main Story
+                          {t('quests.main_story_badge', 'Main Story')}
                         </span>
                         {(activeStoryQuest.chapter || currentChapter) && (
                           <span className="text-[10px] text-gray-400 font-mono">
-                            Chapter {activeStoryQuest.chapter || currentChapter}
+                            {t('quests.chapter_n', { chapter: activeStoryQuest.chapter || currentChapter, defaultValue: `Chapter ${activeStoryQuest.chapter || currentChapter}` })}
                           </span>
                         )}
                         {activeStoryQuest.climax_ready && (
                           <span className="text-[10px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 font-bold uppercase rounded border border-rose-600/60 animate-pulse">
-                            🔥 Climax Ready!
+                            🔥 {t('quests.climax_ready', 'Climax Ready!')}
                           </span>
                         )}
                         {(activeStoryQuest.is_peak_chapter || activeStoryQuest?.fow_dossier?.is_peak_chapter) && (
@@ -1108,7 +1119,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           </>
                         ) : subObjectives.length > 0 && (
                           <span className="text-[10px] font-mono text-fantasy-accent bg-black/50 px-1.5 py-0.2 rounded border border-fantasy-border/40">
-                            {completedSubs}/{subObjectives.length} Completed
+                            {completedSubs}/{subObjectives.length} {t('quests.completed_label', 'Completed')}
                           </span>
                         )}
                       </div>
@@ -1148,13 +1159,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             <MapPin size={13} className="shrink-0 text-rose-400" />
                             <span className="truncate">{t('quests.final_showdown_location', '⚡ Final Showdown Location:')} <strong>{formatCleanLocation(activeStoryQuest.climax_location || activeStoryQuest.target_location)}</strong></span>
                           </div>
-                          {onOpenWorldMap && (
+                          {onOpenWorldMap && (activeStoryQuest.climax_location || activeStoryQuest.target_location) !== 'Hidden Lair' && (
                             <button
                               type="button"
                               onClick={() => onOpenWorldMap(activeStoryQuest.climax_location || activeStoryQuest.target_location)}
                               className="px-2 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 border border-rose-500/50 text-[10px] font-bold shrink-0 transition-colors"
                             >
-                              Locate
+                              {t('quests.locate_btn', 'Map')}
                             </button>
                           )}
                         </div>
@@ -1166,13 +1177,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             <MapPin size={12} className="shrink-0" />
                             <span className="truncate">{t('quests.waypoint_lead', '📍 Waypoint Lead:')} <strong>{formatCleanLocation(activeStoryQuest.target_location)}</strong></span>
                           </div>
-                          {onOpenWorldMap && (
+                          {onOpenWorldMap && activeStoryQuest.target_location !== 'Hidden Lair' && (
                             <button
                               type="button"
                               onClick={() => onOpenWorldMap(activeStoryQuest.target_location)}
                               className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
                             >
-                              Map
+                              {t('quests.locate_btn', 'Map')}
                             </button>
                           )}
                         </div>
@@ -1359,7 +1370,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 </div>
               ) : (
                 <div className="p-4 bg-black/40 rounded border border-dashed border-fantasy-border text-center text-gray-500 text-xs italic">
-                  No active main story quest currently assigned.
+                  {t('quests.no_quests', 'No active quests recorded.')}
                 </div>
               )}
 
@@ -1368,7 +1379,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 <div className="space-y-2 pt-1">
                   <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
                     <ShieldAlert size={12} className="text-fantasy-accent" />
-                    <span>Active Contracts & Bounties ({sideQuests.length})</span>
+                    <span>{t('quests.active_contracts_header', { count: sideQuests.length, defaultValue: `Active Contracts & Bounties (${sideQuests.length})` })}</span>
                   </div>
                   <div className="space-y-2">
                     {sideQuests.map((q, idx) => {
@@ -1383,26 +1394,26 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                           <div 
                             onClick={() => toggleSideQuest(qId)}
                             className="flex justify-between items-start gap-1.5 cursor-pointer select-none group"
-                            title={isExpanded ? "Tap to collapse" : "Tap to expand details"}
+                            title={isExpanded ? t('quests.collapse', 'Collapse ▴') : t('quests.expand', 'Expand ▾')}
                           >
                             <div className="min-w-0 flex-1">
                               <h5 className="font-semibold text-xs text-gray-200 flex items-center gap-1.5 flex-wrap group-hover:text-fantasy-accent transition-colors">
                                 <span>{cleanProseLocations(q.title)}</span>
                                 {q.climax_ready && (
                                   <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-600/60">
-                                    🔥 Climax Ready!
+                                    🔥 {t('quests.climax_ready', 'Climax Ready!')}
                                   </span>
                                 )}
                               </h5>
                               {!isExpanded && (
                                 <p className="text-[10px] text-gray-400 truncate mt-0.5">
-                                  {cleanProseLocations(q.stage_label) || (q.target_location ? `📍 ${formatCleanLocation(q.target_location)}` : cleanProseLocations(q.objective || q.description || 'Tap to view details'))}
+                                  {cleanProseLocations(q.stage_label) || (q.target_location ? `📍 ${formatCleanLocation(q.target_location)}` : cleanProseLocations(q.objective || q.description || t('quests.expand', 'Expand ▾')))}
                                 </p>
                               )}
                             </div>
                             <div className="flex items-center gap-1 shrink-0 mt-0.5">
                               <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/40">
-                                {q.quest_type || 'Bounty'}
+                                {q.quest_type || t('quests.bounty_fallback', 'Bounty')}
                               </span>
                               <span className="text-gray-400 group-hover:text-fantasy-accent">
                                 {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -1420,7 +1431,7 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                 <div className="bg-amber-950/35 border border-amber-600/50 rounded-md p-2 space-y-1">
                                   {q.stage_label && (
                                     <div className="text-[11px] text-amber-100 font-semibold leading-snug">
-                                      🎯 Current Task: {cleanProseLocations(q.stage_label)}
+                                      {t('quests.current_step', '🎯 Current Step:')} {cleanProseLocations(q.stage_label)}
                                     </div>
                                   )}
                                   {q.target_location && (
@@ -1429,20 +1440,20 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                         <MapPin size={12} className="text-amber-400 shrink-0" />
                                         <span className="truncate" title={formatFullLocationPath(q.target_location)}>📍 <strong>{formatCleanLocation(q.target_location)}</strong></span>
                                       </div>
-                                      {onOpenWorldMap && (
+                                      {onOpenWorldMap && q.target_location !== 'Hidden Lair' && (
                                         <button
                                           type="button"
                                           onClick={() => onOpenWorldMap(q.target_location)}
                                           className="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/35 text-amber-200 border border-amber-500/50 text-[10px] font-bold shrink-0 transition-colors"
                                         >
-                                          View on Map
+                                          {t('quests.locate_btn', 'Map')}
                                         </button>
                                       )}
                                     </div>
                                   )}
                                   {q.target_npc && (
                                     <div className="text-[10px] text-cyan-300">
-                                      👤 Contact: <strong>{q.target_npc}</strong>
+                                      {t('quests.key_contact', '👤 Key Contact:')} <strong>{q.target_npc}</strong>
                                     </div>
                                   )}
                                 </div>
@@ -1663,17 +1674,21 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
           {/* ================================================================
               TAB 3: DETECTIVE CASEBOARD & 2-CLUE DEDUCTION SYNTHESIZER
              ================================================================ */}
-          {subTab === 'caseboard' && (
+          {subTab === 'caseboard' && (() => {
+            const unconsumedEvidence = clues.filter(c => c && !c.is_consumed && c.category !== 'deduction');
+            const canDeduceSingle = unconsumedEvidence.length >= 1;
+            const canPairTwo = unconsumedEvidence.length >= 2;
+            return (
             <div className="space-y-3">
-              {/* 2-Clue Deduction Synthesizer Box */}
-              {clues.length >= 2 && (
+              {/* Deduction Synthesizer Box (supports 1-clue Folklore Recognition & 2-clue Caseboard pairing) */}
+              {canDeduceSingle && (
                 <div className="bg-purple-950/20 border border-purple-700/50 rounded-lg p-3 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
                       <Zap size={13} className="text-amber-400" />
                       <span>{t('quests.deduction_synthesizer', 'Deduction Synthesizer (+50 XP)')}</span>
                     </span>
-                    <span className="text-[10px] font-mono text-gray-400">{t('quests.pair_leads', 'Pair 2 Leads')}</span>
+                    <span className="text-[10px] font-mono text-gray-400">{canPairTwo ? t('quests.pair_leads', 'Pair 2 Leads') : t('quests.single_lead', 'Single Lead')}</span>
                   </div>
 
                   <div className="grid grid-cols-1 gap-1.5">
@@ -1683,25 +1698,27 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
                       <option value="">{t('quests.select_evidence_a', 'Select Primary Evidence A...')}</option>
-                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction' && (!clueBId || String(c.id) !== String(clueBId))).map((c, idx) => (
+                      {unconsumedEvidence.filter(c => (!clueBId || String(c.id) !== String(clueBId))).map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
                         </option>
                       ))}
                     </select>
 
+                    {canPairTwo && (
                     <select
                       value={clueBId}
                       onChange={e => setClueBId(e.target.value)}
                       className="w-full bg-black/70 border border-fantasy-border rounded px-2.5 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-purple-500"
                     >
                       <option value="">{t('quests.select_evidence_b', 'Select Corroborating Evidence B...')}</option>
-                      {clues.filter(c => !c.is_consumed && c.category !== 'deduction' && (!clueAId || String(c.id) !== String(clueAId))).map((c, idx) => (
+                      {unconsumedEvidence.filter(c => (!clueAId || String(c.id) !== String(clueAId))).map((c, idx) => (
                         <option key={c.id || idx} value={c.id}>
                           {c.title || (c.lead_text || c.clue_text || '').slice(0, 50)}
                         </option>
                       ))}
                     </select>
+                    )}
                   </div>
 
                   {clueAId && (
@@ -1809,12 +1826,12 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             )}
                             {isVerified && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 font-bold uppercase">
-                                ✓ Verified
+                                ✓ {t('quests.verified_badge', 'Verified')}
                               </span>
                             )}
                           </div>
 
-                          {isObj && c.id && clues.length >= 2 && (
+                          {isObj && c.id && !c.is_consumed && c.category !== 'deduction' && canDeduceSingle && (
                             <div className="flex items-center gap-1 shrink-0">
                               <button
                                 onClick={() => {
@@ -1832,8 +1849,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                     : 'bg-black/60 text-gray-400 border-fantasy-border hover:text-gray-200'
                                 }`}
                               >
-                                Lead A
+                                {t('quests.lead_a', 'Lead A')}
                               </button>
+                              {canPairTwo && (
                               <button
                                 onClick={() => {
                                   const cid = String(c.id);
@@ -1850,8 +1868,9 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                     : 'bg-black/60 text-gray-400 border-fantasy-border hover:text-gray-200'
                                 }`}
                               >
-                                Lead B
+                                {t('quests.lead_b', 'Lead B')}
                               </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1875,7 +1894,8 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                 </div>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* ================================================================
               TAB 4: CAMPAIGN PROGRESS, END GOALS & CHAPTER DIGEST

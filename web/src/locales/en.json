@@ -285,7 +285,17 @@
     "clue_tier_key": "Key Clue",
     "clue_tier_corroborating": "Corroborating",
     "off_hours_trace": "Off-Hours Trace (+2 DC)",
-    "threat_pushed_back": "Threat Delayed (-1)"
+    "threat_pushed_back": "Threat Delayed (-1)",
+    "main_story_badge": "Main Story",
+    "chapter_n": "Chapter {{chapter}}",
+    "climax_ready": "Climax Ready!",
+    "completed_label": "Completed",
+    "active_contracts_header": "Active Contracts & Bounties ({{count}})",
+    "bounty_fallback": "Bounty",
+    "single_lead": "Single Lead",
+    "verified_badge": "Verified",
+    "lead_a": "Lead A",
+    "lead_b": "Lead B"
   },
   "quest": {
     "threat_clock": {
@@ -753,6 +763,9 @@
     "close_phone": "Close Phone",
     "shop": "SHOP",
     "browse": "Browse",
+    "shop_closed_badge": "SHOP CLOSED",
+    "shop_closed_default": "Closed outside operating hours.",
+    "closed_tag": "Closed",
     "fallback_warning": "Fallback scene generation was used for this turn.",
     "truncated_warning": "Scene narration appears unusually brief or truncated.",
     "resolving": "Resolving...",
@@ -1194,7 +1207,8 @@
     "load_failed": "Failed to load world map.",
     "anomalous_threat": "Threat Telemetry",
     "anomalous_stabilized": "Stabilized",
-    "anomalous_harvest_ready": "Harvest Ready"
+    "anomalous_harvest_ready": "Harvest Ready",
+    "travel_blocked": "Fast travel is currently unavailable."
   },
   "merchant": {
     "title_fallback": "Merchant Emporium",

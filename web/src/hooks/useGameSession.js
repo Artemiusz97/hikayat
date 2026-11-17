@@ -204,6 +204,7 @@ export const useGameSession = (user, character) => {
         setSession(data.session);
         setWaitingForParty(false);
         setProcessingTurn(false);
+        setPendingAction(null);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
       } else if (data.type === 'STREAM_RESET') {
         setStreamingNarrative('');
@@ -213,6 +214,7 @@ export const useGameSession = (user, character) => {
         setStreamingNarrative(null);
         setStreamingState(null);
         setProcessingTurn(false);
+        setPendingAction(null);
       } else if (data.type === 'NEW_SCENE') {
         setIsStreaming(false);
         setStreamingNarrative(null);
@@ -220,6 +222,7 @@ export const useGameSession = (user, character) => {
         setSession(data.session);
         setWaitingForParty(false);
         setProcessingTurn(false);
+        setPendingAction(null);
         setLastSyncTimestamp(data.sync_timestamp || Date.now());
         if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
           pollForSceneImage(data.session.id);
@@ -232,6 +235,9 @@ export const useGameSession = (user, character) => {
             console.warn('Action processing exceeded safety window (182s), releasing lock.');
             setProcessingTurn(false);
             setPendingAction(null);
+            setIsStreaming(false);
+            setStreamingNarrative(null);
+            setStreamingState(null);
             safetyTimerRef.current = null;
           }, 182000);
         }
@@ -467,6 +473,9 @@ export const useGameSession = (user, character) => {
       console.warn('Action processing exceeded safety window (182s), releasing lock.');
       setProcessingTurn(false);
       setPendingAction(null);
+      setIsStreaming(false);
+      setStreamingNarrative(null);
+      setStreamingState(null);
       safetyTimerRef.current = null;
     }, 182000);
 
@@ -618,6 +627,12 @@ export const useGameSession = (user, character) => {
 
   const retryGeneration = async () => {
     if (!session?.id || !user?.user_id || processingTurn) return null;
+    clearSafetyTimer();
+    setIsStreaming(false);
+    setStreamingNarrative(null);
+    setStreamingState(null);
+    setPendingAction(null);
+    setActionError(null);
     setProcessingTurn(true);
     try {
       const data = await apiCall('/api/adventure/retry', {
@@ -633,6 +648,10 @@ export const useGameSession = (user, character) => {
         setLastSyncTimestamp(Date.now());
       }
       return data;
+    } catch (e) {
+      const errMsg = e?.detail || e?.message || 'Failed to regenerate narration. Please try again.';
+      setActionError(errMsg);
+      return null;
     } finally {
       setProcessingTurn(false);
     }

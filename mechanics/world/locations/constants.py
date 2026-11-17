@@ -1,6 +1,23 @@
 from pathlib import Path
 LOCATION_SCENARIOS = {'furry_high_school_drama', 'nsfw_high_school_drama', 'nsfw_furry_high_school_drama', 'high_school_drama'}
-TAG_TO_LOCATION_SEED_KEY = {'space': 'sci_fi', 'sci_fi': 'sci_fi', 'dark_fantasy': 'dark_fantasy', 'isekai': 'isekai_fantasy', 'isekai_fantasy': 'isekai_fantasy', 'high_school': 'high_school_drama', 'high_school_drama': 'high_school_drama', 'slice_of_life': 'slice_of_life', 'post_apocalypse': 'nuclear_post_apocalypse', 'nuclear_post_apocalypse': 'nuclear_post_apocalypse', 'cyberpunk': 'cyberpunk', 'steampunk': 'steampunk', 'fantasy': 'fantasy'}
+TAG_TO_LOCATION_SEED_KEY = {
+    'space': 'sci_fi', 'sci_fi': 'sci_fi',
+    'dark_fantasy': 'dark_fantasy',
+    'isekai': 'isekai_fantasy', 'isekai_fantasy': 'isekai_fantasy',
+    'high_school': 'high_school_drama', 'high_school_drama': 'high_school_drama',
+    'slice_of_life': 'slice_of_life',
+    'post_apocalypse': 'nuclear_post_apocalypse', 'nuclear_post_apocalypse': 'nuclear_post_apocalypse',
+    'cyberpunk': 'cyberpunk',
+    'steampunk': 'steampunk',
+    'fantasy': 'fantasy',
+    'urban_fantasy': 'anomalous_incursions',
+    'urban_anomalies': 'anomalous_incursions',
+    'anomalous_incursions': 'anomalous_incursions',
+    'anomalous_high_school': 'anomalous_high_school',
+    'nsfw_gore_anomalous_high_school': 'anomalous_high_school',
+    'furry_anomalous_high_school': 'anomalous_high_school',
+    'nsfw_furry_gore_anomalous_high_school': 'anomalous_high_school',
+}
 _SEED_PATH = Path(__file__).resolve().parent.parent.parent.parent / 'data' / 'locations_seed.json'
 
 ENCLOSED_ROOM_KEYWORDS = {'room', 'office', 'classroom', 'lab', 'clinic', 'library', 'hall', 'dorm', 'apartment', 'house', 'shop', 'store', 'inn', 'tavern', 'bedroom', 'kitchen', 'bathroom'}

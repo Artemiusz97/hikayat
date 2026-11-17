@@ -627,8 +627,9 @@ def get_active_incursion_at_location(
     if not scenario_data.is_anomalous_incursions_scenario(sess.get("scenario", "")):
         return None
     incursions = sess.get("daily_incursions") or []
-    loc_low = str(location_str or sess.get("current_location") or "").strip().lower()
-    nid_low = str(node_id or sess.get("current_node_id") or "").strip().lower()
+    _use_sess = (not location_str and not node_id)
+    loc_low = str(location_str or (sess.get("current_location") if _use_sess else "") or "").strip().lower()
+    nid_low = str(node_id or (sess.get("current_node_id") if _use_sess else "") or "").strip().lower()
 
     for inc in incursions:
         if not isinstance(inc, dict) or inc.get("resolved"):
@@ -678,9 +679,9 @@ def _spawn_after_hours_campus_incursions(
         },
         {
             "node_id": "sub_old_storage_3b",
-            "facility_name": "Sealed Classroom 3-B",
+            "facility_name": "Dusty Annex Clockwork Archive",
             "zone_name": school_name,
-            "full_location": f"{school_name} ➔ Abandoned Old Wing ➔ Sealed Classroom 3-B",
+            "full_location": f"{school_name} ➔ Abandoned Old Campus Wing & Clock Tower ➔ Dusty Annex Clockwork Archive",
         },
         {
             "node_id": "loc_pool",
@@ -698,17 +699,23 @@ def _spawn_after_hours_campus_incursions(
             "node_id": "loc_old_east_music_room",
             "facility_name": "Dusty Old Music Room",
             "zone_name": school_name,
-            "full_location": f"{school_name} ➔ Abandoned Old Wing ➔ Dusty Old Music Room",
+            "full_location": f"{school_name} ➔ Cultural Arts & Student Union ➔ Dusty Old Music Room",
         },
     ]
-    # Resolve actual node names from spatial graph if seeded
+    # Resolve actual node names from spatial graph if seeded (single batch query)
+    w_nodes = db.get_session_world_nodes(session_id) or []
+    node_map = {str(n.get("node_id") or ""): n for n in w_nodes if isinstance(n, dict) and n.get("node_id")}
     for entry in after_hours_pool:
         try:
-            nd = db.get_world_node(session_id, entry["node_id"])
+            nd = node_map.get(entry["node_id"])
             if nd:
                 entry["facility_name"] = nd["name"]
-                anc = db.get_node_ancestors(session_id, entry["node_id"])
-                chain = [a["name"] for a in reversed(anc)] + [nd["name"]]
+                chain = [str(nd.get("name") or "")]
+                cur = nd
+                while cur.get("parent_id") and str(cur["parent_id"]) in node_map and len(chain) < 5:
+                    cur = node_map[str(cur["parent_id"])]
+                    chain.insert(0, str(cur.get("name") or ""))
+                chain = [c for c in chain if c]
                 if chain:
                     entry["full_location"] = " ➔ ".join(chain)
                     entry["zone_name"] = chain[0]
@@ -814,8 +821,9 @@ def get_dormant_after_hours_incursion_at_location(
     if cur_min >= 1200 or cur_min < 360:
         return None
     incursions = sess.get("daily_incursions") or []
-    loc_low = str(location_str or sess.get("current_location") or "").strip().lower()
-    nid_low = str(node_id or sess.get("current_node_id") or "").strip().lower()
+    _use_sess = (not location_str and not node_id)
+    loc_low = str(location_str or (sess.get("current_location") if _use_sess else "") or "").strip().lower()
+    nid_low = str(node_id or (sess.get("current_node_id") if _use_sess else "") or "").strip().lower()
     for inc in incursions:
         if not isinstance(inc, dict) or inc.get("resolved") or str(inc.get("time_window") or "") != "after_hours":
             continue

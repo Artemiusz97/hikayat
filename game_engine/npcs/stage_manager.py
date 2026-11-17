@@ -178,10 +178,33 @@ def _ensure_parent_facility_seeded(
         parent_node = db.get_world_node(sess_id, str(target_node["parent_id"]))
         if not isinstance(parent_node, dict):
             return
-        from mechanics.world.venue_templates import is_node_staffable
+        from mechanics.world.locations import location_has_merchant_shop
+        from mechanics.world.venue_templates import (
+            is_civic_or_multi_wing_hub_node,
+            is_node_staffable,
+            parse_node_state,
+        )
         from mechanics.world import ensure_venue_staff_seeded
-        if is_node_staffable(parent_node, scen_key=scen_key):
-            parent_nid = str(parent_node.get("node_id") or "")
+
+        parent_nid = str(parent_node.get("node_id") or "")
+        parent_is_hub = is_civic_or_multi_wing_hub_node(parent_node, scen_key=scen_key)
+        t_meta = parse_node_state(target_node)
+        is_priv_room = bool(t_meta.get("is_player_residence")) or str(target_node.get("privacy_level") or "").strip().lower() == "private"
+        room_probe = f"Zone ➔ {parent_node.get('name') or ''} ➔ {target_node.get('name') or ''}"
+        room_is_shop = False if t_meta.get("is_player_residence") else bool(
+            t_meta.get("has_merchant_shop")
+            or t_meta.get("has_shop")
+            or (not is_priv_room and (t_meta.get("is_minor_club_hq") or location_has_merchant_shop(room_probe, scen_key=scen_key)))
+        )
+
+        target_seed_nid = ""
+        if room_is_shop and (parent_is_hub or str(parent_node.get("category") or "").strip().lower() != "commercial"):
+            if is_node_staffable(target_node, scen_key=scen_key):
+                target_seed_nid = str(target_node.get("node_id") or "")
+        elif not parent_is_hub and is_node_staffable(parent_node, scen_key=scen_key):
+            target_seed_nid = parent_nid
+
+        if target_seed_nid:
             pre_keys = (
                 {
                     str(r.get("npc_id") or "").strip().lower()
@@ -193,12 +216,12 @@ def _ensure_parent_facility_seeded(
             )
             ensure_venue_staff_seeded(
                 sess_id,
-                parent_nid,
+                target_seed_nid,
                 scen_key=scen_key,
                 current_day=eff_day,
                 turn_number=eff_turn,
             )
-            if isinstance(staged_ops, dict) and parent_nid:
+            if isinstance(staged_ops, dict) and target_seed_nid:
                 post_rows = db.get_world_roster(sess_id, include_legacy_rosters=False) or []
                 created = any(
                     isinstance(r, dict)
@@ -211,7 +234,7 @@ def _ensure_parent_facility_seeded(
                         staged_ops,
                         {
                             "venue_seeds": [{
-                                "facility_node_id": parent_nid,
+                                "facility_node_id": target_seed_nid,
                                 "scen_key": scen_key,
                                 "current_day": eff_day,
                                 "turn_number": eff_turn,
@@ -1289,7 +1312,7 @@ def compute_pre_turn_stage(
                         f"[STAGE DIRECTION — SECLUDED RELOCATION]: Stepped into {effective_location} with {privacy_partner_name} for privacy. "
                         f"Both characters are now situated in {effective_location}."
                     )
-                elif not _spatial_loop_rerouted and target_loc_candidate and target_loc_candidate != effective_location:
+                elif not _spatial_loop_rerouted and not route_res.get("gated") and target_loc_candidate and target_loc_candidate != effective_location:
                     effective_location = target_loc_candidate
                     movement_dest_str = target_loc_candidate
                     session["current_location"] = target_loc_candidate

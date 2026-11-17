@@ -25,7 +25,7 @@ from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
 from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
 from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.world import evaluate_shop_staff_availability
+from mechanics.world import evaluate_shop_staff_availability, resolve_scene_merchant_ui_state
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
     handle_talk_to_merchant as _handle_talk_to_merchant,
@@ -115,19 +115,17 @@ def _preload_choice_view_data(
 
     shop_availability: dict | None = None
     if sess and not in_combat:
-        sess_merch = sess.get("merchant") or {}
-        if not bool(sess_merch.get("is_phone_shop")) and not bool(sess_merch.get("is_faction_quartermaster")):
-            shop_availability = evaluate_shop_staff_availability(
-                session_id,
-                location_str=current_loc,
-                merchant_type="",
-                is_phone_shop=False,
-                scen_key=scen_key,
-                current_day=sess.get("current_day"),
-                current_minute=sess.get("current_minute"),
-                turn_number=int(sess.get("turn_count") or 0),
-                session=sess,
-            )
+        shop_availability = evaluate_shop_staff_availability(
+            session_id,
+            location_str=current_loc,
+            merchant_type="",
+            is_phone_shop=False,
+            scen_key=scen_key,
+            current_day=sess.get("current_day"),
+            current_minute=sess.get("current_minute"),
+            turn_number=int(sess.get("turn_count") or 0),
+            session=sess,
+        )
 
     contacts: list | None = None
     if not in_combat:
@@ -510,52 +508,18 @@ class ChoiceView(SessionRestrictedView):
             notice_button.callback = self._notice_board_callback
             self.add_item(notice_button)
 
-        from mechanics.world.locations import location_has_merchant_shop, is_school_scenario
-        is_school = is_school_scenario(scen_key)
-        show_merchant = False
-        merchant_label = "Talk to Merchant"
-        has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
-        shop_avail: dict | None = None
-        if not self.in_combat and not bool(self.merchant.get("is_phone_shop")) and not bool(self.merchant.get("is_faction_quartermaster")):
-            shop_avail = (
-                evaluate_shop_staff_availability(
-                    session_id,
-                    location_str=current_loc,
-                    merchant_type="",
-                    is_phone_shop=False,
-                    scen_key=scen_key,
-                    current_day=session.get("current_day"),
-                    current_minute=session.get("current_minute"),
-                    turn_number=int(session.get("turn_count") or 0),
-                    session=session,
-                )
-                if preloaded_shop_availability is _UNSET
-                else preloaded_shop_availability
+        merch_ui = resolve_scene_merchant_ui_state(
+            session,
+            session_id=session_id,
+            in_combat=bool(self.in_combat),
+            preloaded_shop_availability=(None if preloaded_shop_availability is _UNSET else preloaded_shop_availability),
+        )
+        if merch_ui["available"] and not self.in_combat:
+            merchant_button = discord.ui.Button(
+                label=str(merch_ui["action_label"] or "Talk to Merchant"),
+                style=discord.ButtonStyle.success,
+                emoji="🛍️",
             )
-
-        if shop_avail is not None and not shop_avail.get("available"):
-            show_merchant = False
-        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
-            show_merchant = True
-            merchant_label = "Visit Club Quartermaster"
-        elif is_school:
-            if has_shop:
-                show_merchant = True
-                merchant_label = "Visit Shop / Café"
-        else:
-            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
-            if self.merchant.get("available") or has_shop or roamer_or_bypass:
-                show_merchant = True
-                if has_shop:
-                    merchant_label = "Visit Market / Shop"
-                elif shop_avail and shop_avail.get("staff_npc"):
-                    merchant_label = f"Trade with {shop_avail['staff_npc'].get('name') or 'Merchant'}"
-                else:
-                    merchant_label = "Talk to Merchant"
-
-        if show_merchant and not self.in_combat:
-            merchant_button = discord.ui.Button(label=merchant_label,
-                                                 style=discord.ButtonStyle.success, emoji="🛍️")
             merchant_button.callback = self._talk_to_merchant
             self.add_item(merchant_button)
 
@@ -1301,52 +1265,18 @@ class SyncChoiceView(SessionRestrictedView):
             notice_button.callback = self._notice_board_callback
             self.add_item(notice_button)
 
-        from mechanics.world.locations import location_has_merchant_shop, is_school_scenario
-        is_school = is_school_scenario(scen_key)
-        show_merchant = False
-        merchant_label = "Talk to Merchant"
-        has_shop = location_has_merchant_shop(current_loc, scen_key=scen_key)
-        shop_avail: dict | None = None
-        if not in_combat and not bool(self.merchant.get("is_phone_shop")) and not bool(self.merchant.get("is_faction_quartermaster")):
-            shop_avail = (
-                evaluate_shop_staff_availability(
-                    session_id,
-                    location_str=current_loc,
-                    merchant_type="",
-                    is_phone_shop=False,
-                    scen_key=scen_key,
-                    current_day=session.get("current_day"),
-                    current_minute=session.get("current_minute"),
-                    turn_number=int(session.get("turn_count") or 0),
-                    session=session,
-                )
-                if preloaded_shop_availability is _UNSET
-                else preloaded_shop_availability
+        merch_ui = resolve_scene_merchant_ui_state(
+            session,
+            session_id=session_id,
+            in_combat=bool(in_combat),
+            preloaded_shop_availability=(None if preloaded_shop_availability is _UNSET else preloaded_shop_availability),
+        )
+        if merch_ui["available"] and not in_combat:
+            merchant_button = discord.ui.Button(
+                label=str(merch_ui["action_label"] or "Talk to Merchant"),
+                style=discord.ButtonStyle.success,
+                emoji="🛍️",
             )
-
-        if shop_avail is not None and not shop_avail.get("available"):
-            show_merchant = False
-        elif shop_avail is not None and shop_avail.get("reason") == "club_quartermaster":
-            show_merchant = True
-            merchant_label = "Visit Club Quartermaster"
-        elif is_school:
-            if has_shop:
-                show_merchant = True
-                merchant_label = "Visit Shop / Café"
-        else:
-            roamer_or_bypass = bool(shop_avail and shop_avail.get("available") and shop_avail.get("reason") in ("club_quartermaster", "roaming_merchant", "world_event_bypass", "kiosk_bypass", "active_staff", "replacement_hired"))
-            if self.merchant.get("available") or has_shop or roamer_or_bypass:
-                show_merchant = True
-                if has_shop:
-                    merchant_label = "Visit Market / Shop"
-                elif shop_avail and shop_avail.get("staff_npc"):
-                    merchant_label = f"Trade with {shop_avail['staff_npc'].get('name') or 'Merchant'}"
-                else:
-                    merchant_label = "Talk to Merchant"
-
-        if show_merchant and not in_combat:
-            merchant_button = discord.ui.Button(label=merchant_label,
-                                                 style=discord.ButtonStyle.success, emoji="🛍️")
             merchant_button.callback = self._talk_to_merchant
             self.add_item(merchant_button)
 

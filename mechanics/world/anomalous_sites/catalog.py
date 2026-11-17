@@ -26,7 +26,33 @@ THEME_PARK_SUB_IDS: frozenset[str] = frozenset({
 })
 AHS_PROTECTED_SUB_IDS: frozenset[str] = frozenset({
     "loc_delinquent_boiler_den",
+    "sub_custodian_boiler_locker",
+    "loc_ruined_hallway",
+    "loc_derelict_gym",
+    "loc_old_infirmary",
+    "loc_sealed_custodian_closet",
 })
+AHS_PROTECTED_SUB_NAME_TOKENS: tuple[str, ...] = (
+    "boiler-room den",
+    "boiler den",
+    "custodian's boiler-room locker",
+    "boiler-room locker",
+    "overgrown hallway",
+    "derelict old gymnasium",
+    "derelict gym",
+    "boarded old infirmary",
+    "old infirmary",
+    "sealed boiler-hall supply closet",
+    "dusty stage-wing storage room",
+)
+_AHS_ACTIVE_ANOMALY_SUB_TOKENS: tuple[str, ...] = (
+    "sub_old_wing_doors",
+    "sub_old_storage_3b",
+    "sub_clock_tower_gears",
+    "padlocked heritage wing",
+    "dusty annex clockwork archive",
+    "clock tower belfry",
+)
 SAFE_EXCLUSION_SITE_IDS: frozenset[str] = frozenset({
     "loc_hq_containment_sector",
     "loc_et_fox_torii_tunnel",
@@ -87,6 +113,10 @@ def _build_indexes() -> tuple[
                 kw_low = str(kw or "").strip().lower()
                 if kw_low:
                     kw_pairs.append((kw_low, sid))
+
+    # Ensure nested Floor 13 isolation room always indexes under loc_hosp_floor_13 even before catalog edits
+    if "loc_hosp_floor_13" in sites:
+        sub_to_site.setdefault("sub_hosp_isolation_cell_1309", "loc_hosp_floor_13")
 
     # Match longer keywords first so embedded wing names beat parent names.
     kw_pairs.sort(key=lambda item: len(item[0]), reverse=True)
@@ -181,11 +211,18 @@ def resolve_anomalous_site(
 
     # 3. Inspect provided world_nodes if location_str matches a seeded node with procedural epithet
     loc_low = str(location_str or "").strip().lower()
+    if loc_low and any(tok in loc_low for tok in AHS_PROTECTED_SUB_NAME_TOKENS):
+        if not any(tok in loc_low for tok in _AHS_ACTIVE_ANOMALY_SUB_TOKENS):
+            return None
+
     if loc_low and session_nodes:
         # Sort longest node names first to prevent partial prefix collisions
-        for wn in session_nodes:
-            if not isinstance(wn, Mapping):
-                continue
+        sorted_nodes = sorted(
+            (wn for wn in session_nodes if isinstance(wn, Mapping) and str(wn.get("name") or "").strip()),
+            key=lambda wn: len(str(wn.get("name") or "").strip()),
+            reverse=True,
+        )
+        for wn in sorted_nodes:
             wnid = str(wn.get("node_id") or "").strip().lower()
             wpid = str(wn.get("parent_id") or "").strip().lower()
             wname = str(wn.get("name") or "").strip().lower()

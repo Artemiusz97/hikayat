@@ -109,10 +109,11 @@ DIALOGUE_INIT_PREFIXES = (
 
 MOVEMENT_PREFIXES = (
     "travel to ", "travel toward ", "travel towards ", "travel through ", "travel into ",
-    "head to ", "head toward ", "head towards ", "head into ",
+    "head to ", "head toward ", "head towards ", "head into ", "head through ",
     "walk to ", "walk toward ", "walk towards ", "walk into ", "walk through ",
     "journey to ", "journey toward ", "journey towards ", "depart toward ",
     "step into ", "step through ", "enter the ", "enter ", "visit the ", "visit ",
+    "descend into ", "descend the ", "cross into ", "venture into ",
     "go to ", "move to ", "move into ", "return to ", "leave for ", "make our way to ",
     "make your way to ", "make my way to ", "slip into ", "slip to "
 )
@@ -186,6 +187,11 @@ QUEST_UI_LABELS = {
     "source_cold": "Gone Cold",
     "source_claimed": "Claimed",
     "source_bonus": "Bonus Lead",
+    "stage_short": "Stage",
+    "aid_active": "Aid Active",
+    "shortcut_active": "Shortcut Active",
+    "bypassed": "Bypassed",
+    "quest_travel_to": "Travel to {dest}",
 }
 
 PACT_UI_LABELS = {

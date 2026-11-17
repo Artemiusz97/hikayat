@@ -199,7 +199,12 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
 
             active_wp = (
                 wp_map.get((qid, None))
-                or (db.get_active_waypoint(session["id"], qid, sub_obj_id=None) if qid and not ctx else None)
+                or wp_map.get((qid, 0))
+                or (
+                    (db.get_active_waypoint(session["id"], qid, sub_obj_id=None) or db.get_active_waypoint(session["id"], qid, sub_obj_id=0))
+                    if qid and not ctx
+                    else None
+                )
             )
 
             wp_info = ""

@@ -974,7 +974,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
         )
         user_prompt = (
-            f"{scenario_data.scenario_prompt_block(scen_info)}\n\n"
+            f"{scenario_data.scenario_prompt_block(scen_info, session_id=int((session or {}).get('id') or 0))}\n\n"
             f"Store App: {shop_title}\n"
             f"Party: {names}\n\n"
             f"Respond with JSON matching exactly this schema:\n{MERCHANT_SHOP_SCHEMA}"
@@ -988,7 +988,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
         )
         user_prompt = (
-            f"{scenario_data.scenario_prompt_block(scen_info)}\n\n"
+            f"{scenario_data.scenario_prompt_block(scen_info, session_id=int((session or {}).get('id') or 0))}\n\n"
             f"Merchant: {merchant_name or arch_title} -- {merchant_description or arch_intro}\n"
             f"Location: {session.get('current_location', 'unknown')}\n"
             f"Party: {names}\n\n"
@@ -1797,12 +1797,16 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
     present = bool(encounter.get("present"))
     scen_key = session.get("scenario", "") if session else ""
     from mechanics.world.locations import is_school_scenario, location_has_merchant_shop
+    from mechanics.world.venue_seeder import evaluate_shop_staff_availability, heal_stale_civic_hq_staff
+
+    if session_id and session:
+        heal_stale_civic_hq_staff(session_id, scen_key=scen_key)
+
     if not session or is_school_scenario(scen_key):
         present = False  # In high school settings, never spawn random wandering roadside merchants
     elif present and not scenario_data.is_mechanic_enabled(scen_key, "merchant_encounters"):
         present = False
     elif present:
-        from mechanics.world.venue_seeder import evaluate_shop_staff_availability
         cur_loc = str(session.get("current_location") or "").strip()
         cur_day = int(session.get("current_day") or 1)
         cur_min = int(session.get("current_minute") if session.get("current_minute") is not None else 480)
@@ -1821,9 +1825,26 @@ def apply_merchant_encounter_result(session_id: int, encounter: dict | list | No
             present = False
         elif reason == "legacy_no_graph" and not location_has_merchant_shop(cur_loc, scen_key=scen_key):
             present = False
+        elif reason == "roaming_merchant":
+            present_names = {
+                str(n.get("name") or "").strip().lower()
+                for n in (session.get("current_npcs") or [])
+                if isinstance(n, dict) and n.get("name")
+            } | {
+                str(n).strip().lower()
+                for n in (session.get("current_npcs") or [])
+                if isinstance(n, str) and n.strip()
+            }
+            if present_names:
+                enc_name = str(encounter.get("name") or "").strip().lower()
+                staff_name = str((avail.get("staff_npc") or {}).get("name") or "").strip().lower()
+                if enc_name not in present_names and staff_name not in present_names:
+                    present = False
 
     merchant["available"] = present
+    merchant["active"] = False
     merchant["is_phone_shop"] = False
+    merchant["is_faction_quartermaster"] = False
     merchant["flavor_name"] = encounter.get("name", "") if present else ""
     merchant["flavor_description"] = encounter.get("description", "") if present else ""
     db.save_merchant_state(session_id, merchant)
@@ -1993,7 +2014,7 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         theme_hint = "Theme: Boutique partner-owned private agency — custom-tuned firearms, fitted ballistic armor, and calibrated ward instruments.\n"
 
     user_prompt = (
-        f"{scenario_data.scenario_prompt_block(scen_info)}\n"
+        f"{scenario_data.scenario_prompt_block(scen_info, session_id=int((session or {}).get('id') or 0))}\n"
         f"Faction: {faction_name} (Category: {category})\n"
         f"{theme_hint}"
         f"Player Reputation: {rep_score:+d} (Discount: {auto_discount}%)\n"

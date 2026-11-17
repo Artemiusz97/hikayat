@@ -247,6 +247,14 @@ def is_abandoned_school_node(
             parts.append(str(n.get("parent_id") or ""))
             parts.append(str(n.get("name") or ""))
     combined = " ".join(parts).lower()
+    # Active Occult Clubroom (`loc_old_storage_3b` under `loc_school_clubs`) in AHS is a clubroom, not abandoned.
+    if (
+        (isinstance(node, dict) and str(node.get("parent_id") or "").strip().lower() == "loc_school_clubs")
+        or (isinstance(parent_node, dict) and str(parent_node.get("node_id") or "").strip().lower() == "loc_school_clubs")
+        or "general student clubroom wing" in combined
+        or "loc_school_clubs" in combined
+    ):
+        return False
     abandoned_markers = (
         "zone_abandoned_school",
         "bld_abandoned_school",
@@ -259,6 +267,12 @@ def is_abandoned_school_node(
         "heritage wing",
         "showa campus",
         "loc_clock_tower",
+        "sub_old_wing_doors",
+        "padlocked heritage wing",
+        "sub_old_storage_3b",
+        "dusty annex clockwork archive",
+        "sub_clock_tower_gears",
+        "clock tower belfry",
         "loc_old_storage_3b",
         "old storage room 3-b",
         "storage room 3-b",
@@ -266,6 +280,8 @@ def is_abandoned_school_node(
         "derelict old gymnasium",
         "loc_old_infirmary",
         "boarded old infirmary",
+        "loc_sealed_custodian_closet",
+        "sealed boiler-hall supply closet",
         "loc_ruined_hallway",
         "overgrown hallway",
         "dark_equipment_room",
@@ -279,6 +295,21 @@ def is_abandoned_school_node(
     return any(m in combined for m in abandoned_markers)
 
 
+def is_university_node_or_location(
+    node: Optional[Dict[str, Any]] = None,
+    parent_node: Optional[Dict[str, Any]] = None,
+    location_str: str = "",
+    node_id: str = "",
+) -> bool:
+    """True when node, parent, or path belongs to the 24/7 University campus (`zone_university` / `loc_uni_*`)."""
+    parts = [str(location_str or ""), str(node_id or "")]
+    for n in (node, parent_node):
+        if isinstance(n, dict):
+            parts.extend((str(n.get("node_id") or ""), str(n.get("parent_id") or ""), str(n.get("name") or "")))
+    combined = " ".join(parts).lower()
+    return any(m in combined for m in ("zone_university", "loc_university", "loc_uni_", "sub_uni_", "university & parapsychology"))
+
+
 def is_campus_node_or_location(
     node: Optional[Dict[str, Any]] = None,
     parent_node: Optional[Dict[str, Any]] = None,
@@ -290,6 +321,8 @@ def is_campus_node_or_location(
     """
     Determines whether a node or tiered location string is part of the school campus.
     """
+    if is_university_node_or_location(node, parent_node, location_str=location_str, node_id=node_id):
+        return False
     if isinstance(node, dict) and str(node.get("category") or "").lower() == "academic":
         return True
     if isinstance(parent_node, dict) and str(parent_node.get("category") or "").lower() == "academic":
@@ -308,7 +341,7 @@ def is_campus_node_or_location(
     # Explicitly exclude residential & commercial off-campus markers
     if any(off in combined for off in (
         "zone_commercial", "zone_downtown", "zone_residential", "zone_seaside_bay",
-        "zone_mountain_park", "zone_recreational_park", "zone_university", "loc_university", "university",
+        "zone_mountain_park", "zone_recreational_park", "zone_university", "loc_university", "loc_uni_", "sub_uni_", "university",
         "zone_eastern_sanctuary", "zone_woods_reserve", "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
         "loc_eastern_temple", "loc_es_lantern_tea_street", "loc_es_bamboo_footbath_bridge",
         "loc_bunian_threshold_glade", "loc_et_fox_torii_tunnel",
@@ -355,7 +388,7 @@ def is_campus_node_or_location(
         "loc_student_council", "loc_auditorium_stage", "loc_auditorium",
         "loc_old_east_music_room", "loc_old_music_room", "loc_fine_arts_studio", "loc_art_studio",
         "loc_broadcasting_room", "loc_broadcast_room", "loc_clubroom_corridor", "loc_clubroom_wing",
-        "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq",
+        "loc_backstage_loft", "loc_backstage_prop_loft", "loc_soundproof_practice_booth", "loc_nsfw_faction_hq",
         "loc_student_council_facility", "loc_drama_club_facility", "loc_sports_club_facility", "loc_nsfw_club_facility",
         "loc_stuco_", "loc_drama_", "loc_athletics_", "loc_nsfw_",
         "loc_gaming_clubroom", "esports & gaming clubroom",
@@ -594,12 +627,23 @@ def get_world_schedule_state(
     }
 
 
+def _node_is_anomalous_flag(node: Optional[Dict[str, Any]]) -> bool:
+    if not isinstance(node, dict):
+        return False
+    if node.get("is_anomalous"):
+        return True
+    raw_st = str(node.get("state_json") or "").lower()
+    return '"is_anomalous": true' in raw_st or '"is_anomalous":true' in raw_st
+
+
 def evaluate_world_schedule_node_access(
     node: Dict[str, Any],
     parent_node: Optional[Dict[str, Any]] = None,
     scen_key: str = "high_school_drama",
     current_day: int = 1,
-    current_minute: int = 480
+    current_minute: int = 480,
+    session_id: int = 0,
+    session: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates dynamic world-schedule facility locks for a node at (current_day, current_minute).
@@ -629,7 +673,7 @@ def evaluate_world_schedule_node_access(
 
     # 0. Special Rule: Theme Park & Amusement Resort (`zone_theme_park`) closes at 22:00 (10:00 PM)
     # and manifests its anomalous state from 22:00 (1320) until it reopens at 08:00 AM (480).
-    if (genre_family == "urban_fantasy" or "anomalous" in str(scen_key or "").lower()) and any(k in combined for k in ("zone_theme_park", "theme park", "amusement resort", "loc_tp_")):
+    if (genre_family == "urban_fantasy" or "anomalous" in str(scen_key or "").lower()) and any(k in combined for k in ("zone_theme_park", "loc_theme_park", "theme park", "amusement resort", "loc_tp_")):
         if safe_min >= 1320 or safe_min < 480:
             return {
                 "schedule_locked": False,
@@ -680,8 +724,33 @@ def evaluate_world_schedule_node_access(
     if n_type == "ZONE" and n_cat != "academic":
         return {"schedule_locked": False, "is_trespassing": False, "force_open": False}
 
+    # 2b. Condemned/anomalous commercial, civic & public sites remain enterable 24/7
+    # (Theme Park night shift handled in Rule 0; HQs & academic breaches gated in later rules)
+    _is_hq_node = any(hq in combined for hq in ("loc_cult_", "sub_cult_", "loc_clandestine_", "sub_synd_", "loc_hq_", "loc_private_hq_", "loc_et_"))
+    if n_cat in ("commercial", "civic", "public", "") and not _is_hq_node and (
+        _node_is_anomalous_flag(node) or _node_is_anomalous_flag(parent_node) or any(
+            k in combined
+            for k in (
+                "loc_endless_dept_store",
+                "loc_static_cinema",
+                "loc_ct_blood_jade_vault",
+                "loc_crimson_auction_house",
+                "loc_ct_paper_opera",
+                "loc_drydock_shipyard",
+            )
+        )
+    ):
+        return {
+            "schedule_locked": False,
+            "is_trespassing": False,
+            "force_open": False,
+            "clear_curfew": True,
+            "badge_override": "Open (Anomalous Site)",
+        }
+
     # 3. Commercial Venues: Cafes, stores, restaurants, arcades, karaoke, and specialty nightlife
     if n_cat == "commercial":
+
         # Explicit 24-hour facilities (Convenience Store, City Square, Love Hotel, Kōban Police Box, etc.) stay open 24/7
         is_explicit_24h = any(
             k in combined for k in (
@@ -786,6 +855,61 @@ def evaluate_world_schedule_node_access(
 
     # 4. High School Academic / Campus Facilities
     if n_cat == "academic" and is_high_school_setting(scen_key):
+        # 4.0a University campus facilities remain open 24/7
+        if is_university_node_or_location(node, parent_node):
+            return {
+                "schedule_locked": False,
+                "is_trespassing": False,
+                "force_open": False,
+                "clear_curfew": True,
+            }
+
+        # 4.0b Adult Special Agents in Anomalous High School are exempt from student curfews & weekend closures
+        from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
+        if is_adult_ahs_operative_fail_closed(session, session_id=session_id, scen_key=scen_key):
+            return {
+                "schedule_locked": False,
+                "is_trespassing": False,
+                "force_open": False,
+                "clear_curfew": True,
+            }
+
+        # 4.0c Loc 13th Stairwell active nocturnal anomaly breach window (20:00-06:00)
+        if any(k in combined for k in ("loc_13th_stairwell", "sub_4th_floor_landing", "sub_mirror_washroom", "sub_13th_step")) and (safe_min >= 1200 or safe_min < 360):
+            # If the anomaly site was pacified or an incursion explicitly targeting this stairwell was resolved, re-engage curfew.
+            sess_obj = session if isinstance(session, dict) else {}
+            if not sess_obj and session_id:
+                try:
+                    import db as _db
+                    sess_obj = _db.get_session(int(session_id)) or {}
+                except Exception:
+                    sess_obj = {}
+            stair_pacified = False
+            if session_id:
+                try:
+                    from mechanics.world.anomalous_sites.catalog import is_site_pacified
+                    stair_pacified = bool(is_site_pacified(int(session_id), site_id="loc_13th_stairwell", node_id=n_id))
+                except Exception:
+                    stair_pacified = False
+            incursions = sess_obj.get("daily_incursions") or []
+            stair_inc_ids = {"loc_13th_stairwell", "sub_4th_floor_landing", "sub_mirror_washroom", "sub_13th_step"}
+            stair_incs = [
+                inc for inc in incursions
+                if isinstance(inc, dict) and str(inc.get("node_id") or "").lower() in stair_inc_ids
+            ]
+            only_resolved_breach = bool(stair_incs) and all(bool(inc.get("resolved")) for inc in stair_incs)
+            if not stair_pacified and not only_resolved_breach:
+                return {
+                    "schedule_locked": False,
+                    "is_trespassing": False,
+                    "force_open": False,
+                    "clear_curfew": True,
+                    "badge_override": "Anomalous Breach (Unlocked)",
+                    "curfew_label": "20:00–06:00",
+                    "reason_code": "after_hours_anomaly_breach",
+                    "reason_label": "Resonance Breach Entry (Active After-Hours Anomaly 20:00–06:00)",
+                }
+
         # 4a. After-Hours Campus Lockdown & Trespassing: 20:00 (1200) to 07:00 (420) every day
         if safe_min >= 1200 or safe_min < 420:
             return {
@@ -829,7 +953,7 @@ def evaluate_world_schedule_node_access(
                 "loc_fine_arts_studio", "loc_art_studio", "fine arts", "easel", "pottery",
                 "loc_broadcasting_room", "loc_broadcast_room", "broadcasting", "media",
                 "loc_clubroom_corridor", "loc_clubroom_wing", "clubroom",
-                "loc_backstage_prop_loft", "prop loft",
+                "loc_backstage_loft", "loc_backstage_prop_loft", "backstage prop loft", "prop loft",
                 "loc_soundproof_practice_booth", "practice booth",
                 "loc_school_gate", "school main gates", "front gate", "bike racks", "notice board",
                 "loc_courtyard", "central courtyard", "fountain", "cherry tree",

@@ -1044,9 +1044,13 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
         "headquarters", "agency hq", "theme park", "amusement", "grand temple",
         "eastern temple", "hospital", "medical center", "botanical",
     )
+    parent_join_lower = " ".join(raw_parts[:-1]).lower() if len(raw_parts) >= 2 else ""
     is_multi_wing_target = (
         len(raw_parts) >= 2
-        and any(m in " ".join(raw_parts[:-1]).lower() for m in multi_wing_complex_markers)
+        and (
+            any(m in parent_join_lower for m in multi_wing_complex_markers)
+            or bool(re.search(r"\bhq\b", parent_join_lower))
+        )
     )
     match_lower = raw_parts[-1].lower() if is_multi_wing_target else loc_lower
 
@@ -1185,7 +1189,8 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
         non_shop_school_places = (
             "classroom", "homeroom", "library", "office", "council",
             "lockers", "gym", "gymnasium", "rooftop", "lounge", "staff room",
-            "infirmary", "dorm", "desk", "corridor", "foyer", "stairs", "alcove"
+            "infirmary", "dorm", "desk", "corridor", "foyer", "stairs", "alcove",
+            "lobby", "vault", "sub-cellar", "containment", "quarantine",
         )
         if not is_anom_scen or any(nsp in school_check_lower for nsp in non_shop_school_places):
             if any(nsp in school_check_lower for nsp in non_shop_school_places):
@@ -1203,6 +1208,34 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
         if any(k in school_check_lower for k in school_shop_keywords):
             return True
         if not is_anom_scen:
+            return False
+
+    if is_room_level:
+        explicit_room_shop_terms = (
+            "shop", "store", "market", "bazaar", "emporium", "armory", "ordnance",
+            "requisition", "quartermaster", "outfitter", "tailoring", "tactical rigging",
+            "fitted armor", "cleansing bay", "psychic detox", "neural recovery",
+            "field infirmary", "dispensary", "apothecary", "pharmacy", "canteen",
+            "cafeteria", "espresso", "pour-over", "roastery", "kitchenette",
+            "cafe", "café", "taproom", "bar", "tavern", "bakery", "diner",
+            "ramen", "izakaya", "tea house", "boutique", "konbini", "convenience",
+            "kiosk", "vending", "co-op", "bookstore", "bookshop", "supply counter",
+            "velvet boutique", "clubroom", "pawn", "black market", "auction house",
+        )
+        non_shop_room_terms = (
+            "lobby", "foyer", "corridor", "hallway", "stairwell", "bedroom", "loft",
+            "dorm", "dormitory", "dormitories", "quarters", "bathroom", "restroom",
+            "locker room", "classroom", "homeroom", "dispatch", "forensics",
+            "calibration", "firing range", "training", "containment", "quarantine",
+            "vault", "sub-cellar", "cell", "interrogation", "archive", "server",
+            "morgue", "icu", "helipad", "garage", "parking", "rooftop", "platform",
+            "turnstile", "ward", "triage", "trauma", "operating", "altar", "prayer",
+        )
+        has_explicit_room_shop = (
+            any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in explicit_room_shop_terms)
+            or any(mc in leaf_lower for mc in DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS)
+        )
+        if not has_explicit_room_shop and any(re.search(rf"\b{re.escape(ns)}\b", leaf_lower) for ns in non_shop_room_terms):
             return False
 
 
@@ -1250,7 +1283,7 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
         "armory", "blacksmith", "weaponsmith", "quartermaster", "convenience", "boutique",
 
-        "bakery", "stall", "merchant", "trader", "noodle bar", "canteen", "saloon", "tavern",
+        "bakery", "stall", "merchant", "trader", "noodle bar", "canteen", "saloon", "tavern", "taproom",
 
         "inn", "trading post", "general store", "guild shop", "alchemist", "herbalist", "forge",
         "outfitter", "tailoring", "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
@@ -1261,9 +1294,13 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
     )
 
-    if len(raw_parts) >= 2 and any(
-        hq_k in " ".join(raw_parts[:-1]).lower()
-        for hq_k in ("tower hq", "field office hq", "office hq", "operations hq", "operations spire hq", "headquarters", "agency hq")
+    parent_chain_lower = " ".join(raw_parts[:-1]).lower() if len(raw_parts) >= 2 else ""
+    if len(raw_parts) >= 2 and (
+        any(
+            hq_k in parent_chain_lower
+            for hq_k in ("tower hq", "field office hq", "office hq", "operations hq", "operations spire hq", "headquarters", "agency hq")
+        )
+        or re.search(r"\bhq\b", parent_chain_lower)
     ):
         hq_shop_wing_keywords = (
             "armory", "ordnance", "requisition", "outfitter", "tailoring",

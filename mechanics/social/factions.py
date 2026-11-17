@@ -2575,7 +2575,7 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             club_id = ""
             club_name = ""
         elif matched_fac and is_school_club_faction(matched_fac):
-            arch = "freelancer"
+            arch = "student_freelancer" if is_student else "freelancer"
             fid = matched_fac["faction_id"]
             fname = matched_fac["name"]
             club_id = matched_fac["faction_id"]
@@ -2605,8 +2605,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             "joined_club_name": club_name,
             "origin_mode": "student" if is_student else "adult",
             "promotion_rep": rep,
-            "promotion_tier": t_info["tier"] if arch != "freelancer" else 0,
-            "promotion_title": t_info["title"] if arch != "freelancer" else default_free_title,
+            "promotion_tier": t_info["tier"] if arch not in ("freelancer", "student_freelancer") else 0,
+            "promotion_title": t_info["title"] if arch not in ("freelancer", "student_freelancer") else default_free_title,
             "salary_ration_suspended": bool(state.get("salary_ration_suspended", False)),
             "shrine_free_claims_today": int(state.get("shrine_free_claims_today", 0) or 0),
             "shrine_free_max_daily": 3,
@@ -2621,8 +2621,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
         t_info = get_anomalous_promotion_tier_info(rep)
         state["promotion_rep"] = rep
         state["origin_mode"] = "student" if is_student else "adult"
-        state["promotion_tier"] = t_info["tier"] if arch != "freelancer" else 0
-        state["promotion_title"] = t_info["title"] if arch != "freelancer" else default_free_title
+        state["promotion_tier"] = t_info["tier"] if arch not in ("freelancer", "student_freelancer") else 0
+        state["promotion_title"] = t_info["title"] if arch not in ("freelancer", "student_freelancer") else default_free_title
         state.setdefault("shrine_free_max_daily", 3)
         state.setdefault("shrine_free_claims_today", 0)
         state.setdefault("salary_ration_suspended", False)
@@ -2645,7 +2645,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
     rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
     t_info = get_anomalous_promotion_tier_info(rep)
     state["promotion_rep"] = rep
-    if arch == "freelancer":
+    if arch in ("freelancer", "student_freelancer"):
         state["promotion_tier"] = 0
         state["promotion_title"] = default_free_title
         club_id = str(state.get("joined_club_id") or "").strip()
@@ -2667,7 +2667,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
         except Exception:
             pass
     if char and char.get("id"):
-        if arch == "freelancer" and state.get("joined_club_id"):
+        if arch in ("freelancer", "student_freelancer") and state.get("joined_club_id"):
             c_rank = int(state.get("club_rank") or char.get("faction_rank") or 1)
             c_title = str(state.get("club_title") or char.get("faction_title") or "Member")
             db.set_character_faction_membership(
@@ -2700,7 +2700,7 @@ def update_agent_promotion_reputation(
     and manages the salary/ration suspension flag when missing a mandatory bounty at 0 Rep.
     """
     state = get_anomalous_faction_state(session_id, user_id=user_id)
-    if not state or state.get("faction_archetype_key") == "freelancer":
+    if not state or state.get("faction_archetype_key") in ("freelancer", "student_freelancer"):
         return {"changed": False, "state": state, "message": ""}
 
     old_rep = int(state.get("promotion_rep", 0) or 0)

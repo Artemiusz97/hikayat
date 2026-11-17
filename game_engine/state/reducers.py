@@ -1351,9 +1351,20 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
         is_quest_act = any(a.get("is_quest_action") for a in actions if isinstance(a, dict))
         quest_action_qid = next((str(a.get("quest_id", "")) for a in actions if isinstance(a, dict) and a.get("is_quest_action")), "")
         quest_action_sub_id = next((a.get("sub_obj_id") for a in actions if isinstance(a, dict) and a.get("is_quest_action")), None)
+        quest_action_intent = next((str(a.get("intent") or "") for a in actions if isinstance(a, dict) and a.get("is_quest_action")), "")
+        quest_action_ctype = next((str(a.get("contract_type") or "") for a in actions if isinstance(a, dict) and a.get("is_quest_action")), "")
+        is_travel_only_act = any(
+            isinstance(a, dict) and (
+                str(a.get("contract_type") or "").strip().lower() == "travel"
+                or str(a.get("intent") or "").strip().lower() in ("movement", "travel", "fast_travel", "move")
+            )
+            for a in actions
+        )
         is_movement_act = any(
             a.get("is_movement") or
             a.get("type") == "travel" or
+            a.get("contract_type") == "travel" or
+            str(a.get("intent") or "").strip().lower() in ("movement", "travel", "fast_travel", "move") or
             any(str(a.get("label", "")).strip().lower().startswith(pfx) for pfx in ("i travel to", "travel to", "i head to", "head to", "i walk to", "walk to", "i go to", "go to", "i move to", "move to", "i return to", "return to", "i leave for", "leave for", "i journey to", "journey to"))
             for a in actions if isinstance(a, dict)
         )
@@ -1372,7 +1383,7 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
             or str(a.get("incursion_action") or "") in ("converse", "study_pattern")
             for a in actions if isinstance(a, dict)
         )
-        if not (is_movement_act and not is_quest_act) and not is_anomaly_inquiry_act:
+        if not is_travel_only_act and not (is_movement_act and not is_quest_act) and not is_anomaly_inquiry_act:
             for q in active_quests:
                 qid = q["quest_id"]
                 if (qid, None) not in advanced_this_turn:
@@ -1391,7 +1402,9 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                     session_id, qid, None, current_location, True, check_tier,
                                     action_text=action_text_combined, narrative=narr_text_combined,
                                     is_quest_action=is_quest_act, action_quest_id=quest_action_qid,
-                                    action_sub_obj_id=quest_action_sub_id
+                                    action_sub_obj_id=quest_action_sub_id,
+                                    action_intent=quest_action_intent,
+                                    action_contract_type=quest_action_ctype,
                                 )
                                 if n:
                                     waypoint_notices.append(n)
@@ -1435,7 +1448,9 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                             action_text=action_text_combined, narrative=narr_text_combined,
                                             sub_obj_text=so.get("text", ""),
                                             is_quest_action=is_quest_act, action_quest_id=quest_action_qid,
-                                            action_sub_obj_id=quest_action_sub_id
+                                            action_sub_obj_id=quest_action_sub_id,
+                                            action_intent=quest_action_intent,
+                                            action_contract_type=quest_action_ctype,
                                         )
                                         if n:
                                             waypoint_notices.append(n)

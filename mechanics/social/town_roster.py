@@ -529,7 +529,7 @@ TOWN_CITIZEN_TEMPLATES: List[Dict[str, Any]] = [
         "role": "Rival Academy Arcade Champion",
         "grade": "Youth Peer",
         "gender": "male",
-        "affiliation": "St. Jude's Esports Rivals",
+        "affiliation": "District Rival Esports Club",
         "club": "",
         "clique": "Town Youth",
         "social_role_type": "student_peer",
@@ -690,6 +690,47 @@ _ROLE_TO_PART_TIME_SPEC: Dict[str, Dict[str, Any]] = {
     s["match_role"].lower(): s for s in STUDENT_PART_TIME_SPECS
 }
 
+_AHS_TOWN_NODE_REMAP: Dict[str, str] = {
+    "loc_cafe": "loc_uptown_roastery",
+    "loc_bookstore": "loc_uptown_roastery",
+    "loc_convenience_store": "loc_suburb_konbini",
+    "loc_arcade": "loc_downtown_game_arcade",
+    "loc_karaoke": "loc_downtown_jazz_bar",
+    "loc_city_square": "loc_sunken_plaza",
+    "loc_transit_plaza": "loc_metro_transit_terminal",
+    "loc_central_station": "loc_metro_transit_terminal",
+    "loc_restaurant": "loc_downtown_ramen_alley",
+    "loc_clothing_store": "loc_downtown_shopping_arcade",
+    "loc_brand_clothing_store": "loc_haute_couture_salon",
+    "loc_accessories_store": "loc_occult_curio_shop",
+    "loc_gift_store": "loc_occult_curio_shop",
+    "loc_night_market": "loc_ct_night_market",
+    "loc_nightclub": "loc_velvet_mirage_club",
+    "loc_adult_store": "loc_velvet_mirage_club",
+    "loc_love_hotel": "loc_velvet_mirage_club",
+    "loc_campsite": "loc_mountain_campsite",
+    "loc_park_lake": "loc_mountain_campsite",
+    "loc_hilltop_lookout": "loc_summit_lookout",
+    "loc_sakura_grove": "loc_mountain_campsite",
+    "loc_park_shrine": "loc_hilltop_shrine",
+    "loc_picnic_pavilions": "loc_mountain_campsite",
+    "loc_school_hallway": "loc_school_academic",
+    "loc_courtyard": "loc_school_courtyard",
+    "loc_cafeteria": "sub_school_cafeteria",
+    "loc_school_gate": "sub_school_gate",
+}
+
+
+def remap_town_node_for_scenario(node_id: str, scen_key: str = "") -> str:
+    """Remap `high_school_drama` town/campus IDs onto seeded `anomalous_high_school` nodes."""
+    nid = str(node_id or "").strip()
+    if not nid or not scen_key:
+        return nid
+    import scenario_data
+    if not scenario_data.is_anomalous_high_school_scenario(scen_key):
+        return nid
+    return _AHS_TOWN_NODE_REMAP.get(nid, nid)
+
 
 def get_town_format_kwargs(session_id: int, scen_key: str = "high_school_drama") -> Dict[str, str]:
     """Resolves session-specific localized/procedural names for Campus & Town 3-tier paths."""
@@ -808,6 +849,7 @@ def ensure_high_school_transit_plaza_seeded(session_id: int, scen_key: str = "hi
 def assign_student_part_time_shifts(
     campus_directory: List[Dict[str, Any]],
     fmt_kwargs: Dict[str, str],
+    scen_key: str = "high_school_drama",
 ) -> None:
     """
     Mutates the 6 designated student records in `campus_directory` in-place to attach
@@ -824,7 +866,7 @@ def assign_student_part_time_shifts(
             venue_path = spec["venue_facility_template"].format(**fmt_kwargs)
             entry["secondary_facility"] = venue_path
             entry["part_time_job"] = spec["job_title"]
-            entry["part_time_node_id"] = spec["venue_node_id"]
+            entry["part_time_node_id"] = remap_town_node_for_scenario(spec["venue_node_id"], scen_key)
             if "Part-Time:" not in entry.get("personality_summary", ""):
                 entry["personality_summary"] = (
                     f"{entry['personality_summary']} Part-Time: {spec['job_title']} at {venue_path.split(' ➔ ')[1]}."
@@ -1036,6 +1078,22 @@ def generate_town_roster(
             f"Drive: {drive} Flaw: {friction} Mannerism: {quirk}{family_clause}"
         ).strip()
 
+        p_nid = remap_town_node_for_scenario(tmpl["primary_node_id"], scen_key)
+        s_nid = remap_town_node_for_scenario(tmpl["secondary_node_id"], scen_key)
+        p_fac = tmpl["primary_facility"].format(**fmt)
+        s_fac = tmpl["secondary_facility"].format(**fmt)
+        if session_id and scenario_data.is_anomalous_high_school_scenario(scen_key):
+            try:
+                from mechanics.world.locations.pathfinding import format_node_hierarchy
+                hp = format_node_hierarchy(session_id, p_nid)
+                if hp and "➔" in hp:
+                    p_fac = hp
+                hs = format_node_hierarchy(session_id, s_nid)
+                if hs and "➔" in hs:
+                    s_fac = hs
+            except Exception:
+                pass
+
         town_entries.append({
             "session_id": session_id,
             "npc_id": full_name.lower().replace(" ", "_").replace(".", ""),
@@ -1050,11 +1108,11 @@ def generate_town_roster(
             "social_role_type": tmpl["social_role_type"],
             "is_nocturnal_shift": bool(tmpl.get("is_nocturnal_shift", False)),
             "schedule_archetype": tmpl["schedule_archetype"],
-            "shop_venue_key": tmpl.get("shop_venue_key", ""),
-            "primary_node_id": tmpl["primary_node_id"],
-            "secondary_node_id": tmpl["secondary_node_id"],
-            "primary_facility": tmpl["primary_facility"].format(**fmt),
-            "secondary_facility": tmpl["secondary_facility"].format(**fmt),
+            "shop_venue_key": remap_town_node_for_scenario(tmpl.get("shop_venue_key", ""), scen_key),
+            "primary_node_id": p_nid,
+            "secondary_node_id": s_nid,
+            "primary_facility": p_fac,
+            "secondary_facility": s_fac,
             "sibling_name": "",
             "town_relative_name": rel_student_name,
             "personality_summary": personality,
@@ -1153,6 +1211,7 @@ def get_town_citizen_schedule_nodes(
     current_day: int = 1,
     seed_val: int = 0,
     current_minute: Optional[int] = None,
+    scen_key: str = "high_school_drama",
 ) -> Dict[str, str]:
     """
     Computes the 8-phase node_id schedule map (`commute`, `morning`, `lunch`,
@@ -1562,6 +1621,8 @@ def get_town_citizen_schedule_nodes(
             "evening": "loc_city_square",
             "night": home_nid,
         })
+    if scen_key:
+        return {k: remap_town_node_for_scenario(v, scen_key) for k, v in s.items()}
     return s
 
 
@@ -1804,8 +1865,9 @@ def get_active_shop_clerk_for_location(
         return None
     sess = db.get_session(session_id) or {}
     scen_key = str(sess.get("scenario") or "fantasy")
+    import scenario_data
     from mechanics.world.locations import is_school_scenario
-    if not is_school_scenario(scen_key):
+    if not (is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key)):
         return None
 
     loc = str(location_str or sess.get("current_location") or "").strip()
@@ -1818,37 +1880,38 @@ def get_active_shop_clerk_for_location(
         return None
 
     target_venue = ""
-    if any(k in probe for k in ("convenience", "konbini")):
+    if any(k in probe for k in ("convenience", "konbini", "loc_suburb_konbini")):
         target_venue = "loc_convenience_store"
-    elif any(k in probe for k in ("brand_clothing", "brand_clothes", "luxury designer", "designer boutique")):
+    elif any(k in probe for k in ("brand_clothing", "brand_clothes", "luxury designer", "designer boutique", "haute couture", "loc_haute_couture_salon")):
         target_venue = "loc_brand_clothing_store"
-    elif any(k in probe for k in ("clothing_store", "streetwear", "apparel shop", "clothes_merchant")):
+    elif any(k in probe for k in ("clothing_store", "streetwear", "apparel shop", "clothes_merchant", "shopping arcade", "loc_downtown_shopping_arcade")):
         target_venue = "loc_clothing_store"
-    elif any(k in probe for k in ("accessories_store", "accessories_merchant", "bijoux", "watch & jewelry")):
+    elif any(k in probe for k in ("accessories_store", "accessories_merchant", "bijoux", "watch & jewelry", "sanctuary antiquities", "occult_curio_shop", "curio_shop")):
         target_venue = "loc_accessories_store"
     elif any(k in probe for k in ("gift_store", "gift_merchant", "curio & gift")):
         target_venue = "loc_gift_store"
-    elif any(k in probe for k in ("night_market", "night market", "lantern night", "bazaar")):
+    elif any(k in probe for k in ("night_market", "night market", "lantern night", "lantern-lit night", "bazaar")):
         target_venue = "loc_night_market"
-    elif any(k in probe for k in ("nightclub", "neon pulse")):
+    elif any(k in probe for k in ("nightclub", "neon pulse", "velvet mirage", "velvet_mirage")):
         target_venue = "loc_nightclub"
     elif any(k in probe for k in ("adult_store", "adult_merchant", "adult boutique", "velvet curtain")):
         target_venue = "loc_adult_store"
-    elif any(k in probe for k in ("loc_restaurant", "restaurant_merchant", "downtown diner", "family restaurant")):
+    elif any(k in probe for k in ("loc_restaurant", "restaurant_merchant", "downtown diner", "family restaurant", "ramen & izakaya", "downtown_ramen")):
         target_venue = "loc_restaurant"
     elif "seaside" in probe or "beach shack" in probe or "shaved ice" in probe:
         target_venue = "loc_seaside_cafe"
-    elif any(k in probe for k in ("cafe", "café", "espresso", "bakery")):
+    elif any(k in probe for k in ("cafe", "café", "espresso", "bakery", "roastery", "rare bookshop", "uptown_roastery")):
         target_venue = "loc_cafe"
-    elif "arcade" in probe:
+    elif "arcade" in probe or "billiards" in probe or "downtown_game_arcade" in probe:
         target_venue = "loc_arcade"
-    elif "karaoke" in probe:
+    elif "karaoke" in probe or "jazz bar" in probe or "downtown_jazz_bar" in probe:
         target_venue = "loc_karaoke"
-    elif any(k in probe for k in ("kiosk", "crosswalk", "city_square", "city square", "transit_plaza", "commuter station", "school_merchant")):
+    elif any(k in probe for k in ("kiosk", "crosswalk", "city_square", "city square", "transit_plaza", "commuter station", "sunken plaza", "transit terminal", "school_merchant")):
         target_venue = "loc_city_square"
-    elif "cafeteria" in probe or "dining hall" in probe:
+    elif "cafeteria" in probe or "dining hall" in probe or "sub_school_cafeteria" in probe:
         target_venue = "loc_cafeteria"
 
+    target_venue = remap_town_node_for_scenario(target_venue, scen_key)
     if not target_venue:
         return None
 
@@ -1860,7 +1923,7 @@ def get_active_shop_clerk_for_location(
     # 1. Check if a Campus Student Part-Timer is actively working this counter right now!
     for entry in roster:
         pt_spec = is_student_on_part_time_shift(entry, curr_day, safe_min, session_id=session_id)
-        if pt_spec and pt_spec["venue_node_id"] == target_venue:
+        if pt_spec and remap_town_node_for_scenario(pt_spec["venue_node_id"], scen_key) == target_venue:
             char_id = 0
             if user_id:
                 ch = db.get_character(user_id)
@@ -1879,7 +1942,7 @@ def get_active_shop_clerk_for_location(
             }
 
     # 2. Check Campus Cafeteria Head Chef
-    if target_venue == "loc_cafeteria":
+    if target_venue in ("loc_cafeteria", "sub_school_cafeteria"):
         for entry in roster:
             if "cafeteria" in str(entry.get("role") or "").lower() or "chef" in str(entry.get("role") or "").lower():
                 return {

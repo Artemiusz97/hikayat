@@ -288,12 +288,19 @@ def promote_prewarmed_dossier(
     session_id: int,
     quest_id: str,
     conn: Optional[sqlite3.Connection] = None,
+    turn_number: Optional[int] = None,
 ) -> dict | None:
     def _run(c: sqlite3.Connection) -> dict | None:
-        c.execute(
-            "UPDATE quest_dossiers SET status_stage = 'compiled', updated_at = ? WHERE session_id = ? AND quest_id = ?",
-            (time.time(), session_id, quest_id),
-        )
+        if turn_number is not None:
+            c.execute(
+                "UPDATE quest_dossiers SET status_stage = 'compiled', compiled_at_turn = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                (int(turn_number), time.time(), session_id, quest_id),
+            )
+        else:
+            c.execute(
+                "UPDATE quest_dossiers SET status_stage = 'compiled', updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                (time.time(), session_id, quest_id),
+            )
         row = c.execute(
             "SELECT * FROM quest_dossiers WHERE session_id = ? AND quest_id = ?",
             (session_id, quest_id),
@@ -806,12 +813,16 @@ def rollback_quest_dossiers_after_turn(
                         (now, session_id, qid),
                     )
                     c.execute(
-                        "UPDATE quests SET status = 'Available', dossier_stage = 'pitch', sub_objectives_json = '[]', updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                        "UPDATE quests SET status = 'Available', dossier_stage = 'pitch', sub_objectives_json = '[]', reward_claimed = 0, updated_at = ? WHERE session_id = ? AND quest_id = ?",
                         (now, session_id, qid),
                     )
                     c.execute(
                         "DELETE FROM quest_waypoints WHERE session_id = ? AND quest_id = ? AND (stage_index >= 2 OR sub_obj_id > 0)",
                         (session_id, qid),
+                    )
+                    c.execute(
+                        "UPDATE quest_waypoints SET sub_obj_id = NULL, status = 'active', updated_at = ? WHERE session_id = ? AND quest_id = ? AND sub_obj_id = 0",
+                        (now, session_id, qid),
                     )
                     dossiers_rolled += 1
             else:
@@ -861,10 +872,17 @@ def rollback_quest_dossiers_after_turn(
                         elif k == "outcome_tier":
                             outcome_tier = str(prev_val or "")
                         elif k == "quest_status" and prev_val:
-                            c.execute(
-                                "UPDATE quests SET status = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
-                                (str(prev_val), now, session_id, qid),
-                            )
+                            prev_st_str = str(prev_val)
+                            if prev_st_str != "Completed":
+                                c.execute(
+                                    "UPDATE quests SET status = ?, reward_claimed = 0, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                                    (prev_st_str, now, session_id, qid),
+                                )
+                            else:
+                                c.execute(
+                                    "UPDATE quests SET status = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                                    (prev_st_str, now, session_id, qid),
+                                )
 
                     c.execute(
                         """UPDATE quest_dossiers
@@ -930,6 +948,8 @@ def rollback_quest_dossiers_after_turn(
                         chronicle_tapestry = dict(prev_val)
                     elif k == "mastermind_profile" and isinstance(prev_val, dict):
                         mastermind_profile = dict(prev_val)
+                    elif k == "nemeses" and isinstance(prev_val, list):
+                        surviving_nemeses = list(prev_val)
 
                 c.execute(
                     """UPDATE campaign_spines

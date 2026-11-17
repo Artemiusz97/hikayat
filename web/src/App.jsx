@@ -89,6 +89,7 @@ function App() {
       allocateStatPoint={allocateStatPoint}
       session={session}
       setSession={setSession}
+      refreshSession={refreshSession}
       lastSyncTimestamp={lastSyncTimestamp}
       processingTurn={processingTurn}
       pendingAction={pendingAction}

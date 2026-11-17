@@ -281,9 +281,9 @@ PHONE_FLIRT_GUARD_PATTERNS = (
 
 # --- DIALOGUE LOCK & EXITS ---
 from localization import (
+    ALL_MOVEMENT_PREFIXES,
     get_all_dialogue_exit_phrases,
     get_all_dialogue_init_prefixes,
-    get_all_movement_prefixes,
 )
 
 DIALOGUE_EXIT_PHRASES = (
@@ -312,17 +312,10 @@ DIALOGUE_INIT_PREFIXES = (
 ) + get_all_dialogue_init_prefixes()
 
 # --- SPATIAL MOVEMENT & RESIDENCES ---
-MOVEMENT_PREFIXES = (
-    "travel to ", "travel toward ", "travel towards ", "travel through ", "travel into ",
-    "head to ", "head toward ", "head towards ", "head into ", "head over to ",
-    "walk to ", "walk toward ", "walk towards ", "walk into ", "walk through ",
-    "journey to ", "journey toward ", "journey towards ", "depart toward ",
-    "step into ", "step through ", "enter the ", "enter ", "visit the ", "visit ",
-    "go to ", "move to ", "move into ", "moving to ", "moving toward ", "moving into ",
-    "return to ", "leave for ", "make our way to ",
-    "make your way to ", "make my way to ", "slip into ", "slip to ",
-    "lead her to ", "lead him to ", "lead them to ", "take her to ", "take him to ", "bring her to ", "bring him to "
-) + get_all_movement_prefixes()
+MOVEMENT_PREFIXES = ALL_MOVEMENT_PREFIXES + (
+    "head over to ", "moving to ", "moving toward ", "moving into ",
+    "lead her to ", "lead him to ", "lead them to ", "take her to ", "take him to ", "bring her to ", "bring him to ",
+)
 
 RESIDENCE_VISIT_RE = re.compile(
     r"\b(?:her|his|their|my|our)\s+(?:home|house|place|apartment|residence|foyer|dorm|porch)\b|"
