@@ -59,6 +59,61 @@ from .vault import (
 )
 
 
+def _apply_faction_live_containment_bonus(
+    session_id: int,
+    lead_uid: Optional[int],
+    entity_name: str,
+    *,
+    blueprint: Optional[Dict[str, Any]] = None,
+) -> Tuple[int, int, int, str]:
+    """
+    Applies active Outlaw Faction live-entity containment perks (suppressed at 0 Rep):
+    - `cult_faction`: +5 Promotion Rep and +25% Max MP restore.
+    - `clandestine_faction`: +50G Specimen Commission.
+    Returns `(extra_rep, extra_gold, mp_restored, notice_suffix)`.
+    """
+    bp_type = str((blueprint or {}).get("type") or (blueprint or {}).get("anomaly_type") or "").strip().lower()
+    if not session_id or bp_type == "object":
+        return 0, 0, 0, ""
+
+    from mechanics.social.factions import (
+        faction_bonus_active,
+        get_anomalous_faction_state,
+        update_agent_promotion_reputation,
+    )
+
+    f_state = get_anomalous_faction_state(int(session_id), user_id=lead_uid)
+    extra_rep = 0
+    extra_gold = 0
+    mp_restored = 0
+    notice = ""
+
+    if faction_bonus_active("cult_faction", f_state):
+        extra_rep = 5
+        update_agent_promotion_reputation(
+            session_id=int(session_id),
+            delta_rep=5,
+            reason=f"Live Sanctuary Containment Tribute '{entity_name}'",
+            user_id=lead_uid,
+        )
+        if lead_uid:
+            c_row = db.get_character(int(lead_uid)) or {}
+            max_mp = max(1, int(c_row.get("max_mp", 10) or 10))
+            cur_mp = max(0, int(c_row.get("mp", 0) or 0))
+            target_mp_gain = max(1, int(round(max_mp * 0.25)))
+            mp_restored = min(target_mp_gain, max(0, max_mp - cur_mp))
+            if mp_restored > 0:
+                db.apply_hp_mp_delta(int(lead_uid), mp_delta=mp_restored)
+        notice = " *(Cult Communion: +5 Rep & +25% Max MP Restored)*"
+    elif faction_bonus_active("clandestine_faction", f_state):
+        extra_gold = 50
+        if lead_uid:
+            db.apply_hp_mp_delta(int(lead_uid), gold_delta=50)
+        notice = " *(+50G Syndicate Specimen Commission)*"
+
+    return extra_rep, extra_gold, mp_restored, notice
+
+
 def spawn_agitated_non_hostile_entity(
     session_id: int,
     entity_name: str,
@@ -721,6 +776,14 @@ def resolve_anomalous_combat_containment(
             resolution_method=method_str,
             user_id=lead_uid,
         )
+        fac_rep, fac_gold, fac_mp, fac_notice = _apply_faction_live_containment_bonus(
+            session_id,
+            lead_uid,
+            target_inc["entity_name"],
+            blueprint=bp_enemy,
+        )
+        rep_bonus += fac_rep
+        gold_gain += fac_gold
         converted_res = handle_secured_object_anomaly_conversion(
             session_id=session_id,
             user_id=lead_uid,
@@ -740,6 +803,7 @@ def resolve_anomalous_combat_containment(
             "subdued": True,
             "live_capture_bonus": is_born_hostile,
             "rep_bonus": rep_bonus,
+            "mp_restored": fac_mp,
             "trick_tax_refunded": int(refund_res.get("refunded_gold", 0) or 0),
             "converted_gear": converted_res,
             "reward_gold": gold_gain,
@@ -747,7 +811,7 @@ def resolve_anomalous_combat_containment(
             "reward_item": dropped_gear,
             "vault_entry": vault_entry,
             "message": (
-                f"{icon_used} Contained **{target_inc['entity_name']}** alive!{live_bonus_suffix} "
+                f"{icon_used} Contained **{target_inc['entity_name']}** alive!{live_bonus_suffix}{fac_notice} "
                 f"Earned +{gold_gain}G, +{xp_gain} XP, and logged into {vault_entry['vault_facility']}.{refund_suffix}{gear_suffix}"
             ),
         }
@@ -798,6 +862,14 @@ def resolve_anomalous_combat_containment(
             )
         except Exception:
             pass
+
+    fac_rep, fac_gold, fac_mp, fac_notice = _apply_faction_live_containment_bonus(
+        session_id,
+        lead_uid,
+        ent_name,
+        blueprint=bp_enemy,
+    )
+    rep_bonus += fac_rep
 
     converted_res = handle_secured_object_anomaly_conversion(
         session_id=session_id,
@@ -859,13 +931,15 @@ def resolve_anomalous_combat_containment(
         "subdued": True,
         "live_capture_bonus": is_born_hostile,
         "bonus_xp": bonus_xp_awarded,
+        "bonus_gold": fac_gold,
         "rep_bonus": rep_bonus,
+        "mp_restored": fac_mp,
         "trick_tax_refunded": int(refund_res_q.get("refunded_gold", 0) or 0),
         "converted_gear": converted_res,
         "quest_containment": quest_res,
         "vault_entry": vault_entry,
         "message": (
-            f"{icon_used} Contained **{ent_name}** alive and sealed it into a containment unit!{live_bonus_suffix} "
+            f"{icon_used} Contained **{ent_name}** alive and sealed it into a containment unit!{live_bonus_suffix}{fac_notice} "
             f"Logged to {vault_entry['vault_facility']}.{follow_note}{refund_q_suffix}{conv_suffix}{pac_suffix}"
         ),
     }
@@ -1289,10 +1363,19 @@ def resolve_non_hostile_incursion_action(
             resolution_method=method_desc,
             user_id=user_id,
         )
+        bp_resolved_pac = bp_inc or {"name": target_inc["entity_name"], "type": target_inc.get("anomaly_type", "")}
+        fac_rep, fac_gold, fac_mp, fac_notice = _apply_faction_live_containment_bonus(
+            session_id,
+            user_id,
+            target_inc["entity_name"],
+            blueprint=bp_resolved_pac,
+        )
+        gold_gain += fac_gold
+
         converted_res = handle_secured_object_anomaly_conversion(
             session_id=session_id,
             user_id=user_id,
-            blueprint=bp_inc or {"name": target_inc["entity_name"], "type": target_inc.get("anomaly_type", "")},
+            blueprint=bp_resolved_pac,
             scen_key=scen_key,
             entity_name=target_inc["entity_name"],
             skip_codex_progress=True,
@@ -1311,10 +1394,12 @@ def resolve_non_hostile_incursion_action(
             "converted_gear": converted_res,
             "reward_gold": gold_gain,
             "reward_xp": xp_gain,
+            "rep_bonus": fac_rep,
+            "mp_restored": fac_mp,
             "reward_item": dropped_gear,
             "vault_entry": vault_entry,
             "message": (
-                f"✨ Successfully contained **{target_inc['entity_name']}** via {approach_method_labels.get(act, 'Containment Protocol')}!{offering_used_note}{taboo_note}{paradox_note_s} "
+                f"✨ Successfully contained **{target_inc['entity_name']}** via {approach_method_labels.get(act, 'Containment Protocol')}!{offering_used_note}{taboo_note}{paradox_note_s}{fac_notice} "
                 f"Earned +{gold_gain}G, +{xp_gain} XP, and logged into {vault_entry['vault_facility']}.{refund_suffix}{gear_suffix}"
             ),
         }

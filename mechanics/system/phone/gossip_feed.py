@@ -107,6 +107,24 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
             system_prompt += "\nACTIVE WORLD PULSE (Reference at least one naturally in timeline chatter):\n" + "\n".join(pulse_lines) + "\n"
     except Exception:
         pass
+    try:
+        from mechanics.social.population_seeder import is_population_seeding_supported
+        if is_population_seeding_supported(scen_key):
+            wr_locals = [
+                r for r in (db.get_world_roster(session_id, include_legacy_rosters=False) or [])
+                if str(r.get("staff_status") or "active").lower() == "active"
+                and str(r.get("origin") or "").lower() in ("roaming_citizen", "district_merchant", "roaming_merchant", "civic_staff", "campus_seed")
+                and r.get("name")
+            ]
+            if wr_locals:
+                picked = [wr_locals[(session_id + idx * 13) % len(wr_locals)] for idx in range(min(4, len(wr_locals)))]
+                wr_lines = [f"- {w['name']} ({w.get('role') or 'Local resident'})" for w in picked]
+                system_prompt += (
+                    "\nLOCAL DISTRICT RESIDENTS & MERCHANTS (Reference naturally in ambient posts; do NOT promote to contacts):\n"
+                    + "\n".join(wr_lines) + "\n"
+                )
+    except Exception:
+        pass
     from game_engine.prompt_layout import build_side_channel_language_directive
     feed_lang_dir = build_side_channel_language_directive(
         session,
@@ -279,7 +297,7 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             f"Output a JSON object with: {{\"clue\": \"string (1-2 sentences of valuable clue)\", \"source\": \"string (e.g. anonymous student post, leaked audio file, overheard locker room chat)\"}}"
         )
         from game_engine.prompt_layout import build_side_channel_language_directive
-        rumor_lang_dir = build_side_channel_language_directive(session, text_fields=("clue", "source"), style="sms")
+        rumor_lang_dir = build_side_channel_language_directive(session, text_fields=("clue", "source"), style="narrative")
         if rumor_lang_dir:
             system_prompt += f"\n{rumor_lang_dir}"
         res = await _resolve_phone_llm_fn()(system_prompt, "Generate verified rumor lead:", temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key), use_utility=True)

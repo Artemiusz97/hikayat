@@ -3,7 +3,10 @@ from typing import Optional, Any, Dict, List
 import db
 import asyncio
 import json
+import logging
 import time
+
+log = logging.getLogger(__name__)
 from contextlib import contextmanager
 import re
 import sqlite3
@@ -27,22 +30,30 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                     show_percentages: int = 1, language: str = "en",
                     narration_language: str = None,
                     character_id: int = None, slot: int = 1,
-                    schema_epoch: int = 2) -> int:
+                    schema_epoch: int = 2,
+                    narrative_pacing: Optional[str] = None,
+                    show_enemy_hp: int = 1,
+                    show_enemy_intent: int = 1) -> int:
     status = "active" if capacity <= 1 else "waiting"
     eff_narr_lang = narration_language or language or "en"
+    eff_pacing = narrative_pacing if narrative_pacing is not None else (
+        "concise" if str(verbosity or "").strip().lower() in ("concise", "direct") else "balanced"
+    )
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO sessions (mode, capacity, status, turn_order, current_turn_index,
                                       choices_json, history_json, pending_picks_json,
                                       current_location, nearby_enemies_json, current_npcs_json,
-                                      verbosity, dialogue_mode, image_gen_enabled, choices_style, combat_ui_style,
+                                      verbosity, narrative_pacing, dialogue_mode, image_gen_enabled, choices_style, combat_ui_style,
                                       result_display, scenario, channel_id, host_user_id, created_at, updated_at,
-                                      show_percentages, language, narration_language, character_id, slot, schema_epoch)
-               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (mode, capacity, status, json.dumps([host_user_id]), verbosity,
+                                      show_percentages, show_enemy_hp, show_enemy_intent,
+                                      language, narration_language, character_id, slot, schema_epoch)
+               VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (mode, capacity, status, json.dumps([host_user_id]), verbosity, eff_pacing,
              dialogue_mode, 1 if image_gen_enabled else 0, choices_style, combat_ui_style,
              result_display, scenario, channel_id, host_user_id, time.time(), time.time(),
-             1 if show_percentages else 0, language or eff_narr_lang, eff_narr_lang, character_id, slot, schema_epoch),
+             1 if show_percentages else 0, 1 if show_enemy_hp else 0, 1 if show_enemy_intent else 0,
+             language or eff_narr_lang, eff_narr_lang, character_id, slot, schema_epoch),
         )
         session_id = cur.lastrowid
         conn.execute("INSERT INTO session_members (session_id, user_id, joined_at) VALUES (?,?,?)",
@@ -110,6 +121,16 @@ def get_session(session_id: int):
         d["phone_social_state"] = json.loads(d.pop("phone_social_state_json", None) or "{}")
         d["scenario"] = d.get("scenario") or "fantasy"
         d["schema_epoch"] = int(d.get("schema_epoch") or 1)
+        if not d.get("verbosity"):
+            d["verbosity"] = "vivid"
+        if not d.get("narrative_pacing"):
+            d["narrative_pacing"] = (
+                "concise" if str(d.get("verbosity") or "").strip().lower() in ("concise", "direct") else "balanced"
+            )
+        if not d.get("dialogue_mode"):
+            d["dialogue_mode"] = "adaptive"
+        d.setdefault("show_enemy_hp", 1)
+        d.setdefault("show_enemy_intent", 1)
         d["dialogue_partners"] = []
         raw_dp = d.get("dialogue_partner")
         if raw_dp:
@@ -987,6 +1008,7 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
         extra_dict.pop("leyline_spirit_passage_unlocked", None)
         extra_dict.pop("leyline_unlocked_turn", None)
         extra_dict.pop("leyline_unlock_reason", None)
+        extra_dict.pop("prompt_epoch", None)
         if prop_name and eff_uid:
             char_row = conn.execute(
                 "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
@@ -1034,7 +1056,10 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
                    last_turn_snapshot_json='{}', merchant_json='{}', party_npcs_json='[]',
                    combat_threat_ledger_json='{}', combat_boss_telegraph_json='{}',
                    current_npcs_json='[]', nearby_enemies_json='[]', dialogue_partner=NULL,
-                   physical_state_json='{}', current_node_id=NULL, focal_point='',
+                   physical_state_json='{}', current_location='', current_node_id=NULL, focal_point='',
+                   scene_title=NULL, scene_image_url=NULL,
+                   temporary_companions_json='[]', phone_social_state_json='{}',
+                   current_day=1, current_minute=480,
                    event_pity_counter=0.0, rumor_pity_counter=0.0, minor_event_pity_counter=0.0,
                    player_scandal_cooldown_until_day=0,
                    recent_witness_catches_json='[]', npc_gossip_shared_today_json='{}',
@@ -1082,12 +1107,13 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
     from .dossiers import rollback_quest_dossiers_after_turn, rollback_session_anomaly_logs_after_turn
     from .memory import MAX_ROLLING_DIGEST_BULLETS, rebuild_session_digests_fts
     from .social import rollback_actor_physical_state_after_turn, rollback_social_pacing_state_after_turn
-    from .properties import rollback_player_properties_after_turn
+    from .properties import rollback_player_properties_after_turn, grant_or_relocate_starter_quarters
     from .contracts import rollback_entity_contracts_after_turn
     from .roster import rollback_world_roster_after_turn
     from .epistemic import rollback_epistemic_state_after_turn
 
     t_num = int(turn_number)
+    restore_quarters_arch: str | None = None
     with UnitOfWork() as conn:
         we_res = rollback_world_events_after_turn(session_id, t_num, conn=conn)
         dos_res = rollback_quest_dossiers_after_turn(session_id, t_num, conn=conn)
@@ -1351,6 +1377,7 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                     if (
                         "player_resonance_pips" in pre_t
                         or "telemetry_calibrations_used" in pre_t
+                        or "anomalous_faction_state" in pre_t
                         or ("daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num)
                     ):
                         try:
@@ -1368,6 +1395,18 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                             )
                         if "telemetry_calibrations_used" in pre_t and isinstance(pre_t["telemetry_calibrations_used"], dict):
                             cur_extra["telemetry_calibrations_used"] = dict(pre_t["telemetry_calibrations_used"])
+                        if "anomalous_faction_state" in pre_t and isinstance(pre_t["anomalous_faction_state"], dict):
+                            pre_afs = dict(pre_t["anomalous_faction_state"])
+                            post_afs = cur_extra.get("anomalous_faction_state") if isinstance(cur_extra.get("anomalous_faction_state"), dict) else {}
+                            pre_arch = str(pre_afs.get("faction_archetype_key") or "").strip().lower()
+                            post_arch = str((post_afs or {}).get("faction_archetype_key") or "").strip().lower()
+                            cur_extra["anomalous_faction_state"] = pre_afs
+                            if pre_arch != post_arch:
+                                restore_quarters_arch = pre_arch or (
+                                    "student_freelancer"
+                                    if str(pre_afs.get("origin_mode") or "").strip().lower() == "student"
+                                    else "freelancer"
+                                )
                         if "daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num:
                             cur_extra["daily_incursions"] = list(pre_t["daily_incursions"])
                             cur_extra["daily_breaches"] = list(pre_t["daily_incursions"])
@@ -1375,8 +1414,43 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                             "UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?",
                             (json.dumps(cur_extra, default=str), time.time(), session_id),
                         )
+                    if "party_factions" in pre_t and isinstance(pre_t["party_factions"], dict):
+                        for pf_uid_raw, pf_data in pre_t["party_factions"].items():
+                            if not isinstance(pf_data, dict):
+                                continue
+                            try:
+                                pf_uid = int(pf_uid_raw)
+                            except (TypeError, ValueError):
+                                continue
+                            jf_id = str(pf_data.get("joined_faction_id") or "")
+                            if "faction_rank" in pf_data or "faction_title" in pf_data:
+                                conn.execute(
+                                    "UPDATE characters SET joined_faction_id = ?, faction_rank = ?, faction_title = ? WHERE user_id = ? AND (active_session_id = ? OR is_active = 1)",
+                                    (
+                                        jf_id,
+                                        int(pf_data.get("faction_rank") or 0),
+                                        str(pf_data.get("faction_title") or ""),
+                                        pf_uid,
+                                        session_id,
+                                    ),
+                                )
+                            else:
+                                conn.execute(
+                                    "UPDATE characters SET joined_faction_id = ? WHERE user_id = ? AND (active_session_id = ? OR is_active = 1)",
+                                    (jf_id, pf_uid, session_id),
+                                )
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
+        if restore_quarters_arch:
+            try:
+                grant_or_relocate_starter_quarters(session_id, restore_quarters_arch, conn=conn)
+            except Exception as exc:
+                log.warning(
+                    "Starter quarters rollback failed for session %s -> %s: %s",
+                    session_id,
+                    restore_quarters_arch,
+                    exc,
+                )
     return {
         "ties_rolled_back": ties_cnt,
         "intimate_events_deleted": intimate_cnt,

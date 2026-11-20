@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 import db
 from db import adb
 import character_data as cd
+import scenario_data
 from mechanics.combat.merchant import (
     generate_merchant_shop,
     generate_grounded_merchant_rumors,
@@ -21,6 +22,8 @@ from mechanics.combat.merchant import (
     compute_item_resale_payout,
     compute_effective_shop_item_price,
     mark_vault_requisition_claimed,
+    stamp_discounted_purchase_metadata,
+    validate_or_clear_faction_quartermaster,
 )
 from mechanics.combat.items import (
     apply_item_to_target,
@@ -57,24 +60,7 @@ router = APIRouter()
 
 def _validate_or_clear_faction_quartermaster(session_id: int, loc: str, merchant: dict) -> tuple[bool, dict]:
     """Verify `is_faction_quartermaster` is anchored to a Faction HQ; clear stale flags if not."""
-    if not isinstance(merchant, dict) or not merchant.get("is_faction_quartermaster"):
-        return False, dict(merchant) if isinstance(merchant, dict) else {}
-    sid = int(session_id or 0)
-    at_hq = bool(
-        sid
-        and (
-            location_has_faction_hq(loc or "", session_id=sid)
-            or db.get_faction_by_hq(sid, loc or "")
-        )
-    )
-    if at_hq:
-        return True, merchant
-    updated = dict(merchant)
-    updated["is_faction_quartermaster"] = False
-    updated.pop("quartermaster_faction_arch", None)
-    if sid:
-        db.save_merchant_state(sid, updated)
-    return False, updated
+    return validate_or_clear_faction_quartermaster(session_id, loc, merchant)
 
 
 def _is_spellbook(item: dict) -> bool:
@@ -1215,33 +1201,22 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
 
         slot_cost = int(stock_item.get("slot_cost", 1) or 1)
 
-        # Embed anti-exploit resale metadata if applicable before stack/capacity check
+        # Embed anti-exploit resale metadata (universal across anomalous shops + all discount/grant shops)
         item_eff = str(stock_item.get("effect") or stock_item.get("description", ""))
-        if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
-            import json as _json
-            for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
-                if item_eff.startswith(prefix):
-                    try:
-                        meta_obj = _json.loads(item_eff[len(prefix):])
-                        if shop_ctx.get("is_monastic_free_shop"):
-                            meta_obj["shrine_sacred_grant"] = True
-                        if shop_ctx.get("is_public_discounted_shop"):
-                            meta_obj["purchase_price_paid"] = price
-                            meta_obj["public_requisition_item"] = True
-                        item_eff = f"{prefix}{_json.dumps(meta_obj)}"
-                    except Exception:
-                        pass
-                    break
-            else:
-                # Plain effect string: wrap or append marker
-                if shop_ctx.get("is_monastic_free_shop"):
-                    item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'shrine_sacred_grant': True})}"
-                elif shop_ctx.get("is_public_discounted_shop"):
-                    item_eff = f"[CONSUMABLE_JSON]{_json.dumps({'description': item_eff, 'purchase_price_paid': price, 'public_requisition_item': True})}"
-
-        elif shop_ctx.get("is_event_discounted_shop"):
-            from mechanics.combat.merchant import stamp_discounted_purchase_metadata
-            item_eff = stamp_discounted_purchase_metadata(item_eff, price)
+        is_anom_purchase = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+        if (
+            is_anom_purchase
+            or shop_ctx.get("is_monastic_free_shop")
+            or shop_ctx.get("is_public_discounted_shop")
+            or shop_ctx.get("is_event_discounted_shop")
+            or shop_ctx.get("is_cult_discounted_shop")
+        ):
+            item_eff = stamp_discounted_purchase_metadata(
+                item_eff,
+                price,
+                shrine_sacred_grant=bool(shop_ctx.get("is_monastic_free_shop")),
+                public_requisition_item=bool(shop_ctx.get("is_public_discounted_shop")),
+            )
 
         try:
             item_id = await adb(

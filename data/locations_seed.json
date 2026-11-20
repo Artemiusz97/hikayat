@@ -9332,6 +9332,55 @@
                         "features": "Lead-lined containment seals, glowing cerenkov-blue fissures, deployed automated radiation monitors",
                         "sensory": "Geiger counter crackle on handheld scanners, unnatural chill defying molten slag, static prickling the skin",
                         "is_anomalous": true
+                    },
+                    {
+                        "id": "fac_syndicate_residence",
+                        "name": "Backstreet Deadbolt Studio",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Reinforced covert safehouse apartment tucked above an unmarked industrial tool depot",
+                        "features": "Steel freight stairwell, copper-mesh Faraday workroom, soundproof standby quarters",
+                        "sensory": "Distant diesel freight rumble, cool ozone around shielded workbenches, deadbolt steel hush",
+                        "sub_locations": [
+                            {
+                                "id": "sub_synd_res_stairwell",
+                                "name": "Reinforced Freight Stairwell",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Biometric Steel Deadbolt",
+                                    "Concealed Stairwell Mirror",
+                                    "Unmarked Parcel Lockbox",
+                                    "Heavy Iron Fire Door"
+                                ],
+                                "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
+                            },
+                            {
+                                "id": "sub_synd_res_workroom",
+                                "name": "Faraday Workbench & Stash Corner",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Copper-Shielded Tool Bench",
+                                    "Burner Handset Charger Dock",
+                                    "Lead-Lined Stash Chest",
+                                    "Encrypted Radio Scanner"
+                                ],
+                                "sensory": "Faint solder rosin and copper-mesh RF stillness beside glowing charger LEDs."
+                            },
+                            {
+                                "id": "sub_synd_res_studio",
+                                "name": "Deadbolted Standby Bunk Studio",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Low-Profile Steel Bunk",
+                                    "Soundproof Acoustic Curtains",
+                                    "Hidden Under-Floor Locker",
+                                    "Dented Espresso Kettle"
+                                ],
+                                "sensory": "Muted blackout quiet behind heavy acoustic drapes and warm bitter espresso."
+                            }
+                        ]
                     }
                 ]
             },
@@ -12592,6 +12641,55 @@
                                 "sensory": "Dead copper-Faraday RF quiet with cool filtered mineral water hum."
                             }
                         ]
+                    },
+                    {
+                        "id": "fac_cult_residence",
+                        "name": "Under-City Cloister Cell",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Quiet warded stone living cell tucked beside forgotten brick catacomb arches",
+                        "features": "Salt-sealed stone threshold, candlelit resonance alcove, private cloister sleeping cell",
+                        "sensory": "Cool damp basalt masonry, lingering myrrh smoke, faint distant drip of subterranean canals",
+                        "sub_locations": [
+                            {
+                                "id": "sub_cult_res_vestibule",
+                                "name": "Warded Cellar Threshold",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Ironbound Oak Door",
+                                    "Salt-Traced Stone Threshold",
+                                    "Oil Sconce Lantern",
+                                    "Chalk Ward Ledger"
+                                ],
+                                "sensory": "Crisp subterranean cellar air threaded with beeswax smoke and damp limestone."
+                            },
+                            {
+                                "id": "sub_cult_res_shrine",
+                                "name": "Candlelit Resonance Alcove",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Basalt Meditation Hearth",
+                                    "Brass Incense Thurible",
+                                    "Bound Apocrypha Shelf",
+                                    "Warm Herbal Kettle"
+                                ],
+                                "sensory": "Gentle beeswax warmth and quiet resonance hum through stacked apocrypha."
+                            },
+                            {
+                                "id": "sub_cult_res_cell",
+                                "name": "Private Cloister Sleeping Cell",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Carved Stone Cot & Wool Blankets",
+                                    "Rune-Ward Wardrobe Chest",
+                                    "Cold-Iron Candle Stand",
+                                    "Velvet Blackout Drapery"
+                                ],
+                                "sensory": "Deep hushed masonry stillness wrapped in heavy wool blankets and faint sandalwood."
+                            }
+                        ]
                     }
                 ]
             }
@@ -14809,6 +14907,55 @@
                         "features": "Lead-lined containment seals, glowing cerenkov-blue fissures, deployed automated radiation monitors",
                         "sensory": "Geiger counter crackle on handheld scanners, unnatural chill defying molten slag, static prickling the skin",
                         "is_anomalous": true
+                    },
+                    {
+                        "id": "fac_syndicate_residence",
+                        "name": "Backstreet Deadbolt Studio",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Reinforced covert safehouse apartment tucked above an unmarked industrial tool depot",
+                        "features": "Steel freight stairwell, copper-mesh Faraday workroom, soundproof standby quarters",
+                        "sensory": "Distant diesel freight rumble, cool ozone around shielded workbenches, deadbolt steel hush",
+                        "sub_locations": [
+                            {
+                                "id": "sub_synd_res_stairwell",
+                                "name": "Reinforced Freight Stairwell",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Biometric Steel Deadbolt",
+                                    "Concealed Stairwell Mirror",
+                                    "Unmarked Parcel Lockbox",
+                                    "Heavy Iron Fire Door"
+                                ],
+                                "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
+                            },
+                            {
+                                "id": "sub_synd_res_workroom",
+                                "name": "Faraday Workbench & Stash Corner",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Copper-Shielded Tool Bench",
+                                    "Burner Handset Charger Dock",
+                                    "Lead-Lined Stash Chest",
+                                    "Encrypted Radio Scanner"
+                                ],
+                                "sensory": "Faint solder rosin and copper-mesh RF stillness beside glowing charger LEDs."
+                            },
+                            {
+                                "id": "sub_synd_res_studio",
+                                "name": "Deadbolted Standby Bunk Studio",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Low-Profile Steel Bunk",
+                                    "Soundproof Acoustic Curtains",
+                                    "Hidden Under-Floor Locker",
+                                    "Dented Espresso Kettle"
+                                ],
+                                "sensory": "Muted blackout quiet behind heavy acoustic drapes and warm bitter espresso."
+                            }
+                        ]
                     }
                 ]
             },
@@ -18795,6 +18942,55 @@
                                 "sensory": "Dead copper-Faraday RF quiet with cool filtered mineral water hum."
                             }
                         ]
+                    },
+                    {
+                        "id": "fac_cult_residence",
+                        "name": "Under-City Cloister Cell",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Quiet warded stone living cell tucked beside forgotten brick catacomb arches",
+                        "features": "Salt-sealed stone threshold, candlelit resonance alcove, private cloister sleeping cell",
+                        "sensory": "Cool damp basalt masonry, lingering myrrh smoke, faint distant drip of subterranean canals",
+                        "sub_locations": [
+                            {
+                                "id": "sub_cult_res_vestibule",
+                                "name": "Warded Cellar Threshold",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Ironbound Oak Door",
+                                    "Salt-Traced Stone Threshold",
+                                    "Oil Sconce Lantern",
+                                    "Chalk Ward Ledger"
+                                ],
+                                "sensory": "Crisp subterranean cellar air threaded with beeswax smoke and damp limestone."
+                            },
+                            {
+                                "id": "sub_cult_res_shrine",
+                                "name": "Candlelit Resonance Alcove",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Basalt Meditation Hearth",
+                                    "Brass Incense Thurible",
+                                    "Bound Apocrypha Shelf",
+                                    "Warm Herbal Kettle"
+                                ],
+                                "sensory": "Gentle beeswax warmth and quiet resonance hum through stacked apocrypha."
+                            },
+                            {
+                                "id": "sub_cult_res_cell",
+                                "name": "Private Cloister Sleeping Cell",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Carved Stone Cot & Wool Blankets",
+                                    "Rune-Ward Wardrobe Chest",
+                                    "Cold-Iron Candle Stand",
+                                    "Velvet Blackout Drapery"
+                                ],
+                                "sensory": "Deep hushed masonry stillness wrapped in heavy wool blankets and faint sandalwood."
+                            }
+                        ]
                     }
                 ]
             }
@@ -21012,6 +21208,55 @@
                         "features": "Lead-lined containment seals, glowing cerenkov-blue fissures, deployed automated radiation monitors",
                         "sensory": "Geiger counter crackle on handheld scanners, unnatural chill defying molten slag, static prickling the skin",
                         "is_anomalous": true
+                    },
+                    {
+                        "id": "fac_syndicate_residence",
+                        "name": "Backstreet Deadbolt Studio",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Reinforced covert safehouse apartment tucked above an unmarked industrial tool depot",
+                        "features": "Steel freight stairwell, copper-mesh Faraday workroom, soundproof standby quarters",
+                        "sensory": "Distant diesel freight rumble, cool ozone around shielded workbenches, deadbolt steel hush",
+                        "sub_locations": [
+                            {
+                                "id": "sub_synd_res_stairwell",
+                                "name": "Reinforced Freight Stairwell",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Biometric Steel Deadbolt",
+                                    "Concealed Stairwell Mirror",
+                                    "Unmarked Parcel Lockbox",
+                                    "Heavy Iron Fire Door"
+                                ],
+                                "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
+                            },
+                            {
+                                "id": "sub_synd_res_workroom",
+                                "name": "Faraday Workbench & Stash Corner",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Copper-Shielded Tool Bench",
+                                    "Burner Handset Charger Dock",
+                                    "Lead-Lined Stash Chest",
+                                    "Encrypted Radio Scanner"
+                                ],
+                                "sensory": "Faint solder rosin and copper-mesh RF stillness beside glowing charger LEDs."
+                            },
+                            {
+                                "id": "sub_synd_res_studio",
+                                "name": "Deadbolted Standby Bunk Studio",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Low-Profile Steel Bunk",
+                                    "Soundproof Acoustic Curtains",
+                                    "Hidden Under-Floor Locker",
+                                    "Dented Espresso Kettle"
+                                ],
+                                "sensory": "Muted blackout quiet behind heavy acoustic drapes and warm bitter espresso."
+                            }
+                        ]
                     }
                 ]
             },
@@ -24270,6 +24515,55 @@
                                     "Steel Gear Workbench"
                                 ],
                                 "sensory": "Dead copper-Faraday RF quiet with cool filtered mineral water hum."
+                            }
+                        ]
+                    },
+                    {
+                        "id": "fac_cult_residence",
+                        "name": "Under-City Cloister Cell",
+                        "category": "residential",
+                        "access_tier": "private",
+                        "privacy_level": "private",
+                        "theme": "Quiet warded stone living cell tucked beside forgotten brick catacomb arches",
+                        "features": "Salt-sealed stone threshold, candlelit resonance alcove, private cloister sleeping cell",
+                        "sensory": "Cool damp basalt masonry, lingering myrrh smoke, faint distant drip of subterranean canals",
+                        "sub_locations": [
+                            {
+                                "id": "sub_cult_res_vestibule",
+                                "name": "Warded Cellar Threshold",
+                                "is_entrance": 1,
+                                "props": [
+                                    "Ironbound Oak Door",
+                                    "Salt-Traced Stone Threshold",
+                                    "Oil Sconce Lantern",
+                                    "Chalk Ward Ledger"
+                                ],
+                                "sensory": "Crisp subterranean cellar air threaded with beeswax smoke and damp limestone."
+                            },
+                            {
+                                "id": "sub_cult_res_shrine",
+                                "name": "Candlelit Resonance Alcove",
+                                "privacy_level": "semi_private",
+                                "props": [
+                                    "Basalt Meditation Hearth",
+                                    "Brass Incense Thurible",
+                                    "Bound Apocrypha Shelf",
+                                    "Warm Herbal Kettle"
+                                ],
+                                "sensory": "Gentle beeswax warmth and quiet resonance hum through stacked apocrypha."
+                            },
+                            {
+                                "id": "sub_cult_res_cell",
+                                "name": "Private Cloister Sleeping Cell",
+                                "privacy_level": "private",
+                                "is_private_intimate": true,
+                                "props": [
+                                    "Carved Stone Cot & Wool Blankets",
+                                    "Rune-Ward Wardrobe Chest",
+                                    "Cold-Iron Candle Stand",
+                                    "Velvet Blackout Drapery"
+                                ],
+                                "sensory": "Deep hushed masonry stillness wrapped in heavy wool blankets and faint sandalwood."
                             }
                         ]
                     }

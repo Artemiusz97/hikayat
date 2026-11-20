@@ -21,11 +21,15 @@ ALLOWED_ROSTER_ORIGINS: frozenset[str] = frozenset(
         "quest_seed",
         "replacement_hire",
         "legacy_adapter",
+        "district_merchant",
+        "civic_staff",
+        "roaming_citizen",
+        "campus_seed",
     }
 )
 ALLOWED_ROSTER_TIERS: frozenset[str] = frozenset({"seeded", "acquaintance", "promoted"})
 ALLOWED_SHIFT_PROFILES: frozenset[str] = frozenset(
-    {"day", "evening", "night", "student", "rotating", "roaming_merchant"}
+    {"day", "evening", "night", "student", "rotating", "roaming_merchant", "pedestrian", "street_vendor"}
 )
 ALLOWED_STAFF_STATUSES: frozenset[str] = frozenset({"active", "dead", "arrested", "in_party"})
 

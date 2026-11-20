@@ -6,7 +6,7 @@ import { AVAILABLE_LANGUAGES } from '../../i18n';
 
 const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSessionUpdated, onRefreshCharacter, onRefreshCodex }) => {
   const { t, i18n } = useTranslation();
-  const [activeTab, setActiveTab] = useState('preferences'); // 'preferences' | 'language' | 'telemetry'
+  const [activeTab, setActiveTab] = useState('preferences'); // 'preferences' | 'narration' | 'language' | 'telemetry'
   const [telemetry, setTelemetry] = useState(null);
   const [debugStatMode, setDebugStatMode] = useState('off');
   const [debugCheckMode, setDebugCheckMode] = useState('off');
@@ -49,13 +49,17 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
     updateSettings({ stream_narrative: currentVal === 1 ? 0 : 1 });
   };
 
-  const handleToggleImageGen = () => {
-    const currentVal = settings.image_gen_enabled ?? 0;
-    updateSettings({ image_gen_enabled: currentVal === 1 ? 0 : 1 });
+  const handleVerbosityChange = (val) => {
+    const rawVerb = (settings.verbosity || '').toLowerCase();
+    if (!settings.narrative_pacing && (rawVerb === 'concise' || rawVerb === 'direct')) {
+      updateSettings({ verbosity: val, narrative_pacing: 'concise' });
+    } else {
+      updateSettings({ verbosity: val });
+    }
   };
 
-  const handleVerbosityChange = (val) => {
-    updateSettings({ verbosity: val });
+  const handlePacingChange = (val) => {
+    updateSettings({ narrative_pacing: val });
   };
 
   const handleDialogueModeChange = (val) => {
@@ -111,7 +115,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
         onClick={onClose}
       />
       
-      <div className="relative w-full max-w-lg max-h-[calc(var(--app-height,100dvh)-1.5rem)] flex flex-col bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10">
+      <div className="relative w-full max-w-xl max-h-[calc(var(--app-height,100dvh)-1.5rem)] flex flex-col bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-fantasy-border bg-black/40">
           <div className="flex items-center gap-2">
@@ -127,10 +131,10 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
         </div>
 
         {/* Sub-Navigation Tabs */}
-        <div className="flex border-b border-fantasy-border bg-black/60 px-4 py-2 gap-2">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap sm:items-center border-b border-fantasy-border bg-black/60 px-3 py-2 gap-1.5">
           <button
             onClick={() => setActiveTab('preferences')}
-            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+            className={`px-2.5 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wide flex items-center justify-center sm:justify-start gap-1.5 transition-colors ${
               activeTab === 'preferences'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
                 : 'text-gray-400 hover:text-gray-200'
@@ -140,8 +144,19 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
             <span>{t('settings.tab_preferences', 'Preferences')}</span>
           </button>
           <button
+            onClick={() => setActiveTab('narration')}
+            className={`px-2.5 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wide flex items-center justify-center sm:justify-start gap-1.5 transition-colors ${
+              activeTab === 'narration'
+                ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
+                : 'text-gray-400 hover:text-gray-200'
+            }`}
+          >
+            <BookOpen size={13} />
+            <span>{t('settings.tab_narration', 'Narration')}</span>
+          </button>
+          <button
             onClick={() => setActiveTab('language')}
-            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+            className={`px-2.5 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wide flex items-center justify-center sm:justify-start gap-1.5 transition-colors ${
               activeTab === 'language'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
                 : 'text-gray-400 hover:text-gray-200'
@@ -152,7 +167,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
           </button>
           <button
             onClick={() => setActiveTab('telemetry')}
-            className={`px-3 py-1 rounded text-xs font-semibold uppercase tracking-wider flex items-center gap-1.5 transition-colors ${
+            className={`px-2.5 py-1.5 rounded text-[11px] font-semibold uppercase tracking-wide flex items-center justify-center sm:justify-start gap-1.5 transition-colors ${
               activeTab === 'telemetry'
                 ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40'
                 : 'text-gray-400 hover:text-gray-200'
@@ -176,7 +191,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       <span className="font-semibold text-gray-200 text-sm">{t('settings.streaming', 'Real-Time Narrative Streaming')}</span>
                       {isStreamingOn && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                          Live
+                          {t('settings.live', 'Live')}
                         </span>
                       )}
                     </div>
@@ -204,7 +219,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                 
                 <div className="mt-3 pt-3 border-t border-white/5 flex items-center gap-2 text-[11px] text-gray-500">
                   <span className="w-1.5 h-1.5 rounded-full bg-gray-500" />
-                  <span>{isStreamingOn ? "Tokens will flow smoothly in typewriter cadence." : "Batch mode: full scene is delivered all at once."}</span>
+                  <span>
+                    {isStreamingOn
+                      ? t('settings.streaming_live_hint', 'Tokens will flow smoothly in typewriter cadence.')
+                      : t('settings.streaming_batch_hint', 'Batch mode: full scene is delivered all at once.')}
+                  </span>
                 </div>
               </div>
 
@@ -217,12 +236,12 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       <span className="font-semibold text-gray-200 text-sm">{t('settings.image_gen', 'AI Scene Illustrations')}</span>
                       {(settings.image_gen_enabled ?? 0) === 1 && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40">
-                          Auto
+                          {t('settings.image_mode_auto_badge', 'Auto')}
                         </span>
                       )}
                       {(settings.image_gen_enabled ?? 0) === 2 && (
                         <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                          On-Demand
+                          {t('settings.image_mode_on_demand_badge', 'On-Demand')}
                         </span>
                       )}
                     </div>
@@ -232,9 +251,9 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   </p>
                   <div className="grid grid-cols-3 gap-2 pt-1">
                     {[
-                      { id: 1, label: '⚡ Auto', desc: 'Every turn' },
-                      { id: 2, label: '✨ On-Demand', desc: 'Manual click' },
-                      { id: 0, label: '🚫 Disabled', desc: 'Off' }
+                      { id: 1, label: t('settings.image_mode_auto_label', '⚡ Auto'), desc: t('settings.image_mode_auto_desc', 'Every turn') },
+                      { id: 2, label: t('settings.image_mode_on_demand_label', '✨ On-Demand'), desc: t('settings.image_mode_on_demand_desc', 'Manual click') },
+                      { id: 0, label: t('settings.image_mode_disabled_label', '🚫 Disabled'), desc: t('settings.image_mode_disabled_desc', 'Off') }
                     ].map((mode) => {
                       const isSelected = (settings.image_gen_enabled ?? 0) === mode.id;
                       return (
@@ -255,78 +274,6 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                       );
                     })}
                   </div>
-                </div>
-              </div>
-
-              {/* Section 2: Narrative Verbosity (5 Options) */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <BookOpen size={14} className="text-fantasy-accent" />
-                  {t('settings.verbosity', 'Story Verbosity')}
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'shakespearean', label: '🎭 Shakespearean', desc: 'Ornate dramatic flourish' },
-                    { id: 'vivid', label: '✨ Vivid', desc: 'Deep sensory prose' },
-                    { id: 'normal', label: '⚖️ Balanced', desc: 'Standard narrative' },
-                    { id: 'direct', label: '🎯 Direct', desc: 'Clear & brisk' },
-                    { id: 'concise', label: '⚡ Concise', desc: 'Action-focused' }
-                  ].map((v) => {
-                    const isSelected = (settings.verbosity || 'normal') === v.id;
-                    return (
-                      <button
-                        key={v.id}
-                        onClick={() => handleVerbosityChange(v.id)}
-                        className={`flex flex-col p-2.5 rounded-lg border text-left transition-all ${
-                          isSelected
-                            ? 'bg-fantasy-accent/15 border-fantasy-accent text-fantasy-accent shadow-sm'
-                            : 'bg-black/30 border-fantasy-border text-gray-400 hover:border-neutral-600 hover:text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span>{v.label}</span>
-                          {isSelected && <Check size={12} />}
-                        </div>
-                        <span className="text-[10px] opacity-70 leading-tight">{v.desc}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Section 2B: NPC Dialogue Mode (5 Options) */}
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
-                  <Sliders size={14} className="text-fantasy-accent" />
-                  {t('settings.dialogue_mode', 'NPC Dialogue Density')}
-                </label>
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {[
-                    { id: 'off', label: '🔇 Off', desc: 'Pure narration only' },
-                    { id: 'minimal', label: '💬 Minimal', desc: 'Brief spoken lines' },
-                    { id: 'balanced', label: '⚖️ Balanced', desc: 'Natural conversation' },
-                    { id: 'adaptive', label: '🧠 Adaptive', desc: 'Context-driven banter' },
-                    { id: 'rich', label: '🎭 Rich', desc: 'Expressive character voice' },
-                  ].map((d) => {
-                    const isSelected = (settings.dialogue_mode || 'adaptive') === d.id;
-                    return (
-                      <button
-                        key={d.id}
-                        onClick={() => handleDialogueModeChange(d.id)}
-                        className={`flex flex-col p-2.5 rounded-lg border text-left transition-all ${
-                          isSelected
-                            ? 'bg-fantasy-accent/15 border-fantasy-accent text-fantasy-accent shadow-sm'
-                            : 'bg-black/30 border-fantasy-border text-gray-400 hover:border-neutral-600 hover:text-gray-300'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between text-xs font-bold mb-1">
-                          <span>{d.label}</span>
-                          {isSelected && <Check size={12} />}
-                        </div>
-                        <span className="text-[10px] opacity-70 leading-tight">{d.desc}</span>
-                      </button>
-                    );
-                  })}
                 </div>
               </div>
 
@@ -433,6 +380,124 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
               </div>
             </>
           )}
+
+          {activeTab === 'narration' && (() => {
+            const rawVerb = (settings.verbosity || 'vivid').toLowerCase();
+            const activeStyle = (rawVerb === 'concise' || rawVerb === 'direct') ? 'normal' : rawVerb;
+            const activePacing = settings.narrative_pacing || ((rawVerb === 'concise' || rawVerb === 'direct') ? 'concise' : 'balanced');
+            const activeDialogue = settings.dialogue_mode || 'adaptive';
+            return (
+              <>
+                {/* Section 1: Narrative Style (6 Options) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <BookOpen size={14} className="text-fantasy-accent" />
+                    {t('settings.narrative_style', 'Narrative Style')}
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { id: 'vivid', label: t('settings.style_vivid_label', '✨ Vivid'), desc: t('settings.style_vivid_desc', 'Deep sensory prose') },
+                      { id: 'normal', label: t('settings.style_normal_label', '⚖️ Standard'), desc: t('settings.style_normal_desc', 'Clear modern prose') },
+                      { id: 'noir', label: t('settings.style_noir_label', '🕵️ Noir'), desc: t('settings.style_noir_desc', 'Cynical detective pulp') },
+                      { id: 'witty', label: t('settings.style_witty_label', '🎩 Witty'), desc: t('settings.style_witty_desc', 'Dry deadpan satire') },
+                      { id: 'shakespearean', label: t('settings.style_shakespearean_label', '🎭 Shakespearean'), desc: t('settings.style_shakespearean_desc', 'Ornate dramatic flourish') },
+                      { id: 'brainrot', label: t('settings.style_brainrot_label', '🧠 Brainrot'), desc: t('settings.style_brainrot_desc', 'Gen Z / Alpha meme slang') },
+                    ].map((v) => {
+                      const isSelected = activeStyle === v.id;
+                      return (
+                        <button
+                          key={v.id}
+                          onClick={() => handleVerbosityChange(v.id)}
+                          className={`flex flex-col p-2.5 rounded-lg border text-left transition-all ${
+                            isSelected
+                              ? 'bg-fantasy-accent/15 border-fantasy-accent text-fantasy-accent shadow-sm'
+                              : 'bg-black/30 border-fantasy-border text-gray-400 hover:border-neutral-600 hover:text-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-xs font-bold mb-1">
+                            <span>{v.label}</span>
+                            {isSelected && <Check size={12} />}
+                          </div>
+                          <span className="text-[10px] opacity-70 leading-tight">{v.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section 2: Narrative Pacing (3 Options) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap size={14} className="text-fantasy-accent" />
+                    {t('settings.narrative_pacing', 'Narrative Pacing')}
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { id: 'concise', label: t('settings.pacing_concise_label', '⚡ Concise'), desc: t('settings.pacing_concise_desc', '1 short paragraph') },
+                      { id: 'balanced', label: t('settings.pacing_balanced_label', '⚖️ Balanced'), desc: t('settings.pacing_balanced_desc', 'Standard 2-3 paras') },
+                      { id: 'novelistic', label: t('settings.pacing_novelistic_label', '📖 Novelistic'), desc: t('settings.pacing_novelistic_desc', 'Slow-burn detail') },
+                    ].map((p) => {
+                      const isSelected = activePacing === p.id;
+                      return (
+                        <button
+                          key={p.id}
+                          onClick={() => handlePacingChange(p.id)}
+                          className={`flex flex-col p-2.5 rounded-lg border text-left transition-all ${
+                            isSelected
+                              ? 'bg-fantasy-accent/15 border-fantasy-accent text-fantasy-accent shadow-sm'
+                              : 'bg-black/30 border-fantasy-border text-gray-400 hover:border-neutral-600 hover:text-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-xs font-bold mb-1">
+                            <span>{p.label}</span>
+                            {isSelected && <Check size={12} />}
+                          </div>
+                          <span className="text-[10px] opacity-70 leading-tight">{p.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section 3: Dialogue Style (6 Options) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-semibold text-gray-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <Sliders size={14} className="text-fantasy-accent" />
+                    {t('settings.dialogue_mode', 'Dialogue Style')}
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {[
+                      { id: 'off', label: t('settings.dialogue_off_label', '🔇 Off'), desc: t('settings.dialogue_off_desc', 'Pure narration only') },
+                      { id: 'minimal', label: t('settings.dialogue_minimal_label', '💬 Minimal'), desc: t('settings.dialogue_minimal_desc', 'Brief spoken lines') },
+                      { id: 'balanced', label: t('settings.dialogue_balanced_label', '⚖️ Balanced'), desc: t('settings.dialogue_balanced_desc', 'Natural conversation') },
+                      { id: 'adaptive', label: t('settings.dialogue_adaptive_label', '🧠 Adaptive'), desc: t('settings.dialogue_adaptive_desc', 'Context-driven banter') },
+                      { id: 'rich', label: t('settings.dialogue_rich_label', '🎭 Rich'), desc: t('settings.dialogue_rich_desc', 'Novel-style banter') },
+                      { id: 'script', label: t('settings.dialogue_script_label', '🎬 Script'), desc: t('settings.dialogue_script_desc', 'Stage-play lines') },
+                    ].map((d) => {
+                      const isSelected = activeDialogue === d.id;
+                      return (
+                        <button
+                          key={d.id}
+                          onClick={() => handleDialogueModeChange(d.id)}
+                          className={`flex flex-col p-2.5 rounded-lg border text-left transition-all ${
+                            isSelected
+                              ? 'bg-fantasy-accent/15 border-fantasy-accent text-fantasy-accent shadow-sm'
+                              : 'bg-black/30 border-fantasy-border text-gray-400 hover:border-neutral-600 hover:text-gray-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between text-xs font-bold mb-1">
+                            <span>{d.label}</span>
+                            {isSelected && <Check size={12} />}
+                          </div>
+                          <span className="text-[10px] opacity-70 leading-tight">{d.desc}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {activeTab === 'language' && (
             <>
@@ -561,11 +626,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
 
                 <div className="space-y-1.5 pt-2 border-t border-fantasy-border/40">
                   <div className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
-                    Endpoint Circuit Breakers
+                    {t('settings.circuit_breakers', 'Endpoint Circuit Breakers')}
                   </div>
                   {circuitBreakers.length === 0 ? (
                     <div className="text-xs text-emerald-400 font-mono bg-emerald-950/30 border border-emerald-800/40 rounded p-2">
-                      🟢 All LLM endpoints healthy (Circuit CLOSED)
+                      {t('settings.circuit_all_healthy', '🟢 All LLM endpoints healthy (Circuit CLOSED)')}
                     </div>
                   ) : (
                     circuitBreakers.map(([modelKey, cb]) => (
@@ -576,11 +641,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                         <span className="text-gray-300 truncate max-w-[240px]">{modelKey}</span>
                         {cb.is_open ? (
                           <span className="text-red-300 bg-red-950/70 border border-red-800 px-2 py-0.5 rounded text-[10px]">
-                            🔴 OPEN ({cb.cooldown_remaining_s}s)
+                            🔴 {t('settings.circuit_open', 'OPEN')} ({cb.cooldown_remaining_s}s)
                           </span>
                         ) : (
                           <span className="text-emerald-300 bg-emerald-950/60 border border-emerald-800/60 px-2 py-0.5 rounded text-[10px]">
-                            🟢 CLOSED
+                            🟢 {t('settings.circuit_closed', 'CLOSED')}
                           </span>
                         )}
                       </div>
@@ -605,11 +670,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
-                        Skill Check Override
+                        {t('settings.skill_check_override', 'Skill Check Override')}
                       </label>
                       <select
                         value={debugCheckMode}
-                        onChange={(e) => handleDebugUpdate({ debug_check_mode: e.target.value }, 'Skill check mode updated')}
+                        onChange={(e) => handleDebugUpdate({ debug_check_mode: e.target.value }, t('settings.notice_check_updated', 'Skill check mode updated'))}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                       >
                         <option value="off">{t('settings.odds_normal', 'Normal (Standard Odds)')}</option>
@@ -622,11 +687,11 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
 
                     <div>
                       <label className="block text-[10px] uppercase tracking-wider text-gray-400 mb-1">
-                        Stat Override
+                        {t('settings.stat_override', 'Stat Override')}
                       </label>
                       <select
                         value={debugStatMode}
-                        onChange={(e) => handleDebugUpdate({ debug_stat_mode: e.target.value }, 'Stat mode updated')}
+                        onChange={(e) => handleDebugUpdate({ debug_stat_mode: e.target.value }, t('settings.notice_stat_updated', 'Stat mode updated'))}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
                       >
                         <option value="off">{t('settings.stats_normal', 'Normal Character Stats')}</option>
@@ -639,7 +704,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                   <div className="grid grid-cols-2 gap-2 pt-2 border-t border-fantasy-border/40">
                     <button
                       type="button"
-                      onClick={() => handleDebugUpdate({ action: 'full_heal' }, 'Character fully restored!')}
+                      onClick={() => handleDebugUpdate({ action: 'full_heal' }, t('settings.notice_full_heal', 'Character fully restored!'))}
                       className="py-1.5 px-3 rounded bg-emerald-950/60 hover:bg-emerald-900/70 border border-emerald-700/60 text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <HeartPulse size={13} />
@@ -647,7 +712,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDebugUpdate({ action: 'hp_to_1' }, 'HP set to 1!')}
+                      onClick={() => handleDebugUpdate({ action: 'hp_to_1' }, t('settings.notice_hp_to_1', 'HP set to 1!'))}
                       className="py-1.5 px-3 rounded bg-red-950/60 hover:bg-red-900/70 border border-red-800/60 text-red-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <Skull size={13} />
@@ -655,18 +720,18 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDebugUpdate({ debug_reveal_all_info: debugRevealAll ? 0 : 1 }, debugRevealAll ? 'NPC Info Lock Restored' : 'All NPC Info Revealed!')}
+                      onClick={() => handleDebugUpdate({ debug_reveal_all_info: debugRevealAll ? 0 : 1 }, debugRevealAll ? t('settings.notice_npc_locked', 'NPC Info Lock Restored') : t('settings.notice_npc_revealed', 'All NPC Info Revealed!'))}
                       className={`py-1.5 px-3 rounded border text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
                         debugRevealAll
                           ? 'bg-purple-900/70 border-purple-500 text-purple-200'
                           : 'bg-purple-950/50 hover:bg-purple-900/60 border-purple-700/60 text-purple-300'
                       }`}
                     >
-                      <span>👁️ {debugRevealAll ? 'NPC Info: Revealed' : 'Reveal All NPC Info'}</span>
+                      <span>{debugRevealAll ? t('settings.npc_info_revealed', '👁️ NPC Info: Revealed') : t('settings.reveal_all_npc_info', '👁️ Reveal All NPC Info')}</span>
                     </button>
                     <button
                       type="button"
-                      onClick={() => handleDebugUpdate({ action: 'force_enemy', session_id: session?.id }, 'Dummy enemy spawned!')}
+                      onClick={() => handleDebugUpdate({ action: 'force_enemy', session_id: session?.id }, t('settings.notice_enemy_spawned', 'Dummy enemy spawned!'))}
                       className="py-1.5 px-3 rounded bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <span>{t('settings.force_enemy', '👹 Force Enemy (Spawn Dummy)')}</span>
@@ -678,7 +743,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
                         debug_stat_mode: 'off',
                         debug_check_mode: 'off',
                         debug_reveal_all_info: 0
-                      }, 'All sandbox overrides reset!')}
+                      }, t('settings.notice_sandbox_reset', 'All sandbox overrides reset!'))}
                       className="col-span-2 py-1.5 px-3 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
                     >
                       <span>{t('settings.reset_overrides', '🔄 Reset All Overrides')}</span>
@@ -696,7 +761,7 @@ const SettingsModal = ({ isOpen, onClose, settingsHook, user, session, onSession
             onClick={onClose}
             className="px-4 py-1.5 bg-fantasy-accent hover:bg-fantasy-accent/90 text-fantasy-dark font-bold text-xs uppercase tracking-wider rounded transition-colors"
           >
-            Done
+            {t('settings.done', 'Done')}
           </button>
         </div>
       </div>

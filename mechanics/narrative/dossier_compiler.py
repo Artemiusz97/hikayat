@@ -17,6 +17,7 @@ from mechanics.narrative.campaign_spine import (
 from mechanics.narrative.quest_engines import (
     build_engine_lead_approaches,
     build_turn_in_rules,
+    get_masked_climax_teaser,
     load_quest_engines_catalog,
     normalize_quest_locale,
     render_offline_pitch_stub,
@@ -61,6 +62,8 @@ def infer_quest_family_tier(
         return "story"
     if qid_up.startswith("CLR-") or "companion_loyalty:1" in notes_low or "loyalty" in qtype_low:
         return "loyalty"
+    if qid_up.startswith("FARC-") or "faction_mini_arc:1" in notes_low or "faction mini-arc" in qtype_low:
+        return "faction"
     if qid_up.startswith("MAND-") or "mandatory_daily:1" in notes_low or "dispatch" in qtype_low:
         return "dispatch"
     if qid_up.startswith("RMR-") or "rumor_investigation:1" in notes_low or "rumor" in qtype_low:
@@ -594,6 +597,7 @@ def compile_bounty_pitch_stub(
     deadline_minute: Optional[int] = None,
     scen_key: str = "fantasy",
     lang: str = "en",
+    turn_number: int = 0,
 ) -> Dict[str, Any]:
     """
     Stage 1 Two-Tier Bounty (`status='Available'`, `dossier_stage='pitch'`):
@@ -630,6 +634,7 @@ def compile_bounty_pitch_stub(
         "deadline_minute": deadline_minute,
         "uses_nsfw_routing": bool(eng_info["uses_nsfw_routing"]),
         "raw_archetype": str(tag_or_archetype or ""),
+        "spawned_at_turn": int(turn_number or 0),
     }
 
     import db
@@ -872,6 +877,7 @@ def populate_stage_clue_sources(
     candidate_rooms: Optional[List[str]] = None,
     candidate_npcs: Optional[List[str]] = None,
     used_room_leaves: Optional[Set[str]] = None,
+    used_witness_npcs: Optional[Set[str]] = None,
     danger_tier: int = 1,
     lang: str = "en",
     scen_key: str = "",
@@ -1014,26 +1020,38 @@ def populate_stage_clue_sources(
         stage_leaves.add(_leaf(fallback))
         return fallback
 
+    for esrc in existing_sources:
+        if used_witness_npcs is not None and str(esrc.get("kind") or "").lower() == "witness":
+            e_npc = str(esrc.get("npc_name") or "").strip().lower()
+            if e_npc:
+                used_witness_npcs.add(e_npc)
+
     if len(existing_sources) >= 3 and len(stage_leaves) >= 3:
         st["clue_sources"] = existing_sources
         if not _valid_room(str(st.get("target_location") or "")):
             st["target_location"] = existing_sources[0]["location"]
         return st
 
-    t_npc = str(st.get("target_npc") or "").strip()
+    raw_t_npc = str(st.get("target_npc") or "").strip()
+    t_npc = raw_t_npc if (raw_t_npc and (used_witness_npcs is None or raw_t_npc.lower() not in used_witness_npcs)) else ""
     witness_npc = t_npc
     if not witness_npc:
         for c_npc in (cands.get("npcs") or []):
-            if str(c_npc or "").strip():
-                witness_npc = str(c_npc).strip()
+            c_clean = str(c_npc or "").strip()
+            if c_clean and (used_witness_npcs is None or c_clean.lower() not in used_witness_npcs):
+                witness_npc = c_clean
                 break
     if not witness_npc:
         witness_npc, _, _ = _pick_safe_npc_name(
             session_id,
             scen_key or "modern_urban",
             f"clue_witness:{quest_id}:{st_idx}",
-            avoid_low=set(),
+            avoid_low=set(used_witness_npcs or ()),
         )
+    if witness_npc and used_witness_npcs is not None:
+        used_witness_npcs.add(witness_npc.lower())
+    if raw_t_npc and not t_npc:
+        st["target_npc"] = witness_npc
 
     plan_slots = (
         [("witness", t_npc or witness_npc, "CHA"), ("record", "", "INT"), ("item", "", "PER")]
@@ -1358,9 +1376,20 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
             chapter=int(climax.get("chapter") or sess.get("chapter") or 1),
             endless_mode_unlocked=bool(sess.get("endless_mode_unlocked")),
         )
+    if not climax.get("masked_climax_teaser"):
+        climax["masked_climax_teaser"] = get_masked_climax_teaser(eff_engine or "MYSTERY_CASE", climax, lang=eff_lang_rep)
+    if not isinstance(climax.get("earned_clearance_locations"), list):
+        climax["earned_clearance_locations"] = []
     if is_clue_based_quest(family_tier, eff_engine) and not climax.get("completed"):
         cands_rep = build_chapter_plan_candidates(session_id, dos, climax_location=climax_loc)
         used_leaves_rep: Set[str] = set()
+        used_witnesses_rep: Set[str] = set()
+        for existing_ms in main_stages:
+            for es in (existing_ms.get("clue_sources") or []):
+                if isinstance(es, dict) and str(es.get("kind") or "").lower() == "witness":
+                    wn = str(es.get("npc_name") or "").strip().lower()
+                    if wn:
+                        used_witnesses_rep.add(wn)
         repaired_stages: List[Dict[str, Any]] = []
         for ms in main_stages:
             is_done = bool(ms.get("completed") or str(ms.get("status") or "").lower() in ("completed", "bypassed"))
@@ -1379,6 +1408,7 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
                         candidate_rooms=cands_rep.get("rooms"),
                         candidate_npcs=cands_rep.get("npcs"),
                         used_room_leaves=used_leaves_rep,
+                        used_witness_npcs=used_witnesses_rep,
                         danger_tier=eff_danger_rep,
                         lang=eff_lang_rep,
                         scen_key=eff_scen_rep,
@@ -1860,6 +1890,7 @@ def compile_quest_dossier(
             climax_location=climax_loc,
         )
         used_leaves_comp: Set[str] = set()
+        used_witnesses_comp: Set[str] = set()
         main_stages = [
             populate_stage_clue_sources(
                 session_id,
@@ -1870,6 +1901,7 @@ def compile_quest_dossier(
                 candidate_rooms=cands_comp.get("rooms"),
                 candidate_npcs=cands_comp.get("npcs"),
                 used_room_leaves=used_leaves_comp,
+                used_witness_npcs=used_witnesses_comp,
                 danger_tier=eff_danger,
                 lang=eff_lang,
                 scen_key=eff_scen,
@@ -1883,6 +1915,8 @@ def compile_quest_dossier(
         "gate_type": gate_mode,  # open | secret
         "gate_mode": gate_mode,
         "is_unlocked": bool(gate_mode == "open"),
+        "masked_climax_teaser": get_masked_climax_teaser(engine, None, lang=eff_lang),
+        "earned_clearance_locations": [],
         "is_peak_chapter": is_peak_story,
         "chapter": eff_chapter,
         "main_objective_text": eff_obj or eff_title,
@@ -2030,7 +2064,7 @@ def compile_micro_dossier(
     eff_lang = normalize_quest_locale(lang)
     engine = "SOCIAL_BROKERAGE" if not is_minor else "CRISIS_DEFENSE"
     family_tier = "minor" if is_minor else "rumor"
-    opt_role = "bypass" if not is_minor else "aid"
+    opt_role = "aid"
     rendered_opt = render_optional_objective_template(
         opt_role,
         {"venue": location_name, "zone": location_name.split("➔")[0].strip(), "informant": "local witnesses", "target": title},
@@ -2062,22 +2096,12 @@ def compile_micro_dossier(
     main_stages = [
         {
             "stage_index": 1,
-            "stage_label": f"Investigate on-site at {location_name}",
+            "stage_label": objective or title,
             "target_location": location_name,
             "target_npc": "",
             "completion_trigger": "action",
-            "approaches": build_engine_lead_approaches(["PER", "CHA", "AGI"], danger_tier=1),
+            "approaches": build_engine_lead_approaches(["PER", "CHA", "STR"], danger_tier=1),
             "status": "active",
-            "can_be_bypassed": True,
-        },
-        {
-            "stage_index": 2,
-            "stage_label": objective or f"Resolve '{title}' at {location_name}",
-            "target_location": location_name,
-            "target_npc": "",
-            "completion_trigger": "action",
-            "approaches": build_engine_lead_approaches(["INT", "CHA", "STR"], danger_tier=1),
-            "status": "locked",
             "is_climax_stage": True,
         },
     ]
@@ -2086,9 +2110,11 @@ def compile_micro_dossier(
         "gate_type": "open",
         "gate_mode": "open",
         "is_unlocked": True,
+        "masked_climax_teaser": get_masked_climax_teaser(engine, None, lang=eff_lang),
+        "earned_clearance_locations": [],
         "main_objective_text": objective or title,
         "label": objective or title,
-        "main_stage_count": 2,
+        "main_stage_count": 1,
         "main_stages": main_stages,
         "location": location_name,
         "target_location": location_name,

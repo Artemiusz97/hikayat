@@ -97,8 +97,7 @@ const getChoiceQuestIcon = (choice) => {
     ['sub_quest', 'bounty', 'side_bounty', 'waypoint', 'skill_check', 'arrival', 'resource_progress'].includes(ctype) ||
     rawLabel.includes('🎯') ||
     ['[bounty', '[kopfgeld', '[ganjaran', '[zlecenie', '[悬赏'].some((k) => rawL.includes(k)) ||
-    qid.includes('bnt-') ||
-    qid.includes('qst-')
+    ['bnt-', 'qst-', 'clr-', 'farc-', 'lib-', 'nem-', 'rem-', 'rmr-', 'mnr-', 'mand-'].some((px) => qid.includes(px))
   ) {
     if (
       ['contract board', 'notice board', 'bounty board', 'bulletin board', 'quest board'].some((b) =>
@@ -203,7 +202,14 @@ const getChoiceSkillEmoji = (choice) => {
     if (['joke', 'tease', 'banter', 'laugh', 'playful', 'ribbing', 'witty', 'humor', 'prank'].some((k) => rawL.includes(k))) {
       return null;
     }
-    if (isConversationalExitLabel(rawL)) {
+    if (choice._quest_dialogue_handoff) {
+      return '🚶';
+    }
+    if (
+      Boolean(choice.ends_dialogue) ||
+      String(choice.intent || '').toLowerCase() === 'dialogue_exit' ||
+      isConversationalExitLabel(rawL)
+    ) {
       return '🚪';
     }
     if (
@@ -331,6 +337,8 @@ const ActionPanel = ({
   phoneOpen,
   phoneHook,
   showPercentages = true,
+  showEnemyHp = true,
+  showEnemyIntent = true,
   processing,
   pendingAction,
   isStreaming,
@@ -777,7 +785,7 @@ const ActionPanel = ({
                         className="px-2.5 py-0.5 rounded-full bg-red-950/80 hover:bg-red-900/80 border border-amber-500/60 text-[11px] font-mono font-bold text-amber-200 flex items-center gap-1 transition-colors"
                       >
                         <span>
-                          🎯 {activeTargetObj.name} ({activeTargetObj.hp ?? activeTargetObj.max_hp ?? 100}/{activeTargetObj.max_hp ?? 100})
+                          🎯 {activeTargetObj.name}{showEnemyHp ? ` (${activeTargetObj.hp ?? activeTargetObj.max_hp ?? 100}/${activeTargetObj.max_hp ?? 100})` : ''}
                         </span>
                         {activeTargetObj.tether_vessel_name && (
                           <span className="text-[9.5px] px-1 rounded bg-amber-950/80 border border-amber-600/50 text-amber-300">
@@ -786,7 +794,7 @@ const ActionPanel = ({
                               : `🏺 ${activeTargetObj.tether_vessel_name}`}
                           </span>
                         )}
-                        {activeTargetObj.telegraphed_skill && typeof activeTargetObj.telegraphed_skill === 'object' && (
+                        {showEnemyIntent && activeTargetObj.telegraphed_skill && typeof activeTargetObj.telegraphed_skill === 'object' && (
                           <span className="text-[9.5px] px-1 rounded bg-amber-950/90 border border-amber-500/70 text-amber-200 font-bold">
                             ⚠️ {activeTargetObj.telegraphed_skill.skill_name || activeTargetObj.telegraphed_skill.telegraphed_label || activeTargetObj.telegraphed_skill.name}
                           </span>
@@ -1120,7 +1128,7 @@ const ActionPanel = ({
                               <span className="hidden 2xl:inline">{questBadge.label}</span>
                             </span>
                           )}
-                          {(!questBadge || !isFreeAction) && (
+                          {(!questBadge || !isFreeAction || skillEmoji === '🚶') && (
                             <span
                               className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9.5px] md:text-[10px] font-mono font-bold uppercase tracking-wider border ${
                                 isQuestHighlighted

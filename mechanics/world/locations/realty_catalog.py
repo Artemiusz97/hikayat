@@ -102,6 +102,40 @@ STARTER_QUARTERS_MAP: dict[str, dict[str, Any]] = {
         ),
         "description": "Serene timber-framed cloister cell within the consecrated mountain temple grounds.",
     },
+    "cult_faction": {
+        "property_id": "starter_cult_residence",
+        "faction_key": "cult_faction",
+        "zone_id": "zone_undercity",
+        "zone_name": "Subterranean Under-City & Catacombs",
+        "facility_node_id": "fac_cult_residence",
+        "entrance_node_id": "sub_cult_res_vestibule",
+        "bedroom_node_id": "sub_cult_res_cell",
+        "name": "Under-City Cloister Cell",
+        "room_name": "Private Cloister Sleeping Cell",
+        "all_room_ids": (
+            "sub_cult_res_vestibule",
+            "sub_cult_res_shrine",
+            "sub_cult_res_cell",
+        ),
+        "description": "Quiet warded stone living cell tucked beside forgotten under-city catacomb arches.",
+    },
+    "clandestine_faction": {
+        "property_id": "starter_syndicate_residence",
+        "faction_key": "clandestine_faction",
+        "zone_id": "zone_industrial",
+        "zone_name": "Industrial Zone",
+        "facility_node_id": "fac_syndicate_residence",
+        "entrance_node_id": "sub_synd_res_stairwell",
+        "bedroom_node_id": "sub_synd_res_studio",
+        "name": "Backstreet Deadbolt Studio",
+        "room_name": "Deadbolted Standby Bunk Studio",
+        "all_room_ids": (
+            "sub_synd_res_stairwell",
+            "sub_synd_res_workroom",
+            "sub_synd_res_studio",
+        ),
+        "description": "Reinforced covert safehouse apartment tucked above an unmarked industrial depot.",
+    },
     "student_freelancer": {
         "property_id": "starter_parents_house",
         "faction_key": "student_freelancer",
@@ -331,6 +365,8 @@ ALL_STATIC_RESIDENTIAL_FACILITY_IDS: frozenset[str] = frozenset(
         "fac_agency_residence",
         "fac_downtown_walkup",
         "fac_temple_residence",
+        "fac_cult_residence",
+        "fac_syndicate_residence",
         "loc_player_house",
         "fac_suburbs_townhouse",
         "fac_tenement_flat",
@@ -434,6 +470,8 @@ def resolve_starter_quarters_spec(
 
 
 _BEDROOM_DISPLAY_NAMES: dict[str, str] = {
+    "sub_cult_res_cell": "Private Cloister Sleeping Cell",
+    "sub_synd_res_studio": "Deadbolted Standby Bunk Studio",
     "sub_tenement_bedroom": "Reinforced Sleeping Alcove",
     "sub_container_loft_bed": "Mezzanine Bunk & Gear Rack",
     "sub_vault_bunkroom": "Sealed Bunk Chamber",

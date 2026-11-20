@@ -477,10 +477,13 @@ const PhoneModal = ({
   const availableBounties = allAvailableBounties.filter(b => {
     if (selectedFactionFilter === 'all') return true;
     const bFaction = String(b.faction_id || b.faction_name || b.faction || '').toLowerCase();
+    const bSource = String(b.board_source || '').toLowerCase();
     const targetF = factionsList.find(f => f.faction_id === selectedFactionFilter || f.name === selectedFactionFilter);
     const targetId = String(targetF?.faction_id || selectedFactionFilter || '').toLowerCase();
     const targetName = String(targetF?.name || '').toLowerCase();
+    const targetArch = String(targetF?.archetype_key || '').toLowerCase();
     return (
+      (targetArch && bSource === targetArch) ||
       bFaction === targetId ||
       (targetName && bFaction.includes(targetName)) ||
       (b.title && targetName && b.title.toLowerCase().includes(targetName)) ||
@@ -2952,20 +2955,26 @@ const PhoneModal = ({
                 >
                   All ({allAvailableBounties.length})
                 </button>
-                {factionsList.map(f => (
+                {factionsList.map(f => {
+                  const isLockedBoard = f.bounty_board_eligible === false;
+                  return (
                   <button
                     key={f.faction_id || f.name}
                     type="button"
                     onClick={() => setSelectedFactionFilter(f.faction_id || f.name)}
+                    title={isLockedBoard ? t('phone.bounties.locked_faction_tip', 'Locked: Outlaws are blacklisted at licensed Bureau boards; private internal boards are members-only.') : undefined}
                     className={`px-2.5 py-1 rounded-full text-xs font-bold transition-colors shrink-0 border cursor-pointer ${
                       selectedFactionFilter === (f.faction_id || f.name)
                         ? 'bg-purple-600/30 text-purple-200 border-purple-500/50'
+                        : isLockedBoard
+                        ? 'bg-neutral-950/80 text-gray-500 border-neutral-800/80 hover:text-gray-300'
                         : 'bg-neutral-900 text-gray-400 border-neutral-800 hover:text-gray-200'
                     }`}
                   >
-                    {f.name}
+                    {isLockedBoard ? `🔒 ${f.name}` : f.name}
                   </button>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -2985,31 +2994,51 @@ const PhoneModal = ({
 
             {/* Content: Available Tab vs Active Tab */}
             <div className="flex-1 overflow-y-auto custom-scrollbar pr-0.5 min-h-0 space-y-2">
-              {bountySubTab === 'available' ? (
-                availableBounties.length === 0 ? (
+              {bountySubTab === 'available' ? (() => {
+                const selectedFactionObj = selectedFactionFilter !== 'all'
+                  ? factionsList.find(f => (f.faction_id || f.name) === selectedFactionFilter)
+                  : null;
+                const isSelectedLocked = Boolean(selectedFactionObj && selectedFactionObj.bounty_board_eligible === false);
+                return availableBounties.length === 0 ? (
                   <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-3">
                     <ShieldAlert size={28} className="mx-auto opacity-30 text-rose-400" />
                     <div>
                       <p className="text-xs text-gray-300 font-semibold">
-                        {selectedFactionFilter !== 'all' ? 'No faction tasks currently posted' : 'Bulletin is quiet right now'}
+                        {isSelectedLocked
+                          ? t('phone.bounties.locked_faction_title', 'Access restricted for this faction board')
+                          : selectedFactionFilter !== 'all' ? 'No faction tasks currently posted' : 'Bulletin is quiet right now'}
                       </p>
                       <p className="text-[10px] text-gray-500 mt-0.5">
-                        {selectedFactionFilter !== 'all' ? 'Request contracts directly from this faction.' : 'Generate live procedural requests for your campus.'}
+                        {isSelectedLocked
+                          ? t('phone.bounties.locked_faction_desc', 'Outlaw operatives are blacklisted from Bureau contracts; private internal boards are restricted to enlisted members.')
+                          : selectedFactionFilter !== 'all' ? 'Request contracts directly from this faction.' : 'Generate live procedural requests for your campus.'}
                       </p>
                     </div>
                     <button
-                      disabled={generatingBounties}
+                      disabled={generatingBounties || isSelectedLocked}
                       onClick={() => handleRefreshBounties(selectedFactionFilter !== 'all' ? selectedFactionFilter : null)}
-                      className="px-3.5 py-1.5 rounded-xl bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border border-rose-500/40 text-xs font-bold transition-all active:scale-95 cursor-pointer"
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                        isSelectedLocked
+                          ? 'bg-neutral-900 text-gray-600 border-neutral-800 cursor-not-allowed'
+                          : 'bg-rose-600/30 hover:bg-rose-600/50 text-rose-200 border-rose-500/40 active:scale-95 cursor-pointer'
+                      }`}
                     >
-                      {generatingBounties ? 'Generating...' : selectedFactionFilter !== 'all' ? 'Request Faction Tasks' : 'Generate New Requests'}
+                      {isSelectedLocked
+                        ? t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')
+                        : generatingBounties ? 'Generating...' : selectedFactionFilter !== 'all' ? 'Request Faction Tasks' : 'Generate New Requests'}
                     </button>
                   </div>
                 ) : (
-                  availableBounties.map((bounty, idx) => (
+                  availableBounties.map((bounty, idx) => {
+                    const isLocked = bounty.anomalous_eligible === false;
+                    return (
                     <div
                       key={bounty.quest_id || idx}
-                      className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-3 space-y-2"
+                      className={`border rounded-xl p-3 space-y-2 ${
+                        isLocked
+                          ? 'bg-neutral-900/60 border-rose-900/50 opacity-85'
+                          : 'bg-neutral-900/80 border-neutral-800'
+                      }`}
                     >
                       <div className="flex justify-between items-start gap-2">
                         <div className="min-w-0">
@@ -3019,14 +3048,30 @@ const PhoneModal = ({
                             {bounty.target_name ? ` • Target: ${bounty.target_name}` : ''}
                           </span>
                         </div>
-                        {bounty.status && (
-                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-gray-400 border border-neutral-700 shrink-0">
-                            {bounty.status}
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1 shrink-0">
+                          {isLocked && (
+                            <span
+                              className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-950/70 text-rose-300 border border-rose-700/60"
+                              title={bounty.anomalous_lock_reason || t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')}
+                            >
+                              🔒
+                            </span>
+                          )}
+                          {bounty.status && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-neutral-800 text-gray-400 border border-neutral-700">
+                              {bounty.status}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <p className="text-[11px] text-gray-300 leading-snug">{cleanProseLocations(bounty.objective || bounty.description)}</p>
+
+                      {isLocked && bounty.anomalous_lock_reason && (
+                        <div className="bg-rose-950/35 border border-rose-700/50 rounded-lg px-2.5 py-1.5 text-[10px] text-rose-300 leading-snug">
+                          🔒 {bounty.anomalous_lock_reason}
+                        </div>
+                      )}
 
                       {/* Rewards row */}
                       <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-mono pt-0.5">
@@ -3055,16 +3100,23 @@ const PhoneModal = ({
                       {/* Action: Accept in phone */}
                       <div className="flex justify-end pt-1">
                         <button
+                          disabled={isLocked}
                           onClick={() => handleAcceptBounty(bounty.quest_id, bounty.title)}
-                          className="px-3 py-1 rounded-lg text-[11px] font-bold bg-rose-600/30 hover:bg-rose-500/40 text-rose-200 border border-rose-500/50 transition-all active:scale-95 cursor-pointer"
+                          title={isLocked ? (bounty.anomalous_lock_reason || t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')) : undefined}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-bold border transition-all ${
+                            isLocked
+                              ? 'bg-neutral-900/60 text-gray-500 border-neutral-700/60 opacity-50 cursor-not-allowed'
+                              : 'bg-rose-600/30 hover:bg-rose-500/40 text-rose-200 border-rose-500/50 active:scale-95 cursor-pointer'
+                          }`}
                         >
-                          Accept Request
+                          {isLocked ? t('phone.bounties.locked_faction_btn', '🔒 Board Restricted') : 'Accept Request'}
                         </button>
                       </div>
                     </div>
-                  ))
-                )
-              ) : (
+                    );
+                  })
+                );
+              })() : (
                 /* Active Tasks Tab */
                 activeBounties.length === 0 ? (
                   <div className="text-center py-12 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">

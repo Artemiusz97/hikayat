@@ -38,6 +38,14 @@ from mechanics.world.locations.residence_fog import (
 )
 from mechanics.world.npc_schedule import get_npc_schedule, get_npc_schedule_node_ids
 
+_SHIFT_TAG_LOCALES: Dict[str, str] = {
+    "en": "(Shift)",
+    "pl": "(Zmiana)",
+    "ms": "(Syif)",
+    "zh": "（兼职）",
+    "de": "(Schicht)",
+}
+
 ROUTINE_BLOCKS: Tuple[str, ...] = ("morning", "lunch", "afternoon", "evening", "night")
 
 BLOCK_MINUTES: Dict[str, int] = {
@@ -156,11 +164,13 @@ def _humanize_node_id(node_id: str, npc_name: str = "", *, lang: str = "en") -> 
         return ""
     if raw == SHARED_ABSTRACT_RESIDENCE_NODE:
         return get_residential_fog_label(lang)
-    for pref in ("sub_npc_res_", "fac_npc_res_", "npc_res_"):
+    for pref in ("sub_npc_res_hh_", "fac_npc_res_hh_", "sub_npc_res_", "fac_npc_res_", "npc_res_"):
         if raw.lower().startswith(pref):
             slug = raw[len(pref):].replace("_", " ").strip()
             if npc_name:
                 return f"{npc_name}'s Residence"
+            if "hh_" in pref:
+                return "Shared Residence"
             return f"{slug.title()} Residence" if slug else "Private Residence"
     for pref in ("sub_", "fac_", "loc_"):
         if raw.lower().startswith(pref):
@@ -407,6 +417,30 @@ def _resolve_full_day_blocks(
             lang=lang,
         )
         out[block] = resolved_txt or masked_slot
+
+    probe_basic = probe.get("basic_info") if isinstance(probe.get("basic_info"), Mapping) else {}
+    pt_spec = probe.get("part_time_shift") or probe_basic.get("part_time_shift")
+    if isinstance(pt_spec, Mapping) and pt_spec.get("venue_node_id"):
+        from mechanics.social.town_roster import remap_town_node_for_scenario
+
+        pt_nid = remap_town_node_for_scenario(str(pt_spec["venue_node_id"]), scen_key)
+        pt_label = _resolve_node_label(
+            pt_nid,
+            nodes_by_id=nodes_by_id,
+            residence_unlocked=residence_unlocked,
+            real_home=real_home,
+            workplace_node_id=workplace_node_id,
+            npc_name=npc_name,
+            lang=lang,
+        )
+        if pt_label:
+            shift_tag = _SHIFT_TAG_LOCALES.get(locales.normalize_social_lang(lang), _SHIFT_TAG_LOCALES["en"])
+            is_wknd_block = chosen_day % 7 in (6, 0)
+            if not is_wknd_block and pt_spec.get("weekday_mods"):
+                out["evening"] = f"{pt_label} {shift_tag}"
+            elif is_wknd_block and pt_spec.get("weekend_mods"):
+                out["afternoon"] = f"{pt_label} {shift_tag}"
+
     return out
 
 
@@ -686,9 +720,23 @@ def build_known_routine_payload(
             real_home=real_home,
         )
         eff_npc_name = str(probe.get("name") or npc_name).strip()
+        probe_basic = probe.get("basic_info") if isinstance(probe.get("basic_info"), Mapping) else {}
+        has_route_sched = bool(
+            probe.get("roaming_route")
+            or probe_basic.get("roaming_route")
+            or probe_basic.get("weekend_route")
+        )
+        wd_candidates: Tuple[int, ...] = (1, 2, 3, 4, 5)
+        we_candidates: Tuple[int, ...] = (6, 7)
+        if current_day is not None and has_route_sched:
+            cd = max(1, int(current_day))
+            if (cd - 1) % 7 in (5, 6):
+                we_candidates = (cd,) + tuple(d for d in (6, 7) if d != cd)
+            else:
+                wd_candidates = (cd,) + tuple(d for d in (1, 2, 3, 4, 5) if d != cd)
         weekday_blocks = _resolve_full_day_blocks(
             probe,
-            candidate_days=(1, 2, 3, 4, 5),
+            candidate_days=wd_candidates,
             scen_key=scen_key,
             nodes_by_id=eff_nodes,
             residence_unlocked=residence_unlocked,
@@ -699,7 +747,7 @@ def build_known_routine_payload(
         )
         weekend_blocks = _resolve_full_day_blocks(
             probe,
-            candidate_days=(6, 7),
+            candidate_days=we_candidates,
             scen_key=scen_key,
             nodes_by_id=eff_nodes,
             residence_unlocked=residence_unlocked,
@@ -756,6 +804,15 @@ def build_known_routine_payload(
         ov_probe["home_node_id"] = real_home
         ov_probe["affinity_score"] = affinity
         ov_probe["relationship_score"] = affinity
+        ov_probe["_roster_premerged"] = True
+        live_anchor_map = resolve_anchor_schedule_nodes(
+            ov_probe,
+            current_day=safe_cd,
+            scen_key=scen_key,
+            session_id=None,
+            current_minute=int(current_minute or 600),
+        )
+        live_sched_nid = str((live_anchor_map or {}).get(cur_block) or workplace_node_id or "").strip()
         ov = resolve_autonomy_node_override(
             ov_probe,
             session_id=int(sid or 0),
@@ -766,6 +823,7 @@ def build_known_routine_payload(
             roster_by_key=roster_by_key,
             active_events=active_events,
             player_home_node_id=eff_player_home,
+            scheduled_node_id=live_sched_nid,
         )
         if isinstance(ov, Mapping) and cur_block in ROUTINE_BLOCKS:
             reason_k = str(ov.get("reason") or "friend_outing").strip().lower()
@@ -825,7 +883,7 @@ def build_known_routine_payload(
                             )
                         )
             slot_tag = ""
-            if is_target_res and not host_unlocked:
+            if is_target_res and not host_unlocked and reason_k != "crisis_redirect":
                 loc_map = _OVERLAY_REASON_LOCALES["friend_outing"]
                 ov_label = loc_map.get(eff_lang) or loc_map.get("en") or "At a friend's place"
                 slot_tag = "friend_home"

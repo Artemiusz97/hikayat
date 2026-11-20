@@ -84,6 +84,14 @@ ARCHETYPES_BY_SCENARIO = {
         "Quarantine Perimeter Defense",
         "Rogue Operative / Rival Hunter Interception",
         "High-Sensitivity Esper / Witness Escort",
+        "Consecrate Ley-Fracture Node",
+        "Shepherd Hunted Entity Beyond Cordon",
+        "Harvest Unblemished Resonance Core",
+        "Invert Suppression Seal",
+        "Hijack Containment Shipment",
+        "Poach Live Specimen for Midnight Auction",
+        "Scrub Compromised Telemetry",
+        "Splice Anomaly Doppler Wiretap",
     ],
 }
 
@@ -197,6 +205,80 @@ ANOMALOUS_BOUNTY_ARCHETYPES: list[dict] = [
         "default_objective": "Protect and escort the high-sensitivity Esper / forensic witness safely through hazardous sectors.",
         "req_item": "",
     },
+    # Occult Cult Bespoke Archetypes
+    {
+        "key": "consecrate_ley_fracture",
+        "label": "Consecrate Ley-Fracture Node",
+        "icon": "🕯️",
+        "blueprint_id": "SITE_DEFENSE_RITUAL",
+        "title_prefix": "Ley Consecration",
+        "default_objective": "Channel a resonance vigil at the fracture node, pacify intruding scavengers, and sanctify the rift anchor.",
+        "req_item": "",
+    },
+    {
+        "key": "shepherd_hunted_entity",
+        "label": "Shepherd Hunted Entity Beyond Cordon",
+        "icon": "👁️",
+        "blueprint_id": "ESCORT_RESCUE",
+        "title_prefix": "Sanctum Shepherding",
+        "default_objective": "Locate the hunted non-hostile entity ahead of sweepers, calm its aura, and guide it past the cordon without lethal force.",
+        "req_item": "",
+    },
+    {
+        "key": "harvest_resonance_core",
+        "label": "Harvest Unblemished Resonance Core",
+        "icon": "🩸",
+        "blueprint_id": "ACQUISITION",
+        "title_prefix": "Core Harvest",
+        "default_objective": "Extract an unblemished anomalous resonance core or relic intact from the active rift pocket for Sanctum communion.",
+        "req_item": "Unblemished Resonance Core",
+    },
+    {
+        "key": "invert_suppression_seal",
+        "label": "Invert Suppression Seal",
+        "icon": "🔮",
+        "blueprint_id": "HEIST_INFILTRATION",
+        "title_prefix": "Seal Inversion",
+        "default_objective": "Infiltrate a rival containment cordon or Syndicate auction staging post and invert their suppressors away from Cult sanctums.",
+        "req_item": "",
+    },
+    # Clandestine Syndicate Bespoke Archetypes
+    {
+        "key": "hijack_containment_shipment",
+        "label": "Hijack Containment Shipment",
+        "icon": "💼",
+        "blueprint_id": "HEIST_INFILTRATION",
+        "title_prefix": "Cargo Hijack",
+        "default_objective": "Intercept the armored containment courier convoy outside Syndicate districts and extract the sealed relic manifest.",
+        "req_item": "",
+    },
+    {
+        "key": "poach_live_specimen",
+        "label": "Poach Live Specimen for Midnight Auction",
+        "icon": "🕸️",
+        "blueprint_id": "ESCORT_RESCUE",
+        "title_prefix": "Live Poach",
+        "default_objective": "Calm or subdue the non-hostile specimen alive before licensed agencies arrive so the auction house secures intact bidding.",
+        "req_item": "",
+    },
+    {
+        "key": "scrub_compromised_telemetry",
+        "label": "Scrub Compromised Telemetry",
+        "icon": "🧹",
+        "blueprint_id": "SOCIAL_MANIPULATION",
+        "title_prefix": "Signal Scrub",
+        "default_objective": "Purge incriminating Doppler logs, misdirect agency investigators, and erase forensic links back to Syndicate shell brokers.",
+        "req_item": "",
+    },
+    {
+        "key": "splice_doppler_wiretap",
+        "label": "Splice Anomaly Doppler Wiretap",
+        "icon": "📡",
+        "blueprint_id": "INVESTIGATION",
+        "title_prefix": "Wiretap Splice",
+        "default_objective": "Tap rival agency relay arrays or raid a Cult reliquary transit drop to siphon raw anomaly trajectory coordinates.",
+        "req_item": "",
+    },
 ]
 
 # Faction Board Flavor Bias for Anomalous Incursions
@@ -232,6 +314,22 @@ ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS: dict[str, list[str]] = {
         "Eliminate Hostile Anomalous Entity",
         "Disrupt Cult Ritual / Clandestine Auction",
         "Secure Non-Hostile Anomalous Entity",
+    ],
+    "cult_faction": [
+        "Consecrate Ley-Fracture Node",
+        "Shepherd Hunted Entity Beyond Cordon",
+        "Harvest Unblemished Resonance Core",
+        "Invert Suppression Seal",
+        "Contain Anomalous Phenomenon",
+        "Secure Non-Hostile Anomalous Entity",
+    ],
+    "clandestine_faction": [
+        "Hijack Containment Shipment",
+        "Poach Live Specimen for Midnight Auction",
+        "Scrub Compromised Telemetry",
+        "Splice Anomaly Doppler Wiretap",
+        "Retrieve Altered Item / Cursed Relic",
+        "Investigate Anomalous Phenomenon",
     ],
     "freelance_app": [
         "Find Missing Person (Spirited Away)",
@@ -272,6 +370,22 @@ QUEST_TYPE_ICONS = {
     "syndicate_black_market_interception": "⚔️",
     "high-sensitivity esper / witness escort": "🛡️",
     "anomalous_autopsy_escort": "🛡️",
+    "consecrate ley-fracture node": "🕯️",
+    "consecrate_ley_fracture": "🕯️",
+    "shepherd hunted entity beyond cordon": "👁️",
+    "shepherd_hunted_entity": "👁️",
+    "harvest unblemished resonance core": "🩸",
+    "harvest_resonance_core": "🩸",
+    "invert suppression seal": "🔮",
+    "invert_suppression_seal": "🔮",
+    "hijack containment shipment": "💼",
+    "hijack_containment_shipment": "💼",
+    "poach live specimen for midnight auction": "🕸️",
+    "poach_live_specimen": "🕸️",
+    "scrub compromised telemetry": "🧹",
+    "scrub_compromised_telemetry": "🧹",
+    "splice anomaly doppler wiretap": "📡",
+    "splice_doppler_wiretap": "📡",
     # General Archetypes
     "monster hunting": "👹",
     "extermination": "👹",
@@ -614,13 +728,57 @@ _ANOMALOUS_SAFE_HQ_FACILITY_IDS = {
 }
 
 
-def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str) -> list[str]:
+def _filter_locations_anti_self_target(locations: list[str], faction_arch: str = "") -> list[str]:
+    """Ensures Cult and Syndicate bounties never assign raids or hostile dispatches against their own HQ/members."""
+    arch = str(faction_arch or "").strip().lower()
+    if arch == "cult_faction":
+        self_tokens = (
+            "loc_cult_sanctum_hq", "sub_cult_", "hidden sanctum", "ward-sealed threshold",
+            "acolyte cloister", "resonant fracture altar", "sacrificial entity holding",
+            "forbidden apocrypha", "abyssal conduit",
+        )
+    elif arch == "clandestine_faction":
+        self_tokens = (
+            "loc_clandestine_syndicate_hq", "sub_synd_", "shadow exchange",
+            "biometric vault door", "mercenary security guardroom", "black-budget brokerage",
+            "contraband entity auction", "weaponized cognitohazard", "directorate black-ledger",
+        )
+    else:
+        return list(locations)
+    def _is_self_hq(loc: Any) -> bool:
+        loc_low = str(loc or "").lower()
+        if "sub_cult_res_" in loc_low or "sub_synd_res_" in loc_low:
+            return False
+        return any(tok in loc_low for tok in self_tokens)
+
+    filtered = [loc for loc in locations if not _is_self_hq(loc)]
+    return filtered or list(locations)
+
+
+def _should_wiretap_reveal_dossier(session_id: int | None, board_src: str) -> bool:
+    """Syndicate Signal Wiretap perk: auto-reveals anomaly dossiers on Syndicate and Freelance bounties."""
+    if not session_id:
+        return False
+    b_low = str(board_src or "").strip().lower()
+    if b_low not in ("clandestine_faction", "freelance_app"):
+        return False
+    from mechanics.social.factions import get_anomalous_faction_state
+    f_state = get_anomalous_faction_state(int(session_id))
+    return str((f_state or {}).get("faction_archetype_key") or "").strip().lower() == "clandestine_faction"
+
+
+def _collect_anomalous_bounty_candidate_locations(
+    session_id: int,
+    scen_key: str,
+    exclude_faction_arch: str = "",
+) -> list[str]:
     """
     Collects candidate field locations for Anomalous Incursions bounties, expanding
     consolidated multi-wing complexes (`loc_general_hospital`, `loc_theme_park`,
     `loc_eastern_temple`, `loc_botanical_zoo`) to `Zone ➔ Complex ➔ Wing` while
-    excluding safe Agency HQs and the player's residence.
+    excluding safe Agency HQs, starter residences, and own outlaw HQ (`anti-self-targeting`).
     """
+    ex_arch = str(exclude_faction_arch or "").strip().lower()
     candidates: list[str] = []
     if session_id:
         try:
@@ -635,6 +793,10 @@ def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str
                     if n.get("node_type") != "FACILITY":
                         continue
                     nid = str(n.get("node_id") or "")
+                    if ex_arch == "cult_faction" and nid == "loc_cult_sanctum_hq":
+                        continue
+                    if ex_arch == "clandestine_faction" and nid == "loc_clandestine_syndicate_hq":
+                        continue
                     from mechanics.world.locations.residences import is_excluded_from_random_incursions
                     if nid in _ANOMALOUS_SAFE_HQ_FACILITY_IDS or nid.startswith("loc_hq_") or is_excluded_from_random_incursions(session_id, node_id=nid, parent_id=str(n.get("parent_id") or "")):
                         continue
@@ -666,7 +828,10 @@ def _collect_anomalous_bounty_candidate_locations(session_id: int, scen_key: str
         except Exception:
             pass
     from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
-    return [c for c in candidates if not is_safe_sanctuary_location(c)]
+    return _filter_locations_anti_self_target(
+        [c for c in candidates if not is_safe_sanctuary_location(c)],
+        ex_arch,
+    )
 
 
 def _build_anomalous_fallback_bounties(
@@ -685,7 +850,10 @@ def _build_anomalous_fallback_bounties(
     scen_key = str(sess.get("scenario") or "anomalous_incursions")
     cur_min = int(sess.get("current_minute", 480) or 480)
 
-    cand_locs = [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c and not is_safe_sanctuary_location(c)]
+    cand_locs = _filter_locations_anti_self_target(
+        [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c and not is_safe_sanctuary_location(c)],
+        board_key,
+    )
     if not cand_locs:
         def_clean = default_loc.replace(" -> ", " ➔ ") if default_loc else ""
         cand_locs = [def_clean] if (def_clean and not is_safe_sanctuary_location(def_clean)) else ["Metropolitan Grid ➔ Civic Plaza"]
@@ -694,6 +862,7 @@ def _build_anomalous_fallback_bounties(
         board_key, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["freelance_app"]
     )
     arch_by_label = {a["label"]: a for a in ANOMALOUS_BOUNTY_ARCHETYPES}
+    wiretap_active = _should_wiretap_reveal_dossier(session_id, board_key)
 
     from mechanics.world.locations import format_clean_location_prose
     results: list[dict] = []
@@ -706,11 +875,11 @@ def _build_anomalous_fallback_bounties(
         tgt_short = format_clean_location_prose(tgt_loc, include_zone=False)
         sec_short = format_clean_location_prose(sec_loc, include_zone=False)
 
-        is_nh = "non-hostile" in lbl.lower()
         lbl_low = lbl.lower()
-        if "altered item" in lbl_low or "relic" in lbl_low:
+        is_nh = ("non-hostile" in lbl_low or "shepherd hunted entity" in lbl_low or "poach live specimen" in lbl_low)
+        if "altered item" in lbl_low or "relic" in lbl_low or "resonance core" in lbl_low:
             force_tp = "object"
-        elif "phenomenon" in lbl_low or "distortion" in lbl_low:
+        elif "phenomenon" in lbl_low or "distortion" in lbl_low or "ley-fracture" in lbl_low:
             force_tp = "phenomenon"
         else:
             force_tp = ("entity", "object", "phenomenon")[(int(session_id or 1) + seed_offset + i) % 3] if is_nh else "entity"
@@ -735,11 +904,13 @@ def _build_anomalous_fallback_bounties(
             force_disposition="non_hostile" if is_nh else "hostile",
             tier=tier_calc,
         )
-        from mechanics.world.folklore_mechanics import get_public_anomaly_name
-        entity_name = get_public_anomaly_name(bp, dossier_revealed=False, fallback=bp["name"])
-        from mechanics.world.folklore_mechanics import is_blueprint_disguised
-        pub_form_lbl = "Uncanny Presence" if is_blueprint_disguised(bp, dossier_revealed=False) else str(bp.get("form_label") or "Manifestation")
-        pub_type = "unconfirmed" if is_blueprint_disguised(bp, dossier_revealed=False) else str(bp.get("type") or "entity")
+        from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised, unmask_blueprint_disguise
+        if wiretap_active:
+            bp, _ = unmask_blueprint_disguise(bp)
+        entity_name = get_public_anomaly_name(bp, dossier_revealed=wiretap_active, fallback=bp["name"])
+        disguised_flag = False if wiretap_active else is_blueprint_disguised(bp, dossier_revealed=False)
+        pub_form_lbl = "Uncanny Presence" if disguised_flag else str(bp.get("form_label") or "Manifestation")
+        pub_type = "unconfirmed" if disguised_flag else str(bp.get("type") or "entity")
 
         sponsor_prefix = f"[{faction_name}] " if faction_name and board_key != "freelance_app" else ""
         nh_temp = ""
@@ -1143,6 +1314,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             q_notes_gen = "board_source:freelance_app" if is_anom else ""
             if is_anom:
                 from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+                wiretap_gen = _should_wiretap_reveal_dossier(session_id, "freelance_app")
                 is_nh_b = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
                 bp_b = b.get("anomaly_blueprint")
                 if not isinstance(bp_b, dict):
@@ -1153,13 +1325,17 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                         seed_key=b_id,
                         scen_key=str(scen_key or "anomalous_incursions"),
                     )
+                if wiretap_gen:
+                    from mechanics.world.folklore_mechanics import unmask_blueprint_disguise
+                    bp_b, _ = unmask_blueprint_disguise(bp_b)
                 if is_nh_b:
                     from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
                     from mechanics.world.folklore_mechanics import get_public_anomaly_name
                     nh_t = str(b.get("non_hostile_temperament") or bp_b.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_b, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_b, dossier_revealed=wiretap_gen, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
                     q_notes_gen = f"{q_notes_gen}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
-                q_notes_gen = f"{q_notes_gen}|dossier_revealed:0|{serialize_blueprint_note(bp_b)}"
+                d_flag = 1 if wiretap_gen else 0
+                q_notes_gen = f"{q_notes_gen}|dossier_revealed:{d_flag}|{serialize_blueprint_note(bp_b)}"
 
             from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
             from mechanics.narrative.quest_engines import resolve_quest_engine
@@ -1606,16 +1782,18 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                     "- Do NOT generate supernatural anomaly containment or military/agency protocols for this club.\n\n"
                 )
     elif is_anom:
-        from mechanics.social.factions import infer_anomalous_faction_archetype, ANOMALOUS_DISTRUSTED_ARCHETYPES
+        from mechanics.social.factions import infer_anomalous_faction_archetype
         f_arch = infer_anomalous_faction_archetype(faction)
-        if f_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
-            # Cult and Clandestine Syndicate are distrusted/unlicensed and do not host operable public bounty boards
-            return []
-        candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+        candidate_locations = _collect_anomalous_bounty_candidate_locations(
+            session_id,
+            scen_key,
+            exclude_faction_arch=f_arch,
+        )
         pref_archs = ", ".join(ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(f_arch, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["public_agency"]))
         anom_fac_hints = (
             f"ANOMALOUS FACTION BOARD ARCHETYPE BIAS ({f_arch}):\n"
             f"- Prioritize these archetypes for {faction_name}: {pref_archs}.\n"
+            f"- NEVER target own faction HQ, safehouses, or members of {faction_name}.\n"
             f"- NEVER use numeric threat grades (e.g. never say 'Grade-4').\n\n"
         )
 
@@ -1727,9 +1905,17 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
 
     def _save_faction_bounties_sync(raw_list):
         from mechanics.world.locations import clean_narrative_location_arrows, parse_tiered_location
+        wiretap_fb = _should_wiretap_reveal_dossier(session_id, f_arch or "freelance_app")
+        safe_cand_locs = _filter_locations_anti_self_target(candidate_locations or [], f_arch or "")
         for idx, b in enumerate(raw_list):
             if not isinstance(b, dict) or not b.get("title"):
                 continue
+            if is_anom and f_arch in ("cult_faction", "clandestine_faction") and safe_cand_locs:
+                fb_safe_loc = safe_cand_locs[idx % len(safe_cand_locs)]
+                for wp_i in (b.get("waypoints") or []):
+                    if isinstance(wp_i, dict) and wp_i.get("target_location"):
+                        if _filter_locations_anti_self_target([str(wp_i["target_location"])], f_arch) != [str(wp_i["target_location"])]:
+                            wp_i["target_location"] = fb_safe_loc
             b_id = f"FBNT-{uuid.uuid4().hex[:8].upper()}"
             q_type = str(b.get("quest_type", "Faction Bounty"))
             obj_text = clean_narrative_location_arrows(str(b.get("objective", "Complete the faction task.")))[:200]
@@ -1778,7 +1964,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             )
             if should_attach_anom_bp:
                 from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
-                is_nh_fb = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
+                is_nh_fb = ("non-hostile" in str(q_type or "").lower() or "shepherd hunted entity" in str(q_type or "").lower() or "poach live specimen" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
                 bp_fb = b.get("anomaly_blueprint")
                 if not isinstance(bp_fb, dict):
                     bp_fb = generate_anomaly_blueprint(
@@ -1788,13 +1974,17 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                         seed_key=b_id,
                         scen_key=str(scen_key or "anomalous_incursions"),
                     )
+                if wiretap_fb:
+                    from mechanics.world.folklore_mechanics import unmask_blueprint_disguise
+                    bp_fb, _ = unmask_blueprint_disguise(bp_fb)
                 if is_nh_fb:
                     from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, extract_non_hostile_entity_name
                     from mechanics.world.folklore_mechanics import get_public_anomaly_name
                     nh_t = str(b.get("non_hostile_temperament") or bp_fb.get("temperament") or get_non_hostile_entity_temperament(seed_key=b_id))
-                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_fb, dossier_revealed=False, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
+                    nh_e = str(b.get("entity_name") or get_public_anomaly_name(bp_fb, dossier_revealed=wiretap_fb, fallback="") or extract_non_hostile_entity_name({"title": title_text, "objective": obj_text}))
                     q_notes = f"{q_notes}|non_hostile_temperament:{nh_t}|entity_name:{nh_e}"
-                q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_fb)}"
+                d_flag_fb = 1 if wiretap_fb else 0
+                q_notes = f"{q_notes}|dossier_revealed:{d_flag_fb}|{serialize_blueprint_note(bp_fb)}"
             from mechanics.narrative.dossier_compiler import compile_bounty_pitch_stub
             from mechanics.narrative.quest_engines import resolve_quest_engine
             _eng_fb = resolve_quest_engine(q_type, obj_text)["engine"]
@@ -2376,6 +2566,7 @@ def replenish_daily_bounties_deterministic(
         rep_q_notes = "board_source:freelance_app" if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
         if scenario_data.is_anomalous_incursions_scenario(scen_key):
             from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
+            wiretap_rep = _should_wiretap_reveal_dossier(session_id, "freelance_app")
             bp_rep = tmpl.get("anomaly_blueprint")
             if not isinstance(bp_rep, dict):
                 bp_rep = generate_anomaly_blueprint(
@@ -2385,12 +2576,16 @@ def replenish_daily_bounties_deterministic(
                     seed_key=b_id,
                     scen_key=str(scen_key or "anomalous_incursions"),
                 )
+            if wiretap_rep:
+                from mechanics.world.folklore_mechanics import unmask_blueprint_disguise
+                bp_rep, _ = unmask_blueprint_disguise(bp_rep)
             if tmpl.get("non_hostile_temperament"):
                 from mechanics.world.folklore_mechanics import get_public_anomaly_name
-                _rep_pub = tmpl.get("entity_name") or get_public_anomaly_name(bp_rep, dossier_revealed=False, fallback=str(bp_rep.get("name", "")))
+                _rep_pub = tmpl.get("entity_name") or get_public_anomaly_name(bp_rep, dossier_revealed=wiretap_rep, fallback=str(bp_rep.get("name", "")))
                 _rep_pub = str(_rep_pub).replace("|", " ")
                 rep_q_notes = f"{rep_q_notes}|non_hostile_temperament:{tmpl['non_hostile_temperament']}|entity_name:{_rep_pub}"
-            rep_q_notes = f"{rep_q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_rep)}"
+            d_flag_rep = 1 if wiretap_rep else 0
+            rep_q_notes = f"{rep_q_notes}|dossier_revealed:{d_flag_rep}|{serialize_blueprint_note(bp_rep)}"
         db.upsert_quest(
             session_id=session_id,
             quest_id=b_id,
@@ -2507,12 +2702,13 @@ def dispatch_anomalous_mandatory_daily_bounty(
     """
     Automatically generates and inserts the player's Mandatory Daily Bounty (`status='Active'`)
     for `current_day` when affiliated with `public_agency`, `private_agency_1`, `private_agency_2`,
-    or `monastic_order`. Freelancers (`freelancer`) receive no mandatory daily bounty.
+    `monastic_order`, `cult_faction`, or `clandestine_faction`. Freelancers (`freelancer`,
+    `student_freelancer`) receive no mandatory daily bounty.
     """
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):
         return None
     arch = str(faction_archetype_key or "").strip().lower()
-    if not arch or arch == "freelancer":
+    if not arch or arch in ("freelancer", "student_freelancer"):
         return None
 
     day_num = max(1, int(current_day or 1))
@@ -2539,7 +2735,11 @@ def dispatch_anomalous_mandatory_daily_bounty(
                 pass
 
     # Candidate city locations (outside safe Agency HQs / Player House, with consolidated complex wings expanded)
-    candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
+    candidate_locations = _collect_anomalous_bounty_candidate_locations(
+        session_id,
+        scen_key,
+        exclude_faction_arch=arch,
+    )
     if not candidate_locations:
         candidate_locations = ["Metropolitan Grid ➔ Central Transit Station", "Downtown Commercial District ➔ Neon Arcade Plaza"]
 
@@ -2563,7 +2763,8 @@ def dispatch_anomalous_mandatory_daily_bounty(
 
     fac_label = faction_name or "Command Dispatch"
     q_id = f"{prefix}{uuid.uuid4().hex[:6].upper()}"
-    is_nh_mand = "non-hostile" in chosen_label.lower()
+    chosen_low = chosen_label.lower()
+    is_nh_mand = ("non-hostile" in chosen_low or "shepherd hunted entity" in chosen_low or "poach live specimen" in chosen_low)
     from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
     mand_p_lvl = 1
     try:
@@ -2583,9 +2784,13 @@ def dispatch_anomalous_mandatory_daily_bounty(
         tier=mand_tier,
         tier_rank=mand_tier,
     )
-    from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised
-    entity_name = get_public_anomaly_name(bp_mand, dossier_revealed=False, fallback=str(bp_mand.get("name") or entity_name))
-    mand_form_lbl = "Uncanny Presence" if is_blueprint_disguised(bp_mand, dossier_revealed=False) else str(bp_mand.get("form_label") or "Anomaly")
+    from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised, unmask_blueprint_disguise
+    wiretap_mand = _should_wiretap_reveal_dossier(session_id, arch)
+    if wiretap_mand:
+        bp_mand, _ = unmask_blueprint_disguise(bp_mand)
+    entity_name = get_public_anomaly_name(bp_mand, dossier_revealed=wiretap_mand, fallback=str(bp_mand.get("name") or entity_name))
+    disguised_mand = False if wiretap_mand else is_blueprint_disguised(bp_mand, dossier_revealed=False)
+    mand_form_lbl = "Uncanny Presence" if disguised_mand else str(bp_mand.get("form_label") or "Anomaly")
     nh_mand_temp = ""
     if is_nh_mand:
         from mechanics.world.anomalous_events import get_non_hostile_entity_temperament, get_temperament_brief_cue
@@ -2610,7 +2815,8 @@ def dispatch_anomalous_mandatory_daily_bounty(
     q_notes = f"mandatory_daily:1|faction:{fac_id}|board_source:{arch}|rep_reward:15"
     if is_nh_mand:
         q_notes = f"{q_notes}|non_hostile_temperament:{nh_mand_temp}|entity_name:{entity_name}"
-    q_notes = f"{q_notes}|dossier_revealed:0|{serialize_blueprint_note(bp_mand)}"
+    d_flag_mand = 1 if wiretap_mand else 0
+    q_notes = f"{q_notes}|dossier_revealed:{d_flag_mand}|{serialize_blueprint_note(bp_mand)}"
 
     # Base gold (confiscated automatically at claim time for Public Agency / Monastic Order)
     base_gold = 95 if arch in ("private_agency_1", "private_agency_2") else 75
@@ -2703,12 +2909,13 @@ def evaluate_anomalous_bounty_eligibility(
     """
     Evaluates whether the player's current Anomalous Incursions Faction Affiliation permits
     accepting `quest`, enforcing the strict Faction Bounty Eligibility Matrix:
-    - `public_agency`: Public Agency + Smartphone Freelance App ONLY. Blocked from Private Agencies & Monastic Order.
-    - `private_agency_1`: Own Private #1 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #2 & Monastic Order.
-    - `private_agency_2`: Own Private #2 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #1 & Monastic Order.
-    - `monastic_order`: Own Monastic Order + Public Agency (Contract Work) + Freelance App. Blocked from Private Agencies #1 & #2.
-    - `freelancer`: Public Agency (Contract Work) + Freelance App. Blocked from internal Private Agency & Monastic Order boards.
-    - All Operatives: Blocked from `cult_faction` and `clandestine_faction` boards.
+    - `public_agency`: Public Agency + Smartphone Freelance App ONLY. Blocked from Private Agencies, Monastic Order, & Outlaws.
+    - `private_agency_1`: Own Private #1 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #2, Monastic Order, & Outlaws.
+    - `private_agency_2`: Own Private #2 + Public Agency (Contract Work) + Freelance App. Blocked from Rival Private #1, Monastic Order, & Outlaws.
+    - `monastic_order`: Own Monastic Order + Public Agency (Contract Work) + Freelance App. Blocked from Private Agencies #1/#2 & Outlaws.
+    - `cult_faction`: Own Occult Cult + Freelance App + Story Quests ONLY. Barred from all 4 licensed boards & Syndicate.
+    - `clandestine_faction`: Own Clandestine Syndicate + Freelance App + Story Quests ONLY. Barred from all 4 licensed boards & Cult.
+    - `freelancer`: Public Agency (Contract Work) + Freelance App. Blocked from internal Private Agency, Monastic Order, & Outlaw boards.
     """
     from mechanics.social.factions import get_anomalous_faction_state
 
@@ -2736,20 +2943,13 @@ def evaluate_anomalous_bounty_eligibility(
             "reason": "Adult Special Agents cannot accept internal High School student club assignments.",
         }
 
-    if board_src in ("cult_faction", "clandestine_faction"):
-        return {
-            "allowed": False,
-            "player_faction": player_arch,
-            "board_source": board_src,
-            "is_contract_work": False,
-            "reason": "Unlicensed occult cult and clandestine syndicate contracts are strictly off-limits.",
-        }
-
     allowed_map: dict[str, set[str]] = {
         "public_agency": {"public_agency", "freelance_app", "story_quest"},
         "private_agency_1": {"private_agency_1", "public_agency", "freelance_app", "story_quest"},
         "private_agency_2": {"private_agency_2", "public_agency", "freelance_app", "story_quest"},
         "monastic_order": {"monastic_order", "public_agency", "freelance_app", "story_quest"},
+        "cult_faction": {"cult_faction", "freelance_app", "story_quest"},
+        "clandestine_faction": {"clandestine_faction", "freelance_app", "story_quest"},
         "freelancer": {"public_agency", "freelance_app", "story_quest"},
     }
     allowed_set = allowed_map.get(player_arch, {"public_agency", "freelance_app", "story_quest"})
@@ -2765,8 +2965,14 @@ def evaluate_anomalous_bounty_eligibility(
             "reason": "Contract work authorized." if is_contract else "Authorized.",
         }
 
-    if player_arch == "public_agency":
-        reason = "As a state-salaried Public Agency operative, jurisdiction law prohibits accepting bounties from Private Agencies or the Monastic Shrine Order (Freelance App commissions remain permitted)."
+    if board_src in ("cult_faction", "clandestine_faction") and player_arch not in ("cult_faction", "clandestine_faction"):
+        reason = "Licensed containment operatives and freelancers are barred from internal Occult Cult and Clandestine Syndicate boards."
+    elif player_arch == "cult_faction":
+        reason = "As an initiated Occult Cult member, all licensed containment boards and rival Syndicate listings are strictly closed to you (Cult Liturgies & Freelance App commissions remain open)."
+    elif player_arch == "clandestine_faction":
+        reason = "As an outlawed Clandestine Syndicate operative, all licensed agency boards and Cult liturgies are strictly closed to you (Syndicate Contracts & Freelance App commissions remain open)."
+    elif player_arch == "public_agency":
+        reason = "As a state-salaried Public Agency operative, jurisdiction law prohibits accepting bounties from Private Agencies, the Monastic Shrine Order, or Outlaw factions (Freelance App commissions remain permitted)."
     elif player_arch in ("private_agency_1", "private_agency_2"):
         if board_src in ("private_agency_1", "private_agency_2"):
             reason = "Corporate non-compete clauses prohibit accepting bounties from a rival Private Agency!"
@@ -2775,7 +2981,7 @@ def evaluate_anomalous_bounty_eligibility(
     elif player_arch == "monastic_order":
         reason = "Monastic Shrine Order vows prohibit accepting commercial contracts from Private Agencies (Public Agency contract work & Freelance App commissions are permitted)."
     else:
-        reason = "Independent Freelancers lack security clearance for internal Private Agency or Monastic Shrine boards (Public Agency contract work & Freelance App commissions are open)."
+        reason = "Independent Freelancers lack security clearance for internal Private Agency, Monastic Shrine, or Outlaw boards (Public Agency contract work & Freelance App commissions are open)."
 
     return {
         "allowed": False,

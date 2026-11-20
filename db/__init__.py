@@ -4,6 +4,7 @@ from .core import *
 from .characters import *
 from .inventory import *
 from .settings import *
+from .settings import sync_user_settings_to_session
 from .sessions import *
 from .saves import *
 from .quests import *
@@ -80,12 +81,14 @@ from .core import (
     _migrate_dynamic_social_overhaul_v50,
     _migrate_main_quest_bounty_overhaul_v51,
     _migrate_anomalous_locations_integrity_v57,
+    _migrate_outlaw_factions_v60,
     _delete_session_child_records_only,
     _delete_session_records,
     _is_suspicious_entity_text,
     _safe_int_db,
     _sanitize_npcs_list,
     _to_str,
+    get_main_event_loop,
     nullify_orphaned_implicated_contacts,
 )
 from .characters import _apply_debug_stat_override, delete_character_by_id, get_character_3axis, set_character_3axis
@@ -96,6 +99,7 @@ from .quests import (
     get_quest_waypoint_target_location,
     is_quest_main_objectives_complete,
     promote_locked_quest_waypoints,
+    reconcile_structured_quest_split_brain,
     sync_quest_projection_from_dossier,
     unlock_climax_waypoint,
     update_quest_anomaly_blueprint,
@@ -173,9 +177,11 @@ from .roster import (
     ALLOWED_STAFF_STATUSES,
     WORLD_ROSTER_V54_DDL,
     apply_world_roster_autonomy_mutations,
+    bulk_upsert_world_roster,
     clear_roster_npc_merchant_archetypes,
     get_world_roster,
     get_world_roster_npc,
+    hydrate_world_roster_visuals,
     mark_world_roster_staff_status,
     promote_world_roster_to_contact,
     record_discovered_schedule_slot,

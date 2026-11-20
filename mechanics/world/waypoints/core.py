@@ -285,77 +285,25 @@ def ensure_quest_waypoints_exist(session_id: int):
                     db.save_quest_waypoints(session_id, qid, wps, sub_obj_id=so_id)
 
 
-def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
-    """Returns dict mapping 'Zone ➔ Primary' (and bare 'Primary') -> [marker labels] for LocationSelectView."""
+def _classify_waypoint_marker(marker: str) -> tuple[str, str]:
+    """Maps a waypoint marker string to (kind, quest_tag)."""
+    m = str(marker or "")
+    if "⚡" in m or "[Story Climax]" in m:
+        return ("climax", "⚡ Story Climax")
+    if "⭐" in m or "[Story]" in m or "[Bonus Lead]" in m:
+        return ("story", "⭐ Story Quest")
+    if "[Bounty]" in m or any(ic in m for ic in ("🎯", "🛡️", "👹", "💋", "🕵️")):
+        return ("bounty", "🎯 Bounty Target")
+    if "💌" in m or "[Meetup]" in m:
+        return ("meetup", "💌 Meetup")
+    return ("", "")
+
+
+def _collect_raw_waypoint_items(session_id: int) -> list[tuple[str, str, str]]:
+    """Collects (target_location, marker_tag, target_npc) tuples across all active waypoint sources."""
     ensure_quest_waypoints_exist(session_id)
     active_wps = db.get_all_session_active_waypoints(session_id)
-    markers: dict[str, list[str]] = {}
-    arrow = "\u2794"
-    delimiters = [arrow, "->", ">", "|"]
-    existing_locs = db.get_session_locations(session_id) if session_id else []
-
-    generic_template_zones = {
-        "ancient woods", "woodlands & forest", "capital city", "central farmlands & plains",
-        "high mountain range", "coastal harbor town", "deep cave network", "ancient dungeon complex",
-        "desert dunes & oasis", "swamp & marshes", "volcanic ashlands", "frozen snow & tundra",
-        "cursed shadowlands", "underworld chasm", "main academy campus", "main academy building"
-    }
-
-    def _register_location_marker(loc_string: str, tag: str):
-        """Resolve a location string to map keys and append the tag, stacking alongside existing markers."""
-        parts = [loc_string]
-        for d in delimiters:
-            if d in loc_string:
-                parts = [p.strip() for p in loc_string.split(d) if p.strip()]
-                break
-        keys = []
-        if len(parts) >= 2:
-            z_tgt, p_tgt = parts[0], parts[1]
-            s_tgt = parts[2] if len(parts) >= 3 else ""
-            keys.extend([f"{z_tgt} {arrow} {p_tgt}", f"{z_tgt} -> {p_tgt}", p_tgt])
-            if s_tgt:
-                keys.append(s_tgt)
-            if existing_locs:
-                z_words = set(re.findall(r"\b\w{3,}\b", z_tgt.lower()))
-                for r in existing_locs:
-                    r_p = r.get("primary_name", "")
-                    r_z = r.get("zone_name", "")
-                    r_s = r.get("sub_name", "")
-                    if not (r_p and r_z):
-                        continue
-                    matches_p = (
-                        r_p.lower() == p_tgt.lower()
-                        or p_tgt.lower() in r_p.lower()
-                        or r_p.lower() in p_tgt.lower()
-                    )
-                    matches_s = bool(r_s) and (
-                        r_s.lower() == p_tgt.lower()
-                        or p_tgt.lower() in r_s.lower()
-                        or (bool(s_tgt) and (r_s.lower() == s_tgt.lower() or s_tgt.lower() in r_s.lower()))
-                    )
-                    if matches_p or matches_s:
-                        r_z_words = set(re.findall(r"\b\w{3,}\b", r_z.lower()))
-                        if z_tgt.lower() in generic_template_zones or not z_tgt or (z_words & r_z_words) or z_words.issubset(r_z_words):
-                            keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
-                            if matches_s and r_s:
-                                keys.extend([f"{r_z} {arrow} {r_s}", r_s])
-        elif len(parts) == 1:
-            p_tgt = parts[0]
-            keys.append(p_tgt)
-            if existing_locs:
-                for r in existing_locs:
-                    r_p = r.get("primary_name", "")
-                    r_z = r.get("zone_name", "")
-                    r_s = r.get("sub_name", "")
-                    if r_z and (r_p.lower() == p_tgt.lower() or (r_s and r_s.lower() == p_tgt.lower())):
-                        keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
-                        if r_s and r_s.lower() == p_tgt.lower():
-                            keys.append(r_s)
-        for k in keys:
-            if k not in markers:
-                markers[k] = []
-            if tag not in markers[k]:
-                markers[k].append(tag)
+    items: list[tuple[str, str, str]] = []
 
     # 0. Phone Meetup Appointments — 💌 marker on rendezvous location (pending or arrived)
     appointments = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
@@ -364,14 +312,14 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
         npc_name = appt.get("npc_name", "")
         if appt_loc and npc_name:
             tag_label = f"💌 [Meetup] {npc_name} is here" if appt.get("status") == "arrived" else f"💌 [Meetup] {npc_name} is waiting here"
-            _register_location_marker(appt_loc, tag_label)
+            items.append((appt_loc, tag_label, str(npc_name).strip()))
 
     # 1. Check for active Story Quest in Climax Ready state
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
     if story_quest and climax_loc:
         climax_title = story_quest.get("title", "Story Quest")
         tag = f"⚡ [Story Climax] {climax_title} — Final Showdown"
-        _register_location_marker(climax_loc, tag)
+        items.append((climax_loc, tag, ""))
 
     for wp in active_wps:
         target_loc = resolve_effective_waypoint_location(session_id, wp).strip()
@@ -402,7 +350,7 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
             stage_part = f" — {sub_label}" if sub_label else ""
             tag = f"{icon} [Bounty] {quest_title}{stage_part}{npc_suffix}"
 
-        _register_location_marker(target_loc, tag)
+        items.append((target_loc, tag, target_npc))
         # For key_clue waypoints, mark all alternate open clue_sources locations on the map as well
         if wp.get("completion_trigger") == "key_clue" and (sub_obj_id in (None, 0)):
             dos_m = db.get_quest_dossier(session_id, wp.get("quest_id", ""))
@@ -412,7 +360,7 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
                         if isinstance(src_m, dict) and str(src_m.get("status") or "open").lower() == "open":
                             s_loc_m = str(src_m.get("location") or "").strip()
                             if s_loc_m:
-                                _register_location_marker(s_loc_m, tag)
+                                items.append((s_loc_m, tag, target_npc))
 
     # Mark unclaimed Bonus Leads (bonus=True) left behind on earlier completed/bypassed stages of active quests
     active_quests_map = {
@@ -438,6 +386,136 @@ def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
                     b_loc = str(src_b.get("location") or "").strip()
                     if b_loc:
                         b_hint = str(src_b.get("approach_hint") or src_b.get("label") or b_title).strip()
-                        _register_location_marker(b_loc, f"⭐ [Bonus Lead] {b_hint}")
+                        items.append((b_loc, f"⭐ [Bonus Lead] {b_hint}", ""))
+
+    return items
+
+
+def get_location_waypoint_entries(session_id: int) -> list[dict]:
+    """Returns structured active waypoint/meetup/bonus entries with resolved node_id and 3-tier location hints."""
+    if not session_id:
+        return []
+    raw_items = _collect_raw_waypoint_items(session_id)
+    delimiters = ["\u2794", "->", ">", "|"]
+    entries: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for loc_string, tag, target_npc in raw_items:
+        loc_clean = str(loc_string or "").strip()
+        if not loc_clean or not tag:
+            continue
+        dedupe_key = (loc_clean.lower(), tag)
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+
+        parts = [loc_clean]
+        for d in delimiters:
+            if d in loc_clean:
+                parts = [p.strip() for p in loc_clean.split(d) if p.strip()]
+                break
+        if len(parts) >= 2:
+            z_hint = parts[0]
+            p_hint = parts[1]
+            s_hint = parts[2] if len(parts) >= 3 else ""
+        else:
+            z_hint = ""
+            p_hint = parts[0] if parts else ""
+            s_hint = ""
+
+        target_node_id = ""
+        try:
+            target_node_id = db.resolve_node_id_from_location(session_id, loc_clean, prefer_facility=False) or ""
+        except Exception:
+            target_node_id = ""
+
+        kind, quest_tag = _classify_waypoint_marker(tag)
+        entries.append({
+            "marker": tag,
+            "kind": kind,
+            "quest_tag": quest_tag,
+            "target_location": loc_clean,
+            "target_node_id": target_node_id,
+            "target_npc": target_npc,
+            "zone_hint": z_hint,
+            "primary_hint": p_hint,
+            "sub_hint": s_hint,
+        })
+    return entries
+
+
+def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
+    """Returns dict mapping 'Zone ➔ Primary' (and canonical 3-tier / bare keys) -> [marker labels] for LocationSelectView."""
+    raw_items = _collect_raw_waypoint_items(session_id)
+    markers: dict[str, list[str]] = {}
+    arrow = "\u2794"
+    delimiters = [arrow, "->", ">", "|"]
+    existing_locs = db.get_session_locations(session_id) if session_id else []
+
+    generic_template_zones = {
+        "ancient woods", "woodlands & forest", "capital city", "central farmlands & plains",
+        "high mountain range", "coastal harbor town", "deep cave network", "ancient dungeon complex",
+        "desert dunes & oasis", "swamp & marshes", "volcanic ashlands", "frozen snow & tundra",
+        "cursed shadowlands", "underworld chasm", "main academy campus", "main academy building"
+    }
+
+    def _register_location_marker(loc_string: str, tag: str):
+        """Resolve a location string to map keys and append the tag, stacking alongside existing markers."""
+        parts = [loc_string]
+        for d in delimiters:
+            if d in loc_string:
+                parts = [p.strip() for p in loc_string.split(d) if p.strip()]
+                break
+        keys = []
+        if len(parts) >= 2:
+            z_tgt, p_tgt = parts[0], parts[1]
+            s_tgt = parts[2] if len(parts) >= 3 else ""
+            keys.extend([f"{z_tgt} {arrow} {p_tgt}", f"{z_tgt} -> {p_tgt}", p_tgt])
+            if s_tgt:
+                keys.extend([f"{z_tgt} {arrow} {p_tgt} {arrow} {s_tgt}", s_tgt])
+            if existing_locs:
+                z_words = set(re.findall(r"\b\w{3,}\b", z_tgt.lower()))
+                for r in existing_locs:
+                    r_p = r.get("primary_name", "")
+                    r_z = r.get("zone_name", "")
+                    r_s = r.get("sub_name", "")
+                    if not (r_p and r_z):
+                        continue
+                    matches_p = (
+                        r_p.lower() == p_tgt.lower()
+                        or p_tgt.lower() in r_p.lower()
+                        or r_p.lower() in p_tgt.lower()
+                    )
+                    matches_s = bool(r_s) and (
+                        r_s.lower() == p_tgt.lower()
+                        or p_tgt.lower() in r_s.lower()
+                        or (bool(s_tgt) and (r_s.lower() == s_tgt.lower() or s_tgt.lower() in r_s.lower()))
+                    )
+                    if matches_p or matches_s:
+                        r_z_words = set(re.findall(r"\b\w{3,}\b", r_z.lower()))
+                        if z_tgt.lower() in generic_template_zones or not z_tgt or (z_words & r_z_words) or z_words.issubset(r_z_words):
+                            keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
+                            if matches_s and r_s:
+                                keys.extend([f"{r_z} {arrow} {r_p} {arrow} {r_s}", f"{r_z} {arrow} {r_s}", r_s])
+        elif len(parts) == 1:
+            p_tgt = parts[0]
+            keys.append(p_tgt)
+            if existing_locs:
+                for r in existing_locs:
+                    r_p = r.get("primary_name", "")
+                    r_z = r.get("zone_name", "")
+                    r_s = r.get("sub_name", "")
+                    if r_z and (r_p.lower() == p_tgt.lower() or (r_s and r_s.lower() == p_tgt.lower())):
+                        keys.extend([f"{r_z} {arrow} {r_p}", f"{r_z} -> {r_p}", r_p])
+                        if r_s and r_s.lower() == p_tgt.lower():
+                            keys.extend([f"{r_z} {arrow} {r_p} {arrow} {r_s}", r_s])
+        for k in keys:
+            if k not in markers:
+                markers[k] = []
+            if tag not in markers[k]:
+                markers[k].append(tag)
+
+    for loc_string, tag, _target_npc in raw_items:
+        _register_location_marker(loc_string, tag)
 
     return markers

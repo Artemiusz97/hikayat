@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useId } from 'react';
-import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone } from 'lucide-react';
+import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone, Eye, KeyRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../../api/client';
 
@@ -271,6 +271,20 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       isDefault: false,
       name: t('embark.faction_monastic_name', 'Monastic Shrine Order'),
       desc: t('embark.faction_monastic_desc', '2–3 Free Sacred Items Daily • Keep Combat Loot (0G Order Fee) • Free Temple Healing • Mandatory Daily Bounty • Starts at Grand Temple'),
+    },
+    {
+      id: 'cult_faction',
+      Icon: Eye,
+      isDefault: false,
+      name: t('embark.faction_cult_name', 'Occult Cult Sanctum'),
+      desc: t('embark.faction_cult_desc', '0.85x Reliquary Tithe • -50% Pact Offering Costs • +1 Daily Resonator Charge • Free Apotheca Extraction • Blacklisted from Licensed Agencies • Starts at Sanctum Threshold'),
+    },
+    {
+      id: 'clandestine_faction',
+      Icon: KeyRound,
+      isDefault: false,
+      name: t('embark.faction_clandestine_name', 'Clandestine Relic Syndicate'),
+      desc: t('embark.faction_clandestine_desc', '+35% Syndicate Bounty Cash • +40% Fence Loot Resale • Auto-Revealed Anomaly Dossiers • +25% Harvest Gold • Blacklisted from Licensed Agencies • Starts at Vault Threshold'),
     },
     {
       id: 'freelancer',

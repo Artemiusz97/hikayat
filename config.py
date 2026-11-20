@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "3.3.0"
+APP_VERSION = "3.4.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -36,11 +36,23 @@ NSFW_LLM_UTILITY_MODEL = os.getenv("NSFW_LLM_UTILITY_MODEL", NSFW_LLM_MODEL)
 NSFW_LLM_FALLBACK_MODELS = [m.strip() for m in os.getenv("NSFW_LLM_FALLBACK_MODELS", "").split(",") if m.strip()]
 
 # Per-request timeout (seconds) per attempt before switching to next fallback model
-LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "300.0"))
+LLM_REQUEST_TIMEOUT = float(os.getenv("LLM_REQUEST_TIMEOUT", "120.0"))
+
+# Split streaming stall thresholds: generous TTFT for cold local KV prefill, fast inter-chunk stall detection
+LLM_TTFT_TIMEOUT = float(os.getenv("LLM_TTFT_TIMEOUT", "75.0"))
+LLM_CHUNK_IDLE_TIMEOUT = float(os.getenv("LLM_CHUNK_IDLE_TIMEOUT", "25.0"))
+
+# Overall wall-clock deadline (seconds) across stream retries, continuations, and batch fallback per turn
+LLM_STREAM_TOTAL_DEADLINE = float(os.getenv("LLM_STREAM_TOTAL_DEADLINE", "150.0"))
+
+# Completion token ceiling for hybrid reasoning models (e.g. Gemma 4, DeepSeek-R1, QwQ)
+LLM_THINKING_MAX_TOKENS = int(os.getenv("LLM_THINKING_MAX_TOKENS", "8192"))
+LLM_REASONING_EFFORT = os.getenv("LLM_REASONING_EFFORT", "").strip()
+LLM_SUPPRESS_NARRATION_COT = os.getenv("LLM_SUPPRESS_NARRATION_COT", "true").lower() in ("true", "1", "yes")
 
 # Dynamic multi-pass turn engine settings
 ENABLE_DYNAMIC_MULTIPASS = os.getenv("ENABLE_DYNAMIC_MULTIPASS", "true").lower() in ("true", "1", "yes")
-LLM_PASS1_TIMEOUT = float(os.getenv("LLM_PASS1_TIMEOUT", "90.0"))
+LLM_PASS1_TIMEOUT = float(os.getenv("LLM_PASS1_TIMEOUT", "45.0"))
 LLM_PASS2_TIMEOUT = float(os.getenv("LLM_PASS2_TIMEOUT", str(LLM_REQUEST_TIMEOUT)))
 
 # Sampling temperatures

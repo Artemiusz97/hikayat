@@ -539,11 +539,17 @@ def evaluate_gendered_room_hazard(
         roll = rng_roll_override if rng_roll_override is not None else _det_float(
             f"gendered_walkin:{sess_id}:{current_day}:{safe_min // 15}:{fac_id}:{session.get('turn_count', 0)}"
         )
-        if roll < base_prob and roster:
+        if roll < base_prob:
             same_gen_peers = [
-                r for r in roster
+                r for r in (roster or [])
                 if str(r.get("gender") or "").lower() == target_gender and str(r.get("grade") or "") != "Faculty"
             ]
+            if not same_gen_peers and sess_id:
+                same_gen_peers = [
+                    r for r in (db.get_world_roster(sess_id, include_legacy_rosters=False) or [])
+                    if str(r.get("gender") or "").lower() == target_gender
+                    and str(r.get("staff_status") or "active").lower() == "active"
+                ]
             if same_gen_peers:
                 pick_idx = _det_int(f"gendered_witness:{sess_id}:{current_day}:{safe_min}:{fac_id}", len(same_gen_peers))
                 witness = same_gen_peers[pick_idx]
@@ -1224,6 +1230,39 @@ def resolve_discreet_couple_action(
 # ---------------------------------------------------------------------------
 # 5. Unified Pre-Turn & Post-Choice Orchestrator for Turn Pipeline
 # ---------------------------------------------------------------------------
+
+def resolve_public_bystander_witness(
+    session: Dict[str, Any],
+    gender_filter: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    Prefers real staged `world_roster` bystanders in `current_npcs` (or active district `world_roster`
+    residents) as named public witnesses when discreet/overt acts are spotted.
+    """
+    if not isinstance(session, dict):
+        return None
+    g_low = str(gender_filter or "").strip().lower()
+    for n in (session.get("current_npcs") or session.get("pre_turn_stage_npcs") or []):
+        if not isinstance(n, dict) or not n.get("name"):
+            continue
+        if n.get("is_anomalous_entity") or n.get("is_special_agent"):
+            continue
+        if g_low and str(n.get("gender") or "").strip().lower() not in ("", g_low):
+            continue
+        origin = str(n.get("origin") or "").strip().lower()
+        if origin in ("roaming_citizen", "district_merchant", "civic_staff", "campus_seed", "roaming_merchant", "seeded"):
+            return dict(n)
+    sess_id = int(session.get("id") or 0)
+    if sess_id:
+        for wr in (db.get_world_roster(sess_id, include_legacy_rosters=False) or []):
+            if str(wr.get("staff_status") or "active").lower() != "active":
+                continue
+            if g_low and str(wr.get("gender") or "").strip().lower() not in ("", g_low):
+                continue
+            if str(wr.get("origin") or "").lower() in ("roaming_citizen", "district_merchant", "civic_staff", "campus_seed"):
+                return dict(wr)
+    return None
+
 
 def evaluate_high_school_turn_events(
     session: Dict[str, Any],

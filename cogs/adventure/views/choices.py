@@ -273,6 +273,8 @@ class ChoiceDropdown(discord.ui.Select):
             clean_raw_text = _strip_leading_emojis(raw_text)
             if quest_icon and not is_free:
                 full_label = f"{prefix}{skill_emoji} [{stat}] {clean_raw_text}"
+            elif quest_icon and is_free and skill_emoji == "🚶":
+                full_label = f"{prefix}{skill_emoji} {clean_raw_text}"
             elif not is_free:
                 full_label = f"{prefix}[{stat}] {clean_raw_text}"
             else:
@@ -426,6 +428,14 @@ class ChoiceView(SessionRestrictedView):
                 self._prebuild_battle_deck_menus()
                 self._build_battle_deck_combat(current_menu)
             return
+
+        from mechanics.social.conversation_choices import (
+            ensure_active_dialogue_exit_choice,
+            has_dialogue_exit_choice,
+        )
+        if not has_dialogue_exit_choice(choices):
+            choices = ensure_active_dialogue_exit_choice(choices, session=session)
+            self.choices = list(choices or [])
 
         curr_narr = str(session.get("narrative") or "")
         is_fallback_narr = (
@@ -1198,6 +1208,14 @@ class SyncChoiceView(SessionRestrictedView):
             if combat_choices:
                 choices = combat_choices[:24]
                 self.choices = list(choices)
+        else:
+            from mechanics.social.conversation_choices import (
+                ensure_active_dialogue_exit_choice,
+                has_dialogue_exit_choice,
+            )
+            if not has_dialogue_exit_choice(choices):
+                choices = ensure_active_dialogue_exit_choice(choices, session=session)
+                self.choices = list(choices or [])
         self._choices = choices
         self._choice_dropdown = ChoiceDropdown(cog, session_id, choices, is_sync=True, party=party, session=session)
         self.add_item(self._choice_dropdown)

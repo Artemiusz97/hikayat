@@ -207,6 +207,7 @@ QUEST_UI_LABELS = {
     "shortcut_active": "Abkürzung Aktiv",
     "bypassed": "Umgegangen",
     "quest_travel_to": "Begib dich zu {dest}",
+    "quest_wrap_up_and_head_to": "Verabschiede dich von {npc} und begib dich zu {dest}",
 }
 
 PACT_UI_LABELS = {
@@ -243,4 +244,13 @@ ANOMALOUS_SITE_UI_LABELS = {
     "milestone_22_reward": "Feldresonator-Upgrade (4 tägliche Ladungen)",
     "milestone_36_title": "Auszeichnung des Stadtwächters (36/36 Stätten)",
     "milestone_36_reward": "+30 Ruf, 5 tägliche Ladungen & Äther-Chronometer-Relikt"
+}
+
+CROWD_DENSITY_LABELS = {
+    "quiet": "Ruhig",
+    "moderate": "Belebt",
+    "bustling": "Lebhaft",
+    "packed": "Überfüllt",
+    "crowd_label": "Menschenmenge",
+    "nearby_bystanders": "Passanten in der Nähe"
 }

@@ -94,6 +94,42 @@ VAULT_FACTION_RULES: Dict[str, Dict[str, Any]] = {
             "folk_patron_toyol",
         ),
     },
+    "cult_faction": {
+        "label": "Sanctum Sacrificial Holding Vault",
+        "node_tokens": (
+            "sub_cult_cells",
+            "sub_cult_altar",
+            "loc_cult_sanctum_hq",
+            "sacrificial entity holding",
+            "resonant fracture altar",
+            "abyssal conduit",
+        ),
+        "patron_ids": (
+            "patron_hollow_choir_worm",
+            "patron_13th_step_mirror_double",
+            "patron_1540_clocktower_fiend",
+            "patron_silk_shackle_sovereign",
+            "folk_patron_pontianak",
+            "folk_patron_leanan_sidhe",
+        ),
+    },
+    "clandestine_faction": {
+        "label": "Contraband Entity Auction Pens",
+        "node_tokens": (
+            "sub_synd_pens",
+            "loc_clandestine_syndicate_hq",
+            "contraband entity auction",
+            "shadow exchange",
+        ),
+        "patron_ids": (
+            "patron_mammon_9",
+            "patron_lye_fog_cleaner",
+            "patron_13th_step_mirror_double",
+            "patron_1540_clocktower_fiend",
+            "patron_arterial_stitch_nurse",
+            "patron_hollow_choir_worm",
+        ),
+    },
 }
 
 BLACK_MARKET_ROTATION_IDS: Tuple[str, ...] = (
@@ -346,6 +382,7 @@ def can_perform_remote_pact_ritual(
         "home", "bedroom", "dorm", "apartment", "residence", "house", "quarters", "safehouse",
         "shrine", "temple", "pagoda", "sanctuary", "chapel", "altar", "meditation", "hq",
         "headquarters", "lounge", "infirmary", "clinic", "medical", "vault", "clubroom", "rest",
+        "apotheca", "cloister", "sanctum",
     )
     return any(tok in loc_text for tok in safe_tokens)
 
@@ -355,26 +392,46 @@ def can_perform_peaceful_medical_or_shrine_scrub(
     contract_row: Dict[str, Any],
 ) -> Tuple[bool, int, str]:
     """
-    Determines whether a contract can be peacefully scrubbed (regulated Tier I–II with no active breach)
-    vs. requiring a **Manifestation Exorcism Boss Fight** (Tier III Exclusive, Cult/Black-Market unregulated, or breached).
+    Determines whether a contract can be peacefully scrubbed (regulated Tier I–II with no active breach,
+    or unbreached Tier I–II unregulated pacts severed by an active Cult member)
+    vs. requiring a **Manifestation Exorcism Boss Fight** (Tier III Exclusive, unregulated non-Cult, or breached).
     Returns `(is_peaceful_scrub, credit_fee, method_label)`.
     """
     tier = int(contract_row.get("tier") or 1)
     breach = int(contract_row.get("breach_stage") or 0)
     meta = contract_row.get("metadata") if isinstance(contract_row.get("metadata"), dict) else {}
     regulated = bool(meta.get("regulated", True))
-    source_pool = str(contract_row.get("source_pool") or "bespoke")
 
-    if tier >= 3 or not regulated or breach >= 1:
+    player_arch = ""
+    if isinstance(session, dict):
+        fac_st = session.get("anomalous_faction_state")
+        if isinstance(fac_st, dict):
+            player_arch = str(fac_st.get("faction_archetype_key") or "").strip().lower()
+        if not player_arch and session.get("id"):
+            try:
+                from mechanics.social.factions import get_anomalous_faction_state
+                player_arch = str(
+                    (get_anomalous_faction_state(int(session["id"])) or {}).get("faction_archetype_key") or ""
+                ).strip().lower()
+            except Exception:
+                player_arch = ""
+
+    if tier >= 3 or breach >= 1 or (not regulated and player_arch != "cult_faction"):
         return False, 0, "Manifestation Exorcism Duel Required"
 
     loc_text = _extract_location_corpus(session)
     at_medical_or_shrine = any(
         k in loc_text
-        for k in ("medical", "infirmary", "hospital", "clinic", "shrine", "temple", "pagoda", "sanctuary", "containment")
+        for k in (
+            "medical", "infirmary", "hospital", "clinic", "shrine", "temple",
+            "pagoda", "sanctuary", "containment", "apotheca", "altar", "sanctum",
+        )
     )
     fee = (80 if at_medical_or_shrine else 140) * max(1, tier)
-    method = "Clinical / Shrine Cleansing Rite" if at_medical_or_shrine else "Remote Sanctuary Cleansing Rite"
+    if not regulated and player_arch == "cult_faction":
+        method = "Sanctum Unbinding & Covenant Severance"
+    else:
+        method = "Clinical / Shrine Cleansing Rite" if at_medical_or_shrine else "Remote Sanctuary Cleansing Rite"
     return True, fee, method
 
 
@@ -505,10 +562,29 @@ def get_available_patrons_for_context(
         except Exception:
             player_fac_key = str(char.get("joined_faction_id") or "").strip().lower()
 
+    from mechanics.social.factions import ANOMALOUS_OUTLAW_ARCHETYPES
+    is_cult_node = (
+        "sub_cult_res_" not in loc_text
+        and (
+            ("sub_cult_" in loc_text)
+            or any(
+                tok in loc_text
+                for tok in ("loc_cult_sanctum_hq", "hidden sanctum", "forbidden apocrypha", "abyssal conduit")
+            )
+        )
+    )
     for v_key, v_cfg in VAULT_FACTION_RULES.items():
-        at_this_vault = any(tok in loc_text for tok in v_cfg["node_tokens"])
+        if v_key == "monastic_order" and is_cult_node:
+            at_this_vault = False
+        else:
+            at_this_vault = any(tok in loc_text for tok in v_cfg["node_tokens"])
         sponsored, sponsor_name = has_companion_vault_sponsorship(session, user_id, v_key)
-        authorized = (player_fac_key == v_key) or (player_fac_rank >= 3 and at_this_vault) or sponsored
+        outlaw_pair = v_key in ANOMALOUS_OUTLAW_ARCHETYPES or player_fac_key in ANOMALOUS_OUTLAW_ARCHETYPES
+        authorized = (
+            (player_fac_key == v_key)
+            or (not outlaw_pair and player_fac_rank >= 3 and at_this_vault)
+            or sponsored
+        )
         if at_this_vault and authorized:
             lbl = f"{v_cfg['label']}" + (f" (Sponsored by {sponsor_name})" if sponsored and player_fac_key != v_key else "")
             channels_active.append({"channel": f"vault:{v_key}", "label": lbl})
@@ -520,7 +596,7 @@ def get_available_patrons_for_context(
                 _add_offer(synth, f"vault:{v_key}", f"{lbl} — Contained Specimen")
 
     # Also allow player's own joined faction vault archive if they have captured sapient specimens and are in HQ
-    if contained_records and any(k in loc_text for k in ("hq", "headquarters", "vault", "pagoda", "sanctum", "agency")):
+    if contained_records and any(k in loc_text for k in ("hq", "headquarters", "vault", "pagoda", "sanctum", "agency", "shadow exchange", "auction pen", "holding cell")):
         for rec in contained_records:
             synth = synthesize_procedural_sapient_patron(rec, scenario_or_key=scen_key, lang=lang)
             _add_offer(synth, "vault:captured", "Contained Sapient Specimen Archive")
@@ -1004,6 +1080,10 @@ def execute_pact_ritual_action(
         tithe = cur_row.get("tithe_schedule") or {}
         keywords = [str(k).lower() for k in (tithe.get("item_keywords") or ["incense", "charm", "ration", "tonic"])]
         credit_cost = int(tithe.get("credit_fallback") or (50 + int(cur_row.get("unpaid_blood_debt") or 0) * 2))
+        from mechanics.social.factions import faction_bonus_active, get_anomalous_faction_state
+        f_state_feed = get_anomalous_faction_state(sid, uid)
+        if faction_bonus_active("cult_faction", f_state_feed):
+            credit_cost = max(1, int(round(credit_cost * 0.50)))
 
         inv = db.get_inventory(uid) or []
         matched_item = None

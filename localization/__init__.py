@@ -192,6 +192,16 @@ def format_quest_travel_label(destination: str, language: str = "en") -> str:
     tpl = get_quest_ui_label("quest_travel_to", language)
     return tpl.format(dest=dest) if "{dest}" in tpl else f"{tpl} {dest}".strip()
 
+
+def format_quest_dialogue_handoff_label(npc: str, destination: str, language: str = "en") -> str:
+    """Formats a localized dialogue-exit quest handoff choice label."""
+    npc_clean = str(npc or "").strip() or "them"
+    dest_clean = str(destination or "").strip()
+    tpl = get_quest_ui_label("quest_wrap_up_and_head_to", language)
+    if "{npc}" in tpl or "{dest}" in tpl:
+        return tpl.format(npc=npc_clean, dest=dest_clean).strip()
+    return f"{tpl} {dest_clean}".strip()
+
 def get_pact_ui_label(key: str, language: str = "en") -> str:
     """Returns a localized Entity Contracts / Devil Pacts UI string with fallback to English."""
     lang = (language or "en").lower().strip()[:2]
@@ -234,6 +244,7 @@ __all__ = [
     "get_folklore_sanctuary_label",
     "get_quest_ui_label",
     "format_quest_travel_label",
+    "format_quest_dialogue_handoff_label",
     "get_pact_ui_label",
     "get_anomalous_site_ui_label",
     "en",

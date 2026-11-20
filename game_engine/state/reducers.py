@@ -461,6 +461,12 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
                 completed_sub_quests.append(csq)
         if int(pre_q.get("deduction_xp_bonus") or 0) > 0:
             outcome["_deduction_xp_bonus"] = int(pre_q["deduction_xp_bonus"])
+        if isinstance(outcome, dict) and pre_q.get("quests_advanced_this_turn"):
+            cur_qadv = list(outcome.get("_quests_advanced_this_turn") or [])
+            for aq in pre_q["quests_advanced_this_turn"]:
+                if aq and aq not in cur_qadv:
+                    cur_qadv.append(aq)
+            outcome["_quests_advanced_this_turn"] = cur_qadv
     newly_discovered_clues = []
     already_claimed_qids = {
         str(rn.get("quest_id"))
@@ -1243,20 +1249,48 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
     waypoint_notices = list(outcome.get("_waypoint_notices") or [])
     pre_quest_info = (outcome.get("_pre_turn_quests") if isinstance(outcome, dict) else None) or {}
     advanced_this_turn = {
-        ( k[0], k[1] )
+        (k[0], k[1])
         for k in (pre_quest_info.get("advanced_keys") or [])
         if isinstance(k, (tuple, list)) and len(k) == 2
     }  # Track (qid, so_id) to prevent pre-turn + post-turn multi-stage cascading in a single turn
-  
+    advanced_main_qids: set[str] = {
+        str(q)
+        for q in (
+            list(outcome.get("_quests_advanced_this_turn") or [])
+            + list(pre_quest_info.get("quests_advanced_this_turn") or [])
+        )
+        if q
+    }
+    for ak_qid, ak_so in advanced_this_turn:
+        if ak_qid and ak_so in (None, 0):
+            advanced_main_qids.add(str(ak_qid))
+
+    def _record_main_adv(adv_qid: str) -> None:
+        if not adv_qid:
+            return
+        advanced_main_qids.add(adv_qid)
+        if isinstance(outcome, dict):
+            q_list = list(outcome.get("_quests_advanced_this_turn") or [])
+            if adv_qid not in q_list:
+                q_list.append(adv_qid)
+                outcome["_quests_advanced_this_turn"] = q_list
+
     # We need to check all active quests & sub-objectives against current location
     active_quests = db.get_session_quests(session_id, status="Active")
     for q in active_quests:
         qid = q["quest_id"]
-        # Check parent quest (e.g. Bounties) if not already advanced pre-turn
-        n = try_advance_on_arrival(session_id, qid, None, current_location) if (qid, None) not in advanced_this_turn else None
+        sub_objs = q.get("sub_objectives", []) or []
+        has_structured_main = bool(isinstance(sub_objs, list) and any(isinstance(so, dict) and so.get("id") == 0 for so in sub_objs))
+        # Check parent quest (e.g. legacy Bounties) if not already advanced pre-turn and not structured sub_obj=0
+        n = (
+            try_advance_on_arrival(session_id, qid, None, current_location)
+            if (not has_structured_main and qid not in advanced_main_qids and (qid, None) not in advanced_this_turn)
+            else None
+        )
         if n:
             waypoint_notices.append(n)
             advanced_this_turn.add((qid, None))
+            _record_main_adv(qid)
             if n.get("all_stages_complete"):
                 evt = QuestCompletedEvent(session_id=session_id, quest_id=qid, party_uids=party_uids)
                 bus.publish(evt)
@@ -1281,14 +1315,18 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
         
         # Check sub-objectives (allow any order, but max 1 completion per turn)
         if not any(k[0] == qid and k[1] is not None for k in advanced_this_turn):
-            for so in q.get("sub_objectives", []):
+            for so in sub_objs:
                 if isinstance(so, dict) and not so.get("completed"):
                     so_id = so.get("id")
+                    if so_id == 0 and qid in advanced_main_qids:
+                        continue
                     if so_id is not None and (qid, so_id) not in advanced_this_turn:
                         n = try_advance_on_arrival(session_id, qid, so_id, current_location)
                         if n:
                             waypoint_notices.append(n)
                             advanced_this_turn.add((qid, so_id))
+                            if so_id == 0:
+                                _record_main_adv(qid)
                             comp_st = int(n.get("completed_stage_index") or n.get("stage_completed") or 1)
                             if so_id == 0 and comp_st >= 1:
                                 try:
@@ -1386,7 +1424,9 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
         if not is_travel_only_act and not (is_movement_act and not is_quest_act) and not is_anomaly_inquiry_act:
             for q in active_quests:
                 qid = q["quest_id"]
-                if (qid, None) not in advanced_this_turn:
+                q_subs = q.get("sub_objectives", []) or []
+                has_structured_main = bool(isinstance(q_subs, list) and any(isinstance(so, dict) and so.get("id") == 0 for so in q_subs))
+                if not has_structured_main and qid not in advanced_main_qids and (qid, None) not in advanced_this_turn:
                     active_wp = db.get_active_waypoint(session_id, qid, None)
                     if active_wp:
                         label_lower = (active_wp.get("stage_label") or "").lower()
@@ -1408,7 +1448,9 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                 )
                                 if n:
                                     waypoint_notices.append(n)
-                                    advanced_this_turn.add((qid, None))
+                                    if not n.get("is_bonus_clue"):
+                                        advanced_this_turn.add((qid, None))
+                                        _record_main_adv(qid)
                                     if n.get("all_stages_complete"):
                                         evt = QuestCompletedEvent(session_id=session_id, quest_id=qid, party_uids=party_uids)
                                         bus.publish(evt)
@@ -1421,9 +1463,11 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                 
                 # Check sub-objectives (allow any order, but max 1 completion per turn)
                 if not any(k[0] == qid and k[1] is not None for k in advanced_this_turn):
-                    for so in q.get("sub_objectives", []):
+                    for so in q_subs:
                         if isinstance(so, dict) and not so.get("completed"):
                             so_id = so.get("id")
+                            if so_id == 0 and qid in advanced_main_qids:
+                                continue
                             if so_id is not None and (qid, so_id) not in advanced_this_turn:
                                 active_wp = db.get_active_waypoint(session_id, qid, so_id)
                                 if active_wp:
@@ -1454,14 +1498,17 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
                                         )
                                         if n:
                                             waypoint_notices.append(n)
-                                            advanced_this_turn.add((qid, so_id))
-                                            comp_st = int(n.get("completed_stage_index") or n.get("stage_completed") or 1)
-                                            if so_id == 0 and comp_st >= 1:
-                                                try:
-                                                    from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
-                                                    sync_dossier_main_stage_advance(session_id, qid, comp_st)
-                                                except Exception:
-                                                    pass
+                                            if not n.get("is_bonus_clue"):
+                                                advanced_this_turn.add((qid, so_id))
+                                                if so_id == 0:
+                                                    _record_main_adv(qid)
+                                                comp_st = int(n.get("completed_stage_index") or n.get("stage_completed") or 1)
+                                                if so_id == 0 and comp_st >= 1:
+                                                    try:
+                                                        from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+                                                        sync_dossier_main_stage_advance(session_id, qid, comp_st)
+                                                    except Exception:
+                                                        pass
                                             break
   
     if waypoint_notices:

@@ -417,6 +417,80 @@ def mutate_anomalous_site_state(
     return new_site
 
 
+def is_outlaw_hq_subnode(node_id: str) -> str:
+    """Return owning outlaw archetype if `node_id` is an Outlaw HQ wing (excluding starter safehouse `sub_*_res_*` rooms)."""
+    nid = str(node_id or "").strip().lower()
+    if nid.startswith("sub_cult_") and not nid.startswith("sub_cult_res_"):
+        return "cult_faction"
+    if nid.startswith("sub_synd_") and not nid.startswith("sub_synd_res_"):
+        return "clandestine_faction"
+    return ""
+
+
+def get_hq_membership_mode(
+    session_id: int = 0,
+    node_id: str = "",
+    location_str: str = "",
+) -> str:
+    """
+    Classify an Outlaw HQ node/location for dual-state behavior:
+    - ``"open_threshold"``: open peaceful entrance thresholds (``sub_cult_entrance``, ``sub_synd_entrance``)
+    - ``"allied_hub"``: player actively belongs to the owning faction (hazards & random spawns off; +15% ambient kept)
+    - ``"hostile_raid"``: outsider / stateless probe inside an outlaw HQ inner wing (Grade IV hostile_hq)
+    - ``""``: not a dual-state outlaw HQ site
+    """
+    nid = str(node_id or "").strip().lower()
+    loc_low = str(location_str or "").strip().lower()
+    combined = f"{nid} {loc_low}"
+    if nid.startswith(("sub_cult_res_", "sub_synd_res_")) or "sub_cult_res_" in loc_low or "sub_synd_res_" in loc_low:
+        return ""
+
+    owner_arch = is_outlaw_hq_subnode(nid)
+    if not owner_arch:
+        if "loc_cult_sanctum_hq" in nid or any(
+            tok in loc_low for tok in (
+                "hidden sanctum", "ward-sealed threshold", "acolyte cloister",
+                "resonant fracture altar", "sacrificial entity holding",
+                "forbidden apocrypha", "ritual athame", "ossuary armory",
+                "covenant vestment", "warded silk loom", "ichor distillation",
+                "blood-letting apotheca", "initiate refectory", "abyssal conduit inner sanctum",
+            )
+        ):
+            owner_arch = "cult_faction"
+        elif "loc_clandestine_syndicate_hq" in nid or any(
+            tok in loc_low for tok in (
+                "shadow exchange", "biometric vault door", "mercenary security guardroom",
+                "black-budget brokerage", "contraband entity auction", "weaponized cognitohazard",
+                "black-bag ballistics", "suppressed ordnance", "faraday-weave",
+                "counter-surveillance tailor", "dead-drop espresso", "broker commissary",
+                "soundproof standby safehouse", "directorate black-ledger",
+            )
+        ):
+            owner_arch = "clandestine_faction"
+
+    if not owner_arch:
+        return ""
+
+    if nid in ("sub_cult_entrance", "sub_synd_entrance") or (
+        not nid.startswith("sub_") and (
+            "ward-sealed threshold" in combined
+            or "biometric vault door entrance" in combined
+        )
+    ):
+        return "open_threshold"
+
+    if session_id and int(session_id) > 0:
+        try:
+            from mechanics.social.factions import get_anomalous_faction_state
+            f_state = get_anomalous_faction_state(int(session_id))
+            if str((f_state or {}).get("faction_archetype_key") or "").strip().lower() == owner_arch:
+                return "allied_hub"
+        except Exception:
+            pass
+
+    return "hostile_raid"
+
+
 def get_site_crowd_stillness_text(
     location_str: str = "",
     scen_key: str = "anomalous_incursions",

@@ -1171,13 +1171,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                         </div>
                       )}
 
-                      {!activeStoryQuest.climax_ready && subObjectives.length === 0 && activeStoryQuest.target_location && (
+                      {!activeStoryQuest.climax_ready && subObjectives.length === 0 && activeStoryQuest.target_location && activeStoryQuest.target_location !== 'Hidden Lair' && (
                         <div className="flex items-center justify-between gap-2 text-[11px] text-amber-300 bg-amber-950/30 px-2.5 py-1.5 rounded border border-amber-700/40">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <MapPin size={12} className="shrink-0" />
                             <span className="truncate">{t('quests.waypoint_lead', '📍 Waypoint Lead:')} <strong>{formatCleanLocation(activeStoryQuest.target_location)}</strong></span>
                           </div>
-                          {onOpenWorldMap && activeStoryQuest.target_location !== 'Hidden Lair' && (
+                          {onOpenWorldMap && (
                             <button
                               type="button"
                               onClick={() => onOpenWorldMap(activeStoryQuest.target_location)}
@@ -1434,13 +1434,13 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                                       {t('quests.current_step', '🎯 Current Step:')} {cleanProseLocations(q.stage_label)}
                                     </div>
                                   )}
-                                  {q.target_location && (
+                                  {q.target_location && q.target_location !== 'Hidden Lair' && (
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-1 text-[11px] text-amber-300 min-w-0">
                                         <MapPin size={12} className="text-amber-400 shrink-0" />
                                         <span className="truncate" title={formatFullLocationPath(q.target_location)}>📍 <strong>{formatCleanLocation(q.target_location)}</strong></span>
                                       </div>
-                                      {onOpenWorldMap && q.target_location !== 'Hidden Lair' && (
+                                      {onOpenWorldMap && (
                                         <button
                                           type="button"
                                           onClick={() => onOpenWorldMap(q.target_location)}
@@ -1589,10 +1589,15 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                   {availableBounties.map((b, idx) => {
                     const bId = b.quest_id || `bounty-${idx}`;
                     const isExpanded = expandedBounties[bId] ?? false;
+                    const isLocked = b.anomalous_eligible === false;
                     return (
                       <div
                         key={bId}
-                        className="bg-black/50 border border-fantasy-border/60 hover:border-amber-600/50 rounded-lg p-2.5 space-y-2 transition-all"
+                        className={`bg-black/50 border rounded-lg p-2.5 space-y-2 transition-all ${
+                          isLocked
+                            ? 'border-rose-800/50 opacity-85'
+                            : 'border-fantasy-border/60 hover:border-amber-600/50'
+                        }`}
                       >
                         <div 
                           onClick={() => toggleBounty(bId)}
@@ -1610,6 +1615,14 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                             )}
                           </div>
                           <div className="flex items-center gap-1 shrink-0 mt-0.5">
+                            {isLocked && (
+                              <span
+                                className="text-[9px] px-1.5 py-0.5 bg-rose-950/70 text-rose-300 rounded font-bold uppercase border border-rose-700/60"
+                                title={b.anomalous_lock_reason || t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')}
+                              >
+                                🔒
+                              </span>
+                            )}
                             <span className="text-[9px] px-1.5 py-0.5 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/50">
                               {b.quest_type || 'Contract'}
                             </span>
@@ -1632,6 +1645,12 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                               </div>
                             )}
 
+                            {isLocked && b.anomalous_lock_reason && (
+                              <div className="bg-rose-950/35 border border-rose-700/50 rounded px-2 py-1 text-[10px] text-rose-300 leading-snug">
+                                🔒 {b.anomalous_lock_reason}
+                              </div>
+                            )}
+
                             <div className="flex items-center justify-between pt-1.5 border-t border-fantasy-border/30">
                               <div className="flex items-center gap-2.5 text-[10px] font-mono">
                                 {b.reward_gold ? <span className="text-amber-300">+{b.reward_gold} G</span> : null}
@@ -1642,23 +1661,30 @@ const QuestLogPanel = ({ codexHook, onRefreshCharacter, character, onOpenWorldMa
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <button
                                   type="button"
-                                  disabled={Boolean(busyAction)}
+                                  disabled={Boolean(busyAction) || isLocked}
                                   onClick={() => handleBountyContract(b.quest_id, 'accept', false)}
-                                  className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 text-[11px] font-bold transition-colors cursor-pointer"
+                                  title={isLocked ? (b.anomalous_lock_reason || t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')) : undefined}
+                                  className={`flex items-center gap-1 px-2.5 py-1 rounded border text-[11px] font-bold transition-colors ${
+                                    isLocked
+                                      ? 'bg-neutral-900/60 text-gray-500 border-neutral-700/50 opacity-50 cursor-not-allowed'
+                                      : 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border-emerald-700/60 cursor-pointer'
+                                  }`}
                                 >
                                   <PlusCircle size={12} />
-                                  <span>{t('quests.accept', 'Accept')}</span>
+                                  <span>{isLocked ? t('phone.bounties.locked_faction_btn', '🔒 Board Restricted') : t('quests.accept', 'Accept')}</span>
                                 </button>
-                                <button
-                                  type="button"
-                                  disabled={Boolean(busyAction)}
-                                  onClick={() => handleBountyContract(b.quest_id, 'accept', true)}
-                                  className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-200 border border-amber-700/60 text-[10px] font-bold transition-colors cursor-pointer"
-                                  title={t('quests.haggle_advance_tooltip', 'Attempt a CHA check to haggle an upfront Gold advance')}
-                                >
-                                  <Coins size={11} />
-                                  <span>{t('quests.accept_advance', 'Accept + Advance (CHA)')}</span>
-                                </button>
+                                {!isLocked && (
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(busyAction)}
+                                    onClick={() => handleBountyContract(b.quest_id, 'accept', true)}
+                                    className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/60 hover:bg-amber-900/70 text-amber-200 border border-amber-700/60 text-[10px] font-bold transition-colors cursor-pointer"
+                                    title={t('quests.haggle_advance_tooltip', 'Attempt a CHA check to haggle an upfront Gold advance')}
+                                  >
+                                    <Coins size={11} />
+                                    <span>{t('quests.accept_advance', 'Accept + Advance (CHA)')}</span>
+                                  </button>
+                                )}
                               </div>
                             </div>
                           </div>

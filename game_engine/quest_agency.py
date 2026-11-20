@@ -16,7 +16,7 @@ from game_engine.quest_lifecycle import (
 from mechanics.narrative.campaign_spine import update_campaign_ending_axes
 from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.narrative.dossier_compiler import format_venue_display
-from mechanics.narrative.quest_engines import render_world_scar_spec
+from mechanics.narrative.quest_engines import get_masked_climax_teaser, render_world_scar_spec
 from mechanics.narrative.threat_clock import (
     get_threat_clock_view,
     get_threat_threshold_text,
@@ -242,6 +242,11 @@ def resolve_caseboard_deduction(
                     climax["is_unlocked"] = True
                     climax["shortcut_unlocked"] = True
                     climax["bypass_unlocked"] = True
+                    clr_locs = [str(x) for x in (climax.get("earned_clearance_locations") or []) if x]
+                    clx_l = str(climax.get("location") or "").strip()
+                    if clx_l and clx_l not in clr_locs:
+                        clr_locs.append(clx_l)
+                    climax["earned_clearance_locations"] = clr_locs
                     m_stages = [dict(st) for st in (climax.get("main_stages") or []) if isinstance(st, dict)]
                     has_explicit_climax = any(bool(s.get("is_climax_stage")) for s in m_stages)
                     for idx_ms, st_item in enumerate(m_stages):
@@ -276,6 +281,32 @@ def resolve_caseboard_deduction(
                     engaged_flag=1,
                     sync_projection=True,
                 )
+                if twist.get("is_discovered") and twist.get("twist_type") == "client_culprit":
+                    cb_flip = dos.get("cast_bindings") or {}
+                    cli_flip = str((cb_flip.get("client") or {}).get("name") or "").strip() if isinstance(cb_flip.get("client"), dict) else ""
+                    if cli_flip and cli_flip.lower() != str(climax.get("true_culprit") or "").strip().lower():
+                        try:
+                            from mechanics.narrative.chapter_plan import (
+                                apply_deterministic_downstream_restitch,
+                                schedule_restitch_downstream_quest_stages,
+                            )
+
+                            restitched_cb = apply_deterministic_downstream_restitch(
+                                session_id,
+                                qid,
+                                "twist_culprit_flip",
+                                {"new_culprit": cli_flip},
+                            )
+                            if restitched_cb:
+                                climax = dict(restitched_cb.get("climax_spec") or climax)
+                            schedule_restitch_downstream_quest_stages(
+                                session_id,
+                                qid,
+                                "twist_culprit_flip",
+                                {"new_culprit": cli_flip},
+                            )
+                        except Exception:
+                            pass
                 unlocked_opts = []
                 try:
                     from game_engine.quest_turn_resolver import unlock_hidden_quest_optional
@@ -972,6 +1003,7 @@ def redact_quest_for_fog_of_war(
     - Attaches `fow` (`build_fog_of_war_quest_payload`) and removes raw internal `dossier` blob.
     """
     q_out = dict(quest or {})
+    q_out.pop("_split_brain_checked", None)
     dos = q_out.get("dossier")
     fow = build_fog_of_war_quest_payload(session_id, q_out, dossier=dos, reveal_all=reveal_all)
     q_out["fow"] = fow
@@ -991,6 +1023,13 @@ def redact_quest_for_fog_of_war(
     raw_subs = list(q_out.get("sub_objectives") or [])
     filtered_subs: List[Dict[str, Any]] = []
     climax_unlocked = bool((fow.get("climax") or {}).get("is_unlocked", True))
+    sess_red = db.get_session(session_id) or {} if session_id else {}
+    lang_red = str(sess_red.get("narration_language") or sess_red.get("language") or "en").strip().lower() or "en"
+    masked_teaser_red = get_masked_climax_teaser(
+        str((dos or {}).get("engine") or q_out.get("engine") or "MYSTERY_CASE"),
+        (dos or {}).get("climax_spec") or {},
+        lang=lang_red,
+    )
 
     for so in raw_subs:
         if not isinstance(so, dict):
@@ -1013,9 +1052,14 @@ def redact_quest_for_fog_of_war(
                     and idx_s == tot_st - 1
                 )
                 if is_final_secret:
-                    st_c["stage_label"] = "Uncover leads or Caseboard clues to expose the final confrontation"
-                    st_c["text"] = st_c["stage_label"]
+                    st_c["stage_label"] = masked_teaser_red
+                    st_c["text"] = masked_teaser_red
                     st_c["target_location"] = "Hidden Lair"
+                    if "static_target_location" in st_c:
+                        st_c["static_target_location"] = "Hidden Lair"
+                    if "effective_location" in st_c:
+                        st_c["effective_location"] = "Hidden Lair"
+                    st_c.pop("live_scheduled_location", None)
                     st_c["target_npc"] = ""
                     st_c["clue_sources"] = []
                 else:
@@ -1049,16 +1093,28 @@ def redact_quest_for_fog_of_war(
         cur_tloc = str(q_out.get("target_location") or "").strip()
         if cur_tloc and (
             (climax_loc_raw and cur_tloc.lower() == climax_loc_raw.lower())
-            or str((fow.get("climax") or {}).get("location") or "") == "Hidden Lair"
+            or not climax_unlocked
             and not q_out.get("climax_ready")
             and q_out.get("has_structured_objectives")
             and len((fow.get("main_objective") or {}).get("stages") or []) > 0
             and str(((fow.get("main_objective") or {}).get("stages") or [])[-1].get("status") or "").lower() == "active"
         ):
             q_out["target_location"] = "Hidden Lair"
+            if "static_target_location" in q_out:
+                q_out["static_target_location"] = "Hidden Lair"
+            if "effective_location" in q_out:
+                q_out["effective_location"] = "Hidden Lair"
+            q_out.pop("live_scheduled_location", None)
             q_out["target_npc"] = ""
+        elif climax_loc_raw:
+            for loc_k in ("static_target_location", "effective_location"):
+                if str(q_out.get(loc_k) or "").strip().lower() == climax_loc_raw.lower():
+                    q_out[loc_k] = "Hidden Lair"
+            if str(q_out.get("live_scheduled_location") or "").strip().lower() == climax_loc_raw.lower():
+                q_out.pop("live_scheduled_location", None)
 
     if q_out.get("waypoints"):
+        climax_loc_cmp = str(((dos or {}).get("climax_spec") or {}).get("location") or "").strip().lower()
         total_main_st = len((fow.get("main_objective") or {}).get("stages") or [])
         cleaned_wps: List[Dict[str, Any]] = []
         for w in q_out["waypoints"]:
@@ -1072,15 +1128,29 @@ def redact_quest_for_fog_of_war(
             ):
                 continue
             w_c = dict(w)
-            if (
+            is_locked_secret_wp = bool(
                 not climax_unlocked
                 and not reveal_all
                 and total_main_st > 0
                 and int(w_c.get("sub_obj_id", -1) if w_c.get("sub_obj_id") is not None else -1) == 0
                 and int(w_c.get("stage_index") or 0) >= total_main_st
-            ):
-                w_c["stage_label"] = "Uncover leads or Caseboard clues to expose the final confrontation"
+            )
+            leaks_climax_loc = bool(
+                not climax_unlocked
+                and not reveal_all
+                and climax_loc_cmp
+                and any(
+                    str(w_c.get(k) or "").strip().lower() == climax_loc_cmp
+                    for k in ("target_location", "static_target_location", "effective_location", "live_scheduled_location")
+                )
+            )
+            if is_locked_secret_wp or leaks_climax_loc:
+                if is_locked_secret_wp:
+                    w_c["stage_label"] = masked_teaser_red
                 w_c["target_location"] = "Hidden Lair"
+                w_c["static_target_location"] = "Hidden Lair"
+                w_c["effective_location"] = "Hidden Lair"
+                w_c.pop("live_scheduled_location", None)
                 w_c["target_npc"] = ""
             cleaned_wps.append(w_c)
         q_out["waypoints"] = cleaned_wps
@@ -1221,6 +1291,12 @@ def build_fog_of_war_quest_payload(
         fow_main_stages: List[Dict[str, Any]] = []
         eff_sess_fow = session if session is not None else (db.get_session(session_id) if session_id else {})
         cur_loc_fow = str((eff_sess_fow or {}).get("current_location") or "").strip()
+        lang_fow_ms = str((eff_sess_fow or {}).get("narration_language") or (eff_sess_fow or {}).get("language") or "en").strip().lower() or "en"
+        masked_climax_teaser = get_masked_climax_teaser(
+            str(dos.get("engine") or quest.get("engine") or "MYSTERY_CASE"),
+            climax,
+            lang=lang_fow_ms,
+        )
         for idx_ms, ms in enumerate(raw_main_stages):
             st_idx = int(ms.get("stage_index", idx_ms + 1) or (idx_ms + 1))
             live_wp_stat = wp_status_by_idx.get(st_idx)
@@ -1232,7 +1308,7 @@ def build_fog_of_war_quest_payload(
                 ms_stat = "active"
             ms_done = ms_stat.lower() in ("completed", "bypassed") or bool(ms.get("completed"))
             ms_lbl = (
-                "Uncover leads or Caseboard clues to expose the final confrontation"
+                masked_climax_teaser
                 if is_secret_climax
                 else sanitize_dossier_prose(str(ms.get("stage_label") or ms.get("label") or ""))
             )
@@ -1379,6 +1455,7 @@ def build_fog_of_war_quest_payload(
         or "en"
     )
     threat_clock_view = get_threat_clock_view(dos, session=sess_for_tc, quest=quest, lang=lang_for_tc)
+    climax_teaser_out = get_masked_climax_teaser(str(dos.get("engine") or quest.get("engine") or "MYSTERY_CASE"), climax, lang=lang_for_tc)
 
     return {
         "dossier_stage": "compiled",
@@ -1399,7 +1476,8 @@ def build_fog_of_war_quest_payload(
         "climax": {
             "gate_type": climax.get("gate_type") or "open",
             "is_unlocked": climax_unlocked,
-            "location": climax.get("location") if climax_unlocked else "Hidden Lair (Uncover Leads / Caseboard)",
+            "location": climax.get("location") if climax_unlocked else climax_teaser_out,
+            "masked_climax_teaser": climax_teaser_out,
             "true_culprit": climax.get("true_culprit") if climax_unlocked else "",
             "has_boss_encounter": climax.get("boss_sheet") is not None,
             "boss_name": sanitize_dossier_prose(str((climax.get("boss_sheet") or {}).get("name") or "")) if climax_unlocked and climax.get("boss_sheet") else "",

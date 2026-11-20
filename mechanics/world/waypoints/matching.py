@@ -96,11 +96,38 @@ def is_hostile_or_lair_waypoint(wp: dict) -> bool:
     return False
 
 
-def _minutes_until_next_shift_open(shift_profile: str, safe_min: int, fallback_wake: int) -> int:
-    from mechanics.world.anchor_schedule import SHIFT_PROFILES, _normalize_shift_profile
-    norm = _normalize_shift_profile(shift_profile, has_route=False)
-    windows = SHIFT_PROFILES.get(norm, {}).get("work_windows") or []
-    waits = [((int(start) - safe_min) % 1440) or 1440 for start, _ in windows]
+def _minutes_until_next_shift_open(
+    shift_profile: str,
+    safe_min: int,
+    fallback_wake: int,
+    *,
+    npc_record: Optional[dict] = None,
+    current_day: int = 1,
+) -> int:
+    from mechanics.world.anchor_schedule import (
+        SHIFT_PROFILES,
+        _effective_shift_windows,
+        _normalize_shift_profile,
+    )
+    from mechanics.world.world_schedule import is_weekend
+
+    eff_rec = npc_record if isinstance(npc_record, dict) else {}
+    rec_basic = eff_rec.get("basic_info") if isinstance(eff_rec.get("basic_info"), dict) else {}
+    pt_raw = eff_rec.get("part_time_shift") or rec_basic.get("part_time_shift")
+    if isinstance(pt_raw, dict) and pt_raw.get("venue_node_id"):
+        start_key = "weekend_start" if is_weekend(current_day) else "weekday_start"
+        if pt_raw.get(start_key) is not None:
+            try:
+                pt_start = int(pt_raw[start_key]) % 1440
+                return ((pt_start - safe_min) % 1440) or 1440
+            except (TypeError, ValueError):
+                pass
+
+    has_route = bool(eff_rec.get("roaming_route") or rec_basic.get("roaming_route"))
+    norm = _normalize_shift_profile(shift_profile, has_route=has_route)
+    profile = SHIFT_PROFILES.get(norm, {})
+    windows, _, _ = _effective_shift_windows(norm, profile, eff_rec) if profile else ([], [], [])
+    waits = [((int(start) - safe_min) % 1440) or 1440 for start, _ in (windows or [])]
     if waits:
         return min(waits)
     wait_mins = (fallback_wake - safe_min) % 1440
@@ -646,17 +673,28 @@ def get_waypoint_npc_schedule_info(
                 work_nid = str(npc_record.get("workplace_node_id") or "").strip()
                 at_pinned_venue = bool(wp_node_id and sched_nid_now and sched_nid_now == wp_node_id)
 
+                from mechanics.world.anchor_schedule import _parse_roaming_route
                 from mechanics.world.presence_doorbell import resolve_sleep_windows
                 sleep_wins = resolve_sleep_windows(npc_record, scen_key)
                 in_shift_sleep = any(s <= safe_min < e for s, e in sleep_wins)
+                is_nocturnal_vendor = (
+                    shift_prof == "street_vendor"
+                    and bool(npc_record.get("nocturnal") or rec_basic.get("nocturnal"))
+                )
                 if shift_prof in ("day", "student", "roaming_merchant", "") and not night_allowed:
                     in_shift_sleep = in_shift_sleep or (safe_min >= 1200 or safe_min < wake_min)
 
-                if in_shift_sleep and not at_pinned_venue and not (night_allowed and shift_prof != "night"):
+                if in_shift_sleep and not at_pinned_venue and (is_nocturnal_vendor or not (night_allowed and shift_prof != "night")):
                     wait_mins = (
                         ((wake_min - safe_min) % 1440) or 60
                         if shift_prof in ("day", "student", "roaming_merchant", "")
-                        else _minutes_until_next_shift_open(shift_prof or "day", safe_min, wake_min)
+                        else _minutes_until_next_shift_open(
+                            shift_prof or "day",
+                            safe_min,
+                            wake_min,
+                            npc_record=npc_record,
+                            current_day=curr_day,
+                        )
                     )
                     return {
                         "effective_location": static_loc,
@@ -670,10 +708,22 @@ def get_waypoint_npc_schedule_info(
                         "wake_minute": wake_min,
                     }
 
-                if not (shift_prof != "night" and night_allowed) and (
+                route_stops = set(
+                    _parse_roaming_route(npc_record.get("roaming_route"))
+                    + _parse_roaming_route(rec_basic.get("roaming_route"))
+                    + _parse_roaming_route(rec_basic.get("weekend_route"))
+                )
+                on_active_route = bool(sched_nid_now and sched_nid_now in route_stops)
+                if not (shift_prof != "night" and night_allowed and not is_nocturnal_vendor) and not on_active_route and (
                     (wp_node_id and not at_pinned_venue) or (not wp_node_id and work_nid and sched_nid_now != work_nid)
                 ):
-                    wait_mins = _minutes_until_next_shift_open(shift_prof or "day", safe_min, wake_min)
+                    wait_mins = _minutes_until_next_shift_open(
+                        shift_prof or "day",
+                        safe_min,
+                        wake_min,
+                        npc_record=npc_record,
+                        current_day=curr_day,
+                    )
                     return {
                         "effective_location": static_loc,
                         "static_location": static_loc,
@@ -1200,21 +1250,47 @@ def _extract_keyword_stems(words: list[str] | set[str]) -> set[str]:
     return stems
 
 
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
+_UNICODE_WORD_RE = re.compile(r"[^\W\d_\u4e00-\u9fff]+", flags=re.UNICODE)
+_CJK_SINGLE_PARTICLES = frozenset("的了在是和去看看找把将向于与及或让从到")
+
+
+def _extract_multilingual_tokens(text: str, stop_words: set[str], min_len: int = 3) -> set[str]:
+    """Extracts Unicode word stems and 2-char CJK bigrams without ASCII fallthrough."""
+    low = str(text or "").lower()
+    if not low.strip():
+        return set()
+    latin_words = [
+        w for w in _UNICODE_WORD_RE.findall(low)
+        if len(w) >= min_len and w not in stop_words
+    ]
+    tokens = _extract_keyword_stems(latin_words)
+    if min_len <= 3:
+        for w in latin_words:
+            if len(w) == 3:
+                tokens.add(w)
+    for run in _CJK_RUN_RE.findall(low):
+        if len(run) >= 2:
+            for idx_c in range(len(run) - 1):
+                tokens.add(run[idx_c:idx_c + 2])
+        elif run not in _CJK_SINGLE_PARTICLES:
+            tokens.add(run)
+    return tokens
+
+
 def check_action_matches_waypoint(
     action_text: str, narrative: str, stage_label: str,
     sub_obj_text: str = "", target_npc: str = ""
 ) -> bool:
     """
-    Verifies that the player's action or resulting narrative actually pertains
-    to the specific waypoint stage or sub-objective before marking it completed.
-    Prevents unrelated skill checks (e.g. asking gossip) from completing unrelated
-    objectives (e.g. searching for a dropped notebook in the debris).
+    Verifies that the player's action pertains to the specific waypoint stage
+    or sub-objective before marking it completed (no atmospheric prose matching
+    and no empty-ASCII fallthrough on non-Latin locales).
     """
-    if not action_text and not narrative:
-        return True
+    if not str(action_text or "").strip():
+        return False
 
     act_lower = str(action_text or "").lower()
-    narr_lower = str(narrative or "").lower()
 
     # Movement and travel actions must NOT complete interaction/skill check waypoints
     from mechanics.narrative.intent import is_travel_action, is_conversational_action
@@ -1234,55 +1310,40 @@ def check_action_matches_waypoint(
     if is_conversational_action_flag and not is_dialogue_stage:
         return False
 
-    # 1. Target NPC match
+    # 1. Target NPC match against player's explicit action text only
     if target_npc and str(target_npc).strip():
-        t_npc_words = [w for w in str(target_npc).lower().split() if len(w) >= 3]
-        # Target NPC must be actively mentioned or addressed in the player's action
+        t_npc_words = [
+            w for w in str(target_npc).lower().split()
+            if (len(w) >= 2 if _CJK_RUN_RE.search(w) else len(w) >= 3)
+        ]
         if any(w in act_lower for w in t_npc_words):
             return True
-        # Or if player action has interaction verbs and NPC is actively interacted with in narrative
-        interact_verbs = {"talk", "speak", "ask", "confront", "approach", "deliver", "give", "hand", "tell", "interrogate", "bribe", "persuade", "consult", "meet", "spare"}
-        if any(v in act_lower for v in interact_verbs) and any(w in narr_lower for w in t_npc_words):
-            return True
 
-    # 2. Substantive keyword extraction from stage label and sub objective
+    # 2. Multilingual keyword extraction from stage label and sub-objective
     stop_words = {
         "the", "and", "for", "with", "from", "into", "onto", "among", "using", "about",
         "your", "their", "this", "that", "some", "what", "which", "when", "where",
         "search", "check", "area", "place", "room", "rooms", "zone", "find", "reach", "travel",
         "examine", "inspect", "investigate", "look", "stage", "task", "objective",
         "make", "take", "give", "help", "need", "must", "will", "have",
+        "are", "you", "was", "has", "had", "can", "not", "but", "she", "him", "her", "his",
+        "our", "out", "off", "all", "any", "one", "two",
         "classroom", "classrooms", "office", "offices", "hallway", "hallways", "corridor",
         "corridors", "building", "buildings", "desk", "desks", "return", "returning",
         "arrive", "arrival", "arriving", "student", "students", "homeroom", "school",
         "before", "after", "through", "across", "under", "over", "between", "while", "during",
-        "again", "then"
+        "again", "then",
     }
 
-    stage_words = re.findall(r"\b[a-z]{3,}\b", stage_lower)
-    stage_keywords = _extract_keyword_stems([w for w in stage_words if w not in stop_words])
+    stage_keywords = _extract_multilingual_tokens(stage_lower, stop_words, min_len=3)
+    sub_keywords = _extract_multilingual_tokens(str(sub_obj_text or "").lower(), stop_words, min_len=4)
 
-    sub_words = re.findall(r"\b[a-z]{4,}\b", str(sub_obj_text or "").lower())
-    sub_keywords = _extract_keyword_stems([w for w in sub_words if w not in stop_words])
-
-    # Priority A: Player's action text directly targets stage keywords or sub-objective keywords
     if stage_keywords and any(kw in act_lower for kw in stage_keywords):
         return True
     if sub_keywords and any(kw in act_lower for kw in sub_keywords):
         return True
 
-    # Priority B: Outcome narrative describes completing the stage.
-    if stage_keywords:
-        if any(kw in narr_lower for kw in stage_keywords):
-            return True
-        return False
-
-    if sub_keywords:
-        if any(kw in narr_lower for kw in sub_keywords):
-            return True
-        return False
-
-    return True
+    return False
 
 
 def does_action_target_waypoint(
@@ -1338,7 +1399,11 @@ def does_action_target_waypoint(
                     c_npc = str(cand.get("npc_name") or "").lower().strip()
                     if c_npc and any(tok in act_low for tok in c_npc.split() if len(tok) >= 3):
                         sc += 3
-                    hint_words = [w for w in re.findall(r"\b[a-z]{4,}\b", str(cand.get("approach_hint") or "").lower()) if w not in ("from", "with", "into", "this", "that")]
+                    hint_words = _extract_multilingual_tokens(
+                        str(cand.get("approach_hint") or ""),
+                        {"from", "with", "into", "this", "that"},
+                        min_len=4,
+                    )
                     sc += sum(1 for w in hint_words if w in act_low)
                     if sc > best_score:
                         best_score = sc

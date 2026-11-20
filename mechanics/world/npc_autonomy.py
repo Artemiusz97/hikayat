@@ -6,8 +6,15 @@ import hashlib
 import json
 from typing import Any, Mapping, Sequence
 
+from mechanics.world.anchor_schedule import _ANCHOR_ORIGINS, resolve_anchor_schedule_nodes
+from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
 from mechanics.world.schedule_blocks import get_time_block_key
 from mechanics.world.world_events.modifiers import is_node_locked_by_event
+
+_EXCLUDED_AUTONOMY_VENUES: frozenset[str] = frozenset({
+    SHARED_ABSTRACT_RESIDENCE_NODE,
+    "loc_rival_academy_away",
+})
 
 _BLOCK_SEQUENCE: tuple[str, ...] = ("morning", "lunch", "afternoon", "evening", "night")
 _FREE_SOCIAL_BLOCKS: frozenset[str] = frozenset({"lunch", "evening", "night"})
@@ -127,7 +134,8 @@ def is_npc_romance_shielded(
         if _contact_affinity(c) >= 30:
             return True
         rel_stat = _norm_key(c.get("relationship_status") or c.get("romance_stage"))
-        if rel_stat in ("crush", "dating", "engaged", "married", "partner", "lover"):
+        track_val = _norm_key(c.get("track"))
+        if track_val == "romantic" or rel_stat in ("romantic", "crush", "dating", "engaged", "married", "partner", "lover"):
             return True
 
     for t in player_ties or ():
@@ -205,6 +213,7 @@ def resolve_autonomy_node_override(
     active_events: Sequence[Mapping[str, Any]] = (),
     has_active_rendezvous_or_quest: bool = False,
     player_home_node_id: str = "",
+    scheduled_node_id: str = "",
 ) -> dict[str, Any] | None:
     """
     Computes an ephemeral current-day autonomy override without mutating baseline anchor schedules (`F4`).
@@ -224,7 +233,16 @@ def resolve_autonomy_node_override(
         raw_exp_day = saved_ov.get("expires_day") if saved_ov.get("expires_day") is not None else saved_ov.get("expiry_day")
         exp_day = int(raw_exp_day or cur_day)
         exp_block = _norm_key(saved_ov.get("expires_block") or saved_ov.get("expiry_block"))
-        if exp_day > cur_day or (exp_day == cur_day and (not exp_block or exp_block == cur_block)):
+        block_ok = (
+            not exp_block
+            or exp_block == cur_block
+            or (
+                cur_block in _BLOCK_SEQUENCE
+                and exp_block in _BLOCK_SEQUENCE
+                and _BLOCK_SEQUENCE.index(cur_block) <= _BLOCK_SEQUENCE.index(exp_block)
+            )
+        )
+        if exp_day > cur_day or (exp_day == cur_day and block_ok):
             return {
                 "node_id": str(saved_ov["node_id"]).strip(),
                 "reason": str(saved_ov.get("reason") or "autonomy_override"),
@@ -237,7 +255,7 @@ def resolve_autonomy_node_override(
             }
 
     unique_prop = _is_unique_proprietor(npc, basic)
-    scheduled_node = str(npc.get("scheduled_node_id") or npc.get("workplace_node_id") or "").strip()
+    scheduled_node = str(scheduled_node_id or npc.get("scheduled_node_id") or npc.get("workplace_node_id") or "").strip()
 
     # 2. D3 Crisis / Infirmary redirect when NPC's scheduled venue is locked by active World Pulse event
     events_payload = (
@@ -246,9 +264,17 @@ def resolve_autonomy_node_override(
         else {"active_macro_events": [dict(e) for e in (active_events or ()) if isinstance(e, Mapping)]}
     )
     if scheduled_node and active_events and is_node_locked_by_event(events_payload, scheduled_node):
-        safe_fallback = str(npc.get("home_node_id") or npc.get("hangout_node_id") or "").strip()
-        if not safe_fallback and "high_school" in _norm_key(scen_key):
-            safe_fallback = "loc_school_infirmary"
+        safe_fallback = ""
+        for cand in (npc.get("home_node_id"), basic.get("home_node_id"), npc.get("hangout_node_id")):
+            c_id = str(cand or "").strip()
+            if c_id and c_id != scheduled_node and not is_node_locked_by_event(events_payload, c_id):
+                safe_fallback = c_id
+                break
+        if not safe_fallback:
+            if "high_school" in _norm_key(scen_key) and not "anomalous" in _norm_key(scen_key):
+                safe_fallback = "loc_school_infirmary"
+            else:
+                safe_fallback = "zone_residential_abstract"
         if safe_fallback and safe_fallback != scheduled_node:
             return {
                 "node_id": safe_fallback,
@@ -276,7 +302,7 @@ def resolve_autonomy_node_override(
         and any(tok in traits_probe for tok in ("delinquent", "rebellious", "truant", "slacker", "troublemaker"))
     ):
         if _det_unit(f"{session_id}:{cur_day}:{cur_block}:{nkey}:truant") < 800:
-            truant_node = str(npc.get("hangout_node_id") or "loc_rooftop").strip()
+            truant_node = str(npc.get("hangout_node_id") or basic.get("hangout_node_id") or "loc_school_rooftop").strip()
             return {
                 "node_id": truant_node,
                 "reason": "truancy",
@@ -350,14 +376,49 @@ def _enumerate_crossed_ticks(old_day: int, old_min: int, new_day: int, new_min: 
     max_days = min(nd - od + 1, 7)
     for d_off in range(max_days):
         cur_d = od + d_off
-        start_idx = _BLOCK_SEQUENCE.index(old_b) if d_off == 0 and old_b in _BLOCK_SEQUENCE else 0
-        end_idx = _BLOCK_SEQUENCE.index(new_b) if cur_d == nd and new_b in _BLOCK_SEQUENCE else len(_BLOCK_SEQUENCE) - 1
+        if d_off == 0:
+            if old_b == "night" and (om % 1440) < 360:
+                start_idx = 0
+            else:
+                start_idx = _BLOCK_SEQUENCE.index(old_b) if old_b in _BLOCK_SEQUENCE else 0
+        else:
+            start_idx = 0
+        if cur_d == nd:
+            if new_b == "night" and (nm % 1440) < 360:
+                if d_off == 0:
+                    ticks.append((cur_d, "night"))
+                continue
+            end_idx = _BLOCK_SEQUENCE.index(new_b) if new_b in _BLOCK_SEQUENCE else len(_BLOCK_SEQUENCE) - 1
+        else:
+            end_idx = len(_BLOCK_SEQUENCE) - 1
         for b_idx in range(start_idx, end_idx + 1):
             ticks.append((cur_d, _BLOCK_SEQUENCE[b_idx]))
     return ticks
 
 
-def _resolve_npc_block_venue(row: Mapping[str, Any], block: str) -> str:
+def _resolve_npc_block_venue(
+    row: Mapping[str, Any],
+    block: str,
+    *,
+    day: int = 1,
+    scen_key: str = "fantasy",
+) -> str:
+    basic = _parse_json_dict(row.get("basic_info") or row.get("basic_info_json"))
+    origin_low = _norm_key(row.get("origin") or basic.get("origin"))
+    shift_prof = _norm_key(row.get("shift_profile") or basic.get("shift_profile"))
+    has_route = bool(row.get("roaming_route") or basic.get("roaming_route") or basic.get("weekend_route"))
+    if (origin_low in _ANCHOR_ORIGINS and origin_low != "legacy_adapter") or shift_prof or has_route:
+        rep_min = {"morning": 540, "lunch": 750, "afternoon": 960, "evening": 1140, "night": 1350}.get(block, 960)
+        a_sched = resolve_anchor_schedule_nodes(
+            {**dict(row), "_roster_premerged": True},
+            current_day=day,
+            scen_key=scen_key,
+            session_id=None,
+            current_minute=rep_min,
+        )
+        if isinstance(a_sched, dict):
+            return str(a_sched.get(block) or "").strip()
+
     if block in ("morning", "afternoon"):
         return str(row.get("workplace_node_id") or row.get("home_node_id") or "").strip()
     if block in ("lunch", "evening"):
@@ -421,11 +482,42 @@ def compute_boundary_autonomy_deltas(
         else:
             ties_by_pair[(min(pa, pb), max(pa, pb))] = t
 
-    active_roster = [
-        r for r in roster_rows
-        if _norm_key(r.get("person_key") or r.get("npc_id") or r.get("name"))
-        and _norm_key(r.get("staff_status") or "active") not in ("deceased", "departed", "removed")
-    ]
+    active_roster = []
+    priority_keys: set[str] = set()
+    for c in contacts or ():
+        for f in ("npc_id", "person_key", "npc_key", "name"):
+            kv = _norm_key(c.get(f))
+            if kv:
+                priority_keys.add(kv)
+    for t in all_ties or ():
+        if str(t.get("status") or "active").lower() != "active":
+            continue
+        for f in ("person_a_key", "person_b_key"):
+            kv = _norm_key(t.get(f))
+            if kv and not _is_player_ref(kv):
+                priority_keys.add(kv)
+
+    for r in roster_rows:
+        pk = _norm_key(r.get("person_key") or r.get("npc_id") or r.get("name"))
+        if not pk:
+            continue
+        r_basic = _parse_json_dict(r.get("basic_info") or r.get("basic_info_json"))
+        r_stat = _norm_key(r.get("staff_status") or r_basic.get("staff_status") or "active")
+        if r_stat in ("dead", "arrested", "deceased", "departed", "removed"):
+            continue
+        if bool(r.get("is_deceased") or r_basic.get("is_deceased")):
+            continue
+        if r.get("alive") is False or r_basic.get("alive") is False:
+            continue
+        active_roster.append(r)
+        r_aff = 0
+        try:
+            r_aff = int(r.get("affinity_score") or r.get("affinity") or r_basic.get("affinity_score") or 0)
+        except (TypeError, ValueError):
+            r_aff = 0
+        if bool(r.get("met_in_person") or r_basic.get("met_in_person")) or r_aff > 0:
+            priority_keys |= _npc_aliases(r)
+
     shield_cache: dict[str, bool] = {}
     for r in active_roster:
         pk = _norm_key(r.get("person_key") or r.get("npc_id") or r.get("name"))
@@ -448,10 +540,12 @@ def compute_boundary_autonomy_deltas(
     for tick_day, tick_block in ticks:
         by_venue: dict[str, list[Mapping[str, Any]]] = {}
         for r in active_roster:
-            vnode = _resolve_npc_block_venue(r, tick_block)
-            if vnode:
+            vnode = _resolve_npc_block_venue(r, tick_block, day=tick_day, scen_key=scen_key)
+            if vnode and vnode not in _EXCLUDED_AUTONOMY_VENUES:
                 by_venue.setdefault(vnode, []).append(r)
 
+        priority_pairs: list[tuple[Mapping[str, Any], Mapping[str, Any], str, str, str, str, str, bool]] = []
+        ambient_pairs: list[tuple[int, str, str, Mapping[str, Any], Mapping[str, Any], str, str, str, bool]] = []
         for vnode, occupants in sorted(by_venue.items()):
             if len(occupants) < 2:
                 continue
@@ -464,210 +558,239 @@ def compute_boundary_autonomy_deltas(
                 ka = _norm_key(a_row.get("person_key") or a_row.get("npc_id") or a_row.get("name"))
                 kb = _norm_key(b_row.get("person_key") or b_row.get("npc_id") or b_row.get("name"))
                 p_low, p_high = (ka, kb) if ka <= kb else (kb, ka)
-                # D11 cap: max 1 tie step per pair per simulated day
-                if (tick_day, p_low, p_high) in pair_day_seen:
-                    continue
-                if _det_unit(f"{sid}:{tick_day}:{tick_block}:{p_low}:{p_high}:interact") >= 4000:
-                    continue
-
-                pair_day_seen.add((tick_day, p_low, p_high))
-                existing_tie = _lookup_pair_tie((p_low, p_high), ties_by_pair)
-                meta = _parse_json_dict(
-                    (existing_tie or {}).get("metadata") or (existing_tie or {}).get("metadata_json")
+                a_aliases = _npc_aliases(a_row)
+                b_aliases = _npc_aliases(b_row)
+                is_prio = bool(
+                    (a_aliases & priority_keys)
+                    or (b_aliases & priority_keys)
+                    or _lookup_pair_tie((p_low, p_high), ties_by_pair) is not None
                 )
-                weights = _parse_json_dict((existing_tie or {}).get("nudge_weights") or meta.get("nudge_weights"))
-
-                either_shielded = shield_cache.get(p_low, False) or shield_cache.get(p_high, False)
-                roll = _det_unit(f"{sid}:{tick_day}:{tick_block}:{p_low}:{p_high}:axis")
-                if roll < 1800 and not either_shielded:
-                    axis = "affection"
-                elif roll < 8200:
-                    axis = "friendship"
+                if is_prio:
+                    priority_pairs.append((a_row, b_row, ka, kb, p_low, p_high, vnode, True))
                 else:
-                    axis = "rivalry"
+                    rank = _det_unit(f"{sid}:{tick_day}:{tick_block}:{p_low}:{p_high}:ambient_rank")
+                    ambient_pairs.append((rank, p_low, p_high, a_row, b_row, ka, kb, vnode, False))
 
-                axis_weight = float(weights.get(axis, 1.0)) if weights else 1.0
-                if axis in ("affection", "romance") and either_shielded:
-                    axis = "friendship"
-                    axis_weight = float(weights.get("friendship", 1.0)) if weights else 1.0
-                if axis_weight <= 0.0:
-                    continue
+        ambient_pairs.sort(key=lambda item: (item[0], item[1], item[2]))
+        selected_pairs: list[tuple[Mapping[str, Any], Mapping[str, Any], str, str, str, str, str, bool]] = (
+            priority_pairs
+            + [(a, b, ka, kb, p_l, p_h, vn, pr) for _, p_l, p_h, a, b, ka, kb, vn, pr in ambient_pairs[:3]]
+        )
 
-                base_delta = 3.0 if axis in ("friendship", "affection") else 2.5
-                final_delta = round(base_delta * axis_weight, 2)
+        for a_row, b_row, ka, kb, p_low, p_high, vnode, is_priority_pair in selected_pairs:
+            # D11 cap: max 1 tie step per pair per simulated day
+            if (tick_day, p_low, p_high) in pair_day_seen:
+                continue
+            if _det_unit(f"{sid}:{tick_day}:{tick_block}:{p_low}:{p_high}:interact") >= 4000:
+                continue
+
+            pair_day_seen.add((tick_day, p_low, p_high))
+            existing_tie = _lookup_pair_tie((p_low, p_high), ties_by_pair)
+            meta = _parse_json_dict(
+                (existing_tie or {}).get("metadata") or (existing_tie or {}).get("metadata_json")
+            )
+            weights = _parse_json_dict((existing_tie or {}).get("nudge_weights") or meta.get("nudge_weights"))
+
+            either_shielded = shield_cache.get(p_low, False) or shield_cache.get(p_high, False)
+            roll = _det_unit(f"{sid}:{tick_day}:{tick_block}:{p_low}:{p_high}:axis")
+            if roll < 1800 and not either_shielded:
+                axis = "affection"
+            elif roll < 8200:
+                axis = "friendship"
+            else:
+                axis = "rivalry"
+
+            axis_weight = float(weights.get(axis, 1.0)) if weights else 1.0
+            if axis in ("affection", "romance") and either_shielded:
+                axis = "friendship"
+                axis_weight = float(weights.get("friendship", 1.0)) if weights else 1.0
+            if axis_weight <= 0.0:
+                continue
+
+            base_delta = 3.0 if axis in ("friendship", "affection") else 2.5
+            final_delta = round(base_delta * axis_weight, 2)
+            tie_ops.append({
+                "op": "nudge",
+                "person_a": p_low,
+                "person_b": p_high,
+                "axis": axis,
+                "delta": final_delta,
+                "day": tick_day,
+                "block": tick_block,
+                "turn": int(turn_number),
+            })
+
+            # D2 & D8 concrete tie evolution & breakup handling
+            cur_type = _norm_key((existing_tie or {}).get("tie_type"))
+            prev_close = float((existing_tie or {}).get("closeness") or 35.0)
+            aff_w = float(weights.get("affection", weights.get("romance", 0.0)) or 0.0)
+            riv_w = float(weights.get("rivalry", 0.0) or 0.0)
+            new_close = max(0.0, min(100.0, prev_close + (final_delta if axis != "rivalry" else -final_delta)))
+            name_a = str(a_row.get("name") or p_low)
+            name_b = str(b_row.get("name") or p_high)
+
+            evolved_type = ""
+            if cur_type in ("dating", "engaged", "married") and axis == "rivalry" and (new_close <= 25.0 or riv_w >= 2.0):
                 tie_ops.append({
-                    "op": "nudge",
+                    "op": "breakup",
                     "person_a": p_low,
                     "person_b": p_high,
-                    "axis": axis,
-                    "delta": final_delta,
+                    "tie_type": cur_type,
+                    "reason": "rivalry_breakup",
+                    "day": tick_day,
+                    "block": tick_block,
+                    "turn": int(turn_number),
+                })
+                partnered_npcs.pop(p_low, None)
+                partnered_npcs.pop(p_high, None)
+                for r_m, k_m in ((a_row, ka), (b_row, kb)):
+                    r_bi = _parse_json_dict(r_m.get("basic_info") or r_m.get("basic_info_json"))
+                    prev_hang = str(r_bi.get("pre_couple_hangout_node_id") or r_m.get("home_node_id") or "").strip()
+                    if prev_hang in _EXCLUDED_AUTONOMY_VENUES:
+                        prev_hang = ""
+                    if k_m not in milestone_shifted and prev_hang:
+                        milestone_shifted.add(k_m)
+                        roster_mutations.append({
+                            "npc_id": str(r_m.get("npc_id") or k_m),
+                            "hangout_node_id": prev_hang,
+                            "basic_info_updates": {"shared_couple_hangout_node_id": ""},
+                        })
+                if len(gossip_posts) < 1:
+                    gossip_posts.append({
+                        "day": tick_day,
+                        "block": tick_block,
+                        "actor_keys": [p_low, p_high],
+                        "tag": "#BreakupWatch",
+                        "summary": f"Word is {name_a} and {name_b} just called it quits after a tense fallout.",
+                    })
+            elif (
+                axis == "affection"
+                and not either_shielded
+                and (cur_type in ("friend", "best_friend", "crush", "secret_crush") or aff_w >= 1.5)
+                and new_close >= 65.0
+                and partnered_npcs.get(p_low) in (None, p_high)
+                and partnered_npcs.get(p_high) in (None, p_low)
+                and cur_type not in ("dating", "engaged", "married")
+            ):
+                evolved_type = "dating"
+                partnered_npcs[p_low] = p_high
+                partnered_npcs[p_high] = p_low
+                tie_ops.append({
+                    "op": "evolve_tie",
+                    "person_a": p_low,
+                    "person_b": p_high,
+                    "tie_type": "dating",
+                    "closeness": max(65, int(round(new_close))),
+                    "visibility": "rumored" if aff_w < 2.0 else "public",
+                    "day": tick_day,
+                    "block": tick_block,
+                    "turn": int(turn_number),
+                })
+            elif (
+                axis == "affection"
+                and not either_shielded
+                and cur_type in ("", "acquaintance", "friend")
+                and (aff_w >= 1.2 or new_close >= 50.0)
+                and cur_type not in ("crush", "secret_crush", "dating", "engaged", "married")
+            ):
+                evolved_type = "crush"
+                tie_ops.append({
+                    "op": "evolve_tie",
+                    "person_a": p_low,
+                    "person_b": p_high,
+                    "tie_type": "crush",
+                    "closeness": max(50, int(round(new_close))),
+                    "visibility": "private",
+                    "day": tick_day,
+                    "block": tick_block,
+                    "turn": int(turn_number),
+                })
+            elif axis == "friendship" and cur_type in ("", "acquaintance") and new_close >= 45.0:
+                evolved_type = "friend"
+                tie_ops.append({
+                    "op": "evolve_tie",
+                    "person_a": p_low,
+                    "person_b": p_high,
+                    "tie_type": "friend",
+                    "closeness": int(round(new_close)),
+                    "visibility": "public",
+                    "day": tick_day,
+                    "block": tick_block,
+                    "turn": int(turn_number),
+                })
+            elif axis == "friendship" and cur_type == "friend" and new_close >= 80.0:
+                evolved_type = "best_friend"
+                tie_ops.append({
+                    "op": "evolve_tie",
+                    "person_a": p_low,
+                    "person_b": p_high,
+                    "tie_type": "best_friend",
+                    "closeness": int(round(new_close)),
+                    "visibility": "public",
+                    "day": tick_day,
+                    "block": tick_block,
+                    "turn": int(turn_number),
+                })
+            elif axis == "rivalry" and (riv_w >= 1.5 or new_close <= 25.0) and cur_type not in ("rival", "enemy"):
+                evolved_type = "rival"
+                tie_ops.append({
+                    "op": "evolve_tie",
+                    "person_a": p_low,
+                    "person_b": p_high,
+                    "tie_type": "rival",
+                    "closeness": max(10, int(round(new_close))),
+                    "visibility": "rumored",
                     "day": tick_day,
                     "block": tick_block,
                     "turn": int(turn_number),
                 })
 
-                # D2 & D8 concrete tie evolution & breakup handling
-                cur_type = _norm_key((existing_tie or {}).get("tie_type"))
-                prev_close = float((existing_tie or {}).get("closeness") or 35.0)
-                aff_w = float(weights.get("affection", weights.get("romance", 0.0)) or 0.0)
-                riv_w = float(weights.get("rivalry", 0.0) or 0.0)
-                new_close = max(0.0, min(100.0, prev_close + (final_delta if axis != "rivalry" else -final_delta)))
-                name_a = str(a_row.get("name") or p_low)
-                name_b = str(b_row.get("name") or p_high)
-
-                evolved_type = ""
-                if cur_type in ("dating", "engaged", "married") and axis == "rivalry" and (new_close <= 25.0 or riv_w >= 2.0):
-                    tie_ops.append({
-                        "op": "breakup",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": cur_type,
-                        "reason": "rivalry_breakup",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
-                    })
-                    partnered_npcs.pop(p_low, None)
-                    partnered_npcs.pop(p_high, None)
-                    for r_m, k_m in ((a_row, ka), (b_row, kb)):
-                        r_bi = _parse_json_dict(r_m.get("basic_info") or r_m.get("basic_info_json"))
-                        prev_hang = str(r_bi.get("pre_couple_hangout_node_id") or r_m.get("home_node_id") or "").strip()
-                        if k_m not in milestone_shifted and prev_hang:
-                            milestone_shifted.add(k_m)
-                            roster_mutations.append({
-                                "npc_id": str(r_m.get("npc_id") or k_m),
-                                "hangout_node_id": prev_hang,
-                                "basic_info_updates": {"shared_couple_hangout_node_id": ""},
-                            })
-                    if len(gossip_posts) < 1:
-                        gossip_posts.append({
-                            "day": tick_day,
-                            "block": tick_block,
-                            "actor_keys": [p_low, p_high],
-                            "tag": "#BreakupWatch",
-                            "summary": f"Word is {name_a} and {name_b} just called it quits after a tense fallout.",
-                        })
-                elif (
-                    axis == "affection"
-                    and not either_shielded
-                    and (cur_type in ("friend", "best_friend", "crush", "secret_crush") or aff_w >= 1.5)
-                    and new_close >= 65.0
-                    and partnered_npcs.get(p_low) in (None, p_high)
-                    and partnered_npcs.get(p_high) in (None, p_low)
-                    and cur_type not in ("dating", "engaged", "married")
-                ):
-                    evolved_type = "dating"
-                    partnered_npcs[p_low] = p_high
-                    partnered_npcs[p_high] = p_low
-                    tie_ops.append({
-                        "op": "evolve_tie",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": "dating",
-                        "closeness": max(65, int(round(new_close))),
-                        "visibility": "rumored" if aff_w < 2.0 else "public",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
-                    })
-                elif (
-                    axis == "affection"
-                    and not either_shielded
-                    and cur_type in ("", "acquaintance", "friend")
-                    and (aff_w >= 1.2 or new_close >= 50.0)
-                    and cur_type not in ("crush", "secret_crush", "dating", "engaged", "married")
-                ):
-                    evolved_type = "crush"
-                    tie_ops.append({
-                        "op": "evolve_tie",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": "crush",
-                        "closeness": max(50, int(round(new_close))),
-                        "visibility": "private",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
-                    })
-                elif axis == "friendship" and cur_type in ("", "acquaintance") and new_close >= 45.0:
-                    evolved_type = "friend"
-                    tie_ops.append({
-                        "op": "evolve_tie",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": "friend",
-                        "closeness": int(round(new_close)),
-                        "visibility": "public",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
-                    })
-                elif axis == "friendship" and cur_type == "friend" and new_close >= 80.0:
-                    evolved_type = "best_friend"
-                    tie_ops.append({
-                        "op": "evolve_tie",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": "best_friend",
-                        "closeness": int(round(new_close)),
-                        "visibility": "public",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
-                    })
-                elif axis == "rivalry" and (riv_w >= 1.5 or new_close <= 25.0) and cur_type not in ("rival", "enemy"):
-                    evolved_type = "rival"
-                    tie_ops.append({
-                        "op": "evolve_tie",
-                        "person_a": p_low,
-                        "person_b": p_high,
-                        "tie_type": "rival",
-                        "closeness": max(10, int(round(new_close))),
-                        "visibility": "rumored",
-                        "day": tick_day,
-                        "block": tick_block,
-                        "turn": int(turn_number),
+            # D8 milestone hangout shift when high closeness forms around a shared hangout venue
+            if (new_close >= 70.0 or evolved_type == "dating") and len(milestone_shifted) < 2:
+                shared_hangout = str(b_row.get("hangout_node_id") or vnode).strip()
+                if shared_hangout in _EXCLUDED_AUTONOMY_VENUES:
+                    shared_hangout = vnode if vnode not in _EXCLUDED_AUTONOMY_VENUES else ""
+                orig_hangout = str(a_row.get("hangout_node_id") or "").strip()
+                if orig_hangout in _EXCLUDED_AUTONOMY_VENUES:
+                    orig_hangout = ""
+                if shared_hangout and ka not in milestone_shifted and orig_hangout != shared_hangout:
+                    milestone_shifted.add(ka)
+                    a_bi = _parse_json_dict(a_row.get("basic_info") or a_row.get("basic_info_json"))
+                    pre_hang = str(a_bi.get("pre_couple_hangout_node_id") or orig_hangout or shared_hangout).strip()
+                    if pre_hang in _EXCLUDED_AUTONOMY_VENUES:
+                        pre_hang = shared_hangout
+                    roster_mutations.append({
+                        "npc_id": str(a_row.get("npc_id") or ka),
+                        "hangout_node_id": shared_hangout,
+                        "basic_info_updates": {
+                            "pre_couple_hangout_node_id": pre_hang,
+                            "shared_couple_hangout_node_id": shared_hangout,
+                        },
                     })
 
-                # D8 milestone hangout shift when high closeness forms around a shared hangout venue
-                if (new_close >= 70.0 or evolved_type == "dating") and len(milestone_shifted) < 2:
-                    shared_hangout = str(b_row.get("hangout_node_id") or vnode).strip()
-                    orig_hangout = str(a_row.get("hangout_node_id") or "").strip()
-                    if shared_hangout and ka not in milestone_shifted and orig_hangout != shared_hangout:
-                        milestone_shifted.add(ka)
-                        a_bi = _parse_json_dict(a_row.get("basic_info") or a_row.get("basic_info_json"))
-                        pre_hang = str(a_bi.get("pre_couple_hangout_node_id") or orig_hangout or shared_hangout).strip()
-                        roster_mutations.append({
-                            "npc_id": str(a_row.get("npc_id") or ka),
-                            "hangout_node_id": shared_hangout,
-                            "basic_info_updates": {
-                                "pre_couple_hangout_node_id": pre_hang,
-                                "shared_couple_hangout_node_id": shared_hangout,
-                            },
-                        })
-
-                # D9 drama gossip on intense affection/rivalry spark
-                if (new_close >= 65.0 or evolved_type in ("dating", "rival")) and len(gossip_posts) < 1:
-                    gossip_posts.append({
+            # D9 drama gossip on intense affection/rivalry spark
+            if (new_close >= 65.0 or evolved_type in ("dating", "rival")) and len(gossip_posts) < 1:
+                gossip_posts.append({
+                    "day": tick_day,
+                    "block": tick_block,
+                    "actor_keys": [p_low, p_high],
+                    "tag": "#CampusWatch" if evolved_type != "dating" else "#CoupleAlert",
+                    "summary": f"{name_a} and {name_b} were spotted together near {vnode}.",
+                })
+                if has_phone and drama_dms_emitted == 0 and is_priority_pair:
+                    drama_dms_emitted += 1
+                    dm_pings.append({
+                        "kind": "drama_gossip",
+                        "sender_key": p_low,
+                        "subject_keys": [p_low, p_high],
                         "day": tick_day,
-                        "block": tick_block,
-                        "actor_keys": [p_low, p_high],
-                        "tag": "#CampusWatch" if evolved_type != "dating" else "#CoupleAlert",
-                        "summary": f"{name_a} and {name_b} were spotted together near {vnode}.",
+                        "summary": f"Did you hear about {name_a} and {name_b}?",
                     })
-                    if has_phone and drama_dms_emitted == 0:
-                        drama_dms_emitted += 1
-                        dm_pings.append({
-                            "kind": "drama_gossip",
-                            "sender_key": p_low,
-                            "subject_keys": [p_low, p_high],
-                            "day": tick_day,
-                            "summary": f"Did you hear about {name_a} and {name_b}?",
-                        })
 
     # D10 / D11 hangout ping on wake-up (Affinity >= 50, capped at 1 hangout ping + phone gated)
-    if has_phone and hangout_pings_emitted == 0:
-        last_day, last_block = ticks[-1]
+    morning_ticks = [(td, tb) for td, tb in ticks if tb == "morning"]
+    if has_phone and hangout_pings_emitted == 0 and morning_ticks:
+        last_day, last_block = morning_ticks[-1]
         eligible_friends = []
         for c in contacts or ():
             if _contact_affinity(c) >= 50 and not c.get("in_party") and not c.get("is_blocked"):
@@ -679,7 +802,8 @@ def compute_boundary_autonomy_deltas(
             if _det_unit(f"{sid}:{last_day}:{last_block}:{ckey}:hangout_ping") < 3500:
                 hangout_pings_emitted += 1
                 cname = str(c.get("name") or ckey)
-                ping_node = str(c.get("hangout_node_id") or "").strip()
+                c_basic = _parse_json_dict(c.get("basic_info") or c.get("basic_info_json"))
+                ping_node = str(c.get("hangout_node_id") or c_basic.get("hangout_node_id") or "").strip()
                 dm_pings.append({
                     "kind": "hangout_invite",
                     "sender_key": ckey,
@@ -693,6 +817,7 @@ def compute_boundary_autonomy_deltas(
                     "pending_hangout_ping": {
                         "day": last_day,
                         "block": last_block,
+                        "expires_day": last_day,
                         "node_id": ping_node,
                     },
                 })

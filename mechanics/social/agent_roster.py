@@ -1,15 +1,15 @@
 from __future__ import annotations
 """
-44 Pre-Generated Special Agents Roster & Rank/Affinity Companion Recruitment
+48 Pre-Generated Special Agents Roster & Rank/Affinity Companion Recruitment
 for the Anomalous Incursions scenario and its variants.
 
-Generates and manages 44 persistent, named Special Agents across the 6 Fixed Factions:
+Generates and manages 48 persistent, named Special Agents across the 6 Fixed Adult Factions:
 - Public Anomaly Investigation Agency (`public_agency`): 12 Agents
 - Private Agency #1 (`private_agency_1`): 6 Agents
 - Private Agency #2 (`private_agency_2`): 6 Agents
 - Eastern Exorcist Clan / Monastic Shrine Order (`monastic_order`): 8 Agents
-- Occult Cult (`cult_faction`): 6 Operatives
-- Clandestine Syndicate (`clandestine_faction`): 6 Operatives
+- Occult Cult (`cult_faction`): 8 Operatives
+- Clandestine Syndicate (`clandestine_faction`): 8 Operatives
 
 Each Agent includes:
 - Faction affiliation (`faction_id`, `faction_name`)
@@ -51,7 +51,7 @@ MONASTIC_ORDER_CULTURE_WEIGHTS: Dict[str, float] = {
 }
 
 # ---------------------------------------------------------------------------
-# Agent Archetype & Faction Roster Blueprints (44 Total Agents)
+# Agent Archetype & Faction Roster Blueprints (48 Adult Agents + 20 HS Student Agents)
 # ---------------------------------------------------------------------------
 
 PUBLIC_AGENCY_BLUEPRINTS: List[Dict[str, Any]] = [
@@ -485,6 +485,28 @@ OCCULT_CULT_BLUEPRINTS: List[Dict[str, Any]] = [
         "hangout_node_id": "sub_pier_observation",
         "summary": "Doubts the Hierophant's most destructive edicts and secretly warns sympathetic agents before major civilian breaches.",
     },
+    {
+        "agent_tier": 1,
+        "role": "Novice Fracture Neophyte",
+        "agent_class": "Abyssal Vessel",
+        "division": "Candle-Warden Initiate",
+        "hq_room": "Initiate Refectory & Cloister Dormitories",
+        "hq_node_id": "sub_cult_quarters",
+        "city_hangout": "Subterranean Under-City & Catacombs ➔ Underground Drifter Enclave & Black Bazaar ➔ String-Lit Relic, Ammo & Salvage Stalls",
+        "hangout_node_id": "sub_uc_salvage_stalls",
+        "summary": "Young initiate tending sanctuary braziers and bartering black-salt wards for occult resonance fragments in the under-city.",
+    },
+    {
+        "agent_tier": 1,
+        "role": "Sanctum Herbal Distiller",
+        "agent_class": "Occult Ritualist",
+        "division": "Apotheca Novices",
+        "hq_room": "Ichor Distillation & Blood-Letting Apotheca",
+        "hq_node_id": "sub_cult_apotheca",
+        "city_hangout": "Subterranean Under-City & Catacombs ➔ Cavernous Cathedral Storm-Drain Cisterns ➔ Echoing Floodlit Concrete Pillar Reservoir",
+        "hangout_node_id": "sub_uc_pillared_reservoir",
+        "summary": "Distills vitae draughts and quietens restless storm-cistern spirits through rhythmic bowl chants.",
+    },
 ]
 
 CLANDESTINE_SYNDICATE_BLUEPRINTS: List[Dict[str, Any]] = [
@@ -554,6 +576,28 @@ CLANDESTINE_SYNDICATE_BLUEPRINTS: List[Dict[str, Any]] = [
         "hangout_node_id": "sub_red_lantern_parlor",
         "summary": "Pragmatic double-dealer who values survival over ideology and gladly sells Syndicate secrets to trusted allies.",
     },
+    {
+        "agent_tier": 1,
+        "role": "Black-Bag Armory Runner",
+        "agent_class": "Black-Ops Relic Smuggler",
+        "division": "Street Cutouts",
+        "hq_room": "Black-Bag Ballistics & Suppressed Ordnance Cage",
+        "hq_node_id": "sub_synd_armory",
+        "city_hangout": "Industrial Zone ➔ Heavy Steel Foundry & Mill ➔ Corrugated Iron Loading Bay",
+        "hangout_node_id": "sub_foundry_loading",
+        "summary": "Grinds serial stamps off recovered containment barrels and swaps dead-drop ammunition crates between freight shifts.",
+    },
+    {
+        "agent_tier": 1,
+        "role": "Dead-Drop Courier Apprentice",
+        "agent_class": "Syndicate Cleaner",
+        "division": "Encrypted Couriers",
+        "hq_room": "Dead-Drop Espresso Lounge & Broker Commissary",
+        "hq_node_id": "sub_synd_canteen",
+        "city_hangout": "Industrial Zone ➔ Metropolitan Power Grid Substation ➔ High-Voltage Warning Perimeter Gate",
+        "hangout_node_id": "sub_power_gate",
+        "summary": "Maintains Faraday pouches and rotates anonymous burner phones across substation utility drops.",
+    },
 ]
 
 AGENT_DRIVES: List[str] = [
@@ -585,6 +629,48 @@ AGENT_QUIRKS: List[str] = [
     "Wears fingerless tactical gloves year-round and traces protective sigils on doorframes out of habit.",
 ]
 
+CULT_DRIVES: List[str] = [
+    "Seeking controlled communion with fractured ley entities to subdue feral usurpers before reality unravels.",
+    "Recording forgotten apocryphal concordats to bind rogue anomalies into blood-warded servitude.",
+    "Guarding underground storm-drain sanctums where misunderstood spirits shelter from sterile Bureau purging.",
+    "Proving that ancient ritual resonance harnesses what clinical containment squads can only bomb or seal away.",
+]
+
+CULT_FRICTIONS: List[str] = [
+    "Refuses to hand captured living anomalies to public Bureau dissectors regardless of official bounty orders.",
+    "Speaks in cryptic liturgical allegories whenever pressed by outsiders, inviting suspicion even from allies.",
+    "Carries an obsessive distrust of mechanical Hume dampers that deafen subtle rift harmonies.",
+    "Willing to accept painful personal blood-tributes rather than sever an endangered entity covenant cleanly.",
+]
+
+CULT_QUIRKS: List[str] = [
+    "Traces quiet chalk bind-sigils on sleeves while murmuring cadence checks under their breath.",
+    "Carries stoppered amber phials of black salt and myrrh ash tucked inside an inner coat pocket.",
+    "Listens intently to bare masonry walls as though gauging distant subterranean fault tremors.",
+    "Wears fingerless silk gloves ink-stained from copying redacted pre-war apocrypha by candlelight.",
+]
+
+SYNDICATE_DRIVES: List[str] = [
+    "Keeping ledger balances black while cornering unlicensed anomaly telemetry before conglomerate syndicates monopolize it.",
+    "Replacing lost street operatives' pensions through high-risk black-bag relic extractions and auction commissions.",
+    "Intercepting Public Agency dispatch frequencies to outmaneuver bureaucratic confiscation sweeps.",
+    "Funding off-grid Faraday safe corridors so independent brokers can trade uncatalogued relics untouched.",
+]
+
+SYNDICATE_FRICTIONS: List[str] = [
+    "Reflexively quotes non-negotiable hazard percentages before stepping into any high-risk containment breach.",
+    "Distrusts ideologues of every stripe—both self-righteous Bureau inspectors and zealous Sanctum cantors.",
+    "Scrubs serial tags and witness footage first, sometimes burning bridges with straightforward investigators.",
+    "Refuses to surrender high-value recovered salvage without cash settlement or hard black-ledger leverage.",
+]
+
+SYNDICATE_QUIRKS: List[str] = [
+    "Checks a Faraday-lined burner pager every few minutes and instinctively angles away from overhead CCTV domes.",
+    "Clicks an unmarked ceramic folding knife shut in crisp rhythms while pricing anomalous hardware on sight.",
+    "Sips double espresso from an unbranded matte-black tumbler and catalogs exit doors before sitting down.",
+    "Tucks copper-mesh signal sleeves over wristwatches whenever passing municipal scanner pylons.",
+]
+
 
 FACTION_ATTRIBUTE_WEIGHT_POOLS: Dict[str, Tuple[str, ...]] = {
     "monastic_order": ("aether", "wind", "water", "aether", "wind", "water", "ice", "fire"),
@@ -597,10 +683,10 @@ FACTION_ATTRIBUTE_WEIGHT_POOLS: Dict[str, Tuple[str, ...]] = {
 }
 
 # ---------------------------------------------------------------------------
-# 16 Pre-Generated Student Special Agent Blueprints for Anomalous High School
-# - 4 per grade (Freshman, Sophomore, Junior, Senior)
+# 20 Pre-Generated Student Special Agent Blueprints for Anomalous High School
+# - 5 per grade (Freshman, Sophomore, Junior, Senior)
 # - 8 Independent Club Freelancers (1 per school club)
-# - 8 Junior Agency-Affiliated Student Operatives (2 per major agency)
+# - 12 Junior Faction-Affiliated Student Operatives (2 per major faction)
 # ---------------------------------------------------------------------------
 STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
     # --- 8 Independent Club Freelancer Student Operatives ---
@@ -813,7 +899,89 @@ STUDENT_SPECIAL_AGENT_BLUEPRINTS: List[Dict[str, Any]] = [
         "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Botanical Glasshouse & Garden",
         "summary": "Disciplined sophomore calligraphy student who practices sacred blade forms at dawn and wards campus stairwells after dusk.",
     },
+    {
+        "agent_tier": 2,
+        "grade": "Senior",
+        "role": "Whispering Choir Cantor & Student Mystic",
+        "agent_class": "Quiet Bookworm",
+        "faction_id": "cult_faction",
+        "club": "Occult & Folklore Society",
+        "clique": "Loner",
+        "primary_node_id": "loc_senior_class",
+        "secondary_node_id": "sub_cult_cloister",
+        "city_hangout": "{session_school} ➔ General Student Clubroom Wing ➔ Occult & Folklore Society Room",
+        "summary": "Calm senior folklore reader quietly initiated into controlled Sanctum communion who shepherds distressed campus entities away from sweepers.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Sophomore",
+        "role": "Novice Fracture Acolyte",
+        "agent_class": "After-School Tinkerer",
+        "faction_id": "cult_faction",
+        "club": "Fine Arts Guild",
+        "clique": "Artists",
+        "primary_node_id": "loc_sophomore_class",
+        "secondary_node_id": "sub_cult_vestments",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Fine Arts Studio",
+        "summary": "Soft-spoken sophomore calligrapher who weaves silver-thread bind sigils inside art portfolios after the dismissal bell.",
+    },
+    {
+        "agent_tier": 2,
+        "grade": "Junior",
+        "role": "Underground Vault Runner & Burner Courier",
+        "agent_class": "Back-Row Rebel",
+        "faction_id": "clandestine_faction",
+        "club": "Campus Delinquents",
+        "clique": "Rebels",
+        "primary_node_id": "loc_junior_class",
+        "secondary_node_id": "sub_synd_canteen",
+        "city_hangout": "{session_school} ➔ Abandoned Old Campus Wing ➔ Custodian's Boiler-Room Locker",
+        "summary": "Streetwise junior who runs encrypted telemetry drops on a midnight scooter in exchange for Faraday gear and off-book hazard pay.",
+    },
+    {
+        "agent_tier": 1,
+        "grade": "Freshman",
+        "role": "Encrypted Packet Spotter & Courier Apprentice",
+        "agent_class": "Class Sharpshooter",
+        "faction_id": "clandestine_faction",
+        "club": "Journalism & Media",
+        "clique": "Media",
+        "primary_node_id": "loc_freshman_class",
+        "secondary_node_id": "sub_synd_entrance",
+        "city_hangout": "{session_school} ➔ Cultural Arts & Student Union ➔ Campus Media & Broadcasting Room",
+        "summary": "Sharp-eyed freshman press-club photographer who monitors municipal scanner traffic for lucrative Syndicate relic salvages.",
+    },
 ]
+
+
+def _pick_agent_persona(faction_id: str, idx: int, seed_base: int) -> Tuple[str, str, str]:
+    """Selects bespoke Drive, Friction, and Quirk pools for Cult/Syndicate vs licensed/freelance agents."""
+    f_low = str(faction_id or "").strip().lower()
+    if f_low == "cult_faction":
+        drives, frictions, quirks = CULT_DRIVES, CULT_FRICTIONS, CULT_QUIRKS
+    elif f_low == "clandestine_faction":
+        drives, frictions, quirks = SYNDICATE_DRIVES, SYNDICATE_FRICTIONS, SYNDICATE_QUIRKS
+    else:
+        drives, frictions, quirks = AGENT_DRIVES, AGENT_FRICTIONS, AGENT_QUIRKS
+    return (
+        drives[(seed_base + idx * 7) % len(drives)],
+        frictions[(seed_base + idx * 11 + 3) % len(frictions)],
+        quirks[(seed_base + idx * 13 + 5) % len(quirks)],
+    )
+
+
+def _resolve_agent_lorebook_disposition(agent_faction_id: str, player_faction_id: str) -> str:
+    """Computes lorebook disposition for Special Agents given player affiliation."""
+    ag_f = str(agent_faction_id or "").strip().lower()
+    pl_f = str(player_faction_id or "").strip().lower()
+    outlaw = {"cult_faction", "clandestine_faction"}
+    if ag_f == pl_f and pl_f:
+        return "friendly"
+    if ag_f in outlaw:
+        return "cautious"
+    if pl_f in outlaw and ag_f in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order"):
+        return "cautious"
+    return "neutral"
 
 
 def _resolve_agent_3axis_for_faction(
@@ -904,15 +1072,18 @@ def generate_anomalous_special_agents_roster(
     player_gender: str = "",
 ) -> List[Dict[str, Any]]:
     """
-    Deterministically generates the 44 Named Special Agents across the 6 Fixed Factions:
+    Deterministically generates the 48 Named Special Agents across the 6 Fixed Factions:
     - 12 Public Agency (`public_agency`)
     - 6 Private Agency #1 (`private_agency_1`)
     - 6 Private Agency #2 (`private_agency_2`)
     - 8 Monastic Shrine Order (`monastic_order`)
-    - 6 Occult Cult (`cult_faction`)
-    - 6 Clandestine Syndicate (`clandestine_faction`)
+    - 8 Occult Cult (`cult_faction`)
+    - 8 Clandestine Syndicate (`clandestine_faction`)
     """
-    from mechanics.social.factions import ANOMALOUS_PROMOTION_TIERS, infer_anomalous_faction_archetype
+    from mechanics.social.factions import (
+        get_anomalous_promotion_tiers_for_archetype,
+        infer_anomalous_faction_archetype,
+    )
     from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
@@ -990,7 +1161,8 @@ def generate_anomalous_special_agents_roster(
             else:
                 gender = "female" if (global_idx % 2 == 0) else "male"
             agent_tier = int(bp.get("agent_tier", 1))
-            tier_meta = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == agent_tier), ANOMALOUS_PROMOTION_TIERS[0])
+            tiers_for_fac = get_anomalous_promotion_tiers_for_archetype(faction_id)
+            tier_meta = next((t for t in tiers_for_fac if t["tier"] == agent_tier), tiers_for_fac[0])
             rank_title = tier_meta["title"]
 
             # Assign shared sibling surname to specific cross-faction pairs:
@@ -1044,9 +1216,7 @@ def generate_anomalous_special_agents_roster(
             npc_id = full_name.lower().replace(" ", "_").replace(".", "")
             char_race = normalize_race("", scen_key, seed=f"{session_id}:agent:{ forced_surname.lower() if forced_surname else npc_id }")
 
-            drive = AGENT_DRIVES[(seed_base + global_idx * 7) % len(AGENT_DRIVES)]
-            friction = AGENT_FRICTIONS[(seed_base + global_idx * 11 + 3) % len(AGENT_FRICTIONS)]
-            quirk = AGENT_QUIRKS[(seed_base + global_idx * 13 + 5) % len(AGENT_QUIRKS)]
+            drive, friction, quirk = _pick_agent_persona(faction_id, global_idx, seed_base)
 
             agent_class = bp["agent_class"]
             from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
@@ -1157,12 +1327,12 @@ def generate_anomalous_special_agents_roster(
     # private_agency_1: 12..17 (6)
     # private_agency_2: 18..23 (6)
     # monastic_order: 24..31 (8)
-    # cult_faction: 32..37 (6)
-    # clandestine_faction: 38..43 (6)
+    # cult_faction: 32..39 (8)
+    # clandestine_faction: 40..47 (8)
     cross_sibling_pairs = [
         (3, 14),   # Public Agency idx 3 <-> Private Agency 1 idx 2
         (6, 36),   # Public Agency idx 6 <-> Cult Faction idx 4
-        (21, 42),  # Private Agency 2 idx 3 <-> Clandestine Faction idx 4
+        (21, 44),  # Private Agency 2 idx 3 <-> Clandestine Faction idx 4
         (26, 8),   # Monastic Order idx 2 <-> Public Agency idx 8
     ]
     for idx_a, idx_b in cross_sibling_pairs:
@@ -1185,13 +1355,16 @@ def generate_student_special_agents_roster(
     used_names: Optional[set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Deterministically generates the 16 Dedicated Student Special Agents for
+    Deterministically generates the 20 Dedicated Student Special Agents for
     `anomalous_high_school` and its variants:
-    - 4 per grade (`Freshman`, `Sophomore`, `Junior`, `Senior`)
+    - 5 per grade (`Freshman`, `Sophomore`, `Junior`, `Senior`)
     - 8 Independent Club Freelancers (`faction_id="freelancer"`, 1 per school club)
-    - 8 Junior Agency-Affiliated Student Operatives (`2 per major agency`)
+    - 12 Junior Faction-Affiliated Student Operatives (`2 per major faction`)
     """
-    from mechanics.social.factions import ANOMALOUS_PROMOTION_TIERS, infer_anomalous_faction_archetype
+    from mechanics.social.factions import (
+        get_anomalous_promotion_tiers_for_archetype,
+        infer_anomalous_faction_archetype,
+    )
     from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
@@ -1245,7 +1418,8 @@ def generate_student_special_agents_roster(
         faction_id = str(bp.get("faction_id") or "freelancer").strip()
         grade = str(bp.get("grade") or "Sophomore").strip()
         agent_tier = int(bp.get("agent_tier", 1))
-        tier_meta = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == agent_tier), ANOMALOUS_PROMOTION_TIERS[0])
+        tiers_for_fac = get_anomalous_promotion_tiers_for_archetype(faction_id)
+        tier_meta = next((t for t in tiers_for_fac if t["tier"] == agent_tier), tiers_for_fac[0])
         rank_title = tier_meta["title"]
 
         if faction_id == "freelancer":
@@ -1279,9 +1453,7 @@ def generate_student_special_agents_roster(
         npc_id = full_name.lower().replace(" ", "_").replace(".", "")
         char_race = normalize_race("", scen_key, seed=f"{session_id}:student_agent:{npc_id}")
 
-        drive = AGENT_DRIVES[(seed_base + idx * 7) % len(AGENT_DRIVES)]
-        friction = AGENT_FRICTIONS[(seed_base + idx * 11 + 3) % len(AGENT_FRICTIONS)]
-        quirk = AGENT_QUIRKS[(seed_base + idx * 13 + 5) % len(AGENT_QUIRKS)]
+        drive, friction, quirk = _pick_agent_persona(faction_id, idx, seed_base)
 
         agent_class = str(bp.get("agent_class") or "Honor Roll Student")
         ag_attr, ag_arch, ag_med = _resolve_agent_3axis_for_faction(
@@ -1386,8 +1558,8 @@ def _build_merged_anomalous_high_school_directory(
     player_gender: str = "",
 ) -> List[Dict[str, Any]]:
     """
-    Merges the Civilian Campus & Town Directory (`generate_campus_directory`) with the 60 Special Agents
-    (44 Adult Special Agents + 16 Student Special Agents) for `anomalous_high_school`.
+    Merges the Civilian Campus & Town Directory (`generate_campus_directory`) with the 68 Special Agents
+    (48 Adult Special Agents + 20 Student Special Agents) for `anomalous_high_school`.
     Ensures civilian records carry explicit `age_group` ("adult" vs "teen"), `standing`, and `anomalous_npc_tag="civilian"`.
     """
     from mechanics.social.school_roster import generate_campus_directory
@@ -1429,10 +1601,10 @@ def _build_merged_anomalous_high_school_directory(
 def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key: str = "", player_gender: str = "") -> List[Dict[str, Any]]:
     """
     Ensures the Special Agents roster is generated and synced into:
-    1. `session['extra']['anomalous_agent_roster']` (44 agents in `anomalous_incursions`; 60 in `anomalous_high_school`)
-    2. `school_directory` (44 agents in `anomalous_incursions`; 148+ merged Civilians + Special Agents in `anomalous_high_school`)
-    3. `factions` table (`leadership_roster` and `members` for each of the 6 Fixed Factions)
-    4. `lorebook` (`entity_type='person'`) for faction leaders and same-faction colleagues
+    1. `session['extra']['anomalous_agent_roster']` (48 agents in `anomalous_incursions`; 68 in `anomalous_high_school`)
+    2. `school_directory` (48 agents in `anomalous_incursions`; 156+ merged Civilians + Special Agents in `anomalous_high_school`)
+    3. `factions` table (`leadership_roster` and `members` for each of the 8 Fixed Factions)
+    4. `lorebook` (`entity_type='person'`) for faction leaders and Special Agents
     """
     if not session_id:
         return []
@@ -1457,7 +1629,7 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
         return []
 
     is_hybrid_hs = scenario_data.is_anomalous_high_school_scenario(scen_key)
-    expected_agent_count = 60 if is_hybrid_hs else 44
+    expected_agent_count = 68 if is_hybrid_hs else 48
 
     existing_roster = sess.get("anomalous_agent_roster") or (
         sess.get("extra", {}).get("anomalous_agent_roster") if isinstance(sess.get("extra"), dict) else None
@@ -1595,7 +1767,7 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
         except Exception:
             pass
 
-    # 4. Upsert all 44 Special Agents into lorebook as background world reference only.
+    # 4. Upsert all Special Agents (48 Adult / 68 Hybrid HS) into lorebook as background world reference only.
     # Never pre-populate unmet colleagues into contacts; characters only appear in Known Characters / Contacts once met or connected.
     for ag in roster:
         try:
@@ -1604,7 +1776,7 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
                 entity_type="person",
                 name=ag["name"],
                 description=ag["personality_summary"],
-                disposition="friendly" if ag["faction_id"] == player_faction_id else ("cautious" if ag["faction_id"] in ("cult_faction", "clandestine_faction") else "neutral"),
+                disposition=_resolve_agent_lorebook_disposition(str(ag.get("faction_id") or ""), player_faction_id),
                 faction=ag["faction_name"],
                 traits=[ag["role"], ag["agent_class"], f"Tier {ag['agent_tier']} {ag['rank_title']}"],
                 motivation=ag["division"],
@@ -1618,6 +1790,47 @@ def ensure_anomalous_agent_roster(session_id: int | dict | str | None, scen_key:
 
     prune_unmet_preseeded_special_agents(session_id)
     return roster
+
+
+def sync_agent_lorebook_dispositions(session_id: int, player_faction_id: str, scen_key: str = "") -> int:
+    """Re-syncs existing Special Agent lorebook dispositions when the player transfers factions."""
+    if not session_id:
+        return 0
+    if not scen_key:
+        sess = db.get_session(session_id) or {}
+        scen_key = str(sess.get("scenario") or "")
+    if not scenario_data.is_anomalous_incursions_scenario(scen_key):
+        return 0
+    roster = ensure_anomalous_agent_roster(session_id, scen_key=scen_key) or []
+    updated = 0
+    for ag in roster:
+        if not isinstance(ag, dict) or not ag.get("name"):
+            continue
+        try:
+            disp = _resolve_agent_lorebook_disposition(str(ag.get("faction_id") or ""), player_faction_id)
+            app_val = ag.get("appearance")
+            db.upsert_lorebook_entity(
+                session_id=session_id,
+                entity_type="person",
+                name=ag["name"],
+                description=str(ag.get("personality_summary") or ""),
+                disposition=disp,
+                faction=str(ag.get("faction_name") or ""),
+                traits=[
+                    str(ag.get("role") or ""),
+                    str(ag.get("agent_class") or ""),
+                    f"Tier {ag.get('agent_tier', 1)} {ag.get('rank_title', '')}".strip(),
+                ],
+                motivation=str(ag.get("division") or ""),
+                mannerisms=str(ag.get("mannerisms") or ""),
+                race=str(ag.get("race") or ""),
+                appearance=app_val if isinstance(app_val, dict) else None,
+                gender=str(ag.get("gender") or ""),
+            )
+            updated += 1
+        except Exception as exc:
+            log.debug("sync_agent_lorebook_dispositions skipped %s: %s", ag.get("name"), exc)
+    return updated
 
 
 def prune_unmet_preseeded_special_agents(session_id: int) -> int:
@@ -1827,12 +2040,15 @@ def evaluate_anomalous_companion_recruitment(
     - Same-Faction Senior Agent (`agent_tier > player_tier`):
       Requires Friend / Trusted Affinity (`affinity_score >= 100`) to join for `0G`.
     - Friendly Cross-Faction Agent (`public_agency`, `private_agency_1`, `private_agency_2`, `monastic_order`):
-      - `affinity_score >= 100`: `0G` Free Joint-Op Companion.
-      - `60 <= affinity_score < 100`: Paid Joint-Op Retainer (`get_recruitment_cost`).
-      - `affinity_score < 60`: Requires at least Friendly standing (`60+` Affinity) for cross-agency joint operations.
-    - Distrusted Faction Operative (`cult_faction`, `clandestine_faction`):
-      - If player belongs to that same faction and `agent_tier <= player_tier`: `0G` Free Requisition.
-      - Otherwise requires Close Friend / Covert Defector standing (`affinity_score >= 150`).
+      - Licensed/Freelancer player: `100+` Free (`0G`), `60-99` Paid Retainer.
+      - Outlaw player (`cult_faction` / `clandestine_faction`): `120+` Free (`0G`), `90-119` Paid Retainer.
+    - Outlaw Faction Operative (`cult_faction`, `clandestine_faction`):
+      - If player belongs to that same faction and `agent_tier <= player_tier`: `0G` Free Requisition (or `100+` for senior).
+      - Otherwise (licensed, freelancer, or rival outlaw faction) requires `affinity_score >= 150`.
+    - Folklore Villager (`TAG_FOLKLORE_VILLAGER`):
+      - `clandestine_faction`: `60` Affinity (no `contact_added` bypass).
+      - `cult_faction`: `20` Affinity with an active `folk_*` Pact, else `30` (no `contact_added` bypass).
+      - Licensed / Freelancer: `20` Affinity or `contact_added`.
     """
     from mechanics.social.relationships import get_recruitment_cost
 
@@ -1896,6 +2112,85 @@ def evaluate_anomalous_companion_recruitment(
     )
 
     if npc_tag == TAG_FOLKLORE_VILLAGER:
+        p_fac_low = str(player_faction_id or "").strip().lower()
+        if p_fac_low == "clandestine_faction":
+            if affinity_score >= 60:
+                return {
+                    "allowed": True,
+                    "cost": 0,
+                    "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+                    "is_special_agent": False,
+                    "is_folklore_villager": True,
+                    "is_beast_companion": bool(hydrated.get("is_beast_companion")),
+                    "folklore_village": hydrated.get("folklore_village", ""),
+                    "agent_tier": hydrated["agent_tier"],
+                    "rank_title": hydrated["rank_title"],
+                    "agent_class": hydrated["agent_class"],
+                    "faction_id": hydrated["faction_id"],
+                    "faction_name": hydrated["faction_name"],
+                    "innate_abilities": hydrated["innate_abilities"],
+                    "spells": hydrated["innate_abilities"],
+                    "hp": hydrated["hp"],
+                    "max_hp": hydrated["max_hp"],
+                    "mp": hydrated["mp"],
+                    "max_mp": hydrated["max_mp"],
+                    "level": hydrated["level"],
+                    "stats": hydrated["stats"],
+                    "weapon_profile": hydrated["weapon_profile"],
+                    "reason": f"Despite Syndicate stigma, {npc_name} agreed to accompany you beyond the veil (Affinity {affinity_score} >= 60, 0G).",
+                }
+            return {
+                "allowed": False,
+                "cost": 0,
+                "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+                "reason": f"{npc_name} distrusts Clandestine Syndicate operatives and requires deeper mutual trust before leaving the sanctuary veil (Affinity {affinity_score}/60).",
+            }
+        if p_fac_low == "cult_faction":
+            has_folk_pact = False
+            if sess_id and user_id is not None:
+                try:
+                    active_pacts = db.get_player_active_pacts(sess_id, user_id) or []
+                    has_folk_pact = any(
+                        str(p.get("codex_id") or "").startswith("folk_")
+                        or str(p.get("patron_id") or "").startswith(("folk_patron_", "folk_"))
+                        for p in active_pacts
+                        if isinstance(p, dict)
+                    )
+                except Exception:
+                    has_folk_pact = False
+            req_aff = 20 if has_folk_pact else 30
+            if affinity_score >= req_aff:
+                return {
+                    "allowed": True,
+                    "cost": 0,
+                    "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+                    "is_special_agent": False,
+                    "is_folklore_villager": True,
+                    "is_beast_companion": bool(hydrated.get("is_beast_companion")),
+                    "folklore_village": hydrated.get("folklore_village", ""),
+                    "agent_tier": hydrated["agent_tier"],
+                    "rank_title": hydrated["rank_title"],
+                    "agent_class": hydrated["agent_class"],
+                    "faction_id": hydrated["faction_id"],
+                    "faction_name": hydrated["faction_name"],
+                    "innate_abilities": hydrated["innate_abilities"],
+                    "spells": hydrated["innate_abilities"],
+                    "hp": hydrated["hp"],
+                    "max_hp": hydrated["max_hp"],
+                    "mp": hydrated["mp"],
+                    "max_mp": hydrated["max_mp"],
+                    "level": hydrated["level"],
+                    "stats": hydrated["stats"],
+                    "weapon_profile": hydrated["weapon_profile"],
+                    "reason": f"Sanctuary resident {npc_name} recognized your communion{' via an active Folklore Pact' if has_folk_pact else ''} and agreed to accompany you (Affinity {affinity_score}/{req_aff}, 0G).",
+                }
+            pact_hint = " (eases to 20 with an active Folklore Patron Pact)"
+            return {
+                "allowed": False,
+                "cost": 0,
+                "anomalous_npc_tag": TAG_FOLKLORE_VILLAGER,
+                "reason": f"{npc_name} is wary of Occult Cultists and requires Affinity {req_aff}{pact_hint} before stepping beyond the sanctuary veil (currently {affinity_score}).",
+            }
         if affinity_score >= 20 or basic_info.get("contact_added"):
             return {
                 "allowed": True,
@@ -2109,7 +2404,7 @@ def evaluate_anomalous_companion_recruitment(
             ),
         }
 
-    # Case 2: Distrusted Faction Operative (Cult or Clandestine Syndicate)
+    # Case 2: Outlaw Faction Operative (Cult or Clandestine Syndicate)
     if agent_faction_id in ("cult_faction", "clandestine_faction"):
         if affinity_score >= 150:
             return {
@@ -2123,12 +2418,38 @@ def evaluate_anomalous_companion_recruitment(
             "cost": 0,
             "anomalous_npc_tag": TAG_SPECIAL_AGENT,
             "reason": (
-                f"{npc_name} belongs to {agent_faction_name} (Distrusted Organization). "
-                f"Recruiting a covert operative from a distrusted faction requires Close Friend / Defector standing (150 Affinity; currently {affinity_score}) or membership in their organization."
+                f"{npc_name} belongs to {agent_faction_name} (Outlaw Organization). "
+                f"Recruiting a covert operative from a rival outlaw faction requires Close Friend / Defector standing (150 Affinity; currently {affinity_score}) or membership in their organization."
             ),
         }
 
-    # Case 3: Friendly Cross-Faction Special Agent
+    # Case 3: Cross-Faction Special Agent (licensed / freelance target)
+    if player_faction_id in ("cult_faction", "clandestine_faction"):
+        if affinity_score >= 120:
+            return {
+                "allowed": True,
+                "cost": 0,
+                "reason": f"Trusted liaison {npc_name} ({agent_faction_name}) set aside your outlaw record for 0G (Affinity {affinity_score} >= 120).",
+                **base_companion_payload,
+            }
+        if affinity_score >= 90:
+            rec_cost = get_recruitment_cost(affinity_score, level=char_level)
+            return {
+                "allowed": True,
+                "cost": rec_cost,
+                "reason": f"Off-the-books joint-operation retainer with {npc_name} ({agent_faction_name}).",
+                **base_companion_payload,
+            }
+        return {
+            "allowed": False,
+            "cost": 0,
+            "anomalous_npc_tag": TAG_SPECIAL_AGENT,
+            "reason": (
+                f"{npc_name} ({agent_faction_name or 'Licensed Agency'}) is guarded around outlaw operatives and requires "
+                f"90 Affinity for a paid discretion retainer (or 120 Affinity for free recruitment; currently {affinity_score})."
+            ),
+        }
+
     if affinity_score >= 100:
         return {
             "allowed": True,
@@ -2352,10 +2673,13 @@ def get_anomalous_facility_ambient_agents(
         conv_roll = int(hashlib.md5(f"inc_{session_id}_{safe_day}_{current_location}".encode("utf-8")).hexdigest(), 16) % 100
         if conv_roll < 45:
             is_night_shift = (safe_min >= 1200 or safe_min < 420)
+            day_factions = ["public_agency", "private_agency_1", "private_agency_2", "monastic_order"]
+            if player_fac in ("cult_faction", "clandestine_faction") and player_fac not in day_factions:
+                day_factions.append(player_fac)
             valid_factions = (
                 ("public_agency", "monastic_order", "cult_faction", "clandestine_faction")
                 if is_night_shift
-                else ("public_agency", "private_agency_1", "private_agency_2", "monastic_order")
+                else tuple(day_factions)
             )
             sel_names = {str(x.get("name") or "").lower() for x in selected}
             pool = [

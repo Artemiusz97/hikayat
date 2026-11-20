@@ -126,7 +126,8 @@ class TurnService:
 
         user_settings = await adb(db.get_user_settings, canonical_id)
         verbosity = user_settings.get("verbosity", "vivid")
-        dialogue_mode = user_settings.get("dialogue_mode", "balanced")
+        narrative_pacing = user_settings.get("narrative_pacing", "balanced")
+        dialogue_mode = user_settings.get("dialogue_mode", "adaptive")
         image_gen_enabled = user_settings.get("image_gen_enabled", 0)
         choices_style = user_settings.get("choices_style", "dropdown")
         result_display = user_settings.get("result_display", "detailed")
@@ -293,6 +294,9 @@ class TurnService:
             narration_language=narration_language,
             character_id=char["id"],
             slot=target_slot,
+            narrative_pacing=narrative_pacing,
+            show_enemy_hp=int(user_settings.get("show_enemy_hp", 1)),
+            show_enemy_intent=int(user_settings.get("show_enemy_intent", 1)),
         )
 
         await adb(db.add_session_member, session_id, canonical_id)
@@ -323,7 +327,34 @@ class TurnService:
         await forge_world_state(session, party)
 
         try:
-            scene = await game_engine.generate_opening_scene(session, party)
+            async def _run_eager_ch1_plan(sq_qid: str) -> Any:
+                try:
+                    from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
+                    return await compile_or_apply_eager_quest_plan(
+                        session_id, sq_qid, timeout_seconds=10.0, defer_apply=True
+                    )
+                except Exception as _bg_plan_err:
+                    log.debug("Ch.1 eager ChapterPlan skipped: %s", _bg_plan_err)
+                    return None
+
+            if schedule_chapter_plan:
+                sq_ch1 = await adb(game_engine.ensure_story_quest_exists, session)
+                sq_qid = str((sq_ch1 or {}).get("quest_id") or "")
+                if sq_qid:
+                    scene, eager_plan = await asyncio.gather(
+                        game_engine.generate_opening_scene(session, party),
+                        _run_eager_ch1_plan(sq_qid),
+                    )
+                    if eager_plan:
+                        try:
+                            from mechanics.narrative.chapter_plan import apply_chapter_plan_to_dossier
+                            await adb(apply_chapter_plan_to_dossier, session_id, sq_qid, eager_plan)
+                        except Exception as _apply_plan_err:
+                            log.debug("Ch.1 eager ChapterPlan apply skipped: %s", _apply_plan_err)
+                else:
+                    scene = await game_engine.generate_opening_scene(session, party)
+            else:
+                scene = await game_engine.generate_opening_scene(session, party)
             await adb(game_engine.apply_quest_update, session_id, scene)
             if isinstance(scene, dict) and "merchant_encounter" in scene:
                 await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
@@ -360,14 +391,6 @@ class TurnService:
                 dialogue_partner=partner_arg,
                 current_node_id=scene.get("current_node_id") or session.get("current_node_id"),
             )
-            if schedule_chapter_plan:
-                try:
-                    sq_ch1 = await adb(db.get_active_story_quest, session_id)
-                    if sq_ch1 and sq_ch1.get("quest_id"):
-                        from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
-                        schedule_background_chapter_plan(session_id, str(sq_ch1["quest_id"]))
-                except Exception as _bg_plan_err:
-                    log.debug("Ch.1 background ChapterPlan schedule skipped: %s", _bg_plan_err)
             char_id = char_row["id"] if char_row else 0
             enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
             party_npc_rows = await adb(db.get_session_party_npcs, session_id) or []
@@ -492,6 +515,21 @@ class TurnService:
         }
 
     @staticmethod
+    async def _await_uninterruptible(coro, *, reraise_cancel: bool = True):
+        """Await a short transactional coroutine without letting task cancellation abort DB cleanup."""
+        task = asyncio.ensure_future(coro)
+        deferred_cancel: Optional[asyncio.CancelledError] = None
+        while True:
+            try:
+                res = await asyncio.shield(task)
+                break
+            except asyncio.CancelledError as c_err:
+                deferred_cancel = c_err
+        if deferred_cancel is not None and reraise_cancel:
+            raise deferred_cancel
+        return res
+
+    @staticmethod
     async def _finalize_and_save_scene(
         session_id: int,
         session_obj: Dict[str, Any],
@@ -534,31 +572,56 @@ class TurnService:
             )
             cleaned_choices = list(cleaned_choices or [])
 
+        from mechanics.social.conversation_choices import (
+            ensure_active_dialogue_exit_choice,
+            has_dialogue_exit_choice,
+        )
+        had_exit_before = has_dialogue_exit_choice(cleaned_choices)
+        cleaned_choices = await adb(
+            ensure_active_dialogue_exit_choice,
+            cleaned_choices,
+            session=sess_dict,
+            partners=effective_partner,
+            outcome=outcome if isinstance(outcome, dict) else None,
+        )
+        if not had_exit_before and has_dialogue_exit_choice(cleaned_choices):
+            log.warning(
+                "Healed missing dialogue exit choice in _finalize_and_save_scene "
+                "(session_id=%s, partner=%r, hybrid_built=%r, pre_labels=%r)",
+                session_id,
+                effective_partner,
+                outcome.get("_hybrid_choices_built") if isinstance(outcome, dict) else None,
+                [c.get("label") for c in (raw_choices or []) if isinstance(c, dict)],
+            )
+
         if isinstance(outcome, dict):
             outcome["next_narrative"] = next_narrative
             outcome["scene_title"] = scene_title
 
-        if is_retry or mode == "sync":
-            await adb(db.clear_pending_picks, session_id)
-        elif mode in ("turn", "multi"):
-            await adb(db.advance_turn, session_id)
+        def _commit_scene_tx() -> None:
+            with db.UnitOfWork():
+                if is_retry or mode == "sync":
+                    db.clear_pending_picks(session_id)
+                elif mode in ("turn", "multi"):
+                    db.advance_turn(session_id)
 
-        await adb(
-            db.save_session_scene,
-            session_id,
-            scene_title,
-            next_narrative,
-            cleaned_choices,
-            list(history or []),
-            location=outcome.get("location") if isinstance(outcome, dict) else None,
-            nearby_enemies=outcome.get("nearby_enemies") if isinstance(outcome, dict) else None,
-            current_npcs=npcs_arg,
-            dialogue_partner=partner_arg,
-            current_node_id=outcome.get("current_node_id") if isinstance(outcome, dict) else None,
-            focal_point=outcome.get("focal_point") if isinstance(outcome, dict) else None,
-            combat_threat_ledger=outcome.get("combat_threat_ledger") if isinstance(outcome, dict) else None,
-            combat_boss_telegraph=outcome.get("combat_boss_telegraph") if isinstance(outcome, dict) else None,
-        )
+                db.save_session_scene(
+                    session_id,
+                    scene_title,
+                    next_narrative,
+                    cleaned_choices,
+                    list(history or []),
+                    location=outcome.get("location") if isinstance(outcome, dict) else None,
+                    nearby_enemies=outcome.get("nearby_enemies") if isinstance(outcome, dict) else None,
+                    current_npcs=npcs_arg,
+                    dialogue_partner=partner_arg,
+                    current_node_id=outcome.get("current_node_id") if isinstance(outcome, dict) else None,
+                    focal_point=outcome.get("focal_point") if isinstance(outcome, dict) else None,
+                    combat_threat_ledger=outcome.get("combat_threat_ledger") if isinstance(outcome, dict) else None,
+                    combat_boss_telegraph=outcome.get("combat_boss_telegraph") if isinstance(outcome, dict) else None,
+                )
+
+        await adb(_commit_scene_tx)
         return scene_title, next_narrative, cleaned_choices
 
     @staticmethod
@@ -816,6 +879,23 @@ class TurnService:
                 cleaned["mp_cost"] = 0
                 cleaned["label"] = raw_lbl or f"Speak with {cleaned.get('target_npc')}"
                 return cleaned
+        if (
+            not active_enemies
+            and isinstance(session, dict)
+            and (
+                raw_intent == "dialogue_exit"
+                or bool(raw_dc.get("ends_dialogue"))
+                or bool(raw_dc.get("_pinned_dialogue_exit"))
+            )
+        ):
+            from mechanics.social.conversation_choices import build_pinned_leave_choice
+            from mechanics.world.mobility import get_session_dialogue_partners
+            active_dps = get_session_dialogue_partners(session)
+            if active_dps:
+                exit_card = build_pinned_leave_choice(active_dps)
+                if raw_lbl:
+                    exit_card["label"] = raw_lbl
+                return exit_card
 
         if not active_enemies and isinstance(session, dict) and isinstance(session.get("_dealt_social_seeds"), list):
             cand_tid = str(raw_dc.get("topic_id") or "").strip()
@@ -1193,7 +1273,6 @@ class TurnService:
 
         user_settings = await adb(db.get_settings, user_id) or {}
         check_mode = user_settings.get("debug_check_mode", "off")
-        dialogue_mode = user_settings.get("dialogue_mode", "balanced")
 
         chosen: Dict[str, Any] = {}
         classification: Dict[str, Any] = {}
@@ -1204,6 +1283,13 @@ class TurnService:
 
         if choices is None and isinstance(session, dict):
             choices = session.get("choices") or []
+        if isinstance(choices, list) and choices and isinstance(session, dict):
+            from mechanics.social.conversation_choices import (
+                ensure_active_dialogue_exit_choice,
+                has_dialogue_exit_choice,
+            )
+            if not has_dialogue_exit_choice(choices):
+                choices = await adb(ensure_active_dialogue_exit_choice, choices, session=session)
 
         if is_item_action and not direct_choice and choice_index is None:
             chosen = {
@@ -1357,6 +1443,28 @@ class TurnService:
                     )
                 chosen["label"] = custom_text
                 chosen["text"] = custom_text
+                if is_custom and session_id:
+                    _t_qid = str(classification.get("targets_quest_id") or "").strip()
+                    if _t_qid:
+                        try:
+                            _q_chk = await adb(db.get_quest_by_id, session_id, _t_qid)
+                        except Exception:
+                            _q_chk = None
+                        if isinstance(_q_chk, dict) and str(_q_chk.get("status") or "").lower() == "active":
+                            chosen["quest_id"] = _t_qid
+                            chosen["is_quest_action"] = True
+                            chosen["_python_verified_quest"] = True
+                            chosen["is_story_quest"] = bool(_q_chk.get("is_story_quest"))
+                            if classification.get("targets_sub_obj_id") is not None:
+                                try:
+                                    chosen["sub_obj_id"] = int(classification["targets_sub_obj_id"])
+                                except (TypeError, ValueError):
+                                    pass
+                            _q_app = str(classification.get("quest_approach") or "").strip().upper()
+                            if _q_app:
+                                chosen["quest_approach"] = _q_app
+                                if not chosen.get("approach"):
+                                    chosen["approach"] = _q_app
         else:
             raise ValueError("Must provide choice_index, direct_choice, or custom_action_text")
 
@@ -1564,16 +1672,8 @@ class TurnService:
             if target_item_name and chosen.get("item_consumed", True) and target_item_obj is not None:
                 item_was_consumed = True
 
-        # ── Dialogue & Persona DC Modifiers ──────────────────────────────────
+        # ── Persona DC Modifiers ─────────────────────────────────────────
         act_cat = str(chosen.get("action_category") or ("custom" if is_custom else "")).strip()
-        if (
-            chosen.get("choice_type") == "dialogue"
-            or act_cat in ("dialogue", "romantic_confession", "social_invite", "party_recruit", "affection", "disclosure_inquiry")
-        ):
-            if dialogue_mode == "casual":
-                req_val = max(1, req_val - 2)
-            elif dialogue_mode == "challenging":
-                req_val += 2
 
         sess_dp = get_session_dialogue_partners(session) if isinstance(session, dict) else []
         explicit_target = (
@@ -2086,6 +2186,7 @@ class TurnService:
             "sub_intent": act_sub_intent,
             "target_npc": act_target or "",
             "ends_dialogue": act_ends_dialogue,
+            "_quest_dialogue_handoff": bool(chosen.get("_quest_dialogue_handoff", False)),
             "dismisses_npc": act_dismisses_npc,
             "_stage2_custom_auto_fail": stage2_custom_auto_fail,
             "resolved_intent": resolved_intent,
@@ -2099,6 +2200,9 @@ class TurnService:
             "is_quest_action": bool(chosen.get("is_quest_action", False)),
             "is_story_quest": bool(chosen.get("is_story_quest", False)),
             "is_climax_action": bool(chosen.get("is_climax_action", False)),
+            "_python_verified_quest": bool(chosen.get("_python_verified_quest", False)),
+            "quest_approach": str(chosen.get("quest_approach") or ""),
+            "approach": str(chosen.get("approach") or ""),
             "rush_climax": bool(chosen.get("rush_climax", False)),
             "off_hours_fallback": bool(chosen.get("off_hours_fallback", False)),
             "clue_source_id": str(chosen.get("clue_source_id") or ""),
@@ -2427,6 +2531,7 @@ class TurnService:
                 "price": a.get("price") or 0,
                 "sub_intent": a.get("sub_intent"),
                 "ends_dialogue": a.get("ends_dialogue", False),
+                "_quest_dialogue_handoff": bool(a.get("_quest_dialogue_handoff", False)),
                 "dismisses_npc": a.get("dismisses_npc", ""),
                 "target_name": a.get("target_name") or a.get("target_npc") or a.get("combat_target"),
                 "target_npc": a.get("target_npc") or a.get("target_name") or a.get("combat_target"),
@@ -2446,6 +2551,9 @@ class TurnService:
                 "quest_id": a.get("quest_id"),
                 "sub_obj_id": a.get("sub_obj_id"),
                 "stage_index": a.get("stage_index"),
+                "approach": a.get("approach") or "",
+                "quest_approach": a.get("quest_approach") or "",
+                "rush_climax": bool(a.get("rush_climax", False)),
                 "is_quest_action": bool(a.get("is_quest_action", False)),
                 "is_climax_action": bool(a.get("is_climax_action", False)),
                 "is_story_quest": bool(a.get("is_story_quest", False)),
@@ -2477,6 +2585,7 @@ class TurnService:
             if not (isinstance(_h, dict) and _h.get("type") == "scene")
         )
         pre_turn_count_val = int(session.get("turn_count") or 0)
+        pre_turn_history_snapshot = copy.deepcopy(list(session.get("history") or []))
         target_turn = max(pre_turn_count_val, _hist_actions_cnt) + 1
         _property_gold_refunds: List[Tuple[int, int, Optional[int]]] = []
         for _pa in actions:
@@ -2532,6 +2641,8 @@ class TurnService:
                 "leyline_spirit_passage_unlocked",
                 "leyline_unlocked_turn",
                 "leyline_unlock_reason",
+                "prompt_epoch",
+                "_just_advanced_quest_ids",
             )
         }
         pre_turn_dialogue_partner = session.get("dialogue_partner")
@@ -2579,6 +2690,17 @@ class TurnService:
                 "event_pity_counter": float(session.get("event_pity_counter") or 0.0),
                 "rumor_pity_counter": float(session.get("rumor_pity_counter") or 0.0),
                 "minor_event_pity_counter": float(session.get("minor_event_pity_counter") or 0.0),
+                "anomalous_faction_state": copy.deepcopy(session.get("anomalous_faction_state")),
+                "party_factions": {
+                    int(c["user_id"]): {
+                        "joined_faction_id": c.get("joined_faction_id"),
+                        "joined_faction_name": c.get("joined_faction_name"),
+                        "faction_rank": int(c.get("faction_rank") or 0),
+                        "faction_title": str(c.get("faction_title") or ""),
+                    }
+                    for c, _ in (party or [])
+                    if isinstance(c, dict) and c.get("user_id")
+                },
             },
             "applied": {}
         }
@@ -2586,6 +2708,7 @@ class TurnService:
 
         if isinstance(session, dict):
             session["_target_turn"] = target_turn
+            session["_just_advanced_quest_ids"] = []
             try:
                 session["_world_events_snapshot"] = await adb(db.get_world_events_snapshot, session_id)
             except Exception:
@@ -2615,6 +2738,8 @@ class TurnService:
                 log.warning("Normalized state rollback failed for session %s: %s", session_id, _rb_norm_err)
             try:
                 rollback_kwargs: Dict[str, Any] = {
+                    "turn_count": pre_turn_count_val,
+                    "history_json": json.dumps(pre_turn_history_snapshot, default=str),
                     "nearby_enemies": pre_turn_nearby_enemies_snapshot,
                     "current_npcs": snapshot["pre_turn"]["npcs"],
                     "dialogue_partner": pre_turn_dialogue_partner,
@@ -2664,10 +2789,14 @@ class TurnService:
             await adb(db.set_turn_snapshot, session_id, snapshot)
 
         # Resolve the turn with the LLM — resolve_turn now always returns a dict
+        def _pre_turn_snapshot_bundle() -> None:
+            with db.UnitOfWork():
+                db.snapshot_session_physical_state_for_turn(session_id, pre_turn_count_val)
+                db.snapshot_session_social_state_for_turn(session_id, pre_turn_count_val)
+                db.save_contract_turn_snapshot(session_id, pre_turn_count_val)
+
         try:
-            await adb(db.snapshot_session_physical_state_for_turn, session_id, pre_turn_count_val)
-            await adb(db.snapshot_session_social_state_for_turn, session_id, pre_turn_count_val)
-            await adb(db.save_contract_turn_snapshot, session_id, pre_turn_count_val)
+            await adb(_pre_turn_snapshot_bundle)
         except Exception as _ps_pre_err:
             log.warning("Pre-turn physical/social snapshot failed (non-fatal): %s", _ps_pre_err)
         try:
@@ -2675,10 +2804,7 @@ class TurnService:
             if isinstance(outcome, dict) and isinstance(session, dict) and "stealth_state" not in outcome:
                 outcome["stealth_state"] = session.get("stealth_state")
         except BaseException as e:
-            try:
-                await asyncio.shield(_rollback_turn_failure(e))
-            except asyncio.CancelledError:
-                pass
+            await TurnService._await_uninterruptible(_rollback_turn_failure(e), reraise_cancel=False)
             raise e
 
         if isinstance(outcome, dict):
@@ -2688,10 +2814,7 @@ class TurnService:
         try:
             items_gained = await adb(game_engine.apply_outcome, session_id, party, outcome, mp_already_spent, actions=actions)
         except BaseException as e:
-            try:
-                await asyncio.shield(_rollback_turn_failure(e))
-            except asyncio.CancelledError:
-                pass
+            await TurnService._await_uninterruptible(_rollback_turn_failure(e), reraise_cancel=False)
             raise e
         finally:
             if isinstance(outcome, dict):
@@ -2700,10 +2823,15 @@ class TurnService:
                 session.pop("_target_turn", None)
         if not isinstance(items_gained, dict):
             items_gained = {}
+
+        def _post_turn_snapshot_bundle() -> None:
+            with db.UnitOfWork():
+                db.snapshot_session_physical_state_for_turn(session_id, target_turn)
+                db.snapshot_session_social_state_for_turn(session_id, target_turn)
+                db.save_contract_turn_snapshot(session_id, target_turn, overwrite=True)
+
         try:
-            await adb(db.snapshot_session_physical_state_for_turn, session_id, target_turn)
-            await adb(db.snapshot_session_social_state_for_turn, session_id, target_turn)
-            await adb(db.save_contract_turn_snapshot, session_id, target_turn, overwrite=True)
+            await adb(_post_turn_snapshot_bundle)
         except Exception as _ps_post_err:
             log.warning("Post-turn physical/social snapshot failed (non-fatal): %s", _ps_post_err)
 
@@ -2854,21 +2982,45 @@ class TurnService:
         _ts_phys = (outcome.get("_physical_state") if isinstance(outcome, dict) else None) or {}
         _ts_ic_str = str(_ts_phys.get("intimate_contact", "") if isinstance(_ts_phys, dict) else "")
         _ts_in_intimate = _ts_is_erotic(_ts_ic_str) or ("aftercare" in _ts_ic_str.lower())
-        # Only re-tag quest choices if a waypoint stage unlocked during apply_outcome
+        # Only re-tag quest choices if a waypoint stage unlocked or quest advanced during apply_outcome
         if (
             isinstance(outcome, dict)
-            and outcome.get("_waypoint_notices")
+            and (outcome.get("_waypoint_notices") or outcome.get("_quests_advanced_this_turn"))
             and not _ts_in_intimate
             and not (game_engine.get_active_enemies(session) or game_engine.get_active_enemies(outcome))
         ):
             try:
+                from game_engine import prune_completed_stage_choices
                 from mechanics.world.waypoints import tag_and_enrich_quest_choices
                 lead_char = party[0][0] if party and party[0] else None
-                raw_c = list(outcome.get("next_choices") or outcome.get("choices") or [])
+                raw_c = prune_completed_stage_choices(
+                    list(outcome.get("next_choices") or outcome.get("choices") or []),
+                    outcome.get("_waypoint_notices") or [],
+                )
 
                 eff_loc = outcome.get("location") or session.get("current_location", "")
-                eff_dp = outcome.get("dialogue_partners") if "dialogue_partners" in outcome else outcome.get("dialogue_partner", ...)
+                if outcome.get("dialogue_partners") is not None:
+                    eff_dp = outcome.get("dialogue_partners")
+                elif "dialogue_partner" in outcome:
+                    eff_dp = outcome.get("dialogue_partner")
+                else:
+                    eff_dp = ...
                 eff_npcs = outcome.get("npcs_present")
+                if eff_dp is ...:
+                    dp_raw = session.get("dialogue_partners")
+                    if isinstance(dp_raw, list) and dp_raw:
+                        eff_dp_list = [str(p).strip() for p in dp_raw if str(p).strip()]
+                    elif session.get("dialogue_partner"):
+                        eff_dp_list = [str(session["dialogue_partner"]).strip()]
+                    else:
+                        eff_dp_list = []
+                elif isinstance(eff_dp, list):
+                    eff_dp_list = [str(p).strip() for p in eff_dp if str(p).strip()]
+                elif isinstance(eff_dp, str) and eff_dp.strip():
+                    eff_dp_list = [eff_dp.strip()]
+                else:
+                    eff_dp_list = []
+
                 enriched_c = await adb(
                     tag_and_enrich_quest_choices,
                     raw_c,
@@ -2878,34 +3030,67 @@ class TurnService:
                     char=lead_char,
                     dialogue_partner=eff_dp,
                     current_npcs=eff_npcs,
+                    just_advanced_quest_ids=outcome.get("_quests_advanced_this_turn") or None,
                 )
 
                 # Prune enriched choices that target already completed waypoint stages
-                from game_engine import prune_completed_stage_choices
                 enriched_c = prune_completed_stage_choices(enriched_c, outcome.get("_waypoint_notices") or [])
                 if enriched_c:
-                    free_actions = [c for c in raw_c if isinstance(c, dict) and c.get("stat") == "FREE"]
-                    filler_budget = 3
-                    filler_used = 0
-                    final_c = []
-                    for ec in enriched_c:
-                        if not isinstance(ec, dict):
-                            continue
-                        is_ess = bool(
-                            ec.get("is_quest_action")
-                            or ec.get("is_climax_action")
-                            or ec.get("_priority_slot")
-                            or ec.get("_npc_speak_choice")
-                            or str(ec.get("label") or "").lower().startswith(("speak with ", "talk to ", "talk with "))
+                    if eff_dp_list:
+                        from mechanics.social.conversation_choices import (
+                            enforce_conversation_choice_bands,
+                            pin_dialogue_exit_last,
                         )
-                        if is_ess:
-                            final_c.append(ec)
-                        elif filler_used < filler_budget:
-                            filler_used += 1
-                            final_c.append(ec)
-                    for fa in free_actions:
-                        if not any(fc.get("label") == fa.get("label") for fc in final_c if isinstance(fc, dict)):
-                            final_c.append(fa)
+                        sess_post = {
+                            **session,
+                            "current_location": eff_loc,
+                            "dialogue_partners": eff_dp_list,
+                            "dialogue_partner": eff_dp_list[0],
+                        }
+                        final_c = await adb(
+                            enforce_conversation_choice_bands,
+                            enriched_c,
+                            sess_post,
+                            eff_dp_list,
+                            party=party,
+                            current_npcs=eff_npcs,
+                        )
+                        final_c = pin_dialogue_exit_last(final_c, eff_dp_list, max_total=8)
+                    else:
+                        from mechanics.narrative.intent import is_conversational_exit
+                        filler_budget = 3
+                        filler_used = 0
+                        final_c = []
+                        seen_post_lbls: set[str] = set()
+                        for ec in enriched_c:
+                            if not isinstance(ec, dict):
+                                continue
+                            lbl_k = str(ec.get("label") or "").strip().lower()
+                            if not lbl_k or lbl_k in seen_post_lbls:
+                                continue
+                            stat_u = str(ec.get("stat") or "").upper()
+                            int_l = str(ec.get("intent") or "").lower()
+                            is_ess = bool(
+                                ec.get("is_quest_action")
+                                or ec.get("is_climax_action")
+                                or ec.get("_quest_dialogue_handoff")
+                                or ec.get("ends_dialogue")
+                                or ec.get("_pinned_dialogue_exit")
+                                or int_l == "dialogue_exit"
+                                or is_conversational_exit(lbl_k)
+                                or ec.get("_priority_slot")
+                                or ec.get("_npc_speak_choice")
+                                or stat_u == "FREE"
+                                or int_l in ("dialogue_init", "dialogue", "social_talk")
+                                or lbl_k.startswith(("speak with ", "talk to ", "talk with "))
+                            )
+                            if is_ess:
+                                seen_post_lbls.add(lbl_k)
+                                final_c.append(ec)
+                            elif filler_used < filler_budget:
+                                filler_used += 1
+                                seen_post_lbls.add(lbl_k)
+                                final_c.append(ec)
                     outcome["next_choices"] = final_c
                     outcome["choices"] = final_c
             except Exception as e:
@@ -3031,64 +3216,89 @@ class TurnService:
         has_dialogue = bool(outcome.get("dialogue_partners") or outcome.get("dialogue_partner"))
         dyn_limit = 12 if has_dialogue else 4
         new_hist = game_engine.push_history(raw_hist, history_entry, limit=dyn_limit)
-        await adb(
-            db.update_session,
-            session_id,
-            history_json=json.dumps(new_hist, default=str),
-            turn_count=target_turn,
-        )
+        _epoch_to_save = outcome.pop("_prompt_epoch", None) if isinstance(outcome, dict) else None
         from mechanics.world.world_events import build_client_world_pulse_payload as _build_wp_payload
 
-        fresh_session = await adb(db.get_session, session_id)
-        new_char = await adb(db.get_character, user_id)
-
-        if isinstance(fresh_session, dict):
-            fresh_session["world_pulse"] = await adb(_build_wp_payload, session_id)
         if user_id not in items_gained:
             items_gained[user_id] = []
 
-        snapshot["status"] = "completed"
-        snapshot["applied"] = {
-            "character_outcomes": outcome.get("character_outcomes", []),
-            "items_gained": items_gained,
-            "xp_gained": dict(xp_by_user),
-            "location": outcome.get("location", ""),
-            "current_node_id": outcome.get("current_node_id") or fresh_session.get("current_node_id", ""),
-            "focal_point": outcome.get("focal_point") or fresh_session.get("focal_point", ""),
-            "npcs_present": (
-                outcome.get("npcs_present")
-                if outcome.get("npcs_present") is not None
-                else list((fresh_session or {}).get("current_npcs") or [])
-            ),
-            "nearby_enemies": (
-                outcome.get("nearby_enemies")
-                if outcome.get("nearby_enemies") is not None
-                else list((fresh_session or {}).get("nearby_enemies") or [])
-            ),
-            "deceased_characters": outcome.get("deceased_characters", []),
-            "dead_enemies": outcome.get("dead_enemies", []),
-            "time_info": outcome.get("_time_info", {}),
-            "sleep_info": outcome.get("_sleep_info"),
-            "quest_updates": outcome.get("quest_updates", []),
-            "relationship_updates": outcome.get("relationship_updates", []),
-            "social_feedback_pills": list(outcome.get("social_feedback_pills") or []),
-            "active_dialogue_mood": outcome.get("active_dialogue_mood"),
-            "dialogue_partner": (
-                outcome.get("dialogue_partner")
-                if "dialogue_partner" in outcome
-                else (fresh_session or {}).get("dialogue_partner")
-            ),
-            "dialogue_partners": outcome.get("dialogue_partners", []),
-            "cast_state": outcome.get("_staged_cast_state") or fresh_session.get("cast_state"),
-            "intimate_update": outcome.get("intimate_update"),
-            "_physical_state": outcome.get("_physical_state"),
-            "_refractory_recovered_notice": outcome.get("_refractory_recovered_notice"),
-            "event_pity_counter": float((fresh_session or {}).get("event_pity_counter") or 0.0),
-            "rumor_pity_counter": float((fresh_session or {}).get("rumor_pity_counter") or 0.0),
-            "minor_event_pity_counter": float((fresh_session or {}).get("minor_event_pity_counter") or 0.0),
-        }
+        def _post_turn_commit_bundle() -> tuple[dict | None, dict | None]:
+            with db.UnitOfWork():
+                update_kwargs: Dict[str, Any] = {
+                    "history_json": json.dumps(new_hist, default=str),
+                    "turn_count": target_turn,
+                }
+                if isinstance(_epoch_to_save, dict):
+                    update_kwargs["extra"] = {"prompt_epoch": _epoch_to_save}
+                db.update_session(session_id, **update_kwargs)
+                f_sess = db.get_session(session_id)
+                n_char = db.get_character(user_id)
+                if isinstance(f_sess, dict):
+                    f_sess["world_pulse"] = _build_wp_payload(session_id)
+                snapshot["status"] = "completed"
+                snapshot["applied"] = {
+                    "character_outcomes": outcome.get("character_outcomes", []),
+                    "items_gained": items_gained,
+                    "xp_gained": dict(xp_by_user),
+                    "location": outcome.get("location", ""),
+                    "current_node_id": outcome.get("current_node_id") or (f_sess or {}).get("current_node_id", ""),
+                    "focal_point": outcome.get("focal_point") or (f_sess or {}).get("focal_point", ""),
+                    "npcs_present": (
+                        outcome.get("npcs_present")
+                        if outcome.get("npcs_present") is not None
+                        else list((f_sess or {}).get("current_npcs") or [])
+                    ),
+                    "nearby_enemies": (
+                        outcome.get("nearby_enemies")
+                        if outcome.get("nearby_enemies") is not None
+                        else list((f_sess or {}).get("nearby_enemies") or [])
+                    ),
+                    "deceased_characters": outcome.get("deceased_characters", []),
+                    "dead_enemies": outcome.get("dead_enemies", []),
+                    "time_info": outcome.get("_time_info", {}),
+                    "sleep_info": outcome.get("_sleep_info"),
+                    "quest_updates": outcome.get("quest_updates", []),
+                    "relationship_updates": outcome.get("relationship_updates", []),
+                    "social_feedback_pills": list(outcome.get("social_feedback_pills") or []),
+                    "active_dialogue_mood": outcome.get("active_dialogue_mood"),
+                    "dialogue_partner": (
+                        outcome.get("dialogue_partner")
+                        if "dialogue_partner" in outcome
+                        else (f_sess or {}).get("dialogue_partner")
+                    ),
+                    "dialogue_partners": outcome.get("dialogue_partners", []),
+                    "cast_state": outcome.get("_staged_cast_state") or (f_sess or {}).get("cast_state"),
+                    "intimate_update": outcome.get("intimate_update"),
+                    "_physical_state": outcome.get("_physical_state"),
+                    "_refractory_recovered_notice": outcome.get("_refractory_recovered_notice"),
+                    "event_pity_counter": float((f_sess or {}).get("event_pity_counter") or 0.0),
+                    "rumor_pity_counter": float((f_sess or {}).get("rumor_pity_counter") or 0.0),
+                    "minor_event_pity_counter": float((f_sess or {}).get("minor_event_pity_counter") or 0.0),
+                }
+                db.set_turn_snapshot(session_id, snapshot)
+                return f_sess, n_char
 
-        await adb(db.set_turn_snapshot, session_id, snapshot)
+        try:
+            fresh_session, new_char = await TurnService._await_uninterruptible(
+                adb(_post_turn_commit_bundle), reraise_cancel=True
+            )
+        except asyncio.CancelledError:
+            await TurnService._await_uninterruptible(
+                TurnService._finalize_and_save_scene(
+                    session_id=session_id,
+                    session_obj=session,
+                    outcome=outcome,
+                    lead_char=(dict(party[0][0]) if party and party[0] else None),
+                    history=new_hist,
+                    mode=mode,
+                    is_retry=False,
+                ),
+                reraise_cancel=False,
+            )
+            raise
+        except Exception as post_err:
+            await TurnService._await_uninterruptible(_rollback_turn_failure(post_err), reraise_cancel=False)
+            raise
 
         async def _run_finalize_memory_after_prose(final_hist: list, final_outcome: dict) -> None:
             try:
@@ -3124,47 +3334,74 @@ class TurnService:
         lead_char_for_scene = dict(new_char) if new_char else (dict(party[0][0]) if party and party[0] else None)
 
         if outcome.get("_is_fallback_narrative"):
-            log.info(f"Auto-recovery triggered for session {session_id} due to empty prose.")
-            try:
-                recovered_response = await TurnService.retry_narration(session_id, user_id, stream_callback=stream_callback)
-                if mode in ("turn", "multi"):
-                    await adb(db.advance_turn, session_id)
-                recovered_hist = list((recovered_response.session or {}).get("history") or new_hist)
-                await _run_finalize_memory_after_prose(recovered_hist, recovered_response.outcome)
-                refreshed_sess = await adb(db.get_session, session_id)
-                if isinstance(refreshed_sess, dict):
-                    refreshed_sess["world_pulse"] = await adb(_build_wp_payload, session_id)
-                    try:
-                        from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
-                        if is_anomalous_realty_scenario(str(refreshed_sess.get("scenario") or "")):
-                            refreshed_sess["realty"] = await adb(build_realty_payload, session_id, user_id)
-                    except Exception:
-                        pass
-                    recovered_response.session = refreshed_sess
-                recovered_response.actions = actions
-                recovered_response.items_gained_by_user = items_gained
-                recovered_response.xp_gained = xp_gained
-                recovered_response.levels_gained = levels_gained
-                recovered_response.xp_by_user = xp_by_user
-                recovered_response.levels_by_user = levels_by_user
-                return recovered_response
-            except Exception as e:
-                log.warning("Auto-recovery narration pass failed: %s", e)
-                snapshot["fallback_reason"] = "empty_prose"
+            if outcome.get("fallback_reason") == "models_unavailable":
+                snapshot["fallback_reason"] = "models_unavailable"
                 await adb(db.set_turn_snapshot, session_id, snapshot)
-                outcome["fallback_reason"] = "empty_prose"
+                log.info(
+                    "Skipping auto-recovery narration pass for session %s because models are unavailable.",
+                    session_id,
+                )
+            else:
+                log.info(f"Auto-recovery triggered for session {session_id} due to empty prose.")
+                try:
+                    recovered_response = await TurnService.retry_narration(session_id, user_id, stream_callback=stream_callback)
+                    if mode in ("turn", "multi"):
+                        await adb(db.advance_turn, session_id)
+                    recovered_hist = list((recovered_response.session or {}).get("history") or new_hist)
+                    await _run_finalize_memory_after_prose(recovered_hist, recovered_response.outcome)
+                    refreshed_sess = await adb(db.get_session, session_id)
+                    if isinstance(refreshed_sess, dict):
+                        refreshed_sess["world_pulse"] = await adb(_build_wp_payload, session_id)
+                        try:
+                            from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
+                            if is_anomalous_realty_scenario(str(refreshed_sess.get("scenario") or "")):
+                                refreshed_sess["realty"] = await adb(build_realty_payload, session_id, user_id)
+                        except Exception:
+                            pass
+                        recovered_response.session = refreshed_sess
+                    recovered_response.actions = actions
+                    recovered_response.items_gained_by_user = items_gained
+                    recovered_response.xp_gained = xp_gained
+                    recovered_response.levels_gained = levels_gained
+                    recovered_response.xp_by_user = xp_by_user
+                    recovered_response.levels_by_user = levels_by_user
+                    return recovered_response
+                except asyncio.CancelledError:
+                    await TurnService._await_uninterruptible(
+                        TurnService._finalize_and_save_scene(
+                            session_id=session_id,
+                            session_obj=fresh_session,
+                            outcome=outcome,
+                            lead_char=lead_char_for_scene,
+                            history=new_hist,
+                            mode=mode,
+                            is_retry=False,
+                        ),
+                        reraise_cancel=False,
+                    )
+                    raise
+                except Exception as e:
+                    log.warning("Auto-recovery narration pass failed: %s", e)
+                    snapshot["fallback_reason"] = "empty_prose"
+                    await adb(db.set_turn_snapshot, session_id, snapshot)
+                    outcome["fallback_reason"] = "empty_prose"
 
-        scene_title, next_narrative, cleaned_choices = await TurnService._finalize_and_save_scene(
-            session_id=session_id,
-            session_obj=fresh_session,
-            outcome=outcome,
-            lead_char=lead_char_for_scene,
-            history=new_hist,
-            mode=mode,
-            is_retry=False,
+        scene_title, next_narrative, cleaned_choices = await TurnService._await_uninterruptible(
+            TurnService._finalize_and_save_scene(
+                session_id=session_id,
+                session_obj=fresh_session,
+                outcome=outcome,
+                lead_char=lead_char_for_scene,
+                history=new_hist,
+                mode=mode,
+                is_retry=False,
+            ),
+            reraise_cancel=False,
         )
 
-        await _run_finalize_memory_after_prose(new_hist, outcome)
+        await TurnService._await_uninterruptible(
+            _run_finalize_memory_after_prose(new_hist, outcome), reraise_cancel=False
+        )
         refreshed_base_sess = await adb(db.get_session, session_id)
         if isinstance(refreshed_base_sess, dict):
             refreshed_base_sess["world_pulse"] = fresh_session.get("world_pulse") if isinstance(fresh_session, dict) else None
@@ -3246,12 +3483,14 @@ class TurnService:
                 last_entry.pop("is_fallback", None)
                 last_entry.pop("_is_fallback_narrative", None)
                 if not new_next_narr and is_prev_fallback:
-                    paras = [p.strip() for p in re.split(r"\n\s*\n", new_outcome_narr) if p.strip()]
-                    if len(paras) >= 2:
-                        last_entry["outcome_narrative"] = "\n\n".join(paras[:-1])
-                        last_entry["narrative"] = last_entry["outcome_narrative"]
-                        last_entry["next_narrative"] = paras[-1]
-                        new_next_narr = paras[-1]
+                    split_out, split_nxt = game_engine.split_outcome_and_next_paragraphs(
+                        new_outcome_narr, new_next_narr
+                    )
+                    if split_nxt:
+                        last_entry["outcome_narrative"] = split_out
+                        last_entry["narrative"] = split_out
+                        last_entry["next_narrative"] = split_nxt
+                        new_next_narr = split_nxt
                     else:
                         last_entry["next_narrative"] = ""
             elif is_prev_fallback and new_next_narr:
@@ -3267,61 +3506,67 @@ class TurnService:
             if new_outcome.get("scene_title"):
                 last_entry["scene_title"] = new_outcome["scene_title"]
             raw_hist[-1] = last_entry
-            await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
-            try:
-                await adb(db.resync_latest_digest_turn, session_id, raw_hist)
-            except Exception as _resync_err:
-                log.warning("resync_latest_digest_turn during retry_narration failed (non-fatal): %s", _resync_err)
 
-        # Update snapshot attempts
-        snapshot["retry_attempts"] = attempt
-        snapshot["fallback_reason"] = None
-        await adb(db.set_turn_snapshot, session_id, snapshot)
-        
-        fresh_session = await adb(db.get_session, session_id)
-        new_char = await adb(db.get_character, user_id)
-        
-        if isinstance(fresh_session, dict):
-            from mechanics.world.world_events.engine import build_client_world_pulse_payload as _build_wp_retry
-            fresh_session["world_pulse"] = await adb(_build_wp_retry, session_id)
-        # D13: Preserve frozen mechanical, spatial & cast state from snapshot["applied"]
-        applied_state = dict(snapshot.get("applied", {}))
-        merged_outcome = dict(applied_state)
-        for k in ("outcome_narrative", "next_narrative", "scene_title", "next_choices", "choices", "_is_fallback_narrative"):
-            if k in new_outcome:
-                merged_outcome[k] = new_outcome[k]
-        # Guarantee frozen cast & spatial fields cannot drift on retry
-        for frozen_k in ("location", "current_node_id", "focal_point", "npcs_present", "dialogue_partner", "dialogue_partners"):
-            if frozen_k in applied_state:
-                merged_outcome[frozen_k] = applied_state[frozen_k]
+        async def _commit_retry_result():
+            if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
+                await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
+                try:
+                    await adb(db.resync_latest_digest_turn, session_id, raw_hist)
+                except Exception as _resync_err:
+                    log.warning("resync_latest_digest_turn during retry_narration failed (non-fatal): %s", _resync_err)
 
-        raw_retry_choices = merged_outcome.get("next_choices") or merged_outcome.get("choices") or []
-        if raw_retry_choices and hasattr(game_engine, "build_hybrid_turn_choices"):
-            try:
-                retry_party = [(dict(new_char), [])] if isinstance(new_char, dict) and new_char else None
-                rebuilt_choices = await adb(
-                    game_engine.build_hybrid_turn_choices,
-                    raw_retry_choices,
-                    session=fresh_session,
-                    party=retry_party,
-                    result=merged_outcome,
-                )
-                if rebuilt_choices:
-                    merged_outcome["next_choices"] = rebuilt_choices
-                    merged_outcome["choices"] = rebuilt_choices
-                    merged_outcome["_hybrid_choices_built"] = True
-            except Exception as e:
-                log.warning("build_hybrid_turn_choices during retry_narration failed (non-fatal): %s", e)
+            snapshot["retry_attempts"] = attempt
+            snapshot["fallback_reason"] = None
+            await adb(db.set_turn_snapshot, session_id, snapshot)
 
-        retry_hist = list((fresh_session or {}).get("history") or raw_hist)
-        scene_title, next_narrative, cleaned_choices = await TurnService._finalize_and_save_scene(
-            session_id=session_id,
-            session_obj=fresh_session,
-            outcome=merged_outcome,
-            lead_char=dict(new_char) if new_char else None,
-            history=retry_hist,
-            mode=snapshot.get("mode"),
-            is_retry=True,
+            fresh_s = await adb(db.get_session, session_id)
+            n_char = await adb(db.get_character, user_id)
+
+            if isinstance(fresh_s, dict):
+                from mechanics.world.world_events.engine import build_client_world_pulse_payload as _build_wp_retry
+                fresh_s["world_pulse"] = await adb(_build_wp_retry, session_id)
+
+            applied_state = dict(snapshot.get("applied", {}))
+            merged = dict(applied_state)
+            for k in ("outcome_narrative", "next_narrative", "scene_title", "next_choices", "choices", "_is_fallback_narrative"):
+                if k in new_outcome:
+                    merged[k] = new_outcome[k]
+            for frozen_k in ("location", "current_node_id", "focal_point", "npcs_present", "dialogue_partner", "dialogue_partners"):
+                if frozen_k in applied_state:
+                    merged[frozen_k] = applied_state[frozen_k]
+
+            raw_retry_choices = merged.get("next_choices") or merged.get("choices") or []
+            if raw_retry_choices and hasattr(game_engine, "build_hybrid_turn_choices"):
+                try:
+                    retry_party = [(dict(n_char), [])] if isinstance(n_char, dict) and n_char else None
+                    rebuilt_choices = await adb(
+                        game_engine.build_hybrid_turn_choices,
+                        raw_retry_choices,
+                        session=fresh_s,
+                        party=retry_party,
+                        result=merged,
+                    )
+                    if rebuilt_choices:
+                        merged["next_choices"] = rebuilt_choices
+                        merged["choices"] = rebuilt_choices
+                        merged["_hybrid_choices_built"] = True
+                except Exception as e:
+                    log.warning("build_hybrid_turn_choices during retry_narration failed (non-fatal): %s", e)
+
+            retry_hist = list((fresh_s or {}).get("history") or raw_hist)
+            s_title, nxt_narr, cl_choices = await TurnService._finalize_and_save_scene(
+                session_id=session_id,
+                session_obj=fresh_s,
+                outcome=merged,
+                lead_char=dict(n_char) if n_char else None,
+                history=retry_hist,
+                mode=snapshot.get("mode"),
+                is_retry=True,
+            )
+            return fresh_s, n_char, merged, s_title, nxt_narr, cl_choices
+
+        fresh_session, new_char, merged_outcome, scene_title, next_narrative, cleaned_choices = await TurnService._await_uninterruptible(
+            _commit_retry_result(), reraise_cancel=False
         )
         saved_retry_session = await adb(db.get_session, session_id)
         if isinstance(saved_retry_session, dict):

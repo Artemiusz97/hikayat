@@ -6,10 +6,13 @@ export const useSettings = (userId) => {
   const [settings, setSettings] = useState({
     stream_narrative: 1,
     verbosity: 'vivid',
-    dialogue_mode: 'balanced',
+    narrative_pacing: 'balanced',
+    dialogue_mode: 'adaptive',
     result_display: 'detailed',
     choices_style: 'dropdown',
     show_percentages: 1,
+    show_enemy_hp: 1,
+    show_enemy_intent: 1,
     image_gen_enabled: 0,
     language: 'en'
   });
@@ -66,6 +69,12 @@ export const useSettings = (userId) => {
     try {
       setSaving(true);
       const merged = { ...settings, ...newFields, user_id: userId };
+      if (
+        newFields?.narrative_pacing &&
+        ['concise', 'direct'].includes(String(merged.verbosity || '').toLowerCase())
+      ) {
+        merged.verbosity = 'normal';
+      }
       // Optimistic update
       setSettings(merged);
 

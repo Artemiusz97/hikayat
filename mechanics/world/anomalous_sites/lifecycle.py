@@ -458,3 +458,230 @@ def backfill_anomalous_locations_integrity_v57(conn: Any, session_id: int | None
         updated += c.rowcount or 0
 
     return updated
+
+
+def backfill_outlaw_faction_hqs_and_residences_v60(conn: Any, session_id: int | None = None) -> int:
+    """
+    Migration v60: Idempotently upgrades existing anomalous sessions and loaded save slots to
+    the 10-wing Occult Cult & Clandestine Syndicate HQs and seeds missing outlaw starter
+    safehouses (`fac_cult_residence`, `fac_syndicate_residence`) without overwriting existing
+    `world_nodes.state_json["anomalous_site"]` payloads.
+    """
+    from mechanics.world.locations.seeds import (
+        OUTLAW_HQ_EXTRA_WINGS,
+        get_outlaw_starter_residence_seeds,
+    )
+
+    sess_filter = " AND id = ?" if session_id is not None else ""
+    params: tuple[Any, ...] = (int(session_id),) if session_id is not None else ()
+    now_ts = time.time()
+    updated = 0
+
+    def _upsert_bidir_edge(sid: int, a: str, b: str, travel_min: int, edge_type: str) -> None:
+        for src, dst in ((a, b), (b, a)):
+            conn.execute(
+                """INSERT INTO world_edges
+                   (session_id, from_node_id, to_node_id, travel_minutes, edge_type, is_bidirectional, created_at)
+                   VALUES (?, ?, ?, ?, ?, 1, ?)
+                   ON CONFLICT(session_id, from_node_id, to_node_id) DO UPDATE SET
+                   travel_minutes = excluded.travel_minutes,
+                   edge_type = excluded.edge_type,
+                   is_bidirectional = 1""",
+                (sid, src, dst, travel_min, edge_type, now_ts),
+            )
+
+    sess_rows = conn.execute(
+        f"SELECT id, scenario FROM sessions WHERE lower(COALESCE(scenario, '')) LIKE '%anomal%'{sess_filter}",
+        params,
+    ).fetchall()
+
+    for sr in sess_rows:
+        sid = int(sr["id"] if hasattr(sr, "keys") else sr[0])
+        scen_key = str((sr["scenario"] if hasattr(sr, "keys") else sr[1]) or "anomalous_incursions")
+
+        node_rows = conn.execute(
+            "SELECT node_id, parent_id, name, node_type FROM world_nodes WHERE session_id = ?",
+            (sid,),
+        ).fetchall()
+        node_map: dict[str, tuple[str, str, str]] = {
+            str(nr["node_id"] if hasattr(nr, "keys") else nr[0]): (
+                str((nr["parent_id"] if hasattr(nr, "keys") else nr[1]) or ""),
+                str((nr["name"] if hasattr(nr, "keys") else nr[2]) or ""),
+                str((nr["node_type"] if hasattr(nr, "keys") else nr[3]) or ""),
+            )
+            for nr in node_rows
+        }
+
+        # 1. Open threshold entrances and add missing 4+4 HQ wings
+        for hq_id, ent_id in (
+            ("loc_cult_sanctum_hq", "sub_cult_entrance"),
+            ("loc_clandestine_syndicate_hq", "sub_synd_entrance"),
+        ):
+            if hq_id not in node_map:
+                continue
+            parent_zone_id, hq_name, _ = node_map[hq_id]
+            zone_name = node_map.get(parent_zone_id, ("", "", ""))[1] or parent_zone_id
+            c_open = conn.execute(
+                "UPDATE world_nodes SET access_tier = 'open' "
+                "WHERE session_id = ? AND node_id IN (?, ?) AND access_tier != 'open'",
+                (sid, hq_id, ent_id),
+            )
+            updated += c_open.rowcount or 0
+
+            anchor_id = ent_id if ent_id in node_map else hq_id
+            for wing in OUTLAW_HQ_EXTRA_WINGS.get(hq_id, ()):
+                wid = str(wing["id"])
+                if wid in node_map:
+                    continue
+                wname = str(wing["name"])
+                wstate = json.dumps({"props": list(wing.get("props") or ()), "is_anomalous": True})
+                conn.execute(
+                    """INSERT OR IGNORE INTO world_nodes
+                       (session_id, node_id, parent_id, name, node_type, category, privacy_level,
+                        is_enclosed, is_transit_hub, access_tier, curfew_start_min, curfew_end_min,
+                        atmosphere, is_dynamic, state_json, created_at)
+                       VALUES (?, ?, ?, ?, 'ROOM', 'civic', 'public', 1, 0, 'restricted', NULL, NULL, '', 0, ?, ?)""",
+                    (sid, wid, hq_id, wname, wstate, now_ts),
+                )
+                conn.execute(
+                    """INSERT OR IGNORE INTO session_locations
+                       (session_id, location_id, zone_name, primary_name, sub_name, atmosphere, is_dynamic, state_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, '', 0, ?, ?)""",
+                    (sid, wid, zone_name, hq_name, wname, wstate, now_ts),
+                )
+                _upsert_bidir_edge(sid, anchor_id, wid, 3, "hallway")
+                node_map[wid] = (hq_id, wname, "ROOM")
+                updated += 1
+
+            interior_wids = sorted(
+                nid
+                for nid, (pid, _, _) in node_map.items()
+                if pid == hq_id and nid not in (ent_id, anchor_id)
+            )
+            if interior_wids:
+                existing_edges = {
+                    (
+                        str(er["from_node_id"] if hasattr(er, "keys") else er[0]),
+                        str(er["to_node_id"] if hasattr(er, "keys") else er[1]),
+                    )
+                    for er in conn.execute(
+                        "SELECT from_node_id, to_node_id FROM world_edges WHERE session_id = ?",
+                        (sid,),
+                    ).fetchall()
+                }
+                for idx_i in range(len(interior_wids)):
+                    for idx_j in range(idx_i + 1, len(interior_wids)):
+                        wa, wb = interior_wids[idx_i], interior_wids[idx_j]
+                        if (wa, wb) not in existing_edges or (wb, wa) not in existing_edges:
+                            _upsert_bidir_edge(sid, wa, wb, 3, "hallway")
+                            updated += 1
+
+        # 2. Seed missing starter safehouses (fac_cult_residence & fac_syndicate_residence)
+        for zid, zname, fac in get_outlaw_starter_residence_seeds(scen_key):
+            fid = str(fac.get("id") or "")
+            if not fid or zid not in node_map or fid in node_map:
+                continue
+            fname = str(fac.get("name") or fid)
+            zone_display = node_map[zid][1] or zname
+            f_state = json.dumps({
+                k: fac[k]
+                for k in ("theme", "features", "sensory")
+                if fac.get(k) is not None
+            })
+            conn.execute(
+                """INSERT OR IGNORE INTO world_nodes
+                   (session_id, node_id, parent_id, name, node_type, category, privacy_level,
+                    is_enclosed, is_transit_hub, access_tier, curfew_start_min, curfew_end_min,
+                    atmosphere, is_dynamic, state_json, created_at)
+                   VALUES (?, ?, ?, ?, 'FACILITY', 'residential', ?, 1, 0, ?, NULL, NULL, ?, 0, ?, ?)""",
+                (
+                    sid,
+                    fid,
+                    zid,
+                    fname,
+                    str(fac.get("privacy_level") or "private"),
+                    str(fac.get("access_tier") or "private"),
+                    str(fac.get("sensory") or ""),
+                    f_state,
+                    now_ts,
+                ),
+            )
+            _upsert_bidir_edge(sid, zid, fid, 3, "road")
+            node_map[fid] = (zid, fname, "FACILITY")
+            updated += 1
+
+            subs = list(fac.get("sub_locations") or ())
+            ent_sub = next((str(s["id"]) for s in subs if s.get("is_entrance")), "")
+            if not ent_sub and subs:
+                ent_sub = str(subs[0].get("id") or "")
+            for sub in subs:
+                sub_id = str(sub.get("id") or "")
+                if not sub_id or sub_id in node_map:
+                    continue
+                sub_name = str(sub.get("name") or sub_id)
+                sub_meta = {
+                    k: sub[k]
+                    for k in ("props", "sensory", "is_entrance", "is_private_intimate")
+                    if sub.get(k) is not None
+                }
+                sub_state = json.dumps(sub_meta)
+                sub_priv = str(sub.get("privacy_level") or ("public" if sub.get("is_entrance") else "private"))
+                sub_acc = str(sub.get("access_tier") or fac.get("access_tier") or "private")
+                conn.execute(
+                    """INSERT OR IGNORE INTO world_nodes
+                       (session_id, node_id, parent_id, name, node_type, category, privacy_level,
+                        is_enclosed, is_transit_hub, access_tier, curfew_start_min, curfew_end_min,
+                        atmosphere, is_dynamic, state_json, created_at)
+                       VALUES (?, ?, ?, ?, 'ROOM', 'residential', ?, 1, 0, ?, NULL, NULL, ?, 0, ?, ?)""",
+                    (
+                        sid,
+                        sub_id,
+                        fid,
+                        sub_name,
+                        sub_priv,
+                        sub_acc,
+                        str(sub.get("sensory") or ""),
+                        sub_state,
+                        now_ts,
+                    ),
+                )
+                conn.execute(
+                    """INSERT OR IGNORE INTO session_locations
+                       (session_id, location_id, zone_name, primary_name, sub_name, atmosphere, is_dynamic, state_json, created_at)
+                       VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+                    (sid, sub_id, zone_display, fname, sub_name, str(sub.get("sensory") or ""), sub_state, now_ts),
+                )
+                if sub_id == ent_sub:
+                    _upsert_bidir_edge(sid, fid, sub_id, 1, "door")
+                elif ent_sub:
+                    _upsert_bidir_edge(sid, ent_sub, sub_id, 1, "door")
+                node_map[sub_id] = (fid, sub_name, "ROOM")
+                updated += 1
+
+        # 3. Ensure active Cult/Syndicate sessions have their starter safehouse deed in player_properties
+        sess_extra_row = conn.execute("SELECT extra_json FROM sessions WHERE id = ?", (sid,)).fetchone()
+        raw_ex = (sess_extra_row["extra_json"] if hasattr(sess_extra_row, "keys") else sess_extra_row[0]) if sess_extra_row else ""
+        f_arch = ""
+        if isinstance(raw_ex, str) and raw_ex.strip():
+            try:
+                ex_obj = json.loads(raw_ex)
+                afs = ex_obj.get("anomalous_faction_state") if isinstance(ex_obj, dict) else None
+                if isinstance(afs, dict):
+                    f_arch = str(afs.get("faction_archetype_key") or "").strip().lower()
+            except Exception:
+                f_arch = ""
+        expected_res_fid = {
+            "cult_faction": "fac_cult_residence",
+            "clandestine_faction": "fac_syndicate_residence",
+        }.get(f_arch, "")
+        if expected_res_fid and expected_res_fid in node_map:
+            has_prop = conn.execute(
+                "SELECT 1 FROM player_properties WHERE session_id = ? AND facility_node_id = ? AND is_starter = 1 LIMIT 1",
+                (sid, expected_res_fid),
+            ).fetchone()
+            if not has_prop:
+                from db.properties import grant_or_relocate_starter_quarters
+                grant_or_relocate_starter_quarters(sid, f_arch, conn=conn)
+                updated += 1
+
+    return updated

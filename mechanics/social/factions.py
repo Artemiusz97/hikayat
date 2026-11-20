@@ -782,9 +782,168 @@ ANOMALOUS_PROMOTION_TIERS: List[Dict[str, Any]] = [
     {"tier": 5, "title": "Elite Agent",          "min_rep": 90, "max_rep": 100, "daily_salary": 300, "next_tier_rep": 100},
 ]
 
-ANOMALOUS_JOINABLE_ARCHETYPES = {"public_agency", "private_agency_1", "private_agency_2", "monastic_order"}
-ANOMALOUS_DISTRUSTED_ARCHETYPES = {"cult_faction", "clandestine_faction"}
+ANOMALOUS_JOINABLE_ARCHETYPES = {
+    "public_agency",
+    "private_agency_1",
+    "private_agency_2",
+    "monastic_order",
+    "cult_faction",
+    "clandestine_faction",
+}
+ANOMALOUS_OUTLAW_ARCHETYPES = {"cult_faction", "clandestine_faction"}
+ANOMALOUS_DISTRUSTED_ARCHETYPES: set[str] = set()
 SCHOOL_CLUB_CATEGORIES = {"council", "club", "delinquents", "sports", "nsfw_club", "school_club", "discipline"}
+
+_DEFAULT_FACTION_SPEC: Dict[str, Any] = {
+    "joinable_adult": True,
+    "outlaw": False,
+    "daily_salary_enabled": False,
+    "rank_titles": tuple(t["title"] for t in ANOMALOUS_PROMOTION_TIERS),
+    "rivals": (),
+    "allowed_boards": {"public_agency", "freelance_app", "story_quest"},
+    "blocked_shop_factions": set(),
+    "shop_price_mult": 1.0,
+    "shop_element_bias": (),
+    "shop_bias_bonus": 0.0,
+    "hq_id": "",
+    "entrance_id": "",
+    "vault_nodes": set(),
+    "extraction": {"node_id": "loc_hosp_emergency_triage", "fee_pct": 0.10, "fee_cap": 100},
+    "pact_tithe_mult": 1.0,
+    "allow_low_tier_unregulated_scrub": False,
+    "live_capture": {"rep": 0, "mp_restore_pct": 0.0, "gold": 0},
+    "bonus_resonator_charges": 0,
+    "overdraw_remnant_chance": 0.40,
+    "harvest_gold_mult": 1.0,
+    "bounty_gold_mult": 1.0,
+    "fence_resale_mult": 1.0,
+    "wiretap_boards": set(),
+}
+
+ANOMALOUS_FACTION_SPECS: Dict[str, Dict[str, Any]] = {
+    "public_agency": {
+        **_DEFAULT_FACTION_SPEC,
+        "daily_salary_enabled": True,
+        "rivals": ("cult_faction", "clandestine_faction"),
+        "allowed_boards": {"public_agency", "freelance_app", "story_quest"},
+        "shop_price_mult": 0.50,
+        "hq_id": "loc_agency_hq",
+        "entrance_id": "loc_hq_main_lobby",
+        "vault_nodes": {"loc_hq_containment_sector"},
+        "extraction": {"node_id": "loc_hq_medical_bay", "fee_pct": 0.0, "fee_cap": 0},
+    },
+    "private_agency_1": {
+        **_DEFAULT_FACTION_SPEC,
+        "rivals": ("private_agency_2", "cult_faction", "clandestine_faction"),
+        "allowed_boards": {"private_agency_1", "public_agency", "freelance_app", "story_quest"},
+        "shop_price_mult": 1.35,
+        "hq_id": "loc_private_hq_1",
+        "entrance_id": "sub_priv1_entrance",
+        "vault_nodes": {"sub_priv1_vault"},
+    },
+    "private_agency_2": {
+        **_DEFAULT_FACTION_SPEC,
+        "rivals": ("private_agency_1", "cult_faction", "clandestine_faction"),
+        "allowed_boards": {"private_agency_2", "public_agency", "freelance_app", "story_quest"},
+        "shop_price_mult": 1.35,
+        "hq_id": "loc_private_hq_2",
+        "entrance_id": "sub_priv2_entrance",
+        "vault_nodes": {"sub_priv2_vault"},
+    },
+    "monastic_order": {
+        **_DEFAULT_FACTION_SPEC,
+        "rivals": ("cult_faction", "clandestine_faction"),
+        "allowed_boards": {"monastic_order", "public_agency", "freelance_app", "story_quest"},
+        "shop_price_mult": 0.0,
+        "hq_id": "loc_eastern_temple",
+        "entrance_id": "loc_et_main_sanctuary",
+        "vault_nodes": {"loc_et_five_story_pagoda"},
+        "extraction": {"node_id": "loc_et_main_sanctuary", "fee_pct": 0.0, "fee_cap": 0},
+    },
+    "cult_faction": {
+        **_DEFAULT_FACTION_SPEC,
+        "outlaw": True,
+        "rank_titles": (
+            "Veiled Initiate",
+            "Rift Acolyte",
+            "Resonant Conduit",
+            "Cantor of Fractures",
+            "Sanctum Hierophant",
+        ),
+        "rivals": ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "clandestine_faction"),
+        "allowed_boards": {"cult_faction", "freelance_app", "story_quest"},
+        "blocked_shop_factions": {"public_agency"},
+        "shop_price_mult": 0.85,
+        "shop_element_bias": ("aether", "bio"),
+        "shop_bias_bonus": 0.25,
+        "hq_id": "loc_cult_sanctum_hq",
+        "entrance_id": "sub_cult_entrance",
+        "vault_nodes": {"sub_cult_cells", "sub_cult_altar"},
+        "extraction": {"node_id": "sub_cult_apotheca", "fee_pct": 0.0, "fee_cap": 0},
+        "pact_tithe_mult": 0.50,
+        "allow_low_tier_unregulated_scrub": True,
+        "live_capture": {"rep": 5, "mp_restore_pct": 0.25, "gold": 0},
+        "bonus_resonator_charges": 1,
+        "overdraw_remnant_chance": 0.20,
+    },
+    "clandestine_faction": {
+        **_DEFAULT_FACTION_SPEC,
+        "outlaw": True,
+        "rank_titles": (
+            "Street Cutout",
+            "Relic Runner",
+            "Black-Bag Fixer",
+            "Senior Cleaner",
+            "Directorate Broker",
+        ),
+        "rivals": ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction"),
+        "allowed_boards": {"clandestine_faction", "freelance_app", "story_quest"},
+        "blocked_shop_factions": {"public_agency"},
+        "shop_price_mult": 1.15,
+        "shop_element_bias": ("electric", "physical"),
+        "shop_bias_bonus": 0.25,
+        "hq_id": "loc_clandestine_syndicate_hq",
+        "entrance_id": "sub_synd_entrance",
+        "vault_nodes": {"sub_synd_pens"},
+        "extraction": {"node_id": "sub_synd_lab", "fee_pct": 0.10, "fee_cap": 100},
+        "live_capture": {"rep": 0, "mp_restore_pct": 0.0, "gold": 50},
+        "harvest_gold_mult": 1.25,
+        "bounty_gold_mult": 1.35,
+        "fence_resale_mult": 1.40,
+        "wiretap_boards": {"clandestine_faction", "freelance_app"},
+    },
+}
+
+
+def get_anomalous_faction_spec(archetype_key: str = "") -> Dict[str, Any]:
+    """Return the declarative specification dict for an Anomalous Incursions faction archetype."""
+    arch = str(archetype_key or "").strip().lower()
+    return dict(ANOMALOUS_FACTION_SPECS.get(arch, _DEFAULT_FACTION_SPEC))
+
+
+def faction_bonus_active(archetype_key: str, f_state: Mapping[str, Any] | None) -> bool:
+    """Return True when the player actively belongs to `archetype_key` without a 0-Rep suspension hold."""
+    if not isinstance(f_state, Mapping):
+        return False
+    arch = str(archetype_key or "").strip().lower()
+    cur_arch = str(f_state.get("faction_archetype_key") or "").strip().lower()
+    return bool(arch and cur_arch == arch and not bool(f_state.get("salary_ration_suspended", False)))
+
+
+def get_anomalous_promotion_tiers_for_archetype(archetype_key: str = "") -> List[Dict[str, Any]]:
+    """Return the 5-tier Promotion ladder customized with bespoke rank titles and daily_salary for `archetype_key`."""
+    spec = get_anomalous_faction_spec(archetype_key)
+    titles = spec.get("rank_titles") or tuple(t["title"] for t in ANOMALOUS_PROMOTION_TIERS)
+    sal_on = bool(spec.get("daily_salary_enabled"))
+    tiers: List[Dict[str, Any]] = []
+    for idx, base in enumerate(ANOMALOUS_PROMOTION_TIERS):
+        row = dict(base)
+        if idx < len(titles):
+            row["title"] = str(titles[idx])
+        if not sal_on:
+            row["daily_salary"] = 0
+        tiers.append(row)
+    return tiers
 
 
 def is_school_club_faction(faction: Dict[str, Any] | None) -> bool:
@@ -913,6 +1072,74 @@ def check_rival_or_hostile_turf_block(
             if target_fid in peer_rivals:
                 return f"Rival crew affiliation with {pf.get('name', pfid)} bars you from using {target_name}'s safehouse rest or supply stash."
     return None
+
+
+def validate_faction_hq_action_access(
+    session_id: int,
+    user_id: int | None,
+    faction: Mapping[str, Any] | None,
+    action: str,
+    session: Mapping[str, Any] | None = None,
+) -> tuple[bool, str, int]:
+    """
+    Headless single source of truth validating HQ actions (`rest`, `quartermaster`, `bounty`)
+    across FastAPI and Discord adapters. Returns `(allowed, reason, http_status)`.
+    """
+    if not isinstance(faction, Mapping):
+        return False, "Faction not found.", 404
+    import db as _db
+    import scenario_data as _sd
+
+    eff_sess = dict(session) if isinstance(session, Mapping) else (_db.get_session(session_id) or {})
+    scen_key = str(eff_sess.get("scenario") or "fantasy")
+    act = str(action or "").strip().lower()
+    fac_name = str(faction.get("name") or "this faction")
+    rep = int(faction.get("reputation_score") or 0)
+    tier = get_faction_tier(rep)
+
+    if act in ("rest", "quartermaster"):
+        turf_block = check_rival_or_hostile_turf_block(session_id, faction, user_id, eff_sess)
+        if turf_block:
+            return False, turf_block, 403
+
+    is_anom = _sd.is_anomalous_incursions_scenario(scen_key)
+    is_club = is_school_club_faction(dict(faction))
+
+    if is_anom and is_club:
+        if act == "quartermaster":
+            a_st = get_anomalous_faction_state(session_id, user_id=user_id)
+            joined_club = str(a_st.get("joined_club_name") or "")
+            if joined_club.lower() != fac_name.lower():
+                return False, f"Club quartermaster equipment is reserved for active members of {fac_name}.", 403
+        return True, "", 200
+
+    if is_anom and not is_club:
+        fac_arch = infer_anomalous_faction_archetype(dict(faction))
+        a_st = get_anomalous_faction_state(session_id, user_id=user_id)
+        player_arch = str(a_st.get("faction_archetype_key") or "freelancer").strip().lower()
+        if act == "rest":
+            if player_arch != fac_arch:
+                return False, f"Safehouse recovery quarters at {fac_name} are restricted to enlisted operatives.", 403
+            return True, "", 200
+        if act == "quartermaster":
+            if fac_arch == "public_agency" and player_arch in ANOMALOUS_OUTLAW_ARCHETYPES:
+                return False, "Public Bureau HQ requisition stores blacklist unlicensed Cult and Syndicate operatives.", 403
+            if fac_arch in (
+                "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"
+            ) and player_arch != fac_arch:
+                return False, f"{fac_name} Quartermaster access is restricted exclusively to contracted operatives of this organization.", 403
+            return True, "", 200
+        if act == "bounty":
+            if fac_arch == "public_agency" and player_arch in ANOMALOUS_OUTLAW_ARCHETYPES:
+                return False, "Public Agency contract boards blacklist unlicensed Cult and Syndicate operatives.", 403
+            if fac_arch != "public_agency" and player_arch != fac_arch:
+                return False, f"Internal dispatch contracts for {fac_name} are restricted to its enlisted operatives.", 403
+            return True, "", 200
+        return True, "", 200
+
+    if act == "rest" and tier["tier_level"] < 2:
+        return False, "You need Liked standing or higher (+1 Rep) to use the faction safehouse rest.", 400
+    return True, "", 200
 
 
 def is_nsfw_salon_faction(faction: Mapping[str, Any] | None) -> bool:
@@ -1206,13 +1433,14 @@ def get_faction_category_tag(faction: Dict[str, Any] | None, scenario_key: str =
     }
 
 
-def get_anomalous_promotion_tier_info(rep_score: int) -> Dict[str, Any]:
+def get_anomalous_promotion_tier_info(rep_score: int, faction_archetype_key: str = "") -> Dict[str, Any]:
     """Returns the 1-5 Promotion Tier dictionary for a 0-100 Anomalous Incursions reputation score."""
     clamped = max(0, min(100, int(rep_score or 0)))
-    for t in ANOMALOUS_PROMOTION_TIERS:
+    tiers = get_anomalous_promotion_tiers_for_archetype(faction_archetype_key)
+    for t in tiers:
         if t["min_rep"] <= clamped <= t["max_rep"]:
             return dict(t)
-    return dict(ANOMALOUS_PROMOTION_TIERS[0])
+    return dict(tiers[0])
 
 
 def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
@@ -1290,8 +1518,9 @@ def infer_anomalous_faction_archetype(faction: Dict[str, Any]) -> str:
 
 def get_anomalous_faction_perks_list(archetype_key: str, promotion_tier: int = 1, salary_suspended: bool = False) -> List[str]:
     """Returns the faction-specific perks & restrictions list for Anomalous Incursions."""
-    t_info = next((t for t in ANOMALOUS_PROMOTION_TIERS if t["tier"] == max(1, min(5, int(promotion_tier or 1)))), ANOMALOUS_PROMOTION_TIERS[0])
     arch = str(archetype_key or "").strip().lower()
+    tiers = get_anomalous_promotion_tiers_for_archetype(arch)
+    t_info = next((t for t in tiers if t["tier"] == max(1, min(5, int(promotion_tier or 1)))), tiers[0])
     if arch == "public_agency":
         sal_str = f"Daily Salary: {t_info['daily_salary']}G/day (Tier {t_info['tier']} {t_info['title']})"
         if salary_suspended:
@@ -1333,9 +1562,38 @@ def get_anomalous_faction_perks_list(archetype_key: str, promotion_tier: int = 1
             "Cross-Contracting: May accept Monastic Order, Public Agency (paid contract), & Smartphone Freelance bounties",
             "Daily Mandatory Rite: Must complete within the day or suffer -15 Rep with the Order",
         ]
-    elif arch in ("cult_faction", "clandestine_faction"):
+    elif arch == "cult_faction":
+        tithe_str = "Forbidden Apocrypha Reliquary: 0.85x Tithe Discount (+25% Aether/Bio & cursed stock, 24/7 HQ access)"
+        pact_str = "Sanctum Pact Altar: -50% Pact Tithe/Offering credit cost & peaceful Tier I–II unregulated pact severance"
+        capture_str = "Vessel Consecration: +5 Promotion Rep & +25% Max MP restore on live entity containment (keep Object Relics)"
+        site_str = "Site & Extraction Mastery: +1 daily Field Resonator Charge (halved 20% Overdraw Remnant risk), 0G Apotheca extraction & Sanctum Rift-Bleed immunity"
+        if salary_suspended:
+            tithe_str += " [SUSPENDED - Complete Mandatory Liturgy to restore]"
+            capture_str += " [SUSPENDED]"
+            site_str = "Site & Extraction Mastery: 0G Apotheca extraction & Sanctum Rift-Bleed immunity (+1 Resonator Charge & 20% Overdraw Remnant [SUSPENDED])"
         return [
-            "Distrusted Organization: Non-joinable clandestine/occult entity viewed with deep suspicion.",
+            f"Covenant Initiate: 0G Daily Salary (Tier {t_info['tier']} {t_info['title']}) — keep 100% bounty cash & anomaly loot",
+            tithe_str,
+            pact_str,
+            capture_str,
+            site_str,
+            "Outlaw Blacklist: Barred from all 4 licensed agency boards & Public Bureau HQ stores (Own Board, Freelance App & Story Quests open)",
+            "Daily Mandatory Liturgy: Must complete within the day or suffer -15 Rep with the Cult",
+        ]
+    elif arch == "clandestine_faction":
+        bounty_str = "Hazard Cut & Fence Network: +35% Gold on Syndicate bounties & +40% Fence Sell Bonus on non-purchased loot"
+        harvest_str = "Black-Vault Salvage: +50G Specimen Commission on live containment & +25% Harvest Gold from stabilized sites"
+        if salary_suspended:
+            bounty_str += " [SUSPENDED - Complete Mandatory Directive to restore]"
+            harvest_str += " [SUSPENDED]"
+        return [
+            f"Shadow Broker Asset: 0G Daily Salary (Tier {t_info['tier']} {t_info['title']}) — keep 100% combat spoils & Object Relics",
+            bounty_str,
+            "Black-Budget Brokerage Armory: 1.15x Contraband Armory (+25% Electric/Physical, stealth & Faraday stock, 24/7 HQ access)",
+            "Signal Wiretap: Auto-reveals disguised anomaly dossiers on Syndicate & Freelance bounties + Overwatch Jamming immunity",
+            harvest_str,
+            "Outlaw Blacklist: Barred from all 4 licensed agency boards & Public Bureau HQ stores (Own Board, Freelance App & Story Quests open)",
+            "Daily Mandatory Directive: Must complete within the day or suffer -15 Rep with the Syndicate",
         ]
     else:
         return [
@@ -1347,15 +1605,16 @@ def get_anomalous_faction_perks_list(archetype_key: str, promotion_tier: int = 1
 
 
 # ---------------------------------------------------------------- Perks Evaluation
-def get_active_perks(faction: Dict[str, Any], player_rank: int, reputation_score: int) -> List[str]:
+def get_active_perks(
+    faction: Dict[str, Any],
+    player_rank: int,
+    reputation_score: int,
+    salary_suspended: bool = False,
+) -> List[str]:
     """Return list of active perk strings based on the player's rank and reputation score."""
     arch = infer_anomalous_faction_archetype(faction)
     if arch in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction"):
-        if arch in ("cult_faction", "clandestine_faction"):
-            return get_anomalous_faction_perks_list(arch, 1)
-        if player_rank <= 0:
-            return get_anomalous_faction_perks_list(arch, 1)
-        return get_anomalous_faction_perks_list(arch, player_rank)
+        return get_anomalous_faction_perks_list(arch, max(1, int(player_rank or 1)), salary_suspended=bool(salary_suspended))
 
     if player_rank == 0:
         return []
@@ -1615,9 +1874,23 @@ def format_llm_player_faction_block(faction: Dict[str, Any], player_rank: int,
     tier = get_faction_tier(score)
     hq = faction.get("hq_location_id", "")
     hq_str = f" | HQ: {hq}" if hq else ""
+    arch = infer_anomalous_faction_archetype(faction)
+    tone_line = ""
+    if arch == "cult_faction":
+        tone_line = (
+            "\nOUTLAW FACTION TONE DIRECTIVE (OCCULT CULT): Municipal officials, police, and licensed containment agents "
+            "treat the player with guarded suspicion or outright hostility; keep Bureau doors shut unless masked by pretext. "
+            "Among Cult initiates, adopt an esoteric liturgical and vessel-communion register, and treat Syndicate relic traffickers as profane rivals."
+        )
+    elif arch == "clandestine_faction":
+        tone_line = (
+            "\nOUTLAW FACTION TONE DIRECTIVE (CLANDESTINE SYNDICATE): Municipal officials, police, and licensed containment agents "
+            "treat the player as an unlicensed black-market operator; keep Bureau channels hostile unless handled off-the-books. "
+            "Among Syndicate personnel, use a clipped, transactional noir register focused on leverage, cutouts, and custody, treating Cult zealots as dangerous liabilities."
+        )
     return (
         f"PLAYER FACTION MEMBERSHIP: {fname} [{tier['name']}|{score:+d}] "
-        f"Rank {player_rank}: {player_title}{hq_str}"
+        f"Rank {player_rank}: {player_title}{hq_str}{tone_line}"
     )
 
 
@@ -2497,19 +2770,38 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
         allied_ids = []
         rival_ids = []
         if is_anom and arch_key:
+            sess_seed = db.get_session(session_id) or {}
+            player_start_arch = str(
+                sess_seed.get("anomalous_starting_faction") or sess_seed.get("starting_faction_id") or ""
+            ).strip().lower()
             friendly_archs = ["public_agency", "private_agency_1", "private_agency_2", "monastic_order"]
-            distrusted_archs = ["cult_faction", "clandestine_faction"]
-            if arch_key in friendly_archs:
+            outlaw_archs = ["cult_faction", "clandestine_faction"]
+            if player_start_arch in ANOMALOUS_OUTLAW_ARCHETYPES:
+                if arch_key == player_start_arch:
+                    initial_delta = 25
+                    rival_ids = [arch_to_fid[a] for a in friendly_archs + outlaw_archs if a != arch_key and a in arch_to_fid]
+                else:
+                    initial_delta = -25
+                    if arch_key in friendly_archs:
+                        allied_ids = [arch_to_fid[a] for a in friendly_archs if a != arch_key and a in arch_to_fid]
+                        rival_ids = [arch_to_fid[a] for a in outlaw_archs if a in arch_to_fid]
+                        if arch_key == "private_agency_1" and "private_agency_2" in arch_to_fid:
+                            rival_ids.insert(0, arch_to_fid["private_agency_2"])
+                        elif arch_key == "private_agency_2" and "private_agency_1" in arch_to_fid:
+                            rival_ids.insert(0, arch_to_fid["private_agency_1"])
+                    else:
+                        rival_ids = [arch_to_fid[a] for a in friendly_archs + outlaw_archs if a != arch_key and a in arch_to_fid]
+            elif arch_key in friendly_archs:
                 initial_delta = 25
                 allied_ids = [arch_to_fid[a] for a in friendly_archs if a != arch_key and a in arch_to_fid]
-                rival_ids = [arch_to_fid[a] for a in distrusted_archs if a in arch_to_fid]
+                rival_ids = [arch_to_fid[a] for a in outlaw_archs if a in arch_to_fid]
                 if arch_key == "private_agency_1" and "private_agency_2" in arch_to_fid:
                     rival_ids.insert(0, arch_to_fid["private_agency_2"])
                 elif arch_key == "private_agency_2" and "private_agency_1" in arch_to_fid:
                     rival_ids.insert(0, arch_to_fid["private_agency_1"])
             else:
                 initial_delta = -25
-                rival_ids = [arch_to_fid[a] for a in friendly_archs if a in arch_to_fid]
+                rival_ids = [arch_to_fid[a] for a in friendly_archs + outlaw_archs if a != arch_key and a in arch_to_fid]
         elif is_delinq_fac and len(delinquent_fids) >= 2:
             cur_fid = name.strip().lower().replace(" ", "_")
             rival_ids = [fid for fid in delinquent_fids if fid != cur_fid]
@@ -2596,7 +2888,7 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
                 club_name = ""
 
         rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
-        t_info = get_anomalous_promotion_tier_info(rep)
+        t_info = get_anomalous_promotion_tier_info(rep, arch)
         state = {
             "faction_archetype_key": arch,
             "joined_faction_id": fid,
@@ -2618,7 +2910,7 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
     else:
         arch = state.get("faction_archetype_key", "public_agency")
         rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
-        t_info = get_anomalous_promotion_tier_info(rep)
+        t_info = get_anomalous_promotion_tier_info(rep, arch)
         state["promotion_rep"] = rep
         state["origin_mode"] = "student" if is_student else "adult"
         state["promotion_tier"] = t_info["tier"] if arch not in ("freelancer", "student_freelancer") else 0
@@ -2643,7 +2935,7 @@ def save_anomalous_faction_state(session_id: int, state: Dict[str, Any], user_id
 
     arch = str(state.get("faction_archetype_key") or "public_agency").strip().lower()
     rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
-    t_info = get_anomalous_promotion_tier_info(rep)
+    t_info = get_anomalous_promotion_tier_info(rep, arch)
     state["promotion_rep"] = rep
     if arch in ("freelancer", "student_freelancer"):
         state["promotion_tier"] = 0
@@ -2710,8 +3002,9 @@ def update_agent_promotion_reputation(
     if is_missed_mandatory and old_rep == 0:
         state["salary_ration_suspended"] = True
 
+    arch = str(state.get("faction_archetype_key") or "")
     new_rep = max(0, min(100, old_rep + int(delta_rep or 0)))
-    t_info = get_anomalous_promotion_tier_info(new_rep)
+    t_info = get_anomalous_promotion_tier_info(new_rep, arch)
     new_tier = t_info["tier"]
     new_title = t_info["title"]
 
@@ -2770,14 +3063,13 @@ def join_or_transfer_anomalous_faction(
     user_id: int | None = None,
 ) -> Dict[str, Any]:
     """
-    Enlists a Freelancer or transfers an existing Agent into one of the 4 joinable factions
+    Enlists a Freelancer or transfers an existing Agent into one of the 6 joinable adult factions
     (or resigns to Independent Freelancer), resetting Promotion Tier to Tier 1 (0 Rep).
     In `anomalous_high_school`, enforces asymmetric membership:
-    - Student Operatives may join High School Clubs, but cannot join the 4 Anomalous Agencies.
-    - Adult Operatives may join the 4 Anomalous Agencies, but cannot join High School Clubs.
+    - Student Operatives may join High School Clubs, but cannot join adult Anomalous Agencies/Factions.
+    - Adult Operatives may join all 6 adult Anomalous Factions, but cannot join High School Clubs.
     """
     import db
-    import scenario_data
     from mechanics.social.origin_mode import (
         is_student_operative,
         is_adult_operative,
@@ -2807,42 +3099,152 @@ def join_or_transfer_anomalous_faction(
 
     default_free_title = "Independent Student Operative" if is_student else "Independent Freelancer"
 
-    def _abandon_old_mandatory_bounties() -> None:
+    def _abandon_old_bounties(target_arch: str) -> None:
         try:
+            from mechanics.narrative.bounty import parse_anomalous_quest_board_source
             active_qs = db.get_session_quests(session_id, status="Active") or []
+            allowed_keep = {"freelance_app", "story_quest"}
+            if target_arch and target_arch not in ("freelancer", "student_freelancer"):
+                allowed_keep.add(target_arch)
             for aq in active_qs:
                 qid = str(aq.get("quest_id") or "")
                 qnotes = str(aq.get("quest_notes") or "")
-                if qid.upper().startswith("MAND-") or "mandatory_daily:1" in qnotes:
+                is_mand = qid.upper().startswith("MAND-") or "mandatory_daily:1" in qnotes
+                b_src = parse_anomalous_quest_board_source(aq, session_id=session_id)
+                if is_mand or (b_src not in allowed_keep):
                     db.update_quest_status(session_id, qid, "Abandoned")
         except Exception:
             pass
 
+    def _cleanup_post_transfer(target_arch: str) -> list[str]:
+        notices: list[str] = []
+        # 1. Sync faction standings (+25 own, -25 rivals) & lorebook dispositions
+        try:
+            is_target_outlaw = target_arch in ANOMALOUS_OUTLAW_ARCHETYPES
+            spec_tgt = get_anomalous_faction_spec(target_arch)
+            tgt_rivals = set(spec_tgt.get("rivals") or ())
+            for f_row in factions:
+                f_a = infer_anomalous_faction_archetype(f_row)
+                cur_rep = int(f_row.get("reputation_score") or 0)
+                if f_a == target_arch and target_arch not in ("freelancer", "student_freelancer"):
+                    if cur_rep < 25:
+                        db.upsert_faction(session_id, name=f_row["name"], delta_score=25 - cur_rep)
+                elif f_a in ANOMALOUS_OUTLAW_ARCHETYPES or (is_target_outlaw and f_a in tgt_rivals):
+                    if cur_rep > -25:
+                        db.upsert_faction(session_id, name=f_row["name"], delta_score=-25 - cur_rep)
+        except Exception:
+            pass
+        try:
+            from mechanics.social.agent_roster import sync_agent_lorebook_dispositions
+            sync_agent_lorebook_dispositions(session_id, target_arch, scen_key=scen_key)
+        except Exception:
+            pass
+
+        # 2. Escort player out of restricted inner HQ wings they no longer own
+        try:
+            sess_now = db.get_session(session_id) or sess
+            cur_nid = str(sess_now.get("current_node_id") or "").strip().lower()
+            cur_loc_low = str(sess_now.get("current_location") or "").lower()
+            inner_hq_map = (
+                ("sub_cult_", "sub_cult_entrance", "cult_faction", ("sub_cult_entrance",)),
+                ("sub_synd_", "sub_synd_entrance", "clandestine_faction", ("sub_synd_entrance",)),
+                ("sub_priv1_", "sub_priv1_entrance", "private_agency_1", ("sub_priv1_entrance", "sub_priv1_dispatch")),
+                ("sub_priv2_", "sub_priv2_entrance", "private_agency_2", ("sub_priv2_entrance", "sub_priv2_dispatch")),
+                ("loc_et_five_story_pagoda", "loc_et_main_sanctuary", "monastic_order", ()),
+                ("loc_et_reliquary_pagoda", "loc_et_main_sanctuary", "monastic_order", ()),
+                ("loc_et_exorcist_dojo", "loc_et_main_sanctuary", "monastic_order", ()),
+            )
+            escort_nid = ""
+            is_outlaw_starter_res = (
+                cur_nid.startswith(("sub_cult_res_", "sub_synd_res_"))
+                or "sub_cult_res_" in cur_loc_low
+                or "sub_synd_res_" in cur_loc_low
+            )
+            if not is_outlaw_starter_res:
+                for pfx, ent_nid, owner_arch, safe_set in inner_hq_map:
+                    if (cur_nid.startswith(pfx) or pfx in cur_loc_low) and cur_nid not in safe_set and target_arch != owner_arch:
+                        escort_nid = ent_nid
+                        break
+            if not escort_nid and cur_nid.startswith("loc_hq_") and cur_nid not in (
+                "loc_hq_main_lobby", "loc_hq_tactical_armory", "loc_hq_field_outfitter", "loc_hq_medical_bay", "loc_hq_canteen_cafe"
+            ) and target_arch != "public_agency":
+                escort_nid = "loc_hq_main_lobby"
+            if escort_nid:
+                escort_loc = db.format_node_tiered_location(session_id, escort_nid) or escort_nid
+                db.update_session(session_id, current_node_id=escort_nid, current_location=escort_loc)
+                notices.append(f"Escorted out of restricted quarters to {escort_loc}.")
+        except Exception:
+            pass
+
+        # 3. Evict incompatible party companions (prevents free rank-requisition carryover exploit)
+        try:
+            party_npcs = db.get_session_party_npcs(session_id) or []
+            if party_npcs:
+                from mechanics.social.agent_roster import evaluate_anomalous_companion_recruitment
+                sess_post = db.get_session(session_id) or sess
+                eff_uid = int(user_id or sess_post.get("host_user_id") or 0)
+                contacts = db.get_contacts(session_id, resolve_relations=False, ensure_scene=False) or []
+                c_by_name = {str(c.get("name") or "").strip().lower(): c for c in contacts if isinstance(c, dict) and c.get("name")}
+                kept_party = []
+                evicted_names = []
+                for p_comp in party_npcs:
+                    if not isinstance(p_comp, dict):
+                        continue
+                    p_nm = str(p_comp.get("name") or "").strip()
+                    p_low = p_nm.lower()
+                    matched_c = c_by_name.get(p_low) or dict(p_comp)
+                    aff = int(matched_c.get("relationship_score") or matched_c.get("affinity") or 0)
+                    binfo = matched_c.get("basic_info") if isinstance(matched_c.get("basic_info"), dict) else {}
+                    is_anom_comp = bool(
+                        binfo.get("is_special_agent")
+                        or p_comp.get("is_special_agent")
+                        or p_comp.get("anomalous_npc_tag") in ("special_agent", "folklore_villager")
+                        or binfo.get("anomalous_npc_tag") in ("special_agent", "folklore_villager")
+                        or p_comp.get("faction_id")
+                    )
+                    if is_anom_comp and eff_uid:
+                        rec_chk = evaluate_anomalous_companion_recruitment(sess_post, eff_uid, matched_c, affinity_score=aff)
+                        if not rec_chk.get("allowed"):
+                            evicted_names.append(p_nm)
+                            continue
+                    kept_party.append(p_comp)
+                if evicted_names:
+                    db.set_session_party_npcs(session_id, kept_party)
+                    notices.append(f"Removed ineligible squadmate(s) after transfer: {', '.join(evicted_names)}.")
+        except Exception:
+            pass
+        return notices
+
     if target_clean in ("freelancer", "student_freelancer", "independent_freelancer", "leave", "independent", "none", ""):
-        _abandon_old_mandatory_bounties()
-        state = get_anomalous_faction_state(session_id, user_id=user_id)
         chosen_key = "student_freelancer" if (is_student or target_clean == "student_freelancer") else "freelancer"
-        state.update({
-            "faction_archetype_key": chosen_key,
-            "joined_faction_id": "",
-            "joined_faction_name": default_free_title,
-            "joined_club_id": "",
-            "joined_club_name": "",
-            "club_rank": 0,
-            "club_title": "",
-            "origin_mode": "student" if is_student else "adult",
-            "promotion_rep": 0,
-            "promotion_tier": 0,
-            "promotion_title": default_free_title,
-            "salary_ration_suspended": False,
-            "mandatory_bounty_completed_today": False,
-            "mandatory_bounty_id": "",
-        })
-        save_anomalous_faction_state(session_id, state, user_id=user_id)
+        with db.UnitOfWork():
+            _abandon_old_bounties(chosen_key)
+            state = get_anomalous_faction_state(session_id, user_id=user_id)
+            state.update({
+                "faction_archetype_key": chosen_key,
+                "joined_faction_id": "",
+                "joined_faction_name": default_free_title,
+                "joined_club_id": "",
+                "joined_club_name": "",
+                "club_rank": 0,
+                "club_title": "",
+                "origin_mode": "student" if is_student else "adult",
+                "promotion_rep": 0,
+                "promotion_tier": 0,
+                "promotion_title": default_free_title,
+                "salary_ration_suspended": False,
+                "mandatory_bounty_completed_today": False,
+                "mandatory_bounty_id": "",
+            })
+            save_anomalous_faction_state(session_id, state, user_id=user_id)
+            extra_notes = _cleanup_post_transfer(chosen_key)
+        msg = f"You are now operating as an {default_free_title}."
+        if extra_notes:
+            msg += " " + " ".join(extra_notes)
         return {
             "success": True,
             "state": state,
-            "message": f"You are now operating as an {default_free_title}.",
+            "message": msg,
         }
 
     matched_fac = None
@@ -2896,12 +3298,6 @@ def join_or_transfer_anomalous_faction(
         }
 
     arch = infer_anomalous_faction_archetype(matched_fac)
-    if arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
-        return {
-            "success": False,
-            "error": f"{matched_fac.get('name')} is an unlicensed occult/clandestine organization and cannot be joined by operatives.",
-        }
-
     if is_student:
         return {
             "success": False,
@@ -2911,51 +3307,56 @@ def join_or_transfer_anomalous_faction(
             ),
         }
 
-    _abandon_old_mandatory_bounties()
-    t1 = ANOMALOUS_PROMOTION_TIERS[0]
-    state = get_anomalous_faction_state(session_id, user_id=user_id)
-    state.update({
-        "faction_archetype_key": arch,
-        "joined_faction_id": matched_fac["faction_id"],
-        "joined_faction_name": matched_fac["name"],
-        "joined_club_id": "",
-        "joined_club_name": "",
-        "origin_mode": "adult",
-        "promotion_rep": 0,
-        "promotion_tier": 1,
-        "promotion_title": t1["title"],
-        "salary_ration_suspended": False,
-        "mandatory_bounty_completed_today": False,
-        "mandatory_bounty_id": "",
-    })
-    save_anomalous_faction_state(session_id, state, user_id=user_id)
-    try:
-        cur_day = int(sess.get("current_day", 1) or 1)
-        if sess.get("id"):
-            from mechanics.narrative.bounty import dispatch_anomalous_mandatory_daily_bounty
-            mand_q = dispatch_anomalous_mandatory_daily_bounty(
-                session_id=session_id,
-                current_day=cur_day,
-                faction_archetype_key=arch,
-                faction_name=matched_fac["name"],
-                scen_key=scen_key,
-            )
-            if mand_q and mand_q.get("quest_id"):
-                state = get_anomalous_faction_state(session_id, user_id=user_id)
-                state["mandatory_bounty_id"] = mand_q["quest_id"]
-                save_anomalous_faction_state(session_id, state, user_id=user_id)
-    except Exception:
-        pass
-    try:
-        from mechanics.social.agent_roster import hydrate_faction_colleagues_to_contacts
-        hydrate_faction_colleagues_to_contacts(session_id, arch, scen_key=scen_key)
-    except Exception:
-        pass
+    t1 = get_anomalous_promotion_tier_info(0, arch)
+    with db.UnitOfWork():
+        _abandon_old_bounties(arch)
+        state = get_anomalous_faction_state(session_id, user_id=user_id)
+        state.update({
+            "faction_archetype_key": arch,
+            "joined_faction_id": matched_fac["faction_id"],
+            "joined_faction_name": matched_fac["name"],
+            "joined_club_id": "",
+            "joined_club_name": "",
+            "origin_mode": "adult",
+            "promotion_rep": 0,
+            "promotion_tier": 1,
+            "promotion_title": t1["title"],
+            "salary_ration_suspended": False,
+            "mandatory_bounty_completed_today": False,
+            "mandatory_bounty_id": "",
+        })
+        save_anomalous_faction_state(session_id, state, user_id=user_id)
+        extra_notes = _cleanup_post_transfer(arch)
+        try:
+            cur_day = int(sess.get("current_day", 1) or 1)
+            if sess.get("id"):
+                from mechanics.narrative.bounty import dispatch_anomalous_mandatory_daily_bounty
+                mand_q = dispatch_anomalous_mandatory_daily_bounty(
+                    session_id=session_id,
+                    current_day=cur_day,
+                    faction_archetype_key=arch,
+                    faction_name=matched_fac["name"],
+                    scen_key=scen_key,
+                )
+                if mand_q and mand_q.get("quest_id"):
+                    state = get_anomalous_faction_state(session_id, user_id=user_id)
+                    state["mandatory_bounty_id"] = mand_q["quest_id"]
+                    save_anomalous_faction_state(session_id, state, user_id=user_id)
+        except Exception:
+            pass
+        try:
+            from mechanics.social.agent_roster import hydrate_faction_colleagues_to_contacts
+            hydrate_faction_colleagues_to_contacts(session_id, arch, scen_key=scen_key)
+        except Exception:
+            pass
+    msg = f"Enlisted with {matched_fac['name']} as a Tier 1 {t1['title']} (0/100 Rep)!"
+    if extra_notes:
+        msg += " " + " ".join(extra_notes)
     return {
         "success": True,
         "faction": matched_fac,
         "state": state,
-        "message": f"Enlisted with {matched_fac['name']} as a Tier 1 {t1['title']} (0/100 Rep)!",
+        "message": msg,
     }
 
 
@@ -2974,7 +3375,8 @@ def get_agent_dossier_summary(session_id: int, user_id: int | None = None) -> Di
     state = get_anomalous_faction_state(session_id, user_id=user_id)
     arch = state.get("faction_archetype_key", "public_agency")
     rep = int(state.get("promotion_rep", 0) or 0)
-    tier_info = get_anomalous_promotion_tier_info(rep)
+    tier_info = get_anomalous_promotion_tier_info(rep, arch)
+    tiers_list = get_anomalous_promotion_tiers_for_archetype(arch)
     suspended = bool(state.get("salary_ration_suspended", False))
     daily_salary = tier_info["daily_salary"] if (arch == "public_agency" and not suspended) else 0
     cataclysm = session.get("world_ending_anomaly")
@@ -2998,7 +3400,7 @@ def get_agent_dossier_summary(session_id: int, user_id: int | None = None) -> Di
         "tier_min_rep": tier_info["min_rep"],
         "tier_max_rep": tier_info["max_rep"],
         "next_tier_rep": tier_info["next_tier_rep"],
-        "promotion_tiers": ANOMALOUS_PROMOTION_TIERS,
+        "promotion_tiers": tiers_list,
         "daily_salary": daily_salary,
         "base_tier_salary": tier_info["daily_salary"] if arch == "public_agency" else 0,
         "salary_ration_suspended": suspended,

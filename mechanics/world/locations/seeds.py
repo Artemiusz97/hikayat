@@ -508,6 +508,78 @@ def get_session_urban_facility_name(
     )
 
 
+OUTLAW_HQ_EXTRA_WINGS: Dict[str, List[Dict[str, Any]]] = {
+    "loc_cult_sanctum_hq": [
+        {
+            "id": "sub_cult_armory",
+            "name": "Ritual Athame & Ossuary Armory",
+            "access_tier": "restricted",
+            "props": ["Obsidian Athame Racks", "Bone-Chiseled Glaives", "Consecrated Censer Flails", "Silvered Ritual Sharpening Stone"],
+        },
+        {
+            "id": "sub_cult_vestments",
+            "name": "Covenant Vestment & Warded Silk Loom",
+            "access_tier": "restricted",
+            "props": ["Sigil-Embroidered Robe Rails", "Spider-Silk Threading Loom", "Silver-Thread Mask Displays", "Anointed Cloak Steamer"],
+        },
+        {
+            "id": "sub_cult_apotheca",
+            "name": "Ichor Distillation & Blood-Letting Apotheca",
+            "access_tier": "restricted",
+            "props": ["Glass Alembic Stills", "Sanguine Triage Cots", "Black-Salt Crucible Bench", "Hermetic Phial Cabinets"],
+        },
+        {
+            "id": "sub_cult_quarters",
+            "name": "Initiate Refectory & Cloister Dormitories",
+            "access_tier": "restricted",
+            "props": ["Long Refectory Trestle", "Steaming Herbal Cauldron", "Straw-Ticking Bunk Alcoves", "Oil-Lamp Study Niche"],
+        },
+    ],
+    "loc_clandestine_syndicate_hq": [
+        {
+            "id": "sub_synd_armory",
+            "name": "Black-Bag Ballistics & Suppressed Ordnance Cage",
+            "access_tier": "restricted",
+            "props": ["Serial-Scrubbed Carbine Racks", "Suppressor Baffle Lathe", "EMP Grenade Lockers", "Ballistic Test Tank"],
+        },
+        {
+            "id": "sub_synd_outfitter",
+            "name": "Faraday-Weave & Counter-Surveillance Tailor",
+            "access_tier": "restricted",
+            "props": ["Faraday Trench Coat Racks", "Kevlar-Lined Suiting Forms", "IR-Baffled Mask Shelf", "Industrial Seam Welders"],
+        },
+        {
+            "id": "sub_synd_canteen",
+            "name": "Dead-Drop Espresso Lounge & Broker Commissary",
+            "access_tier": "restricted",
+            "props": ["Espresso & Stim Dispensers", "Vacuum-Sealed Ration Cases", "Acoustic-Masked Booths", "Burner-Phone Charging Tray"],
+        },
+        {
+            "id": "sub_synd_quarters",
+            "name": "Soundproof Standby Safehouse Bunks",
+            "access_tier": "restricted",
+            "props": ["Steel Capsule Bunk Stacks", "Faraday Locker Banks", "Emergency Drop Bag Pegs", "White-Noise Vent Grilles"],
+        },
+    ],
+}
+
+
+def get_outlaw_starter_residence_seeds(scenario_key: str = "anomalous_incursions") -> List[Tuple[str, str, Dict[str, Any]]]:
+    """Return `(zone_id, zone_name, facility_dict)` entries for `fac_cult_residence` & `fac_syndicate_residence`."""
+    seeds = _load_seeds()
+    scen_data = seeds.get(scenario_key) or seeds.get("anomalous_incursions") or {}
+    out: List[Tuple[str, str, Dict[str, Any]]] = []
+    targets = {"fac_cult_residence", "fac_syndicate_residence"}
+    for z in scen_data.get("zones") or []:
+        zid = str(z.get("id") or "")
+        zname = str(z.get("name") or "")
+        for p in z.get("primary_locations") or []:
+            pid = str(p.get("id") or "")
+            if pid in targets:
+                out.append((zid, zname, dict(p)))
+    return out
+
+
 def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 0, scenario_key: str = "anomalous_incursions") -> list[dict]:
     """
     When seeding an Anomalous Incursions session, deterministically injects the
@@ -685,7 +757,6 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "id": "loc_cult_sanctum_hq",
             "name": f"{cult_name} Hidden Sanctum",
             "is_anomalous": True,
-            "access_tier": "restricted",
             "sub_locations": [
                 {
                     "id": "sub_cult_entrance",
@@ -717,6 +788,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "access_tier": "restricted",
                     "props": ["Chained Grimoire Lecterns", "Cursed Relic Display Cases", "Wax-Sealed Scroll Racks", "Cipher Translation Desk"],
                 },
+                *[dict(w, props=list(w["props"])) for w in OUTLAW_HQ_EXTRA_WINGS["loc_cult_sanctum_hq"]],
                 {
                     "id": "sub_cult_sanctum",
                     "name": "Abyssal Conduit Inner Sanctum",
@@ -729,7 +801,6 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
             "id": "loc_clandestine_syndicate_hq",
             "name": f"{synd_name} Shadow Exchange HQ",
             "is_anomalous": True,
-            "access_tier": "restricted",
             "sub_locations": [
                 {
                     "id": "sub_synd_entrance",
@@ -761,6 +832,7 @@ def inject_anomalous_faction_hq_facilities(zones: list[dict], session_id: int = 
                     "access_tier": "restricted",
                     "props": ["Memetic Isolation Chamber", "Centrifuge & Vial Racks", "Hazmat Airlock", "Research Server Array"],
                 },
+                *[dict(w, props=list(w["props"])) for w in OUTLAW_HQ_EXTRA_WINGS["loc_clandestine_syndicate_hq"]],
                 {
                     "id": "sub_synd_vault",
                     "name": "Directorate Black-Ledger Vault",

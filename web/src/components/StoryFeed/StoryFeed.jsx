@@ -2,18 +2,23 @@ import { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import HistoryCard, { formatNarrative, getOutcomeTierTheme } from './HistoryCard';
 import SceneImageCard from './SceneImageCard';
-import { Feather, Sparkles, Swords, Skull, Heart } from 'lucide-react';
+import { Feather, Sparkles, Swords, Skull, Heart, Square } from 'lucide-react';
 
 const StoryFeed = ({
   history,
   currentScene,
   isStreaming,
+  isThinking = false,
+  cancellingTurn = false,
   streamingNarrative,
   streamingState,
   selectedCombatTarget,
   onSelectCombatTarget,
+  showEnemyHp = true,
+  showEnemyIntent = true,
   processing,
   pendingAction,
+  onCancelTurn = null,
   onRerollImage = null,
   rerollingImage = false
 }) => {
@@ -130,17 +135,35 @@ const StoryFeed = ({
                 <span className="truncate">
                   {pendingAction?.label || pendingAction?.direct_choice?.label || pendingAction?.direct_choice?.text || pendingAction?.custom_action_text || t('feed.resolving_action', 'Resolving Action...')}
                 </span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-mono not-italic text-amber-400/90 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                <span className={`inline-flex items-center gap-1 text-[10px] font-mono not-italic px-1.5 py-0.5 rounded border ${
+                  isThinking
+                    ? 'text-violet-300 bg-violet-500/10 border-violet-400/30 animate-pulse'
+                    : 'text-amber-400/90 bg-amber-500/10 border-amber-500/20'
+                }`}>
                   <Sparkles size={10} className="animate-spin" />
-                  {t('feed.resolving', 'Resolving')}
+                  {isThinking ? t('feed.thinking', 'Thinking...') : t('feed.resolving', 'Resolving')}
                 </span>
               </div>
+              {onCancelTurn && currentScene?.id !== 'embarking' && !pendingAction?.isSyncTurnZeroRetry && (
+                <button
+                  type="button"
+                  onClick={onCancelTurn}
+                  disabled={cancellingTurn}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-red-500/35 bg-red-950/35 hover:bg-red-900/50 text-red-200 text-[10px] font-mono uppercase tracking-wider transition-colors disabled:opacity-50 shrink-0"
+                  title={t('feed.cancel_turn', 'Stop')}
+                >
+                  <Square size={9} className="fill-current" />
+                  <span>{cancellingTurn ? t('feed.cancelling_turn', 'Stopping...') : t('feed.cancel_turn', 'Stop')}</span>
+                </button>
+              )}
             </div>
             <div className="border-l-2 border-amber-500/60 pl-4 py-3 bg-amber-950/20 rounded-r-lg flex items-center gap-3 text-sm text-amber-200/90">
               <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin shrink-0" />
               <div className="flex flex-col">
                 <span className="font-semibold text-xs tracking-wider uppercase text-amber-300">
-                  {t('feed.chronicler_resolving', 'The Chronicler is resolving your choice...')}
+                  {isThinking
+                    ? t('feed.chronicler_thinking', 'The Chronicler is thinking through your move...')
+                    : t('feed.chronicler_resolving', 'The Chronicler is resolving your choice...')}
                 </span>
                 <span className="text-[11px] text-gray-400 mt-0.5">
                   {t('feed.calculating_outcomes', 'Calculating outcomes, dice checks, and world reactions...')}
@@ -158,18 +181,36 @@ const StoryFeed = ({
               <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400 italic">
                 <span className="text-fantasy-accent not-italic font-mono text-[11px]">▸</span>
                 <span className="truncate">{streamAction?.label || t('feed.resolving_action', 'Resolving Action...')}</span>
-                <span className="inline-flex items-center gap-1 text-[10px] font-mono not-italic text-amber-400/90 px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+                <span className={`inline-flex items-center gap-1 text-[10px] font-mono not-italic px-1.5 py-0.5 rounded border ${
+                  isThinking
+                    ? 'text-violet-300 bg-violet-500/10 border-violet-400/30 animate-pulse'
+                    : 'text-amber-400/90 bg-amber-500/10 border-amber-500/20'
+                }`}>
                   <Feather size={10} className="animate-bounce" />
-                  {t('feed.live', 'Live')}
+                  {isThinking ? t('feed.thinking', 'Thinking...') : t('feed.live', 'Live')}
                 </span>
               </div>
 
-              {streamAction && (
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono font-bold uppercase tracking-wider shrink-0 ${streamTheme.badgeClass}`}>
-                  <span>{streamTheme.icon}</span>
-                  <span>{streamStatPrefix}{streamTierLabel}{streamChanceSuffix}</span>
-                </span>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                {streamAction && (
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono font-bold uppercase tracking-wider shrink-0 ${streamTheme.badgeClass}`}>
+                    <span>{streamTheme.icon}</span>
+                    <span>{streamStatPrefix}{streamTierLabel}{streamChanceSuffix}</span>
+                  </span>
+                )}
+                {onCancelTurn && currentScene?.id !== 'embarking' && !pendingAction?.isSyncTurnZeroRetry && (
+                  <button
+                    type="button"
+                    onClick={onCancelTurn}
+                    disabled={cancellingTurn}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-red-500/35 bg-red-950/35 hover:bg-red-900/50 text-red-200 text-[10px] font-mono uppercase tracking-wider transition-colors disabled:opacity-50"
+                    title={t('feed.cancel_turn', 'Stop')}
+                  >
+                    <Square size={9} className="fill-current" />
+                    <span>{cancellingTurn ? t('feed.cancelling_turn', 'Stopping...') : t('feed.cancel_turn', 'Stop')}</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {streamOutcomeText || streamNextText || streamingNarrative ? (
@@ -193,9 +234,13 @@ const StoryFeed = ({
                 )}
               </div>
             ) : (
-              <div className={`border-l-2 ${streamTheme.accentBorderClass} pl-4 py-2 flex items-center gap-2 text-sm text-gray-400 italic`}>
-                <Sparkles size={14} className="text-amber-400 animate-spin" />
-                <span>{t('feed.chronicler_weaving', 'The Chronicler is weaving your fate...')}</span>
+              <div className={`border-l-2 ${streamTheme.accentBorderClass} pl-4 py-2 flex items-center gap-2 text-sm italic ${isThinking ? 'text-violet-300' : 'text-gray-400'}`}>
+                <Sparkles size={14} className={`${isThinking ? 'text-violet-400' : 'text-amber-400'} animate-spin`} />
+                <span>
+                  {isThinking
+                    ? t('feed.chronicler_thinking', 'The Chronicler is thinking through your move...')
+                    : t('feed.chronicler_weaving', 'The Chronicler is weaving your fate...')}
+                </span>
               </div>
             )}
           </div>
@@ -283,27 +328,29 @@ const StoryFeed = ({
                     </div>
 
                     {/* Monster HP Bar */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between items-center text-[10px] font-mono">
-                        <span className="text-red-300 flex items-center gap-1">
-                          <Heart size={10} className="text-red-400" /> HP
-                        </span>
-                        <span className="text-gray-300 font-semibold">
-                          {hp} / {maxHp} ({pct}%)
-                        </span>
+                    {showEnemyHp && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center text-[10px] font-mono">
+                          <span className="text-red-300 flex items-center gap-1">
+                            <Heart size={10} className="text-red-400" /> HP
+                          </span>
+                          <span className="text-gray-300 font-semibold">
+                            {hp} / {maxHp} ({pct}%)
+                          </span>
+                        </div>
+                        <div className="h-2 w-full bg-black/80 rounded-full overflow-hidden border border-red-900/50">
+                          <div
+                            className={`h-full transition-all duration-500 ${
+                              pct > 50 ? 'bg-red-500' : pct > 25 ? 'bg-amber-500' : 'bg-rose-600'
+                            }`}
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
                       </div>
-                      <div className="h-2 w-full bg-black/80 rounded-full overflow-hidden border border-red-900/50">
-                        <div
-                          className={`h-full transition-all duration-500 ${
-                            pct > 50 ? 'bg-red-500' : pct > 25 ? 'bg-amber-500' : 'bg-rose-600'
-                          }`}
-                          style={{ width: `${pct}%` }}
-                        />
-                      </div>
-                    </div>
+                    )}
 
                     {/* Qualitative Boss Charging Telegraph & Stagger Progress */}
-                    {!isDefeated && monster.telegraphed_skill && typeof monster.telegraphed_skill === 'object' && (() => {
+                    {showEnemyIntent && !isDefeated && monster.telegraphed_skill && typeof monster.telegraphed_skill === 'object' && (() => {
                       const skillLabel =
                         monster.telegraphed_skill.skill_name ||
                         monster.telegraphed_skill.telegraphed_label ||

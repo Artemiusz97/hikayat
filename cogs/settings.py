@@ -146,26 +146,53 @@ class SettingsCog(commands.Cog):
         msg = f"Language set to **{lang.name}**. Story narration and system options will now use this language."
         await interaction.response.send_message(msg, ephemeral=True)
 
-    @settings_group.command(name="verbosity", description="How the narrator should write scenes")
+    @settings_group.command(name="verbosity", description="Choose the narrator's prose style & voice")
     @app_commands.choices(style=[
-        app_commands.Choice(name="Shakespearean (poetic, theatrical Elizabethan prose)", value="shakespearean"),
-        app_commands.Choice(name="Vivid (vivid, atmospheric RPG prose)", value="vivid"),
-        app_commands.Choice(name="Normal (clear, contemporary descriptive style)", value="normal"),
-        app_commands.Choice(name="Direct (momentum-driven story & dialogue without filler)", value="direct"),
-        app_commands.Choice(name="Concise (brief, direct action & key updates)", value="concise"),
+        app_commands.Choice(name="Vivid (rich sensory RPG prose)", value="vivid"),
+        app_commands.Choice(name="Standard (clear contemporary prose)", value="normal"),
+        app_commands.Choice(name="Noir (cynical hardboiled detective pulp)", value="noir"),
+        app_commands.Choice(name="Witty (dry deadpan satire)", value="witty"),
+        app_commands.Choice(name="Shakespearean (theatrical Elizabethan flourish)", value="shakespearean"),
+        app_commands.Choice(name="Brainrot (Gen Z / Alpha meme slang)", value="brainrot"),
     ])
     async def verbosity(self, interaction: discord.Interaction, style: app_commands.Choice[str]):
         await adb(db.update_settings, interaction.user.id, verbosity=style.value)
-        msg = f"Narration style set to **{style.name}**. This applies immediately."
+        msg = f"Narrative style set to **{style.name}**. This applies immediately."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @settings_group.command(name="style", description="Choose the narrator's prose style & voice")
+    @app_commands.choices(style=[
+        app_commands.Choice(name="Vivid (rich sensory RPG prose)", value="vivid"),
+        app_commands.Choice(name="Standard (clear contemporary prose)", value="normal"),
+        app_commands.Choice(name="Noir (cynical hardboiled detective pulp)", value="noir"),
+        app_commands.Choice(name="Witty (dry deadpan satire)", value="witty"),
+        app_commands.Choice(name="Shakespearean (theatrical Elizabethan flourish)", value="shakespearean"),
+        app_commands.Choice(name="Brainrot (Gen Z / Alpha meme slang)", value="brainrot"),
+    ])
+    async def style_command(self, interaction: discord.Interaction, style: app_commands.Choice[str]):
+        await adb(db.update_settings, interaction.user.id, verbosity=style.value)
+        msg = f"Narrative style set to **{style.name}**. This applies immediately."
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    @settings_group.command(name="pacing", description="Set paragraph length & narrative pacing")
+    @app_commands.choices(pacing=[
+        app_commands.Choice(name="Concise (1 short paragraph per section)", value="concise"),
+        app_commands.Choice(name="Balanced (standard 2-3 paragraphs)", value="balanced"),
+        app_commands.Choice(name="Novelistic (slow-burn immersive detail)", value="novelistic"),
+    ])
+    async def pacing(self, interaction: discord.Interaction, pacing: app_commands.Choice[str]):
+        await adb(db.update_settings, interaction.user.id, narrative_pacing=pacing.value)
+        msg = f"Narrative pacing set to **{pacing.name}**. This applies immediately."
         await interaction.response.send_message(msg, ephemeral=True)
 
     @settings_group.command(name="dialogue", description="Toggle spoken NPC dialogue in narration")
     @app_commands.choices(state=[
-        app_commands.Choice(name="Off (no character quotes, pure narration)", value="off"),
-        app_commands.Choice(name="Minimal (mostly narration, 1-2 short quotes)", value="minimal"),
-        app_commands.Choice(name="Balanced (50/50 mix of two-way dialogue & narration)", value="balanced"),
-        app_commands.Choice(name="Adaptive (dynamic: tactical barks in combat, rich dialogue in social)", value="adaptive"),
-        app_commands.Choice(name="Rich (dialogue primary, cinematic stage directions)", value="rich"),
+        app_commands.Choice(name="Off (pure narration, no quotes)", value="off"),
+        app_commands.Choice(name="Minimal (1-2 brief spoken lines max)", value="minimal"),
+        app_commands.Choice(name="Balanced (two-way spoken conversation)", value="balanced"),
+        app_commands.Choice(name="Adaptive (tactical barks in combat, rich banter in social)", value="adaptive"),
+        app_commands.Choice(name="Rich (novel-style expressive character banter)", value="rich"),
+        app_commands.Choice(name="Script (stage-play **Name** *(action)*: lines)", value="script"),
     ])
     async def dialogue(self, interaction: discord.Interaction, state: app_commands.Choice[str]):
         await adb(db.update_settings, interaction.user.id, dialogue_mode=state.value)
@@ -229,6 +256,30 @@ class SettingsCog(commands.Cog):
         await interaction.response.send_message(
             f"Raw percentages on action choices set to **{state.name}**. This applies immediately.", ephemeral=True)
 
+    @settings_group.command(name="enemy_hp",
+                             description="Toggle displaying enemy health bars and exact HP numbers")
+    @app_commands.choices(state=[
+        app_commands.Choice(name="On (Show enemy HP values and bars)", value="on"),
+        app_commands.Choice(name="Off (Hide enemy HP bars)", value="off"),
+    ])
+    async def enemy_hp(self, interaction: discord.Interaction, state: app_commands.Choice[str]):
+        val = 1 if state.value == "on" else 0
+        await adb(db.update_settings, interaction.user.id, show_enemy_hp=val)
+        await interaction.response.send_message(
+            f"Enemy health bars set to **{state.name}**. This applies immediately.", ephemeral=True)
+
+    @settings_group.command(name="enemy_intent",
+                             description="Toggle displaying enemy planned actions and charging telegraphs")
+    @app_commands.choices(state=[
+        app_commands.Choice(name="On (Show enemy intent & telegraphs)", value="on"),
+        app_commands.Choice(name="Off (Hide enemy intent & telegraphs)", value="off"),
+    ])
+    async def enemy_intent(self, interaction: discord.Interaction, state: app_commands.Choice[str]):
+        val = 1 if state.value == "on" else 0
+        await adb(db.update_settings, interaction.user.id, show_enemy_intent=val)
+        await interaction.response.send_message(
+            f"Enemy combat intent set to **{state.name}**. This applies immediately.", ephemeral=True)
+
     @settings_group.command(name="show", description="View your current settings")
     async def show(self, interaction: discord.Interaction):
         s = await adb(db.get_settings, interaction.user.id)
@@ -236,9 +287,13 @@ class SettingsCog(commands.Cog):
         lang_names = {"en": "English (GB)", "pl": "Polski (PL)", "ms": "Bahasa Melayu (MY)", "zh": "中文 (CN)", "de": "Deutsch (DE)"}
         active_lang = lang_names.get(s.get("narration_language") or s.get("language") or "en", "English (GB)")
         embed.add_field(name="Language", value=active_lang, inline=True)
-        embed.add_field(name="Verbosity", value=s["verbosity"].capitalize(), inline=True)
-        dialogue_disp = s.get("dialogue_mode", "balanced").capitalize()
-        embed.add_field(name="Dialogue", value=dialogue_disp, inline=True)
+        raw_style = str(s.get("verbosity") or "vivid").lower()
+        eff_style = "Standard" if raw_style in ("normal", "concise", "direct") else raw_style.capitalize()
+        raw_pacing = s.get("narrative_pacing") or ("concise" if raw_style in ("concise", "direct") else "balanced")
+        embed.add_field(name="Narrative Style", value=eff_style, inline=True)
+        embed.add_field(name="Narrative Pacing", value=str(raw_pacing).capitalize(), inline=True)
+        dialogue_disp = (s.get("dialogue_mode") or "adaptive").capitalize()
+        embed.add_field(name="Dialogue Style", value=dialogue_disp, inline=True)
         embed.add_field(name="Image Generation", value="On" if s["image_gen_enabled"] else "Off", inline=True)
         combat_ui_map = {
             "battle_deck": "JRPG Battle Deck (Default)",
@@ -251,6 +306,12 @@ class SettingsCog(commands.Cog):
                          inline=True)
         embed.add_field(name="Raw Percentages",
                          value="On" if s.get("show_percentages", 1) else "Off",
+                         inline=True)
+        embed.add_field(name="Enemy Health Bars",
+                         value="On" if s.get("show_enemy_hp", 1) else "Off",
+                         inline=True)
+        embed.add_field(name="Enemy Combat Intent",
+                         value="On" if s.get("show_enemy_intent", 1) else "Off",
                          inline=True)
         embed.add_field(name="Image Model Override", value=s["image_model"] or "(using bot default)", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -313,11 +374,14 @@ class SettingsCog(commands.Cog):
             value=(
                 "`/help` or `/commands` — Display this complete command overview list.\n"
                 "`/settings show` — View your current player preferences.\n"
-                "`/settings verbosity` — Set narrator description detail level.\n"
-                "`/settings dialogue` — Toggle spoken NPC quotes in narration.\n"
+                "`/settings style` (or `/settings verbosity`) — Choose narrator prose style & voice.\n"
+                "`/settings pacing` — Set paragraph length & narrative pacing.\n"
+                "`/settings dialogue` — Set spoken NPC dialogue style & density.\n"
                 "`/settings image_generation` — Toggle AI scene images on/off.\n"
                 "`/settings result_display` — Toggle Detailed vs Compact turn outcomes.\n"
                 "`/settings percentages` — Toggle displaying raw success percentages on choices.\n"
+                "`/settings enemy_hp` — Toggle enemy health bars and HP values.\n"
+                "`/settings enemy_intent` — Toggle enemy planned actions and charging telegraphs.\n"
                 "`/model` — Check active LLM model architecture & endpoint.\n"
                 "`/debug` — Developer tools for state inspection & stat testing."
             ),
@@ -337,4 +401,3 @@ class SettingsCog(commands.Cog):
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(SettingsCog(bot))
-

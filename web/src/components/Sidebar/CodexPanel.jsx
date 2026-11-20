@@ -467,8 +467,14 @@ const CodexPanel = ({
           telemetry_calibrations_used: data.telemetry_calibrations_used ?? session?.telemetry_calibrations_used,
         });
       }
-      if ((action === 'rest' || action === 'calibrate') && onRefreshCharacter) {
+      if ((action === 'rest' || action === 'calibrate' || action === 'join' || action === 'transfer' || action === 'leave') && onRefreshCharacter) {
         onRefreshCharacter();
+      }
+      if ((action === 'join' || action === 'transfer' || action === 'leave') && data) {
+        if (refreshCodex) refreshCodex();
+        if (data.session_sync && onSessionUpdated) {
+          onSessionUpdated({ ...session, ...data.session_sync });
+        }
       }
       if (action === 'quartermaster') {
         if (data?.merchant && onSessionUpdated) {
@@ -1659,8 +1665,14 @@ const CodexPanel = ({
                 const isMember = Boolean(faction.is_member);
                 const playerRank = Number(faction.player_rank || 0);
                 const eligibleRank = Number(faction.eligible_rank || 0);
+                const isAnomScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+                const isOutlaw = Boolean(faction.is_outlaw || faction.diplomatic_stance === 'outlaw');
+                const isAnomMainFaction = isAnomScenario && !faction.is_school_club;
+                const promoTiers = Array.isArray(faction.promotion_tiers) ? faction.promotion_tiers : [];
                 const canPromote = isMember && eligibleRank > playerRank && playerRank < 4;
-                const canRest = rep >= 1;
+                const canRest = isAnomMainFaction ? isMember : rep >= 1;
+                const qmBlocked = faction.quartermaster_eligible === false;
+                const bountyBlocked = faction.bounty_board_eligible === false;
                 const roster = Array.isArray(faction.leadership_roster) ? faction.leadership_roster : [];
                 const hierarchy = Array.isArray(faction.hierarchy) ? faction.hierarchy : [];
                 const activePerks = Array.isArray(faction.active_perks) ? faction.active_perks : [];
@@ -1683,6 +1695,11 @@ const CodexPanel = ({
                             <span className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border flex items-center gap-1 shrink-0 ${factionCategoryTag.style}`}>
                               <span>{factionCategoryTag.icon}</span>
                               <span>{factionCategoryTag.label}</span>
+                            </span>
+                          )}
+                          {isOutlaw && (
+                            <span className="text-[9.5px] px-1.5 py-0.2 rounded font-bold border bg-rose-950/70 text-rose-300 border-rose-700/60 shrink-0 uppercase">
+                              {t('codex.outlaw_badge', 'Outlaw')}
                             </span>
                           )}
                           {isMember && (
@@ -1752,6 +1769,38 @@ const CodexPanel = ({
                                 <span className="text-[11px] text-gray-300">{rivalFactions.join(', ')}</span>
                               </div>
                             )}
+                          </div>
+                        )}
+
+                        {/* 5-Tier Anomalous Operative Promotion Ladder */}
+                        {isAnomMainFaction && promoTiers.length > 0 && (
+                          <div className="space-y-1.5 bg-black/40 p-2 rounded border border-fantasy-border/40">
+                            <div className="flex items-center justify-between text-[10px] font-bold text-cyan-300 uppercase tracking-wider">
+                              <span>🎖️ {t('codex.promotion_ladder', '5-Tier Operative Ladder')}</span>
+                              {isMember && (
+                                <span className="font-mono text-amber-300">
+                                  {Number(agentDossier?.promotion_rep || 0)}/100 Rep • T{Number(agentDossier?.promotion_tier || playerRank || 1)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              {promoTiers.map((pt) => {
+                                const isCurTier = isMember && Number(agentDossier?.promotion_tier || playerRank || 0) === Number(pt.tier);
+                                return (
+                                  <div
+                                    key={pt.tier}
+                                    className={`flex items-center justify-between px-1.5 py-1 rounded border text-[10.5px] ${
+                                      isCurTier
+                                        ? 'bg-amber-950/35 border-amber-500/50 text-amber-200 font-semibold'
+                                        : 'bg-black/50 border-fantasy-border/30 text-gray-300'
+                                    }`}
+                                  >
+                                    <span>T{pt.tier} • {pt.title}</span>
+                                    <span className="font-mono text-[10px] text-gray-500">{pt.min_rep ?? pt.rep_required ?? 0} Rep</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
 
@@ -1830,7 +1879,13 @@ const CodexPanel = ({
                             <button
                               disabled={Boolean(factionBusy) || !canRest}
                               onClick={() => handleFactionOp(faction.faction_id, 'rest')}
-                              title={canRest ? 'Recover full HP & MP at Faction Safehouse' : 'Requires Liked standing (+1 Rep)'}
+                              title={
+                                canRest
+                                  ? 'Recover full HP & MP at Faction Safehouse'
+                                  : isAnomMainFaction
+                                    ? t('codex.rest_members_only', 'Restricted to enlisted operatives of this HQ')
+                                    : 'Requires Liked standing (+1 Rep)'
+                              }
                               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
                                 canRest
                                   ? 'bg-cyan-950/40 hover:bg-cyan-900/50 border-cyan-700/60 text-cyan-300'
@@ -1843,42 +1898,58 @@ const CodexPanel = ({
 
                             {/* Quartermaster Shop */}
                             <button
-                              disabled={Boolean(factionBusy)}
+                              disabled={Boolean(factionBusy) || qmBlocked}
                               onClick={() => handleFactionOp(faction.faction_id, 'quartermaster')}
-                              className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300 transition-all"
+                              title={qmBlocked ? t('codex.qm_locked_tip', 'Locked: Outlaws are blacklisted at Bureau HQ; specialized faction armories are members-only.') : undefined}
+                              className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                                qmBlocked
+                                  ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                                  : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300'
+                              }`}
                             >
                               <ShoppingBag size={12} />
-                              <span>{t('codex.quartermaster', 'Quartermaster')}</span>
+                              <span>{qmBlocked ? `🔒 ${t('codex.quartermaster', 'Quartermaster')}` : t('codex.quartermaster', 'Quartermaster')}</span>
                             </button>
 
                             {/* Promotion Trial */}
                             <button
-                              disabled={Boolean(factionBusy) || !canPromote}
+                              disabled={Boolean(factionBusy) || isAnomMainFaction || !canPromote}
                               onClick={() => handleFactionOp(faction.faction_id, 'promote')}
                               title={
-                                !isMember
-                                  ? 'Join faction first'
-                                  : canPromote
-                                    ? `Challenge for Rank ${playerRank + 1}!`
-                                    : 'Earn more Faction Reputation to unlock the next rank'
+                                isAnomMainFaction
+                                  ? t('codex.auto_promote_tip', 'Advances automatically at 20 / 45 / 70 / 90 Rep via Bounties and Dispatches')
+                                  : !isMember
+                                    ? 'Join faction first'
+                                    : canPromote
+                                      ? `Challenge for Rank ${playerRank + 1}!`
+                                      : 'Earn more Faction Reputation to unlock the next rank'
                               }
                               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
-                                canPromote
+                                !isAnomMainFaction && canPromote
                                   ? 'bg-purple-950/50 hover:bg-purple-900/60 border-purple-600/60 text-purple-200 animate-pulse'
                                   : 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
                               }`}
                             >
                               <Swords size={12} />
-                              <span>{canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}</span>
+                              <span>
+                                {isAnomMainFaction
+                                  ? t('codex.auto_promote_btn', 'Auto-Promotes (Rep)')
+                                  : canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}
+                              </span>
                             </button>
 
                             {/* Faction Bounties */}
                             <button
-                              disabled={Boolean(factionBusy)}
+                              disabled={Boolean(factionBusy) || bountyBlocked}
                               onClick={() => handleFactionOp(faction.faction_id, 'bounty')}
-                              className="col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-700/60 text-indigo-300 transition-all"
+                              title={bountyBlocked ? t('codex.bounty_locked_tip', 'Locked: Outlaws are blacklisted at Bureau contracts; internal dispatches are members-only.') : undefined}
+                              className={`col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                                bountyBlocked
+                                  ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                                  : 'bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-700/60 text-indigo-300'
+                              }`}
                             >
-                              <span>{t('codex.faction_bounties', '📋 Faction Bounties')}</span>
+                              <span>{bountyBlocked ? `🔒 ${t('codex.faction_bounties', '📋 Faction Bounties')}` : t('codex.faction_bounties', '📋 Faction Bounties')}</span>
                             </button>
                           </div>
 

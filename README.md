@@ -1,6 +1,6 @@
-# Hikayat (v3.3.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v3.4.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-3.3.0-blue.svg)](releases/CHANGELOG-v3.3.0.md)
+[![Version](https://img.shields.io/badge/version-3.4.0-blue.svg)](releases/CHANGELOG-v3.4.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -92,9 +92,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What it looks like**: An in-game encyclopedia tab with Folklore, Anomalous Sites, and Field Log views tracking supernatural sites, creatures, and stabilized zones.
 * **How it plays**: Exploring anomalous zones lets you solve multi-step spatial puzzles, use wards and stabilization flares to survive domain hazards, seal and reclaim 36 pacifiable wild sites (`anomalous_sites/`), and study monster weaknesses for tactical combat bonuses.
 
-### 10. World Pulse Regional Crises & Living Factions (`/factions`)
-* **What it looks like**: A live dashboard displaying ongoing faction skirmishes, resource shortages, and seasonal events.
-* **How it plays**: The game world is divided among competing factions. You can track their territorial influence, complete bounty contracts for specific groups, and change how different factions treat you.
+### 10. World Pulse Regional Crises, Living Factions & Outlaw Syndicates (`/factions`)
+* **What it looks like**: A live dashboard displaying ongoing faction skirmishes, resource shortages, seasonal events, and faction promotion ladders.
+* **How it plays**: The game world is divided among competing lawful agencies, ancient orders, and outlaw syndicates (Occult Cults, Clandestine Syndicates). You can advance across 5-tier promotion ladders, unlock archetype perks, claim starter safehouses and 10-wing headquarters, complete bounty contracts for specific groups, and change how different factions treat you.
 
 ---
 

@@ -21,6 +21,13 @@ DEFAULT_STAT_FALLBACK_LABELS = {
 }
 
 
+def _strip_wrapping_quotes(val: Any) -> str:
+    s = str(val or "").strip()
+    while len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
 def _safe_int(val, default=None) -> int | None:
     if val is None:
         return default
@@ -116,6 +123,25 @@ def _stem_choice_word(word: str) -> str:
     return _CHOICE_SYNONYM_MAP.get(w, w)
 
 
+def _has_cjk_chars(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
+def _tokenize_multilingual_stems(text: str, *, min_word_len: int = 3) -> list[str]:
+    """Extracts Unicode word tokens (including Polish/German diacritics) plus CJK character bigrams."""
+    tokens: list[str] = []
+    for tok in re.findall(r"[^\W_\u4e00-\u9fff]+", text.lower()):
+        if len(tok) >= min_word_len:
+            tokens.append(tok)
+    for cjk_run in re.findall(r"[\u4e00-\u9fff]+", text):
+        if len(cjk_run) >= 2:
+            for idx in range(len(cjk_run) - 1):
+                tokens.append(cjk_run[idx : idx + 2])
+        elif min_word_len <= 2:
+            tokens.append(cjk_run)
+    return tokens
+
+
 def _extract_choice_semantic_stems(
     choice: Dict[str, Any],
     extra_ignore_names: Optional[List[str]] = None,
@@ -130,25 +156,32 @@ def _extract_choice_semantic_stems(
     clean_lbl = re.sub(r"^(?:[⭐🎯⚡🔹📱⏳💌🛏️🛋️🏕️🧩🤝\s\[\]]+|\s*\[[^\]]+\]\s*)+", "", clean_lbl).strip()
 
     ignore_tokens: set[str] = set()
+    raw_ignore_names: list[str] = []
     t_npc = str(choice.get("target_npc") or "").strip()
     if t_npc:
-        for tok in re.findall(r"[a-z0-9]{2,}", t_npc.lower()):
-            ignore_tokens.add(tok)
-            ignore_tokens.add(_stem_choice_word(tok))
+        raw_ignore_names.append(t_npc)
     for nm in (extra_ignore_names or []):
-        if nm:
-            for tok in re.findall(r"[a-z0-9]{2,}", str(nm).lower()):
-                ignore_tokens.add(tok)
-                ignore_tokens.add(_stem_choice_word(tok))
+        nm_s = str(nm or "").strip()
+        if nm_s:
+            raw_ignore_names.append(nm_s)
 
-    words = re.findall(r"[a-z0-9]{3,}", clean_lbl.lower())
+    lbl_for_stems = clean_lbl
+    for nm in raw_ignore_names:
+        for tok in _tokenize_multilingual_stems(nm, min_word_len=2):
+            ignore_tokens.add(tok)
+            if tok.isascii():
+                ignore_tokens.add(_stem_choice_word(tok))
+        if _has_cjk_chars(nm):
+            lbl_for_stems = lbl_for_stems.replace(nm, " ")
+
+    words = _tokenize_multilingual_stems(lbl_for_stems, min_word_len=3)
     full_stems: set[str] = set()
     core_stems: set[str] = set()
     for w in words:
         if w in _CHOICE_STOPWORDS or w in ignore_tokens:
             continue
-        st = _stem_choice_word(w)
-        if not st or len(st) < 3 or st in _CHOICE_STOPWORDS or st in ignore_tokens:
+        st = _stem_choice_word(w) if w.isascii() else w
+        if not st or (not _has_cjk_chars(st) and len(st) < 3) or st in _CHOICE_STOPWORDS or st in ignore_tokens:
             continue
         if st in _CHOICE_SPEECH_VERBS:
             continue
@@ -196,8 +229,8 @@ def are_choices_semantically_redundant(
 
     # 1. Never merge exit vs non-exit
     from mechanics.narrative.intent import is_conversational_exit
-    exit1 = bool(c1.get("_pinned_dialogue_exit") or c1.get("intent") == "dialogue_exit" or c1.get("ends_dialogue") or is_conversational_exit(lbl1))
-    exit2 = bool(c2.get("_pinned_dialogue_exit") or c2.get("intent") == "dialogue_exit" or c2.get("ends_dialogue") or is_conversational_exit(lbl2))
+    exit1 = bool(not c1.get("_quest_dialogue_handoff") and (c1.get("_pinned_dialogue_exit") or c1.get("intent") == "dialogue_exit" or c1.get("ends_dialogue") or is_conversational_exit(lbl1)))
+    exit2 = bool(not c2.get("_quest_dialogue_handoff") and (c2.get("_pinned_dialogue_exit") or c2.get("intent") == "dialogue_exit" or c2.get("ends_dialogue") or is_conversational_exit(lbl2)))
     if exit1 != exit2:
         return False
     if exit1 and exit2:
@@ -689,6 +722,13 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     if sp.strip():
                         partners_list.append(sp.strip())
 
+    active_appts: list = []
+    if session_id:
+        try:
+            active_appts = db.get_active_rendezvous_appointments(session_id) or []
+        except Exception:
+            active_appts = []
+
     cleaned = []
     if isinstance(choices, list):
         for c in choices[:25]:
@@ -817,9 +857,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             # Topic Embargo Filter:
             # If there's an active confidential appointment, filter out choices that leak the confidential topic
             # before arriving at the rendezvous location!
-            if session_id:
+            if active_appts:
                 try:
-                    active_appts = db.get_active_rendezvous_appointments(session_id)
                     is_embargoed_leak = False
                     from mechanics.world.waypoints import check_location_matches_waypoint
                     for appt in active_appts:
@@ -863,7 +902,9 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
             parsed_early = resolve_action_intent(c if isinstance(c, dict) else clean_label_str, ctx_early)
             early_intent = c.get("intent") or (parsed_early.category.value if parsed_early else "general_action")
             early_sub_intent = c.get("sub_intent") or (parsed_early.sub_target if parsed_early else "")
-            early_target_npc = c.get("target_npc") or (parsed_early.target_entity if parsed_early else "")
+            early_target_npc = _strip_wrapping_quotes(
+                c.get("target_npc") or (parsed_early.target_entity if parsed_early else "")
+            )
 
             _is_server_stamped = bool(
                 c.get("_server_stamped")
@@ -934,10 +975,13 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "is_privacy_nudge", "_convince_stay", "departure_action",
                 "event_key", "_active_quest_inquiry", "_is_world_rumor_inquiry",
                 "_is_break_the_news", "linked_quest_id", "_topic_sig",
-                "_deterministic_supplement",
+                "_deterministic_supplement", "_quest_dialogue_handoff", "_access_barrier",
             ):
                 if _extra_k in c and c[_extra_k] is not None:
-                    entry_dict[_extra_k] = c[_extra_k]
+                    val_extra = c[_extra_k]
+                    if _extra_k in ("topic_id", "category") and isinstance(val_extra, str):
+                        val_extra = _strip_wrapping_quotes(val_extra)
+                    entry_dict[_extra_k] = val_extra
             cleaned.append(entry_dict)
 
     if not partners_list and session_id:
@@ -1244,13 +1288,16 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
             is_intimate_exit_lbl = any(k in lbl for k in INTIMATE_EXIT_KEYWORDS)
             is_exit = (
-                bool(c.get("ends_dialogue"))
-                or is_intimate_exit_lbl
-                or intent_cat == IntentCategory.DIALOGUE_EXIT
-                or is_exempt_free_action(c, in_dialogue_mode=True)
-                or (
-                    is_conversational_exit(clean_lbl)
-                    and (c["stat"] in ("NONE", "FREE") or c.get("requirement", 0) <= 0)
+                not c.get("_quest_dialogue_handoff")
+                and (
+                    bool(c.get("ends_dialogue"))
+                    or is_intimate_exit_lbl
+                    or intent_cat == IntentCategory.DIALOGUE_EXIT
+                    or is_exempt_free_action(c, in_dialogue_mode=True)
+                    or (
+                        is_conversational_exit(clean_lbl)
+                        and (c["stat"] in ("NONE", "FREE") or c.get("requirement", 0) <= 0)
+                    )
                 )
             )
             if is_exit:
@@ -1274,7 +1321,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
             # 3. Filter out travel / movement / departure actions
             if intent_cat == IntentCategory.MOVEMENT:
-                if c.get("is_phase2_choice"):
+                if c.get("is_phase2_choice") or c.get("_quest_dialogue_handoff"):
                     dialogue_filtered.append(c)
                     continue
                 if any(p in lbl for p in ("walk with", "step into", "turn back", "step away", "head with", "sneak in", "pick the lock", "ring the intercom")):
@@ -2651,10 +2698,24 @@ def build_hybrid_turn_choices(
     if in_active_intimate_turn:
         return _sanitize_choice_labels(cleaned[:5])
 
-    # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint (or remote Story Quest travel)
+    # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint (or remote Story Quest travel / dialogue handoff)
+    _adv_qids_raw: list[str] = []
+    if isinstance(result, dict):
+        _adv_qids_raw.extend(str(q).strip() for q in (result.get("_quests_advanced_this_turn") or []) if q)
+    if isinstance(session, dict):
+        _adv_qids_raw.extend(str(q).strip() for q in (session.get("_just_advanced_quest_ids") or []) if q)
+        if isinstance(session.get("extra"), dict):
+            _adv_qids_raw.extend(str(q).strip() for q in (session["extra"].get("_just_advanced_quest_ids") or []) if q)
+    _adv_qids_turn = list(dict.fromkeys(_adv_qids_raw))
+    _need_dialogue_handoff = bool(
+        in_active_dialogue_turn
+        and _adv_qids_turn
+        and not any(isinstance(c, dict) and c.get("_quest_dialogue_handoff") for c in cleaned)
+    )
     if session_id and eff_loc and (
         not any(isinstance(c, dict) and c.get("is_quest_action") for c in cleaned)
         or not any(isinstance(c, dict) and c.get("is_quest_action") and c.get("is_story_quest") and not c.get("is_premature_climax") for c in cleaned)
+        or _need_dialogue_handoff
     ):
         try:
             from mechanics.world.waypoints import tag_and_enrich_quest_choices
@@ -2667,6 +2728,7 @@ def build_hybrid_turn_choices(
                 dialogue_partner=new_partners,
                 current_npcs=eff_npcs,
                 allow_fallback=True,
+                just_advanced_quest_ids=_adv_qids_turn,
             )
             if tagged_fb:
                 for tc in tagged_fb:
@@ -2702,7 +2764,9 @@ def build_hybrid_turn_choices(
     has_access_barrier = bool(active_gate.get("gated") and active_gate.get("barrier_choices"))
     if has_access_barrier:
         for bc in active_gate["barrier_choices"][:2]:
-            priority_buttons.append(_to_choice_dict(bc))
+            bc_dict = _to_choice_dict(bc)
+            bc_dict["_access_barrier"] = True
+            priority_buttons.append(bc_dict)
     else:
         if schedule_transition_choice is not None:
             priority_buttons.append(_to_choice_dict(schedule_transition_choice, "NONE", 0))

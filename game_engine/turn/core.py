@@ -12,9 +12,9 @@ from .prompts import _build_quest_and_bounty_directives, _build_player_actions_t
 from game_engine.turn_context import TurnContext
 import json
 import random
-from config import LLM_PASS2_TIMEOUT
+from config import LLM_PASS2_TIMEOUT, LLM_STREAM_TOTAL_DEADLINE
 import scenario_data
-from game_engine.core import SYSTEM_PROMPT, OUTCOME_SCHEMA, is_nsfw_scenario, uses_nsfw_model
+from game_engine.core import is_nsfw_scenario, uses_nsfw_model
 import namegen
 from mechanics.combat.merchant import merchant_prompt_note
 import logging
@@ -652,7 +652,6 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     if cast_plan.has_exited_convo:
         has_exited_convo = True
 
-    import db
     from mechanics.world.mobility import get_session_dialogue_partners
     from mechanics.social.physical_state import (
         build_physical_prompt_block,
@@ -721,8 +720,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             "whether they synergize (e.g. a flanking attack plus a distraction "
             "compound for a better result), conflict/waste each other (e.g. one "
             "blocks the other's approach), or are simply independent -- and let "
-            "that shape both the shared narrative and each character's individual "
-            "hp_change/mp_change/etc in character_outcomes.\n"
+            "that shape how the actions play out across `@@OUTCOME` and `@@NEXT`.\n"
         )
 
     import game_engine.prompt_layout as prompt_layout
@@ -967,19 +965,36 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 log.warning("Failed pre-turn anomalous incursion resolution: %s", _inc_err)
 
     mode = "combat" if (is_in_combat(session) and not _skip_precompute_for_incursion) else "narrative"
+    _breach_round_dirs: list[str] = []
+    try:
+        from mechanics.social.anomalous_npc_tags import apply_breach_civilian_round_rules
+        _, _breach_round_dirs = apply_breach_civilian_round_rules(
+            session,
+            str(session.get("scenario") or ""),
+            stage_info=stage_info,
+        )
+        if _breach_round_dirs and isinstance(stage_info, dict) and isinstance(stage_info.get("stage_npcs"), list):
+            pre_turn_stage_npcs = stage_info["stage_npcs"]
+    except Exception as _br_err:
+        log.debug("Breach civilian round rules check skipped: %s", _br_err)
+
     precomputed = None
     if mode == "combat":
-        preloaded_eq: dict[int, dict] = {}
-        for _p_entry in (party or []):
-            _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
-            if isinstance(_p_char, dict) and _p_char.get("user_id"):
-                _p_uid = int(_p_char["user_id"])
-                if _p_uid not in preloaded_eq:
-                    preloaded_eq[_p_uid] = await adb(db.get_equipment, _p_uid) or {}
-        if isinstance(session, dict):
-            session["_preloaded_equipment_by_uid"] = preloaded_eq
+        def _load_combat_precomputed_bundle() -> tuple[dict[int, dict], dict | None]:
+            eq_by_uid: dict[int, dict] = {}
+            with db.UnitOfWork():
+                for _p_entry in (party or []):
+                    _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+                    if isinstance(_p_char, dict) and _p_char.get("user_id"):
+                        _p_uid = int(_p_char["user_id"])
+                        if _p_uid not in eq_by_uid:
+                            eq_by_uid[_p_uid] = db.get_equipment(_p_uid) or {}
+                if isinstance(session, dict):
+                    session["_preloaded_equipment_by_uid"] = eq_by_uid
+                return eq_by_uid, precompute_combat_turn(session, party, actions)
+
         try:
-            precomputed = await adb(precompute_combat_turn, session, party, actions)
+            _, precomputed = await adb(_load_combat_precomputed_bundle)
         finally:
             if isinstance(session, dict):
                 session.pop("_preloaded_equipment_by_uid", None)
@@ -1027,6 +1042,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         for sdir in stage_info["stage_directives"]:
             if sdir and sdir not in directive_note:
                 directive_note += f"\n{sdir}\n"
+    for bdir in _breach_round_dirs:
+        if bdir and bdir not in directive_note:
+            directive_note += f"\n{bdir}\n"
 
     if cast_plan is not None:
         stage_plan_text = render_stage_plan(cast_plan)
@@ -1331,7 +1349,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
                     directive_note += (
                         f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Predetermined quest adversaries ({_names}) confront the party! "
-                        f"You MUST dramatically narrate their reveal and hostile confrontation in `outcome_narrative` and `next_narrative`, "
+                        f"You MUST dramatically narrate their reveal and hostile confrontation in `@@OUTCOME` and `@@NEXT`, "
                         f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
                         f"DO NOT resolve the battle this turn; set the stage for combat!\n"
                     )
@@ -1376,7 +1394,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                             npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
                             directive_note += (
                                 f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Hostile guards/adversaries ({_names}) confront the party! "
-                                f"You MUST dramatically narrate their confrontation in `outcome_narrative` and `next_narrative`, "
+                                f"You MUST dramatically narrate their confrontation in `@@OUTCOME` and `@@NEXT`, "
                                 f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
                                 f"DO NOT resolve the battle this turn; set the stage for combat!\n"
                             )
@@ -1455,7 +1473,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             )
             directive_note += (
                 f"\n[MANDATORY AMBUSH DIRECTIVE]: Enemies ({names}) have suddenly ambushed the party! "
-                f"You MUST narrate their sudden appearance and attack in `outcome_narrative` and `next_narrative`, "
+                f"You MUST narrate their sudden appearance and attack in `@@OUTCOME` and `@@NEXT`, "
                 f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter "
                 f"(drawing weapons, shouting warnings, taking defensive stances). "
                 f"DO NOT resolve the fight this turn; just spring the trap!\n"
@@ -1579,7 +1597,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         directive_note += (
                             f"\n[TRAVEL ARRIVAL & ESTABLISHMENT DEPARTURE DIRECTIVE]:\n"
                             f"- The party has departed [{old_primary}] and arrived at [{dest_z} ➔ {dest_p}].\n"
-                            f"- Set `location` to '{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}'.\n"
+                            f"- Arrival Destination: '{dest_z} ➔ {dest_p} ➔ {loc_prompt_target}'. Depict the party arriving at this exact sub-area.\n"
                         )
                     if target_resident_name and target_station_sub:
                         directive_note += f"- Target Resident: {target_resident_name} is stationed at {target_station_sub}.\n"
@@ -1588,7 +1606,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     if patron_names:
                         patron_str = ", ".join(patron_names)
                         directive_note += (
-                            f"- Patrons left behind at {old_primary} (DO NOT NARRATE OR INCLUDE IN `npcs_present`): {patron_str}.\n"
+                            f"- Patrons left behind at {old_primary} (DO NOT NARRATE OR DEPICT IN THIS SCENE): {patron_str}.\n"
                         )
                     directive_note += f"- Local environment: Introduce or focus on local NPCs native to {dest_p}.\n"
 
@@ -1638,11 +1656,11 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
                                     f"- This is a PRIVATE meeting/rendezvous between the player and {npc_name}. Uninvited peers or classmates from prior locations (such as homeroom or hallways) are NOT present and must NOT be mentioned in this scene.\n"
 
-                                    f"- You MUST narrate {npc_name}'s greeting and presence in `outcome_narrative` and `next_narrative`.\n"
+                                    f"- You MUST narrate {npc_name}'s greeting and presence in `@@OUTCOME` and `@@NEXT`.\n"
 
-                                    f"- You MUST include {npc_name} in `present_named_characters`, `npcs_present`, and generate direct conversational choices with {npc_name} in `next_choices`.\n"
+                                    f"- You MUST depict {npc_name} physically present in the scene and generate direct conversational choices with {npc_name} in `@@CHOICES` (emit `cast: engage | {npc_name} | meetup` in `@@META` if initiating dialogue).\n"
 
-                                    f"- Set the location's sub-area to match the rendezvous if applicable (e.g. '{appt_loc}').\n"
+                                    f"- Ensure the scene reflects the rendezvous area (e.g. '{appt_loc}').\n"
 
                                 )
 
@@ -1668,91 +1686,104 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
 
 
-    dialogue_prompt_block = await db.adb(_build_dialogue_prompt_block, session, ctx, new_partners, party, actions)
-
-    if session.get("id"):
-        try:
-            curr_day, curr_min, _ = await db.adb(db.get_session_time, session["id"])
-        except Exception:
-            curr_day, curr_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
-    else:
-        curr_day, curr_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
-
-    time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key)
-
-
-
-    # --- DYNAMIC TOKEN BUDGETING ---
-
-
-
-
-
-    # Trim individual components to fit elastic budgets based on scene mode
-
-    # KNOWN WORLD is split by volatility (see prompt_layout docstring):
-    #   canon -> Z1b (cached; fixed cap, independent of scene mode)
-    #   scene -> Z2  (per turn; "lore" budget)
-    #   board -> Z3  (waypoints: "quest" budget, caseboard: "caseboard" budget)
-    world_bundle = dict(ctx.world_bundle) if session.get('id') else game_engine._load_known_world(session['id'])
-    world_bundle["session"] = session
-    world_bundle["_ctx"] = ctx
     scene_loc = effective_location if effective_location else session.get('current_location', '')
     scene_npcs_for_prompt = pre_turn_stage_npcs if (stage_info.get("is_movement") or pre_turn_stage_npcs) else session.get('current_npcs', [])
-    raw_scene_ctx = await db.adb(
-        game_engine._scene_context_text,
-        session['id'],
-        scene_loc,
-        scene_npcs_for_prompt,
-        4,
-        hist_text,
+    from game_engine.turn.generation import extract_deterministic_recall_query
+    from contextlib import nullcontext
+
+    def _pre_prompt_read_bundle() -> tuple:
+        sid_val = session.get("id")
+        uow_cm = db.UnitOfWork() if sid_val else nullcontext()
+        with uow_cm:
+            dlg_blk = _build_dialogue_prompt_block(session, ctx, new_partners, party, actions)
+            if sid_val:
+                try:
+                    c_day, c_min, _ = db.get_session_time(sid_val)
+                except Exception:
+                    c_day, c_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
+            else:
+                c_day, c_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
+
+            w_bundle = dict(ctx.world_bundle) if sid_val else game_engine._load_known_world(sid_val)
+            w_bundle["session"] = session
+            w_bundle["_ctx"] = ctx
+            r_scene_ctx = game_engine._scene_context_text(
+                sid_val,
+                scene_loc,
+                scene_npcs_for_prompt,
+                4,
+                hist_text,
+                w_bundle,
+            )
+            wp_blk = ""
+            cb_blk = ""
+            fow_blk = ""
+            if not _in_intimate_for_core and not _in_aftercare_for_core:
+                wp_blk, cb_blk = game_engine._quest_board_parts(
+                    sid_val,
+                    scene_loc,
+                    movement_dest_str,
+                    session=session,
+                )
+                fow_blk = game_engine.build_fog_of_war_quest_prompt_block(
+                    sid_val,
+                    session,
+                    bool(_in_intimate_for_core),
+                )
+
+            recall_hits: list[str] = []
+            for a in (actions or []):
+                if isinstance(a, dict) and a.get("active_recall"):
+                    recall_hits.extend(a["active_recall"])
+                elif isinstance(a, dict) and sid_val:
+                    recall_q = extract_deterministic_recall_query(a.get("label", ""), session_id=sid_val)
+                    if recall_q:
+                        try:
+                            det_recalls = db.active_recall_search(sid_val, recall_q)
+                            if det_recalls:
+                                a["active_recall"] = det_recalls
+                                recall_hits.extend(det_recalls)
+                        except Exception:
+                            pass
+
+            we_snap_res = session.get("_world_events_snapshot")
+            if we_snap_res is None and sid_val:
+                try:
+                    we_snap_res = db.get_world_events_snapshot(int(sid_val))
+                except Exception:
+                    we_snap_res = None
+
+            return dlg_blk, c_day, c_min, w_bundle, r_scene_ctx, wp_blk, cb_blk, fow_blk, recall_hits, we_snap_res
+
+    (
+        dialogue_prompt_block,
+        curr_day,
+        curr_min,
         world_bundle,
-    )
+        raw_scene_ctx,
+        wp_block,
+        caseboard_block,
+        fow_dossier_block,
+        active_recall_blocks,
+        _we_snap,
+    ) = await adb(_pre_prompt_read_bundle)
+
+    time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key, session=session)
+
+    # --- DYNAMIC TOKEN BUDGETING ---
     trimmed_scene_ctx = budget.trim(raw_scene_ctx, "lore")
     quest_board_text = ""
     if not _in_intimate_for_core and not _in_aftercare_for_core:
-        wp_block, caseboard_block = await db.adb(
-            game_engine._quest_board_parts,
-            session['id'],
-            scene_loc,
-            movement_dest_str,
-            session=session,
-        )
         quest_board_text = "".join(
             f"{b}\n\n" for b in (budget.trim(wp_block, "quest"), budget.trim(caseboard_block, "caseboard")) if b
         )
         if quest_board_text:
             quest_board_text += "[CASEBOARD & WAYPOINT PRESENCE NOTE: NPCs named or referenced in clues, caseboard entries, or waypoints (e.g. clue sources, suspects, archivists) are background investigation records. They are NOT physically present in the current room unless explicitly listed in 'NPCs currently present'. NEVER narrate them acting, watching, or standing in this scene.]\n\n"
-        fow_dossier_block = await db.adb(
-            game_engine.build_fog_of_war_quest_prompt_block,
-            session['id'],
-            session,
-            bool(_in_intimate_for_core),
-        )
         if fow_dossier_block:
             quest_board_text += f"{budget.trim(fow_dossier_block, 'quest')}\n\n"
 
     trimmed_history = hist_text
-
     trimmed_dialogue = budget.trim(dialogue_prompt_block, "dialogue")
-
-
-
-    active_recall_blocks = []
-    from game_engine.turn.generation import extract_deterministic_recall_query
-    for a in actions:
-        if isinstance(a, dict) and a.get("active_recall"):
-            active_recall_blocks.extend(a["active_recall"])
-        elif isinstance(a, dict) and session.get("id"):
-            recall_q = extract_deterministic_recall_query(a.get("label", ""), session_id=session["id"])
-            if recall_q:
-                try:
-                    det_recalls = db.active_recall_search(session["id"], recall_q)
-                    if det_recalls:
-                        a["active_recall"] = det_recalls
-                        active_recall_blocks.extend(det_recalls)
-                except Exception:
-                    pass
 
     active_recall_text = ""
 
@@ -1778,12 +1809,12 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         react_who = f"{p_names} and {', '.join(pres_npcs)}" if pres_npcs else p_names
         ambush_req_note = (
             f"- MANDATORY ENEMY ENCOUNTER NARRATION: Hostile enemies ({e_names}) appear in this turn! "
-            f"Your prose in `outcome_narrative` and `next_narrative` MUST explicitly name {e_names}, describe how they appeared/attacked, "
+            f"Your prose in `@@OUTCOME` and `@@NEXT` MUST explicitly name {e_names}, describe how they appeared/attacked, "
             f"and describe how {react_who} reacted to the encounter.\n"
         )
     else:
         ambush_req_note = (
-            "- ENEMY ENCOUNTER CONSISTENCY: Whenever hostile enemies are present in `nearby_enemies` or introduced in `new_entities`, "
+            "- ENEMY ENCOUNTER CONSISTENCY: Whenever hostile enemies are present in `ENEMIES CURRENTLY NEARBY`, "
             "your narrative MUST explicitly describe how those enemies appeared in the scene and how the player and any present characters/NPCs react to the encounter.\n"
         )
 
@@ -1798,10 +1829,10 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         directive_note += (
             "\n[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]:\n"
             "The player has explicitly concluded the conversation, stepped away, or left the conversation.\n"
-            "- In `outcome_narrative`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
+            "- In `@@OUTCOME`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
             "EVERY character present in the scene MUST STOP talking with the player! DO NOT have any NPCs continue, reopen, or capture dialogue with the player this turn! DO NOT reopen the conversation!\n"
-            "- In `next_narrative`, transition the scene forward into open exploration, room atmosphere, or the player's next move. NO characters should be speaking to the player.\n"
-            "- In `choices`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices.\n"
+            "- In `@@NEXT`, transition the scene forward into open exploration, room atmosphere, or the player's next move. NO characters should be speaking to the player.\n"
+            "- In `@@CHOICES`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices.\n"
         )
 
     # Check access gate prompt directive from stage_info
@@ -1862,6 +1893,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 directive_note += build_conversation_prompt_directive(session, new_partners, party=party)
             else:
                 session.pop("_dealt_social_seeds", None)
+                dialogue_prompt_block = ""
+                trimmed_dialogue = ""
         except Exception as _conv_dep_err:
             log.warning("Failed evaluating conversation departure state: %s", _conv_dep_err)
 
@@ -1881,19 +1914,13 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     zone_0 = prompt_layout.build_static_core(mode, "turn")
     zone_1 = prompt_layout.build_session_zone(session)
     zone_1b = prompt_layout.build_world_canon_zone(session, world=world_bundle)
-    _we_snap = session.get("_world_events_snapshot")
-    if _we_snap is None and session.get("id"):
-        try:
-            _we_snap = await db.adb(db.get_world_events_snapshot, int(session["id"]))
-        except Exception:
-            _we_snap = None
     _we_nsfw = uses_nsfw_model(session.get("scenario"))
     _we_lang = str(session.get("narration_language") or session.get("language") or "en")
     from mechanics.world.world_events.formatting import format_macro_events_for_z2, format_rumors_for_z3
     macro_events_z2 = format_macro_events_for_z2(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw)
     rumors_z3 = format_rumors_for_z3(_we_snap, lang=_we_lang, is_nsfw_enabled=_we_nsfw, current_location=str(scene_loc or ""))
     # Z2 ordered least -> most volatile; the clock changes every turn so it goes last.
-    zone_2 = "\n".join(p for p in [
+    fresh_zone_2 = "\n".join(p for p in [
         f"CHARACTER SHEET(S):\n{game_engine._party_sheet_text(party)}",
         f"{prompt_layout.SCENE_CONTEXT_HEADER}\n{trimmed_scene_ctx}",
         enemies_str.strip(),
@@ -1901,18 +1928,50 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         macro_events_z2,
         time_prompt_block,
     ] if p)
-    
+
+    present_npc_names = [
+        nm
+        for nm in (game_engine._get_npc_name(n) for n in (scene_npcs_for_prompt or []))
+        if nm and nm.lower() != "none"
+    ]
+    epoch_enemy_names = [
+        nm
+        for nm in (game_engine._get_npc_name(e) for e in (enemies_list or []))
+        if nm and nm.lower() != "none"
+    ]
+    _hist_tail = list(session.get("history") or [])[-1:]
+    _last_turn_summary = (
+        game_engine._history_text(_hist_tail, session_id=session.get("id"))
+        if _hist_tail
+        else ""
+    )
+    zone_2, user_prompt_prefix, _next_prompt_epoch = prompt_layout.resolve_prompt_epoch(
+        session=session,
+        mode=mode,
+        scene_loc=str(scene_loc or ""),
+        party=party,
+        present_npc_names=present_npc_names,
+        fresh_zone_2=fresh_zone_2,
+        phys_prompt_block=phys_prompt_block,
+        time_prompt_block=time_prompt_block,
+        active_quests_str=active_quests_str,
+        quest_board_text=quest_board_text,
+        rumors_z3=rumors_z3,
+        trimmed_history=trimmed_history,
+        active_recall_text=active_recall_text,
+        last_turn_summary=_last_turn_summary,
+        enemy_names=epoch_enemy_names,
+        enemies_str=enemies_str,
+    )
+
     user_prompt = (
-        f"{active_quests_str}"
-        f"{quest_board_text}"
-        f"{rumors_z3}"
-        f"RECENT HISTORY:\n{trimmed_history}{active_recall_text}\n\n"
+        f"{user_prompt_prefix}"
         f"ACTIONS:\n{actions_text}\n{simultaneity_note}\n{directive_note}\n\n"
         f"{trimmed_dialogue}"
         f"{ambush_req_note}"
-        f"{prompt_layout.CLOSING_REMINDER}"
+        f"{prompt_layout.build_closing_reminder(session)}"
     )
-    
+
     final_system_prompt_list = prompt_layout.assemble_system_prompt(zone_0, zone_1, zone_1b, zone_2)
     log.debug("prompt zones %s sizes %s",
               prompt_layout.zone_fingerprints(zone_0, zone_1, zone_1b, zone_2),
@@ -1923,23 +1982,25 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
     result = None
     try:
-        if stream_callback:
-            result = await game_engine.call_llm_json_stream(
-                final_system_prompt_list, user_prompt,
-                on_narrative_token=stream_callback,
-                is_nsfw=is_nsfw_flag,
-                timeout=LLM_PASS2_TIMEOUT,
-                response_model=response_schema,
-                system_zones=(zone_0, zone_1, zone_1b, zone_2),
-            )
-        else:
-            result = await game_engine.call_llm_json(
-                final_system_prompt_list, user_prompt,
-                is_nsfw=is_nsfw_flag,
-                timeout=LLM_PASS2_TIMEOUT,
-                response_model=response_schema,
-                system_zones=(zone_0, zone_1, zone_1b, zone_2),
-            )
+        import llm_client
+        with llm_client.narration_sampling_context(session, is_nsfw=is_nsfw_flag):
+            if stream_callback:
+                result = await game_engine.call_llm_json_stream(
+                    final_system_prompt_list, user_prompt,
+                    on_narrative_token=stream_callback,
+                    is_nsfw=is_nsfw_flag,
+                    timeout=LLM_STREAM_TOTAL_DEADLINE,
+                    response_model=response_schema,
+                    system_zones=(zone_0, zone_1, zone_1b, zone_2),
+                )
+            else:
+                result = await game_engine.call_llm_json(
+                    final_system_prompt_list, user_prompt,
+                    is_nsfw=is_nsfw_flag,
+                    timeout=LLM_PASS2_TIMEOUT,
+                    response_model=response_schema,
+                    system_zones=(zone_0, zone_1, zone_1b, zone_2),
+                )
     except Exception as llm_err:
         log.warning(
             "LLM generation pass failed during turn resolution (%s: %s). Activating deterministic fallback narration.",
@@ -2378,6 +2439,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 result["_waypoint_notices"] = list(pre_quest_res["waypoint_notices"])
             if pre_quest_res.get("completed_sub_quests"):
                 result["_completed_sub_quests"] = list(pre_quest_res["completed_sub_quests"])
+            if pre_quest_res.get("quests_advanced_this_turn"):
+                result["_quests_advanced_this_turn"] = list(pre_quest_res["quests_advanced_this_turn"])
 
         result["_pre_turn_vitals"] = pre_vitals_res
         result["_pre_turn_social"] = pre_social_res
@@ -2662,12 +2725,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 result["is_fallback"] = True
                 result["_is_fallback_narrative"] = True
             else:
-                paras = [p.strip() for p in re.split(r"\n\s*\n", outcome_narrative) if p.strip()]
-                if len(paras) >= 2:
-                    outcome_narrative = "\n\n".join(paras[:-1])
-                    next_narrative = paras[-1]
-                else:
-                    next_narrative = ""
+                outcome_narrative, next_narrative = game_engine.split_outcome_and_next_paragraphs(
+                    outcome_narrative, next_narrative
+                )
 
 
 
@@ -3001,6 +3061,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     if isinstance(result, dict):
         result["_llm_system_prompt_list"] = final_system_prompt_list
         result["_llm_user_prompt"] = user_prompt
+        if _next_prompt_epoch is not None and not result.get("_is_fallback_narrative"):
+            session["prompt_epoch"] = _next_prompt_epoch
+            result["_prompt_epoch"] = _next_prompt_epoch
         result = game_engine.reconcile_implied_hostile_encounter(
             result,
             session,

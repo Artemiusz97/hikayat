@@ -81,14 +81,17 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 CREATE TABLE IF NOT EXISTS user_settings (
     user_id             INTEGER PRIMARY KEY,
-    verbosity           TEXT DEFAULT 'vivid',   -- 'vivid' | 'normal' | 'concise'
-    dialogue_mode       TEXT DEFAULT 'balanced',
+    verbosity           TEXT DEFAULT 'vivid',   -- 'normal' | 'vivid' | 'noir' | 'witty' | 'shakespearean' | 'brainrot'
+    narrative_pacing    TEXT DEFAULT 'balanced', -- 'concise' | 'balanced' | 'novelistic'
+    dialogue_mode       TEXT DEFAULT 'adaptive',
     image_gen_enabled   INTEGER DEFAULT 0,
     image_model         TEXT,
     choices_style       TEXT DEFAULT 'dropdown',  -- 'dropdown' | 'embed' | 'buttons'
     combat_ui_style     TEXT DEFAULT 'battle_deck', -- 'battle_deck' | 'multi_dropdown'
     result_display      TEXT DEFAULT 'detailed', -- 'detailed' | 'compact'
     show_percentages    INTEGER DEFAULT 1,       -- 1 = show raw %, 0 = hide raw %
+    show_enemy_hp       INTEGER DEFAULT 1,       -- 1 = show enemy HP bars, 0 = hide
+    show_enemy_intent   INTEGER DEFAULT 1,       -- 1 = show enemy intent, 0 = hide
     stream_narrative    INTEGER DEFAULT 1,       -- 1 = stream real-time, 0 = batch
     debug_stat_mode     TEXT DEFAULT 'off',  -- 'off' | 'max' | 'min'
     debug_check_mode    TEXT DEFAULT 'off',  -- 'off' | 'always_success' | 'always_fail' | 'always_crit_success' | 'always_crit_fail'
@@ -131,7 +134,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     party_recruit_cooldowns_json TEXT DEFAULT '{}',
     confession_cooldowns_json TEXT DEFAULT '{}',
     verbosity           TEXT DEFAULT 'vivid',
-    dialogue_mode       TEXT DEFAULT 'balanced',
+    narrative_pacing    TEXT DEFAULT 'balanced',
+    dialogue_mode       TEXT DEFAULT 'adaptive',
     image_gen_enabled   INTEGER DEFAULT 0,
     choices_style       TEXT DEFAULT 'dropdown',   -- 'dropdown' | 'embed' | 'buttons'
     combat_ui_style     TEXT DEFAULT 'battle_deck', -- 'battle_deck' | 'multi_dropdown'
@@ -149,6 +153,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     extra_json          TEXT DEFAULT '{}',   -- flexible extension dict (e.g. pending_promotion)
     faction_reinforcements_used INTEGER DEFAULT 0,
     show_percentages    INTEGER DEFAULT 1,
+    show_enemy_hp       INTEGER DEFAULT 1,
+    show_enemy_intent   INTEGER DEFAULT 1,
     last_turn_snapshot_json TEXT DEFAULT '{}',
     language            TEXT DEFAULT 'en',
     narration_language  TEXT DEFAULT 'en',
@@ -1173,7 +1179,7 @@ def _get_independent_conn(db_path: str = None):
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except BaseException:
         conn.rollback()
         raise
     finally:
@@ -1213,7 +1219,7 @@ def UnitOfWork(db_path: str = None):
     try:
         yield conn
         conn.commit()
-    except Exception:
+    except BaseException:
         conn.rollback()
         raise
     finally:
@@ -1247,7 +1253,7 @@ def get_conn():
         try:
             yield conn
             conn.commit()
-        except Exception:
+        except BaseException:
             conn.rollback()
             raise
         finally:
@@ -1257,6 +1263,17 @@ def get_conn():
                 pool.put_nowait(conn)
             except queue.Full:
                 conn.close()
+
+_MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def get_main_event_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """Returns the last active main asyncio event loop if still running."""
+    loop = _MAIN_EVENT_LOOP
+    if loop is not None and not loop.is_closed() and loop.is_running():
+        return loop
+    return None
+
 
 async def adb(fn, /, *args, **kwargs):
     """Async wrapper for any synchronous ``db.*`` function.
@@ -1269,6 +1286,11 @@ async def adb(fn, /, *args, **kwargs):
         char = await adb(db.get_character, user_id)
         session = await adb(db.get_session, session_id)
     """
+    global _MAIN_EVENT_LOOP
+    try:
+        _MAIN_EVENT_LOOP = asyncio.get_running_loop()
+    except RuntimeError:
+        pass
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 def nullify_orphaned_implicated_contacts(conn: sqlite3.Connection, session_id: int | None = None) -> int:
@@ -2248,6 +2270,46 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+_NARRATION_PACING_V58_DDL = [
+    "ALTER TABLE user_settings ADD COLUMN narrative_pacing TEXT DEFAULT 'balanced'",
+    "ALTER TABLE user_settings ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
+    "ALTER TABLE user_settings ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
+    "ALTER TABLE sessions ADD COLUMN narrative_pacing TEXT DEFAULT 'balanced'",
+    "UPDATE user_settings SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
+    "UPDATE sessions SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
+]
+
+SCHEMA_MIGRATIONS.append(
+    (
+        58,
+        "narrative_pacing_and_style_v58",
+        list(_NARRATION_PACING_V58_DDL),
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        59,
+        "combat_display_and_session_parity_v59",
+        [
+            "ALTER TABLE user_settings ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
+            "ALTER TABLE user_settings ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
+            "ALTER TABLE sessions ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
+            "ALTER TABLE sessions ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
+            "UPDATE user_settings SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
+            "UPDATE sessions SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
+        ],
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        60,
+        "outlaw_factions_10wing_and_safehouses_v60",
+        [],
+    )
+)
+
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
     """Executes pending versioned schema migrations deterministically and records applied versions."""
@@ -2368,6 +2430,12 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         except Exception as e:
             print(f"[migration 57] Warning: anomalous locations integrity backfill encountered: {e}")
 
+    if 60 in newly_applied:
+        try:
+            _migrate_outlaw_factions_v60(conn)
+        except Exception as e:
+            print(f"[migration 60] Warning: outlaw factions 10-wing HQ & safehouses backfill encountered: {e}")
+
     try:
         _strip_legacy_session_fk_constraints(conn)
     except Exception as e:
@@ -2397,6 +2465,12 @@ def _migrate_anomalous_locations_integrity_v57(conn: sqlite3.Connection) -> int:
     """Idempotently repairs misparented nodes, edges, renamed rooms, and access drift."""
     from mechanics.world.anomalous_sites.lifecycle import backfill_anomalous_locations_integrity_v57
     return backfill_anomalous_locations_integrity_v57(conn)
+
+
+def _migrate_outlaw_factions_v60(conn: sqlite3.Connection) -> int:
+    """Idempotently backfills 10-wing Occult Cult & Clandestine Syndicate HQs and starter safehouses."""
+    from mechanics.world.anomalous_sites.lifecycle import backfill_outlaw_faction_hqs_and_residences_v60
+    return backfill_outlaw_faction_hqs_and_residences_v60(conn)
 
 
 def _migrate_dynamic_social_overhaul_v50(conn: sqlite3.Connection) -> int:
@@ -3711,11 +3785,10 @@ STAT_COLUMN = {"STR": "str_", "PER": "per_", "END": "end_", "CHA": "cha",
                "INT": "int_", "AGI": "agi", "LUK": "luk"}
 
 
-def acquire_distributed_lock(lock_key: str, owner_id: str, timeout_seconds: int = 45) -> bool:
+def acquire_distributed_lock(lock_key: str, owner_id: str, timeout_seconds: int = 210) -> bool:
     """Attempts to acquire a database-backed distributed lock.
     Returns True if successfully acquired (or already held by this owner), False if locked by someone else.
     """
-    import time
     now = time.time()
     with _get_independent_conn() as conn:
         # Clear expired locks safely inside the transaction

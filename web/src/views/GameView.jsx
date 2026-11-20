@@ -29,6 +29,7 @@ import { useInventory } from '../hooks/useInventory';
 import { useCodex } from '../hooks/useCodex';
 import { usePhone } from '../hooks/usePhone';
 import { useSettings } from '../hooks/useSettings';
+import { formatCleanLocation } from '../utils/locationFormat';
 import { isValidSessionId, isAnomalousScenarioKey } from '../utils/session';
 
 const GameView = ({
@@ -43,6 +44,8 @@ const GameView = ({
   processingTurn,
   pendingAction,
   isStreaming,
+  isThinking = false,
+  cancellingTurn = false,
   streamingNarrative,
   streamingState,
   waitingForParty,
@@ -51,6 +54,7 @@ const GameView = ({
   onlineUserIds = [],
   sendPartyChat,
   submitAction,
+  cancelTurn = null,
   exitToDashboard,
   endSession,
   retryGeneration,
@@ -211,6 +215,9 @@ const GameView = ({
     }
 
     const outcome = await submitAction(finalAction);
+    if (outcome?.status === 'accepted') {
+      return;
+    }
     const updatedStealth = outcome?.session?.stealth_state || outcome?.stealth_state;
     if (updatedStealth && typeof updatedStealth.is_hidden === 'boolean') {
       setIsStealthActive(updatedStealth.is_hidden);
@@ -220,7 +227,9 @@ const GameView = ({
 
   const handleFastTravel = async (destination) => {
     if (!destination || processingTurn) return;
+    const cleanDest = formatCleanLocation(destination, { includeZone: true, style: 'badge' }) || destination;
     await handleAction({
+      label: t('atlas.traveling_to', { destination: cleanDest, defaultValue: `Traveling to ${cleanDest}...` }),
       custom_action_text: `I travel to ${destination}.`,
       target_location: destination,
       intent: 'fast_travel',
@@ -245,8 +254,10 @@ const GameView = ({
 
   const handleRetryGeneration = async () => {
     if (!retryGeneration) return;
-    await retryGeneration();
-    refreshAllSidebars();
+    const res = await retryGeneration();
+    if (res?.status !== 'accepted') {
+      refreshAllSidebars();
+    }
   };
 
   const activeQuestCount = (codex.activeStoryQuest ? 1 : 0) + (codex.quests || []).filter(
@@ -567,12 +578,17 @@ const GameView = ({
             history={session.history}
             currentScene={session}
             isStreaming={isStreaming}
+            isThinking={isThinking}
+            cancellingTurn={cancellingTurn}
             streamingNarrative={streamingNarrative}
             streamingState={streamingState}
             processing={processingTurn}
             pendingAction={pendingAction}
+            onCancelTurn={cancelTurn}
             selectedCombatTarget={selectedCombatTarget}
             onSelectCombatTarget={setSelectedCombatTarget}
+            showEnemyHp={(settings.settings?.show_enemy_hp ?? 1) === 1}
+            showEnemyIntent={(settings.settings?.show_enemy_intent ?? 1) === 1}
             onRerollImage={rerollImage}
             rerollingImage={rerollingImage}
           />
@@ -592,6 +608,8 @@ const GameView = ({
           phoneOpen={phoneModalOpen}
           phoneHook={phone}
           showPercentages={(settings.settings?.show_percentages ?? 1) === 1}
+          showEnemyHp={(settings.settings?.show_enemy_hp ?? 1) === 1}
+          showEnemyIntent={(settings.settings?.show_enemy_intent ?? 1) === 1}
           processing={processingTurn}
           pendingAction={pendingAction}
           isStreaming={isStreaming}
@@ -690,6 +708,7 @@ const GameView = ({
         user={user}
         onTravel={handleFastTravel}
         initialTargetLocation={worldMapTargetLocation}
+        processingTurn={processingTurn}
       />
 
       {/* Merchant Emporium Modal */}

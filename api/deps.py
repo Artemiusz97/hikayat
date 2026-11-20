@@ -96,11 +96,35 @@ class ConnectionManager:
 
         await asyncio.gather(*[_safe_send(c) for c in list(conns)], return_exceptions=True)
 
+    async def send_personal(self, session_id: int, websocket: WebSocket, message: dict) -> None:
+        """Send a serialized JSON message to a single socket under its connection lock."""
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        conns = self.active_connections.get(clean_sid, [])
+        if not conns and isinstance(clean_sid, int):
+            conns = self.active_connections.get(str(clean_sid), [])
+        elif not conns and isinstance(clean_sid, str) and clean_sid.isdigit():
+            conns = self.active_connections.get(int(clean_sid), [])
+        target = next((c for c in list(conns) if c.get("ws") is websocket), None)
+        safe_message = _to_json_safe(message)
+        if target is None:
+            await websocket.send_json(safe_message)
+            return
+        lock = target.setdefault("lock", asyncio.Lock())
+        async with lock:
+            try:
+                await websocket.send_json(safe_message)
+            except Exception as e:
+                logger.error(f"Error sending personal WS frame to user {target.get('user_id')}: {e}")
+                self.disconnect(clean_sid, target["ws"])
+
 
 manager = ConnectionManager()
 
 
-_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot", "_dealt_social_seeds"})
+_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot", "_dealt_social_seeds", "_prompt_epoch", "prompt_epoch"})
 
 
 def _to_json_safe(val, _seen: set[int] | None = None):
@@ -147,10 +171,10 @@ def enrich_choices_with_odds(
     inv: list | None = None,
 ) -> list:
     """Enriches scene choices with calculated success_pct, chance, and Discord-matching action icons."""
-    from cogs.adventure.embeds import (
-        _get_choice_quest_icon,
-        _get_choice_skill_emoji,
-        _get_choice_emoji,
+    from game_engine import (
+        get_choice_quest_icon as _get_choice_quest_icon,
+        get_choice_skill_emoji as _get_choice_skill_emoji,
+        get_choice_emoji as _get_choice_emoji,
     )
     from mechanics.stealth import compute_choice_stealth_odds
 
@@ -495,6 +519,7 @@ class ActionRequest(BaseModel):
     sleep_mode: Optional[str] = None
     is_stealth: Optional[bool] = False
     stance: Optional[str] = None
+    async_ws: Optional[bool] = False
 
 
 class ToggleStealthRequest(BaseModel):
@@ -515,6 +540,12 @@ class EndAdventureRequest(BaseModel):
 
 
 class RetryAdventureRequest(BaseModel):
+    session_id: int
+    user_id: Optional[int] = None
+    async_ws: Optional[bool] = False
+
+
+class CancelTurnRequest(BaseModel):
     session_id: int
     user_id: Optional[int] = None
 
@@ -580,17 +611,21 @@ class LoadSlotRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     user_id: int
-    language: Optional[str] = "en"
+    language: Optional[str] = None
     ui_language: Optional[str] = None
     narration_language: Optional[str] = None
-    verbosity: Optional[str] = "normal"
-    dialogue_mode: Optional[str] = "balanced"
-    image_gen_enabled: Optional[int] = 0
-    choices_style: Optional[str] = "dropdown"
-    result_display: Optional[str] = "detailed"
-    stream_narrative: Optional[int] = 1
-    show_percentages: Optional[int] = 1
-    combat_ui_style: Optional[str] = "battle_deck"
+    verbosity: Optional[str] = None
+    narrative_style: Optional[str] = None
+    narrative_pacing: Optional[str] = None
+    dialogue_mode: Optional[str] = None
+    image_gen_enabled: Optional[int] = None
+    choices_style: Optional[str] = None
+    result_display: Optional[str] = None
+    stream_narrative: Optional[int] = None
+    show_percentages: Optional[int] = None
+    show_enemy_hp: Optional[int] = None
+    show_enemy_intent: Optional[int] = None
+    combat_ui_style: Optional[str] = None
     image_model: Optional[str] = None
 
 

@@ -427,7 +427,9 @@ def is_campus_node_or_location(
 def get_world_schedule_state(
     scen_key: str = "fantasy",
     current_day: int = 1,
-    current_minute: int = 480
+    current_minute: int = 480,
+    session: Optional[Dict[str, Any]] = None,
+    session_id: int = 0,
 ) -> Dict[str, Any]:
     """
     Computes the active World Schedule state for any scenario, day, and minute.
@@ -437,6 +439,22 @@ def get_world_schedule_state(
     day_type = "weekend" if weekend else "weekday"
     profile = get_scenario_schedule_profile(scen_key)
     genre_family = profile["genre_family"]
+
+    is_ahs = False
+    is_adult_ahs = False
+    try:
+        import scenario_data as _ws_sd
+        is_ahs = bool(_ws_sd.is_anomalous_high_school_scenario(scen_key))
+    except Exception:
+        is_ahs = ("anomalous_high_school" in str(scen_key or "").lower())
+    if is_ahs and (session is not None or session_id):
+        try:
+            from mechanics.social.origin_mode import is_adult_ahs_operative_fail_closed
+            is_adult_ahs = bool(is_adult_ahs_operative_fail_closed(session, session_id=session_id, scen_key=scen_key))
+        except Exception:
+            is_adult_ahs = False
+    if is_ahs and is_adult_ahs:
+        genre_family = "urban_fantasy"
 
     comm_open = int(profile.get("commercial_open_min", 480))
     comm_close = int(profile.get("commercial_close_min", 1320))
@@ -540,11 +558,36 @@ def get_world_schedule_state(
                     "(except the Abandoned Old Campus Building, which remains unlocked 24/7)."
                 )
 
-        comm_status_note = (
-            "Commercial shops, cafés, restaurants, and arcades are OPEN (08:00–22:00 daily)."
-            if commercial_venues_open
-            else "Commercial shops, cafés, restaurants, and arcades are CLOSED (open 08:00–22:00 daily; only outdoor streets/parks and the 24-Hour Convenience Store remain open)."
-        )
+        if is_ahs:
+            if safe_min >= 1320 or safe_min < 480:
+                metro_note = (
+                    "Metropolitan retail shops are closed (22:00–08:00), while 24/7 Agency HQ divisions, "
+                    "Chinatown Night Market (18:00–03:00), Velvet Mirage Club, Rusty Pipe Bar, Drifter Bazaar, "
+                    "and Airport Skyline Lounge remain open. The Theme Park Zone is in its 22:00–08:00 Anomalous Shift!"
+                )
+            elif 1200 <= safe_min < 1320:
+                tp_warn = (
+                    " Theme Park gates broadcast final 22:00 closing warnings before the Anomalous Shift begins."
+                    if safe_min >= 1290
+                    else " Theme Park evening lights remain open until 22:00."
+                )
+                metro_note = (
+                    "Metropolitan shops, cafés, Chinatown Night Market, and nightlife districts are open until 22:00+."
+                    + tp_warn
+                )
+            else:
+                metro_note = (
+                    "Metropolitan commercial shops, cafés, 24/7 Agency divisions, and the Theme Park (daytime hours) are open (08:00–22:00)."
+                    if commercial_venues_open
+                    else "Early-morning metropolitan transit and 24/7 convenience stores are open before retail shops open at 08:00."
+                )
+            comm_status_note = metro_note
+        else:
+            comm_status_note = (
+                "Commercial shops, cafés, restaurants, and arcades are OPEN (08:00–22:00 daily)."
+                if commercial_venues_open
+                else "Commercial shops, cafés, restaurants, and arcades are CLOSED (open 08:00–22:00 daily; only outdoor streets/parks and the 24-Hour Convenience Store remain open)."
+            )
 
         return {
             "genre_family": genre_family,
@@ -568,9 +611,15 @@ def get_world_schedule_state(
         period_key = "weekend_daytime" if weekend else "daytime_operations"
         period_label = "Weekend Daytime Activity" if weekend else "Standard Daytime Operations"
         if genre_family == "urban_fantasy":
+            ahs_campus_note = (
+                " (Academy classes/extracurriculars are active for students until 20:00.)"
+                if (is_ahs and is_adult_ahs)
+                else ""
+            )
             narrative_directive = (
                 f"Metropolitan daytime operations are active ({'Weekend' if weekend else 'Weekday'}). "
                 f"{'Commercial districts, transit hubs, cafés, and agency headquarters are open (Theme Park operates normal family hours).' if commercial_venues_open else 'Early morning transit rush before commercial storefronts open at 08:00; 24/7 Agency HQ and convenience stores are active.'}"
+                + ahs_campus_note
             )
         else:
             narrative_directive = (
@@ -581,6 +630,11 @@ def get_world_schedule_state(
         period_key = "night_operations"
         period_label = "Nighttime / After-Hours (20:00–07:00)"
         if genre_family == "urban_fantasy":
+            ahs_campus_note = (
+                " (Academy campus is locked down to students after 20:00, though adult Agency operatives retain clearance.)"
+                if (is_ahs and is_adult_ahs)
+                else ""
+            )
             if 1200 <= safe_min < 1320:
                 closing_warn = (
                     " Theme Park loudspeakers broadcast final 22:00 closing announcements as staff usher late visitors toward the gates before the Anomalous Shift begins!"
@@ -591,6 +645,7 @@ def get_world_schedule_state(
                     "Metropolitan late-evening hours (20:00–22:00) are in effect. Standard commercial storefronts remain open until 22:00, "
                     "while nightlife alleys, 24/7 Agency HQ divisions, and transit corridors are bustling."
                     + closing_warn
+                    + ahs_campus_note
                 )
             else:
                 anomalous_shift_note = (
@@ -602,6 +657,7 @@ def get_world_schedule_state(
                     "Metropolitan nighttime hours are in effect. Standard daytime retail storefronts shutter from 22:00–08:00, "
                     "while 24/7 Agency HQ operations, metro transit, nightlife districts, and emergency hospitals remain open."
                     + anomalous_shift_note
+                    + ahs_campus_note
                 )
         else:
             narrative_directive = (
@@ -751,12 +807,13 @@ def evaluate_world_schedule_node_access(
     # 3. Commercial Venues: Cafes, stores, restaurants, arcades, karaoke, and specialty nightlife
     if n_cat == "commercial":
 
-        # Explicit 24-hour facilities (Convenience Store, City Square, Love Hotel, Kōban Police Box, etc.) stay open 24/7
+        # Explicit 24-hour facilities (Convenience Store, City Square, Love Hotel, Skyline Lounge, Kōban Police Box, etc.) stay open 24/7
         is_explicit_24h = any(
             k in combined for k in (
                 "convenience_store", "convenience store", "24-hour", "24h",
                 "transit_plaza", "loc_city_square", "city square",
                 "loc_love_hotel", "love hotel", "mirage boutique love hotel", "touchscreen check-in",
+                "loc_ap_skyline_lounge", "skyline lounge",
                 "bus_shelter", "bus terminal", "koban", "kōban",
                 "police box", "shopping_crosswalk", "pedestrian crosswalk",
                 "sub_square_fountain", "sub_square_underpass",
@@ -766,7 +823,21 @@ def evaluate_world_schedule_node_access(
             return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (24/7)"}
 
         # Custom High School Downtown venue operating windows:
-        # 3a. Lantern Night Market & Bazaar (`loc_night_market`): strictly 18:00 (1080) to 22:00 (1320)
+        # 3a. Chinatown Night Market (`loc_ct_night_market`): 18:00 (1080) to 03:00 (180)
+        if any(k in combined for k in ("loc_ct_night_market", "chinatown night market")):
+            if safe_min >= 1080 or safe_min < 180:
+                return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (18:00–03:00)"}
+            return {
+                "schedule_locked": True,
+                "is_trespassing": False,
+                "force_open": False,
+                "badge_override": "Closed (Open 18:00–03:00)",
+                "curfew_label": "03:00–18:00",
+                "reason_code": "commercial_closed",
+                "reason_label": "Chinatown Night Market Closed (Open 18:00–03:00 Nightly)",
+            }
+
+        # 3a-hs. Lantern Night Market & Bazaar (`loc_night_market`): strictly 18:00 (1080) to 22:00 (1320)
         if any(k in combined for k in ("loc_night_market", "lantern night market", "night market & bazaar")):
             if 1080 <= safe_min < 1320:
                 return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (18:00–22:00)"}
@@ -826,7 +897,10 @@ def evaluate_world_schedule_node_access(
         if (genre_family in ("urban_fantasy", "cyberpunk") or "anomalous" in str(scen_key or "").lower()) and any(
             k in combined for k in (
                 "late-night", "izakaya", "jazz", "cocktail", "red-lantern",
-                "black market", "masquerade auction", "sky-high penthouse", "fight pit"
+                "black market", "masquerade auction", "sky-high penthouse", "fight pit",
+                "loc_velvet_mirage_club", "velvet mirage",
+                "loc_rusty_pipe_bar", "rusty pipe",
+                "loc_uc_drifter_bazaar", "drifter bazaar",
             )
         ):
             return {"schedule_locked": False, "is_trespassing": False, "force_open": True, "badge_override": "Open (Late-Night)"}

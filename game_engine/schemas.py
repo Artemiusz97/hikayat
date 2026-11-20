@@ -23,7 +23,7 @@ SCENE_SCHEMA = f"""{{
   "entity_audit": {ENTITY_AUDIT_FIELD},
   "narrative": "string, paragraphs establishing scene setting, environment, and upcoming choice context. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone.",
   "choices": [
-    {{"label": "string (concise, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
+    {{"label": "string (action choice label obeying active pacing & style directive)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
   ],
   "campaign_end_goals": [
     {{"id": "G1", "title": "string, 1st long-term campaign victory condition relevant to scenario", "description": "string, 1-sentence goal description"}},
@@ -48,7 +48,7 @@ OUTCOME_SCHEMA = f"""{{
   "outcome_narrative": "string, paragraphs narrating exclusively the execution and immediate consequence of the NEW action: (1) how the player carries out their immediate choice with class/race flavor, (2) the immediate outcome and instant NPC reaction based on the check tier. Focus strictly on executing the player's immediate decision. NEVER repeat, recap, or re-quote past dialogue/events from RECENT HISTORY; start immediately from the new action and move forward. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. For 'Failure' or 'Critical Failure', enforce FAIL-FORWARD: narrate complications, escalations, or success-at-a-cost rather than static roadblocks. Do NOT contradict the check tier.",
   "next_narrative": "string, paragraphs establishing exclusively the subsequent scene aftermath: environmental shifts, physical atmosphere, what NPCs do or say next, and new tension leading into the upcoming choices. Do NOT re-narrate or re-hash the action execution from `outcome_narrative`. FOLLOW THE ACTIVE STYLE DIRECTIVE for paragraph count and vocabulary tone. FOLLOW THE ACTIVE DIALOGUE DIRECTIVE for how much spoken dialogue to include.",
   "next_choices": [
-    {{"label": "string (concise contextual roleplay or exploration action, max 6-8 words)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "topic_id": "string (optional: exact topic_id from [PRE-TURN SOCIAL SEEDS] when in dialogue, else empty)", "category": "string (optional: social category from [PRE-TURN SOCIAL SEEDS] when in dialogue, else empty)", "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
+    {{"label": "string (contextual roleplay or exploration action matching active PACING word count)", "stat": "STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE", "requirement": 0-12, "mp_cost": 0, "topic_id": "string (optional: exact topic_id from [PRE-TURN SOCIAL SEEDS] when in dialogue, else empty)", "category": "string (optional: social category from [PRE-TURN SOCIAL SEEDS] when in dialogue, else empty)", "intent": "general_action|dialogue_init|dialogue_exit|movement|social_invite|phone_contact_exchange|romantic_confession|affection_touch|intimate_act|disclosure_inquiry|investigate_clue|area_scout|stealth_covert|rest_sleep|party_recruit|gift_offer|merchant_trade|inspect_board|media_capture|phone_comm", "sub_intent": "string (optional: kiss|foreplay|manual_give|manual_receive|manual_mutual|oral_give|oral_receive|oral_mutual|intercourse|anal_give|anal_receive|anal_mutual|aftercare|redress|date|confession|lockpick|pickpocket|gamble|use_item|deduce_clues|explore|combat_flee or empty)", "target_npc": "string (exact NPC name if targeting an NPC, else empty)", "ends_dialogue": false, "dismisses_npc": false, "gold_spent": 0, "triggers_loot_roll": false}}
   ],
   "cast_events": [{CAST_EVENT_FIELD}],
   "actor_poses": {ACTOR_POSE_FIELD},
@@ -65,6 +65,43 @@ COMBAT_OUTCOME_SCHEMA = f"""{{
   "episodic_memory": "string or null, 1 concise sentence if a memorable combat turning point occurred, else null",
   "image_prompt": "string, a short (1-2 sentence) visual description of the combat scene"
 }}"""
+
+NARRATIVE_SENTINEL_FORMAT = """Respond using these exact section headers in plain text (NO JSON braces, NO markdown code fences, NO backslash-escaped quotes):
+
+@@TITLE: <2-5 word atmospheric scene heading>
+
+@@OUTCOME
+<Raw prose paragraphs narrating exclusively the execution and immediate consequence of the NEW action according to the check tier and FAIL-FORWARD rules. Never repeat or recap RECENT HISTORY. Follow STYLE & DIALOGUE directives.>
+
+@@NEXT
+<Raw prose paragraphs establishing the subsequent scene aftermath, environmental atmosphere, NPC reactions/dialogue, and forward tension. Do NOT re-hash @@OUTCOME.>
+
+@@CHOICES
+- <STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE> | <0-12> | [optional: topic_id=<id> | category=<cat> | ends_dialogue=true | target=<Exact NPC Name>] | <contextual action label matching active PACING word count>
+(Provide 2-5 genuinely meaningful choices grounded strictly in the immediate room and present NPCs. Free actions use NONE | 0.)
+
+@@META
+memory: <1 concise sentence of notable personal fact/promise an active NPC remembers, or none>
+pose: <Character Name> | <posture> | <held item or Empty hands>
+cast: <arrive|depart|engage> | <Exact NPC Name> | <male|female> | <short physical descriptor> | <brief reason>
+epistemic: <Target NPC> | <fact_key> | <1-line summary> | <proof_ref>
+(Omit any @@META line that does not apply this turn.)"""
+
+COMBAT_SENTINEL_FORMAT = """Respond using these exact section headers in plain text (NO JSON braces, NO markdown code fences, NO backslash-escaped quotes, NO @@CHOICES section):
+
+@@TITLE: <2-5 word atmospheric combat heading>
+
+@@OUTCOME
+<Raw combat prose paragraphs narrating the player's action and enemy counter-attack matching the pre-computed combat directive and STYLE directive.>
+
+@@NEXT
+<Raw prose paragraphs describing immediate battlefield aftermath, enemy stances, and tactical tension.>
+
+@@META
+memory: <1 concise sentence if a memorable combat turning point occurred, or none>
+pose: <Character Name> | <posture> | <held item or Empty hands>
+cast: <arrive|depart|engage> | <Exact NPC Name> | <male|female> | <short physical descriptor> | <brief reason>
+(Omit any @@META line that does not apply this turn.)"""
 
 SOCIAL_ARBITER_SCHEMA = f"""{{
   "relationship_updates": [{RELATIONSHIP_UPDATE_FIELD}],
@@ -87,6 +124,9 @@ CLASSIFY_SCHEMA = """{
   "gold_spent": 0,
   "triggers_loot_roll": false,
   "breakthrough_leveraged": false,
+  "targets_quest_id": "string (exact quest_id from Local Open Quest Beats if player action attempts that beat in any language, else empty)",
+  "targets_sub_obj_id": "integer sub_obj_id from Local Open Quest Beats or null",
+  "quest_approach": "STR|PER|END|CHA|INT|AGI|LUK|ITEM or empty",
   "is_memory_recall": false,
   "recall_query": "string (if is_memory_recall is true, output the core subject/entity the player is trying to remember, otherwise empty)",
   "reasoning": "string, one sentence"

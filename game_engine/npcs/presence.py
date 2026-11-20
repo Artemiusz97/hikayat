@@ -610,6 +610,16 @@ def classify_scene_npcs(
     is_same_primary = bool(old_primary_loc and dest_primary and old_primary_loc.lower() == dest_primary.lower())
 
     active_dialogue_names = {p.lower() for p in get_session_dialogue_partners(session)}
+    if any(
+        isinstance(a, dict)
+        and (
+            a.get("ends_dialogue")
+            or a.get("_quest_dialogue_handoff")
+            or str(a.get("intent") or "").lower() == "dialogue_exit"
+        )
+        for a in actions
+    ):
+        active_dialogue_names = set()
 
 
 

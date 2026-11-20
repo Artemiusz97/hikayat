@@ -773,6 +773,297 @@ def format_travel_eta_tag(minutes: int, is_same_zone: bool = False, scen_key: st
     return f"{dur} trek"
 
 
+_QUEST_TAG_PRIORITY = (
+    "⚡ Story Climax",
+    "⭐ Story Quest",
+    "🎯 Bounty Target",
+    "💌 Meetup",
+)
+_QUEST_TAG_KIND = {
+    "⚡ Story Climax": "climax",
+    "⭐ Story Quest": "story",
+    "🎯 Bounty Target": "bounty",
+    "💌 Meetup": "meetup",
+}
+
+
+def _summarize_quest_markers(markers_list: list[str], classify_fn) -> tuple[list[str], str, str]:
+    """Returns (distinct_tags_in_priority_order, primary_tag, primary_kind) for a list of marker strings."""
+    found_tags: set[str] = set()
+    for qm in (markers_list or []):
+        _kind, tag = classify_fn(qm)
+        if tag:
+            found_tags.add(tag)
+    ordered_tags = [t for t in _QUEST_TAG_PRIORITY if t in found_tags]
+    primary_tag = ordered_tags[0] if ordered_tags else ""
+    primary_kind = _QUEST_TAG_KIND.get(primary_tag, "")
+    return ordered_tags, primary_tag, primary_kind
+
+
+def _entry_matches_building(entry: dict, zone_name: str, place_name: str) -> bool:
+    """Returns True when a waypoint entry's zone/primary hints are compatible with this building."""
+    eh_p = str(entry.get("primary_hint") or "").strip().lower()
+    eh_z = str(entry.get("zone_hint") or "").strip().lower()
+    p_low = str(place_name or "").strip().lower()
+    z_low = str(zone_name or "").strip().lower()
+    p_ok = (not eh_p) or (eh_p == p_low) or (len(eh_p) >= 4 and (eh_p in p_low or p_low in eh_p))
+    z_ok = (not eh_z) or (eh_z == z_low) or (len(eh_z) >= 4 and (eh_z in z_low or z_low in eh_z))
+    return p_ok and z_ok
+
+
+def _match_marker_to_sub_rooms(
+    qm: str,
+    entries_for_marker: list[dict],
+    sub_details: list[dict],
+    zone_name: str,
+    place_name: str,
+) -> list[int]:
+    """Resolves a marker to matching Tier 3 room indices within this building in strict priority order."""
+    if not sub_details:
+        return []
+
+    # Priority 1: Exact Room node_id match
+    entry_node_ids = {
+        str(e.get("target_node_id") or "").strip()
+        for e in entries_for_marker
+        if str(e.get("target_node_id") or "").strip()
+    }
+    if entry_node_ids:
+        nid_hits = [
+            idx for idx, sd in enumerate(sub_details)
+            if str(sd.get("node_id") or "").strip() in entry_node_ids
+        ]
+        if nid_hits:
+            return nid_hits
+
+    # Priority 2: Scoped sub_hint match inside THIS building (prevents cross-building collisions)
+    p_low = str(place_name or "").strip().lower()
+    z_low = str(zone_name or "").strip().lower()
+    scoped_hints: list[str] = []
+    for e in entries_for_marker:
+        s_hint = str(e.get("sub_hint") or "").strip()
+        if s_hint and _entry_matches_building(e, zone_name, place_name):
+            scoped_hints.append(s_hint.lower())
+        elif not s_hint:
+            # Handle 2-tier shortcut 'Zone ➔ RoomName' scoped to this zone when primary_hint is NOT the building
+            eh_p = str(e.get("primary_hint") or "").strip().lower()
+            eh_z = str(e.get("zone_hint") or "").strip().lower()
+            z_ok = (not eh_z) or (eh_z == z_low) or (len(eh_z) >= 4 and (eh_z in z_low or z_low in eh_z))
+            not_building = bool(eh_p) and eh_p != p_low and eh_p not in p_low and p_low not in eh_p
+            if z_ok and not_building:
+                scoped_hints.append(eh_p)
+
+    if scoped_hints:
+        exact_hits = [
+            idx for idx, sd in enumerate(sub_details)
+            if str(sd.get("name") or "").strip().lower() in scoped_hints
+        ]
+        if exact_hits:
+            return exact_hits
+        partial_hits = [
+            idx for idx, sd in enumerate(sub_details)
+            if (sd_low := str(sd.get("name") or "").strip().lower())
+            and any(
+                (len(sh) >= 4 and len(sd_low) >= 4 and (sh in sd_low or sd_low in sh))
+                for sh in scoped_hints
+            )
+        ]
+        if partial_hits:
+            return partial_hits
+
+    # Priority 3: Explicit room name appearing in marker text
+    qm_low = str(qm or "").lower()
+    wb_hits: list[tuple[int, int]] = []
+    sub_hits: list[tuple[int, int]] = []
+    for idx, sd in enumerate(sub_details):
+        sd_low = str(sd.get("name") or "").strip().lower()
+        if len(sd_low) < 5:
+            continue
+        if re.search(rf"(?<!\w){re.escape(sd_low)}(?!\w)", qm_low):
+            wb_hits.append((idx, len(sd_low)))
+        elif sd_low in qm_low:
+            sub_hits.append((idx, len(sd_low)))
+    chosen = wb_hits or sub_hits
+    if chosen:
+        max_len = max(length for _i, length in chosen)
+        return [idx for idx, length in chosen if length == max_len]
+
+    # Priority 4: Target NPC room inside THIS building
+    npc_candidates: set[str] = set()
+    for e in entries_for_marker:
+        if _entry_matches_building(e, zone_name, place_name):
+            npc = str(e.get("target_npc") or "").strip().lower()
+            if npc:
+                npc_candidates.add(npc)
+    m_npc = re.search(r"\(👤\s*([^)]+)\)", str(qm or ""))
+    if m_npc:
+        npc_txt = m_npc.group(1).strip().lower()
+        if npc_txt:
+            npc_candidates.add(npc_txt)
+    if npc_candidates:
+        npc_hits = [
+            idx for idx, sd in enumerate(sub_details)
+            if any(
+                str(kn.get("name") or "").strip().lower() in npc_candidates
+                for kn in (sd.get("known_npcs_here") or [])
+            )
+        ]
+        if npc_hits:
+            return npc_hits
+
+    return []
+
+
+def _assign_tier3_markers_for_place(
+    p_item: dict,
+    z_nm: str,
+    entries_by_marker: dict[str, list[dict]],
+    entries_by_node_id: dict[str, list[dict]],
+    child_rooms: list[dict],
+    curr_sub: str,
+    is_here_place: bool,
+    is_same_z: bool,
+    scen_key: str,
+    classify_fn,
+) -> None:
+    """Pins Tier 3 quest/bounty markers onto sub_location_details and computes direct vs. sub quest metadata."""
+    p_nm = p_item.get("name", "")
+    is_unpurchased = bool(p_item.get("is_unpurchased_realty"))
+    sub_details = list(p_item.get("sub_location_details") or []) if not is_unpurchased else []
+
+    if not is_unpurchased and not sub_details and p_item.get("sub_locations"):
+        p_mins = int(p_item.get("travel_minutes") or (4 if is_same_z else 15))
+        for s_name in (p_item.get("sub_locations") or []):
+            s_str = str(s_name or "").strip()
+            if not s_str:
+                continue
+            cr_here = bool(is_here_place and curr_sub and curr_sub.strip().lower() == s_str.lower())
+            cr_mins = 0 if cr_here else (1 if is_here_place else max(1, p_mins + 1))
+            sub_details.append({
+                "node_id": "",
+                "name": s_str,
+                "is_current_room": cr_here,
+                "travel_minutes": cr_mins,
+                "travel_tag": format_travel_eta_tag(cr_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=cr_here),
+                "props": [],
+                "access_tier": "open",
+                "access_badge": "Open",
+                "is_unlocked": False,
+                "scene_residue": "",
+                "known_npcs_here": [],
+                "unmet_activity_count": 0,
+                "is_transit_hub": False,
+                "is_faction_hq": False,
+                "is_minor_club_hq": False,
+                "has_bounty_board": False,
+                "has_merchant_shop": False,
+                "is_discreet": False,
+                "badges": [],
+                "anomalous_site_meta": None,
+            })
+
+    all_markers = list(p_item.get("quest_markers") or [])
+    pnid = str(p_item.get("node_id") or "").strip()
+    if pnid:
+        for wpe in entries_by_node_id.get(pnid, ()):
+            mk = wpe.get("marker") or ""
+            if mk and mk not in all_markers:
+                all_markers.append(mk)
+    for cr in (child_rooms or []):
+        cr_id = str(cr.get("node_id") or "").strip()
+        if not cr_id:
+            continue
+        for wpe in entries_by_node_id.get(cr_id, ()):
+            mk = wpe.get("marker") or ""
+            if mk and mk not in all_markers:
+                all_markers.append(mk)
+
+    p_item["quest_markers"] = all_markers
+    building_node_ids = {
+        nid for nid in (
+            [pnid]
+            + [str(sd.get("node_id") or "").strip() for sd in sub_details]
+            + [str(cr.get("node_id") or "").strip() for cr in (child_rooms or [])]
+        )
+        if nid
+    }
+    room_names_low = {
+        str(sd.get("name") or "").strip().lower()
+        for sd in sub_details
+        if str(sd.get("name") or "").strip()
+    }
+    z_low = str(z_nm or "").strip().lower()
+
+    filtered_markers: list[str] = []
+    for qm in all_markers:
+        qm_entries = entries_by_marker.get(qm) or []
+        if not qm_entries:
+            filtered_markers.append(qm)
+            continue
+        keep = False
+        for e in qm_entries:
+            e_nid = str(e.get("target_node_id") or "").strip()
+            if e_nid and e_nid in building_node_ids:
+                keep = True
+                break
+            if _entry_matches_building(e, z_nm, p_nm):
+                keep = True
+                break
+            if not e.get("sub_hint"):
+                eh_p = str(e.get("primary_hint") or "").strip().lower()
+                eh_z = str(e.get("zone_hint") or "").strip().lower()
+                z_ok = (not eh_z) or (eh_z == z_low) or (len(eh_z) >= 4 and (eh_z in z_low or z_low in eh_z))
+                if z_ok and eh_p and eh_p in room_names_low:
+                    keep = True
+                    break
+        if keep and qm not in filtered_markers:
+            filtered_markers.append(qm)
+
+    all_markers = filtered_markers
+    p_item["quest_markers"] = all_markers
+    all_tags, all_primary_tag, _ = _summarize_quest_markers(all_markers, classify_fn)
+    p_item["quest_tag"] = all_primary_tag
+
+    room_markers: dict[int, list[str]] = {idx: [] for idx in range(len(sub_details))}
+    direct_markers: list[str] = []
+
+    for qm in all_markers:
+        matched_indices = (
+            _match_marker_to_sub_rooms(qm, entries_by_marker.get(qm, ()), sub_details, z_nm, p_nm)
+            if not is_unpurchased and sub_details
+            else []
+        )
+        if matched_indices:
+            for idx in matched_indices:
+                if qm not in room_markers[idx]:
+                    room_markers[idx].append(qm)
+        else:
+            if qm not in direct_markers:
+                direct_markers.append(qm)
+
+    sub_tags_acc: set[str] = set()
+    for idx, sd in enumerate(sub_details):
+        r_mks = room_markers.get(idx, [])
+        r_tags, r_primary, r_kind = _summarize_quest_markers(r_mks, classify_fn)
+        sd["value"] = f"{z_nm} ➔ {p_nm} ➔ {sd['name']}"
+        sd["quest_markers"] = list(r_mks)
+        sd["quest_tags"] = r_tags
+        sd["quest_tag"] = r_primary
+        sd["quest_kind"] = r_kind
+        sub_tags_acc.update(r_tags)
+
+    if not is_unpurchased and sub_details:
+        sub_details.sort(key=lambda sd: (0 if sd.get("is_current_room") else 1, 0 if sd.get("quest_markers") else 1))
+        p_item["sub_location_details"] = sub_details
+
+    d_tags, d_primary, _ = _summarize_quest_markers(direct_markers, classify_fn)
+    p_item["direct_quest_markers"] = list(direct_markers)
+    p_item["direct_quest_tag"] = d_primary
+    p_item["direct_quest_tags"] = d_tags
+    p_item["sub_quest_count"] = sum(len(sd.get("quest_markers") or []) for sd in sub_details)
+    p_item["sub_quest_tags"] = [t for t in _QUEST_TAG_PRIORITY if t in sub_tags_acc]
+
+
 def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_loc: str = "", char_name: str = "") -> list[dict]:
 
     """
@@ -787,7 +1078,8 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
 
     tree = get_discovered_location_tree(session_id, scen_key)
 
-    from mechanics.world.waypoints import get_location_waypoint_markers
+    from mechanics.world.waypoints import get_location_waypoint_markers, get_location_waypoint_entries
+    from mechanics.world.waypoints.core import _classify_waypoint_marker
     from mechanics.world.mobility import calculate_route_travel_time
 
     waypoint_markers = get_location_waypoint_markers(session_id)
@@ -864,7 +1156,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
             if not wp_tags:
                 sub_tag_acc = []
                 for sub_loc_nm in primaries_dict.get(primary_name, []):
-                    for cand_k in (f"{zone_name} ➔ {sub_loc_nm}", sub_loc_nm):
+                    for cand_k in (f"{zone_name} ➔ {primary_name} ➔ {sub_loc_nm}", f"{zone_name} ➔ {sub_loc_nm}", sub_loc_nm):
                         for t_item in (waypoint_markers.get(cand_k) or []):
                             if t_item not in sub_tag_acc:
                                 sub_tag_acc.append(t_item)
@@ -1030,21 +1322,29 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                     occ_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
                 return occ_by_node[nid]
 
+            def _record_npc_occ(raw_nid: str, npc_name: str, status: str) -> None:
+                n_obj = next((n for n in all_nodes if n["node_id"] == raw_nid), None)
+                is_room = bool(n_obj and n_obj.get("node_type") == "ROOM")
+                fac_id = n_obj.get("parent_id") if is_room else raw_nid
+                target_ids = [raw_nid, fac_id] if (is_room and fac_id) else ([fac_id] if fac_id else [raw_nid])
+                for oid in target_ids:
+                    if not oid:
+                        continue
+                    occ = _get_occ(oid)
+                    if not any(kn["name"].lower() == npc_name.lower() for kn in occ["known_npcs"]):
+                        occ["known_npcs"].append({"name": npc_name, "status": status})
+
             appts = []
             if hasattr(db, "get_phone_appointments"):
                 appts = (db.get_phone_appointments(session_id, status="pending") or []) + (db.get_phone_appointments(session_id, status="arrived") or [])
             for appt in appts:
                 tgt = appt.get("target_node_id")
                 if not tgt and appt.get("rendezvous_location"):
-                    tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=True)
+                    tgt = db.resolve_node_id_from_location(session_id, appt["rendezvous_location"], prefer_facility=False)
                 if tgt:
-                    tgt_n = next((n for n in all_nodes if n["node_id"] == tgt), None)
-                    fac_id = tgt_n.get("parent_id") if (tgt_n and tgt_n.get("node_type") == "ROOM") else tgt
-                    if fac_id:
-                        occ = _get_occ(fac_id)
-                        an = appt.get("npc_name", "")
-                        if an and not any(kn["name"].lower() == an.lower() for kn in occ["known_npcs"]):
-                            occ["known_npcs"].append({"name": an, "status": "Rendezvous"})
+                    an = appt.get("npc_name", "")
+                    if an:
+                        _record_npc_occ(tgt, an, "Rendezvous")
 
             c_names_lower = set()
             for c in contacts:
@@ -1053,12 +1353,7 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 c_names_lower.add(cn.lower())
                 snid = get_npc_scheduled_node_id(c, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
                 if snid:
-                    sn = next((n for n in all_nodes if n["node_id"] == snid), None)
-                    fac_id = sn.get("parent_id") if (sn and sn.get("node_type") == "ROOM") else snid
-                    if fac_id:
-                        occ = _get_occ(fac_id)
-                        if not any(kn["name"].lower() == cn.lower() for kn in occ["known_npcs"]):
-                            occ["known_npcs"].append({"name": cn, "status": "Routine"})
+                    _record_npc_occ(snid, cn, "Routine")
 
             for r in roster:
                 rn = (r.get("name") or "").strip()
@@ -1066,9 +1361,11 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 snid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
                 if snid:
                     sn = next((n for n in all_nodes if n["node_id"] == snid), None)
-                    fac_id = sn.get("parent_id") if (sn and sn.get("node_type") == "ROOM") else snid
-                    if fac_id:
-                        _get_occ(fac_id)["unmet_count"] += 1
+                    is_room_r = bool(sn and sn.get("node_type") == "ROOM")
+                    fac_id = sn.get("parent_id") if is_room_r else snid
+                    for oid in ([snid, fac_id] if (is_room_r and fac_id) else ([fac_id] if fac_id else [])):
+                        if oid:
+                            _get_occ(oid)["unmet_count"] += 1
 
             # Single-source Dijkstra from current node across world_edges + room/facility links
             import heapq
@@ -1131,6 +1428,17 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 session=sess_row if isinstance(sess_row, dict) else None,
                 for_atlas_visibility=True,
             )
+
+            wp_entries = get_location_waypoint_entries(session_id)
+            entries_by_marker: dict[str, list[dict]] = {}
+            entries_by_node_id: dict[str, list[dict]] = {}
+            for wpe in wp_entries:
+                m_key = wpe.get("marker") or ""
+                if m_key:
+                    entries_by_marker.setdefault(m_key, []).append(wpe)
+                n_key = wpe.get("target_node_id") or ""
+                if n_key:
+                    entries_by_node_id.setdefault(n_key, []).append(wpe)
 
             for z_item in summary_list:
                 z_nm = z_item["zone_name"]
@@ -1312,6 +1620,19 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                             })
                         p_item["sub_location_details"] = sub_details
 
+                    _assign_tier3_markers_for_place(
+                        p_item,
+                        z_nm,
+                        entries_by_marker,
+                        entries_by_node_id,
+                        child_rooms,
+                        curr_sub,
+                        is_here_place,
+                        is_same_z,
+                        scen_key,
+                        _classify_waypoint_marker,
+                    )
+
                     p_node_obj = node_by_id.get(pnid) if pnid else None
                     p_state_meta = {}
                     if p_node_obj and p_node_obj.get("state_json"):
@@ -1338,6 +1659,32 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                     z_item["primary_locations"] = visible_primaries
                     z_item["places_count"] = len(visible_primaries)
 
+                rebuilt_z_markers: list[dict] = []
+                z_tag_merge = {t for t in (z_item.get("active_tags") or []) if t not in _QUEST_TAG_PRIORITY}
+                for p_vis in z_item.get("primary_locations", []):
+                    for sd in (p_vis.get("sub_location_details") or []):
+                        for qm in (sd.get("quest_markers") or []):
+                            rebuilt_z_markers.append({
+                                "place_name": p_vis["name"],
+                                "sub_name": sd["name"],
+                                "value": sd.get("value") or f"{z_nm} ➔ {p_vis['name']} ➔ {sd['name']}",
+                                "marker": qm,
+                                "quest_tag": sd.get("quest_tag") or p_vis.get("quest_tag", ""),
+                            })
+                    for qm in (p_vis.get("direct_quest_markers") or []):
+                        rebuilt_z_markers.append({
+                            "place_name": p_vis["name"],
+                            "sub_name": "",
+                            "value": p_vis.get("value") or f"{z_nm} ➔ {p_vis['name']}",
+                            "marker": qm,
+                            "quest_tag": p_vis.get("direct_quest_tag") or p_vis.get("quest_tag", ""),
+                        })
+                    z_tag_merge.update(p_vis.get("sub_quest_tags") or [])
+                    z_tag_merge.update(p_vis.get("direct_quest_tags") or [])
+                z_item["quest_markers"] = rebuilt_z_markers
+                z_item["quest_count"] = len(rebuilt_z_markers)
+                z_item["active_tags"] = sorted(z_tag_merge)
+
                 if is_same_z:
                     z_item["travel_minutes"] = 0
                     z_item["travel_tag"] = "Here"
@@ -1363,6 +1710,11 @@ def get_zone_summary_tree(session_id: int, scen_key: str = "fantasy", current_lo
                 p_item["is_current_place"] = is_here_p
                 p_item["travel_minutes"] = p_mins
                 p_item["travel_tag"] = format_travel_eta_tag(p_mins, is_same_zone=is_same_z, scen_key=scen_key, is_here=is_here_p)
+            p_item.setdefault("direct_quest_markers", list(p_item.get("quest_markers") or []))
+            p_item.setdefault("direct_quest_tag", p_item.get("quest_tag", ""))
+            p_item.setdefault("direct_quest_tags", _summarize_quest_markers(p_item["direct_quest_markers"], _classify_waypoint_marker)[0])
+            p_item.setdefault("sub_quest_count", 0)
+            p_item.setdefault("sub_quest_tags", [])
 
     return summary_list
 

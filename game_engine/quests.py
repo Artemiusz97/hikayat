@@ -602,6 +602,25 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                 + "\n".join(leads) + "\n\n"
             )
 
+    try:
+        from mechanics.social.population_seeder import is_population_seeding_supported
+        if session_id and is_population_seeding_supported(scen_key):
+            wr_rows = [
+                r for r in (db.get_world_roster(session_id, include_legacy_rosters=False) or [])
+                if str(r.get("staff_status") or "active").lower() == "active"
+                and str(r.get("origin") or "").lower() in ("district_merchant", "civic_staff", "roaming_citizen", "roaming_merchant")
+                and r.get("name")
+            ]
+            if wr_rows:
+                sample_w = [wr_rows[(session_id + chapter_num + idx * 17) % len(wr_rows)] for idx in range(min(3, len(wr_rows)))]
+                w_leads = [f"- {w['name']} ({w.get('role') or 'Local Resident'}) @ {w.get('workplace_node_id') or 'District'}" for w in sample_w]
+                school_context += (
+                    "DISTRICT EYEWITNESSES & SHOPKEEPERS (Available as regional quest/rumor leads):\n"
+                    + "\n".join(w_leads) + "\n\n"
+                )
+    except Exception:
+        pass
+
     user_prompt = (
         f"{scen_block}\n"
         f"Current Starting Location: {loc}\n"
@@ -2460,6 +2479,7 @@ def _resolve_pre_turn_quests_impl(
     completed_quests = []
     advanced_stages = []
     advanced_keys = []
+    quests_advanced_this_turn: list[str] = []
     waypoint_notices = []
     completed_sub_quests = []
     staged_advances = {}
@@ -2604,7 +2624,7 @@ def _resolve_pre_turn_quests_impl(
                         )
                         if res_adv:
                             if res_adv.get("is_bonus_clue"):
-                                if persist_db and session_id:
+                                if session_id:
                                     try:
                                         from game_engine.quest_turn_resolver import resolve_clue_source_claim
                                         b_res = resolve_clue_source_claim(
@@ -2614,6 +2634,7 @@ def _resolve_pre_turn_quests_impl(
                                             source_id=str(res_adv.get("matched_clue_source_id") or ""),
                                             cur_loc=cur_loc,
                                             is_bonus=True,
+                                            persist_db=persist_db,
                                         )
                                         if b_res.get("directive"):
                                             directives.append(b_res["directive"])
@@ -2681,6 +2702,8 @@ def _resolve_pre_turn_quests_impl(
                             directives.append(strike_res["directive"])
                         if strike_res and strike_res.get("stage_advanced"):
                             advanced_keys.append((qid, None))
+                            if qid not in quests_advanced_this_turn:
+                                quests_advanced_this_turn.append(qid)
                             comp_st = int(strike_res.get("completed_stage") or 1)
                             nxt_wp = strike_res.get("next_waypoint") or {}
                             nxt_st = int(strike_res.get("next_stage") or (comp_st + 1))
@@ -2692,6 +2715,16 @@ def _resolve_pre_turn_quests_impl(
                                 "next_waypoint": nxt_wp,
                                 "fail_forward": True,
                             }
+                            waypoint_notices.append({
+                                "quest_id": qid,
+                                "sub_obj_id": None,
+                                "completed_stage_index": comp_st,
+                                "stage_index": comp_st,
+                                "status": "completed",
+                                "next_stage": nxt_st,
+                                "next_waypoint": nxt_wp,
+                                "fail_forward": True,
+                            })
                             if strike_res.get("all_stages_complete") and not _should_defer_dossier_turn_in(session_id, q):
                                 completed_quests.append(q)
 
@@ -2817,7 +2850,7 @@ def _resolve_pre_turn_quests_impl(
                                 )
                                 if res_so:
                                     if res_so.get("is_bonus_clue"):
-                                        if persist_db and session_id:
+                                        if session_id:
                                             try:
                                                 from game_engine.quest_turn_resolver import resolve_clue_source_claim
                                                 b_res_so = resolve_clue_source_claim(
@@ -2827,6 +2860,7 @@ def _resolve_pre_turn_quests_impl(
                                                     source_id=str(res_so.get("matched_clue_source_id") or ""),
                                                     cur_loc=cur_loc,
                                                     is_bonus=True,
+                                                    persist_db=persist_db,
                                                 )
                                                 if b_res_so.get("directive"):
                                                     directives.append(b_res_so["directive"])
@@ -3104,13 +3138,34 @@ def _resolve_pre_turn_quests_impl(
                 if ("story climax" in act_low or "⚡" in action_str or bool(fa.get("is_climax_action")) or int(fa.get("stage_index") or 0) == 99):
                     sub_objs_done = db.is_quest_main_objectives_complete(q.get("sub_objectives") or [])
                     if is_success:
-                        # Auto-mark Main (non-optional) sub-objectives as cleared on successful climax; keep skipped/failed Optionals truthful!
-                        for s in (q.get("sub_objectives") or []):
-                            if isinstance(s, dict) and not bool(s.get("is_optional")):
-                                s["completed"] = True
-                                s["status"] = "completed"
-                        if q not in completed_quests:
-                            completed_quests.append(q)
+                        _clx_dos_def = db.get_quest_dossier(session_id, qid) if session_id else None
+                        _clx_spec_def = (
+                            (_clx_dos_def.get("climax_spec") or {})
+                            if isinstance(_clx_dos_def, dict) and str(_clx_dos_def.get("status_stage") or "") == "compiled"
+                            else {}
+                        )
+                        _scen_k_def = str((session or {}).get("scenario") or "fantasy")
+                        _defer_for_climax_boss = bool(
+                            _clx_spec_def
+                            and _clx_spec_def.get("is_unlocked")
+                            and not _clx_spec_def.get("boss_defeated")
+                            and isinstance(_clx_spec_def.get("boss_sheet"), dict)
+                            and scenario_data.is_mechanic_enabled(_scen_k_def, "tactical_combat")
+                            and (
+                                bool(fa.get("rush_climax"))
+                                or not _clx_spec_def.get("boss_escalation_only")
+                                or _clx_spec_def.get("escalated")
+                                or _clx_spec_def.get("ambush_unlocked")
+                            )
+                        )
+                        if not _defer_for_climax_boss:
+                            # Auto-mark Main (non-optional) sub-objectives as cleared on successful climax; keep skipped/failed Optionals truthful!
+                            for s in (q.get("sub_objectives") or []):
+                                if isinstance(s, dict) and not bool(s.get("is_optional")):
+                                    s["completed"] = True
+                                    s["status"] = "completed"
+                            if q not in completed_quests:
+                                completed_quests.append(q)
                     else:
                         if not sub_objs_done:
                             # Phase 5 A11: Premature confrontation failure -> immediate escape/escalation +2 strikes
@@ -3306,12 +3361,17 @@ def _resolve_pre_turn_quests_impl(
         except Exception:
             pass
 
+    for ak_qid, ak_so in advanced_keys:
+        if ak_qid and ak_so in (None, 0) and ak_qid not in quests_advanced_this_turn:
+            quests_advanced_this_turn.append(ak_qid)
+
     res = {
         "completed_quests": [q.get("quest_id") for q in completed_quests],
         "reward_notices": reward_notices,
         "waypoint_notices": waypoint_notices,
         "completed_sub_quests": completed_sub_quests,
         "advanced_keys": advanced_keys,
+        "quests_advanced_this_turn": quests_advanced_this_turn,
         "directives": directives,
         "chapter_climax": chapter_climax,
         "deduction_xp_bonus": deduction_xp_bonus,

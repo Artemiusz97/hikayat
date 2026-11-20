@@ -13,10 +13,12 @@ Resolves who is physically present at a location across 6 strict precedence tier
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Any, Mapping
 
 import db
 from mechanics.social.activity_tags import resolve_actor_activity_bundle
+from mechanics.social.population_seeder import hydrate_roster_npc_on_scene
 from mechanics.world.anchor_schedule import resolve_anchor_schedule_nodes
 from mechanics.world.locations import location_has_merchant_shop
 from mechanics.world.locations.residence_fog import (
@@ -66,8 +68,48 @@ _CRISIS_KEYWORDS: tuple[str, ...] = (
     "crisis", "ambush", "emergency", "under siege", "attack", "assault", "rescue",
 )
 _ARRIVED_GRACE_MINUTES = 120
-MAX_TIER5_BYSTANDERS = 5
+MAX_TIER5_BYSTANDERS = 6
 _PAIR_TIE_TYPES: frozenset[str] = frozenset({"dating", "engaged", "married", "affair", "best_friend", "friend"})
+
+_QUIET_VENUE_KEYWORDS: tuple[str, ...] = (
+    "shrine", "temple", "library", "alley", "rooftop", "bathroom", "restroom",
+    "locker", "closet", "lookout", "observatory", "laundry", "study", "office",
+    "booth", "sanctuary", "chapel", "storage",
+)
+_HUB_VENUE_KEYWORDS: tuple[str, ...] = (
+    "plaza", "square", "market", "bazaar", "mall", "cafeteria", "terminal",
+    "station", "transit", "beach", "pier", "park", "courtyard", "promenade",
+    "arcade", "quad", "harbor", "airport", "concourse", "canteen",
+)
+_NIGHT_LIVELY_KEYWORDS: tuple[str, ...] = (
+    "nightclub", "bar", "lounge", "night_market", "night market", "konbini",
+    "convenience", "hospital", "ramen", "kar", "casino", "auction",
+)
+
+
+def resolve_venue_bystander_cap(
+    target_node: Mapping[str, Any] | None,
+    eff_node_id: str = "",
+    eff_loc: str = "",
+    prop_at_node: Mapping[str, Any] | None = None,
+) -> int:
+    """Scales Tier 5 bystander staging cap by venue privacy and capacity."""
+    if is_private_home_or_wilderness(target_node, eff_node_id, eff_loc, prop_at_node):
+        return 0
+    probe = " ".join(
+        str(x or "").lower()
+        for x in (eff_node_id, eff_loc, (target_node or {}).get("name"), (target_node or {}).get("category"))
+    )
+    if any(k in probe for k in _QUIET_VENUE_KEYWORDS):
+        return 2
+    if any(k in probe for k in _HUB_VENUE_KEYWORDS):
+        return MAX_TIER5_BYSTANDERS
+    return 4
+
+
+def _rotation_hash(session_id: int, safe_day: int, block_key: str, npc_key: str) -> int:
+    digest = hashlib.md5(f"{session_id}:{safe_day}:{block_key}:{npc_key}".encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
 
 
 def _minutes_to_next_bell(safe_min: int, block_key: str) -> int:
@@ -277,19 +319,35 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
         if wp_aliases & ctx.casualty_keys:
             continue
 
+        syn_meta = ctx.synthetic_npcs_by_key.get(t_npc.lower()) or ctx.synthetic_npcs_by_key.get(slugify_key(t_npc))
+        is_transient_synthetic = bool(isinstance(syn_meta, dict) and r_row is None and c_row is None)
+        base_stage_rec: dict[str, Any] = {
+            "name": t_npc,
+            "npc_id": (c_row or r_row or {}).get("npc_id") or slugify_key(t_npc),
+        }
+        if is_transient_synthetic and isinstance(syn_meta, dict):
+            if syn_meta.get("role"):
+                base_stage_rec["role"] = str(syn_meta["role"])
+                base_stage_rec["occupation"] = str(syn_meta["role"])
+            if syn_meta.get("persona") or syn_meta.get("description"):
+                base_stage_rec["persona"] = str(syn_meta.get("persona") or syn_meta.get("description"))
+            if syn_meta.get("disposition"):
+                base_stage_rec["disposition"] = str(syn_meta["disposition"])
+            base_stage_rec["is_transient_quest_npc"] = True
+
         wp_loc = str(wp.get("target_location") or wp.get("location") or "").strip()
         wp_node = str(wp.get("target_node_id") or "").strip()
         is_hostile = is_hostile_or_lair_waypoint(wp)
         wp_blob = f"{wp.get('stage_label', '')} {wp.get('title', '')} {wp.get('objective', '')} {wp.get('notes', '')}".lower()
         is_crisis = bool(wp.get("is_crisis")) or any(k in wp_blob for k in _CRISIS_KEYWORDS)
-        follow_sched = bool(wp.get("follow_npc_schedule"))
+        follow_sched = False if is_transient_synthetic else bool(wp.get("follow_npc_schedule"))
 
         if is_hostile or is_crisis or not follow_sched:
             if not location_targets_node(wp_node, wp_loc, ctx.eff_node_id, ctx.eff_loc, ctx.nodes_by_id, ctx.loc_cache):
                 continue
             if is_crisis:
                 ctx.tier3_crisis_aliases.update(wp_aliases)
-            ctx.stage({"name": t_npc, "npc_id": (c_row or r_row or {}).get("npc_id") or slugify_key(t_npc)}, 3, "quest_pin")
+            ctx.stage(base_stage_rec, 3, "quest_pin")
             continue
 
         sched_info = get_waypoint_npc_schedule_info(
@@ -360,10 +418,10 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
                     )
             if not is_own_unlocked_res:
                 continue
-        if r_row is None and c_row is None and not (420 <= (int(ctx.safe_min) % 1440) < 1320):
+        if r_row is None and c_row is None and not is_transient_synthetic and not (420 <= (int(ctx.safe_min) % 1440) < 1320):
             continue
         if not sched_info.get("is_off_duty"):
-            ctx.stage({"name": t_npc, "npc_id": (c_row or r_row or {}).get("npc_id") or slugify_key(t_npc)}, 3, "quest_pin")
+            ctx.stage(base_stage_rec, 3, "quest_pin")
 
 
 def _resolve_tier4_doorbell(ctx: _PresenceContext) -> None:
@@ -410,6 +468,8 @@ def _resolve_tier4_doorbell(ctx: _PresenceContext) -> None:
             if has_key:
                 ctx.doorbell_events.append({
                     "applicable": True,
+                    "name": npc_disp,
+                    "npc_id": str(merged_npc.get("npc_id") or ""),
                     "npc_name": npc_disp,
                     "doorbell_status": "spare_key_entry",
                     "entry_mode": "spare_key_entry",
@@ -427,6 +487,8 @@ def _resolve_tier4_doorbell(ctx: _PresenceContext) -> None:
             else:
                 ctx.doorbell_events.append({
                     "applicable": True,
+                    "name": npc_disp,
+                    "npc_id": str(merged_npc.get("npc_id") or ""),
                     "npc_name": npc_disp,
                     "doorbell_status": "npc_ringing_player_door",
                     "entry_mode": "doorbell_ringing",
@@ -645,6 +707,7 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
             active_events=ctx.active_events,
             has_active_rendezvous_or_quest=bool(aliases & protected_aliases),
             player_home_node_id=ctx.player_home_node_id,
+            scheduled_node_id=sched_nid,
         )
         # D10: Do not allow autonomy friend-visiting to crowd an active Tier 2 rendezvous NPC.
         if isinstance(ov, Mapping):
@@ -682,14 +745,28 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         if not (eff_work_match or sched_match):
             continue
 
-        aff_val = int((c_row or {}).get("relationship_score") or (c_row or {}).get("affinity") or merged_npc.get("affinity") or 0)
+        aff_val = int((c_row or {}).get("relationship_score") or (c_row or {}).get("affinity") or merged_npc.get("affinity_score") or merged_npc.get("affinity") or 0)
         is_dropby = bool(isinstance(ov, Mapping) and ov.get("is_dropby"))
         is_active_merchant = bool(
             not ov
             and on_shift
             and has_merch_arch
-            and (eff_work_match or (origin_val == "roaming_merchant" and sched_match))
+            and (eff_work_match or (origin_val in ("roaming_merchant", "district_merchant") and sched_match))
         )
+        is_met_or_known = bool(r_row.get("met_in_person")) or aff_val != 0 or origin_val in ("venue_seed", "role_slot_fill", "replacement_hire", "quest_seed", "roaming_merchant")
+        npc_key_str = str(r_row.get("person_key") or r_row.get("npc_id") or merged_npc.get("name") or "").strip().lower()
+        rot_tie = 0 if (is_dropby or is_active_merchant or is_met_or_known) else _rotation_hash(ctx.sid, ctx.safe_day, ctx.block_key, npc_key_str)
+        if is_dropby:
+            prio_tier = 0
+        elif is_active_merchant:
+            prio_tier = 1
+        elif is_met_or_known:
+            prio_tier = 2
+        elif origin_val in ("civic_staff", "campus_seed", "district_merchant"):
+            prio_tier = 3
+        else:
+            prio_tier = 4
+
         extra_meta: dict[str, Any] = {}
         if isinstance(ov, Mapping):
             extra_meta["autonomy_reason"] = str(ov.get("reason") or "")
@@ -700,10 +777,10 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         candidates.append({
             "npc": merged_npc,
             "r_row": r_row,
-            "priority": (0 if is_dropby else (1 if is_active_merchant else 2), -aff_val),
+            "priority": (prio_tier, -aff_val, rot_tie),
             "extra": extra_meta,
             "aliases": aliases,
-            "key": str(r_row.get("person_key") or r_row.get("npc_id") or merged_npc.get("name") or "").strip().lower(),
+            "key": npc_key_str,
         })
 
     # Track 5B: Materialized `legacy_adapter` rows + unlinked contacts + raw legacy pools (Ruling 6)
@@ -757,16 +834,18 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
         ):
             continue
 
+        leg_key = str((linked_r_row or {}).get("person_key") or leg_npc.get("npc_id") or leg_npc.get("name") or "").strip().lower()
         candidates.append({
             "npc": leg_npc,
             "r_row": linked_r_row,
-            "priority": (2, 0),
+            "priority": (2, 0, _rotation_hash(ctx.sid, ctx.safe_day, ctx.block_key, leg_key)),
             "extra": {},
             "aliases": aliases,
-            "key": str((linked_r_row or {}).get("person_key") or leg_npc.get("npc_id") or leg_npc.get("name") or "").strip().lower(),
+            "key": leg_key,
         })
 
-    # F2: Group active tie pairs atomically before admitting up to MAX_TIER5_BYSTANDERS = 5
+    # F2: Group active tie pairs atomically before admitting up to venue bystander cap
+    bystander_cap = resolve_venue_bystander_cap(ctx.target_node, ctx.eff_node_id, ctx.eff_loc, ctx.prop_at_node)
     candidates.sort(key=lambda c: c["priority"])
     by_alias: dict[str, int] = {}
     for idx, c in enumerate(candidates):
@@ -813,8 +892,10 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
     admitted = 0
     overflow = 0
     for unit in units:
-        if admitted + len(unit) > MAX_TIER5_BYSTANDERS:
+        if bystander_cap <= 0 or (admitted + len(unit) > bystander_cap):
             overflow += len(unit)
+            for idx in unit:
+                ctx.tier5_overflow_candidates.append(dict(candidates[idx]["npc"]))
             continue
         for idx in unit:
             c = candidates[idx]
@@ -826,14 +907,29 @@ def _resolve_tier5_schedules(ctx: _PresenceContext) -> None:
     ctx.tier5_overflow_count += overflow
 
 
-def _resolve_tier6_crowd(ctx: _PresenceContext, present_list: list[dict[str, Any]]) -> str:
+def _resolve_tier6_crowd(ctx: _PresenceContext, present_list: list[dict[str, Any]]) -> tuple[str, str]:
     if not ctx.eff_node_id and not ctx.eff_loc:
-        return ""
+        return "", "empty"
     if is_private_home_or_wilderness(ctx.target_node, ctx.eff_node_id, ctx.eff_loc, ctx.prop_at_node):
-        return ""
-    if present_list and int(getattr(ctx, "tier5_overflow_count", 0) or 0) <= 0:
-        return ""
-    return format_venue_crowd_flavor(ctx.eff_node_id, ctx.eff_loc, ctx.scen_key, ctx.safe_min)
+        return "", "empty"
+    flavor = format_venue_crowd_flavor(ctx.eff_node_id, ctx.eff_loc, ctx.scen_key, ctx.safe_min)
+    present_cnt = len(present_list)
+    overflow_cnt = int(getattr(ctx, "tier5_overflow_count", 0) or 0)
+    if present_cnt >= 5 and overflow_cnt >= 3:
+        density = "packed"
+    elif present_cnt >= 4 or overflow_cnt >= 1:
+        density = "bustling"
+    elif present_cnt >= 2:
+        density = "moderate"
+    else:
+        density = "quiet"
+    safe_min = int(getattr(ctx, "safe_min", 600) or 600) % 1440
+    if safe_min >= 1380 or safe_min < 300:
+        probe = f"{ctx.eff_node_id} {ctx.eff_loc}".lower()
+        if not any(k in probe for k in _NIGHT_LIVELY_KEYWORDS):
+            downgrade = {"packed": "bustling", "bustling": "moderate", "moderate": "quiet", "quiet": "quiet"}
+            density = downgrade.get(density, density)
+    return flavor, density
 
 
 def resolve_node_presence(
@@ -874,6 +970,29 @@ def resolve_node_presence(
     _resolve_tier5_schedules(ctx)
 
     present_list = [ctx.staged_by_key[k] for k in ctx.staged_order]
+    visual_patches: list[dict[str, Any]] = []
+    for npc_entry in present_list:
+        r_origin = str(npc_entry.get("origin") or "").strip().lower()
+        r_basic = npc_entry.get("basic_info") if isinstance(npc_entry.get("basic_info"), dict) else {}
+        if r_origin in ("district_merchant", "civic_staff", "roaming_citizen", "campus_seed", "roaming_merchant", "seeded") or r_basic.get("visual_hydrated") is False:
+            patch = hydrate_roster_npc_on_scene(npc_entry, ctx.scen_key)
+            if isinstance(patch, dict):
+                npc_entry["appearance"] = dict(patch["appearance"])
+                npc_entry["traits"] = list(patch["traits"])
+                merged_b = dict(r_basic)
+                merged_b.update(patch["basic_info_updates"])
+                npc_entry["basic_info"] = merged_b
+                for k_extra in ("likes", "dislikes", "quirk", "drive"):
+                    if k_extra in patch["basic_info_updates"]:
+                        npc_entry[k_extra] = patch["basic_info_updates"][k_extra]
+                visual_patches.append(patch)
+
+    if visual_patches:
+        if persist_db and ctx.sid > 0:
+            db.hydrate_world_roster_visuals(ctx.sid, visual_patches)
+        elif not persist_db:
+            ctx.staged_roster_ops.setdefault("visual_hydrations", []).extend(visual_patches)
+
     lang_code = str(ctx.session_dict.get("language") or "en").strip().lower()
     max_per = _extract_max_party_per(ctx.session_dict, present_list)
     mins_left = _minutes_to_next_bell(ctx.safe_min, ctx.block_key)
@@ -944,7 +1063,15 @@ def resolve_node_presence(
         )
         npc_entry.update(bundle)
 
-    crowd_flavor = _resolve_tier6_crowd(ctx, present_list)
+    crowd_flavor, crowd_density = _resolve_tier6_crowd(ctx, present_list)
+    overflow_cands = list(getattr(ctx, "tier5_overflow_candidates", []) or [])
+    overflow_cnt = int(getattr(ctx, "tier5_overflow_count", 0) or len(overflow_cands))
+    crowd_state = {
+        "density": crowd_density,
+        "flavor": crowd_flavor,
+        "overflow_count": overflow_cnt,
+        "overflow_candidates": overflow_cands[:6],
+    }
     return {
         "node_id": ctx.eff_node_id,
         "location": ctx.eff_loc,
@@ -952,6 +1079,9 @@ def resolve_node_presence(
         "allowed_names": [n["name"] for n in present_list],
         "doorbell_events": ctx.doorbell_events,
         "crowd_flavor": crowd_flavor,
+        "crowd_density": crowd_density,
+        "crowd_overflow_count": overflow_cnt,
+        "crowd_state": crowd_state,
         "time_block": ctx.block_key,
         "staged_roster_ops": dict(ctx.staged_roster_ops),
         "epistemic_matrix": dict(ctx.epistemic_matrix),
@@ -960,6 +1090,7 @@ def resolve_node_presence(
 
 __all__ = [
     "MAX_TIER5_BYSTANDERS",
+    "resolve_venue_bystander_cap",
     "resolve_node_presence",
     "check_doorbell_etiquette",
     "is_node_descendant_in_memory",

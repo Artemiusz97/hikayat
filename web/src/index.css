@@ -912,11 +912,15 @@ body::before {
    Native <dialog> top-layer scroll containment & backdrop (modern-web-guidance)
    ========================================================================== */
 dialog.hk-chronicle-dialog,
-dialog.hk-contracts-dialog {
+dialog.hk-contracts-dialog,
+dialog.hk-atlas-dialog {
   padding: 0;
   border: 0;
   background: transparent;
   color: inherit;
+}
+dialog.hk-chronicle-dialog,
+dialog.hk-contracts-dialog {
   max-height: calc(var(--app-height, 100dvh) - 1.5rem);
   width: 100%;
   margin: auto;
@@ -926,6 +930,48 @@ dialog.hk-chronicle-dialog {
 }
 dialog.hk-contracts-dialog {
   max-width: min(56rem, calc(100vw - 1.5rem));
+}
+dialog.hk-atlas-dialog {
+  overflow: hidden;
+}
+dialog.hk-atlas-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 768px) {
+  dialog.hk-atlas-dialog {
+    width: min(72rem, calc(100vw - 2rem));
+    max-width: min(72rem, calc(100vw - 2rem));
+    height: min(54rem, calc(var(--app-height, 100dvh) - 2rem));
+    max-height: calc(var(--app-height, 100dvh) - 2rem);
+    margin: auto;
+  }
+}
+@media (max-width: 767px) {
+  dialog.hk-atlas-dialog {
+    width: 100dvw;
+    max-width: 100dvw;
+    height: var(--app-height, 100dvh);
+    max-height: var(--app-height, 100dvh);
+    margin: 0;
+  }
+  .hk-atlas-header {
+    padding-top: max(0.875rem, env(safe-area-inset-top, 0px));
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+  .hk-atlas-scroll {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px));
+    padding-left: max(1rem, env(safe-area-inset-left, 0px));
+    padding-right: max(1rem, env(safe-area-inset-right, 0px));
+  }
+}
+.hk-atlas-heading {
+  text-wrap: balance;
+}
+.hk-atlas-prose {
+  text-wrap: pretty;
+  overflow-wrap: break-word;
 }
 dialog:modal {
   overscroll-behavior: contain;

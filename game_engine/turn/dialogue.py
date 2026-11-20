@@ -1310,6 +1310,40 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             except Exception:
                 _dealt_social_seeds_section = ""
 
+        from game_engine.prompts import resolve_style_and_pacing
+        _, _, _eff_dlg_mode = resolve_style_and_pacing(session)
+        if _eff_dlg_mode == "off":
+            _two_way_conv_directive = (
+                f"- 🔇 DIALOGUE MODE = OFF (MANDATORY): Do NOT include any spoken dialogue or quotation marks "
+                f"for the player character or {partner_str}. Convey their entire interaction, questions, and reactions "
+                f"strictly through third-person narrative prose.\n"
+            )
+        elif _eff_dlg_mode == "minimal":
+            _two_way_conv_directive = (
+                f"- 💬 DIALOGUE MODE = MINIMAL (MANDATORY): Include at most 1-2 short, impactful spoken quotes total "
+                f"across the turn. STRICTLY FORBIDDEN: Do NOT write extended multi-turn back-and-forth exchanges.\n"
+            )
+        elif _eff_dlg_mode == "script":
+            _two_way_conv_directive = (
+                f"- 🎬 STAGE SCRIPT DIALOGUE DIRECTIVE (MANDATORY): Drive the scene primarily through direct two-way spoken dialogue "
+                f"between the player character and {partner_str} formatted on distinct lines as **Name** *(physical action or vocal tone)*: \"Quote\" "
+                f"(at least 3-5 back-and-forth exchanges).\n"
+            )
+        elif _eff_dlg_mode == "rich":
+            _two_way_conv_directive = (
+                f"- 🎭 RICH NOVEL DIALOGUE DIRECTIVE (MANDATORY): Drive the scene primarily through expressive two-way spoken banter "
+                f"between BOTH the player character and {partner_str} (at least 3-5 back-and-forth quoted exchanges woven naturally into novel prose; "
+                f"do NOT use stage-play `**Name**:` prefixes).\n"
+            )
+        else:
+            _two_way_conv_directive = (
+                f"- ⚡ TWO-WAY CONVERSATION DIRECTIVE (MANDATORY): "
+                f"You MUST write BOTH the player character AND {partner_str} speaking aloud in direct quoted lines. "
+                f"The player character's words MUST appear as a spoken quote, followed by {partner_str}'s reply. "
+                f"Generate at least 2-3 back-and-forth spoken turns. "
+                f"STRICTLY FORBIDDEN: Do NOT summarize the player character's words in third-person while only voicing {partner_str}.\n"
+            )
+
         if active_bounty_contact and not has_phone_meetup:
 
             pn_name, bnt_q, bnt_wp = active_bounty_contact
@@ -1338,15 +1372,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- Immediate Task (Stage {st_idx}): {st_lbl}" + (f" (Target Destination: {st_loc})\n" if st_loc else "\n") +
 
-                f"- ⚡ TWO-WAY CONVERSATION DIRECTIVE (MANDATORY): "
-
-                f"You MUST write BOTH the player character AND {partner_str} speaking aloud in direct quoted lines. "
-
-                f"The player character's words MUST appear as a spoken quote, followed by {partner_str}'s reply. "
-
-                f"Generate at least 2-3 back-and-forth spoken turns. "
-
-                f"STRICTLY FORBIDDEN: Do NOT summarize the player character's words in third-person while only voicing {partner_str}.\n"
+                f"{_two_way_conv_directive}"
 
                 f"- CHARACTER GROUNDING & MOTIVATION:\n"
 
@@ -1393,15 +1419,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- The player is focused on this objective until they choose to step away.\n"
 
-                f"- ⚡ TWO-WAY CONVERSATION DIRECTIVE (MANDATORY): "
-
-                f"You MUST write BOTH the player character AND {partner_str} speaking aloud in direct quoted lines. "
-
-                f"The player character's words MUST appear as a spoken quote, followed by {partner_str}'s reply. "
-
-                f"Generate at least 2-3 back-and-forth spoken turns. "
-
-                f"STRICTLY FORBIDDEN: Do NOT summarize the player character's words in third-person while only voicing {partner_str}.\n"
+                f"{_two_way_conv_directive}"
 
                 f"{contact_info_block}"
                 f"{recent_phone_section}"
@@ -1460,15 +1478,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
 
                 f"- The party is hanging out in face-to-face dialogue with {partner_str}.\n"
 
-                f"- ⚡ TWO-WAY CONVERSATION DIRECTIVE (MANDATORY — APPLIES TO ALL DIALOGUE MODES EXCEPT 'off' AND 'minimal'): "
-
-                f"You MUST write BOTH the player character AND {partner_str} speaking aloud in direct quoted lines. "
-
-                f"The player character's action/inquiry MUST appear as a spoken quote (e.g. [Player Name]: \"...\"), "
-
-                f"followed by {partner_str}'s spoken reply. Generate at least 2-3 back-and-forth spoken turns between them. "
-
-                f"STRICTLY FORBIDDEN: Do NOT write only {partner_str}'s single quote while summarizing the player character's words in third-person narration. Both sides must speak.\n"
+                f"{_two_way_conv_directive}"
 
                 f"- TONE & ATMOSPHERE: This is a lively, character-driven social/personal hangout (NOT a high-stakes investigation, council conspiracy, or melodramatic soliloquy).\n"
 

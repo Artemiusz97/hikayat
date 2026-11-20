@@ -242,13 +242,18 @@ def generate_quest_action_choices(
             or {}
         )
         _sq_cs = (_sq_dos.get("climax_spec") or {}) if isinstance(_sq_dos, dict) else {}
+        _main_stages = _sq_cs.get("main_stages") or []
         _has_incomplete_ms = any(
             isinstance(ms, dict)
             and not ms.get("is_climax_stage")
             and str(ms.get("status") or "").lower() not in ("completed", "bypassed")
-            for ms in (_sq_cs.get("main_stages") or [])
+            for ms in _main_stages
         )
-        is_premature = bool((sub_objs and not db.is_quest_main_objectives_complete(sub_objs)) or _has_incomplete_ms)
+        is_premature = (
+            _has_incomplete_ms
+            if _main_stages
+            else bool(sub_objs and not db.is_quest_main_objectives_complete(sub_objs))
+        )
         stat = "CHA" if "high_school" in scen_key or "modern" in scen_key else ("INT" if "sci" in scen_key else "STR")
         req = 6
         if char and isinstance(char.get("stats"), dict):
@@ -270,16 +275,31 @@ def generate_quest_action_choices(
                 "de": f"Bedrohung für '{sq_title}' ohne volle Beweise direkt stellen ({stat})",
             }
             climax_label = _rush_labels.get(raw_lang, _rush_labels["en"])
-        elif "high_school" in scen_key or "modern" in scen_key:
-            climax_label = f"Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
-        elif "cyberpunk" in scen_key or "scifi" in scen_key:
-            climax_label = f"Execute the final operation and secure '{sq_title}' ({stat})"
-        elif "postapoc" in scen_key:
-            climax_label = f"Rally the survivors and overcome the crisis of '{sq_title}' ({stat})"
-        elif "nsfw" in scen_key:
-            climax_label = f"Take the decisive initiative and resolve '{sq_title}' ({stat})"
         else:
-            climax_label = f"Confront the threat and bring '{sq_title}' to a decisive resolution ({stat})"
+            clx_ms_list = [ms for ms in (_sq_cs.get("main_stages") or []) if isinstance(ms, dict)]
+            clx_stage = next((ms for ms in clx_ms_list if ms.get("is_climax_stage")), None)
+            if clx_stage is None and clx_ms_list:
+                clx_stage = clx_ms_list[-1]
+            bc_verb = str((((clx_stage or {}).get("beat_contract") or {}).get("player_verb") or (clx_stage or {}).get("stage_label") or "")).strip()
+            has_leak = bool(
+                not bc_verb
+                or re.search(r"\b(?:HP|MP|DC)\b", bc_verb)
+                or "_JSON" in bc_verb
+                or "hidden lair" in bc_verb.lower()
+                or "uncover leads" in bc_verb.lower()
+            )
+            if not has_leak:
+                climax_label = bc_verb if bc_verb.endswith(")") else f"{bc_verb} ({stat})"
+            elif "high_school" in scen_key or "modern" in scen_key:
+                climax_label = f"Present your resolution plan for '{sq_title}' and coordinate the student body ({stat})"
+            elif "cyberpunk" in scen_key or "scifi" in scen_key:
+                climax_label = f"Execute the final operation and secure '{sq_title}' ({stat})"
+            elif "postapoc" in scen_key:
+                climax_label = f"Rally the survivors and overcome the crisis of '{sq_title}' ({stat})"
+            elif "nsfw" in scen_key:
+                climax_label = f"Take the decisive initiative and resolve '{sq_title}' ({stat})"
+            else:
+                climax_label = f"Confront the threat and bring '{sq_title}' to a decisive resolution ({stat})"
 
         quest_choices.append({
             "label": climax_label,
@@ -813,6 +833,9 @@ def _strip_unverified_quest_flags(raw_choices: list) -> list:
         if not isinstance(c, dict):
             cleaned.append(c)
             continue
+        if c.get("_quest_dialogue_handoff") and (c.get("_python_verified_quest") or c.get("_server_stamped")):
+            cleaned.append(dict(c))
+            continue
         c_copy = dict(c)
         c_copy["is_quest_action"] = False
         c_copy["is_story_quest"] = False
@@ -830,8 +853,13 @@ def _strip_unverified_quest_flags(raw_choices: list) -> list:
     return cleaned
 
 
-def _is_remote_node_revealed_and_reachable(session_id: int, curr_nid: str, dest_loc: str) -> tuple[bool, str]:
-    """Ensures a candidate remote destination is not a hidden/undiscovered node."""
+def _is_remote_node_revealed_and_reachable(
+    session_id: int,
+    curr_nid: str,
+    dest_loc: str,
+    allow_active_quest_node: bool = False,
+) -> tuple[bool, str]:
+    """Ensures a candidate remote destination is not a hidden/undiscovered node unless explicitly allowed for an active unlocked quest stage."""
     if not dest_loc:
         return False, ""
     if not session_id:
@@ -849,13 +877,12 @@ def _is_remote_node_revealed_and_reachable(session_id: int, curr_nid: str, dest_
             st = json.loads(st_raw) if isinstance(st_raw, str) else (st_raw or {})
         except Exception:
             st = {}
-        if not (isinstance(st, dict) and st.get("discovered") is True and not st.get("is_hidden")):
+        if not (isinstance(st, dict) and st.get("discovered") is True and not st.get("is_hidden")) and not allow_active_quest_node:
             return False, ""
     return True, target_nid
 
 
-def _inject_or_upgrade_remote_quest_travel(
-    result_choices: list[dict],
+def _collect_remote_quest_candidates(
     session_id: int,
     current_location: str,
     session_row: Optional[dict],
@@ -864,47 +891,46 @@ def _inject_or_upgrade_remote_quest_travel(
     climax_loc: Optional[str],
     climax_ready_at_loc: bool,
     dossier_cache: dict[str, Any],
-    intimate_excl_words: tuple[str, ...],
-) -> None:
-    """Upgrades 1 matching LLM travel choice or prepends 1 localized quest-travel choice for revealed remote destinations."""
-    from localization import format_quest_travel_label
-    from mechanics.narrative.intent import classify_action_intent, IntentCategory, is_conversational_exit
-    from mechanics.narrative.quest_engines import normalize_quest_locale
-    from mechanics.social.intimate_excitement import is_intimate_action_label
-    from mechanics.world.locations.hierarchy import format_clean_location_badge
-    from mechanics.world.locations.movement import extract_movement_destination, is_movement_action
-
-    has_non_premature_sq = any(
-        isinstance(c, dict)
-        and c.get("is_quest_action")
-        and c.get("is_story_quest")
-        and not c.get("is_premature_climax")
-        for c in result_choices
-    )
-    if has_non_premature_sq:
-        return
-
-    restrict_to_story = any(
-        isinstance(c, dict) and c.get("is_quest_action")
-        for c in result_choices
-    )
-
+    allowed_qids: Optional[set[str]] = None,
+) -> list[dict[str, Any]]:
+    """Builds ranked remote quest destination candidates with deadline/updated_at metadata."""
     curr_nid = str(
         (session_row or {}).get("current_node_id")
         or (db.resolve_node_id_from_location(session_id, current_location) if session_id and current_location else "")
         or ""
     )
+    active_qs_by_id: dict[str, dict] = {}
+    if session_id:
+        try:
+            for q_item in (db.get_session_quests(session_id, status="Active") or []):
+                if isinstance(q_item, dict) and q_item.get("quest_id"):
+                    active_qs_by_id[str(q_item["quest_id"])] = q_item
+        except Exception:
+            pass
 
-    # Tuple: (bucket: 0=story_wp, 1=story_climax, 2=bounty_wp; stage_idx; qid; sub_obj_id; is_story; dest_loc; target_nid)
-    candidates: list[tuple[int, int, str, Any, bool, str, str]] = []
+    candidates: list[dict[str, Any]] = []
     for wp in remote_wps:
         wp_qid = str(wp.get("quest_id") or "")
-        is_story = bool(wp.get("is_story_quest") or "SQ-" in wp_qid or "story" in wp_qid.lower())
-        if restrict_to_story and not is_story:
+        if allowed_qids is not None and wp_qid not in allowed_qids:
             continue
+        is_story = bool(wp.get("is_story_quest") or "SQ-" in wp_qid or "story" in wp_qid.lower())
         wp_dos = dossier_cache.get(wp_qid) or (db.get_quest_dossier(session_id, wp_qid) if session_id and wp_qid else None) or {}
         if wp_qid and wp_qid not in dossier_cache:
             dossier_cache[wp_qid] = wp_dos
+        wp_sub_id = wp.get("sub_obj_id")
+        if wp_sub_id not in (None, 0):
+            try:
+                wp_sub_int = int(wp_sub_id)
+                if any(
+                    isinstance(ld, dict)
+                    and ld.get("sub_obj_id") is not None
+                    and int(ld["sub_obj_id"]) == wp_sub_int
+                    and ld.get("is_discovered") is False
+                    for ld in (wp_dos.get("leads_graph") or [])
+                ):
+                    continue
+            except Exception:
+                pass
         wp_cs = wp_dos.get("climax_spec") or {}
         gate_mode = str(wp_cs.get("gate_type") or wp_cs.get("gate_mode") or "").lower()
         secret_locked = ("secret" in gate_mode or "hidden" in gate_mode or "lair" in gate_mode) and not wp_cs.get("is_unlocked")
@@ -931,95 +957,153 @@ def _inject_or_upgrade_remote_quest_travel(
             dest_loc = str(wp.get("_eff_loc") or wp.get("target_location") or wp.get("static_target_location") or "").strip()
         if not dest_loc or dest_loc.lower() in ("local area", "area") or "hidden lair" in dest_loc.lower():
             continue
-        if secret_locked and (wp.get("is_climax_stage") or (secret_loc and check_location_matches_waypoint(dest_loc, secret_loc, session_id=session_id))):
+        is_secret_climax_wp = bool(
+            secret_locked and (wp.get("is_climax_stage") or (secret_loc and check_location_matches_waypoint(dest_loc, secret_loc, session_id=session_id)))
+        )
+        if is_secret_climax_wp:
             continue
         if check_location_matches_waypoint(current_location, dest_loc, session_id=session_id):
             continue
-        ok, tgt_nid = _is_remote_node_revealed_and_reachable(session_id, curr_nid, dest_loc)
+        ok, tgt_nid = _is_remote_node_revealed_and_reachable(
+            session_id,
+            curr_nid,
+            dest_loc,
+            allow_active_quest_node=bool(wp.get("sub_obj_id") in (None, 0) and not is_secret_climax_wp),
+        )
         if not ok:
             continue
         final_nid = tgt_nid or str(wp.get("target_node_id") or "")
-        candidates.append((0 if is_story else 2, int(wp.get("stage_index") or 1), wp_qid, wp.get("sub_obj_id"), is_story, dest_loc, final_nid))
+        q_row = active_qs_by_id.get(wp_qid) or {}
+        raw_dd = q_row.get("deadline_day")
+        raw_dm = q_row.get("deadline_minute")
+        dd_sort = int(raw_dd) if raw_dd is not None else 999999
+        dm_sort = int(raw_dm) if raw_dm is not None else 999999
+        upd_sort = -float(q_row.get("updated_at") or 0.0)
+        candidates.append({
+            "bucket": 0 if is_story else 2,
+            "stage_idx": int(wp.get("stage_index") or 1),
+            "qid": wp_qid,
+            "sub_obj_id": wp.get("sub_obj_id"),
+            "is_story": is_story,
+            "dest_loc": dest_loc,
+            "target_nid": final_nid,
+            "deadline_sort": (dd_sort, dm_sort, upd_sort),
+        })
 
     if story_quest and climax_loc and not climax_ready_at_loc:
         sq_qid = str(story_quest.get("quest_id") or "")
-        sq_dos = story_quest.get("dossier") or dossier_cache.get(sq_qid) or (db.get_quest_dossier(session_id, sq_qid) if session_id and sq_qid else None) or {}
-        sq_cs = sq_dos.get("climax_spec") or {}
-        climax_clean = str(climax_loc or "").strip()
-        gate_mode = str(sq_cs.get("gate_type") or sq_cs.get("gate_mode") or "").lower()
-        is_revealed_climax = bool(sq_cs.get("is_unlocked")) and not bool(sq_cs.get("is_hidden"))
-        if (
-            is_revealed_climax
-            and climax_clean
-            and climax_clean.lower() not in ("local area", "area")
-            and "hidden lair" not in climax_clean.lower()
-            and not ("secret" in gate_mode and not sq_cs.get("is_unlocked"))
-            and not check_location_matches_waypoint(current_location, climax_clean, session_id=session_id)
-        ):
-            ok, tgt_nid = _is_remote_node_revealed_and_reachable(session_id, curr_nid, climax_clean)
-            if ok:
-                main_st = sq_cs.get("main_stages") or []
-                candidates.append((1, max(1, len(main_st) + 1), sq_qid, None, True, climax_clean, tgt_nid or str(sq_cs.get("node_id") or "")))
-
-    if not candidates:
-        return
-    candidates.sort(key=lambda item: (item[0], item[1]))
-
-    eff_scen = str((session_row or {}).get("scenario") or "fantasy")
-    for _, stage_idx, qid, sub_obj_id, is_story, dest_loc, wp_nid in candidates:
-        dest_parts = [p.strip().lower() for p in dest_loc.replace("->", "➔").split("➔") if p.strip()]
-        dest_leaf = dest_parts[-1] if dest_parts else dest_loc.lower()
-        if dest_leaf in ("main area", "area", "") and len(dest_parts) >= 2:
-            dest_leaf = dest_parts[-2]
-        for c in result_choices:
-            if not isinstance(c, dict) or c.get("is_quest_action"):
-                continue
-            lbl_raw = str(c.get("label") or "")
-            lbl_low = lbl_raw.lower()
-            if is_intimate_action_label(lbl_low) or any(iw in lbl_low for iw in intimate_excl_words) or is_conversational_exit(lbl_low):
-                continue
-            if lbl_low.lstrip().startswith(("leave ", "exit ", "depart ")):
-                continue
-            c_int = str(c.get("intent") or "").strip().lower()
-            is_mv = (
-                c_int in ("movement", "travel", "fast_travel", "move")
-                or is_movement_action(lbl_raw)
-                or classify_action_intent(lbl_low).category == IntentCategory.MOVEMENT
-            )
-            if not is_mv:
-                continue
-            c_tgt = str(c.get("target_location") or "").strip()
-            c_nid = str(c.get("target_node_id") or "").strip()
-            ext_dest = extract_movement_destination(lbl_raw, session_id, scen_key=eff_scen) if session_id else None
-            ext_loc = f"{ext_dest[0]} ➔ {ext_dest[1]}" if ext_dest else ""
+        if allowed_qids is None or sq_qid in allowed_qids:
+            sq_dos = story_quest.get("dossier") or dossier_cache.get(sq_qid) or (db.get_quest_dossier(session_id, sq_qid) if session_id and sq_qid else None) or {}
+            sq_cs = sq_dos.get("climax_spec") or {}
+            climax_clean = str(climax_loc or "").strip()
+            gate_mode = str(sq_cs.get("gate_type") or sq_cs.get("gate_mode") or "").lower()
+            is_revealed_climax = bool(sq_cs.get("is_unlocked")) and not bool(sq_cs.get("is_hidden"))
             if (
-                (wp_nid and c_nid and wp_nid == c_nid)
-                or (c_tgt and check_location_matches_waypoint(c_tgt, dest_loc, session_id=session_id))
-                or (ext_loc and check_location_matches_waypoint(ext_loc, dest_loc, session_id=session_id))
-                or (len(dest_leaf) >= 4 and dest_leaf in lbl_low)
+                is_revealed_climax
+                and climax_clean
+                and climax_clean.lower() not in ("local area", "area")
+                and "hidden lair" not in climax_clean.lower()
+                and not ("secret" in gate_mode and not sq_cs.get("is_unlocked"))
+                and not check_location_matches_waypoint(current_location, climax_clean, session_id=session_id)
             ):
-                node_id = wp_nid or c_nid or (str(db.resolve_node_id_from_location(session_id, dest_loc) or "") if session_id else "")
-                c.update({
-                    "is_quest_action": True,
-                    "is_story_quest": is_story,
-                    "is_climax_action": False,
-                    "_python_verified_quest": True,
-                    "_server_stamped": True,
-                    "quest_id": qid,
-                    "sub_obj_id": sub_obj_id,
-                    "stage_index": stage_idx,
-                    "contract_type": "travel",
-                    "approach": "travel",
-                    "intent": "movement",
-                    "stat": "FREE",
-                    "requirement": 0,
-                    "mp_cost": 0,
-                    "target_location": dest_loc,
-                    "target_node_id": node_id,
-                })
-                return
+                ok, tgt_nid = _is_remote_node_revealed_and_reachable(
+                    session_id,
+                    curr_nid,
+                    climax_clean,
+                    allow_active_quest_node=True,
+                )
+                if ok:
+                    main_st = sq_cs.get("main_stages") or []
+                    candidates.append({
+                        "bucket": 1,
+                        "stage_idx": max(1, len(main_st) + 1),
+                        "qid": sq_qid,
+                        "sub_obj_id": None,
+                        "is_story": True,
+                        "dest_loc": climax_clean,
+                        "target_nid": tgt_nid or str(sq_cs.get("node_id") or ""),
+                        "deadline_sort": (999999, 999999, 0.0),
+                    })
+    return candidates
 
-    _, stage_idx, qid, sub_obj_id, is_story, dest_loc, wp_nid = candidates[0]
+
+def _upgrade_or_insert_remote_travel_candidate(
+    cand: dict[str, Any],
+    result_choices: list[dict],
+    session_id: int,
+    session_row: Optional[dict],
+    eff_scen: str,
+    intimate_excl_words: tuple[str, ...],
+    insert_offset: int = 0,
+) -> int:
+    """Upgrades a matching LLM movement choice in-place or inserts a localized quest-travel choice; returns next offset."""
+    from localization import format_quest_travel_label
+    from mechanics.narrative.intent import classify_action_intent, IntentCategory, is_conversational_exit
+    from mechanics.narrative.quest_engines import normalize_quest_locale
+    from mechanics.social.intimate_excitement import is_intimate_action_label
+    from mechanics.world.locations.hierarchy import format_clean_location_badge
+    from mechanics.world.locations.movement import extract_movement_destination, is_movement_action
+
+    dest_loc = cand["dest_loc"]
+    wp_nid = cand["target_nid"]
+    stage_idx = cand["stage_idx"]
+    qid = cand["qid"]
+    sub_obj_id = cand["sub_obj_id"]
+    is_story = cand["is_story"]
+
+    dest_parts = [p.strip().lower() for p in dest_loc.replace("->", "➔").split("➔") if p.strip()]
+    dest_leaf = dest_parts[-1] if dest_parts else dest_loc.lower()
+    if dest_leaf in ("main area", "area", "") and len(dest_parts) >= 2:
+        dest_leaf = dest_parts[-2]
+
+    for c in result_choices:
+        if not isinstance(c, dict) or c.get("is_quest_action"):
+            continue
+        lbl_raw = str(c.get("label") or "")
+        lbl_low = lbl_raw.lower()
+        if is_intimate_action_label(lbl_low) or any(iw in lbl_low for iw in intimate_excl_words) or is_conversational_exit(lbl_low):
+            continue
+        if lbl_low.lstrip().startswith(("leave ", "exit ", "depart ")):
+            continue
+        c_int = str(c.get("intent") or "").strip().lower()
+        is_mv = (
+            c_int in ("movement", "travel", "fast_travel", "move")
+            or is_movement_action(lbl_raw)
+            or classify_action_intent(lbl_low).category == IntentCategory.MOVEMENT
+        )
+        if not is_mv:
+            continue
+        c_tgt = str(c.get("target_location") or "").strip()
+        c_nid = str(c.get("target_node_id") or "").strip()
+        ext_dest = extract_movement_destination(lbl_raw, session_id, scen_key=eff_scen) if session_id else None
+        ext_loc = f"{ext_dest[0]} ➔ {ext_dest[1]}" if ext_dest else ""
+        if (
+            (wp_nid and c_nid and wp_nid == c_nid)
+            or (c_tgt and check_location_matches_waypoint(c_tgt, dest_loc, session_id=session_id))
+            or (ext_loc and check_location_matches_waypoint(ext_loc, dest_loc, session_id=session_id))
+            or (len(dest_leaf) >= 4 and dest_leaf in lbl_low)
+        ):
+            node_id = wp_nid or c_nid or (str(db.resolve_node_id_from_location(session_id, dest_loc) or "") if session_id else "")
+            c.update({
+                "is_quest_action": True,
+                "is_story_quest": is_story,
+                "is_climax_action": False,
+                "_python_verified_quest": True,
+                "_server_stamped": True,
+                "quest_id": qid,
+                "sub_obj_id": sub_obj_id,
+                "stage_index": stage_idx,
+                "contract_type": "travel",
+                "approach": "travel",
+                "intent": "movement",
+                "stat": "FREE",
+                "requirement": 0,
+                "mp_cost": 0,
+                "target_location": dest_loc,
+                "target_node_id": node_id,
+            })
+            return insert_offset
+
     node_id = wp_nid or (str(db.resolve_node_id_from_location(session_id, dest_loc) or "") if session_id else "")
     eff_lang = normalize_quest_locale((session_row or {}).get("narration_language") or (session_row or {}).get("language") or "en")
     dest_disp = format_clean_location_badge(dest_loc, include_zone=True) or dest_loc
@@ -1027,7 +1111,8 @@ def _inject_or_upgrade_remote_quest_travel(
     ins_idx = 0
     while ins_idx < len(result_choices) and isinstance(result_choices[ins_idx], dict) and result_choices[ins_idx].get("_priority_slot"):
         ins_idx += 1
-    result_choices.insert(ins_idx, {
+    ins_pos = min(len(result_choices), ins_idx + insert_offset)
+    result_choices.insert(ins_pos, {
         "label": lbl,
         "stat": "FREE",
         "requirement": 0,
@@ -1051,6 +1136,162 @@ def _inject_or_upgrade_remote_quest_travel(
         "_python_verified_quest": True,
         "_server_stamped": True,
     })
+    return insert_offset + 1
+
+
+def _inject_or_upgrade_remote_quest_travel(
+    result_choices: list[dict],
+    session_id: int,
+    current_location: str,
+    session_row: Optional[dict],
+    remote_wps: list[dict],
+    story_quest: Optional[dict],
+    climax_loc: Optional[str],
+    climax_ready_at_loc: bool,
+    dossier_cache: dict[str, Any],
+    intimate_excl_words: tuple[str, ...],
+) -> None:
+    """Emits up to 2 remote [QUEST] travel choices in open exploration (1 Story + 1 tightest-deadline Bounty/Loyalty)."""
+    has_non_premature_sq = any(
+        isinstance(c, dict)
+        and c.get("is_quest_action")
+        and c.get("is_story_quest")
+        and not c.get("is_premature_climax")
+        for c in result_choices
+    )
+
+    has_non_story_q = any(
+        isinstance(c, dict)
+        and c.get("is_quest_action")
+        and not c.get("is_story_quest")
+        for c in result_choices
+    )
+    need_story_slot = not has_non_premature_sq
+    need_bounty_slot = not has_non_story_q
+    if not need_story_slot and not need_bounty_slot:
+        return
+
+    candidates = _collect_remote_quest_candidates(
+        session_id=session_id,
+        current_location=current_location,
+        session_row=session_row,
+        remote_wps=remote_wps,
+        story_quest=story_quest,
+        climax_loc=climax_loc,
+        climax_ready_at_loc=climax_ready_at_loc,
+        dossier_cache=dossier_cache,
+    )
+    if not candidates:
+        return
+
+    story_cands = sorted([c for c in candidates if c["is_story"]], key=lambda item: (item["bucket"], item["stage_idx"]))
+    bounty_cands = sorted(
+        [c for c in candidates if not c["is_story"]],
+        key=lambda item: (*item["deadline_sort"], item["stage_idx"]),
+    )
+
+    selected: list[dict[str, Any]] = []
+    chosen_story = story_cands[0] if (need_story_slot and story_cands) else None
+    if chosen_story is not None:
+        selected.append(chosen_story)
+
+    if need_bounty_slot and bounty_cands:
+        for b_cand in bounty_cands:
+            if chosen_story is not None:
+                same_nid = bool(b_cand["target_nid"] and chosen_story["target_nid"] and b_cand["target_nid"] == chosen_story["target_nid"])
+                same_loc = check_location_matches_waypoint(b_cand["dest_loc"], chosen_story["dest_loc"], session_id=session_id)
+                if same_nid or same_loc:
+                    continue
+            selected.append(b_cand)
+            break
+
+    eff_scen = str((session_row or {}).get("scenario") or "fantasy")
+    offset = 0
+    for cand in selected:
+        offset = _upgrade_or_insert_remote_travel_candidate(
+            cand=cand,
+            result_choices=result_choices,
+            session_id=session_id,
+            session_row=session_row,
+            eff_scen=eff_scen,
+            intimate_excl_words=intimate_excl_words,
+            insert_offset=offset,
+        )
+
+
+def _inject_dialogue_handoff_choice(
+    result_choices: list[dict],
+    session_id: int,
+    current_location: str,
+    session_row: Optional[dict],
+    remote_wps: list[dict],
+    story_quest: Optional[dict],
+    climax_loc: Optional[str],
+    climax_ready_at_loc: bool,
+    dossier_cache: dict[str, Any],
+    adv_qids: list[str],
+    active_dps: list[str],
+) -> None:
+    """Injects 1 diegetic 5-locale dialogue-handoff choice when a quest beat just advanced in active dialogue."""
+    if not adv_qids or not active_dps:
+        return
+    from localization import format_quest_dialogue_handoff_label
+    from mechanics.narrative.quest_engines import normalize_quest_locale
+    from mechanics.world.locations.hierarchy import format_clean_location_badge
+
+    candidates = _collect_remote_quest_candidates(
+        session_id=session_id,
+        current_location=current_location,
+        session_row=session_row,
+        remote_wps=remote_wps,
+        story_quest=story_quest,
+        climax_loc=climax_loc,
+        climax_ready_at_loc=climax_ready_at_loc,
+        dossier_cache=dossier_cache,
+        allowed_qids=set(adv_qids),
+    )
+    if not candidates:
+        return
+    candidates.sort(key=lambda item: (0 if item["is_story"] else 1, item["bucket"], item["stage_idx"]))
+    cand = candidates[0]
+    if any(
+        isinstance(c, dict)
+        and c.get("_quest_dialogue_handoff")
+        and str(c.get("quest_id") or "") == cand["qid"]
+        for c in result_choices
+    ):
+        return
+
+    node_id = cand["target_nid"] or (str(db.resolve_node_id_from_location(session_id, cand["dest_loc"]) or "") if session_id else "")
+    eff_lang = normalize_quest_locale((session_row or {}).get("narration_language") or (session_row or {}).get("language") or "en")
+    dest_disp = format_clean_location_badge(cand["dest_loc"], include_zone=True) or cand["dest_loc"]
+    lbl = format_quest_dialogue_handoff_label(active_dps[0], dest_disp, eff_lang)
+    result_choices.insert(0, {
+        "label": lbl,
+        "stat": "FREE",
+        "requirement": 0,
+        "mp_cost": 0,
+        "intent": "movement",
+        "sub_intent": "",
+        "target_npc": active_dps[0],
+        "ends_dialogue": True,
+        "is_fallback": False,
+        "quest_id": cand["qid"],
+        "sub_obj_id": cand["sub_obj_id"],
+        "stage_index": cand["stage_idx"],
+        "is_quest_action": True,
+        "is_story_quest": cand["is_story"],
+        "is_climax_action": False,
+        "contract_type": "travel",
+        "approach": "travel",
+        "target_location": cand["dest_loc"],
+        "target_node_id": node_id,
+        "gold_cost": 0,
+        "_priority_slot": False,
+        "_quest_dialogue_handoff": True,
+        "_python_verified_quest": True,
+        "_server_stamped": True,
+    })
 
 
 def tag_and_enrich_quest_choices(
@@ -1062,6 +1303,7 @@ def tag_and_enrich_quest_choices(
     dialogue_partner: Any = ...,
     current_npcs: list = None,
     allow_fallback: bool = True,
+    just_advanced_quest_ids: Optional[list[str]] = None,
 ) -> list[dict]:
     """
     Seamlessly inspects LLM-generated choices against active quest waypoints at the current location.
@@ -1269,6 +1511,17 @@ def tag_and_enrich_quest_choices(
         else:
             remote_wps.append(wp_tag_copy)
 
+    raw_adv_qids = (
+        just_advanced_quest_ids
+        if just_advanced_quest_ids is not None
+        else (
+            (session_row or {}).get("_just_advanced_quest_ids")
+            or (((session_row or {}).get("extra") or {}).get("_just_advanced_quest_ids") if isinstance((session_row or {}).get("extra"), dict) else None)
+            or []
+        )
+    )
+    adv_qids = [str(q).strip() for q in (raw_adv_qids or []) if str(q).strip()]
+
     can_inject_remote = bool(
         allow_fallback
         and not in_active_dialogue
@@ -1276,7 +1529,15 @@ def tag_and_enrich_quest_choices(
         and not _in_combat_now
         and (remote_wps or (story_quest and climax_loc and not climax_ready_at_loc))
     )
-    if not matching_wps and not climax_ready_at_loc and not premature_rush_at_loc and not appts_at_loc and not can_inject_remote:
+    can_inject_dialogue_handoff = bool(
+        allow_fallback
+        and in_active_dialogue
+        and not is_restrained
+        and not _in_combat_now
+        and adv_qids
+        and (remote_wps or (story_quest and climax_loc and not climax_ready_at_loc))
+    )
+    if not matching_wps and not climax_ready_at_loc and not premature_rush_at_loc and not appts_at_loc and not can_inject_remote and not can_inject_dialogue_handoff:
         return _strip_unverified_quest_flags(choices)
 
     result_choices = []
@@ -1881,6 +2142,21 @@ def tag_and_enrich_quest_choices(
             climax_ready_at_loc=climax_ready_at_loc,
             dossier_cache=_dossier_cache,
             intimate_excl_words=intimate_excl_words,
+        )
+
+    if can_inject_dialogue_handoff:
+        _inject_dialogue_handoff_choice(
+            result_choices=result_choices,
+            session_id=session_id,
+            current_location=current_location,
+            session_row=session_row,
+            remote_wps=remote_wps,
+            story_quest=story_quest,
+            climax_loc=climax_loc,
+            climax_ready_at_loc=climax_ready_at_loc,
+            dossier_cache=_dossier_cache,
+            adv_qids=adv_qids,
+            active_dps=active_dps,
         )
 
     # Strict Final Location Lock Guard:

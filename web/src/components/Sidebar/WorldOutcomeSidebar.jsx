@@ -342,6 +342,14 @@ const WorldOutcomeSidebar = ({
               <span className="flex items-center gap-1.5">
                 <Users size={14} className="text-fantasy-accent/90" />
                 <span>{t('scene.present', 'Present in Scene')}</span>
+                {session?.crowd_state?.density && session.crowd_state.density !== 'empty' && (
+                  <span
+                    className="px-1.5 py-0.2 rounded bg-amber-950/70 border border-amber-600/50 text-[10px] text-amber-200 font-semibold normal-case"
+                    title={session.crowd_state.flavor || ''}
+                  >
+                    {t(`scene.crowd_density_${session.crowd_state.density}`, session.crowd_state.density)}
+                  </span>
+                )}
               </span>
               <span className="px-1.5 py-0.2 rounded bg-black/70 border border-fantasy-border text-[11px] text-gray-200 font-bold">
                 {npcs.length}
@@ -419,6 +427,37 @@ const WorldOutcomeSidebar = ({
                   const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
                   const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
                   const showExcitement = !isAnomaly && isExcActive && excMeter !== null;
+                  const isBystanderCompact = !isAnomaly && !isPartner && typeof npc === 'object' && npc?.is_spotlight === false;
+                  if (isBystanderCompact) {
+                    const roleText = String(npc?.role || npc?.basic_info?.role || '').trim();
+                    return (
+                      <div
+                        key={`${name}-${idx}`}
+                        className="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md border border-neutral-800/75 bg-black/35 text-[11px] text-gray-300"
+                        title={roleText ? `${name} — ${roleText}` : name}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0 truncate">
+                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
+                          <span className="font-semibold text-gray-200 truncate">{name}</span>
+                          {roleText && (
+                            <span className="text-[10px] text-gray-400 truncate">({roleText})</span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {npc?.activity_tag && (
+                            <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-fantasy-950/50 border border-fantasy-border/30 text-amber-200/80">
+                              {npc.activity_tag}
+                            </span>
+                          )}
+                          {npc?.telltale_revealed && npc?.visible_tell_text && (
+                            <span className="text-[9.5px] px-1 rounded bg-purple-950/60 border border-purple-500/40 text-purple-200" title={npc.visible_tell_text}>
+                              👁️
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  }
 
                   return (
                     <div

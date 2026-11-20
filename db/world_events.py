@@ -380,6 +380,20 @@ def _persist_event_bounty_claim(
             loc_node_id = loc_node_id or ""
 
     micro_engine = "CRISIS_DEFENSE" if is_minor else "SOCIAL_BROKERAGE"
+    sess_lang_row = conn.execute(
+        "SELECT narration_language, language FROM sessions WHERE id = ?",
+        (session_id,),
+    ).fetchone()
+    sess_lang = (
+        str(
+            (sess_lang_row["narration_language"] if sess_lang_row else "")
+            or (sess_lang_row["language"] if sess_lang_row else "")
+            or "en"
+        )
+        .strip()
+        .lower()
+        or "en"
+    )
     conn.execute(
         """INSERT INTO quests (
             session_id, quest_id, quest_type, title, objective, status,
@@ -402,6 +416,7 @@ def _persist_event_bounty_claim(
             location_name=loc_label,
             is_minor=is_minor,
             turn_number=int(turn_number),
+            lang=sess_lang,
             conn=conn,
             sync_waypoints=False,
         )

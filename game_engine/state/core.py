@@ -843,6 +843,15 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                 _r_ops = outcome["_staged_roster_ops"]
                 from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
                 from mechanics.world.venue_templates import is_node_staffable
+                from mechanics.social.population_seeder import ensure_world_population_seeded
+
+                for _ps in (_r_ops.get("population_seed") or []):
+                    if isinstance(_ps, dict):
+                        ensure_world_population_seeded(
+                            session_id,
+                            scen_key=str(_ps.get("scen_key") or "fantasy"),
+                            turn_number=int(_ps.get("turn_number") or 0),
+                        )
 
                 for _vs in (_r_ops.get("venue_seeds") or []):
                     if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
@@ -919,6 +928,9 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                             appearance=_ru.get("appearance"),
                             traits=list(_ru.get("traits") or []),
                         )
+                _vh_list = [v for v in (_r_ops.get("visual_hydrations") or []) if isinstance(v, dict)]
+                if _vh_list:
+                    db.hydrate_world_roster_visuals(session_id, _vh_list)
             except Exception as _ro_err:
                 log.warning("Failed committing staged roster ops: %s", _ro_err)
 
@@ -1059,6 +1071,14 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         _reduce_factions(session_id, session, outcome, party, first_char_id)
 
         _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
+        if isinstance(outcome, dict) and session_id:
+            _just_adv_qids = list(dict.fromkeys(str(q) for q in (outcome.get("_quests_advanced_this_turn") or []) if q))
+            if isinstance(session, dict):
+                session["_just_advanced_quest_ids"] = _just_adv_qids
+            try:
+                db.update_session(session_id, extra={"_just_advanced_quest_ids": _just_adv_qids})
+            except Exception:
+                pass
         _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
         if not outcome.get("_b17_neutralized"):
             _b17_killed = list(outcome.get("deceased_characters") or []) + list(outcome.get("dead_enemies") or [])
@@ -1134,7 +1154,12 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     outcome["_b17_neutralized"] = True
         if outcome.get("epistemic_signal"):
             from mechanics.social.epistemic_engine import resolve_fenced_epistemic_signal
-            _uid = int(session.get("user_id") or 0)
+            _lead_party_uid = (
+                party[0][0].get("user_id")
+                if party and isinstance(party[0], (tuple, list)) and party[0] and isinstance(party[0][0], dict)
+                else 0
+            )
+            _uid = int(session.get("user_id") or session.get("host_user_id") or _lead_party_uid or 0)
             _inv = db.get_inventory(_uid) if _uid else []
             _held_ids = [
                 str(it.get("id") or it.get("item_id") or "")
@@ -1147,10 +1172,16 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                 for cl in (_clues or [])
                 if isinstance(cl, dict) and cl.get("id")
             ]
+            _ep_present_npcs = (
+                outcome.get("npcs_present")
+                or session.get("current_npcs")
+                or session.get("npcs")
+                or []
+            )
             resolve_fenced_epistemic_signal(
                 session_id,
                 outcome["epistemic_signal"],
-                present_npcs=session.get("npcs") or [],
+                present_npcs=_ep_present_npcs,
                 held_item_ids=_held_ids,
                 clue_ids=_clue_ids,
                 turn=int(session.get("turn_count") or 0),

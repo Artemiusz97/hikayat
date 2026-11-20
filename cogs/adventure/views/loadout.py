@@ -249,6 +249,18 @@ class LoadoutClassSelectView(discord.ui.View):
                     default=(starting_faction == "monastic_order"),
                 ),
                 discord.SelectOption(
+                    label="Occult Cult",
+                    value="cult_faction",
+                    description="0.85x Ritual Shop • -50% Pact Tithes • 4 Resonator Charges • Cult Sanctum Start",
+                    default=(starting_faction == "cult_faction"),
+                ),
+                discord.SelectOption(
+                    label="Clandestine Syndicate",
+                    value="clandestine_faction",
+                    description="+35% Bounty Gold • +40% Fence Sell • Signal Wiretap • Syndicate Cellar Start",
+                    default=(starting_faction == "clandestine_faction"),
+                ),
+                discord.SelectOption(
                     label="Independent Freelancer",
                     value="freelancer",
                     description="No Daily Quotas • Street & Improvised Gear • Suburb Home Start",
@@ -1020,7 +1032,15 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
             cfg["verbosity"], cfg["dialogue"], cfg["image_gen"],
             cfg["choices_style"], interaction.channel_id,
             scenario=cfg["scenario"],
-            result_display=cfg["result_display"]
+            result_display=cfg["result_display"],
+            combat_ui_style=cfg.get("combat_ui_style", "battle_deck"),
+            show_percentages=cfg.get("show_percentages", 1),
+            language=cfg.get("language", "en"),
+            narration_language=cfg.get("narration_language"),
+            character_id=cfg.get("character_id"),
+            narrative_pacing=cfg.get("pacing", "balanced"),
+            show_enemy_hp=cfg.get("show_enemy_hp", 1),
+            show_enemy_intent=cfg.get("show_enemy_intent", 1),
         )
         import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(cfg.get("scenario", "")):

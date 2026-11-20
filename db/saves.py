@@ -420,6 +420,16 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         }
         sess_data.setdefault("combat_threat_ledger_json", "{}")
         sess_data.setdefault("combat_boss_telegraph_json", "{}")
+        sess_data.setdefault("show_enemy_hp", 1)
+        sess_data.setdefault("show_enemy_intent", 1)
+        if not sess_data.get("narrative_pacing"):
+            sess_data["narrative_pacing"] = (
+                "concise"
+                if str(sess_data.get("verbosity") or "").strip().lower() in ("concise", "direct")
+                else "balanced"
+            )
+        if str(sess_data.get("verbosity") or "").strip().lower() in ("concise", "direct"):
+            sess_data["verbosity"] = "normal"
         sess_data = {k: v for k, v in sess_data.items() if k in valid_session_cols}
 
         # Make sure any dict/list fields are serialized
@@ -617,6 +627,11 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                                     row_dict[_csnap_col] = json.dumps(parsed_csnap)
                             except Exception:
                                 pass
+                elif tbl == "quests":
+                    if old_session_id and "remediation_scar:" in str(row_dict.get("quest_notes") or ""):
+                        old_scar_tok = f"remediation_scar:scar_{int(old_session_id)}_"
+                        new_scar_tok = f"remediation_scar:scar_{int(new_session_id)}_"
+                        row_dict["quest_notes"] = str(row_dict["quest_notes"]).replace(old_scar_tok, new_scar_tok)
                 elif tbl == "world_events":
                     ek = row_dict.get("event_key", "")
                     if old_session_id and ek:
@@ -758,8 +773,12 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
 
         # Backfill Migration 57 anomalous locations integrity on save load
         try:
-            from mechanics.world.anomalous_sites.lifecycle import backfill_anomalous_locations_integrity_v57
+            from mechanics.world.anomalous_sites.lifecycle import (
+                backfill_anomalous_locations_integrity_v57,
+                backfill_outlaw_faction_hqs_and_residences_v60,
+            )
             backfill_anomalous_locations_integrity_v57(conn, session_id=new_session_id)
+            backfill_outlaw_faction_hqs_and_residences_v60(conn, session_id=new_session_id)
         except Exception:
             pass
 
@@ -834,7 +853,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 return out
             if isinstance(obj, list):
                 return [_remap_nested_session_keys(x) for x in obj]
-            if isinstance(obj, str) and re.match(r"^(?:lt|nem|hh|rv|cm|we|bible|rendezvous|promise|pact|grudge)_\d+(?:_|$)", obj):
+            if isinstance(obj, str) and re.match(r"^(?:lt|nem|hh|rv|cm|we|scar|bible|rendezvous|promise|pact|grudge)_\d+(?:_|$)", obj):
                 return _rewrite_session_key_id(obj, old_session_id, new_session_id)
             return obj
 

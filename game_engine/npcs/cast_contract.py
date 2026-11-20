@@ -120,10 +120,10 @@ async def repair_cast_contract_violations(
             _REPAIR_SYSTEM_PROMPT,
             user_prompt,
             temperature=0.3,
-            max_tokens=600,
+            max_tokens=380,
             retries=0,
             use_utility=True,
-            timeout=25,
+            timeout=8,
         )
     except Exception as e:
         log.warning("[CastContract] Repair call failed; violation logged only: %s", e)

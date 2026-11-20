@@ -1778,7 +1778,8 @@ def seed_contact_social_graph(
         elif provided_partner and isinstance(provided_partner, dict) and provided_partner.get("name"):
             p_name = provided_partner["name"]
             p_role = provided_partner.get("role", "Partner")
-            if not is_player_person_key(p_name):
+            p_disp_name = _resolve_player_display_name(session_id, c)
+            if not is_player_person_key(p_name) and str(p_name).strip().lower() != str(p_disp_name or "").strip().lower():
                 p_key = canonical_person_key(p_name)
                 get_or_create_person(session_id, p_name, person_key=p_key, role=p_role, origin="procedural", conn=c)
                 form_tie(session_id, c_key, p_key, TIETYPE_DATING, closeness=70, origin="procedural", turn=0, materialize=False, conn=c)

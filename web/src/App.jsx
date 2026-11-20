@@ -22,10 +22,10 @@ function App() {
   } = useAuth();
 
   const {
-    session, setSession, pausedOnDashboard, loading: sessionLoading, processingTurn, pendingAction, isStreaming, streamingNarrative, streamingState,
+    session, setSession, pausedOnDashboard, loading: sessionLoading, processingTurn, pendingAction, isStreaming, isThinking, cancellingTurn, streamingNarrative, streamingState,
     waitingForParty, partyStatus, lastSyncTimestamp,
     partyChatMessages, onlineUserIds, sendPartyChat,
-    startSession, joinSession, submitAction,
+    startSession, joinSession, submitAction, cancelTurn,
     exitToDashboard, resumeSession, resumeSessionSlot, endSession, endSessionById, retryGeneration,
     rerollImage, rerollingImage,
     actionError, clearActionError,
@@ -94,6 +94,8 @@ function App() {
       processingTurn={processingTurn}
       pendingAction={pendingAction}
       isStreaming={isStreaming}
+      isThinking={isThinking}
+      cancellingTurn={cancellingTurn}
       streamingNarrative={streamingNarrative}
       streamingState={streamingState}
       waitingForParty={waitingForParty}
@@ -102,6 +104,7 @@ function App() {
       onlineUserIds={onlineUserIds}
       sendPartyChat={sendPartyChat}
       submitAction={submitAction}
+      cancelTurn={cancelTurn}
       exitToDashboard={exitToDashboard}
       endSession={endSession}
       retryGeneration={retryGeneration}

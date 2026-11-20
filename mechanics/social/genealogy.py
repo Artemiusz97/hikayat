@@ -2111,7 +2111,7 @@ def ensure_contact_relations(
                     bg_p = existing["romance"].get("current_partner")
                     if bg_p and isinstance(bg_p, dict) and bg_p.get("name"):
                         bg_name = bg_p["name"].strip()
-                        if not rg.is_player_person_key(bg_name):
+                        if not rg.is_player_person_key(bg_name) and bg_name.lower() != str(player_name or "").strip().lower():
                             bg_key = rg.canonical_person_key(bg_name)
                             rg.get_or_create_person(session_id, bg_name, person_key=bg_key, role=bg_p.get("role", "Partner"))
                             curr_partner = rg.get_current_partner(session_id, c_key)

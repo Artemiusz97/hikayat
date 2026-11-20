@@ -201,6 +201,7 @@ QUEST_UI_LABELS = {
     "shortcut_active": "捷径已开启",
     "bypassed": "已绕过",
     "quest_travel_to": "前往{dest}",
+    "quest_wrap_up_and_head_to": "结束与{npc}的交谈，前往{dest}",
 }
 
 PACT_UI_LABELS = {
@@ -237,4 +238,13 @@ ANOMALOUS_SITE_UI_LABELS = {
     "milestone_22_reward": "野外谐振器升级（每日 4 次充能）",
     "milestone_36_title": "都市守护者勋章（36/36 站点）",
     "milestone_36_reward": "+30 声望、每日 5 次充能与守护者以太精密时计圣遗物"
+}
+
+CROWD_DENSITY_LABELS = {
+    "quiet": "冷清",
+    "moderate": "适中",
+    "bustling": "热闹",
+    "packed": "拥挤",
+    "crowd_label": "人潮",
+    "nearby_bystanders": "周围路人"
 }

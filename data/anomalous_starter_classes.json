@@ -1724,6 +1724,560 @@
           "Shield": null
         }
       }
+    },
+    "cult_faction": {
+      "Rift Vessel Acolyte": {
+        "description": "Initiated vessel-keeper trained to house restrained abyssal sparks safely beneath warded garments and stabilize volatile reality fractures.",
+        "starting_items": [
+          [
+            "Consecrated Obsidian Phial",
+            "Consumable",
+            "Distilled ichor draught calming unstable resonance tremors and restoring focus.",
+            1
+          ],
+          [
+            "Rift Harmonic Tuning Fork",
+            "Tool",
+            "Cold-iron fork chiming in sympathetic pitch with nearby spatial tears.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Veiled Obsidian Half-Mask",
+            "Hand-stitched silk and matte basalt visor concealing initiate markings.",
+            1
+          ],
+          "Weapon": [
+            "Obsidian Sacrificial Athame",
+            "Flaked volcanic-glass ritual dagger etched with vessel-binding runes.",
+            2
+          ],
+          "Armor": [
+            "Sigil-Inlaid Leather Harness",
+            "Supple black harness reinforced with ward-stamped bronze plaques.",
+            2
+          ],
+          "Top": [
+            "Hooded Sanctuary Vestment Coat",
+            "Floor-length occult overcoat lined with geometric aether stitching.",
+            2
+          ],
+          "Bottom": [
+            "Draped Ritual Skirt / Pleated Sanctuary Trousers",
+            "Dark liturgical garment stitched with reinforced silver hems.",
+            1
+          ],
+          "Gloves": [
+            "Rune-Embroidered Silk Gauntlets",
+            "Dark finger-fitted gloves grounding volatile invocation currents.",
+            1
+          ],
+          "Shoes": [
+            "Soft-Soled Catacomb Boots",
+            "Silent calfskin boots built for damp basalt stairways beneath the city.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Apocrypha Scribe": {
+        "description": "Esoteric lorekeeper who deciphers pre-human monolith rubbings and wields forbidden ritual treatises alongside razor kris blades.",
+        "starting_items": [
+          [
+            "Apocrypha Cipher Codex",
+            "Tool",
+            "Brass-clasped notebook indexing entity taboos and sealing hymns.",
+            1
+          ],
+          [
+            "Smoked Myrrh Incense Bundle",
+            "Consumable",
+            "Heavy resin incense soothing spiritual backlash during rites.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Brass-Rimmed Occult Monocle",
+            "Etched crystal lens revealing faint ley-line script and aura fractures.",
+            1
+          ],
+          "Weapon": [
+            "Ritual Kris Dagger",
+            "Wave-bladed ceremonial dagger forged from meteoric iron.",
+            2
+          ],
+          "Armor": [
+            "Parchment-Lined Brigandine Vest",
+            "Flexible dark vest stuffed with prayer-warded vellum strips.",
+            2
+          ],
+          "Top": [
+            "High-Collar Archivist Robe-Coat",
+            "Structured midnight coat with inner scroll holsters.",
+            2
+          ],
+          "Bottom": [
+            "Tailored Ink-Black Sanctuary Slacks",
+            "Reinforced dark wool trousers sewn for underground archives.",
+            1
+          ],
+          "Gloves": [
+            "Ink-Stained Scribe Half-Gloves",
+            "Fine kidskin gloves leaving index fingertips bare for sigil tracing.",
+            1
+          ],
+          "Shoes": [
+            "Buckled Basalt-Tread Oxfords",
+            "Quiet rubber-soled leather shoes for slick stone corridors.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Abyssal Cantor": {
+        "description": "Liturgical chanter who broadcasts counter-frequencies across broken radio bands to pacify rogue entities and fracture rival wards.",
+        "starting_items": [
+          [
+            "Harmonic Resonance Bell",
+            "Tool",
+            "Tarnished bronze handbell tuned to dead-frequency rift harmonics.",
+            1
+          ],
+          [
+            "Resonance-Calming Elixir",
+            "Consumable",
+            "Bitter herbal distillation easing vocal strain and psychic static.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Gold-Threaded Choir Veil",
+            "Draped silk cowl dampening hostile cognitohazard static.",
+            1
+          ],
+          "Weapon": [
+            "Hex-Carved Ceremonial Staff",
+            "Blackwood ritual staff crowned with interlocking iron resonance rings.",
+            2
+          ],
+          "Armor": [
+            "Censer-Chain Ritual Breastplate",
+            "Lightweight blackened steel chestpiece threaded with copper ward wire.",
+            2
+          ],
+          "Top": [
+            "Flowing Choir-Liturgist Cassock",
+            "Layered crimson-trimmed vestment coat tailored for rhythmic channeling.",
+            2
+          ],
+          "Bottom": [
+            "Draped Ritual Skirt / Pleated Sanctuary Trousers",
+            "Flowing dark liturgical garment reinforced for rapid traversal.",
+            1
+          ],
+          "Gloves": [
+            "Copper-Threaded Cantor Wraps",
+            "Conductive ritual wraps focusing sound and aether invocations.",
+            1
+          ],
+          "Shoes": [
+            "Soft-Soled Catacomb Boots",
+            "Silent leather boots built for echoing under-city vaults.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Blood-Ward Ritualist": {
+        "description": "Covenant enforcer anchoring blood-pact thresholds and crushing rogue usurpers with heavy iron censers and fortified wards.",
+        "starting_items": [
+          [
+            "Sanguine Ward Chalk",
+            "Tool",
+            "Mineral-infused crimson chalk drawing rapid containment circles.",
+            2
+          ],
+          [
+            "Coagulant Tincture Vial",
+            "Consumable",
+            "Concentrated alchemical phial sealing bleed wounds mid-rite.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Iron-Crowned Acolyte Hood",
+            "Heavy cowled hood reinforced with concealed brow plating.",
+            1
+          ],
+          "Weapon": [
+            "Cursed Iron Censer Mace",
+            "Weighted flanged iron mace hollowed to burn smoldering ritual resin.",
+            2
+          ],
+          "Armor": [
+            "Obsidian-Studded Coat of Plates",
+            "Heavy layered leather and dark iron chestplate bearing pact seals.",
+            3
+          ],
+          "Top": [
+            "Blood-Trimmed Sanctum Surcoat",
+            "Sturdy sleeveless surcoat worn over heavy padded ritual sleeves.",
+            1
+          ],
+          "Bottom": [
+            "Strapped Combat Cassock Trousers",
+            "Heavy reinforced trousers buckled at the shin for stance stability.",
+            2
+          ],
+          "Gloves": [
+            "Riveted Ritualist Gauntlets",
+            "Iron-knuckled leather gauntlets built for heavy mace blows.",
+            1
+          ],
+          "Shoes": [
+            "Hobnailed Sanctuary Greave-Boots",
+            "Steel-shanked high boots suited for shattering bone and concrete.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Sanctum Inquisitor": {
+        "description": "Covert internal auditor hunting rogue cult splinters and black-market poachers with braided thorn whips and counter-ward sigils.",
+        "starting_items": [
+          [
+            "Seal-Breaking Salt Vial",
+            "Consumable",
+            "Volatile consecrated ash that corrodes rival barriers on impact.",
+            1
+          ],
+          [
+            "Obsidian Scrying Mirror",
+            "Tool",
+            "Pocket polished-obsidian disk detecting masked entities and watchers.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Veiled Obsidian Half-Mask",
+            "Silent matte visor shielding eyes from sudden flash-wards.",
+            1
+          ],
+          "Weapon": [
+            "Serpent-Tooth Ceremonial Whip",
+            "Braided black-leather ritual lash studded with cold-iron barbs.",
+            2
+          ],
+          "Armor": [
+            "Sigil-Inlaid Leather Harness",
+            "Form-fitting ward harness layered smoothly under an inquisitor coat.",
+            2
+          ],
+          "Top": [
+            "Hooded Sanctuary Vestment Coat",
+            "Weathered charcoal coat lined with geometric occult pockets.",
+            2
+          ],
+          "Bottom": [
+            "Tailored Ink-Black Sanctuary Slacks",
+            "Flexible dark trousers built for stealth and sudden lunges.",
+            1
+          ],
+          "Gloves": [
+            "Rune-Embroidered Silk Gauntlets",
+            "Grip-lined ritual gloves resisting whip backlash.",
+            1
+          ],
+          "Shoes": [
+            "Soft-Soled Catacomb Boots",
+            "Quiet cushioned boots designed for midnight urban pursuit.",
+            1
+          ],
+          "Shield": null
+        }
+      }
+    },
+    "clandestine_faction": {
+      "Black-Bag Relic Smuggler": {
+        "description": "Covert logistics specialist moving uncatalogued altered items through municipal checkpoints with lead-lined briefcases and suppressed submachine guns.",
+        "starting_items": [
+          [
+            "Lead-Lined Smuggler Case",
+            "Tool",
+            "Compact shielded courier case masking anomalous signatures from scanners.",
+            1
+          ],
+          [
+            "Black-Market Adrenal Ampoule",
+            "Consumable",
+            "Unregulated combat stimulant boosting stamina during rapid exfiltration.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Low-Light Scramble Visor",
+            "Polarized matte-black frames defeating municipal facial-recognition cameras.",
+            1
+          ],
+          "Weapon": [
+            "Silenced Black-Market SMG",
+            "Serial-scrubbed compact submachine gun fitted with an integral baffle suppressor.",
+            2
+          ],
+          "Armor": [
+            "Stealth Ceramic Concealment Vest",
+            "Featherweight composite plate carrier contoured to vanish beneath coats.",
+            2
+          ],
+          "Top": [
+            "Matte-Black Covert Operator Jacket",
+            "All-weather covert shell lined with Faraday-mesh relic holsters.",
+            2
+          ],
+          "Bottom": [
+            "Reinforced Black Stealth Cargo Pants",
+            "Articulated ripstop trousers with silenced hook-and-loop pockets.",
+            1
+          ],
+          "Gloves": [
+            "Zero-Print Nitrile Operator Gloves",
+            "Textured grip gloves leaving no forensic trace on triggers or locks.",
+            1
+          ],
+          "Shoes": [
+            "Silent-Tread Shadow Runners",
+            "Soft-compound dark tactical sneakers muffled against wet steel grates.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Signal Intercept Specialist": {
+        "description": "Counter-intel wiretapper who hijacks agency dispatch frequencies, scrubs forensic telemetry, and strikes cleanly with unmarked covert pistols.",
+        "starting_items": [
+          [
+            "Encrypted Burst Transceiver",
+            "Tool",
+            "Frequency-hopping scanner intercepting Bureau and corporate patrol comms.",
+            1
+          ],
+          [
+            "Faraday Foil Decoy Pouch",
+            "Tool",
+            "Shielded signal sleeve isolating hijacked transmitters from triangulation.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Bone-Conduction Wiretap Headset",
+            "Concealed matte earpiece paired with anti-glare night lenses.",
+            1
+          ],
+          "Weapon": [
+            "Unmarked .380 Covert Pistol",
+            "Pocket-sized suppressed pistol stripped of all factory markings.",
+            2
+          ],
+          "Armor": [
+            "Faraday-Lined Aramid Waistcoat",
+            "Tailored Kevlar waistcoat shielding vital organs and encrypted drives.",
+            2
+          ],
+          "Top": [
+            "Cutout Trench & Burner Rig",
+            "Unassuming charcoal trenchcoat fitted with concealed antenna seams.",
+            2
+          ],
+          "Bottom": [
+            "Tailored Charcoal Wiretap Skirt / Tailored Shadow Slacks",
+            "Sharp urban attire reinforced against shrapnel and abrasion.",
+            1
+          ],
+          "Gloves": [
+            "Conductive Touch-Screen Operator Gloves",
+            "Thin slate gloves allowing rapid keypad bursts in freezing rain.",
+            1
+          ],
+          "Shoes": [
+            "Rubber-Soled Black Broker Brogues",
+            "Low-profile city shoes concealing steel shanks and silent heels.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Shadow Brokerage Fixer": {
+        "description": "Calculating underworld negotiator who arranges midnight relic auctions and settles defaulted contracts from long range with takedown rifles.",
+        "starting_items": [
+          [
+            "Cold-Storage Escrow Key",
+            "Tool",
+            "Hardware cryptographic key tied to Directorate Zero dead-drop lockers.",
+            1
+          ],
+          [
+            "Street-Grade Trauma Auto-Shot",
+            "Consumable",
+            "Compact unmarked trauma pen sealing wounds without hospital records.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Voice-Modulator Collar & Shades",
+            "High-collar acoustic scrambler paired with dark mirrored sunglasses.",
+            1
+          ],
+          "Weapon": [
+            "Black-Ops Takedown Rifle",
+            "Suppressor-ready breakdown marksman rifle packed neatly into an attache case.",
+            2
+          ],
+          "Armor": [
+            "Executive Ballistic Silk Liner",
+            "Bespoke aramid under-layer woven directly beneath tailored suiting.",
+            2
+          ],
+          "Top": [
+            "Tailored Charcoal Syndicate Suit",
+            "Immaculate dark suit concealing dual shoulder rigs and escrow drives.",
+            2
+          ],
+          "Bottom": [
+            "Tailored Charcoal Wiretap Skirt / Tailored Shadow Slacks",
+            "Crisp dark trousers cut for sudden sprints from botched meets.",
+            1
+          ],
+          "Gloves": [
+            "Zero-Print Nitrile Operator Gloves",
+            "Sleek matte-black driving and trigger gloves.",
+            1
+          ],
+          "Shoes": [
+            "Rubber-Soled Black Broker Brogues",
+            "Polished dark brogues reinforced with traction treads.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Contraband Asset Cleaner": {
+        "description": "Black-bag erasure operative eliminating loose ends and rogue containment witnesses with silent monofilament lashes and chemical scrubs.",
+        "starting_items": [
+          [
+            "Forensic Enzyme Neutralizer",
+            "Consumable",
+            "Pressurized spray dissolving blood traces and anomalous spore residue.",
+            2
+          ],
+          [
+            "Hydraulic Lock-Bypass Pick",
+            "Tool",
+            "Titanium tension tool defeating containment vault mag-locks.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Matte-Black Half-Balaclava & Goggles",
+            "Close-fitting tactical mask filtering chemical fumes and ash.",
+            1
+          ],
+          "Weapon": [
+            "Monofilament Garrote Whip",
+            "Weighted tungsten-wire whip coiled inside a wrist-mounted spool.",
+            2
+          ],
+          "Armor": [
+            "Stealth Ceramic Concealment Vest",
+            "Low-silhouette chest rig coated in sound-deadening matte polymer.",
+            2
+          ],
+          "Top": [
+            "Matte-Black Covert Operator Jacket",
+            "Water-repellent dark field jacket shedding stains and chemical mist.",
+            2
+          ],
+          "Bottom": [
+            "Reinforced Black Stealth Cargo Pants",
+            "Slim articulated trousers built for silent duct and rooftop entry.",
+            1
+          ],
+          "Gloves": [
+            "Wire-Reinforced Cleaner Gauntlets",
+            "Cut-proof Kevlar gloves built to handle monofilament tension.",
+            1
+          ],
+          "Shoes": [
+            "Silent-Tread Shadow Runners",
+            "Noiseless black boots leaving untraceable flat soles.",
+            1
+          ],
+          "Shield": null
+        }
+      },
+      "Faraday Breach Operator": {
+        "description": "Heavy black-vault enforcer neutralizing rogue shock-caged specimens and ambushing rival convoys with lead-cased shotguns and Faraday shielding.",
+        "starting_items": [
+          [
+            "Portable Jammer Puck",
+            "Tool",
+            "Palm-sized directional RF jammer scrambling agency distress beacons.",
+            1
+          ],
+          [
+            "Black-Market Adrenal Ampoule",
+            "Consumable",
+            "High-output synthetic stim keeping reflexes sharp through concussion shock.",
+            1
+          ]
+        ],
+        "starter_gear": {
+          "Head": [
+            "Faraday-Shielded Assault Helmet",
+            "Matte-black ballistic helmet wired with copper counter-jammer coils.",
+            1
+          ],
+          "Weapon": [
+            "Lead-Cased Breaching Shotgun",
+            "Heavy pump shotgun shielded against anomalous discharge misfires.",
+            2
+          ],
+          "Armor": [
+            "Black-Vault Heavy Plate Carrier",
+            "Modular armored chest rig insulated against high-voltage containment arcs.",
+            3
+          ],
+          "Top": [
+            "Rubberized Breacher Combat Shirt",
+            "Insulated tactical shirt layered under heavy armor harnesses.",
+            1
+          ],
+          "Bottom": [
+            "Reinforced Black Stealth Cargo Pants",
+            "Padded knee-insert cargo pants built for breaching doors.",
+            2
+          ],
+          "Gloves": [
+            "Insulated Breacher Knuckle Gloves",
+            "High-voltage rubberized leather gloves with weighted knuckles.",
+            1
+          ],
+          "Shoes": [
+            "Steel-Shank Black Vault Boots",
+            "Insulated heavy boots grounded against electrified grates.",
+            1
+          ],
+          "Shield": null
+        }
+      }
     }
   },
   "faction_weapons": {
@@ -1774,6 +2328,22 @@
       "Sawed-Off Street Scattergun",
       "Modified Gauss Coil-Carbine",
       "Folding Takedown Marksman Carbine"
+    ],
+    "cult_faction": [
+      "Obsidian Sacrificial Athame",
+      "Ritual Kris Dagger",
+      "Hex-Carved Ceremonial Staff",
+      "Cursed Iron Censer Mace",
+      "Serpent-Tooth Ceremonial Whip",
+      "Grimoire-Bound Twin Shortsword"
+    ],
+    "clandestine_faction": [
+      "Silenced Black-Market SMG",
+      "Unmarked .380 Covert Pistol",
+      "Black-Ops Takedown Rifle",
+      "Monofilament Garrote Whip",
+      "Lead-Cased Breaching Shotgun",
+      "Arc-Taser Shock Baton"
     ]
   },
   "faction_starter_outfits": {
@@ -2278,6 +2848,174 @@
         [
           "Clip-On Campus & Hume Pager",
           "Pocket keychain charm that vibrates quietly when an anomaly rift opens nearby."
+        ]
+      ]
+    },
+    "cult_faction": {
+      "Head": [
+        [
+          "Veiled Obsidian Half-Mask",
+          "Hand-stitched silk and matte basalt visor concealing initiate markings."
+        ],
+        [
+          "Brass-Rimmed Occult Monocle",
+          "Etched crystal lens revealing faint ley-line script and aura fractures."
+        ],
+        [
+          "Gold-Threaded Choir Veil",
+          "Draped silk cowl dampening hostile cognitohazard static."
+        ]
+      ],
+      "Armor": [
+        [
+          "Sigil-Inlaid Leather Harness",
+          "Supple black harness reinforced with ward-stamped bronze plaques."
+        ],
+        [
+          "Parchment-Lined Brigandine Vest",
+          "Flexible dark vest stuffed with prayer-warded vellum strips."
+        ],
+        [
+          "Censer-Chain Ritual Breastplate",
+          "Lightweight blackened steel chestpiece threaded with copper ward wire."
+        ]
+      ],
+      "Top": [
+        [
+          "Hooded Sanctuary Vestment Coat",
+          "Floor-length occult overcoat lined with geometric aether stitching."
+        ],
+        [
+          "High-Collar Archivist Robe-Coat",
+          "Structured midnight coat with inner scroll holsters."
+        ],
+        [
+          "Flowing Choir-Liturgist Cassock",
+          "Layered crimson-trimmed vestment coat tailored for rhythmic channeling."
+        ]
+      ],
+      "Bottom": [
+        [
+          "Draped Ritual Skirt / Pleated Sanctuary Trousers",
+          "Dark liturgical garment stitched with reinforced silver hems."
+        ],
+        [
+          "Tailored Ink-Black Sanctuary Slacks",
+          "Reinforced dark wool trousers sewn for underground archives."
+        ]
+      ],
+      "Gloves": [
+        [
+          "Rune-Embroidered Silk Gauntlets",
+          "Dark finger-fitted gloves grounding volatile invocation currents."
+        ],
+        [
+          "Ink-Stained Scribe Half-Gloves",
+          "Fine kidskin gloves leaving index fingertips bare for sigil tracing."
+        ]
+      ],
+      "Shoes": [
+        [
+          "Soft-Soled Catacomb Boots",
+          "Silent calfskin boots built for damp basalt stairways beneath the city."
+        ],
+        [
+          "Buckled Basalt-Tread Oxfords",
+          "Quiet rubber-soled leather shoes for slick stone corridors."
+        ]
+      ],
+      "Accessory 1": [
+        [
+          "Basalt Covenant Signet Ring",
+          "Heavy cold-iron ring etched with the hidden sanctum's geometric cipher."
+        ],
+        [
+          "Vial-Clasp Silver Thurible Pendant",
+          "Hollowed ritual pendant retaining faint sanctuary resin smoke."
+        ]
+      ]
+    },
+    "clandestine_faction": {
+      "Head": [
+        [
+          "Low-Light Scramble Visor",
+          "Polarized matte-black frames defeating municipal facial-recognition cameras."
+        ],
+        [
+          "Bone-Conduction Wiretap Headset",
+          "Concealed matte earpiece paired with anti-glare night lenses."
+        ],
+        [
+          "Voice-Modulator Collar & Shades",
+          "High-collar acoustic scrambler paired with dark mirrored sunglasses."
+        ]
+      ],
+      "Armor": [
+        [
+          "Stealth Ceramic Concealment Vest",
+          "Featherweight composite plate carrier contoured to vanish beneath coats."
+        ],
+        [
+          "Faraday-Lined Aramid Waistcoat",
+          "Tailored Kevlar waistcoat shielding vital organs and encrypted drives."
+        ],
+        [
+          "Executive Ballistic Silk Liner",
+          "Bespoke aramid under-layer woven directly beneath tailored suiting."
+        ]
+      ],
+      "Top": [
+        [
+          "Matte-Black Covert Operator Jacket",
+          "All-weather covert shell lined with Faraday-mesh relic holsters."
+        ],
+        [
+          "Cutout Trench & Burner Rig",
+          "Unassuming charcoal trenchcoat fitted with concealed antenna seams."
+        ],
+        [
+          "Tailored Charcoal Syndicate Suit",
+          "Immaculate dark suit concealing dual shoulder rigs and escrow drives."
+        ]
+      ],
+      "Bottom": [
+        [
+          "Tailored Charcoal Wiretap Skirt / Tailored Shadow Slacks",
+          "Sharp urban attire reinforced against shrapnel and abrasion."
+        ],
+        [
+          "Reinforced Black Stealth Cargo Pants",
+          "Articulated ripstop trousers with silenced hook-and-loop pockets."
+        ]
+      ],
+      "Gloves": [
+        [
+          "Zero-Print Nitrile Operator Gloves",
+          "Textured grip gloves leaving no forensic trace on triggers or locks."
+        ],
+        [
+          "Conductive Touch-Screen Operator Gloves",
+          "Thin slate gloves allowing rapid keypad bursts in freezing rain."
+        ]
+      ],
+      "Shoes": [
+        [
+          "Silent-Tread Shadow Runners",
+          "Soft-compound dark tactical sneakers muffled against wet steel grates."
+        ],
+        [
+          "Rubber-Soled Black Broker Brogues",
+          "Low-profile city shoes concealing steel shanks and silent heels."
+        ]
+      ],
+      "Accessory 1": [
+        [
+          "Encrypted Shadow-Ledger Token",
+          "Faraday-cased hardware key authorizing dead-drop escrow payouts."
+        ],
+        [
+          "Frequency-Hopping Burner Handset",
+          "Disposable slate handset wired into Syndicate wiretap relays."
         ]
       ]
     }

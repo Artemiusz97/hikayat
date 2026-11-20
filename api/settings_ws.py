@@ -52,13 +52,16 @@ async def save_settings(user_id: int, req: SettingsUpdateRequest, request: Reque
         language=req.language,
         ui_language=req.ui_language,
         narration_language=req.narration_language,
-        verbosity=req.verbosity,
+        verbosity=req.verbosity if req.verbosity is not None else req.narrative_style,
+        narrative_pacing=req.narrative_pacing,
         dialogue_mode=req.dialogue_mode,
         image_gen_enabled=req.image_gen_enabled,
         choices_style=req.choices_style,
         result_display=req.result_display,
         stream_narrative=req.stream_narrative,
         show_percentages=req.show_percentages,
+        show_enemy_hp=req.show_enemy_hp,
+        show_enemy_intent=req.show_enemy_intent,
         combat_ui_style=req.combat_ui_style,
         image_model=req.image_model,
     )
@@ -157,7 +160,7 @@ async def websocket_session(websocket: WebSocket, session_id: int, user_id: int 
             data = await websocket.receive_json()
             msg_type = data.get("type")
             if msg_type == "PING":
-                await websocket.send_json({"type": "PONG"})
+                await manager.send_personal(session_id, websocket, {"type": "PONG"})
             elif msg_type == "CHAT":
                 char_row = await adb(db.get_character, verified_uid)
                 sender_name = (char_row.get("name") if isinstance(char_row, dict) else None) or f"User {verified_uid}"

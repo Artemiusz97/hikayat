@@ -10019,7 +10019,11 @@
         "sub_cult_altar",
         "sub_cult_cells",
         "sub_cult_reliquary",
-        "sub_cult_sanctum"
+        "sub_cult_sanctum",
+        "sub_cult_armory",
+        "sub_cult_vestments",
+        "sub_cult_apotheca",
+        "sub_cult_quarters"
       ],
       "name_keywords": [
         "crimson veil",
@@ -10085,7 +10089,11 @@
         "sub_synd_floor",
         "sub_synd_pens",
         "sub_synd_lab",
-        "sub_synd_vault"
+        "sub_synd_vault",
+        "sub_synd_armory",
+        "sub_synd_outfitter",
+        "sub_synd_canteen",
+        "sub_synd_quarters"
       ],
       "name_keywords": [
         "pale market",

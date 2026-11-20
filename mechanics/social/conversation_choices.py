@@ -808,6 +808,8 @@ def _utility_sort_rank(c: Dict[str, Any]) -> int:
 
 def _classify_choice_band(c: Dict[str, Any]) -> int:
     """Classifies a dialogue choice into Band 1 (Quest/Rumor), Band 2 (Social), Band 3 (Utility), or Band 4 (Exit)."""
+    if c.get("_quest_dialogue_handoff") and _is_verified_quest_choice(c):
+        return 1
     if c.get("_pinned_dialogue_exit") or c.get("intent") == "dialogue_exit" or c.get("ends_dialogue"):
         return 4
     if _is_pre_exit_utility_choice(c):
@@ -1167,6 +1169,7 @@ def enforce_conversation_choice_bands(
 
     combined_raw: List[Dict[str, Any]] = []
     seen_lbls: Set[str] = set()
+    from mechanics.narrative.intent import is_conversational_exit
     for src in list(priority_buttons or []) + list(cleaned_choices or []):
         if not isinstance(src, dict):
             continue
@@ -1175,13 +1178,14 @@ def enforce_conversation_choice_bands(
         lbl_k = lbl.lower()
         if not lbl_k or lbl_k in seen_lbls:
             continue
-        if src.get("_pinned_dialogue_exit") or src.get("intent") == "dialogue_exit" or src.get("ends_dialogue"):
-            continue
-        from mechanics.narrative.intent import is_conversational_exit
-        if is_conversational_exit(lbl):
-            continue
-        if not is_choice_allowed_for_partner_profile(src, lead_profile, session=sess, allow_convince_stay=in_stage_1):
-            continue
+        is_q_handoff = bool(src.get("_quest_dialogue_handoff") and _is_verified_quest_choice(src))
+        if not is_q_handoff:
+            if src.get("_pinned_dialogue_exit") or src.get("intent") == "dialogue_exit" or src.get("ends_dialogue"):
+                continue
+            if is_conversational_exit(lbl):
+                continue
+            if not is_choice_allowed_for_partner_profile(src, lead_profile, session=sess, allow_convince_stay=in_stage_1):
+                continue
 
         is_quest_c = _is_verified_quest_choice(src)
         is_util_c = _is_pre_exit_utility_choice(src)
@@ -1228,9 +1232,17 @@ def enforce_conversation_choice_bands(
             if len(band1) >= 2:
                 break
 
-    band1.sort(key=lambda x: (0 if x.get("clue_pair_ids") else 1, 0 if x.get("quest_id") else 1))
+    band1.sort(
+        key=lambda x: (
+            0 if x.get("clue_pair_ids") else 1,
+            0 if x.get("_quest_dialogue_handoff") else 1,
+            0 if x.get("quest_id") else 1,
+        )
+    )
     from game_engine.choices_cleaner import infer_choice_stat_and_dc
     for b1 in band1:
+        if b1.get("_quest_dialogue_handoff") or b1.get("contract_type") == "travel":
+            continue
         st_u = str(b1.get("stat") or "NONE").upper()
         req_u = int(b1.get("requirement") or 0)
         if st_u not in SPECIAL_STATS_SET or req_u <= 0:
@@ -1396,7 +1408,7 @@ def enforce_conversation_choice_bands(
 
     if remaining_budget <= 0:
         convince_only = [u for u in band3_utils if u.get("_convince_stay")]
-        out_b1 = [_apply_stage1_hurry_gate(c) for c in band1] if (in_stage_1 and urg_profile) else band1
+        out_b1 = [c if c.get("_quest_dialogue_handoff") else _apply_stage1_hurry_gate(c) for c in band1] if (in_stage_1 and urg_profile) else band1
         return out_b1 + convince_only + [pinned_exit]
 
     # ── ELASTIC BAND 2 DYNAMIC SOCIAL SUITE (4-6 slots, <= 8 total) ─────────
@@ -1448,7 +1460,7 @@ def enforce_conversation_choice_bands(
         band2 = band2[:desired_max_b2]
 
     if in_stage_1 and urg_profile:
-        band1 = [_apply_stage1_hurry_gate(c) for c in band1]
+        band1 = [c if c.get("_quest_dialogue_handoff") else _apply_stage1_hurry_gate(c) for c in band1]
         band2 = [_apply_stage1_hurry_gate(c) for c in band2]
         band3_utils = [
             u if u.get("_convince_stay") else _apply_stage1_hurry_gate(u)
@@ -1485,10 +1497,13 @@ def pin_dialogue_exit_last(
             continue
         lbl = str(c.get("label") or "").strip()
         if (
-            c.get("_pinned_dialogue_exit")
-            or c.get("intent") == "dialogue_exit"
-            or c.get("ends_dialogue")
-            or is_conversational_exit(lbl)
+            not c.get("_quest_dialogue_handoff")
+            and (
+                c.get("_pinned_dialogue_exit")
+                or c.get("intent") == "dialogue_exit"
+                or c.get("ends_dialogue")
+                or is_conversational_exit(lbl)
+            )
         ):
             if exit_choice is None:
                 exit_choice = c if c.get("_pinned_dialogue_exit") else build_pinned_leave_choice(clean_partners)
@@ -1504,6 +1519,101 @@ def pin_dialogue_exit_last(
     utilities.sort(key=_utility_sort_rank)
     avail_body = max(0, max_total - 1 - len(utilities))
     return body[:avail_body] + utilities[: max(0, max_total - 1)] + [exit_choice]
+
+
+def has_dialogue_exit_choice(choices: Optional[List[Any]]) -> bool:
+    """Returns True if any dict choice in `choices` represents an active-dialogue exit option."""
+    if not choices:
+        return False
+    from mechanics.narrative.intent import is_conversational_exit
+
+    for c in choices:
+        if not isinstance(c, dict) or c.get("_quest_dialogue_handoff"):
+            continue
+        lbl = str(c.get("label") or "").strip()
+        if (
+            c.get("_pinned_dialogue_exit")
+            or c.get("intent") == "dialogue_exit"
+            or c.get("ends_dialogue")
+            or is_conversational_exit(lbl)
+        ):
+            return True
+    return False
+
+
+def ensure_active_dialogue_exit_choice(
+    choices: Optional[List[Any]],
+    *,
+    session: Optional[Dict[str, Any]] = None,
+    partners: Any = ...,
+    outcome: Optional[Dict[str, Any]] = None,
+    max_total: int = 8,
+) -> List[Any]:
+    """Ensures active non-combat, non-intimate, non-barrier dialogue menus retain a pinned Leave option."""
+    if not choices or any(not isinstance(c, dict) for c in choices):
+        return list(choices or [])
+    if isinstance(outcome, dict) and outcome.get("has_exited_convo"):
+        return list(choices)
+
+    if partners is not ...:
+        if isinstance(partners, list):
+            clean_partners = [str(p).strip() for p in partners if str(p).strip()]
+        elif isinstance(partners, str) and partners.strip():
+            clean_partners = [partners.strip()]
+        else:
+            clean_partners = []
+    elif isinstance(outcome, dict) and (outcome.get("dialogue_partners") is not None or "dialogue_partner" in outcome):
+        raw_dp = outcome.get("dialogue_partners") if outcome.get("dialogue_partners") is not None else outcome.get("dialogue_partner")
+        if isinstance(raw_dp, list):
+            clean_partners = [str(p).strip() for p in raw_dp if str(p).strip()]
+        elif isinstance(raw_dp, str) and raw_dp.strip():
+            clean_partners = [raw_dp.strip()]
+        else:
+            clean_partners = []
+    elif isinstance(session, dict):
+        from mechanics.world.mobility import get_session_dialogue_partners
+        clean_partners = [str(p).strip() for p in (get_session_dialogue_partners(session) or []) if str(p).strip()]
+    else:
+        clean_partners = []
+
+    if not clean_partners:
+        return list(choices)
+
+    from mechanics.combat import is_in_combat
+    if (isinstance(session, dict) and is_in_combat(session)) or (
+        isinstance(outcome, dict)
+        and any(
+            (isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0) or (isinstance(e, str) and e.strip())
+            for e in (outcome.get("nearby_enemies") or [])
+        )
+    ):
+        return list(choices)
+
+    from mechanics.social.physical_state import is_erotic_intimate_contact
+    phys = (
+        (outcome.get("_physical_state") if isinstance(outcome, dict) else None)
+        or (session.get("_physical_state") if isinstance(session, dict) else None)
+        or (session.get("physical_state") if isinstance(session, dict) else None)
+    )
+    if not phys and isinstance(session, dict) and session.get("id"):
+        try:
+            phys = db.get_session_physical_state(int(session["id"]))
+        except Exception:
+            phys = None
+    ic_str = str(phys.get("intimate_contact", "") if isinstance(phys, dict) else "")
+    if is_erotic_intimate_contact(ic_str) or "aftercare" in ic_str.lower():
+        return list(choices)
+
+    if any(c.get("_access_barrier") for c in choices):
+        return list(choices)
+    if all(
+        "break free from:" in str(c.get("label") or "").lower()
+        or "slip out of:" in str(c.get("label") or "").lower()
+        for c in choices
+    ):
+        return list(choices)
+
+    return pin_dialogue_exit_last(list(choices), clean_partners, max_total=max_total)
 
 
 def evaluate_conversation_departure_turn(
@@ -1577,7 +1687,7 @@ def build_conversation_prompt_directive(
             seed_lines = (
                 "  - [PRE-TURN SOCIAL SEEDS — AUTHOR BESPOKE CONTEXTUAL LABELS]:\n"
                 "    Write natural, scene-grounded dialogue choice `label` strings for each seed below (never formulaic templates; never mention raw DC numbers), "
-                "and copy its exact `topic_id` and `category` onto the emitted `Choice` object:\n"
+                "and include its exact `topic_id=<id> | category=<cat>` pipe metadata on its `@@CHOICES` line:\n"
                 + "\n".join(formatted)
                 + "\n"
             )
@@ -1585,7 +1695,7 @@ def build_conversation_prompt_directive(
     return (
         "\n[CONVERSATION CHOICE ARCHITECTURE — 4-BAND PYTHON-ENFORCED]:\n"
         f"- Active Dialogue Partner(s): {', '.join(clean_partners)} ({partner}: '{tier_name}', score={score})\n"
-        "- Structure `choices` cleanly (total <= 8):\n"
+        "- Structure `@@CHOICES` cleanly (total <= 8):\n"
         "  1. QUEST / INVESTIGATION (0-2 slots ONLY if an active quest, bounty, or discovered rumor genuinely applies).\n"
         "  2. DYNAMIC SOCIAL SUITE (4-6 slots across `STR, PER, END, CHA, INT, AGI, LUK`): Contextual Sims-style get-to-know, situational props, banter, early/warm flirt gambles, rivalry pushback, callbacks, or casual local event gossip. Never treat student/personality tropes ('Class Clown', 'Delinquent') as paid jobs.\n"
         f"{seed_lines}"

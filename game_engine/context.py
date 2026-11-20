@@ -713,7 +713,7 @@ def _world_canon_text(session_id: int, world: dict | None = None,
 
 def _scene_context_text(session_id: int, current_location: str,
                         current_npcs: list = None, max_items: int = 4, history_text: str = "",
-                        world: dict | None = None) -> str:
+                        world: dict | None = None, session: dict | None = None) -> str:
     """Per-turn, scene-relevant slice of KNOWN WORLD (volatile Z2 prompt zone).
 
     Everything that depends on where the party is, who is present, recent
@@ -723,7 +723,7 @@ def _scene_context_text(session_id: int, current_location: str,
         max_items = 4
     world = world or _load_known_world(session_id)
     lore, contacts, factions = world["lore"], world["contacts"], world["factions"]
-    session = world["session"]
+    session = session if isinstance(session, dict) else world["session"]
     scen_key = world["scen_key"]
     history_lower = (history_text or "").lower()
 
@@ -851,9 +851,66 @@ def _scene_context_text(session_id: int, current_location: str,
         else:
             batched_npc_memories = db.get_npc_memories_batch(session_id, present_names_for_mem, per_npc_limit=5)
 
-        # 1. Characters physically present in this room / scene get full dossiers
+        # 1. Characters physically present: Spotlight Full Dossiers vs ~20-token Bystander Micro-Cards
         present_entries = []
+        bystander_micro_cards = []
+        active_dp_lows: set[str] = set()
+        if isinstance(session, dict):
+            if session.get("dialogue_partner"):
+                active_dp_lows.add(str(session["dialogue_partner"]).strip().lower())
+            for dp_x in (session.get("dialogue_partners") or ()):
+                if dp_x:
+                    active_dp_lows.add(str(dp_x).strip().lower())
+        party_nm_lows = {
+            str(pn.get("name") or "").strip().lower()
+            for pn in (world.get("party_npcs") or [])
+            if isinstance(pn, dict) and pn.get("name")
+        }
+
+        def _is_spotlight_person(p_ent: dict, c_rec: dict, live_rec: dict | None) -> bool:
+            p_nm_l = str(p_ent.get("name") or "").strip().lower()
+            if c_rec or p_nm_l in party_nm_lows or p_nm_l in active_dp_lows:
+                return True
+            src = live_rec if isinstance(live_rec, dict) else p_ent
+            if src.get("presence_tier") in (1, 2, 3) or src.get("stage_role") == "active_partner":
+                return True
+            if src.get("is_unique_proprietor") or src.get("quest_pinned") or src.get("is_quest_target"):
+                return True
+            if src.get("met_in_person") or int(src.get("affinity_score") or src.get("affinity") or 0) != 0:
+                return True
+            if str(p_ent.get("disposition") or src.get("disposition") or "").lower() == "hostile" or src.get("is_hostile"):
+                return True
+            if src.get("hp") is not None:
+                return True
+            origin_l = str(src.get("origin") or p_ent.get("origin") or "").strip().lower()
+            tier_l = str(src.get("tier_status") or p_ent.get("tier_status") or "").strip().lower()
+            if tier_l == "seeded" or origin_l in ("roaming_citizen", "district_merchant", "civic_staff", "campus_seed", "roaming_merchant"):
+                return False
+            return True
+
         for p in present_persons:
+            p_name_low = str(p.get("name") or "").lower().strip()
+            c_data_chk = contacts_by_name.get(p_name_low, {})
+            live_src_chk = _live_npc_by_low.get(p_name_low)
+            if not _is_spotlight_person(p, c_data_chk, live_src_chk):
+                src_b = live_src_chk if isinstance(live_src_chk, dict) else p
+                role_s = str(src_b.get("role") or (src_b.get("basic_info") or {}).get("role") or "Resident").strip()
+                gen_s = str(p.get("gender") or src_b.get("gender") or "").strip().lower()
+                gen_short = "F" if ("female" in gen_s or "woman" in gen_s) else ("M" if ("male" in gen_s or "man" in gen_s) else "NB")
+                race_s = format_race_display(p.get("race") or src_b.get("race") or "Human")
+                app_s = p.get("appearance") or src_b.get("appearance") or {}
+                cue_parts = [str(app_s.get(k) or "").strip() for k in ("hair", "outfit_style") if isinstance(app_s, dict) and app_s.get(k)]
+                cue_s = ", ".join(cue_parts)[:48] if cue_parts else "everyday attire"
+                act_s = str(src_b.get("activity_tag") or p.get("activity_tag") or "").strip()
+                tell_s = ""
+                if src_b.get("telltale_revealed") and src_b.get("visible_tell_text"):
+                    tell_s = f" | Tell: {str(src_b['visible_tell_text']).strip()}"
+                elif (src_b.get("basic_info") or {}).get("hidden_secret_revealed") and (src_b.get("basic_info") or {}).get("hidden_secret"):
+                    tell_s = f" | Secret: {str((src_b.get('basic_info') or {})['hidden_secret'])[:60]}"
+                act_part = f", {act_s}" if act_s else ""
+                bystander_micro_cards.append(f"- {p['name']} ({role_s}; {gen_short}, {race_s}, {cue_s}{act_part}{tell_s})")
+                continue
+
             raw_gen = str(p.get("gender") or "").strip().lower()
             if not raw_gen:
                 c_data = contacts_by_name.get(p.get("name", "").lower().strip(), {})
@@ -1002,17 +1059,23 @@ def _scene_context_text(session_id: int, current_location: str,
 
         if present_entries:
             lines.append("Characters physically in this room: " + "; ".join(present_entries))
+        if bystander_micro_cards:
+            lines.append("Nearby bystanders (compact micro-cards):\n" + "\n".join(bystander_micro_cards))
 
         # 2. Known contacts elsewhere in the world:
         # Only inject if explicitly referenced or inquired about in recent turn / action history (or at adventure start when history is empty)
+        from mechanics.social.population_seeder import is_population_seeding_supported
         absent_entries = []
         for p in absent_persons[:max(6, max_items)]:
             p_name = p.get("name", "")
             if not p_name:
                 continue
             p_low = p_name.lower().strip()
+            c_data = contacts_by_name.get(p_low, {})
+            if not history_text and is_population_seeding_supported(scen_key):
+                if not c_data and not p.get("met_in_person") and int(p.get("affinity_score") or 0) == 0:
+                    continue
             if not history_text or p_low in history_lower or (len(p_low.split()) > 1 and p_low.split()[0] in history_lower):
-                c_data = contacts_by_name.get(p_low, {})
                 c_loc = c_data.get("location") or (c_data.get("basic_info") or {}).get("location") or ""
                 loc_tag = f" [Stationed at: {c_loc} - NOT in this room]" if c_loc else " [Stationed elsewhere - NOT in this room]"
                 role_desc = p.get("description") or (c_data.get("basic_info") or {}).get("role") or ""
@@ -1039,6 +1102,10 @@ def _scene_context_text(session_id: int, current_location: str,
         lines.append("NPCs currently present: " + "; ".join(described_npcs))
     else:
         lines.append("NPCs currently present: none")
+
+    crowd_state_ctx = (session.get("crowd_state") if isinstance(session, dict) else None) or (world.get("crowd_state") if isinstance(world, dict) else None)
+    if isinstance(crowd_state_ctx, dict) and crowd_state_ctx.get("flavor") and str(crowd_state_ctx.get("density") or "") not in ("", "empty"):
+        lines.append(f"Crowd Context: [Density: {crowd_state_ctx.get('density')}] {crowd_state_ctx.get('flavor')}")
 
     party_npcs = world.get("party_npcs")
     if party_npcs:
@@ -1311,32 +1378,68 @@ def _quest_board_parts(session_id: int, current_location: str,
 
 def _known_world_text(session_id: int, current_location: str,
                        current_npcs: list = None, max_items: int = 4, history_text: str = "",
-                       destination_location: str = "") -> str:
+                       destination_location: str = "", include_canon: bool = True,
+                       session: dict = None) -> str:
     """Full KNOWN WORLD block (canon + scene + quest board) for callers that
     don't use the cache-ordered zone layout (e.g. the opening scene)."""
     if not isinstance(max_items, int):
         max_items = 4
     world = _load_known_world(session_id)
-    wp_block, caseboard_ctx = _quest_board_parts(session_id, current_location, destination_location)
+    wp_block, caseboard_ctx = _quest_board_parts(session_id, current_location, destination_location, session=session)
     parts = [
         _scene_context_text(session_id, current_location, current_npcs=current_npcs,
-                            max_items=max_items, history_text=history_text, world=world),
-        _world_canon_text(session_id, world=world),
-        wp_block,
-        caseboard_ctx,
+                            max_items=max_items, history_text=history_text, world=world, session=session),
     ]
+    if include_canon:
+        parts.append(_world_canon_text(session_id, world=world))
+    parts.extend([wp_block, caseboard_ctx])
     return "\n".join(p for p in parts if p)
 
-def _style_block(session: dict) -> str:
-    verbosity = session.get('verbosity', 'vivid')
-    dialogue_mode = session.get('dialogue_mode', 'balanced')
-    choices_style = session.get('choices_style', 'dropdown')
-        
+def _style_block(session: dict, *, kind: str = "turn") -> str:
+    style, pacing, dialogue_mode = resolve_style_and_pacing(session)
+    choices_style = session.get('choices_style', 'dropdown') if isinstance(session, dict) else 'dropdown'
+    style_text = VERBOSITY_INSTRUCTIONS.get(style, VERBOSITY_INSTRUCTIONS['vivid'])
+    if kind == "opening":
+        style_text = (
+            style_text
+            .replace("`@@TITLE`", "`scene_title`")
+            .replace("`@@CHOICES`", "`choices[].label`")
+        )
+        pacing_text = OPENING_PACING_INSTRUCTIONS.get(pacing, OPENING_PACING_INSTRUCTIONS['balanced'])
+        choice_note = OPENING_CHOICE_INSTRUCTIONS.get(pacing, OPENING_CHOICE_INSTRUCTIONS['balanced'])
+        shield_text = (
+            "CANON PERSISTENCE SHIELD: Style and voice directives govern ONLY player-facing story text "
+            "(`scene_title`, `narrative`, `choices[].label`). Keep `new_entities.description`, `campaign_end_goals`, "
+            "and 3-tier `location` paths (`Zone ➔ Primary Place ➔ Sub-Area`) strictly in clean, grounded canon prose — "
+            "NEVER inject internet slang, memes, or archaicisms into entity metadata or location paths."
+        )
+    else:
+        pacing_text = NARRATIVE_PACING_INSTRUCTIONS.get(pacing, NARRATIVE_PACING_INSTRUCTIONS['balanced'])
+        choice_note = PACING_CHOICE_INSTRUCTIONS.get(
+            pacing,
+            CHOICES_STYLE_INSTRUCTIONS.get(choices_style, CHOICES_STYLE_INSTRUCTIONS['dropdown']),
+        )
+        shield_text = CANON_PERSISTENCE_SHIELD
+
+    lang_code = (
+        str((session or {}).get("narration_language") or (session or {}).get("language") or "en")
+        .lower().strip().split("-")[0]
+    )
+    locale_note = (
+        "\nLOCALE NOTE: Apply the active style's cadence, register, and humor strictly in the target language "
+        "specified by LANGUAGE DIRECTIVE below (using native target-language phrasing/slang rather than English example words)."
+        if lang_code in ("pl", "ms", "zh", "de")
+        else ""
+    )
+
     return (
-        f"=== ACTIVE NARRATIVE STYLE & DIALOGUE DIRECTIVES (STRICT SUPREMACY — OVERRIDES ALL OTHER INSTRUCTIONS) ===\n"
-        f"STYLE: {VERBOSITY_INSTRUCTIONS.get(verbosity, VERBOSITY_INSTRUCTIONS['vivid'])}\n"
-        f"DIALOGUE: {DIALOGUE_INSTRUCTIONS.get(dialogue_mode, DIALOGUE_INSTRUCTIONS['balanced'])}\n"
-        f"{CHOICES_STYLE_INSTRUCTIONS.get(choices_style, CHOICES_STYLE_INSTRUCTIONS['dropdown'])}\n"
+        f"=== ACTIVE NARRATIVE STYLE, PACING & DIALOGUE DIRECTIVES (STRICT SUPREMACY — OVERRIDES ALL OTHER INSTRUCTIONS) ===\n"
+        f"STYLE: {style_text}\n"
+        f"PACING: {pacing_text}\n"
+        f"DIALOGUE: {DIALOGUE_INSTRUCTIONS.get(dialogue_mode, DIALOGUE_INSTRUCTIONS['adaptive'])}\n"
+        f"{choice_note}\n"
+        f"{shield_text}"
+        f"{locale_note}\n"
         f"=== END STYLE & DIALOGUE DIRECTIVES — ALL OTHER INSTRUCTIONS IN THIS PROMPT MUST COMPLY WITH THESE DIRECTIVES ==="
     )
 

@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.4.0** | 2026-11-20 | Minor | Outlaw Factions & 10-Wing HQs (Migration v60), 68 Special Agent Blueprints & 3-Stage Population Engine, Native `<dialog>` World Map Modal Overhaul, Narrative Pacing & Prose Styles (v58/v59), Hybrid Reasoning Streaming. |
 | **v3.3.0** | 2026-11-17 | Minor | Migration v57 Anomalous Locations Integrity, Procedural Urban City Profiles, Unified Merchant UI Authority, Quest Climax & Remote Travel Guards, and Code Hygiene Sweep. |
 | **v3.2.0** | 2026-11-16 | Minor | Dynamic NPC Wardrobe & Continuity Engine (`mechanics/social/wardrobe/`), SDXL Attire Prompt Synthesis, `KnownWardrobeCard` Fog-of-War UI & 5-Language Parity. |
 | **v3.1.0** | 2026-11-16 | Minor | Anomalous Sites Package (36 Pacifiable Wild Sites, Spatial Puzzles & Harvesting), School Club & Rival Turf Hardening, Private Residence Access Gates & UI Parity. |
@@ -56,6 +57,21 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.4.0] - 2026-11-20
+
+#### Added & Enhanced
+- **Outlaw Factions, 10-Wing HQs & Starter Safehouses (`db/core.py`, `mechanics/social/factions.py`, `mechanics/world/anomalous_sites/lifecycle.py`)**:
+  - Implemented Schema Migration v60 (`_migrate_outlaw_factions_v60`) backfilling 10-wing headquarters for `loc_cult_sanctum_hq` and `loc_clandestine_syndicate_hq`, alongside starter safehouses and restricted inner wings. Added 5-tier anomalous faction promotion progression with archetype-specific perks, strict HQ action access gating, and clean transfer protocols.
+- **68 Special Agent Blueprints & 3-Stage Procedural Population Engine (`mechanics/social/`, `db/roster.py`)**:
+  - Authored 48 adult special agent blueprints and 20 anomalous high school student agents across 6 major factions.
+  - Implemented Stage 0 zero-LLM bulk skeleton seeding (`ensure_world_population_seeded` in `population_seeder.py`), Stage 1 lazy scene hydration (`hydrate_roster_npc_on_scene`), and batch DB operations (`bulk_upsert_world_roster`).
+- **Native `<dialog>` World Map Modal Overhaul (`web/src/components/Modals/WorldMapModal.jsx`)**:
+  - Migrated world map to native HTML `<dialog>` with ESC auto-close, click-outside dismissal, responsive mobile dual-view (`list` vs. `detail`), active quest routing (`regions` vs. `quests`), deep linking with auto-scroll (`highlightedTarget`), sub-room access badges, and fast travel integration.
+- **Narrative Pacing, Prose Styles & Combat Visual Settings (`db/core.py`, `cogs/settings.py`, `web/`)**:
+  - Implemented Schema Migrations v58 and v59 adding `narrative_pacing` (*concise*, *balanced*, *novelistic*), stylized `verbosity` registers (*normal*, *vivid*, *noir*, *witty*, *shakespearean*, *brainrot*), and `show_enemy_hp` / `show_enemy_intent` toggles across database, Discord bot, and Web UI settings.
+- **Hybrid Reasoning LLM Streaming & Bundled Turn Transactions (`services/turn_service.py`, `game_engine/turn/`, `llm_client.py`)**:
+  - Added split stall thresholds (`LLM_TTFT_TIMEOUT` = 75s, `LLM_CHUNK_IDLE_TIMEOUT` = 25s, `LLM_STREAM_TOTAL_DEADLINE` = 150s), hybrid reasoning token ceilings and COT suppression, consolidated pre-/post-turn DB transactions, and micro-context ambient action classification (<250 tokens).
 
 ### [v3.3.0] - 2026-11-17
 
