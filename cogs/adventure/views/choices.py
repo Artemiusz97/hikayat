@@ -322,6 +322,110 @@ class ChoiceDropdown(discord.ui.Select):
                 return
             await self.cog.handle_action(interaction, self.session_id, choice_index=idx)
 
+def _build_examine_embed(payload: dict) -> discord.Embed:
+    """Formats a zero-turn Examine / Intel snapshot into an ephemeral Discord embed."""
+    scene_mode = str(payload.get("scene_mode") or "exploration")
+    title = "🔍 Tactical Intel (0 Turns)" if scene_mode == "combat" else "👁️ Examine Surroundings (0 Turns)"
+    color = discord.Color.red() if scene_mode == "combat" else discord.Color.teal()
+
+    prose = str(payload.get("narrative_prose") or payload.get("fallback_prose") or "").strip()
+    embed = discord.Embed(title=title, description=prose[:3900], color=color)
+
+    env = payload.get("environment") or {}
+    loc = str(env.get("location") or "Unknown Location").strip()
+    sub = str(env.get("sub_location") or "").strip()
+    loc_display = f"{loc} · {sub}" if (sub and sub.lower() not in loc.lower()) else loc
+    day_name = str(env.get("day_name") or f"Day {env.get('current_day') or 1}")
+    tod = str(env.get("time_of_day") or "")
+    privacy = str(env.get("privacy_level") or "public").replace("_", " ").title()
+    per_tier = str(payload.get("per_tier") or "standard").upper()
+
+    st_ep = payload.get("stealth_and_epistemic") or {}
+    st_line = (
+        f"🥷 Hidden (Alert: {st_ep.get('alert_level', 'unaware')})"
+        if st_ep.get("is_hidden")
+        else f"Privacy: {privacy} • Bystanders: {st_ep.get('bystander_count', 0)}"
+    )
+    embed.add_field(
+        name="📍 Surroundings & Awareness",
+        value=f"**{loc_display}**\n{day_name} ({tod}) • PER: {per_tier}\n{st_line}"[:1024],
+        inline=False,
+    )
+
+    combat_intel = payload.get("combat_intel") or []
+    show_hp = bool(payload.get("show_enemy_hp", True))
+    if scene_mode == "combat" and combat_intel:
+        lines = []
+        for en in combat_intel[:6]:
+            hp_part = (
+                f"{en['hp']}/{en['max_hp']} HP · "
+                if (show_hp and en.get("hp") is not None and en.get("max_hp") is not None)
+                else ""
+            )
+            cond = en.get("condition_label") or "Hostile"
+            extras = []
+            if en.get("intent"):
+                extras.append(f"Intent: {en['intent']}")
+            if en.get("weaknesses"):
+                extras.append(f"Weak: {', '.join(en['weaknesses'][:3])}")
+            if en.get("resistances"):
+                extras.append(f"Res: {', '.join(en['resistances'][:3])}")
+            if en.get("status_effects"):
+                extras.append(f"Status: {', '.join(en['status_effects'][:3])}")
+            suffix = f" ({' | '.join(extras)})" if extras else ""
+            lines.append(f"• **{en.get('name', 'Enemy')}** — {hp_part}{cond}{suffix}")
+        embed.add_field(name="⚔️ Hostile Threats", value="\n".join(lines)[:1024], inline=False)
+
+    npcs = payload.get("present_npcs") or []
+    if npcs:
+        npc_lines = []
+        for n in npcs[:8]:
+            bits = [f"**{n.get('name', 'NPC')}** [{n.get('relationship_tier', 'Stranger')}]"]
+            if n.get("activity"):
+                bits.append(str(n["activity"]))
+            if n.get("clothing_summary"):
+                bits.append(f"Wearing: {n['clothing_summary']}")
+            if n.get("holding"):
+                bits.append(f"Holding: {n['holding']}")
+            if n.get("subtle_tell"):
+                bits.append(f"_{n['subtle_tell']}_")
+            npc_lines.append("• " + " — ".join(bits[:4]))
+        embed.add_field(name=f"👥 People Present ({len(npcs)})", value="\n".join(npc_lines)[:1024], inline=False)
+
+    objects = payload.get("objects") or []
+    clues = payload.get("clues") or []
+    if objects or clues:
+        obj_lines = []
+        for o in objects[:6]:
+            tag = " *(Pick up)*" if o.get("pickupable") else ""
+            desc = f": {o['description']}" if o.get("description") else ""
+            obj_lines.append(f"• **{o.get('display_name', 'Object')}**{tag}{desc}")
+        for c in clues[:4]:
+            lead = f" — {c['lead_text']}" if c.get("lead_text") else ""
+            obj_lines.append(f"• 🔍 **{c.get('title', 'Lead')}**{lead}")
+        embed.add_field(name="📦 Notable Objects & Leads", value="\n".join(obj_lines)[:1024], inline=False)
+
+    exits = env.get("exits") or []
+    if exits:
+        embed.add_field(name="🧭 Visible Exits", value=", ".join(exits[:6])[:1024], inline=False)
+
+    return embed
+
+
+async def _send_ephemeral_examine(session_id: int, interaction: discord.Interaction) -> None:
+    """Shared zero-turn ephemeral Examine handler for ChoiceView and SyncChoiceView."""
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+    from services.examine_service import get_examine_payload
+    try:
+        payload = await get_examine_payload(session_id, interaction.user.id, include_prose=True)
+    except LookupError:
+        await interaction.followup.send("Session not found.", ephemeral=True)
+        return
+    embed = _build_examine_embed(payload)
+    await interaction.followup.send(embed=embed, ephemeral=True)
+
+
 class ChoiceView(SessionRestrictedView):
     """Turn-based (and solo) mode: only the current turn-holder can act."""
 
@@ -490,6 +594,16 @@ class ChoiceView(SessionRestrictedView):
         self.stealth_btn.callback = self._stealth_callback
         self.add_item(self.stealth_btn)
 
+        examine_lbl = "Intel" if self.in_combat else "Examine"
+        examine_btn = discord.ui.Button(
+            label=examine_lbl,
+            style=discord.ButtonStyle.secondary,
+            emoji="👁️",
+        )
+        examine_btn.callback = self._examine_callback
+        if len(self.children) < 25:
+            self.add_item(examine_btn)
+
         from mechanics.system.phone import scenario_has_smartphone, get_phone_branding, build_phone_home_embed, PhoneMainView
         if scenario_has_smartphone(scen_key) and not self.in_combat:
             branding = get_phone_branding(scen_key)
@@ -555,6 +669,8 @@ class ChoiceView(SessionRestrictedView):
                                 matching_contacts.append(c)
                 import namegen
                 for contact in matching_contacts:
+                    if len(self.children) >= 25:
+                        break
                     c_name = str(contact.get("name") or "Contact").strip()
                     label_name = namegen.get_display_short_name(c_name, max_len=15)
                     profile_btn = discord.ui.Button(
@@ -621,6 +737,10 @@ class ChoiceView(SessionRestrictedView):
         custom_button = discord.ui.Button(label="Do something else...", style=discord.ButtonStyle.secondary, emoji="✏️", row=1)
         custom_button.callback = self._custom_callback
         root_items.append(custom_button)
+
+        examine_btn = discord.ui.Button(label="Intel", emoji="👁️", style=discord.ButtonStyle.secondary, row=1)
+        examine_btn.callback = self._examine_callback
+        root_items.append(examine_btn)
 
         if hasattr(self, "hostiles") and len(self.hostiles) > 1:
             cur_target = self.hostiles[self.target_idx]
@@ -764,6 +884,11 @@ class ChoiceView(SessionRestrictedView):
         custom_button.callback = self._custom_callback
         self.add_item(custom_button)
 
+        examine_btn = discord.ui.Button(label="Intel", emoji="👁️", style=discord.ButtonStyle.secondary, row=3)
+        examine_btn.callback = self._examine_callback
+        if len(self.children) < 25:
+            self.add_item(examine_btn)
+
         if hasattr(self, "hostiles") and len(self.hostiles) > 1:
             cur_target = self.hostiles[self.target_idx]
             target_hp = cur_target.get("hp", 100)
@@ -880,6 +1005,9 @@ class ChoiceView(SessionRestrictedView):
         view = SceneItemSelectView(self.cog, self.session_id, interaction.user.id, carried, sync=False)
         await interaction.response.send_message("🎒 Select an item from your bag to use:", view=view, ephemeral=True)
 
+    async def _examine_callback(self, interaction: discord.Interaction):
+        await _send_ephemeral_examine(self.session_id, interaction)
+
     async def _stealth_callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.turn_user_id:
             await interaction.response.send_message(
@@ -888,7 +1016,12 @@ class ChoiceView(SessionRestrictedView):
             return
 
         from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
-        from mechanics.stealth import toggle_stealth_stance, is_actor_hidden
+        from mechanics.stealth import (
+            toggle_stealth_stance,
+            is_actor_hidden,
+            sync_stealth_choices_for_toggle,
+        )
+        from services.examine_service import invalidate_examine_cache
 
         try:
             async with distributed_session_lock(self.session_id, raise_http_error=False):
@@ -899,8 +1032,20 @@ class ChoiceView(SessionRestrictedView):
 
                 new_active = not is_actor_hidden(session, interaction.user.id)
                 toggle_stealth_stance(session, new_active, user_id=interaction.user.id)
-                await adb(db.update_session, self.session_id, stealth_state=session["stealth_state"])
-                self.session["stealth_state"] = session["stealth_state"]
+                updated_choices = sync_stealth_choices_for_toggle(
+                    session, interaction.user.id, new_active
+                )
+                await adb(
+                    db.update_session,
+                    self.session_id,
+                    stealth_state=session["stealth_state"],
+                    choices=updated_choices,
+                )
+                invalidate_examine_cache(self.session_id)
+                if getattr(self, "session", None) is not None:
+                    self.session["stealth_state"] = session["stealth_state"]
+                    self.session["choices"] = updated_choices
+                self._choices = updated_choices
         except LockAcquisitionError:
             await interaction.response.send_message(
                 "Turn resolution is currently in progress. Please wait a moment.", ephemeral=True
@@ -1250,6 +1395,16 @@ class SyncChoiceView(SessionRestrictedView):
         self.stealth_btn.callback = self._stealth_callback
         self.add_item(self.stealth_btn)
 
+        examine_lbl = "Intel" if getattr(self, "_is_combat", False) else "Examine"
+        examine_btn = discord.ui.Button(
+            label=examine_lbl,
+            style=discord.ButtonStyle.secondary,
+            emoji="👁️",
+        )
+        examine_btn.callback = self._examine_callback
+        if len(self.children) < 25:
+            self.add_item(examine_btn)
+
         scen_key = session.get("scenario", "fantasy")
         in_combat = self._is_combat
 
@@ -1319,6 +1474,8 @@ class SyncChoiceView(SessionRestrictedView):
                                 matching_contacts.append(c)
                 import namegen
                 for contact in matching_contacts:
+                    if len(self.children) >= 25:
+                        break
                     c_name = str(contact.get("name") or "Contact").strip()
                     label_name = namegen.get_display_short_name(c_name, max_len=15)
                     profile_btn = discord.ui.Button(
@@ -1391,13 +1548,25 @@ class SyncChoiceView(SessionRestrictedView):
         return _profile_callback
 
 
+    async def _examine_callback(self, interaction: discord.Interaction):
+        if self.member_ids and interaction.user.id not in self.member_ids:
+            await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
+            return
+        await _send_ephemeral_examine(self.session_id, interaction)
+
     async def _stealth_callback(self, interaction: discord.Interaction):
         if self.member_ids and interaction.user.id not in self.member_ids:
             await interaction.response.send_message("You're not part of this adventure.", ephemeral=True)
             return
 
         from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
-        from mechanics.stealth import toggle_stealth_stance, is_actor_hidden, any_actor_hidden
+        from mechanics.stealth import (
+            toggle_stealth_stance,
+            is_actor_hidden,
+            any_actor_hidden,
+            sync_stealth_choices_for_toggle,
+        )
+        from services.examine_service import invalidate_examine_cache
 
         try:
             async with distributed_session_lock(self.session_id, raise_http_error=False):
@@ -1412,7 +1581,17 @@ class SyncChoiceView(SessionRestrictedView):
 
                 new_active = not is_actor_hidden(session, interaction.user.id)
                 toggle_stealth_stance(session, new_active, user_id=interaction.user.id)
-                await adb(db.update_session, self.session_id, stealth_state=session["stealth_state"])
+                updated_choices = sync_stealth_choices_for_toggle(
+                    session, interaction.user.id, new_active
+                )
+                await adb(
+                    db.update_session,
+                    self.session_id,
+                    stealth_state=session["stealth_state"],
+                    choices=updated_choices,
+                )
+                invalidate_examine_cache(self.session_id)
+                self._choices = updated_choices
         except LockAcquisitionError:
             await interaction.response.send_message(
                 "Turn resolution is currently in progress. Please wait a moment.", ephemeral=True

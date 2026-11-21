@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { copyToClipboard } from '../../utils/clipboard';
 import { useTranslation } from 'react-i18next';
 import { Users, Heart, Zap, UserCheck, Shield, Sparkles, UserMinus, MessageSquare, Send, Share2, Check } from 'lucide-react';
 import { apiCall } from '../../api/client';
@@ -11,7 +12,7 @@ const MiniBar = ({ label, current, max, color, icon: Icon }) => {
 
   return (
     <div className="flex items-center gap-1.5 text-[10px]">
-      <div className="flex items-center gap-0.5 text-gray-400 font-bold w-6">
+      <div className="flex items-center gap-0.5 text-gray-400 font-bold min-w-[2.5rem] shrink-0">
         <Icon size={10} className={color.text} />
         <span>{label}</span>
       </div>
@@ -21,7 +22,7 @@ const MiniBar = ({ label, current, max, color, icon: Icon }) => {
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="font-mono text-[9px] text-gray-400 min-w-8 text-right font-medium">{safeCurrent}/{safeMax}</span>
+      <span className="font-mono text-[9px] text-gray-400 min-w-[3.75rem] shrink-0 text-right font-medium tabular-nums">{safeCurrent}/{safeMax}</span>
     </div>
   );
 };
@@ -87,31 +88,31 @@ const PartyMemberCard = ({ member, isNpc = false, isSelf = false, isOnline = tru
             )}
           </div>
           <div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center flex-wrap gap-1.5">
               <span className="font-semibold text-xs text-gray-200">{name}</span>
               {isSelf && (
-                <span className="text-[9px] px-1 py-0.2 bg-fantasy-accent/20 text-fantasy-accent rounded font-bold uppercase">
+                <span className="text-[9px] px-1 py-0.5 bg-fantasy-accent/20 text-fantasy-accent rounded font-bold uppercase">
                   You
                 </span>
               )}
               {isNpc && (
                 isSpecialAgent ? (
-                  <span className="text-[9px] px-1.5 py-0.2 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
+                  <span className="text-[9px] px-1.5 py-0.5 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
                     ⚡ {t('codex.special_agent', 'Special Agent')}
                   </span>
                 ) : (
-                  <span className="text-[9px] px-1 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
+                  <span className="text-[9px] px-1 py-0.5 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
                     NPC
                   </span>
                 )
               )}
               {isNpc && (member.combat_archetype || member.archetype) && (
-                <span className="text-[9px] px-1.5 py-0.2 bg-indigo-950/70 text-indigo-200 rounded font-bold uppercase border border-indigo-700/50">
+                <span className="text-[9px] px-1.5 py-0.5 bg-indigo-950/70 text-indigo-200 rounded font-bold uppercase border border-indigo-700/50">
                   {member.combat_archetype || member.archetype}
                 </span>
               )}
               {member.clothing_status && (
-                <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
+                <span className="text-[8.5px] font-mono px-1 py-0.5 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                   {member.clothing_status}
                 </span>
               )}
@@ -230,6 +231,10 @@ const PartyWidget = ({
   const [dismissingNpc, setDismissingNpc] = useState(null);
   const [chatText, setChatText] = useState('');
   const [copiedLink, setCopiedLink] = useState(false);
+  const copyTimerRef = useRef(null);
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   if (!session) return null;
 
@@ -250,9 +255,11 @@ const PartyWidget = ({
         // fallback
       }
       const inviteMsg = `${shareUrl} (Invite Code: ${session.id})`;
-      await navigator.clipboard.writeText(inviteMsg);
-      setCopiedLink(true);
-      setTimeout(() => setCopiedLink(false), 2500);
+      if (await copyToClipboard(inviteMsg)) {
+        setCopiedLink(true);
+        if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+        copyTimerRef.current = setTimeout(() => setCopiedLink(false), 2500);
+      }
     } catch (e) {
       console.error('Failed to copy share link:', e);
     }
@@ -289,16 +296,16 @@ const PartyWidget = ({
   };
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5">
+    <div className="space-y-3 min-w-0">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-fantasy-border pb-2">
-        <div>
+      <div className="flex items-center justify-between flex-wrap gap-2 border-b border-fantasy-border/35 pb-2.5">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Users size={15} className="text-fantasy-accent" />
+            <Users size={15} className="text-fantasy-accent shrink-0" />
             <h3 className="font-rpg font-bold text-xs sm:text-sm text-gray-100 uppercase tracking-wider">{t('party.roster')}</h3>
           </div>
           {session.id && (
-            <div className="flex items-center gap-2 mt-1">
+            <div className="flex items-center flex-wrap gap-2 mt-1">
               <span className="text-[10px] text-gray-500 font-mono">
                 Code: <strong className="text-gray-300">{session.id}</strong>
               </span>
@@ -320,7 +327,7 @@ const PartyWidget = ({
       </div>
 
       {/* Members List */}
-      <div className="space-y-2 max-h-80 overflow-y-auto custom-scrollbar pr-1">
+      <div className="space-y-2">
         {/* Human Players */}
         {partyMembers.map(member => {
           const isSelf = member.user_id === currentUserId;

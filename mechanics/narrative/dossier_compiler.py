@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 import namegen
 import scenario_data
+from db.roster_adapters import slugify_npc_id
 from mechanics.combat import enemies as combat_enemies
 from mechanics.narrative.campaign_spine import (
     PEAK_CHAPTERS,
@@ -31,6 +32,7 @@ from mechanics.social.persona.intimacy.ledger import (
     enforce_biological_invariants,
     normalize_gender,
 )
+from mechanics.social.races import roll_scenario_npc_race
 
 FAMILY_SCENE_PRIORITY: Dict[str, int] = {
     "story": 1,
@@ -340,6 +342,200 @@ def _pick_safe_npc_name(
             continue
         return cand, gender, None
     return "Mysterious Broker", gender, None
+
+
+_DEFAULT_QUEST_CAST_ROLES: Dict[str, str] = {
+    "client": "Quest Patron",
+    "informant": "Informant",
+    "target": "Quest Target",
+    "accomplice": "Suspect Associate",
+    "witness": "Witness",
+}
+
+_FEMALE_GENDER_TOKENS: frozenset[str] = frozenset(
+    {"mrs", "miss", "ms", "madam", "madame", "lady", "dame", "sister", "binti", "priestess", "princess", "queen"}
+)
+_MALE_GENDER_TOKENS: frozenset[str] = frozenset(
+    {"mr", "sir", "lord", "brother", "bin", "prince", "king", "father"}
+)
+_FEMALE_SURNAME_SUFFIXES: Tuple[str, ...] = (
+    "ska", "cka", "dzka", "skaya", "ova", "eva", "sdottir", "dottir", "poulou", "idou", "iadou",
+)
+
+
+def resolve_quest_npc_fallback_gender(npc_name: str, session_id: int = 0) -> str:
+    """Infers gender from unambiguous first-name/title cues, or deterministic 50/50 hash fallback."""
+    clean = str(npc_name or "").strip()
+    if not clean:
+        return "female"
+    first_tok, last_tok = namegen.extract_first_and_last_name(clean)
+    probe_tok = (first_tok or clean.split()[0]).strip().lower()
+    is_m = bool(probe_tok and namegen.is_known_male_name(probe_tok))
+    is_f = bool(probe_tok and namegen.is_known_female_name(probe_tok))
+    if is_m and not is_f:
+        return "male"
+    if is_f and not is_m:
+        return "female"
+
+    low = clean.lower()
+    words = set(re.sub(r"[^a-z]+", " ", low).split())
+    last_low = (last_tok or "").strip().lower()
+    if (words & _FEMALE_GENDER_TOKENS) or (last_low and last_low.endswith(_FEMALE_SURNAME_SUFFIXES)):
+        return "female"
+    if words & _MALE_GENDER_TOKENS:
+        return "male"
+
+    digest = hashlib.md5(f"{int(session_id or 0)}:{low}".encode("utf-8")).hexdigest()
+    return "female" if int(digest[:8], 16) % 2 == 0 else "male"
+
+
+def _load_quest_cast_lookup_maps(session_id: int) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
+    roster_by_low: Dict[str, Dict[str, Any]] = {}
+    contacts_by_low: Dict[str, Dict[str, Any]] = {}
+    if not session_id or int(session_id) <= 0:
+        return roster_by_low, contacts_by_low
+    import db
+    for r in (db.get_world_roster(session_id, include_legacy_rosters=True) or []):
+        if isinstance(r, dict) and r.get("name"):
+            roster_by_low[str(r["name"]).strip().lower()] = r
+    for c in (db.get_contacts(session_id) or []):
+        if isinstance(c, dict) and c.get("name"):
+            contacts_by_low[str(c["name"]).strip().lower()] = c
+    return roster_by_low, contacts_by_low
+
+
+def _resolve_and_register_quest_cast_npc(
+    session_id: int,
+    scen_key: str,
+    quest_id: str,
+    slot_role: str,
+    npc_name: str,
+    gender_hint: str = "",
+    contact_id: Optional[int] = None,
+    turn_number: int = 0,
+    anchor_node_id: str = "",
+    existing_roster_by_low: Optional[Dict[str, Dict[str, Any]]] = None,
+    existing_contacts_by_low: Optional[Dict[str, Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Resolves canonical gender, scenario race, role, and age_group for a quest NPC and ensures a `world_roster` row exists."""
+    clean_name = str(npc_name or "").strip()
+    if not clean_name or _PLACEHOLDER_ACTOR_RE.search(clean_name):
+        return {"name": clean_name, "contact_id": contact_id, "gender": "", "race": "", "role": ""}
+
+    low_name = clean_name.lower()
+    if existing_roster_by_low is None or existing_contacts_by_low is None:
+        loaded_roster, loaded_contacts = _load_quest_cast_lookup_maps(session_id)
+        if existing_roster_by_low is None:
+            existing_roster_by_low = loaded_roster
+        if existing_contacts_by_low is None:
+            existing_contacts_by_low = loaded_contacts
+
+    ex_contact = existing_contacts_by_low.get(low_name)
+    ex_roster = existing_roster_by_low.get(low_name)
+    resolved_cid: Optional[int] = contact_id
+    if resolved_cid is None and isinstance(ex_contact, dict) and ex_contact.get("id"):
+        resolved_cid = int(ex_contact["id"])
+
+    ex_c_bi = (ex_contact.get("basic_info") if isinstance(ex_contact, dict) and isinstance(ex_contact.get("basic_info"), dict) else {})
+    ex_r_bi = (ex_roster.get("basic_info") if isinstance(ex_roster, dict) and isinstance(ex_roster.get("basic_info"), dict) else {})
+
+    raw_ex_gender = (
+        (ex_contact.get("gender") if isinstance(ex_contact, dict) else "")
+        or ex_c_bi.get("gender")
+        or (ex_roster.get("gender") if isinstance(ex_roster, dict) else "")
+        or ex_r_bi.get("gender")
+        or ""
+    )
+    norm_ex_gender = normalize_gender(raw_ex_gender)
+    norm_hint_gender = normalize_gender(gender_hint)
+    if norm_ex_gender in ("male", "female", "non-binary"):
+        resolved_gender = norm_ex_gender
+    elif norm_hint_gender in ("male", "female", "non-binary"):
+        resolved_gender = norm_hint_gender
+    else:
+        resolved_gender = resolve_quest_npc_fallback_gender(clean_name, session_id=session_id)
+
+    raw_ex_race = str(
+        (ex_contact.get("race") if isinstance(ex_contact, dict) else "")
+        or ex_c_bi.get("race")
+        or (ex_roster.get("race") if isinstance(ex_roster, dict) else "")
+        or ex_r_bi.get("race")
+        or ""
+    ).strip()
+    if raw_ex_race.lower() in ("unknown", "none", "null", "n/a"):
+        raw_ex_race = ""
+    resolved_race = raw_ex_race or roll_scenario_npc_race(
+        scen_key, seed=f"quest_wp:{int(session_id or 0)}:{low_name}"
+    )
+
+    resolved_role = str(
+        (ex_contact.get("role") if isinstance(ex_contact, dict) else "")
+        or ex_c_bi.get("role")
+        or (ex_roster.get("role") if isinstance(ex_roster, dict) else "")
+        or ex_r_bi.get("role")
+        or _DEFAULT_QUEST_CAST_ROLES.get(slot_role, "Quest Contact")
+    ).strip()
+
+    is_hs_scen = bool(
+        scenario_data.is_high_school_scenario(scen_key)
+        or scenario_data.is_anomalous_high_school_scenario(scen_key)
+    )
+    resolved_age_group = str(
+        ex_c_bi.get("age_group")
+        or ex_r_bi.get("age_group")
+        or ("teen" if (is_hs_scen and slot_role in ("informant", "accomplice", "witness")) else "adult")
+    ).strip()
+
+    ex_wr_gender = normalize_gender(
+        (ex_roster.get("gender") if isinstance(ex_roster, dict) else "") or ex_r_bi.get("gender") or ""
+    )
+    ex_wr_race = str(
+        (ex_roster.get("race") if isinstance(ex_roster, dict) else "") or ex_r_bi.get("race") or ""
+    ).strip()
+    needs_roster_upsert = bool(
+        session_id
+        and int(session_id) > 0
+        and (
+            not isinstance(ex_roster, dict)
+            or ex_wr_gender not in ("male", "female", "non-binary")
+            or not ex_wr_race
+            or ex_wr_race.lower() in ("unknown", "none", "null", "n/a")
+        )
+    )
+    if needs_roster_upsert:
+        import db
+        ex_origin = str((ex_roster or {}).get("origin") or "").strip()
+        target_origin = ex_origin if (ex_origin and ex_origin != "legacy_adapter") else "quest_seed"
+        payload: Dict[str, Any] = {
+            "npc_id": slugify_npc_id(clean_name),
+            "name": clean_name,
+            "gender": resolved_gender,
+            "race": resolved_race,
+            "role": resolved_role,
+            "origin": target_origin,
+            "tier_status": str((ex_roster or {}).get("tier_status") or "seeded"),
+            "workplace_node_id": str(anchor_node_id or (ex_roster or {}).get("workplace_node_id") or "").strip(),
+            "basic_info": {
+                "role": resolved_role,
+                "occupation": resolved_role,
+                "age_group": resolved_age_group,
+                "quest_id": str(quest_id or ""),
+                "quest_cast_slot": slot_role,
+                "visual_hydrated": False,
+            },
+        }
+        upserted = db.upsert_world_roster_npc(session_id, payload, turn_number=int(turn_number or 0))
+        if isinstance(existing_roster_by_low, dict):
+            existing_roster_by_low[low_name] = upserted or payload
+
+    return {
+        "name": clean_name,
+        "contact_id": resolved_cid,
+        "gender": resolved_gender,
+        "race": resolved_race,
+        "role": resolved_role,
+        "age_group": resolved_age_group,
+    }
 
 
 def _pick_inner_circle_ally(session_id: int) -> str:
@@ -1035,6 +1231,8 @@ def populate_stage_clue_sources(
     raw_t_npc = str(st.get("target_npc") or "").strip()
     t_npc = raw_t_npc if (raw_t_npc and (used_witness_npcs is None or raw_t_npc.lower() not in used_witness_npcs)) else ""
     witness_npc = t_npc
+    witness_gender = ""
+    witness_cid: Optional[int] = None
     if not witness_npc:
         for c_npc in (cands.get("npcs") or []):
             c_clean = str(c_npc or "").strip()
@@ -1042,11 +1240,25 @@ def populate_stage_clue_sources(
                 witness_npc = c_clean
                 break
     if not witness_npc:
-        witness_npc, _, _ = _pick_safe_npc_name(
+        witness_npc, witness_gender, witness_cid = _pick_safe_npc_name(
             session_id,
             scen_key or "modern_urban",
             f"clue_witness:{quest_id}:{st_idx}",
             avoid_low=set(used_witness_npcs or ()),
+        )
+    if session_id and witness_npc:
+        import db
+        _sess_cs = db.get_session(session_id) or {}
+        _turn_cs = int(db.infer_session_turn(_sess_cs))
+        _resolve_and_register_quest_cast_npc(
+            session_id,
+            scen_key or str(_sess_cs.get("scenario") or "modern_urban"),
+            quest_id,
+            "witness",
+            witness_npc,
+            gender_hint=witness_gender,
+            contact_id=witness_cid,
+            turn_number=_turn_cs,
         )
     if witness_npc and used_witness_npcs is not None:
         used_witness_npcs.add(witness_npc.lower())
@@ -1268,6 +1480,9 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
     cast = dict(dos.get("cast_bindings") or {})
     main_stages = [dict(s) for s in (climax.get("main_stages") or [])]
 
+    eff_turn_rep = int(db.infer_session_turn(sess)) if session_id else 0
+    rep_roster_map, rep_contacts_map = _load_quest_cast_lookup_maps(session_id) if session_id else ({}, {})
+
     # 1. Target & Informant Placeholders & Friendly Protection
     protected_low = get_protected_quest_cast_names(session_id) if session_id else set()
     cur_target = str(dos.get("target_npc") or climax.get("true_culprit") or climax.get("target_npc") or (cast.get("target") or {}).get("name") or "").strip()
@@ -1286,14 +1501,36 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
                     avoid.add(str(p_char["name"]).strip().lower())
             except Exception:
                 pass
-        new_target, _, _ = _pick_safe_npc_name(session_id, scen_key, f"repair_tgt:{qid}", avoid_low=avoid)
+        new_target, new_target_gender, new_target_cid = _pick_safe_npc_name(session_id, scen_key, f"repair_tgt:{qid}", avoid_low=avoid)
         if _PLACEHOLDER_ACTOR_RE.search(new_target) or new_target.lower() in protected_low:
             new_target = backups[0]
+            new_target_gender = ""
+            new_target_cid = None
+        new_target_meta = _resolve_and_register_quest_cast_npc(
+            session_id,
+            scen_key,
+            qid,
+            "target",
+            new_target,
+            gender_hint=new_target_gender,
+            contact_id=new_target_cid,
+            turn_number=eff_turn_rep,
+            existing_roster_by_low=rep_roster_map,
+            existing_contacts_by_low=rep_contacts_map,
+        )
         dos["target_npc"] = new_target
         climax["true_culprit"] = new_target
         climax["target_npc"] = new_target
         if "target" in cast and isinstance(cast["target"], dict):
-            cast["target"]["name"] = new_target
+            cast["target"].update(
+                {
+                    "name": new_target,
+                    "contact_id": new_target_meta["contact_id"],
+                    "gender": new_target_meta["gender"],
+                    "race": new_target_meta["race"],
+                    "role": new_target_meta["role"],
+                }
+            )
         for ms in main_stages:
             if ms.get("is_climax_stage") or str(ms.get("target_npc") or "").lower() == cur_target.lower():
                 ms["target_npc"] = new_target
@@ -1301,10 +1538,30 @@ def validate_and_repair_dossier(session_id: int, dossier: Dict[str, Any]) -> Dic
 
     cur_informant = str(dos.get("informant_npc") or (cast.get("informant") or {}).get("name") or "").strip()
     if cur_informant and _PLACEHOLDER_ACTOR_RE.search(cur_informant):
-        new_inf, _, _ = _pick_safe_npc_name(session_id, scen_key, f"repair_inf:{qid}", avoid_low={cur_target.lower()})
+        new_inf, new_inf_gender, new_inf_cid = _pick_safe_npc_name(session_id, scen_key, f"repair_inf:{qid}", avoid_low={cur_target.lower()})
+        new_inf_meta = _resolve_and_register_quest_cast_npc(
+            session_id,
+            scen_key,
+            qid,
+            "informant",
+            new_inf,
+            gender_hint=new_inf_gender,
+            contact_id=new_inf_cid,
+            turn_number=eff_turn_rep,
+            existing_roster_by_low=rep_roster_map,
+            existing_contacts_by_low=rep_contacts_map,
+        )
         dos["informant_npc"] = new_inf
         if "informant" in cast and isinstance(cast["informant"], dict):
-            cast["informant"]["name"] = new_inf
+            cast["informant"].update(
+                {
+                    "name": new_inf,
+                    "contact_id": new_inf_meta["contact_id"],
+                    "gender": new_inf_meta["gender"],
+                    "race": new_inf_meta["race"],
+                    "role": new_inf_meta["role"],
+                }
+            )
         cur_informant = new_inf
 
     # 2. Main Stage Count (>= 3 for Story Quests)
@@ -1492,6 +1749,8 @@ def compile_quest_dossier(
         if p_char and p_char.get("name"):
             avoid_set.add(str(p_char["name"]).strip().lower())
 
+    cast_roster_map, cast_contacts_map = _load_quest_cast_lookup_maps(session_id) if session_id else ({}, {})
+
     for_intimate = engine == "INTIMATE_LIAISON"
     is_target_valid = (
         bool(target_npc)
@@ -1501,7 +1760,7 @@ def compile_quest_dossier(
     )
     if is_target_valid:
         eff_target = target_npc
-        target_gender = "female"
+        target_gender = ""
         target_cid = None
     else:
         eff_target, target_gender, target_cid = _pick_safe_npc_name(
@@ -1511,19 +1770,21 @@ def compile_quest_dossier(
 
     eff_client = client_npc or stub.get("client_npc") or (existing_q or {}).get("client_npc") or ""
     if not eff_client or _PLACEHOLDER_ACTOR_RE.search(eff_client):
-        eff_client, _, client_cid = _pick_safe_npc_name(session_id, eff_scen, f"client:{quest_id}", avoid_set)
+        eff_client, client_gender, client_cid = _pick_safe_npc_name(session_id, eff_scen, f"client:{quest_id}", avoid_set)
     else:
+        client_gender = ""
         client_cid = None
     avoid_set.add(eff_client.lower())
 
     if informant_npc and informant_npc.lower() not in avoid_set and not _PLACEHOLDER_ACTOR_RE.search(informant_npc):
         eff_informant = informant_npc
+        informant_gender = ""
         informant_cid = None
     else:
-        eff_informant, _, informant_cid = _pick_safe_npc_name(session_id, eff_scen, f"informant:{quest_id}", avoid_set)
+        eff_informant, informant_gender, informant_cid = _pick_safe_npc_name(session_id, eff_scen, f"informant:{quest_id}", avoid_set)
     avoid_set.add(eff_informant.lower())
 
-    eff_accomplice, _, accomplice_cid = _pick_safe_npc_name(session_id, eff_scen, f"accomplice:{quest_id}", avoid_set)
+    eff_accomplice, accomplice_gender, accomplice_cid = _pick_safe_npc_name(session_id, eff_scen, f"accomplice:{quest_id}", avoid_set)
 
     pref_loc = preferred_location or stub.get("client_location") or (existing_q or {}).get("client_location") or sess.get("current_location") or "Central District"
     climax_loc, climax_node_id = select_deconflicted_climax_location(
@@ -1536,28 +1797,116 @@ def compile_quest_dossier(
     )
     if not lead_loc or lead_loc == "District Inner Chamber" or lead_loc == climax_loc or is_safe_sanctuary_location(lead_loc):
         lead_loc = ""
+        _lead_nid = ""
         if session_id:
             try:
                 with db.get_conn() as _conn:
                     nodes = _conn.execute(
-                        "SELECT name FROM world_nodes WHERE session_id=? AND node_type='ROOM' AND name NOT IN (?, ?)",
+                        "SELECT id, name FROM world_nodes WHERE session_id=? AND node_type='ROOM' AND name NOT IN (?, ?)",
                         (session_id, climax_loc, pref_loc),
                     ).fetchall()
                     for n_row in nodes:
-                        cand_name = str(n_row[0] or "")
+                        cand_name = str(n_row[1] or "")
                         if cand_name and not is_safe_sanctuary_location(cand_name):
                             lead_loc = cand_name
+                            _lead_nid = str(n_row[0] or "")
                             break
             except Exception:
                 pass
         if not lead_loc:
             lead_loc = pref_loc if (pref_loc and pref_loc != climax_loc and not is_safe_sanctuary_location(pref_loc)) else "District Forward Post"
 
+    client_meta = _resolve_and_register_quest_cast_npc(
+        session_id,
+        eff_scen,
+        quest_id,
+        "client",
+        eff_client,
+        gender_hint=client_gender,
+        contact_id=client_cid,
+        turn_number=eff_turn,
+        anchor_node_id="",
+        existing_roster_by_low=cast_roster_map,
+        existing_contacts_by_low=cast_contacts_map,
+    )
+    target_meta = _resolve_and_register_quest_cast_npc(
+        session_id,
+        eff_scen,
+        quest_id,
+        "target",
+        eff_target,
+        gender_hint=target_gender,
+        contact_id=target_cid,
+        turn_number=eff_turn,
+        anchor_node_id=climax_node_id,
+        existing_roster_by_low=cast_roster_map,
+        existing_contacts_by_low=cast_contacts_map,
+    )
+    target_gender = str(target_meta.get("gender") or target_gender or "female")
+    informant_meta = _resolve_and_register_quest_cast_npc(
+        session_id,
+        eff_scen,
+        quest_id,
+        "informant",
+        eff_informant,
+        gender_hint=informant_gender,
+        contact_id=informant_cid,
+        turn_number=eff_turn,
+        anchor_node_id=_lead_nid,
+        existing_roster_by_low=cast_roster_map,
+        existing_contacts_by_low=cast_contacts_map,
+    )
+    accomplice_meta = _resolve_and_register_quest_cast_npc(
+        session_id,
+        eff_scen,
+        quest_id,
+        "accomplice",
+        eff_accomplice,
+        gender_hint=accomplice_gender,
+        contact_id=accomplice_cid,
+        turn_number=eff_turn,
+        anchor_node_id=climax_node_id,
+        existing_roster_by_low=cast_roster_map,
+        existing_contacts_by_low=cast_contacts_map,
+    )
+
     cast_bindings = {
-        "client": {"name": eff_client, "contact_id": client_cid, "status": "alive", "fallback_on_death": "contract_void_or_successor"},
-        "target": {"name": eff_target, "contact_id": target_cid, "gender": target_gender, "status": "alive", "plot_armor": False},
-        "informant": {"name": eff_informant, "contact_id": informant_cid, "status": "alive", "fallback_on_death": "lootable_cipher_or_room_search"},
-        "accomplice": {"name": eff_accomplice, "contact_id": accomplice_cid, "status": "alive", "is_red_herring_suspect": True},
+        "client": {
+            "name": eff_client,
+            "contact_id": client_meta["contact_id"],
+            "gender": client_meta["gender"],
+            "race": client_meta["race"],
+            "role": client_meta["role"],
+            "status": "alive",
+            "fallback_on_death": "contract_void_or_successor",
+        },
+        "target": {
+            "name": eff_target,
+            "contact_id": target_meta["contact_id"],
+            "gender": target_gender,
+            "race": target_meta["race"],
+            "role": target_meta["role"],
+            "status": "alive",
+            "plot_armor": False,
+        },
+        "informant": {
+            "name": eff_informant,
+            "contact_id": informant_meta["contact_id"],
+            "gender": informant_meta["gender"],
+            "race": informant_meta["race"],
+            "role": informant_meta["role"],
+            "status": "alive",
+            "fallback_on_death": "lootable_cipher_or_room_search",
+        },
+        "accomplice": {
+            "name": eff_accomplice,
+            "contact_id": accomplice_meta["contact_id"],
+            "gender": accomplice_meta["gender"],
+            "race": accomplice_meta["race"],
+            "role": accomplice_meta["role"],
+            "status": "alive",
+            "is_red_herring_suspect": True,
+        },
     }
 
     encounter_roster, boss_sheet = _build_combat_rosters_for_dossier(

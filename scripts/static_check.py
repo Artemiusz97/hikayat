@@ -88,6 +88,18 @@ class Finding:
 # Analyzer 2: flow-sensitive possibly-unbound-local detection
 # ---------------------------------------------------------------------------
 
+def _is_suppressed_line(lines: List[str], lineno: int, rule_name: str) -> bool:
+    """Inline opt-out: `# static-check: ignore[rule1,rule2]` or bare `# static-check: ignore`."""
+    line = lines[lineno - 1] if 0 < lineno <= len(lines) else ""
+    if "static-check: ignore" not in line:
+        return False
+    m = re.search(r"static-check:\s*ignore\[([^\]]+)\]", line)
+    if not m:
+        return True
+    rules = {r.strip() for r in m.group(1).split(",") if r.strip()}
+    return rule_name in rules
+
+
 _TERMINATED = None  # state sentinel: control never falls through (return/raise/break/continue)
 State = Optional[Set[str]]
 
@@ -324,8 +336,7 @@ class _FunctionFlow:
 
     def _suppressed(self, lineno: int) -> bool:
         """Inline opt-out for verified false positives: `# static-check: ignore[possibly-unbound-local]`."""
-        line = self.lines[lineno - 1] if 0 < lineno <= len(self.lines) else ""
-        return "static-check: ignore" in line and ("possibly-unbound-local" in line or "ignore]" not in line)
+        return _is_suppressed_line(self.lines, lineno, "possibly-unbound-local")
 
     # -- statement walker -------------------------------------------------------
     def _block(self, stmts: List[ast.stmt], state: State) -> State:
@@ -524,6 +535,402 @@ def analyze_possibly_unbound(path: Path, rel: str) -> List[Finding]:
 
 
 # ---------------------------------------------------------------------------
+# Analyzers 3–5: Bundle B DB/Async/Registry Architecture Contracts
+# ---------------------------------------------------------------------------
+
+_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/turn/")
+_ASYNC_SAFE_DB_ATTRS = frozenset({
+    "adb",
+    "distributed_session_lock",
+    "distributed_user_lock",
+})
+_DEFAULT_SQLITE_CONN_NAMES = frozenset({
+    "conn",
+    "con",
+    "db_conn",
+    "uow_conn",
+    "raw_conn",
+    "sqlite_conn",
+    "dst_conn",
+    "src_conn",
+})
+
+
+def _extract_pure_db_helpers(db_init_path: Optional[Path] = None) -> Set[str]:
+    """Parse PURE_IN_MEMORY_DB_HELPERS from db/__init__.py via AST without importing db."""
+    target = db_init_path or (ROOT / "db" / "__init__.py")
+    if not target.exists():
+        return set()
+    try:
+        tree = ast.parse(target.read_text(encoding="utf-8"), filename=str(target))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return set()
+
+    def _strings_in_node(val: Optional[ast.AST]) -> Set[str]:
+        if val is None:
+            return set()
+        if isinstance(val, ast.Call) and val.args:
+            return _strings_in_node(val.args[0])
+        if isinstance(val, (ast.Set, ast.List, ast.Tuple)):
+            out: Set[str] = set()
+            for elt in val.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                    out.add(elt.value)
+            return out
+        return set()
+
+    for stmt in tree.body:
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "PURE_IN_MEMORY_DB_HELPERS":
+            return _strings_in_node(stmt.value)
+        if isinstance(stmt, ast.Assign):
+            for tgt in stmt.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == "PURE_IN_MEMORY_DB_HELPERS":
+                    return _strings_in_node(stmt.value)
+    return set()
+
+
+def _collect_db_imports(nodes: Iterable[ast.AST]) -> Tuple[Set[str], Dict[str, str]]:
+    """Collect aliases of `import db` and `from db import fn` bindings in a block."""
+    aliases: Set[str] = set()
+    symbols: Dict[str, str] = {}
+    for node in nodes:
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                if al.name == "db":
+                    aliases.add(al.asname or "db")
+        elif isinstance(node, ast.ImportFrom) and node.module == "db" and node.level == 0:
+            for al in node.names:
+                if al.name != "*":
+                    symbols[al.asname or al.name] = al.name
+    return aliases, symbols
+
+
+def analyze_sync_db_in_async(
+    path: Path,
+    rel: str,
+    pure_helpers: Optional[Set[str]] = None,
+) -> List[Finding]:
+    """Flag direct blocking db.* calls inside `async def` (offload via `await adb(...)`)."""
+    norm_rel = rel.replace("\\", "/")
+    if not norm_rel.startswith(_SYNC_DB_ASYNC_PREFIXES):
+        return []
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+    lines = source.splitlines()
+    helpers = pure_helpers if pure_helpers is not None else _extract_pure_db_helpers()
+    allowed = helpers | _ASYNC_SAFE_DB_ATTRS
+    findings: List[Finding] = []
+
+    mod_aliases, mod_symbols = _collect_db_imports(tree.body)
+
+    def _iter_direct_imports(body: List[ast.stmt]) -> List[ast.stmt]:
+        stmts: List[ast.stmt] = []
+        stack: List[ast.AST] = list(body)
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                stmts.append(node)
+                continue
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            stack.extend(ast.iter_child_nodes(node))
+        return stmts
+
+    def _scan_async_fn(
+        fn: ast.AsyncFunctionDef,
+        qualname: str,
+        parent_aliases: Set[str],
+        parent_symbols: Dict[str, str],
+    ) -> None:
+        local_stmts = _iter_direct_imports(fn.body)
+        loc_aliases, loc_symbols = _collect_db_imports(local_stmts)
+        aliases = parent_aliases | loc_aliases
+        symbols = {**parent_symbols, **loc_symbols}
+
+        def _visit(node: ast.AST) -> None:
+            if node is not fn:
+                if isinstance(node, ast.AsyncFunctionDef):
+                    _scan_async_fn(node, f"{qualname}.{node.name}", aliases, symbols)
+                    return
+                if isinstance(node, ast.FunctionDef):
+                    for d in node.decorator_list:
+                        _visit(d)
+                    for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
+                        _visit(d)
+                    # Recurse only into nested async defs inside this sync helper.
+                    for sub in node.body:
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols)
+                    return
+                if isinstance(node, ast.Lambda):
+                    for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
+                        _visit(d)
+                    return
+                if isinstance(node, ast.ClassDef):
+                    for sub in node.body:
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols)
+                    return
+                if isinstance(node, ast.Call):
+                    fn_name: Optional[str] = None
+                    via_alias = False
+                    if (
+                        isinstance(node.func, ast.Attribute)
+                        and isinstance(node.func.value, ast.Name)
+                        and node.func.value.id in aliases
+                    ):
+                        fn_name = node.func.attr
+                        via_alias = True
+                    elif isinstance(node.func, ast.Name) and node.func.id in symbols:
+                        fn_name = symbols[node.func.id]
+
+                    if (
+                        fn_name is not None
+                        and fn_name not in allowed
+                        and not _is_suppressed_line(lines, node.lineno, "sync-db-in-async")
+                    ):
+                        how = f"`db.{fn_name}()`" if via_alias else f"`{fn_name}()` (from `db`)"
+                        findings.append(Finding(
+                            norm_rel,
+                            node.lineno,
+                            "sync-db-in-async",
+                            qualname,
+                            f"blocking {how} called inside async def; offload via `await adb(...)`",
+                        ))
+            for child in ast.iter_child_nodes(node):
+                _visit(child)
+
+        for stmt in fn.body:
+            _visit(stmt)
+
+    def _scan_for_nested_async(
+        node: ast.AST,
+        scope_prefix: str,
+        parent_aliases: Set[str],
+        parent_symbols: Dict[str, str],
+    ) -> None:
+        if isinstance(node, ast.AsyncFunctionDef):
+            q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
+            _scan_async_fn(node, q, parent_aliases, parent_symbols)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
+            for sub in node.body:
+                _scan_for_nested_async(sub, q, parent_aliases, parent_symbols)
+            return
+        for child in ast.iter_child_nodes(node):
+            _scan_for_nested_async(child, scope_prefix, parent_aliases, parent_symbols)
+
+    for item in tree.body:
+        _scan_for_nested_async(item, "", mod_aliases, mod_symbols)
+    return findings
+
+
+def _is_sqlite_conn_producer(expr: Optional[ast.AST]) -> bool:
+    """Return True when `expr` constructs or opens a sqlite3 connection / UoW handle."""
+    if expr is None or not isinstance(expr, ast.Call):
+        return False
+    f = expr.func
+    name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
+    if name in ("get_conn", "_get_independent_conn", "UnitOfWork", "ReadUnitOfWork"):
+        return True
+    if name == "connect" and isinstance(f, ast.Attribute) and isinstance(f.value, ast.Name) and f.value.id == "sqlite3":
+        return True
+    return False
+
+
+def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
+    """Flag raw SQLite `conn.commit()` outside `db/core.py` (would release active savepoints)."""
+    norm_rel = rel.replace("\\", "/")
+    if norm_rel == "db/core.py":
+        return []
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+    lines = source.splitlines()
+    findings: List[Finding] = []
+
+    def _collect_conn_vars(scope_node: ast.AST) -> Set[str]:
+        conn_vars = set(_DEFAULT_SQLITE_CONN_NAMES)
+        stack: List[ast.AST] = list(getattr(scope_node, "body", []))
+        while stack:
+            node = stack.pop()
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(node, ast.With):
+                for item in node.items:
+                    if item.optional_vars is not None and _is_sqlite_conn_producer(item.context_expr):
+                        conn_vars.update(_target_names(item.optional_vars))
+            elif isinstance(node, ast.Assign) and _is_sqlite_conn_producer(node.value):
+                for tgt in node.targets:
+                    conn_vars.update(_target_names(tgt))
+            elif isinstance(node, ast.AnnAssign) and _is_sqlite_conn_producer(node.value):
+                conn_vars.update(_target_names(node.target))
+            stack.extend(ast.iter_child_nodes(node))
+        return conn_vars
+
+    def _scan_scope(node: ast.AST, qualname: str, inherited_conns: Set[str]) -> None:
+        conn_vars = inherited_conns | _collect_conn_vars(node)
+
+        def _visit(cur: ast.AST) -> None:
+            if cur is not node and isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                sub_q = f"{qualname}.{cur.name}" if qualname != "<module>" else cur.name
+                _scan_scope(cur, sub_q, conn_vars)
+                return
+            if cur is not node and isinstance(cur, ast.ClassDef):
+                sub_q = f"{qualname}.{cur.name}" if qualname != "<module>" else cur.name
+                for item in cur.body:
+                    _visit_cls_item(item, sub_q)
+                return
+            if isinstance(cur, ast.Call) and isinstance(cur.func, ast.Attribute) and cur.func.attr == "commit":
+                val = cur.func.value
+                is_conn = (
+                    (isinstance(val, ast.Name) and val.id in conn_vars)
+                    or _is_sqlite_conn_producer(val)
+                )
+                if is_conn and not _is_suppressed_line(lines, cur.lineno, "raw-conn-commit-outside-core"):
+                    target_desc = val.id if isinstance(val, ast.Name) else "get_conn()"
+                    findings.append(Finding(
+                        norm_rel,
+                        cur.lineno,
+                        "raw-conn-commit-outside-core",
+                        qualname,
+                        f"raw `{target_desc}.commit()` outside db/core.py; remove it inside UnitOfWork/savepoints or use `db.UnitOfWork()`",
+                    ))
+            for child in ast.iter_child_nodes(cur):
+                _visit(child)
+
+        def _visit_cls_item(item: ast.AST, cls_q: str) -> None:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _scan_scope(item, f"{cls_q}.{item.name}", conn_vars)
+            elif isinstance(item, ast.ClassDef):
+                for sub in item.body:
+                    _visit_cls_item(sub, f"{cls_q}.{item.name}")
+
+        for stmt in getattr(node, "body", []):
+            _visit(stmt)
+
+    _scan_scope(tree, "<module>", set(_DEFAULT_SQLITE_CONN_NAMES))
+    return findings
+
+
+def _extract_registered_table_names(registry_path: Path) -> Set[str]:
+    """Extract all table names registered in SESSION_TABLE_REGISTRY, GLOBAL_TABLES, FTS5_VIRTUAL_TABLES."""
+    tree = ast.parse(registry_path.read_text(encoding="utf-8"), filename=str(registry_path))
+    names: Set[str] = set()
+
+    def _collect_from_set_var(val: Optional[ast.AST]) -> None:
+        if val is None:
+            return
+        if isinstance(val, ast.Call) and val.args:
+            _collect_from_set_var(val.args[0])
+            return
+        if isinstance(val, (ast.Set, ast.List, ast.Tuple)):
+            for elt in val.elts:
+                if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                    names.add(elt.value.strip().lower())
+
+    def _collect_from_registry(val: Optional[ast.AST]) -> None:
+        if not isinstance(val, (ast.List, ast.Tuple)):
+            return
+        for elt in val.elts:
+            if isinstance(elt, ast.Call):
+                for kw in elt.keywords:
+                    if kw.arg in ("name", "table") and isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, str):
+                        names.add(kw.value.value.strip().lower())
+                if elt.args and isinstance(elt.args[0], ast.Constant) and isinstance(elt.args[0].value, str):
+                    names.add(elt.args[0].value.strip().lower())
+
+    for stmt in tree.body:
+        val_node: Optional[ast.AST] = None
+        target_name = ""
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            target_name = stmt.target.id
+            val_node = stmt.value
+        elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            target_name = stmt.targets[0].id
+            val_node = stmt.value
+        if target_name in ("GLOBAL_TABLES", "FTS5_VIRTUAL_TABLES"):
+            _collect_from_set_var(val_node)
+        elif target_name == "SESSION_TABLE_REGISTRY":
+            _collect_from_registry(val_node)
+    return names
+
+
+def analyze_unregistered_session_tables(
+    db_core_path: Optional[Path] = None,
+    registry_path: Optional[Path] = None,
+    rel: str = "db/core.py",
+) -> List[Finding]:
+    """Flag any SCHEMA table in db/core.py with a `session_id` column missing from db/registry.py."""
+    core_p = db_core_path or (ROOT / "db" / "core.py")
+    reg_p = registry_path or (ROOT / "db" / "registry.py")
+    if not core_p.exists() or not reg_p.exists():
+        return []
+    try:
+        core_source = core_p.read_text(encoding="utf-8")
+        core_tree = ast.parse(core_source, filename=str(core_p))
+        registered = _extract_registered_table_names(reg_p)
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+
+    schema_str: Optional[str] = None
+    schema_start_line = 1
+    for stmt in core_tree.body:
+        val_node: Optional[ast.AST] = None
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "SCHEMA":
+            val_node = stmt.value
+        elif isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "SCHEMA" for t in stmt.targets):
+            val_node = stmt.value
+        if isinstance(val_node, ast.Constant) and isinstance(val_node.value, str):
+            schema_str = val_node.value
+            schema_start_line = getattr(val_node, "lineno", stmt.lineno) or stmt.lineno
+            break
+    if not schema_str:
+        return []
+
+    core_lines = core_source.splitlines()
+    findings: List[Finding] = []
+    create_re = re.compile(
+        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        re.IGNORECASE,
+    )
+    for m in create_re.finditer(schema_str):
+        tname = m.group(1).strip().lower()
+        open_idx = m.end() - 1
+        depth = 0
+        end_idx = len(schema_str)
+        for pos in range(open_idx, len(schema_str)):
+            ch = schema_str[pos]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+                if depth == 0:
+                    end_idx = pos
+                    break
+        body = schema_str[open_idx + 1 : end_idx]
+        if not re.search(r"\bsession_id\b", body, re.IGNORECASE):
+            continue
+        if tname in registered:
+            continue
+        lineno = schema_start_line + schema_str[: m.start()].count("\n")
+        if _is_suppressed_line(core_lines, lineno, "unregistered-session-table"):
+            continue
+        findings.append(Finding(
+            rel.replace("\\", "/"),
+            lineno,
+            "unregistered-session-table",
+            "SCHEMA",
+            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY / GLOBAL_TABLES)",
+        ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Analyzer 1: pylint (error subset)
 # ---------------------------------------------------------------------------
 
@@ -662,8 +1069,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     rels = [str(p.relative_to(ROOT)).replace("\\", "/") if p.is_relative_to(ROOT) else str(p) for p in targets]
 
     findings: List[Finding] = []
+    pure_helpers = _extract_pure_db_helpers()
     for p, rel in zip(targets, rels):
         findings.extend(analyze_possibly_unbound(p, rel))
+        findings.extend(analyze_sync_db_in_async(p, rel, pure_helpers=pure_helpers))
+        findings.extend(analyze_raw_conn_commit(p, rel))
+    if any(r.replace("\\", "/") in ("db/core.py", "db/registry.py") for r in rels):
+        findings.extend(analyze_unregistered_session_tables())
     if not args.no_pylint:
         findings.extend(run_pylint(rels))
     findings.sort(key=lambda f: (f.path, f.line, f.check))

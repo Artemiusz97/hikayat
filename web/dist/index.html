@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="en" data-theme="ember" data-scheme="dark">
+<html lang="en" data-theme="ember" data-scheme="dark" data-acrylic="full">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#1b1712" />
-    <title>Hikayat - AI RPG Console</title>
+    <title>Hikayat — Living Chronicles · Interactive RPG</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" />
     <script>
@@ -17,14 +17,27 @@
             document.documentElement.setAttribute('data-theme', m);
             document.documentElement.setAttribute('data-scheme', light[m] ? 'light' : 'dark');
           }
+          var p = localStorage.getItem('hikayat_ui_prefs_v1');
+          if (p) {
+            var parsed = JSON.parse(p);
+            if (parsed && (parsed.acrylicMode === 'full' || parsed.acrylicMode === 'focused' || parsed.acrylicMode === 'solid')) {
+              document.documentElement.setAttribute('data-acrylic', parsed.acrylicMode);
+            }
+            if (parsed && typeof parsed.acrylicOpacity === 'number' && parsed.acrylicOpacity >= 5 && parsed.acrylicOpacity <= 95) {
+              document.documentElement.style.setProperty('--acrylic-alpha', (Math.round(parsed.acrylicOpacity) / 100).toFixed(2));
+            }
+            if (parsed && typeof parsed.textScale === 'number' && parsed.textScale >= 70 && parsed.textScale <= 130) {
+              document.documentElement.style.setProperty('--ui-text-scale', (Math.round(parsed.textScale) / 100).toFixed(2));
+            }
+          }
         } catch (e) {}
       })();
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
-    <script type="module" crossorigin src="/assets/index-78JergaV.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-C3nTmXrI.css">
+    <script type="module" crossorigin src="/assets/index-D1Oxfb0s.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-iATQprMp.css">
   </head>
   <body class="text-gray-200 antialiased overflow-hidden">
     <div id="root"></div>

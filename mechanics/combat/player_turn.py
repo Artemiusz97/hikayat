@@ -431,12 +431,40 @@ def resolve_player_combat_phase(ctx: Dict[str, Any]) -> None:
             elif parsed_item.get("hp_restore", 0) > 0 or parsed_item.get("mp_restore", 0) > 0:
                 h_val = parsed_item.get("hp_restore", 0)
                 m_val = parsed_item.get("mp_restore", 0)
-                acting_char_data["hp"] = min(acting_char_data.get("max_hp", 100), acting_char_data.get("hp", 0) + h_val)
-                player_heal_by_name[acting_char_name] = player_heal_by_name.get(acting_char_name, 0) + h_val
-                if m_val > 0:
-                    acting_char_data["mp"] = min(acting_char_data.get("max_mp", 100), acting_char_data.get("mp", 0) + m_val)
-                    player_mp_change_by_name[acting_char_name] = player_mp_change_by_name.get(acting_char_name, 0) + m_val
-                combat_log.append(f"🧪 **{acting_char_name}** consumed **{action.get('label', 'Potion')}**: Restored **+{h_val} HP**" + (f", **+{m_val} MP**" if m_val > 0 else "") + ".")
+                act_t_type = str(action.get("target_type") or "self").strip().lower()
+                act_t_name = str(action.get("target_name") or action.get("target_npc") or "").strip().lower()
+                act_t_uid = action.get("target_user_id")
+                healed_target_char = None
+                healed_target_npc = None
+                if act_t_type == "player" and (act_t_uid is not None or act_t_name):
+                    for p_entry in (party or []):
+                        pc = p_entry[0] if isinstance(p_entry, (tuple, list)) and p_entry else (p_entry if isinstance(p_entry, dict) else None)
+                        if not isinstance(pc, dict):
+                            continue
+                        if (act_t_uid is not None and pc.get("user_id") == act_t_uid) or (act_t_name and str(pc.get("name") or "").strip().lower() == act_t_name):
+                            healed_target_char = pc
+                            break
+                elif act_t_type == "companion" and act_t_name:
+                    for npc in (current_npcs or []):
+                        if isinstance(npc, dict) and str(npc.get("name") or "").strip().lower() == act_t_name:
+                            healed_target_npc = npc
+                            break
+
+                if healed_target_npc is not None:
+                    n_max_hp = int(healed_target_npc.get("max_hp", 40) or 40)
+                    n_hp = int(healed_target_npc.get("hp", n_max_hp) if healed_target_npc.get("hp") is not None else n_max_hp)
+                    healed_target_npc["hp"] = min(n_max_hp, n_hp + h_val)
+                    combat_log.append(f"🧪 **{acting_char_name}** used **{action.get('item_name') or action.get('label', 'Potion')}** on **{healed_target_npc['name']}**: Restored **+{h_val} HP**.")
+                else:
+                    tgt_c = healed_target_char or acting_char_data
+                    tgt_nm = str(tgt_c.get("name") or acting_char_name)
+                    tgt_c["hp"] = min(tgt_c.get("max_hp", 100), tgt_c.get("hp", 0) + h_val)
+                    player_heal_by_name[tgt_nm] = player_heal_by_name.get(tgt_nm, 0) + h_val
+                    if m_val > 0:
+                        tgt_c["mp"] = min(tgt_c.get("max_mp", 100), tgt_c.get("mp", 0) + m_val)
+                        player_mp_change_by_name[tgt_nm] = player_mp_change_by_name.get(tgt_nm, 0) + m_val
+                    tgt_desc = f" on **{tgt_nm}**" if tgt_nm != acting_char_name else ""
+                    combat_log.append(f"🧪 **{acting_char_name}** used **{action.get('item_name') or action.get('label', 'Potion')}**{tgt_desc}: Restored **+{h_val} HP**" + (f", **+{m_val} MP**" if m_val > 0 else "") + ".")
                 if h_val > 0:
                     all_eids = [str(e.get("id") or e.get("name")) for e in enemies if e.get("hp", 0) > 0]
                     update_threat_on_action(threat_matrix, str(acting_char_name), "heal", [], all_eids, effective_healing=h_val, sticky_taunts=sticky_taunts)

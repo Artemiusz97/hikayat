@@ -14,7 +14,9 @@ import {
   ChevronRight,
   Crosshair,
   AlertTriangle,
+  Maximize2,
 } from 'lucide-react';
+import { MotionButton, isTopEscapeLayer, registerEscapeLayer } from '../Common/MotionPrimitives';
 import { apiCall } from '../../api/client';
 import { useMediaQuery } from '../../hooks/useMediaQuery';
 import {
@@ -187,6 +189,8 @@ const WorldMapModal = ({
   onTravel,
   initialTargetLocation,
   processingTurn = false,
+  mode = 'modal',
+  onExpandModal = null,
 }) => {
   const { t } = useTranslation();
   const dialogRef = useRef(null);
@@ -194,6 +198,10 @@ const WorldMapModal = ({
   const placeRefs = useRef({});
   const roomRefs = useRef({});
   const isMobile = useMediaQuery('(max-width: 767px)');
+  const isDesktopWide = useMediaQuery('(min-width: 1280px)');
+  const isDrawer = mode === 'drawer';
+  const useTwoColumnDrawer = isDrawer && isDesktopWide;
+  const isCompact = isMobile || (isDrawer && !useTwoColumnDrawer);
 
   const [mapData, setMapData] = useState(null);
   const [selectedZone, setSelectedZone] = useState(null);
@@ -205,50 +213,121 @@ const WorldMapModal = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const abortRef = useRef(null);
+  const seqRef = useRef(0);
+  const wasOpenRef = useRef(false);
+  const lastSessionIdRef = useRef(session?.id ?? null);
+  const lastInitialTargetRef = useRef(initialTargetLocation ?? null);
+  const lastCurrentZoneRef = useRef(null);
+  const searchQueryRef = useRef(searchQuery);
+
+  useEffect(() => {
+    searchQueryRef.current = searchQuery;
+  }, [searchQuery]);
+
   const fetchLocations = useCallback(async () => {
     if (!isValidSessionId(session?.id)) return;
+    if (abortRef.current) {
+      try {
+        abortRef.current.abort();
+      } catch {}
+    }
+    const seq = ++seqRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    const cleanInitialTarget = initialTargetLocation ?? null;
+    const isFreshOpenOrSwitch =
+      (!wasOpenRef.current && isOpen) ||
+      lastSessionIdRef.current !== session?.id ||
+      Boolean(cleanInitialTarget && cleanInitialTarget !== lastInitialTargetRef.current);
+    wasOpenRef.current = isOpen;
+    lastSessionIdRef.current = session?.id;
+    lastInitialTargetRef.current = cleanInitialTarget;
+
     setLoading(true);
     setError(null);
     try {
       const uidParam = user?.user_id ? `?user_id=${user.user_id}` : '';
-      const data = await apiCall(`/api/locations/${session.id}${uidParam}`);
+      const data = await apiCall(`/api/locations/${session.id}${uidParam}`, {
+        signal: controller.signal,
+      });
+      if (seq !== seqRef.current) return;
       setMapData(data);
       const zones = data?.zones || [];
       const matchedInitial = extractZoneFromTarget(initialTargetLocation, zones);
       const currentZone = zones.find(z => z.is_current) || zones[0] || null;
-      const nextZone = matchedInitial || (currentZone ? currentZone.zone_name : null);
-      setSelectedZone(nextZone);
-      setExpandedPlaces({});
-      setSearchQuery('');
-      setLeftTab('regions');
+      const currentZoneName = currentZone ? currentZone.zone_name : null;
 
-      if (initialTargetLocation) {
-        const parsed = parseCleanLocationParts(initialTargetLocation);
-        setHighlightedTarget({
-          zoneName: nextZone,
-          placeName: parsed.facility || '',
-          subName: parsed.subRoom || '',
-        });
-      } else {
-        setHighlightedTarget(null);
-      }
+      if (isFreshOpenOrSwitch) {
+        const nextZone = matchedInitial || currentZoneName;
+        setSelectedZone(nextZone);
+        setExpandedPlaces({});
+        setSearchQuery('');
+        setLeftTab('regions');
 
-      if (nextZone) {
-        setMobileView('detail');
-      } else {
-        setMobileView('list');
+        if (initialTargetLocation) {
+          const parsed = parseCleanLocationParts(initialTargetLocation);
+          setHighlightedTarget({
+            zoneName: nextZone,
+            placeName: parsed.facility || '',
+            subName: parsed.subRoom || '',
+          });
+        } else {
+          setHighlightedTarget(null);
+        }
+
+        if (nextZone) {
+          setMobileView('detail');
+        } else {
+          setMobileView('list');
+        }
+      } else if (
+        currentZoneName &&
+        currentZoneName !== lastCurrentZoneRef.current &&
+        !searchQueryRef.current.trim()
+      ) {
+        setSelectedZone(currentZoneName);
       }
+      lastCurrentZoneRef.current = currentZoneName;
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== seqRef.current) return;
       setError(err.message || t('atlas.load_failed', 'Failed to load world map.'));
     } finally {
-      setLoading(false);
+      if (seq === seqRef.current) {
+        setLoading(false);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
     }
-  }, [session?.id, user?.user_id, initialTargetLocation, t]);
+  }, [isOpen, session?.id, user?.user_id, initialTargetLocation, t]);
 
-  // Native <dialog> open/close synchronization (modern-web-guidance: dialog)
+  // Native <dialog> open/close synchronization (modal mode) or direct fetch (drawer mode)
   useEffect(() => {
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+        abortRef.current = null;
+      }
+    }
+    if (isDrawer) {
+      if (isOpen) {
+        fetchLocations();
+      }
+      return () => {
+        if (abortRef.current) {
+          try {
+            abortRef.current.abort();
+          } catch {}
+        }
+      };
+    }
     const dialog = dialogRef.current;
-    if (!dialog) return;
+    if (!dialog) return undefined;
     if (isOpen) {
       if (!dialog.open) {
         dialog.showModal();
@@ -257,10 +336,44 @@ const WorldMapModal = ({
     } else if (dialog.open) {
       dialog.close();
     }
-  }, [isOpen, fetchLocations]);
+    return () => {
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+      }
+    };
+  }, [isDrawer, isOpen, fetchLocations, session?.current_location, session?.turn_count]);
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (isDrawer || !isOpen) return undefined;
+    const token = Symbol('world-map-esc');
+    const unregister = registerEscapeLayer(token);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dialog = dialogRef.current;
+        if (dialog?.open) {
+          dialog.close();
+        } else if (onCloseRef.current) {
+          onCloseRef.current();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [isDrawer, isOpen]);
 
   // Progressive enhancement fallback for browsers without native <dialog closedby="any">
   useEffect(() => {
+    if (isDrawer) return undefined;
     const dialog = dialogRef.current;
     if (!dialog || typeof HTMLDialogElement === 'undefined') return undefined;
     if ('closedBy' in HTMLDialogElement.prototype) return undefined;
@@ -398,7 +511,7 @@ const WorldMapModal = ({
   const handleSelectZone = (zoneName) => {
     setSelectedZone(zoneName);
     setHighlightedTarget(null);
-    if (isMobile) {
+    if (isCompact) {
       setMobileView('detail');
     }
   };
@@ -415,7 +528,7 @@ const WorldMapModal = ({
       placeName: qd.place_name || '',
       subName: qd.sub_name || '',
     });
-    if (isMobile) {
+    if (isCompact) {
       setMobileView('detail');
     }
   };
@@ -430,73 +543,87 @@ const WorldMapModal = ({
     : t('atlas.unknown_area', 'Unknown Area');
   const fullCurrLocTooltip = rawCurrLoc ? formatFullLocationPath(rawCurrLoc) : '';
 
-  const showLeftRail = !isMobile || mobileView === 'list';
-  const showRightPane = !isMobile || mobileView === 'detail';
+  const showLeftRail = !isCompact || mobileView === 'list';
+  const showRightPane = !isCompact || mobileView === 'detail';
 
   const facilityBadgeLabels = useMemo(() => getFacilityBadgeLabels(t), [t]);
 
-  return (
-    <dialog
-      ref={dialogRef}
-      className="hk-atlas-dialog"
-      aria-labelledby={titleId}
-      closedby="any"
-      onClose={handleDialogClose}
-    >
-      {isOpen && (
-        <div className="hk-surface flex-1 min-h-0 flex flex-col overflow-hidden rounded-none md:rounded-2xl border-0 md:border">
-          {/* Top Modal Header */}
-          <header className="hk-atlas-header px-4 sm:px-6 py-3.5 border-b border-fantasy-border/70 bg-fantasy-darker/70 flex items-start justify-between gap-3 shrink-0">
-            <div className="flex items-start gap-3 min-w-0 flex-1">
-              <div className="w-10 h-10 rounded-xl bg-fantasy-accent/15 border border-fantasy-accent/40 flex items-center justify-center text-fantasy-accent shrink-0 mt-0.5">
-                <Map size={20} aria-hidden="true" />
-              </div>
-              <div className="min-w-0 flex-1 space-y-1">
-                <div className="flex items-center flex-wrap gap-2.5">
-                  <h2 id={titleId} className="hk-atlas-heading font-rpg font-bold text-base sm:text-lg text-gray-100 tracking-wide">
+  const atlasContent = (
+        <div className={isDrawer ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'hk-acrylic flex-1 min-h-0 flex flex-col overflow-hidden rounded-none md:rounded-2xl border-0 md:border'}>
+          {/* Top Modal / Drawer Header */}
+          <header className={`hk-atlas-header ${isDrawer ? 'px-3.5 py-2.5' : 'px-4 sm:px-6 py-3.5'} border-b border-fantasy-border/40 flex items-start justify-between gap-2.5 shrink-0`}>
+            <div className="flex items-start gap-2.5 min-w-0 flex-1">
+              {!isDrawer && (
+                <div className="w-10 h-10 rounded-xl bg-fantasy-accent/15 border border-fantasy-accent/40 flex items-center justify-center text-fantasy-accent shrink-0 mt-0.5">
+                  <Map size={20} aria-hidden="true" />
+                </div>
+              )}
+              <div className="min-w-0 flex-1 space-y-0.5">
+                <div className="flex items-center flex-wrap gap-2">
+                  <h2 id={titleId} className={`hk-atlas-heading font-rpg font-bold ${isDrawer ? 'text-sm' : 'text-base sm:text-lg'} text-gray-100 tracking-wide truncate`}>
                     {t('atlas.title', 'World Atlas & Fast-Travel')}
                   </h2>
                   {activeQuestDestinations.length > 0 && (
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-950/75 text-amber-200 border border-amber-500/60">
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/45">
                       {activeQuestDestinations.length === 1
                         ? t('atlas.active_leads', { count: 1, defaultValue: '⭐ 1 Active Quest Lead' })
                         : t('atlas.active_leads_plural', { count: activeQuestDestinations.length, defaultValue: `⭐ ${activeQuestDestinations.length} Active Quest Leads` })}
                     </span>
                   )}
                 </div>
-                <p className="text-sm text-gray-300 flex items-start gap-1.5 hk-atlas-prose" title={fullCurrLocTooltip}>
-                  <MapPin size={15} className="text-fantasy-accent shrink-0 mt-0.5" aria-hidden="true" />
-                  <span>
-                    <span className="text-gray-400 mr-1.5">{t('atlas.current_position', 'Current Position:')}</span>
+                <p className={`${isDrawer ? 'text-xs' : 'text-sm'} text-gray-300 flex items-start gap-1.5 hk-atlas-prose`} title={fullCurrLocTooltip}>
+                  <MapPin size={14} className="text-fantasy-accent shrink-0 mt-0.5" aria-hidden="true" />
+                  <span className="min-w-0 truncate">
+                    {!isDrawer && <span className="text-gray-400 mr-1.5">{t('atlas.current_position', 'Current Position:')}</span>}
                     <strong className="text-gray-100 font-semibold">{cleanCurrLoc}</strong>
                   </span>
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
+            <div className="flex items-center gap-1 shrink-0">
+              <MotionButton
                 onClick={fetchLocations}
                 disabled={loading}
-                className="hk-icon-btn min-h-[44px] min-w-[44px] md:min-h-[36px] md:min-w-[36px]"
+                className={`hk-icon-btn ${isDrawer ? 'h-8 min-w-8' : 'min-h-[44px] min-w-[44px] md:min-h-[36px] md:min-w-[36px]'}`}
                 title={t('atlas.refresh', 'Refresh Atlas')}
                 aria-label={t('atlas.refresh', 'Refresh Atlas')}
               >
-                <RefreshCw size={16} className={loading ? 'animate-spin text-fantasy-accent' : ''} aria-hidden="true" />
-              </button>
-              <form method="dialog">
-                <button
-                  type="submit"
-                  value="close"
-                  autoFocus
-                  className="hk-icon-btn is-danger min-h-[44px] min-w-[44px] md:min-h-[36px] md:min-w-[36px]"
+                <RefreshCw size={15} className={loading ? 'animate-spin text-fantasy-accent' : ''} aria-hidden="true" />
+              </MotionButton>
+              {isDrawer && onExpandModal && (
+                <MotionButton
+                  onClick={onExpandModal}
+                  className="hk-icon-btn h-8 min-w-8"
+                  title={t('nav.expand_atlas', 'Expand Full Atlas')}
+                  aria-label={t('nav.expand_atlas', 'Expand Full Atlas')}
+                >
+                  <Maximize2 size={14} aria-hidden="true" />
+                </MotionButton>
+              )}
+              {isDrawer ? (
+                <MotionButton
+                  onClick={onClose}
+                  className="hk-icon-btn is-danger h-8 min-w-8"
                   title={t('atlas.close_atlas', 'Close World Atlas')}
                   aria-label={t('atlas.close_atlas', 'Close World Atlas')}
                 >
-                  <X size={18} aria-hidden="true" />
-                </button>
-              </form>
+                  <X size={16} aria-hidden="true" />
+                </MotionButton>
+              ) : (
+                <form method="dialog">
+                  <button
+                    type="submit"
+                    value="close"
+                    autoFocus
+                    className="hk-icon-btn is-danger min-h-[44px] min-w-[44px] md:min-h-[36px] md:min-w-[36px]"
+                    title={t('atlas.close_atlas', 'Close World Atlas')}
+                    aria-label={t('atlas.close_atlas', 'Close World Atlas')}
+                  >
+                    <X size={18} aria-hidden="true" />
+                  </button>
+                </form>
+              )}
             </div>
           </header>
 
@@ -533,38 +660,54 @@ const WorldMapModal = ({
               <p className="text-sm max-w-md hk-atlas-prose">{t('atlas.no_regions_desc', 'Explore your surroundings to unlock regions and fast-travel destinations.')}</p>
             </div>
           ) : (
-            <div className="flex-1 min-h-0 grid grid-cols-1 md:grid-cols-12 overflow-hidden">
+            <div
+              className={`flex-1 min-h-0 grid overflow-hidden ${
+                useTwoColumnDrawer
+                  ? 'grid-cols-[minmax(11.5rem,38%)_minmax(0,1fr)]'
+                  : isDrawer
+                    ? 'grid-cols-1'
+                    : 'grid-cols-1 md:grid-cols-12'
+              }`}
+            >
               {/* LEFT RAIL: Regions / Quests Tabs + Search + Vertical List */}
               {showLeftRail && (
-                <aside className="md:col-span-4 border-b md:border-b-0 md:border-r border-fantasy-border/70 bg-fantasy-darker/35 flex flex-col min-h-0 overflow-hidden">
+                <aside
+                  className={`${
+                    useTwoColumnDrawer
+                      ? 'min-w-0 border-r border-fantasy-border/45'
+                      : isDrawer
+                        ? 'min-w-0'
+                        : 'md:col-span-4 min-w-0 border-b md:border-b-0 md:border-r border-fantasy-border/50'
+                  } flex flex-col min-h-0 overflow-hidden`}
+                >
                   {/* Sticky Rail Controls */}
-                  <div className="p-3.5 border-b border-fantasy-border/50 space-y-2.5 shrink-0">
+                  <div className={`${useTwoColumnDrawer ? 'p-2.5 space-y-2' : 'p-3.5 space-y-2.5'} border-b border-fantasy-border/50 shrink-0`}>
                     <div className="hk-segmented" role="tablist">
                       <button
                         type="button"
                         role="tab"
                         aria-selected={leftTab === 'regions'}
                         onClick={() => setLeftTab('regions')}
-                        className="min-h-[44px] md:min-h-[36px] text-sm px-2"
+                        className={useTwoColumnDrawer ? 'min-h-[34px] text-xs px-1.5' : 'min-h-[44px] md:min-h-[36px] text-sm px-2'}
                       >
-                        <Compass size={15} aria-hidden="true" />
-                        <span>{t('atlas.tab_regions', 'Regions')} ({zones.length})</span>
+                        <Compass size={useTwoColumnDrawer ? 13 : 15} aria-hidden="true" />
+                        <span className="truncate">{t('atlas.tab_regions', 'Regions')} ({zones.length})</span>
                       </button>
                       <button
                         type="button"
                         role="tab"
                         aria-selected={leftTab === 'quests'}
                         onClick={() => setLeftTab('quests')}
-                        className="min-h-[44px] md:min-h-[36px] text-sm px-2"
+                        className={useTwoColumnDrawer ? 'min-h-[34px] text-xs px-1.5' : 'min-h-[44px] md:min-h-[36px] text-sm px-2'}
                       >
-                        <Crosshair size={15} aria-hidden="true" />
-                        <span>{t('atlas.tab_quests', 'Quests')} ({activeQuestDestinations.length})</span>
+                        <Crosshair size={useTwoColumnDrawer ? 13 : 15} aria-hidden="true" />
+                        <span className="truncate">{t('atlas.tab_quests', 'Quests')} ({activeQuestDestinations.length})</span>
                       </button>
                     </div>
 
                     <div className="relative">
                       <Search
-                        size={15}
+                        size={useTwoColumnDrawer ? 14 : 15}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"
                         aria-hidden="true"
                       />
@@ -574,7 +717,7 @@ const WorldMapModal = ({
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder={t('atlas.search_placeholder', 'Search regions, places, or rooms...')}
                         aria-label={t('atlas.search_placeholder', 'Search regions, places, or rooms...')}
-                        className="hk-input pl-9 pr-9 min-h-[44px] md:min-h-[38px] text-sm"
+                        className={`hk-input pl-9 pr-9 ${useTwoColumnDrawer ? 'h-9 min-h-[34px] text-xs' : 'min-h-[44px] md:min-h-[38px] text-sm'}`}
                       />
                       {searchQuery && (
                         <button
@@ -591,7 +734,7 @@ const WorldMapModal = ({
                   </div>
 
                   {/* Rail Scroll List */}
-                  <div className="hk-atlas-scroll flex-1 min-h-0 overflow-y-auto custom-scrollbar p-3.5 space-y-2.5">
+                  <div className={`hk-atlas-scroll flex-1 min-h-0 overflow-y-auto custom-scrollbar ${useTwoColumnDrawer ? 'p-2.5 space-y-2' : 'p-3.5 space-y-2.5'}`}>
                     {leftTab === 'regions' ? (
                       filteredZones.length === 0 ? (
                         <div className="p-6 text-center space-y-3 text-gray-400">
@@ -619,7 +762,9 @@ const WorldMapModal = ({
                               key={z.zone_name}
                               type="button"
                               onClick={() => handleSelectZone(z.zone_name)}
-                              className={`hk-card hk-card-interactive w-full text-left p-3.5 min-h-[44px] flex flex-col gap-2 ${
+                              className={`hk-card hk-card-interactive w-full text-left flex flex-col ${
+                                useTwoColumnDrawer ? 'p-2.5 gap-1.5 min-h-[40px]' : 'p-3.5 gap-2 min-h-[44px]'
+                              } ${
                                 isSelected
                                   ? 'border-fantasy-accent/80 bg-fantasy-accent/10 ring-1 ring-fantasy-accent/40'
                                   : hasQuest
@@ -629,14 +774,14 @@ const WorldMapModal = ({
                             >
                               <div className="flex items-start justify-between gap-2 w-full">
                                 <div className="flex items-start gap-2 min-w-0 flex-1">
-                                  <span className="text-base leading-snug shrink-0" aria-hidden="true">
+                                  <span className={`${useTwoColumnDrawer ? 'text-sm' : 'text-base'} leading-snug shrink-0`} aria-hidden="true">
                                     {z.is_current ? '🧭' : (z.emoji || '📍')}
                                   </span>
-                                  <span className="text-[15px] font-semibold text-gray-100 leading-snug break-words">
+                                  <span className={`${useTwoColumnDrawer ? 'text-[13px]' : 'text-[15px]'} font-semibold text-gray-100 leading-snug break-words`}>
                                     {z.zone_name}
                                   </span>
                                 </div>
-                                {isMobile && (
+                                {isCompact && (
                                   <ChevronRight size={18} className="text-gray-400 shrink-0 mt-0.5" aria-hidden="true" />
                                 )}
                               </div>
@@ -762,11 +907,11 @@ const WorldMapModal = ({
 
               {/* RIGHT PANE: Selected Region Locations & Tier 3 Rooms */}
               {showRightPane && (
-                <section className="md:col-span-8 flex flex-col min-h-0 overflow-hidden bg-fantasy-dark/30">
+                <section className={`${useTwoColumnDrawer || isDrawer ? 'min-w-0' : 'md:col-span-8 min-w-0'} flex flex-col min-h-0 overflow-hidden`}>
                   {activeZoneObj && (
                     <>
-                      {/* Mobile Drill-Down Sticky Navigation */}
-                      {isMobile && (
+                      {/* Compact Drill-Down Sticky Navigation */}
+                      {isCompact && (
                         <div className="px-4 py-2 border-b border-fantasy-border/60 bg-fantasy-darker/75 flex items-center justify-between gap-2 shrink-0">
                           <button
                             type="button"
@@ -793,27 +938,27 @@ const WorldMapModal = ({
                       )}
 
                       {/* Region Banner Header */}
-                      <div className="px-4 sm:px-6 py-4 border-b border-fantasy-border/60 bg-fantasy-darker/40 shrink-0 space-y-1.5">
-                        <div className="flex items-start justify-between gap-3 flex-wrap">
-                          <h3 className="hk-atlas-heading font-rpg font-bold text-base sm:text-lg text-gray-100 flex items-center gap-2 flex-wrap">
+                      <div className={`${useTwoColumnDrawer ? 'px-3.5 py-2.5' : 'px-4 sm:px-6 py-4'} border-b border-fantasy-border/60 bg-fantasy-darker/40 shrink-0 space-y-1`}>
+                        <div className="flex items-start justify-between gap-2 flex-wrap">
+                          <h3 className={`hk-atlas-heading font-rpg font-bold ${useTwoColumnDrawer ? 'text-sm sm:text-base' : 'text-base sm:text-lg'} text-gray-100 flex items-center gap-1.5 flex-wrap`}>
                             <span aria-hidden="true">{activeZoneObj.emoji || '🗺️'}</span>
                             <span className="break-words">{activeZoneObj.zone_name}</span>
                           </h3>
-                          <span className="text-xs font-mono text-fantasy-accent bg-fantasy-accent/10 px-2.5 py-1 rounded-lg border border-fantasy-accent/30 shrink-0">
+                          <span className="text-[11px] font-mono text-fantasy-accent bg-fantasy-accent/10 px-2 py-0.5 rounded-lg border border-fantasy-accent/30 shrink-0">
                             {activeZoneObj.is_current
                               ? t('atlas.current_region', '📍 Current Region')
                               : `🧭 ${activeZoneObj.travel_tag || t('atlas.cross_region_travel', 'Cross-Region Travel')}`}
                           </span>
                         </div>
                         {activeZoneObj.theme && (
-                          <p className="text-sm text-gray-400 hk-atlas-prose leading-relaxed">
+                          <p className={`${useTwoColumnDrawer ? 'text-xs' : 'text-sm'} text-gray-400 hk-atlas-prose leading-relaxed`}>
                             {activeZoneObj.theme}
                           </p>
                         )}
                       </div>
 
                       {/* Primary Locations Vertical List */}
-                      <div className="hk-atlas-scroll flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 sm:p-5 space-y-3.5">
+                      <div className={`hk-atlas-scroll flex-1 min-h-0 overflow-y-auto custom-scrollbar ${useTwoColumnDrawer ? 'p-3 space-y-2.5' : 'p-4 sm:p-5 space-y-3.5'}`}>
                         {primaryPlaces.length === 0 ? (
                           <div className="hk-card p-6 text-center space-y-3.5">
                             <p className="text-sm text-gray-300 hk-atlas-prose">
@@ -921,18 +1066,18 @@ const WorldMapModal = ({
                                 ref={(el) => {
                                   if (el) placeRefs.current[placeRefKey] = el;
                                 }}
-                                className={`hk-card p-4 space-y-3 ${cardToneCls} ${
+                                className={`hk-card ${useTwoColumnDrawer ? 'p-3 space-y-2' : 'p-4 space-y-3'} ${cardToneCls} ${
                                   isTargetPlace && !highlightedTarget?.subName ? 'ring-2 ring-fantasy-accent' : ''
                                 }`}
                               >
                                 {/* Building Card Header */}
-                                <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                                <div className={`flex flex-col ${useTwoColumnDrawer ? 'gap-2' : 'sm:flex-row sm:items-start justify-between gap-3'}`}>
                                   <div className="min-w-0 flex-1 space-y-1.5">
-                                    <div className="flex items-start flex-wrap gap-2">
-                                      <span className="text-base leading-snug shrink-0" aria-hidden="true">
+                                    <div className="flex items-start flex-wrap gap-1.5">
+                                      <span className={`${useTwoColumnDrawer ? 'text-sm' : 'text-base'} leading-snug shrink-0`} aria-hidden="true">
                                         {place.archetype_emoji || place.emoji || '📍'}
                                       </span>
-                                      <h4 className="text-[15px] font-semibold text-gray-100 leading-snug break-words">
+                                      <h4 className={`${useTwoColumnDrawer ? 'text-sm' : 'text-[15px]'} font-semibold text-gray-100 leading-snug break-words`}>
                                         {placeName}
                                       </h4>
                                       {isHere && (
@@ -1050,7 +1195,11 @@ const WorldMapModal = ({
                                         disabled={processingTurn || !canTravel || place.can_travel === false}
                                         title={!canTravel ? (travelBlockedReason || t('atlas.travel_blocked', 'Fast travel is currently unavailable.')) : undefined}
                                         onClick={() => handleTravel(destValue)}
-                                        className={`hk-btn min-h-[44px] md:min-h-[36px] text-sm px-3.5 ${
+                                        className={`hk-btn ${
+                                          useTwoColumnDrawer
+                                            ? 'h-8 min-h-[32px] text-xs px-2.5'
+                                            : 'min-h-[44px] md:min-h-[36px] text-sm px-3.5'
+                                        } ${
                                           hasDirectQuest ? 'hk-btn-primary' : 'hk-btn-ghost border border-fantasy-border/70'
                                         }`}
                                       >
@@ -1157,7 +1306,7 @@ const WorldMapModal = ({
                                               ref={(el) => {
                                                 if (el) roomRefs.current[roomRefKey] = el;
                                               }}
-                                              className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition-colors ${roomToneCls} ${
+                                              className={`${useTwoColumnDrawer ? 'p-2.5 gap-2' : 'p-3 sm:flex-row sm:items-center gap-2.5'} rounded-xl border flex flex-col justify-between transition-colors ${roomToneCls} ${
                                                 isTargetSub ? 'ring-2 ring-fantasy-accent' : ''
                                               }`}
                                             >
@@ -1243,7 +1392,11 @@ const WorldMapModal = ({
                                                     disabled={processingTurn || !canTravel || place.can_travel === false}
                                                     title={!canTravel ? (travelBlockedReason || t('atlas.travel_blocked', 'Fast travel is currently unavailable.')) : undefined}
                                                     onClick={() => handleTravel(subValue)}
-                                                    className={`hk-btn min-h-[44px] md:min-h-[36px] text-xs sm:text-sm px-3 ${
+                                                    className={`hk-btn ${
+                                                      useTwoColumnDrawer
+                                                        ? 'h-8 min-h-[32px] text-xs px-2.5'
+                                                        : 'min-h-[44px] md:min-h-[36px] text-xs sm:text-sm px-3'
+                                                    } ${
                                                       subHasQuest ? 'hk-btn-primary' : 'hk-btn-ghost border border-fantasy-border/70'
                                                     }`}
                                                   >
@@ -1271,7 +1424,21 @@ const WorldMapModal = ({
             </div>
           )}
         </div>
-      )}
+  );
+
+  if (isDrawer) {
+    return isOpen ? atlasContent : null;
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="hk-atlas-dialog"
+      aria-labelledby={titleId}
+      {...{ closedby: 'any' }}
+      onClose={handleDialogClose}
+    >
+      {isOpen && atlasContent}
     </dialog>
   );
 };

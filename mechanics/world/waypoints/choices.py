@@ -1102,7 +1102,14 @@ def _upgrade_or_insert_remote_travel_candidate(
                 "target_location": dest_loc,
                 "target_node_id": node_id,
             })
-            return insert_offset
+            c_idx = result_choices.index(c)
+            result_choices.pop(c_idx)
+            ins_idx = 0
+            while ins_idx < len(result_choices) and isinstance(result_choices[ins_idx], dict) and result_choices[ins_idx].get("_priority_slot"):
+                ins_idx += 1
+            ins_pos = min(len(result_choices), ins_idx + insert_offset)
+            result_choices.insert(ins_pos, c)
+            return insert_offset + 1
 
     node_id = wp_nid or (str(db.resolve_node_id_from_location(session_id, dest_loc) or "") if session_id else "")
     eff_lang = normalize_quest_locale((session_row or {}).get("narration_language") or (session_row or {}).get("language") or "en")
@@ -2179,8 +2186,13 @@ def tag_and_enrich_quest_choices(
                         c["label"] = clean_lbl
 
     try:
-        from game_engine.choices_cleaner import deduplicate_redundant_choices
+        from game_engine.choices_cleaner import deduplicate_redundant_choices, order_choices_canonically
         result_choices = deduplicate_redundant_choices(result_choices)
+        result_choices = order_choices_canonically(
+            result_choices,
+            in_dialogue=in_active_dialogue,
+            in_combat=_in_combat_now,
+        )
     except Exception:
         pass
 

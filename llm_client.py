@@ -272,10 +272,11 @@ def record_llm_telemetry(
         "error": error[:160] if error else None,
     })
     
-    log.info("LLM usage model=%s prompt=%d cached=%s completion=%d", 
-             model_name, prompt_tokens, 
-             cached_tokens if cached_tokens is not None else "not reported", 
-             completion_tokens)
+    if success or usage is not None:
+        log.info("LLM usage model=%s prompt=%d cached=%s completion=%d",
+                 model_name, prompt_tokens,
+                 cached_tokens if cached_tokens is not None else "not reported",
+                 completion_tokens)
 
 
 def get_llm_telemetry() -> dict:
@@ -1079,10 +1080,11 @@ def _effective_json_max_tokens(
     suppress_cot: bool = False,
 ) -> int:
     req = int(requested_max_tokens or 3500)
-    if use_utility and 0 < req <= 1000:
+    if use_utility and 0 < req <= 2500:
         if suppress_cot or not _is_reasoning_model(model_name):
             return max(128, req)
-        return max(req, min(2048, int(LLM_THINKING_MAX_TOKENS)))
+        cap = 2048 if req <= 1000 else 3500
+        return max(req, min(cap, int(LLM_THINKING_MAX_TOKENS)))
     floor = LLM_THINKING_MAX_TOKENS if _is_reasoning_model(model_name) else 3500
     return max(req, int(floor))
 
@@ -1237,7 +1239,7 @@ def _should_suppress_cot(
         return False
     if suppress_cot is not None:
         return bool(suppress_cot)
-    return bool(is_sentinel or (use_utility and int(max_tokens or 0) <= 400))
+    return bool(is_sentinel or (use_utility and int(max_tokens or 0) <= 2000))
 
 
 def _strip_unsupported_bad_request_params(
@@ -1273,9 +1275,13 @@ def _strip_unsupported_bad_request_params(
         _REASONING_PARAM_UNSUPPORTED.add(cache_key)
         kwargs.pop("reasoning_effort", None)
         changed = True
-    if ("presence_penalty" in kwargs or "frequency_penalty" in kwargs) and any(
-        marker in err_str
-        for marker in (
+    mentions_other_param = any(
+        p in err_str for p in ("response_format", "response format", "stream_options")
+    )
+    penalty_markers = (
+        ("presence_penalty", "frequency_penalty", "penalty")
+        if mentions_other_param
+        else (
             "presence_penalty",
             "frequency_penalty",
             "penalty",
@@ -1285,6 +1291,9 @@ def _strip_unsupported_bad_request_params(
             "unexpected keyword",
             "unsupported",
         )
+    )
+    if ("presence_penalty" in kwargs or "frequency_penalty" in kwargs) and any(
+        marker in err_str for marker in penalty_markers
     ):
         log.info("Model '%s' rejected presence/frequency penalty; stripping for retry and caching bypass.", model_name)
         _PENALTY_PARAM_UNSUPPORTED.add(cache_key)
@@ -1974,7 +1983,7 @@ async def _call_llm_json_stream_live(system_prompt: str | list, user_prompt: str
                     "messages": messages,
                     "timeout": attempt_timeout,
                 }
-                if cache_key not in _PENALTY_PARAM_UNSUPPORTED:
+                if not use_utility and cache_key not in _PENALTY_PARAM_UNSUPPORTED:
                     kwargs["presence_penalty"] = stream_pres_penalty
                     kwargs["frequency_penalty"] = stream_freq_penalty
                 if LLM_REASONING_EFFORT and cache_key not in _REASONING_PARAM_UNSUPPORTED:
@@ -2463,13 +2472,21 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
                         "messages": list(attempt_messages),
                         "timeout": req_timeout,
                     }
-                    if cache_key not in _PENALTY_PARAM_UNSUPPORTED:
+                    if not use_utility and cache_key not in _PENALTY_PARAM_UNSUPPORTED:
                         kwargs["presence_penalty"] = live_pres_penalty
                         kwargs["frequency_penalty"] = live_freq_penalty
                     if LLM_REASONING_EFFORT and cache_key not in _REASONING_PARAM_UNSUPPORTED:
                         kwargs["reasoning_effort"] = LLM_REASONING_EFFORT
                     if want_suppress_cot:
                         kwargs["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+
+                    def _sync_attempt_timeout() -> None:
+                        if timeout is None:
+                            return
+                        rem_t = float(req_timeout) - (time.perf_counter() - t0)
+                        if rem_t <= 0.5:
+                            raise TimeoutError("Request timed out.")
+                        kwargs["timeout"] = max(2.0, rem_t)
 
                     known_cap = _MODEL_CAPABILITIES.get(cache_key) or _MODEL_CAPABILITIES.get(model_name)
                     supports_json_mode = False if is_sentinel else (
@@ -2487,6 +2504,7 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
                     if response_model and supports_json_schema:
                         for _schema_try in range(2):
                             try:
+                                _sync_attempt_timeout()
                                 schema_kwargs = kwargs.copy()
                                 schema_kwargs["response_format"] = {
                                     "type": "json_schema",
@@ -2521,6 +2539,7 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
                     if not response and supports_json_mode:
                         for _mode_try in range(3):
                             try:
+                                _sync_attempt_timeout()
                                 response = await client.chat.completions.create(
                                     response_format={"type": "json_object"},
                                     **kwargs
@@ -2567,6 +2586,7 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
                         if not response:
                             while True:
                                 try:
+                                    _sync_attempt_timeout()
                                     response = await client.chat.completions.create(**kwargs)
                                     break
                                 except BadRequestError as bad_req_err:
@@ -2701,7 +2721,10 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
 
             if retries > 0:
                 trip_model_circuit(model_name)
-            log.warning("All attempts for model '%s' failed. Cascading to next fallback candidate...", model_name)
+            if cand_idx + 1 < len(candidates):
+                log.warning("All attempts for model '%s' failed. Cascading to next fallback candidate...", model_name)
+            else:
+                log.warning("All attempts for model '%s' failed (no further fallback candidates configured).", model_name)
 
     raise RuntimeError(f"All LLM candidate models in fallback chain failed. Last error: {last_err}") from last_err
 
@@ -2761,7 +2784,7 @@ async def _call_llm_text_live(system_prompt: str, user_prompt: str,
 
     async with _semaphore:
         candidates = get_candidate_models(is_nsfw=is_nsfw, use_utility=use_utility)
-        for client, model_name in candidates:
+        for cand_idx, (client, model_name) in enumerate(candidates):
             for attempt in range(retries + 1):
                 t0 = time.perf_counter()
                 try:
@@ -2796,7 +2819,10 @@ async def _call_llm_text_live(system_prompt: str, user_prompt: str,
 
             if retries > 0:
                 trip_model_circuit(model_name)
-            log.warning("All attempts for text model '%s' failed. Cascading to next candidate...", model_name)
+            if cand_idx + 1 < len(candidates):
+                log.warning("All attempts for text model '%s' failed. Cascading to next candidate...", model_name)
+            else:
+                log.warning("All attempts for text model '%s' failed (no further fallback candidates configured).", model_name)
 
     if last_err:
         log.error("All candidate LLM models failed for call_llm_text: %s", last_err)

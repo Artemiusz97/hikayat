@@ -830,7 +830,7 @@ async def accept_bounty_contract_async(
             plan_b = await compile_or_apply_eager_quest_plan(
                 session_id,
                 quest_id,
-                timeout_seconds=8.0,
+                timeout_seconds=18.0,
                 dossier=dos_b,
                 defer_apply=True,
             )

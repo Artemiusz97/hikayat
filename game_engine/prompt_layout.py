@@ -670,7 +670,8 @@ def resolve_prompt_epoch(
         return fresh_zone_2, default_prefix, None
 
     try:
-        turn_num = int(session.get("_target_turn") or (int(session.get("turn_count") or 0) + 1))
+        from game_engine.turn_context import resolve_target_turn
+        turn_num = resolve_target_turn(None, session)
     except (TypeError, ValueError):
         turn_num = 1
 

@@ -46,7 +46,13 @@ _ADULT_SERVICE_KEYWORDS = (
     "merchant", "tailor", "librarian", "owner", "roaster", "proprietor",
     "electrician", "contractor", "tradesperson", "artisan", "barber",
     "stylist", "innkeeper", "carpenter", "plumber", "accountant", "lawyer",
-    "lifeguard", "rescuer", "courier"
+    "lifeguard", "rescuer", "courier",
+    "trader", "stall keeper", "shrine keeper", "blacksmith", "armorer",
+    "apothecary", "priest", "priestess", "acolyte", "healer", "physician",
+    "medic", "archivist", "guildmaster", "receptionist", "quartermaster",
+    "supervisor", "duty officer", "outfitter", "steward", "server",
+    "clothier", "dispatch operator", "dispatcher", "operative",
+    "concierge", "curator", "bouncer",
 )
 
 # False-positive student exceptions (words that contain adult tokens but are student roles)

@@ -1,21 +1,234 @@
 from __future__ import annotations
+
 import json
+from dataclasses import dataclass, field
+from typing import Any, Optional
+
 import db
 from mechanics.narrative.intent import classify_action_intent
 
-class TurnContext:
+
+@dataclass
+class TurnClockStage:
+    """Typed temporal and turn-counter state for a single turn execution."""
+
+    target_turn: Optional[int] = None
+    prev_turn_day: Optional[int] = None
+    prev_turn_minute: Optional[int] = None
+    staged_day: Optional[int] = None
+    staged_minute: Optional[int] = None
+    staged_time_slot: Optional[str] = None
+    staged_time_op: Optional[dict[str, Any]] = None
+    time_info: dict[str, Any] = field(default_factory=dict)
+    sleep_info: Optional[dict[str, Any]] = None
+
+
+@dataclass
+class CombatStageState:
+    """Typed combat pacing and preloaded equipment state for a turn."""
+
+    last_combat_turn: Optional[int] = None
+    last_combat_location: str = ""
+    active_quest_encounter: Optional[dict[str, Any]] = None
+    preloaded_equipment_by_uid: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    combat_resolved: bool = False
+
+
+@dataclass
+class EpistemicAndWorldStage:
+    """Typed world-events, quest progression, physical, and social staging state."""
+
+    world_events_snapshot: dict[str, Any] = field(default_factory=dict)
+    pre_turn_quest_res: Optional[dict[str, Any]] = None
+    just_advanced_quest_ids: list[str] = field(default_factory=list)
+    dealt_social_seeds: list[Any] = field(default_factory=list)
+    joined_activity_node_id: str = ""
+    physical_state: Optional[dict[str, Any]] = None
+    active_commitments: list[dict[str, Any]] = field(default_factory=list)
+    pre_turn_social_res: Optional[dict[str, Any]] = None
+    last_prewarmed_chapter: Optional[int] = None
+    staged_spatial_mutations: Optional[dict[str, Any]] = None
+    staged_cast_state: Optional[dict[str, Any]] = None
+    staged_folklore_ops: Optional[dict[str, Any]] = None
+    staged_roster_ops: Optional[dict[str, Any]] = None
+    staged_scene_residue: Optional[dict[str, Any]] = None
+    completed_appointment_npc_ids: list[Any] = field(default_factory=list)
+
+
+_NOTICE_LIST_FIELDS: tuple[tuple[str, str], ...] = (
+    ("combat_log", "_combat_log"),
+    ("completed_sub_quests", "_completed_sub_quests"),
+    ("newly_discovered_factions", "_newly_discovered_factions"),
+    ("quest_reward_notices", "_quest_reward_notices"),
+    ("waypoint_notices", "_waypoint_notices"),
+)
+
+_NOTICE_SCALAR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("combat_resolved_notice", "_combat_resolved_notice"),
+    ("enemy_attack_notice", "_enemy_attack_notice"),
+    ("newly_discovered_clue", "_newly_discovered_clue"),
+    ("party_defeated_notice", "_party_defeated_notice"),
+    ("refractory_recovered_notice", "_refractory_recovered_notice"),
+)
+
+
+@dataclass
+class TurnNotices:
+    """Typed outward player/UI notices projected onto ``outcome`` for cogs and tests."""
+
+    combat_log: list[Any] = field(default_factory=list)
+    combat_resolved_notice: Optional[str] = None
+    completed_sub_quests: list[Any] = field(default_factory=list)
+    enemy_attack_notice: Optional[str] = None
+    newly_discovered_clue: Optional[Any] = None
+    newly_discovered_factions: list[Any] = field(default_factory=list)
+    party_defeated_notice: Optional[str] = None
+    quest_reward_notices: list[Any] = field(default_factory=list)
+    refractory_recovered_notice: Optional[str] = None
+    waypoint_notices: list[Any] = field(default_factory=list)
+
+    def sync_from_outcome(self, outcome: Optional[dict[str, Any]]) -> None:
+        """Capture populated notice keys from ``outcome`` without erasing prior ctx notices."""
+        if not isinstance(outcome, dict):
+            return
+        for attr, key in _NOTICE_LIST_FIELDS:
+            val = outcome.get(key)
+            if isinstance(val, list) and val:
+                setattr(self, attr, list(val))
+        for attr, key in _NOTICE_SCALAR_FIELDS:
+            val = outcome.get(key)
+            if val is not None and val != "":
+                setattr(self, attr, val)
+
+    def apply_to_outcome(self, outcome: Optional[dict[str, Any]]) -> None:
+        """Project non-empty notices onto ``outcome`` while merging reducer-set keys."""
+        if not isinstance(outcome, dict):
+            return
+        self.sync_from_outcome(outcome)
+        for attr, key in _NOTICE_LIST_FIELDS:
+            val = getattr(self, attr)
+            if val:
+                outcome[key] = list(val)
+        for attr, key in _NOTICE_SCALAR_FIELDS:
+            val = getattr(self, attr)
+            if val is not None and val != "":
+                outcome[key] = val
+
+
+def resolve_target_turn(
+    ctx: Optional["TurnExecutionContext"],
+    session: Optional[dict[str, Any]],
+    outcome: Optional[dict[str, Any]] = None,
+) -> int:
+    """Resolve 1-based target turn from ``ctx`` first, falling back to outcome/session dicts."""
+    if ctx is not None and ctx.clock.target_turn:
+        return max(1, int(ctx.clock.target_turn))
+    if isinstance(outcome, dict) and outcome.get("_target_turn"):
+        return max(1, int(outcome["_target_turn"]))
+    if isinstance(session, dict):
+        bound_ctx = session.get("_ctx")
+        if isinstance(bound_ctx, TurnExecutionContext) and bound_ctx.clock.target_turn:
+            return max(1, int(bound_ctx.clock.target_turn))
+        if session.get("_target_turn"):
+            return max(1, int(session["_target_turn"]))
+        tc = int(session.get("turn_count") or 0)
+        hist_actions = sum(
+            1 for item in (session.get("history") or [])
+            if not (isinstance(item, dict) and item.get("type") == "scene")
+        )
+        return max(tc, hist_actions) + 1
+    return 1
+
+
+def resolve_pre_turn_quest_res(
+    ctx: Optional["TurnExecutionContext"],
+    session: Optional[dict[str, Any]],
+    outcome: Optional[dict[str, Any]] = None,
+) -> Optional[dict[str, Any]]:
+    """Resolve staged pre-turn quest results from ``ctx`` first, with outcome/session fallbacks."""
+    if ctx is not None and isinstance(ctx.world_stage.pre_turn_quest_res, dict):
+        return ctx.world_stage.pre_turn_quest_res
+    if isinstance(outcome, dict):
+        res = outcome.get("_pre_turn_quests") or outcome.get("_pre_turn_quest_res")
+        if isinstance(res, dict):
+            return res
+    if isinstance(session, dict):
+        bound_ctx = session.get("_ctx")
+        if isinstance(bound_ctx, TurnExecutionContext) and isinstance(bound_ctx.world_stage.pre_turn_quest_res, dict):
+            return bound_ctx.world_stage.pre_turn_quest_res
+        res = session.get("_pre_turn_quest_res")
+        if isinstance(res, dict):
+            return res
+    return None
+
+
+class TurnExecutionContext:
     """
-    A per-turn Unit of Work and cache layer.
-    Wraps the raw session dictionary to eliminate duplicate SQLite queries 
-    and prevent dictionary key drift for critical state variables.
+    Per-turn typed execution context, Unit-of-Work snapshot, and cache layer.
+    Replaces ad-hoc ``session["_..."]`` / ``outcome["_..."]`` transient handoffs
+    while keeping dictionary fallbacks for standalone unit-test callers.
     """
-    def __init__(self, session_id: int, session: dict, party: list = None, actions: list = None, mp_already_spent: dict = None):
+
+    def __init__(
+        self,
+        session_id: int,
+        session: dict,
+        party: list = None,
+        actions: list = None,
+        mp_already_spent: dict = None,
+        *,
+        clock: Optional[TurnClockStage] = None,
+        combat: Optional[CombatStageState] = None,
+        world_stage: Optional[EpistemicAndWorldStage] = None,
+        notices: Optional[TurnNotices] = None,
+    ):
         self.session_id = session_id
         self.session = session
         self.party = party or []
         self.actions = actions or []
         self.mp_already_spent = mp_already_spent or {}
-        self._cache = {}
+        self._cache: dict[str, Any] = {}
+
+        sess = session if isinstance(session, dict) else {}
+        if clock is not None:
+            self.clock = clock
+        else:
+            raw_tt = sess.get("_target_turn")
+            self.clock = TurnClockStage(
+                target_turn=int(raw_tt) if raw_tt else None,
+                prev_turn_day=sess.get("_prev_turn_day"),
+                prev_turn_minute=sess.get("_prev_turn_minute"),
+                staged_day=None,
+                staged_minute=None,
+                staged_time_slot=None,
+                staged_time_op=sess.get("_staged_time_op") if isinstance(sess.get("_staged_time_op"), dict) else None,
+            )
+
+        if combat is not None:
+            self.combat = combat
+        else:
+            self.combat = CombatStageState(
+                last_combat_turn=sess.get("_last_combat_turn"),
+                last_combat_location=str(sess.get("_last_combat_location") or ""),
+                active_quest_encounter=None,
+                preloaded_equipment_by_uid=dict(sess.get("_preloaded_equipment_by_uid") or {}) if isinstance(sess.get("_preloaded_equipment_by_uid"), dict) else {},
+            )
+
+        if world_stage is not None:
+            self.world_stage = world_stage
+        else:
+            self.world_stage = EpistemicAndWorldStage(
+                world_events_snapshot=dict(sess.get("_world_events_snapshot") or {}) if isinstance(sess.get("_world_events_snapshot"), dict) else {},
+                pre_turn_quest_res=sess.get("_pre_turn_quest_res") if isinstance(sess.get("_pre_turn_quest_res"), dict) else None,
+                just_advanced_quest_ids=[],
+                dealt_social_seeds=list(sess.get("_dealt_social_seeds") or []),
+                joined_activity_node_id=str(sess.get("_joined_activity_node_id") or ""),
+                physical_state=sess.get("_physical_state") if isinstance(sess.get("_physical_state"), dict) else None,
+                pre_turn_social_res=sess.get("_pre_turn_social_res") if isinstance(sess.get("_pre_turn_social_res"), dict) else None,
+                last_prewarmed_chapter=sess.get("_last_prewarmed_chapter"),
+            )
+
+        self.notices = notices or TurnNotices()
 
     def invalidate(self, key: str):
         """Invalidates a specific cached key if a mid-turn DB write occurs, cascading coupled keys."""
@@ -25,6 +238,34 @@ class TurnContext:
             self._cache.pop("all_quests", None)
             self._cache.pop("active_waypoints", None)
 
+    def hydrate_snapshot(self) -> "TurnExecutionContext":
+        """Hydrate TurnExecutionContext DB caches in-place inside a single ReadUnitOfWork snapshot."""
+        if not self.session_id:
+            return self
+
+        import game_engine
+
+        with db.ReadUnitOfWork():
+            world_bundle = game_engine._load_known_world(self.session_id)
+            self._cache["world_bundle"] = world_bundle
+            self._cache["contacts"] = world_bundle.get("contacts") or []
+            self._cache["factions"] = world_bundle.get("factions") or []
+            self._cache["party_npcs"] = world_bundle.get("party_npcs") or []
+            self._cache["all_quests"] = db.get_session_quests(self.session_id)
+            self._cache["story_quest"] = db.get_active_story_quest(self.session_id)
+            self._cache["pending_appointments"] = db.get_phone_appointments(self.session_id, status="pending")
+            self._cache["arrived_appointments"] = db.get_phone_appointments(self.session_id, status="arrived")
+            self._cache["active_waypoints"] = db.get_all_session_active_waypoints(self.session_id)
+            self._cache["school_directory_map"] = db.get_school_directory_batch(self.session_id)
+
+            present_names = [
+                n.get("name", "") if isinstance(n, dict) else str(n)
+                for n in ((self.session or {}).get("current_npcs") or [])
+                if n
+            ]
+            self.npc_memories_by_name(present_names, per_npc_limit=5)
+        return self
+
     @classmethod
     def load_snapshot(
         cls,
@@ -33,33 +274,25 @@ class TurnContext:
         party: list | None = None,
         actions: list | None = None,
         mp_already_spent: dict | None = None,
-    ) -> "TurnContext":
-        """Hydrate TurnContext in a single synchronous snapshot (designed for `await db.adb(...)`)."""
-        ctx = cls(session_id, session, party=party, actions=actions, mp_already_spent=mp_already_spent)
-        if not session_id:
-            return ctx
-
-        import game_engine
-
-        world_bundle = game_engine._load_known_world(session_id)
-        ctx._cache["world_bundle"] = world_bundle
-        ctx._cache["contacts"] = world_bundle.get("contacts") or []
-        ctx._cache["factions"] = world_bundle.get("factions") or []
-        ctx._cache["party_npcs"] = world_bundle.get("party_npcs") or []
-        ctx._cache["all_quests"] = db.get_session_quests(session_id)
-        ctx._cache["story_quest"] = db.get_active_story_quest(session_id)
-        ctx._cache["pending_appointments"] = db.get_phone_appointments(session_id, status="pending")
-        ctx._cache["arrived_appointments"] = db.get_phone_appointments(session_id, status="arrived")
-        ctx._cache["active_waypoints"] = db.get_all_session_active_waypoints(session_id)
-        ctx._cache["school_directory_map"] = db.get_school_directory_batch(session_id)
-
-        present_names = [
-            n.get("name", "") if isinstance(n, dict) else str(n)
-            for n in ((session or {}).get("current_npcs") or [])
-            if n
-        ]
-        ctx.npc_memories_by_name(present_names, per_npc_limit=5)
-        return ctx
+        *,
+        clock: Optional[TurnClockStage] = None,
+        combat: Optional[CombatStageState] = None,
+        world_stage: Optional[EpistemicAndWorldStage] = None,
+        notices: Optional[TurnNotices] = None,
+    ) -> "TurnExecutionContext":
+        """Instantiate and hydrate TurnExecutionContext inside a single ReadUnitOfWork snapshot (designed for `await db.adb(...)`)."""
+        ctx = cls(
+            session_id,
+            session,
+            party=party,
+            actions=actions,
+            mp_already_spent=mp_already_spent,
+            clock=clock,
+            combat=combat,
+            world_stage=world_stage,
+            notices=notices,
+        )
+        return ctx.hydrate_snapshot()
 
     @property
     def world_bundle(self) -> dict:
@@ -199,3 +432,6 @@ class TurnContext:
     def clear_active_enemies(self):
         """Clears all active enemies."""
         self.session["nearby_enemies"] = []
+
+
+TurnContext = TurnExecutionContext

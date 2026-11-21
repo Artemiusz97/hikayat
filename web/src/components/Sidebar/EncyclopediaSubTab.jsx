@@ -146,7 +146,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
   return (
     <div className="space-y-3">
       {/* Sub-switcher: Folklore Codex vs Field Log & Vault */}
-      <div className="flex bg-black/70 p-0.5 rounded-md border border-fantasy-border/60 gap-1">
+      <div className="flex flex-wrap gap-1 pb-2 border-b border-fantasy-border/30">
         <button
           type="button"
           onClick={() => setViewMode('folklore')}
@@ -274,7 +274,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
               >
                 <div className="flex items-start justify-between gap-2">
                   <span className="font-bold text-gray-100 leading-tight">{s.name}</span>
-                  <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-black/60 border border-neutral-700 text-gray-200 shrink-0">
+                  <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-black/60 border border-neutral-700 text-gray-200 shrink-0">
                     {s.badge}
                   </span>
                 </div>
@@ -391,7 +391,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                         <div className="flex items-center gap-1.5">
                           <Lock size={11} className="text-gray-500 shrink-0" />
                           <span className="font-mono font-bold text-xs text-gray-400 tracking-widest">???</span>
-                          <span className="text-[9.5px] font-mono px-1.5 py-0.2 rounded bg-neutral-900 text-gray-400 border border-neutral-800 truncate">
+                          <span className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-neutral-900 text-gray-400 border border-neutral-800 truncate">
                             {entry.tradition_label}
                           </span>
                         </div>
@@ -425,12 +425,12 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                           <span className="font-rpg font-bold text-xs sm:text-sm text-gray-100">
                             {entry.name}
                           </span>
-                          <span className={`text-[9px] font-mono uppercase px-1.5 py-0.2 rounded border font-bold ${style.badge}`}>
+                          <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border font-bold ${style.badge}`}>
                             {t(`codex.${stage}`, formatTag(stage))}
                           </span>
                           {(entry.is_currently_contracted || entry.contracted_ever) && (
                             <span
-                              className={`text-[9px] font-mono px-1.5 py-0.2 rounded border font-bold ${
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border font-bold ${
                                 entry.is_currently_contracted
                                   ? 'bg-rose-950/85 text-rose-200 border-rose-500/70'
                                   : 'bg-emerald-950/75 text-emerald-200 border-emerald-600/60'
@@ -441,7 +441,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                           )}
                           {entry.folklore_recognition_active && (
                             <span
-                              className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/80 text-purple-200 border border-purple-600/60 font-bold"
+                              className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-200 border border-purple-600/60 font-bold"
                               title={t('codex.verification_tooltip', 'Prior verification reduces Stage 1 clue requirement by 1 on future encounters')}
                             >
                               🧠 {t('codex.folklore_recognition', 'Recognition (-1 Clue)')}
@@ -463,27 +463,27 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                         {isFullUnlocked && (
                           <div className="flex flex-wrap gap-1 pt-0.5">
                             {entry.has_disguise && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/50">
                                 🎭 {t('codex.tag_disguise', 'Disguise')}
                               </span>
                             )}
                             {entry.has_tether && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">
                                 🏺 {t('codex.tag_vessel_tether', 'Vessel Tether')}
                               </span>
                             )}
                             {entry.has_dialogue_trap && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-rose-950/60 text-rose-300 border border-rose-800/50">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-800/50">
                                 ❓ {t('codex.tag_riddle_trap', 'Riddle Trap')}
                               </span>
                             )}
                             {entry.has_omen_paradox && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/50">
                                 🔊 {t('codex.tag_omen_paradox', 'Omen Paradox')}
                               </span>
                             )}
                             {Array.isArray(entry.appeasement_tags) && entry.appeasement_tags.length > 0 && (
-                              <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50">
                                 🎁 {t('codex.tag_offerings', 'Offerings')}
                               </span>
                             )}
@@ -606,7 +606,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                                 {entry.appeasement_tags.map((tag) => (
                                   <span
                                     key={tag}
-                                    className="px-1.5 py-0.2 rounded bg-emerald-950/60 text-emerald-200 border border-emerald-700/50"
+                                    className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-200 border border-emerald-700/50"
                                   >
                                     {formatTag(tag)}
                                   </span>
@@ -655,7 +655,7 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-bold text-emerald-200">{v.entity_name || v.name || t('codex.sealed_anomaly', 'Sealed Anomaly')}</span>
-                    <span className="text-[9.5px] font-mono uppercase px-1.5 py-0.2 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 truncate max-w-[55%]">
+                    <span className="text-[9.5px] font-mono uppercase px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-600/50 truncate max-w-[55%]">
                       {formatTag(v.resolution_method || v.resolution_mode || 'Vaulted')}
                     </span>
                   </div>
@@ -710,12 +710,12 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
                         {log.is_disguised ? (log.public_name || t('scene.uncanny_stranger', 'Uncanny Stranger')) : (log.name || t('codex.unknown_anomaly', 'Unknown Anomaly'))}
                       </span>
                       {log.codex_id && !log.is_disguised && (
-                        <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50 shrink-0">
+                        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50 shrink-0">
                           {t('codex.folklore_badge', 'Folklore')}
                         </span>
                       )}
                     </div>
-                    <span className="text-[9.5px] font-mono uppercase px-1.5 py-0.2 rounded bg-neutral-900 text-gray-300 border border-neutral-700 shrink-0">
+                    <span className="text-[9.5px] font-mono uppercase px-1.5 py-0.5 rounded bg-neutral-900 text-gray-300 border border-neutral-700 shrink-0">
                       {formatTag(log.status || 'sighted')}
                     </span>
                   </div>

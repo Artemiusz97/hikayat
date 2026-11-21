@@ -1009,7 +1009,6 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                     conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
-                conn.commit()
             try:
                 build_consequence_followup_bounty(session_id, session=session)
             except Exception:
@@ -1743,7 +1742,6 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                     conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
-                conn.commit()
         await db.adb(_clear_stale_faction_bounties)
 
     scen_block = _scenario_block(session)

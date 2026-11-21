@@ -18,6 +18,65 @@ const computeRemainingTimeLabel = (item, currentDay, currentMinute, t) => {
   return t('codex.worldPulseTimeHoursOnly', { hours: totalHours, defaultValue: '{{hours}}h left' });
 };
 
+const formatLoreTypeBadge = (ent, t) => {
+  const rawType = String(ent?.entity_type || '').trim().toLowerCase();
+  if (!rawType) return t('codex.lore', 'Lore');
+  if (rawType === 'world_lore') return t('codex.world_lore', 'World Lore');
+  if (rawType === 'place' || rawType === 'location') return t('codex.locations', 'Known Locations');
+  if (rawType === 'faction') return t('codex.factions', 'Factions');
+  return ent.entity_type_label || rawType.replace(/_/g, ' ');
+};
+
+const parseMacroWorldLoreEntry = (ent, t) => {
+  const rawName = String(ent?.name || '').trim();
+  const rawDesc = String(ent?.description || '').trim();
+  const isMacro = Boolean(
+    ent?.is_macro_world_state ||
+      rawName === '_macro_world_state' ||
+      /\|\s*(?:CURRENT\s+RUMOR|FLASHPOINT)\s*:/i.test(rawDesc)
+  );
+
+  let description = rawDesc;
+  let currentRumor = String(ent?.current_rumor || '').trim();
+  let flashpoint = String(ent?.flashpoint || '').trim();
+
+  if (isMacro && rawDesc) {
+    const segments = rawDesc.split(/\s*\|\s*(?=(?:CURRENT\s+RUMOR|FLASHPOINT)\s*:)/i);
+    const conflictParts = [];
+    for (const seg of segments) {
+      const sClean = seg.trim();
+      if (!sClean) continue;
+      const mRumor = sClean.match(/^CURRENT\s+RUMOR\s*:\s*([\s\S]+)$/i);
+      const mFlash = sClean.match(/^FLASHPOINT\s*:\s*([\s\S]+)$/i);
+      if (mRumor) {
+        if (!currentRumor) currentRumor = mRumor[1].trim();
+      } else if (mFlash) {
+        if (!flashpoint) flashpoint = mFlash[1].trim();
+      } else {
+        conflictParts.push(sClean);
+      }
+    }
+    if (conflictParts.length > 0) {
+      description = conflictParts.join(' ').trim();
+    }
+  }
+
+  const title =
+    ent?.is_macro_world_state || rawName === '_macro_world_state'
+      ? t('codex.macroWorldStateTitle', 'Regional Power Dynamics')
+      : rawName;
+
+  return {
+    isMacro,
+    title,
+    badgeLabel: formatLoreTypeBadge(ent, t),
+    description,
+    currentRumor,
+    flashpoint: flashpoint || (isMacro ? String(ent?.location || '').trim() : ''),
+    location: String(ent?.location || '').trim(),
+  };
+};
+
 const WorldPulseLoreSubTab = ({
   worldPulse,
   filteredLore = [],
@@ -372,32 +431,59 @@ const WorldPulseLoreSubTab = ({
 
           {/* 3. Documented World Lore */}
           {showLore &&
-            filteredLore.map((ent, idx) => (
-              <div
-                key={ent.id || idx}
-                className="bg-black/50 border border-fantasy-border/60 rounded-lg p-3 space-y-1.5"
-              >
-                <div className="flex justify-between items-start gap-1">
-                  <h5 className="font-semibold text-xs text-gray-200">{ent.name}</h5>
-                  <span className="text-[9px] px-1.5 py-0.2 bg-black/60 text-gray-400 rounded uppercase font-bold border border-fantasy-border">
-                    {ent.entity_type || 'Lore'}
-                  </span>
+            filteredLore.map((ent, idx) => {
+              const parsed = parseMacroWorldLoreEntry(ent, t);
+              return (
+                <div
+                  key={ent.id || idx}
+                  className="bg-black/50 border border-fantasy-border/60 rounded-lg p-3 space-y-1.5"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {parsed.isMacro && <Globe size={13} className="text-amber-300/90 shrink-0" />}
+                      <h5 className="font-semibold text-xs text-gray-200">{parsed.title}</h5>
+                    </div>
+                    <span className="text-[9px] px-1.5 py-0.5 bg-black/60 text-gray-400 rounded uppercase font-bold border border-fantasy-border shrink-0">
+                      {parsed.badgeLabel}
+                    </span>
+                  </div>
+
+                  {parsed.description && (
+                    <p className="text-[11px] text-gray-300 leading-snug">
+                      {cleanProseLocations(parsed.description)}
+                    </p>
+                  )}
+
+                  {parsed.currentRumor && (
+                    <div className="flex items-start gap-1.5 px-2.5 py-1.5 rounded bg-amber-950/25 border border-amber-700/35 text-[11px] text-amber-100/90 leading-snug">
+                      <Compass size={12} className="text-amber-300 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-semibold text-amber-300 uppercase text-[9px] tracking-wider mr-1.5">
+                          {t('codex.worldPulseRumorBadge', 'Rumor')}:
+                        </span>
+                        <span>{cleanProseLocations(parsed.currentRumor)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {parsed.isMacro && parsed.flashpoint ? (
+                    <span className="text-[10px] text-gray-400 flex items-center gap-1 pt-0.5">
+                      <MapPin size={10} className="text-amber-300/80 shrink-0" />
+                      <span>
+                        {t('codex.macroFlashpointLabel', 'Flashpoint')}: {formatCleanLocation(parsed.flashpoint)}
+                      </span>
+                    </span>
+                  ) : (
+                    parsed.location && (
+                      <span className="text-[10px] text-gray-500 flex items-center gap-1">
+                        <MapPin size={10} />
+                        <span>{formatCleanLocation(parsed.location)}</span>
+                      </span>
+                    )
+                  )}
                 </div>
-
-                {ent.description && (
-                  <p className="text-[11px] text-gray-400 leading-snug">
-                    {cleanProseLocations(ent.description)}
-                  </p>
-                )}
-
-                {ent.location && (
-                  <span className="text-[10px] text-gray-500 flex items-center gap-1">
-                    <MapPin size={10} />
-                    <span>{formatCleanLocation(ent.location)}</span>
-                  </span>
-                )}
-              </div>
-            ))}
+              );
+            })}
         </div>
       )}
     </div>

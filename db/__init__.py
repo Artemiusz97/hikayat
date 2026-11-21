@@ -1,6 +1,19 @@
 from __future__ import annotations
 
 from .core import *
+from .registry import (
+    FTS5_VIRTUAL_TABLES,
+    GLOBAL_TABLES,
+    SESSION_TABLE_MAP,
+    SESSION_TABLE_REGISTRY,
+    SessionTableSpec,
+    get_load_specs,
+    get_purge_specs,
+    get_save_specs,
+    get_session_child_table_names,
+    get_simple_rollback_specs,
+    get_snapshot_prune_specs,
+)
 from .characters import *
 from .inventory import *
 from .settings import *
@@ -42,6 +55,7 @@ from .inventory import (
     get_inventories_for_characters,
     sell_inventory_item,
     set_item_quest_lock,
+    transfer_item_between_users,
 )
 from .social import *
 from .world import *
@@ -76,6 +90,10 @@ from .world_events import (
     mark_world_event_cold,
 )
 from .core import (
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_SNAPSHOT_KEEP_LAST,
+    WAL_MAINTENANCE_TURN_INTERVAL,
+    ReadUnitOfWork,
     _backfill_session_anomaly_records_v45,
     _migrate_zone_split_and_hidden_villages_v49,
     _migrate_dynamic_social_overhaul_v50,
@@ -88,9 +106,33 @@ from .core import (
     _safe_int_db,
     _sanitize_npcs_list,
     _to_str,
+    ensure_table_group_once,
     get_main_event_loop,
+    maybe_run_wal_maintenance,
     nullify_orphaned_implicated_contacts,
+    preload_prepare_action_bundle,
+    preload_turn_party_bundle,
+    prune_session_turn_snapshots,
 )
+
+# Verified zero-I/O in-memory helpers on the `db` package facade; allowed inside `async def`.
+PURE_IN_MEMORY_DB_HELPERS: frozenset[str] = frozenset({
+    "current_turn_user_id",
+    "infer_session_turn",
+    "canon_social_npc_id",
+    "get_skill_progress",
+    "compute_inventory_used_slots",
+    "is_discord_snowflake",
+    "build_contract_key",
+    "build_grudge_key",
+    "get_main_event_loop",
+    "get_session_child_table_names",
+    "get_purge_specs",
+    "get_save_specs",
+    "get_load_specs",
+    "get_snapshot_prune_specs",
+    "get_simple_rollback_specs",
+})
 from .characters import _apply_debug_stat_override, delete_character_by_id, get_character_3axis, set_character_3axis
 from .quests import (
     _enrich_quest_dict,

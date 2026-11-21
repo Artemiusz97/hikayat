@@ -1,7 +1,12 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 from .constants import *
 from .helpers import get_combined_narrative, is_check_success
+from game_engine.turn_context import (
+    TurnExecutionContext,
+    resolve_pre_turn_quest_res,
+    resolve_target_turn,
+)
 import mechanics.narrative.event_handlers
 from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
 import json
@@ -27,20 +32,13 @@ def _status_effect_text(entry: Any) -> str:
     return str(entry or "")
 
 
-def _resolve_current_turn_1based(session: dict | None, outcome: dict | None = None) -> int:
+def _resolve_current_turn_1based(
+    session: dict | None,
+    outcome: dict | None = None,
+    ctx: Optional[TurnExecutionContext] = None,
+) -> int:
     """Resolve 1-based monotonic gameplay turn number (0 is reserved for character backstory)."""
-    if isinstance(outcome, dict) and outcome.get("_target_turn"):
-        return max(1, int(outcome["_target_turn"]))
-    if isinstance(session, dict):
-        if session.get("_target_turn"):
-            return max(1, int(session["_target_turn"]))
-        tc = int(session.get("turn_count") or 0)
-        hist_actions = sum(
-            1 for item in (session.get("history") or [])
-            if not (isinstance(item, dict) and item.get("type") == "scene")
-        )
-        return max(tc, hist_actions) + 1
-    return 1
+    return resolve_target_turn(ctx, session, outcome)
 
 
 def _evaluate_npc_milestones(
@@ -426,16 +424,22 @@ def _evaluate_npc_milestones(
         app_dict["_resolved_milestone_event"] = mapped_act
     return new_mem, current_intercourse, current_oral, current_manual, track, is_intimate_act, delta_boost
 
-def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: list, outcome: dict, actions: list, items_gained_by_user: dict):
+def _reduce_quests_and_waypoints(
+    session_id: int,
+    session: dict,
+    party_uids: list,
+    outcome: dict,
+    actions: list,
+    items_gained_by_user: dict,
+    ctx: Optional[TurnExecutionContext] = None,
+):
     """Extracted Phase 2B Reducer for Quest and Waypoint Updates."""
     import db, game_engine
       # Process quest_updates array from OUTCOME_SCHEMA (preserving any pre-turn deterministic rewards/sub-quests)
     quest_reward_notices = list(outcome.get("_quest_reward_notices") or [])
     completed_sub_quests = list(outcome.get("_completed_sub_quests") or [])
     # Phase 5: Commit staged pre-turn quest/clue/climax execution atomically inside apply_outcome UnitOfWork (D3)
-    pre_q = (
-        (outcome.get("_pre_turn_quests") or outcome.get("_pre_turn_quest_res")) if isinstance(outcome, dict) else None
-    ) or (session.get("_pre_turn_quest_res") if isinstance(session, dict) else None)
+    pre_q = resolve_pre_turn_quest_res(ctx, session, outcome)
     if isinstance(pre_q, dict) and pre_q.get("_needs_db_commit") and session_id:
         _saved_loc = session.get("current_location")
         if pre_q.get("_effective_location"):
@@ -448,6 +452,8 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
             actions=actions,
             persist_db=True,
         )
+        if ctx is not None:
+            ctx.world_stage.pre_turn_quest_res = pre_q
         if isinstance(outcome, dict):
             outcome["_pre_turn_quests"] = pre_q
         if _saved_loc and not outcome.get("location"):
@@ -461,12 +467,19 @@ def _reduce_quests_and_waypoints(session_id: int, session: dict, party_uids: lis
                 completed_sub_quests.append(csq)
         if int(pre_q.get("deduction_xp_bonus") or 0) > 0:
             outcome["_deduction_xp_bonus"] = int(pre_q["deduction_xp_bonus"])
-        if isinstance(outcome, dict) and pre_q.get("quests_advanced_this_turn"):
-            cur_qadv = list(outcome.get("_quests_advanced_this_turn") or [])
+        if pre_q.get("quests_advanced_this_turn"):
+            cur_qadv = list((outcome.get("_quests_advanced_this_turn") if isinstance(outcome, dict) else None) or [])
+            if ctx is not None:
+                for aq_ctx in ctx.world_stage.just_advanced_quest_ids:
+                    if aq_ctx and aq_ctx not in cur_qadv:
+                        cur_qadv.append(aq_ctx)
             for aq in pre_q["quests_advanced_this_turn"]:
                 if aq and aq not in cur_qadv:
                     cur_qadv.append(aq)
-            outcome["_quests_advanced_this_turn"] = cur_qadv
+            if ctx is not None:
+                ctx.world_stage.just_advanced_quest_ids = list(cur_qadv)
+            if isinstance(outcome, dict):
+                outcome["_quests_advanced_this_turn"] = cur_qadv
     newly_discovered_clues = []
     already_claimed_qids = {
         str(rn.get("quest_id"))
@@ -604,6 +617,92 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                 db.remove_item_by_name(r_uid, r_name)
             if r_name:
                 already_removed_consumable_names_by_uid.setdefault(r_uid, []).append(r_name.lower())
+
+    for xfer in (pre_vit.get("staged_item_transfers") or []):
+        if not isinstance(xfer, dict):
+            continue
+        f_uid = int(xfer.get("from_user_id") or 0)
+        t_uid = int(xfer.get("to_user_id") or 0)
+        x_id = xfer.get("item_id")
+        x_name = str(xfer.get("item_name") or "").strip()
+        if not xfer.get("_persisted_in_db") and f_uid and t_uid and x_id is not None:
+            try:
+                db.transfer_item_between_users(f_uid, t_uid, int(x_id), allow_quest_locked=True)
+            except Exception as _xf_err:
+                log.warning("Failed staged_item_transfers commit: %s", _xf_err)
+        if f_uid and x_name:
+            already_removed_consumable_names_by_uid.setdefault(f_uid, []).append(x_name.lower())
+
+    for g_it in (pre_vit.get("staged_npc_gifts") or []):
+        if not isinstance(g_it, dict):
+            continue
+        g_uid = int(g_it.get("user_id") or 0)
+        g_item = g_it.get("item") if isinstance(g_it.get("item"), dict) else {}
+        g_name = str(g_item.get("name") or "").strip()
+        g_target = str(g_it.get("target_name") or "").strip()
+        if not g_it.get("_persisted_in_db") and g_uid and g_item and g_target:
+            try:
+                from mechanics.combat.items.consumables import evaluate_gift_reaction
+                evaluate_gift_reaction(g_uid, g_item, g_target, session=session)
+            except Exception as _gf_err:
+                log.warning("Failed staged_npc_gifts commit: %s", _gf_err)
+        if g_uid and g_name:
+            already_removed_consumable_names_by_uid.setdefault(g_uid, []).append(g_name.lower())
+
+    for u_it in (pre_vit.get("staged_npc_item_uses") or []):
+        if not isinstance(u_it, dict):
+            continue
+        u_uid = int(u_it.get("user_id") or 0)
+        u_item = u_it.get("item") if isinstance(u_it.get("item"), dict) else {}
+        u_name = str(u_item.get("name") or "").strip()
+        u_ttype = str(u_it.get("target_type") or "npc").strip()
+        u_target = str(u_it.get("target_name") or "").strip()
+        if not u_it.get("_persisted_in_db") and u_uid and u_item and u_target:
+            try:
+                from mechanics.combat.items.consumables import apply_item_to_target
+                apply_item_to_target(u_uid, u_item, u_ttype, u_target, session=session, mode="use")
+            except Exception as _nu_err:
+                log.warning("Failed staged_npc_item_uses commit: %s", _nu_err)
+        if u_uid and u_name:
+            already_removed_consumable_names_by_uid.setdefault(u_uid, []).append(u_name.lower())
+
+    for hf in (pre_vit.get("staged_hostile_item_failures") or []):
+        if not isinstance(hf, dict):
+            continue
+        h_npc = str(hf.get("npc_name") or "").strip()
+        h_delta = int(hf.get("delta_score", -15) or -15)
+        h_spike = int(hf.get("alert_spike", 35) or 35)
+        h_item_nm = str(hf.get("item_name") or "substance").strip()
+        if session_id and h_npc:
+            if not hf.get("_persisted_in_db"):
+                try:
+                    db.update_relationship_score(session_id, h_npc, delta_score=h_delta)
+                except Exception:
+                    pass
+            try:
+                turn_idx_hf = int((session or {}).get("turn_count") or len((session or {}).get("history") or []) or 0)
+                db.add_npc_memory(
+                    session_id,
+                    h_npc,
+                    turn_idx_hf,
+                    f"Caught an attempt to administer '{h_item_nm}'!",
+                    sentiment_delta=-5,
+                    importance=2,
+                )
+            except Exception:
+                pass
+        if isinstance(session, dict) and h_spike > 0:
+            try:
+                from mechanics.stealth import get_session_stealth_state, set_session_stealth_state, get_alert_stage
+                st_cur = get_session_stealth_state(session)
+                new_meter = max(0, min(100, int(st_cur.get("detection_meter") or 0) + h_spike))
+                st_cur["detection_meter"] = new_meter
+                st_cur["alert_level"] = get_alert_stage(new_meter)
+                set_session_stealth_state(session, st_cur)
+                if session_id:
+                    db.update_session(session_id, stealth_state=session["stealth_state"])
+            except Exception:
+                pass
 
     if session_id:
         for pen in (pre_vit.get("staged_pickpocket_penalties") or []):
@@ -862,8 +961,14 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
           if isinstance(p_state_meta_holder, dict) and isinstance(p_state_meta_holder.get("dropped_item_meta"), dict)
           else {}
       )
+      auth_loot_meta = (
+          outcome.get("_authorized_loot_meta")
+          if isinstance(outcome, dict) and isinstance(outcome.get("_authorized_loot_meta"), dict)
+          else {}
+      )
 
       for item_name in gained:
+          overflow_meta = None
           is_media = any(k in item_name.lower() for k in ("photo", "selfie", "video", "snapshot", "recording", "clip"))
           if is_media and scenario_has_smartphone(scen_key):
               from mechanics.combat.items import create_digital_media_item
@@ -872,15 +977,22 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
               added_id = create_digital_media_item(user_id, item_name, m_type, caption, subject=session.get("current_location", "Local Area"), tags=["misc", "digital", "story"])
               gain_lbl = item_name
           else:
-              restored_meta = dropped_meta_map.pop(str(item_name).strip().lower(), None) if isinstance(dropped_meta_map, dict) else None
+              itm_meta_key = str(item_name).strip().lower()
+              restored_meta = (dropped_meta_map.pop(itm_meta_key, None) if isinstance(dropped_meta_map, dict) else None) or auth_loot_meta.get(itm_meta_key)
               if isinstance(restored_meta, dict) and restored_meta.get("name"):
                   gain_lbl = str(restored_meta["name"])
+                  overflow_meta = {
+                      "name": gain_lbl,
+                      "item_type": str(restored_meta.get("item_type") or "Misc"),
+                      "effect": str(restored_meta.get("effect") or ""),
+                      "slot_cost": int(restored_meta.get("slot_cost", 1) if restored_meta.get("slot_cost") is not None else 1),
+                  }
                   added_id = db.add_item(
                       user_id=user_id,
                       name=gain_lbl,
-                      item_type=str(restored_meta.get("item_type") or "Misc"),
-                      effect=str(restored_meta.get("effect") or ""),
-                      slot_cost=int(restored_meta.get("slot_cost", 1) or 1),
+                      item_type=overflow_meta["item_type"],
+                      effect=overflow_meta["effect"],
+                      slot_cost=overflow_meta["slot_cost"],
                   )
                   if added_id is not None and session_id and isinstance(p_state_meta_holder, dict):
                       try:
@@ -891,6 +1003,12 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                   from mechanics.combat.items import classify_and_enrich_ad_hoc_item
                   enriched = classify_and_enrich_ad_hoc_item(item_name, scen_key)
                   gain_lbl = enriched["name"]
+                  overflow_meta = {
+                      "name": gain_lbl,
+                      "item_type": str(enriched.get("item_type") or "Misc"),
+                      "effect": str(enriched.get("effect") or ""),
+                      "slot_cost": int(enriched.get("slot_cost", 1) if enriched.get("slot_cost") is not None else 1),
+                  }
                   added_id = db.add_item(
                       user_id=user_id,
                       name=enriched["name"],
@@ -909,6 +1027,8 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                   dropped_items.append(gain_lbl)
               if len(dropped_items) > 10:
                   del dropped_items[:-10]
+              if isinstance(overflow_meta, dict) and overflow_meta.get("name"):
+                  p_state.setdefault("dropped_item_meta", {})[gain_lbl.lower()] = overflow_meta
               if isinstance(session, dict):
                   session["physical_state"] = p_state
               if session_id:
@@ -1239,7 +1359,14 @@ def _reduce_factions(session_id: int, session: dict, outcome: dict, party: list,
                 session["pending_promotion"] = None
             db.update_session(session_id, extra={"pending_promotion": None})
 
-def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dict, party_uids: list, actions: list):
+def _reduce_deterministic_waypoints(
+    session_id: int,
+    session: dict,
+    outcome: dict,
+    party_uids: list,
+    actions: list,
+    ctx: Optional[TurnExecutionContext] = None,
+):
     """Extracted Phase 2B Reducer for Deterministic Waypoint Triggers."""
     import db, game_engine
       # ---------------------------------------------------------------- Waypoint Progression Engine
@@ -1247,16 +1374,18 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
     from mechanics.world.waypoints import try_advance_on_arrival, try_complete_on_skill_check
     current_location = outcome.get("location") or (session.get("current_location") if session else "") or ""
     waypoint_notices = list(outcome.get("_waypoint_notices") or [])
-    pre_quest_info = (outcome.get("_pre_turn_quests") if isinstance(outcome, dict) else None) or {}
+    pre_quest_info = resolve_pre_turn_quest_res(ctx, session, outcome) or {}
     advanced_this_turn = {
         (k[0], k[1])
         for k in (pre_quest_info.get("advanced_keys") or [])
         if isinstance(k, (tuple, list)) and len(k) == 2
     }  # Track (qid, so_id) to prevent pre-turn + post-turn multi-stage cascading in a single turn
+    ctx_qadv = list(ctx.world_stage.just_advanced_quest_ids) if ctx is not None else []
     advanced_main_qids: set[str] = {
         str(q)
         for q in (
             list(outcome.get("_quests_advanced_this_turn") or [])
+            + ctx_qadv
             + list(pre_quest_info.get("quests_advanced_this_turn") or [])
         )
         if q
@@ -1269,6 +1398,8 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
         if not adv_qid:
             return
         advanced_main_qids.add(adv_qid)
+        if ctx is not None and adv_qid not in ctx.world_stage.just_advanced_quest_ids:
+            ctx.world_stage.just_advanced_quest_ids.append(adv_qid)
         if isinstance(outcome, dict):
             q_list = list(outcome.get("_quests_advanced_this_turn") or [])
             if adv_qid not in q_list:
@@ -1514,7 +1645,15 @@ def _reduce_deterministic_waypoints(session_id: int, session: dict, outcome: dic
     if waypoint_notices:
         outcome["_waypoint_notices"] = waypoint_notices
 
-def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome: dict, party: list, scen_key: str, actions: list):
+def _reduce_physical_state_and_memories(
+    session_id: int,
+    session: dict,
+    outcome: dict,
+    party: list,
+    scen_key: str,
+    actions: list,
+    ctx: Optional[TurnExecutionContext] = None,
+):
     """Extracted Phase 2B Reducer for Physical State, Commitments, and NPC Memories."""
     import db
     from mechanics.social.physical_state import (
@@ -1555,6 +1694,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     current_phys = (
         (outcome.get("_physical_state") if isinstance(outcome, dict) and isinstance(outcome.get("_physical_state"), dict) and outcome.get("_physical_state") else None)
         or (pre_intimate_dict.get("physical_state") if isinstance(pre_intimate_dict.get("physical_state"), dict) and pre_intimate_dict.get("physical_state") else None)
+        or (ctx.world_stage.physical_state if ctx is not None and isinstance(ctx.world_stage.physical_state, dict) and ctx.world_stage.physical_state else None)
         or (session.get("_physical_state") if isinstance(session, dict) and isinstance(session.get("_physical_state"), dict) and session.get("_physical_state") else None)
         or db.get_session_physical_state(session_id)
     )
@@ -3273,7 +3413,12 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
         )
         from mechanics.social.physical_state import _match_actor_key, is_erotic_intimate_contact
 
-        _w_turn = int(outcome.get("_target_turn") or (session.get("turn_count") if session else 0) or 0)
+        _w_turn = int(
+            (ctx.clock.target_turn if ctx is not None and ctx.clock.target_turn else None)
+            or outcome.get("_target_turn")
+            or (session.get("turn_count") if session else 0)
+            or 0
+        )
         _pre_soc = outcome.get("_pre_turn_social") if isinstance(outcome, dict) and isinstance(outcome.get("_pre_turn_social"), dict) else {}
         _por_list = _pre_soc.get("pending_outfit_requests") or []
         _newly_deferred_this_turn: set[str] = set()
@@ -3407,6 +3552,8 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
 
     db.update_session_physical_state(session_id, updated_phys)
     outcome["_physical_state"] = updated_phys
+    if ctx is not None:
+        ctx.world_stage.physical_state = updated_phys
 
     # 12. Post-turn choice reconciliation against updated_phys
     try:
@@ -3673,7 +3820,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     broken_ids = outcome.get("broken_commitments")
     if fulfilled_ids or broken_ids:
         from mechanics.system.commitments_engine import get_commitment, fulfill_commitment, flake_commitment
-        arb_turn = _resolve_current_turn_1based(session, outcome)
+        arb_turn = _resolve_current_turn_1based(session, outcome, ctx=ctx)
         for cid in (fulfilled_ids or []):
             if isinstance(cid, int) and cid > 0:
                 cm_row = get_commitment(session_id, cid)
@@ -3715,7 +3862,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     episodic_mem = outcome.get("episodic_memory")
     if episodic_mem and isinstance(episodic_mem, str) and episodic_mem.strip():
         from mechanics.world.mobility import get_session_dialogue_partners
-        current_turn = _resolve_current_turn_1based(session, outcome)
+        current_turn = _resolve_current_turn_1based(session, outcome, ctx=ctx)
         mem_targets = list(outcome.get("dialogue_partners") or (get_session_dialogue_partners(session) if isinstance(session, dict) else []) or [])
         if not mem_targets and outcome.get("dialogue_partner"):
             mem_targets = [str(outcome["dialogue_partner"]).strip()]
@@ -3742,7 +3889,7 @@ def _reduce_physical_state_and_memories(session_id: int, session: dict, outcome:
     # ── Resolve NPC Episodic Memories ────────────────────────────────────────
     npc_memories = outcome.get("npc_memories")
     if npc_memories and isinstance(npc_memories, list):
-        current_turn = _resolve_current_turn_1based(session, outcome)
+        current_turn = _resolve_current_turn_1based(session, outcome, ctx=ctx)
         for m in npc_memories:
             if isinstance(m, dict) and m.get("npc_name") and m.get("memory_fact"):
                 n_name = m["npc_name"].strip()

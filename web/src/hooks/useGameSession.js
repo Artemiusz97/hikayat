@@ -18,6 +18,7 @@ export const useGameSession = (user, character) => {
   const [onlineUserIds, setOnlineUserIds] = useState([]);
   const [pausedOnDashboard, setPausedOnDashboard] = useState(false);
   const [actionError, setActionError] = useState(null);
+  const [wsStatus, setWsStatus] = useState('idle');
 
   const socketRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
@@ -25,14 +26,21 @@ export const useGameSession = (user, character) => {
   const imagePollIntervalRef = useRef(null);
   const safetyTimerRef = useRef(null);
   const turnAbortControllerRef = useRef(null);
+  const fetchSessionAbortRef = useRef(null);
   const syncTurnRequestRef = useRef(false);
   const processingTurnRef = useRef(false);
   const pendingAsyncPostRef = useRef(null);
   const activeTurnIdRef = useRef(null);
+  const hasConnectedOnceRef = useRef(false);
 
   useEffect(() => {
     processingTurnRef.current = processingTurn;
   }, [processingTurn]);
+
+  const setProcessingState = useCallback((next) => {
+    processingTurnRef.current = next;
+    setProcessingTurn(next);
+  }, []);
 
   const clearImagePoll = useCallback(() => {
     if (imagePollIntervalRef.current) {
@@ -52,7 +60,7 @@ export const useGameSession = (user, character) => {
     clearSafetyTimer();
     safetyTimerRef.current = setTimeout(() => {
       console.warn(`Action processing exceeded safety window (${Math.round(ms / 1000)}s), releasing lock.`);
-      setProcessingTurn(false);
+      setProcessingState(false);
       setPendingAction(null);
       setIsThinking(false);
       setCancellingTurn(false);
@@ -64,6 +72,8 @@ export const useGameSession = (user, character) => {
   }, [clearSafetyTimer]);
 
   const closeSocket = useCallback(() => {
+    hasConnectedOnceRef.current = false;
+    setWsStatus('idle');
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
       reconnectTimeoutRef.current = null;
@@ -131,26 +141,43 @@ export const useGameSession = (user, character) => {
     const isInitial = isInitialLoadRef.current;
     const silent = options?.silent ?? !isInitial;
     if (!user) {
+      if (fetchSessionAbortRef.current) {
+        try {
+          fetchSessionAbortRef.current.abort();
+        } catch {}
+        fetchSessionAbortRef.current = null;
+      }
       setSession(null);
       setLoading(false);
       isInitialLoadRef.current = false;
       return;
     }
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    fetchSessionAbortRef.current = controller;
+    let aborted = false;
     try {
       if (!silent) {
         setLoading(true);
       }
-      const data = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+      const data = await apiCall(`/api/adventure/active-session/${user.user_id}`, {
+        signal: controller.signal,
+      });
+      if (fetchSessionAbortRef.current !== controller) return;
       if (data && data.session) {
         setSession(data.session);
         if (data.session.in_flight_turn) {
-          setProcessingTurn(true);
+          setProcessingState(true);
           setPendingAction(data.session.in_flight_turn.action || { label: 'Resolving Action...' });
           setIsThinking(data.session.in_flight_turn.status === 'thinking');
           armSafetyTimer(245000);
         } else if (!syncTurnRequestRef.current) {
           clearSafetyTimer();
-          setProcessingTurn(false);
+          setProcessingState(false);
           setPendingAction(null);
           setIsThinking(false);
           setCancellingTurn(false);
@@ -163,11 +190,20 @@ export const useGameSession = (user, character) => {
         setSession(null);
       }
     } catch (e) {
+      if (e?.isUserAbort || e?.name === 'AbortError') {
+        aborted = true;
+        return;
+      }
       setSession(null);
     } finally {
-      isInitialLoadRef.current = false;
-      if (!silent) {
-        setLoading(false);
+      if (fetchSessionAbortRef.current === controller) {
+        fetchSessionAbortRef.current = null;
+      }
+      if (!aborted) {
+        isInitialLoadRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        }
       }
     }
   }, [user?.user_id, character?.id]);
@@ -175,6 +211,12 @@ export const useGameSession = (user, character) => {
   useEffect(() => {
     fetchActiveSession();
     return () => {
+      if (fetchSessionAbortRef.current) {
+        try {
+          fetchSessionAbortRef.current.abort();
+        } catch {}
+        fetchSessionAbortRef.current = null;
+      }
       clearImagePoll();
       clearSafetyTimer();
       closeSocket();
@@ -183,6 +225,9 @@ export const useGameSession = (user, character) => {
 
   const connectWebSocket = useCallback((sessionId) => {
     if (!sessionId || sessionId === 'embarking' || !user?.user_id) return;
+    if (activeSessionIdRef.current !== null && String(activeSessionIdRef.current) !== String(sessionId)) {
+      hasConnectedOnceRef.current = false;
+    }
     activeSessionIdRef.current = sessionId;
     if (
       socketRef.current &&
@@ -200,6 +245,8 @@ export const useGameSession = (user, character) => {
         prevWs.close();
       } catch (e) {}
     }
+
+    setWsStatus(hasConnectedOnceRef.current ? 'reconnecting' : 'connecting');
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const tokenParam = user?.auth_token ? `&token=${encodeURIComponent(user.auth_token)}` : '';
@@ -220,7 +267,7 @@ export const useGameSession = (user, character) => {
       setActionError(null);
       setSession(payload.session);
       setWaitingForParty(false);
-      setProcessingTurn(false);
+      setProcessingState(false);
       setPendingAction(null);
       setLastSyncTimestamp(payload.sync_timestamp || Date.now());
       if (payload.session?.image_gen_enabled && !payload.session?.scene_image_url) {
@@ -229,14 +276,21 @@ export const useGameSession = (user, character) => {
     };
 
     ws.onopen = async () => {
+      hasConnectedOnceRef.current = true;
+      setWsStatus('connected');
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
         reconnectTimeoutRef.current = null;
       }
-      if (processingTurnRef.current && user?.user_id && activeSessionIdRef.current) {
+      const expectedSid = String(sessionId);
+      if (processingTurnRef.current && user?.user_id && String(activeSessionIdRef.current) === expectedSid) {
         try {
           const res = await apiCall(`/api/adventure/active-session/${user.user_id}`);
-          if (res?.session) {
+          if (
+            res?.session &&
+            String(activeSessionIdRef.current) === expectedSid &&
+            String(res.session.id) === expectedSid
+          ) {
             if (res.session.in_flight_turn) {
               setPendingAction(res.session.in_flight_turn.action || { label: 'Resolving Action...' });
               setIsThinking(res.session.in_flight_turn.status === 'thinking');
@@ -246,7 +300,7 @@ export const useGameSession = (user, character) => {
                 ...res.session,
                 scene_image_url: res.session?.scene_image_url || prev?.scene_image_url || null
               }));
-              setProcessingTurn(false);
+              setProcessingState(false);
               setPendingAction(null);
               setIsThinking(false);
               setCancellingTurn(false);
@@ -269,7 +323,14 @@ export const useGameSession = (user, character) => {
     };
 
     ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
+      let data;
+      try {
+        data = JSON.parse(event.data);
+      } catch (err) {
+        console.warn('Ignoring malformed WebSocket message:', err);
+        return;
+      }
+      if (!data || typeof data !== 'object') return;
       if (data.type === 'STREAM_THINKING') {
         setIsThinking(true);
         if (data.action) {
@@ -313,7 +374,7 @@ export const useGameSession = (user, character) => {
         setIsStreaming(false);
         setStreamingNarrative(null);
         setStreamingState(null);
-        setProcessingTurn(false);
+        setProcessingState(false);
         setPendingAction(null);
         if (data.session) {
           setSession(prev => ({
@@ -334,7 +395,7 @@ export const useGameSession = (user, character) => {
         setStreamingNarrative(null);
         setStreamingState(null);
         setWaitingForParty(false);
-        setProcessingTurn(false);
+        setProcessingState(false);
         setPendingAction(null);
         setActionError(null);
         if (data.session) {
@@ -400,15 +461,32 @@ export const useGameSession = (user, character) => {
       } else if (data.type === 'REALTY_STATE_SYNC') {
         setSession(prev => (prev ? { ...prev, realty: data.realty } : prev));
         setLastSyncTimestamp(Date.now());
+      } else if (data.type === 'CONTRACTS_STATE_SYNC') {
+        const ts = data.sync_timestamp || Date.now();
+        setSession(prev => (
+          prev
+            ? {
+                ...prev,
+                contracts_sync_ts: ts,
+                ...(data.overview ? { contracts_overview: data.overview } : {}),
+                ...(data.contracts ? { contracts: data.contracts } : {}),
+              }
+            : prev
+        ));
+        setLastSyncTimestamp(ts);
       } else if (data.type === 'STEALTH_STATE_UPDATED') {
         setSession(prev => {
           if (!prev) return prev;
           const isSameUser = !data.user_id || String(data.user_id) === String(user?.user_id);
+          const nextChoices = Array.isArray(data.choices)
+            ? data.choices
+            : (Array.isArray(data.session?.choices) ? data.session.choices : null);
           if (isSameUser) {
             return {
               ...prev,
               stealth_state: data.stealth_state,
-              stealth_badge: data.stealth_badge || prev.stealth_badge
+              stealth_badge: data.stealth_badge || prev.stealth_badge,
+              ...(nextChoices ? { choices: nextChoices } : {})
             };
           }
           const prevSt = prev.stealth_state || {};
@@ -447,8 +525,12 @@ export const useGameSession = (user, character) => {
         !activeSessionIdRef.current ||
         String(activeSessionIdRef.current) !== String(sessionId)
       ) {
+        if (!ws._intentionalClose) {
+          setWsStatus('idle');
+        }
         return;
       }
+      setWsStatus('reconnecting');
       // Auto-reconnect across server restarts / hot-reloads when session remains active
       reconnectTimeoutRef.current = setTimeout(() => {
         if (activeSessionIdRef.current && String(activeSessionIdRef.current) === String(sessionId)) {
@@ -494,7 +576,7 @@ export const useGameSession = (user, character) => {
               ...res.session,
               scene_image_url: res.session?.scene_image_url || prev?.scene_image_url || null
             }));
-            setProcessingTurn(false);
+            setProcessingState(false);
             setPendingAction(null);
             setIsThinking(false);
             setCancellingTurn(false);
@@ -550,7 +632,7 @@ export const useGameSession = (user, character) => {
     // Immediately transition to narration UI with active processing banner
     setActionError(null);
     setPausedOnDashboard(false);
-    setProcessingTurn(true);
+    setProcessingState(true);
     setPendingAction({ label: 'Embarking on new journey...' });
     setSession({
       id: 'embarking',
@@ -590,7 +672,7 @@ export const useGameSession = (user, character) => {
       setActionError(err.message || 'Failed to embark on adventure.');
       throw err;
     } finally {
-      setProcessingTurn(false);
+      setProcessingState(false);
       setPendingAction(null);
     }
   };
@@ -612,8 +694,8 @@ export const useGameSession = (user, character) => {
   };
 
   const submitAction = async (actionData) => {
-    if (processingTurn) return;
-    setProcessingTurn(true);
+    if (processingTurnRef.current) return;
+    setProcessingState(true);
     setPendingAction(actionData);
     setIsThinking(false);
     setActionError(null);
@@ -640,6 +722,11 @@ export const useGameSession = (user, character) => {
         combat_target: actionData?.combat_target || null,
         intent: actionData?.intent || null,
         target_npc: actionData?.target_npc || null,
+        item_id: actionData?.item_id !== undefined ? actionData.item_id : null,
+        target_type: actionData?.target_type || null,
+        target_name: actionData?.target_name || null,
+        target_user_id: actionData?.target_user_id !== undefined ? actionData.target_user_id : null,
+        use_mode: actionData?.use_mode || null,
         skip_minutes: actionData?.skip_minutes !== undefined ? actionData.skip_minutes : null,
         sleep_mode: actionData?.sleep_mode || null,
         is_stealth: Boolean(actionData?.is_stealth),
@@ -731,7 +818,7 @@ export const useGameSession = (user, character) => {
       }
       if (!asyncAccepted) {
         clearSafetyTimer();
-        setProcessingTurn(false);
+        setProcessingState(false);
         setPendingAction(null);
         setIsThinking(false);
       }
@@ -813,14 +900,15 @@ export const useGameSession = (user, character) => {
     setSession(null);
     setPausedOnDashboard(false);
     setWaitingForParty(false);
-    setProcessingTurn(false);
+    setProcessingState(false);
     setPendingAction(null);
     setIsThinking(false);
     setCancellingTurn(false);
   };
 
   const retryGeneration = async () => {
-    if (!session?.id || !user?.user_id || processingTurn) return null;
+    if (!session?.id || !user?.user_id || processingTurnRef.current) return null;
+    setProcessingState(true);
     armSafetyTimer(245000);
     setIsStreaming(false);
     setIsThinking(false);
@@ -832,7 +920,6 @@ export const useGameSession = (user, character) => {
       ...(hasHistory ? {} : { isSyncTurnZeroRetry: true }),
     });
     setActionError(null);
-    setProcessingTurn(true);
     const canAsyncWs = Boolean(
       hasHistory &&
       socketRef.current &&
@@ -886,7 +973,7 @@ export const useGameSession = (user, character) => {
       }
       if (!asyncAccepted) {
         clearSafetyTimer();
-        setProcessingTurn(false);
+        setProcessingState(false);
         setPendingAction(null);
         setIsThinking(false);
       }
@@ -919,7 +1006,7 @@ export const useGameSession = (user, character) => {
       setStreamingNarrative(null);
       setStreamingState(null);
       setIsThinking(false);
-      setProcessingTurn(false);
+      setProcessingState(false);
       setPendingAction(null);
       setWaitingForParty(false);
       setActionError(null);
@@ -991,6 +1078,7 @@ export const useGameSession = (user, character) => {
     waitingForParty,
     partyStatus,
     lastSyncTimestamp,
+    wsStatus,
     partyChatMessages,
     onlineUserIds,
     sendPartyChat,

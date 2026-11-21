@@ -282,8 +282,16 @@ def _batch_load_party_characters(missing_uids: List[int]) -> Dict[int, Dict[str,
         return {}
 
 
-def _format_party_member_entry(uid: Any, char_data: Dict[str, Any]) -> Dict[str, Any]:
+def _format_party_member_entry(
+    uid: Any,
+    char_data: Dict[str, Any],
+    *,
+    used_slots: Optional[int] = None,
+    capacity: Optional[int] = None,
+) -> Dict[str, Any]:
     raw_eff_val = _parse_status_effects_list(char_data.get("status_effects"))
+    eff_cap = int(capacity) if capacity is not None else int(cd.inventory_capacity(int(char_data.get("str_", 5) or 5)))
+    eff_used = int(used_slots) if used_slots is not None else 0
     return {
         "user_id": uid,
         "character_id": char_data.get("id"),
@@ -295,6 +303,8 @@ def _format_party_member_entry(uid: Any, char_data: Dict[str, Any]) -> Dict[str,
         "mp": char_data.get("mp", 0),
         "max_mp": char_data.get("max_mp", 0),
         "gold": char_data.get("gold", 0),
+        "used_slots": eff_used,
+        "capacity": eff_cap,
         "stats": {
             "str": char_data.get("str_", 1),
             "per": char_data.get("per_", 1),
@@ -315,7 +325,7 @@ def enrich_session_party_members(
     *,
     preloaded_chars: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Fetches real-time vitals and status effects for all human characters in the party."""
+    """Fetches real-time vitals, capacity, and status effects for all human characters in the party."""
     session_id = session_dict.get("id")
     if not session_id:
         return []
@@ -329,12 +339,31 @@ def enrich_session_party_members(
     if len(missing_uids) > 1:
         chars_by_uid.update(_batch_load_party_characters(missing_uids))
 
-    members: List[Dict[str, Any]] = []
+    resolved_chars: List[Tuple[Any, Dict[str, Any]]] = []
     for uid in uids:
         u_int = int(uid)
         c = chars_by_uid[u_int] if u_int in chars_by_uid else db.get_character(uid)
         if c:
-            members.append(_format_party_member_entry(uid, c))
+            resolved_chars.append((uid, c))
+
+    inv_by_cid: Dict[int, List[Dict[str, Any]]] = {}
+    if resolved_chars:
+        try:
+            inv_by_cid = db.get_inventories_for_characters([c for _, c in resolved_chars]) or {}
+        except Exception:
+            inv_by_cid = {}
+
+    members: List[Dict[str, Any]] = []
+    for uid, c in resolved_chars:
+        cid = c.get("id")
+        c_inv = inv_by_cid.get(int(cid), []) if cid is not None else []
+        try:
+            u_slots = db.compute_inventory_used_slots(c_inv)
+            cap = db.get_character_inventory_capacity(int(uid), c, int(session_id))
+        except Exception:
+            u_slots = len(c_inv)
+            cap = cd.inventory_capacity(int(c.get("str_", 5) or 5))
+        members.append(_format_party_member_entry(uid, c, used_slots=u_slots, capacity=cap))
     return members
 
 
@@ -448,6 +477,7 @@ class ItemUseRequest(BaseModel):
     item_id: int
     target_type: Optional[str] = "self"
     target_name: Optional[str] = "self"
+    target_user_id: Optional[int] = None
     session_id: Optional[int] = None
 
 
@@ -519,6 +549,11 @@ class ActionRequest(BaseModel):
     sleep_mode: Optional[str] = None
     is_stealth: Optional[bool] = False
     stance: Optional[str] = None
+    item_id: Optional[int] = None
+    target_type: Optional[str] = None
+    target_name: Optional[str] = None
+    target_user_id: Optional[int] = None
+    use_mode: Optional[str] = None
     async_ws: Optional[bool] = False
 
 

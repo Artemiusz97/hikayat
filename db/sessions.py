@@ -14,6 +14,7 @@ from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .registry import get_purge_specs, get_simple_rollback_specs
 
 def _json_dataclass_default(obj):
     import dataclasses
@@ -916,24 +917,23 @@ def prune_orphaned_and_finished_sessions(dry_run: bool = False, include_finished
             chunk = stale_ids[i:i + chunk_size]
             placeholders = ",".join("?" * len(chunk))
 
-            for tbl in SESSION_CHILD_TABLES:
-                if dry_run:
-                    cnt = conn.execute(f"SELECT count(*) FROM {tbl} WHERE session_id IN ({placeholders})", chunk).fetchone()[0]
-                    counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cnt
-                else:
-                    cur = conn.execute(f"DELETE FROM {tbl} WHERE session_id IN ({placeholders})", chunk)
-                    counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cur.rowcount
-
-            for vtbl in ("session_digests_fts",):
+            for spec in get_purge_specs():
                 try:
                     if dry_run:
-                        cnt = conn.execute(f"SELECT count(*) FROM {vtbl} WHERE session_id IN ({placeholders})", chunk).fetchone()[0]
-                        counts["deleted_by_table"][vtbl] = counts["deleted_by_table"].get(vtbl, 0) + cnt
+                        cnt = conn.execute(
+                            f"SELECT count(*) FROM {spec.name} WHERE session_id IN ({placeholders})",
+                            chunk,
+                        ).fetchone()[0]
+                        counts["deleted_by_table"][spec.name] = counts["deleted_by_table"].get(spec.name, 0) + cnt
                     else:
-                        cur = conn.execute(f"DELETE FROM {vtbl} WHERE session_id IN ({placeholders})", chunk)
-                        counts["deleted_by_table"][vtbl] = counts["deleted_by_table"].get(vtbl, 0) + cur.rowcount
+                        cur = conn.execute(
+                            f"DELETE FROM {spec.name} WHERE session_id IN ({placeholders})",
+                            chunk,
+                        )
+                        counts["deleted_by_table"][spec.name] = counts["deleted_by_table"].get(spec.name, 0) + cur.rowcount
                 except sqlite3.OperationalError:
-                    pass
+                    if not spec.optional_table:
+                        raise
 
             if dry_run:
                 cnt = conn.execute(f"SELECT count(*) FROM sessions WHERE id IN ({placeholders})", chunk).fetchone()[0]
@@ -943,16 +943,20 @@ def prune_orphaned_and_finished_sessions(dry_run: bool = False, include_finished
                 counts["deleted_by_table"]["sessions"] = counts["deleted_by_table"].get("sessions", 0) + cur.rowcount
 
         # Also purge any child records whose session was already deleted directly
-        for tbl in tuple(SESSION_CHILD_TABLES) + ("session_digests_fts",):
+        for spec in get_purge_specs():
             try:
                 if dry_run:
-                    cnt = conn.execute(f"SELECT count(*) FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)").fetchone()[0]
+                    cnt = conn.execute(
+                        f"SELECT count(*) FROM {spec.name} WHERE session_id NOT IN (SELECT id FROM sessions)"
+                    ).fetchone()[0]
                     if cnt > 0:
-                        counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cnt
+                        counts["deleted_by_table"][spec.name] = counts["deleted_by_table"].get(spec.name, 0) + cnt
                 else:
-                    cur = conn.execute(f"DELETE FROM {tbl} WHERE session_id NOT IN (SELECT id FROM sessions)")
+                    cur = conn.execute(
+                        f"DELETE FROM {spec.name} WHERE session_id NOT IN (SELECT id FROM sessions)"
+                    )
                     if cur.rowcount > 0:
-                        counts["deleted_by_table"][tbl] = counts["deleted_by_table"].get(tbl, 0) + cur.rowcount
+                        counts["deleted_by_table"][spec.name] = counts["deleted_by_table"].get(spec.name, 0) + cur.rowcount
             except sqlite3.OperationalError:
                 pass
 
@@ -1132,17 +1136,15 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
         from mechanics.world.anomalous_sites.lifecycle import rollback_anomalous_sites_after_turn
         anomalous_sites_reverted = rollback_anomalous_sites_after_turn(session_id, t_num, conn=conn)
         intimate_cnt = delete_intimate_events_after_turn(session_id, t_num, conn=conn)
-        cur_cm = conn.execute(
-            "DELETE FROM commitments_ledger WHERE session_id = ? AND turn_created > ?",
-            (session_id, t_num),
-        )
-        cm_cnt = cur_cm.rowcount
-
-        cur_cl = conn.execute(
-            "DELETE FROM session_clues WHERE session_id = ? AND turn_created > ?",
-            (session_id, t_num),
-        )
-        cl_cnt = cur_cl.rowcount
+        simple_counts: dict[str, int] = {}
+        for spec in get_simple_rollback_specs():
+            if not spec.rollback_turn_col or not spec.rollback_result_key:
+                continue
+            cur_simple = conn.execute(
+                f"DELETE FROM {spec.name} WHERE session_id = ? AND {spec.rollback_turn_col} > ?",
+                (session_id, t_num),
+            )
+            simple_counts[spec.rollback_result_key] = int(cur_simple.rowcount or 0)
 
         conn.execute(
             """DELETE FROM inventory
@@ -1170,12 +1172,6 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                  )""",
             (session_id, session_id, session_id, session_id, session_id),
         )
-
-        cur_nm = conn.execute(
-            "DELETE FROM npc_memories WHERE session_id = ? AND turn_index > ?",
-            (session_id, t_num),
-        )
-        nm_cnt = cur_nm.rowcount
 
         cur_ch = conn.execute(
             "DELETE FROM session_chronicles WHERE session_id = ? AND (turn_end > ? OR (created_turn > 0 AND created_turn > ?))",
@@ -1451,17 +1447,19 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                     restore_quarters_arch,
                     exc,
                 )
+    from services.examine_service import invalidate_examine_cache
+    invalidate_examine_cache(int(session_id))
     return {
         "ties_rolled_back": ties_cnt,
         "intimate_events_deleted": intimate_cnt,
-        "commitments_deleted": cm_cnt,
+        "commitments_deleted": simple_counts.get("commitments_deleted", 0),
         "world_events_rolled_back": we_res.get("total_rolled_back", 0),
         "dossiers_rolled_back": dos_res.get("dossiers_rolled_back", 0),
         "spines_rolled_back": dos_res.get("spines_rolled_back", 0),
-        "npc_memories_deleted": nm_cnt,
+        "npc_memories_deleted": simple_counts.get("npc_memories_deleted", 0),
         "digests_deleted": dg_cnt,
         "chronicles_deleted": ch_cnt,
-        "session_clues_deleted": cl_cnt,
+        "session_clues_deleted": simple_counts.get("session_clues_deleted", 0),
         "physical_actors_restored": phys_res.get("physical_actors_restored", 0),
         "garments_restored": phys_res.get("garments_restored", 0),
         "social_discoveries_deleted": soc_pacing_res.get("discoveries_deleted", 0),

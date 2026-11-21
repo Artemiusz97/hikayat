@@ -204,7 +204,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     # Only check if one already exists (e.g. session resumed mid-adventure)
 
     ctx = TurnContext(session.get("id"), session)
-    existing_sq = ctx.story_quest
+    existing_sq = await adb(lambda: ctx.story_quest)
 
     if existing_sq:
 
@@ -252,166 +252,178 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     from mechanics.system.time_engine import format_llm_time_context
     from mechanics.world.schedules import get_time_block_key
 
-    curr_day, curr_min, _ = db.get_session_time(session["id"])
+    def _prepare_opening_scene_db_bundle(
+        init_suggested_loc: str,
+    ) -> tuple[int, int, str, str]:
+        with db.UnitOfWork():
+            cur_d, cur_m, _ = db.get_session_time(session["id"])
+            sug_loc = init_suggested_loc
 
-    hook_start_min = hook_context.get("starting_minute")
-    if hook_start_min is not None and curr_day == 1 and not session.get("history"):
-        curr_min = int(hook_start_min)
-        session["current_minute"] = curr_min
-        new_slot = get_time_block_key(curr_min)
-        session["time_slot"] = new_slot
-        try:
-            db.update_session_time(session["id"], curr_day, curr_min, 0)
-        except Exception:
-            pass
+            hook_start_min = hook_context.get("starting_minute")
+            if hook_start_min is not None and cur_d == 1 and not session.get("history"):
+                cur_m = int(hook_start_min)
+                session["current_minute"] = cur_m
+                new_slot = get_time_block_key(cur_m)
+                session["time_slot"] = new_slot
+                try:
+                    db.update_session_time(session["id"], cur_d, cur_m, 0)
+                except Exception:
+                    pass
 
-    # D21: Seed spatial world_nodes and lock starting current_node_id & canonical location BEFORE spawning roles or calling Turn 0 LLM
-    locked_opening_node_id = ""
-    if session.get("id") and is_location_engine_enabled(scen_key):
-        try:
-            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
-            from mechanics.world.locations.pathfinding import format_node_hierarchy
-            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
-            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
-                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
-            pre_node_id = session.get("current_node_id") or ""
-            if not pre_node_id and suggested_loc:
-                pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc) or ""
-            if not pre_node_id:
-                all_wn = db.get_session_world_nodes(session["id"]) or []
-                for wn in all_wn:
-                    if str(wn.get("tier") or "").upper() in ("ROOM", "FACILITY"):
-                        pre_node_id = str(wn["node_id"])
-                        break
-                if not pre_node_id and all_wn:
-                    pre_node_id = str(all_wn[0]["node_id"])
-            if pre_node_id:
-                locked_opening_node_id = pre_node_id
-                canon_loc = format_node_hierarchy(session["id"], pre_node_id) or suggested_loc
-                if canon_loc:
-                    suggested_loc = canon_loc
-                    session["current_location"] = canon_loc
-                session["current_node_id"] = pre_node_id
-                db.update_session(session["id"], current_node_id=pre_node_id, current_location=session.get("current_location") or suggested_loc)
-        except Exception as e:
-            log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
+            # D21: Seed spatial world_nodes and lock starting current_node_id & canonical location BEFORE spawning roles or calling Turn 0 LLM
+            locked_nid = ""
+            if session.get("id") and is_location_engine_enabled(scen_key):
+                try:
+                    from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+                    from mechanics.world.locations.pathfinding import format_node_hierarchy
+                    ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+                    if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                        db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
+                    pre_node_id = session.get("current_node_id") or ""
+                    if not pre_node_id and sug_loc:
+                        pre_node_id = db.resolve_node_id_from_location(session["id"], sug_loc) or ""
+                    if not pre_node_id:
+                        all_wn = db.get_session_world_nodes(session["id"]) or []
+                        for wn in all_wn:
+                            if str(wn.get("tier") or "").upper() in ("ROOM", "FACILITY"):
+                                pre_node_id = str(wn["node_id"])
+                                break
+                        if not pre_node_id and all_wn:
+                            pre_node_id = str(all_wn[0]["node_id"])
+                    if pre_node_id:
+                        locked_nid = pre_node_id
+                        canon_loc = format_node_hierarchy(session["id"], pre_node_id) or sug_loc
+                        if canon_loc:
+                            sug_loc = canon_loc
+                            session["current_location"] = canon_loc
+                        session["current_node_id"] = pre_node_id
+                        db.update_session(session["id"], current_node_id=pre_node_id, current_location=session.get("current_location") or sug_loc)
+                except Exception as e:
+                    log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
 
-    # Zero-LLM Stage 0 world population seed for Anomalous / High School scenarios
-    if session.get("id"):
-        try:
-            from mechanics.social.population_seeder import ensure_world_population_seeded, is_population_seeding_supported
-            if is_population_seeding_supported(scen_key):
-                ensure_world_population_seeded(int(session["id"]), scen_key, session=session, turn_number=0)
-        except Exception as e:
-            log.warning("World population seed warning in generate_opening_scene: %s", e)
+            # Zero-LLM Stage 0 world population seed for Anomalous / High School scenarios
+            if session.get("id"):
+                try:
+                    from mechanics.social.population_seeder import ensure_world_population_seeded, is_population_seeding_supported
+                    if is_population_seeding_supported(scen_key):
+                        ensure_world_population_seeded(int(session["id"]), scen_key, session=session, turn_number=0)
+                except Exception as e:
+                    log.warning("World population seed warning in generate_opening_scene: %s", e)
 
-    # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
-    hook_focal_point = hook_context.get("focal_point", "")
-    if hook_focal_point:
-        session["focal_point"] = hook_focal_point
-        try:
-            db.update_session(session["id"], focal_point=hook_focal_point)
-        except Exception as e:
-            log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
+            # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
+            hf_point = hook_context.get("focal_point", "")
+            if hf_point:
+                session["focal_point"] = hf_point
+                try:
+                    db.update_session(session["id"], focal_point=hf_point)
+                except Exception as e:
+                    log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
 
-    scheduled_roles = hook_context.get("scheduled_roles", [])
-    if scheduled_roles:
-        try:
-            from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
-            from mechanics.social.persona.actor_card import derive_initial_micro_blocking
-            curr_npcs = list(session.get("current_npcs") or [])
-            curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
-            for role_title in scheduled_roles:
-                if role_title:
-                    spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, suggested_loc or "")
-                    if spawned and spawned.get("name"):
-                        sp_name = spawned["name"]
-                        if sp_name.lower() not in curr_npc_names:
-                            micro = derive_initial_micro_blocking(
-                                spawned,
-                                current_location=suggested_loc or "",
-                                time_slot=session.get("time_slot", "morning"),
-                                stage_role="room_bystander"
+            sched_roles = hook_context.get("scheduled_roles", [])
+            if sched_roles:
+                try:
+                    from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
+                    from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+                    curr_npcs = list(session.get("current_npcs") or [])
+                    curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
+                    for role_title in sched_roles:
+                        if role_title:
+                            spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, sug_loc or "")
+                            if spawned and spawned.get("name"):
+                                sp_name = spawned["name"]
+                                if sp_name.lower() not in curr_npc_names:
+                                    micro = derive_initial_micro_blocking(
+                                        spawned,
+                                        current_location=sug_loc or "",
+                                        time_slot=session.get("time_slot", "morning"),
+                                        stage_role="room_bystander"
+                                    )
+                                    spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
+                                    spawned["active_prop"] = micro.get("active_prop", "")
+                                    curr_npcs.append(spawned)
+                                    curr_npc_names.add(sp_name.lower())
+                    session["current_npcs"] = curr_npcs
+                    db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
+                except Exception as e:
+                    log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+
+            # Pre-stage living district/campus bystanders + crowd_state on Turn 0 for public non-crisis hooks
+            if session.get("id") and arch_key != "in_media_res":
+                try:
+                    from mechanics.social.population_seeder import is_population_seeding_supported
+                    from mechanics.world.presence_resolver import resolve_node_presence
+                    open_nid = str(session.get("current_node_id") or locked_nid or "").strip()
+                    if open_nid and is_population_seeding_supported(scen_key):
+                        open_loc = str(session.get("current_location") or sug_loc or "")
+                        pres_open = resolve_node_presence(
+                            int(session["id"]),
+                            open_nid,
+                            open_loc,
+                            current_day=cur_d,
+                            current_minute=cur_m,
+                            scen_key=scen_key,
+                            session=session,
+                            turn_number=0,
+                            persist_db=True,
+                        )
+                        if isinstance(pres_open, dict):
+                            if isinstance(pres_open.get("crowd_state"), dict):
+                                session["crowd_state"] = dict(pres_open["crowd_state"])
+                            open_npcs = list(session.get("current_npcs") or [])
+                            seen_open = {game_engine._get_npc_name(n).strip().lower() for n in open_npcs if n}
+                            for pn in (pres_open.get("present_npcs") or []):
+                                if isinstance(pn, dict) and pn.get("name") and pn["name"].strip().lower() not in seen_open:
+                                    open_npcs.append(dict(pn))
+                                    seen_open.add(pn["name"].strip().lower())
+                            session["current_npcs"] = open_npcs
+                            db.update_session(session["id"], current_npcs_json=json.dumps(open_npcs))
+                except Exception as e:
+                    log.warning("Opening bystander presence staging warning: %s", e)
+
+            init_p = hook_context.get("initial_physical_state") or {}
+            if init_p and session.get("id"):
+                try:
+                    from mechanics.social.physical_state import upsert_actor_physical_state
+                    for p_entry in party:
+                        p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
+                        if isinstance(p_char, dict) and p_char.get("name"):
+                            upsert_actor_physical_state(session["id"], p_char["name"], init_p)
+                except Exception as e:
+                    log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
+
+            st_prop = hook_context.get("starting_prop")
+            if st_prop and party:
+                lead_uid = None
+                first_elem = party[0]
+                if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
+                    lead_uid = first_elem[0].get("user_id")
+                elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
+                    lead_uid = first_elem[1]
+                elif isinstance(first_elem, dict):
+                    lead_uid = first_elem.get("user_id")
+                if lead_uid and isinstance(st_prop, dict) and st_prop.get("name"):
+                    try:
+                        already_granted = str(session.get("opening_starting_prop_name") or "").strip().lower() == str(st_prop["name"]).strip().lower()
+                        if not already_granted:
+                            db.add_item(
+                                user_id=lead_uid,
+                                name=st_prop["name"],
+                                item_type=st_prop.get("item_type", "tool"),
+                                effect=st_prop.get("effect", ""),
+                                force=True
                             )
-                            spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
-                            spawned["active_prop"] = micro.get("active_prop", "")
-                            curr_npcs.append(spawned)
-                            curr_npc_names.add(sp_name.lower())
-            session["current_npcs"] = curr_npcs
-            db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
-        except Exception as e:
-            log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+                            session["opening_starting_prop_name"] = st_prop["name"]
+                            if session.get("id"):
+                                db.update_session(session["id"], extra={"opening_starting_prop_name": st_prop["name"]})
+                    except Exception as e:
+                        log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
+            return cur_d, cur_m, sug_loc, locked_nid
 
-    # Pre-stage living district/campus bystanders + crowd_state on Turn 0 for public non-crisis hooks
-    if session.get("id") and arch_key != "in_media_res":
-        try:
-            from mechanics.social.population_seeder import is_population_seeding_supported
-            from mechanics.world.presence_resolver import resolve_node_presence
-            open_nid = str(session.get("current_node_id") or locked_opening_node_id or "").strip()
-            if open_nid and is_population_seeding_supported(scen_key):
-                open_loc = str(session.get("current_location") or suggested_loc or "")
-                pres_open = resolve_node_presence(
-                    int(session["id"]),
-                    open_nid,
-                    open_loc,
-                    current_day=curr_day,
-                    current_minute=curr_min,
-                    scen_key=scen_key,
-                    session=session,
-                    turn_number=0,
-                    persist_db=True,
-                )
-                if isinstance(pres_open, dict):
-                    if isinstance(pres_open.get("crowd_state"), dict):
-                        session["crowd_state"] = dict(pres_open["crowd_state"])
-                    open_npcs = list(session.get("current_npcs") or [])
-                    seen_open = {game_engine._get_npc_name(n).strip().lower() for n in open_npcs if n}
-                    for pn in (pres_open.get("present_npcs") or []):
-                        if isinstance(pn, dict) and pn.get("name") and pn["name"].strip().lower() not in seen_open:
-                            open_npcs.append(dict(pn))
-                            seen_open.add(pn["name"].strip().lower())
-                    session["current_npcs"] = open_npcs
-                    db.update_session(session["id"], current_npcs_json=json.dumps(open_npcs))
-        except Exception as e:
-            log.warning("Opening bystander presence staging warning: %s", e)
-
+    curr_day, curr_min, suggested_loc, locked_opening_node_id = await adb(
+        _prepare_opening_scene_db_bundle, suggested_loc
+    )
+    hook_focal_point = hook_context.get("focal_point", "")
     initial_phys = hook_context.get("initial_physical_state") or {}
-    if initial_phys and session.get("id"):
-        try:
-            from mechanics.social.physical_state import upsert_actor_physical_state
-            for p_entry in party:
-                p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
-                if isinstance(p_char, dict) and p_char.get("name"):
-                    upsert_actor_physical_state(session["id"], p_char["name"], initial_phys)
-        except Exception as e:
-            log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
-
-    starting_prop = hook_context.get("starting_prop")
-    if starting_prop and party:
-        lead_uid = None
-        first_elem = party[0]
-        if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
-            lead_uid = first_elem[0].get("user_id")
-        elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
-            lead_uid = first_elem[1]
-        elif isinstance(first_elem, dict):
-            lead_uid = first_elem.get("user_id")
-        if lead_uid and isinstance(starting_prop, dict) and starting_prop.get("name"):
-            try:
-                already_granted = str(session.get("opening_starting_prop_name") or "").strip().lower() == str(starting_prop["name"]).strip().lower()
-                if not already_granted:
-                    db.add_item(
-                        user_id=lead_uid,
-                        name=starting_prop["name"],
-                        item_type=starting_prop.get("item_type", "tool"),
-                        effect=starting_prop.get("effect", ""),
-                        force=True
-                    )
-                    session["opening_starting_prop_name"] = starting_prop["name"]
-                    if session.get("id"):
-                        db.update_session(session["id"], extra={"opening_starting_prop_name": starting_prop["name"]})
-            except Exception as e:
-                log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
 
     visual_cues = hook_context.get("visual_cues", "")
     if visual_cues:
@@ -566,28 +578,32 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     res_deep = namegen.resolve_tokens_deep(result, scenario=scen_key)
 
     if isinstance(res_deep, dict) and session.get("id") and is_location_engine_enabled(scen_key):
+        def _post_llm_spatial_opening_bundle() -> None:
+            with db.UnitOfWork():
+                from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+                from mechanics.world.locations.pathfinding import format_node_hierarchy
+                ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+                if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                    db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
+                init_loc = res_deep.get("location") or suggested_loc or ""
+                init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
+                if not init_node_id and locked_opening_node_id:
+                    init_node_id = locked_opening_node_id
+                if init_node_id:
+                    canon_hier = format_node_hierarchy(session["id"], init_node_id)
+                    if canon_hier:
+                        res_deep["location"] = canon_hier
+                        session["current_location"] = canon_hier
+                    res_deep["current_node_id"] = init_node_id
+                    session["current_node_id"] = init_node_id
+                    db.update_session(
+                        session["id"],
+                        current_node_id=init_node_id,
+                        current_location=res_deep.get("location") or suggested_loc or "",
+                    )
+
         try:
-            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
-            from mechanics.world.locations.pathfinding import format_node_hierarchy
-            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
-            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
-                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
-            init_loc = res_deep.get("location") or suggested_loc or ""
-            init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
-            if not init_node_id and locked_opening_node_id:
-                init_node_id = locked_opening_node_id
-            if init_node_id:
-                canon_hier = format_node_hierarchy(session["id"], init_node_id)
-                if canon_hier:
-                    res_deep["location"] = canon_hier
-                    session["current_location"] = canon_hier
-                res_deep["current_node_id"] = init_node_id
-                session["current_node_id"] = init_node_id
-                db.update_session(
-                    session["id"],
-                    current_node_id=init_node_id,
-                    current_location=res_deep.get("location") or suggested_loc or "",
-                )
+            await adb(_post_llm_spatial_opening_bundle)
         except Exception as e:
             log.warning("Failed to seed/resolve initial current_node_id in generate_opening_scene: %s", e)
 
@@ -639,21 +655,24 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception as e:
             log.warning("dialogue partner extraction failed for opening scene: %s", e)
 
-        # D21: Persist initial deterministic cast_state on Turn 0
-        try:
-            from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
-            init_cast_st = get_cast_state(session)
-            save_cast_state(session, init_cast_st, persist_db=bool(session.get("id")))
-        except Exception as e:
-            log.warning("initial cast_state persistence failed for opening scene: %s", e)
+        def _post_llm_cast_and_phys_bundle() -> None:
+            with db.UnitOfWork():
+                try:
+                    from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
+                    init_cast_st = get_cast_state(session)
+                    save_cast_state(session, init_cast_st, persist_db=bool(session.get("id")))
+                except Exception as e:
+                    log.warning("initial cast_state persistence failed for opening scene: %s", e)
 
-        init_default_physical_state(
-            session["id"],
-            party,
-            scen_key,
-            opening_scene=res_deep,
-            initial_actor_override=initial_phys if initial_phys else None,
-        )
+                init_default_physical_state(
+                    session["id"],
+                    party,
+                    scen_key,
+                    opening_scene=res_deep,
+                    initial_actor_override=initial_phys if initial_phys else None,
+                )
+
+        await adb(_post_llm_cast_and_phys_bundle)
 
         if hook_focal_point and not res_deep.get("focal_point"):
             res_deep["focal_point"] = hook_focal_point
@@ -689,8 +708,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 })
 
         if formatted_goals:
-
-            db.update_session_campaign_goals(session["id"], formatted_goals)
+            await adb(db.update_session_campaign_goals, session["id"], formatted_goals)
 
 
 
@@ -734,113 +752,101 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 )
             except Exception as _sq_err:
                 log.warning("generate_story_quest for Chapter 1 failed: %s. Using contextual generator.", _sq_err)
-                sq_data = game_engine.create_contextual_story_quest_data(
-                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
-                )
+                sq_data = None
 
-            if res_deep.get("story_quest_title") and sq_data:
-                sq_data["title"] = str(res_deep["story_quest_title"]).strip()
-            if res_deep.get("story_quest_objective") and sq_data:
-                sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
-                _sub_objs_sq = sq_data.get("sub_objectives") or []
-                if _sub_objs_sq and isinstance(_sub_objs_sq[0], dict) and (
-                    _sub_objs_sq[0].get("is_main") or _sub_objs_sq[0].get("id") == 0
-                ):
-                    _sub_objs_sq[0]["text"] = sq_data["objective"]
+            def _persist_opening_story_quest_bundle(generated_sq: Optional[dict]) -> None:
+                import uuid
+                with db.UnitOfWork():
+                    eff_sq = generated_sq
+                    if eff_sq is None:
+                        eff_sq = game_engine.create_contextual_story_quest_data(
+                            session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                        )
 
-            sq_title = sq_data.get("title") or "Story Quest #1: The Discovery"
+                    if res_deep.get("story_quest_title") and eff_sq:
+                        eff_sq["title"] = str(res_deep["story_quest_title"]).strip()
+                    if res_deep.get("story_quest_objective") and eff_sq:
+                        eff_sq["objective"] = str(res_deep["story_quest_objective"]).strip()
+                        _sub_objs_sq = eff_sq.get("sub_objectives") or []
+                        if _sub_objs_sq and isinstance(_sub_objs_sq[0], dict) and (
+                            _sub_objs_sq[0].get("is_main") or _sub_objs_sq[0].get("id") == 0
+                        ):
+                            _sub_objs_sq[0]["text"] = eff_sq["objective"]
 
-            sq_archetype = sq_data.get("archetype") or "Story Quest"
+                    sq_title = eff_sq.get("title") or "Story Quest #1: The Discovery"
+                    sq_archetype = eff_sq.get("archetype") or "Story Quest"
+                    sq_objective = eff_sq.get("objective") or "Explore the area, uncover local mysteries, and establish your footing."
+                    formatted_sub_objs = eff_sq.get("sub_objectives") or []
+                    sub_waypoints = eff_sq.get("sub_waypoints") or {}
 
-            sq_objective = sq_data.get("objective") or "Explore the area, uncover local mysteries, and establish your footing."
+                    sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+                    db.upsert_quest(
+                        session_id=session["id"],
+                        quest_id=sq_id,
+                        quest_type=sq_archetype,
+                        title=sq_title,
+                        objective=sq_objective,
+                        progress="Quest #1",
+                        current_clues="",
+                        status="Active",
+                        reward_xp=250,
+                        reward_gold=60,
+                        is_story_quest=1,
+                        clues_required=1,
+                        deadline_day=None,
+                        deadline_minute=None,
+                        dossier_stage="compiled",
+                        sub_objectives=formatted_sub_objs,
+                    )
 
-            formatted_sub_objs = sq_data.get("sub_objectives") or []
+                    for so in formatted_sub_objs:
+                        so_id = so["id"]
+                        wps = sub_waypoints.get(so_id) or []
+                        if wps:
+                            db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
 
-            sub_waypoints = sq_data.get("sub_waypoints") or {}
-
-
-
-            import uuid
-
-            sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-
-            db.upsert_quest(
-
-                session_id=session["id"],
-
-                quest_id=sq_id,
-
-                quest_type=sq_archetype,
-
-                title=sq_title,
-
-                objective=sq_objective,
-
-                progress="Quest #1",
-
-                current_clues="",
-
-                status="Active",
-
-                reward_xp=250,
-
-                reward_gold=60,
-
-                is_story_quest=1,
-
-                clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
-
-                sub_objectives=formatted_sub_objs
-
-            )
-
-
-
-            # Persist waypoints for each sub-objective
-
-            for so in formatted_sub_objs:
-
-                so_id = so["id"]
-
-                wps = sub_waypoints.get(so_id) or []
-
-                if wps:
-
-                    db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+            await adb(_persist_opening_story_quest_bundle, sq_data)
 
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("generate_story_quest for Chapter 1 failed: %s. Applying emergency contextual generator.", e)
-            try:
-                sq_data = game_engine.create_contextual_story_quest_data(
-                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
-                )
-                formatted_sub_objs = sq_data.get("sub_objectives") or []
-                sub_waypoints = sq_data.get("sub_waypoints") or {}
+            log.warning("generate_story_quest for Chapter 1 failed: %s. Applying emergency contextual generator.", e)
+
+            def _persist_emergency_story_quest_bundle() -> None:
                 import uuid
-                sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-                db.upsert_quest(
-                    session_id=session["id"],
-                    quest_id=sq_id,
-                    quest_type=sq_data.get("archetype") or "Story Quest",
-                    title=sq_data.get("title") or "Story Quest #1: The Discovery",
-                    objective=sq_data.get("objective") or "Explore the area, uncover local mysteries, and establish your footing.",
-                    progress=f"0/{len(formatted_sub_objs)} Cleared" if formatted_sub_objs else "Quest #1",
-                    current_clues="",
-                    status="Active",
-                    reward_xp=250,
-                    reward_gold=60,
-                    is_story_quest=1,
-                    clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
-                    sub_objectives=formatted_sub_objs
-                )
-                for so in formatted_sub_objs:
-                    so_id = so["id"]
-                    wps = sub_waypoints.get(so_id) or []
-                    if wps:
-                        db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+                with db.UnitOfWork():
+                    em_sq = game_engine.create_contextual_story_quest_data(
+                        session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                    )
+                    formatted_sub_objs = em_sq.get("sub_objectives") or []
+                    sub_waypoints = em_sq.get("sub_waypoints") or {}
+                    sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+                    db.upsert_quest(
+                        session_id=session["id"],
+                        quest_id=sq_id,
+                        quest_type=em_sq.get("archetype") or "Story Quest",
+                        title=em_sq.get("title") or "Story Quest #1: The Discovery",
+                        objective=em_sq.get("objective") or "Explore the area, uncover local mysteries, and establish your footing.",
+                        progress=f"0/{len(formatted_sub_objs)} Cleared" if formatted_sub_objs else "Quest #1",
+                        current_clues="",
+                        status="Active",
+                        reward_xp=250,
+                        reward_gold=60,
+                        is_story_quest=1,
+                        clues_required=1,
+                        deadline_day=None,
+                        deadline_minute=None,
+                        dossier_stage="compiled",
+                        sub_objectives=formatted_sub_objs,
+                    )
+                    for so in formatted_sub_objs:
+                        so_id = so["id"]
+                        wps = sub_waypoints.get(so_id) or []
+                        if wps:
+                            db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+
+            try:
+                await adb(_persist_emergency_story_quest_bundle)
             except Exception as e2:
-                logging.getLogger(__name__).error("Failed to insert emergency contextual story quest: %s", e2)
+                log.error("Failed to insert emergency contextual story quest: %s", e2)
 
     try:
         await adb(
@@ -850,8 +856,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             str(session.get("narration_language") or session.get("language") or "en"),
         )
     except Exception as _spine_err:
-        import logging
-        logging.getLogger(__name__).warning("compile_campaign_spine_at_turn_zero failed (non-fatal): %s", _spine_err)
+        log.warning("compile_campaign_spine_at_turn_zero failed (non-fatal): %s", _spine_err)
 
     if isinstance(res_deep, dict):
 
@@ -886,17 +891,6 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             if code_choices:
                 res_deep["choices"] = code_choices
                 res_deep["next_choices"] = code_choices
-        else:
-            op_choices = res_deep.get("choices") or []
-            if not any("observe your surroundings" in str(c.get("label", "") if isinstance(c, dict) else c).lower() for c in op_choices):
-                op_choices.append({
-                    "label": "Observe your surroundings and inspect those present",
-                    "stat": "FREE",
-                    "requirement": 0,
-                    "mp_cost": 0
-                })
-                res_deep["choices"] = op_choices
-                res_deep["next_choices"] = op_choices
 
     return res_deep
 

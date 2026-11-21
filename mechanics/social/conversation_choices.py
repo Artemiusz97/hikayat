@@ -737,6 +737,7 @@ def generate_band1_quest_and_rumor_fallbacks(
     char: Optional[Dict[str, Any]] = None,
     actions: Optional[List[Any]] = None,
     active_quests: Optional[List[Any]] = None,
+    require_partner_relevance: bool = False,
     **kwargs: Any,
 ) -> List[Dict[str, Any]]:
     return _gen_b1_impl(
@@ -746,6 +747,7 @@ def generate_band1_quest_and_rumor_fallbacks(
         actions=actions,
         active_quests=active_quests,
         ledgers_getter=get_npc_conversation_ledgers,
+        require_partner_relevance=require_partner_relevance,
         **kwargs,
     )
 
@@ -1222,9 +1224,21 @@ def enforce_conversation_choice_bands(
 
     # Backfill verified Band 1 quest / discovered rumor / claimed MNR hooks (0-2 slots ONLY when genuinely applicable!)
     if len(band1) < 2:
-        for fb1 in generate_band1_quest_and_rumor_fallbacks(lead_profile, sess, char=lead_char, actions=actions):
+        seen_b1_active_qids = {str(b.get("quest_id") or "").strip() for b in band1 if b.get("quest_id")}
+        for fb1 in generate_band1_quest_and_rumor_fallbacks(
+            lead_profile,
+            sess,
+            char=lead_char,
+            actions=actions,
+            require_partner_relevance=True,
+        ):
             if not _is_verified_quest_choice(fb1):
                 continue
+            fb_qid = str(fb1.get("quest_id") or "").strip()
+            if fb1.get("_active_quest_inquiry") and fb_qid:
+                if fb_qid in seen_b1_active_qids:
+                    continue
+                seen_b1_active_qids.add(fb_qid)
             fb_k = fb1["label"].strip().lower()
             if fb_k not in seen_lbls:
                 seen_lbls.add(fb_k)
@@ -1232,13 +1246,19 @@ def enforce_conversation_choice_bands(
             if len(band1) >= 2:
                 break
 
-    band1.sort(
-        key=lambda x: (
-            0 if x.get("clue_pair_ids") else 1,
+    def _band1_priority_key(x: Dict[str, Any]) -> Tuple[int, int, int]:
+        qid_u = str(x.get("quest_id") or "").strip().upper()
+        is_climax = bool(x.get("is_climax_action") and not x.get("is_premature_climax"))
+        is_story = bool(x.get("is_story_quest") or qid_u.startswith("SQ-"))
+        is_q = bool(x.get("is_quest_action") or x.get("_python_verified_quest") or qid_u)
+        tier = 0 if is_climax else (1 if is_story else (2 if is_q else 3))
+        return (
+            tier,
             0 if x.get("_quest_dialogue_handoff") else 1,
-            0 if x.get("quest_id") else 1,
+            0 if x.get("clue_pair_ids") else 1,
         )
-    )
+
+    band1.sort(key=_band1_priority_key)
     from game_engine.choices_cleaner import infer_choice_stat_and_dc
     for b1 in band1:
         if b1.get("_quest_dialogue_handoff") or b1.get("contract_type") == "travel":

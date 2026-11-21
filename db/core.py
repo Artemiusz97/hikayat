@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Union, Dict, List, Tuple
+from typing import Any, Callable, Optional, Union, Dict, List, Tuple
 import db
 """
 SQLite persistence layer.
@@ -16,14 +16,22 @@ Tables:
 """
 import asyncio
 import json
+import logging
 import time
 from contextlib import contextmanager
 import re
 import sqlite3
 import contextvars
 
+_log = logging.getLogger(__name__)
+
 from config import DB_PATH
 import character_data as cd
+from .registry import (
+    get_purge_specs,
+    get_session_child_table_names,
+    get_snapshot_prune_specs,
+)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS characters (
@@ -683,8 +691,12 @@ CREATE TABLE IF NOT EXISTS session_digests (
 CREATE INDEX IF NOT EXISTS idx_lorebook_session ON lorebook(session_id);
 CREATE INDEX IF NOT EXISTS idx_characters_user_active ON characters(user_id, is_active);
 CREATE INDEX IF NOT EXISTS idx_session_members_user ON session_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_char_slot ON sessions(character_id, slot, status);
 CREATE INDEX IF NOT EXISTS idx_contacts_session ON contacts(session_id, npc_id);
 CREATE INDEX IF NOT EXISTS idx_contacts_char ON contacts(character_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_household_id ON contacts(household_id);
+CREATE INDEX IF NOT EXISTS idx_households_session_surname ON households(session_id, surname);
+CREATE INDEX IF NOT EXISTS idx_factions_session_hq_node ON factions(session_id, hq_node_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_char_user ON inventory(character_id, user_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_user_linked_quest ON inventory(user_id, linked_quest_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_pact_contract ON inventory(linked_contract_key) WHERE linked_contract_key != '';
@@ -1136,20 +1148,106 @@ _POOL: dict[str, queue.Queue] = {}
 _POOL_LOCK = threading.Lock()
 MAX_CONNECTIONS = 15
 
+_MAINTENANCE_LOCK = threading.Lock()
+_TURNS_SINCE_MAINTENANCE = 0
+DEFAULT_SNAPSHOT_KEEP_LAST = 10
+WAL_MAINTENANCE_TURN_INTERVAL = 25
+
+_VERIFIED_TABLE_GROUPS: set[tuple[str, str]] = set()
+_VERIFIED_TABLE_GROUPS_LOCK = threading.Lock()
+
 _uow_conn_var = contextvars.ContextVar("_uow_conn_var", default=None)
 _uow_db_path_var = contextvars.ContextVar("_uow_db_path_var", default=None)
+_uow_is_readonly_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uow_is_readonly_var", default=False)
+_uow_added_table_groups_var: contextvars.ContextVar[Optional[set[tuple[str, str]]]] = contextvars.ContextVar(
+    "_uow_added_table_groups_var", default=None
+)
+
+
+def _discard_verified_table_groups(groups: Optional[set[tuple[str, str]]]) -> None:
+    """Removes uncommitted lazy-DDL cache entries when a transaction rolls back."""
+    if not groups:
+        return
+    with _VERIFIED_TABLE_GROUPS_LOCK:
+        _VERIFIED_TABLE_GROUPS.difference_update(groups)
+
+
+def _read_schema_version(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute("PRAGMA schema_version").fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.Error:
+        return 0
+
+
+def ensure_table_group_once(
+    conn: sqlite3.Connection,
+    group_name: str,
+    check_and_create_fn: Callable[[sqlite3.Connection], None],
+) -> None:
+    """Runs lazy DDL guard at most once per active db_path (or directly on ad-hoc connections)."""
+    active_db_path = _uow_db_path_var.get()
+    if active_db_path:
+        key = (str(active_db_path), str(group_name))
+        with _VERIFIED_TABLE_GROUPS_LOCK:
+            if key in _VERIFIED_TABLE_GROUPS:
+                return
+        check_and_create_fn(conn)
+        newly_added = False
+        with _VERIFIED_TABLE_GROUPS_LOCK:
+            if key not in _VERIFIED_TABLE_GROUPS:
+                _VERIFIED_TABLE_GROUPS.add(key)
+                newly_added = True
+        if newly_added:
+            added = _uow_added_table_groups_var.get()
+            if added is not None:
+                added.add(key)
+        return
+    check_and_create_fn(conn)
+
+
+def _acquire_pooled_conn(db_path: str) -> tuple[queue.Queue, sqlite3.Connection]:
+    with _POOL_LOCK:
+        if db_path not in _POOL:
+            _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
+        pool = _POOL[db_path]
+    try:
+        conn = pool.get_nowait()
+    except queue.Empty:
+        conn = _create_new_connection(db_path)
+    return pool, conn
+
+
+def _release_pooled_conn(pool: queue.Queue, conn: sqlite3.Connection) -> None:
+    try:
+        pool.put_nowait(conn)
+    except queue.Full:
+        conn.close()
+
 
 def close_all_connections():
     """Drains all connection pools. Vital for test teardown on Windows."""
+    global _TURNS_SINCE_MAINTENANCE
     with _POOL_LOCK:
-        for path, q in _POOL.items():
+        for _path, q in _POOL.items():
+            optimized_path = False
             while not q.empty():
                 try:
                     conn = q.get_nowait()
+                    if not optimized_path and not conn.in_transaction:
+                        optimized_path = True
+                        try:
+                            conn.execute("PRAGMA optimize")
+                        except sqlite3.Error:
+                            pass
                     conn.close()
                 except queue.Empty:
                     break
         _POOL.clear()
+    with _MAINTENANCE_LOCK:
+        _TURNS_SINCE_MAINTENANCE = 0
+    with _VERIFIED_TABLE_GROUPS_LOCK:
+        _VERIFIED_TABLE_GROUPS.clear()
 
 def _create_new_connection(db_path: str):
     conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
@@ -1161,6 +1259,8 @@ def _create_new_connection(db_path: str):
     conn.execute("PRAGMA cache_size = -64000")
     conn.execute("PRAGMA temp_store = MEMORY")
     conn.execute("PRAGMA mmap_size = 268435456")
+    conn.execute("PRAGMA wal_autocheckpoint = 1000")
+    conn.execute("PRAGMA journal_size_limit = 67108864")
     return conn
 
 @contextmanager
@@ -1168,14 +1268,7 @@ def _get_independent_conn(db_path: str = None):
     """Acquires an independent pooled connection that commits immediately, bypassing active contextvars."""
     if db_path is None:
         db_path = __import__('db').DB_PATH
-    with _POOL_LOCK:
-        if db_path not in _POOL:
-            _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
-        pool = _POOL[db_path]
-    try:
-        conn = pool.get_nowait()
-    except queue.Empty:
-        conn = _create_new_connection(db_path)
+    pool, conn = _acquire_pooled_conn(db_path)
     try:
         yield conn
         conn.commit()
@@ -1183,52 +1276,119 @@ def _get_independent_conn(db_path: str = None):
         conn.rollback()
         raise
     finally:
-        try:
-            pool.put_nowait(conn)
-        except queue.Full:
-            conn.close()
+        _release_pooled_conn(pool, conn)
 
 @contextmanager
 def UnitOfWork(db_path: str = None):
-    """Context manager that begins a transaction and yields the connection."""
+    """Context manager that begins a write transaction (`BEGIN IMMEDIATE`) and yields the connection."""
     if db_path is None:
         db_path = __import__('db').DB_PATH
 
     # If we are already in a transaction on the same DB, just yield the existing connection
     existing_conn = _uow_conn_var.get()
     if existing_conn is not None and _uow_db_path_var.get() == db_path:
+        if _uow_is_readonly_var.get():
+            _log.warning(
+                "UnitOfWork nested inside active ReadUnitOfWork on %s; "
+                "reusing BEGIN DEFERRED connection without write-lock upgrade.",
+                db_path,
+            )
         yield existing_conn
         return
 
-    with _POOL_LOCK:
-        if db_path not in _POOL:
-            _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
-        pool = _POOL[db_path]
-
-    try:
-        conn = pool.get_nowait()
-    except queue.Empty:
-        conn = _create_new_connection(db_path)
+    pool, conn = _acquire_pooled_conn(db_path)
 
     # Begin the transaction explicitly
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
 
+    added_groups: set[tuple[str, str]] = set()
     token = _uow_conn_var.set(conn)
     path_token = _uow_db_path_var.set(db_path)
+    ro_token = _uow_is_readonly_var.set(False)
+    added_token = _uow_added_table_groups_var.set(added_groups)
+    committed = False
     try:
         yield conn
         conn.commit()
+        committed = True
     except BaseException:
         conn.rollback()
         raise
     finally:
+        if not committed:
+            _discard_verified_table_groups(added_groups)
+        _uow_added_table_groups_var.reset(added_token)
+        _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)
         _uow_conn_var.reset(token)
-        try:
-            pool.put_nowait(conn)
-        except queue.Full:
-            conn.close()
+        _release_pooled_conn(pool, conn)
+
+
+@contextmanager
+def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False):
+    """Context manager pinning a pooled connection for consistent WAL reads (`BEGIN DEFERRED`) without taking a write lock."""
+    if db_path is None:
+        db_path = __import__("db").DB_PATH
+
+    existing_conn = _uow_conn_var.get()
+    if not strict_readonly and existing_conn is not None and _uow_db_path_var.get() == db_path:
+        yield existing_conn
+        return
+
+    pool, conn = _acquire_pooled_conn(db_path)
+    before_changes = conn.total_changes
+    before_schema_version = _read_schema_version(conn)
+    added_groups: set[tuple[str, str]] = set()
+    query_only_enabled = False
+    token = _uow_conn_var.set(conn)
+    path_token = _uow_db_path_var.set(db_path)
+    ro_token = _uow_is_readonly_var.set(True)
+    added_token = _uow_added_table_groups_var.set(added_groups)
+    rolled_back = False
+    try:
+        if strict_readonly:
+            conn.execute("PRAGMA query_only = ON")
+            query_only_enabled = True
+        if not conn.in_transaction:
+            conn.execute("BEGIN DEFERRED")
+        yield conn
+        # SQLite total_changes counts DML only; PRAGMA schema_version catches lazy DDL (CREATE TABLE/INDEX).
+        has_mutations = (
+            conn.total_changes > before_changes
+            or _read_schema_version(conn) != before_schema_version
+        )
+        if not strict_readonly and has_mutations:
+            conn.commit()
+        elif conn.in_transaction:
+            conn.rollback()
+            if has_mutations:
+                rolled_back = True
+    except BaseException:
+        rolled_back = True
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+    finally:
+        if rolled_back:
+            _discard_verified_table_groups(added_groups)
+        _uow_added_table_groups_var.reset(added_token)
+        _uow_is_readonly_var.reset(ro_token)
+        _uow_db_path_var.reset(path_token)
+        _uow_conn_var.reset(token)
+        release_to_pool = True
+        if query_only_enabled:
+            try:
+                conn.execute("PRAGMA query_only = OFF")
+            except sqlite3.Error:
+                release_to_pool = False
+                try:
+                    conn.close()
+                except sqlite3.Error:
+                    pass
+        if release_to_pool:
+            _release_pooled_conn(pool, conn)
+
 
 @contextmanager
 def get_conn():
@@ -1238,31 +1398,29 @@ def get_conn():
     if existing_conn is not None and _uow_db_path_var.get() == db_path:
         yield existing_conn
     else:
-        with _POOL_LOCK:
-            if db_path not in _POOL:
-                _POOL[db_path] = queue.Queue(maxsize=MAX_CONNECTIONS)
-            pool = _POOL[db_path]
+        pool, conn = _acquire_pooled_conn(db_path)
 
-        try:
-            conn = pool.get_nowait()
-        except queue.Empty:
-            conn = _create_new_connection(db_path)
-
+        added_groups: set[tuple[str, str]] = set()
         token = _uow_conn_var.set(conn)
         path_token = _uow_db_path_var.set(db_path)
+        ro_token = _uow_is_readonly_var.set(False)
+        added_token = _uow_added_table_groups_var.set(added_groups)
+        committed = False
         try:
             yield conn
             conn.commit()
+            committed = True
         except BaseException:
             conn.rollback()
             raise
         finally:
+            if not committed:
+                _discard_verified_table_groups(added_groups)
+            _uow_added_table_groups_var.reset(added_token)
+            _uow_is_readonly_var.reset(ro_token)
             _uow_db_path_var.reset(path_token)
             _uow_conn_var.reset(token)
-            try:
-                pool.put_nowait(conn)
-            except queue.Full:
-                conn.close()
+            _release_pooled_conn(pool, conn)
 
 _MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
@@ -1292,6 +1450,90 @@ async def adb(fn, /, *args, **kwargs):
     except RuntimeError:
         pass
     return await asyncio.to_thread(fn, *args, **kwargs)
+
+
+def preload_prepare_action_bundle(
+    session_id: int,
+    user_id: int,
+    *,
+    session: Optional[Dict[str, Any]] = None,
+    char: Optional[Dict[str, Any]] = None,
+    include_world_events: bool = True,
+    include_inventory: bool = True,
+) -> Dict[str, Any]:
+    """Hydrates session, character, settings, world_events_snapshot, and inventory in one ReadUnitOfWork."""
+    db_mod = __import__("db")
+    with ReadUnitOfWork():
+        eff_sess = session
+        if eff_sess is None:
+            sess_row = db_mod.get_session(session_id)
+            eff_sess = dict(sess_row) if sess_row else None
+        eff_char = char
+        if eff_char is None:
+            char_row = db_mod.get_character(user_id)
+            eff_char = dict(char_row) if char_row else None
+        else:
+            eff_char = dict(eff_char)
+        settings = db_mod.get_settings(user_id) or {}
+        we_snap: Any = None
+        if include_world_events and isinstance(eff_sess, dict) and eff_sess.get("id") and "_world_events_snapshot" not in eff_sess:
+            try:
+                we_snap = db_mod.get_world_events_snapshot(int(eff_sess["id"]))
+            except Exception:
+                we_snap = {}
+        inv = (
+            db_mod.get_inventory(user_id, char=eff_char)
+            if isinstance(eff_char, dict) and eff_char.get("id") is not None
+            else []
+        ) if include_inventory else None
+    return {
+        "session": eff_sess,
+        "char": eff_char,
+        "settings": settings,
+        "inventory": inv,
+        "world_events_snapshot": we_snap,
+    }
+
+
+def preload_turn_party_bundle(
+    session_id: int,
+) -> Tuple[Optional[Dict[str, Any]], List[Tuple[Dict[str, Any], List[Dict[str, Any]]]]]:
+    """Hydrates session and batch-loaded party (character, inventory) pairs in one ReadUnitOfWork."""
+    db_mod = __import__("db")
+    with ReadUnitOfWork():
+        session = db_mod.get_session(session_id)
+        if not session:
+            return None, []
+        members = list(db_mod.get_session_members(session_id) or [])
+        if not members:
+            return session, []
+        party_chars = list(db_mod.get_session_characters(session_id) or [])
+        char_by_uid: Dict[int, Dict[str, Any]] = {}
+        for pc in party_chars:
+            if isinstance(pc, dict) and pc.get("user_id") is not None:
+                char_by_uid[int(pc["user_id"])] = dict(pc)
+        for uid in members:
+            if int(uid) not in char_by_uid:
+                mc = db_mod.get_character(uid)
+                if mc:
+                    char_by_uid[int(uid)] = dict(mc)
+        inv_by_cid = (
+            db_mod.get_inventories_for_characters(list(char_by_uid.values()))
+            if char_by_uid
+            else {}
+        )
+        party: List[Tuple[Dict[str, Any], List[Dict[str, Any]]]] = []
+        for uid in members:
+            c_dict = char_by_uid.get(int(uid))
+            if not c_dict:
+                continue
+            cid = c_dict.get("id")
+            if cid is not None and int(cid) in inv_by_cid:
+                inv = inv_by_cid[int(cid)]
+            else:
+                inv = db_mod.get_inventory(uid, char=c_dict)
+            party.append((c_dict, list(inv or [])))
+        return session, party
 
 def nullify_orphaned_implicated_contacts(conn: sqlite3.Connection, session_id: int | None = None) -> int:
     """Safely nulls out any dangling soft FK references from world_events.implicated_contact_id."""
@@ -1324,11 +1566,6 @@ def _delete_session_child_records_only(conn, session_id: int, preserve_members: 
     except sqlite3.OperationalError:
         pass
     nullify_orphaned_implicated_contacts(conn, session_id)
-    for opt_tbl in ("session_digest_vectors", "session_digests_fts", "phone_appointments"):
-        try:
-            conn.execute(f"DELETE FROM {opt_tbl} WHERE session_id=?", (session_id,))
-        except sqlite3.OperationalError:
-            pass
     try:
         conn.execute("""
             UPDATE user_patron_compendium SET is_currently_contracted = 0
@@ -1351,11 +1588,9 @@ def _delete_session_child_records_only(conn, session_id: int, preserve_members: 
         """, (session_id,))
     except sqlite3.OperationalError:
         pass
-    for tbl in SESSION_CHILD_TABLES:
-        if preserve_members and tbl == "session_members":
-            continue
+    for spec in get_purge_specs(preserve_members=preserve_members):
         try:
-            conn.execute(f"DELETE FROM {tbl} WHERE session_id=?", (session_id,))
+            conn.execute(f"DELETE FROM {spec.name} WHERE session_id=?", (session_id,))
         except sqlite3.OperationalError:
             pass
 
@@ -2275,8 +2510,6 @@ _NARRATION_PACING_V58_DDL = [
     "ALTER TABLE user_settings ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
     "ALTER TABLE user_settings ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
     "ALTER TABLE sessions ADD COLUMN narrative_pacing TEXT DEFAULT 'balanced'",
-    "UPDATE user_settings SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
-    "UPDATE sessions SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
 ]
 
 SCHEMA_MIGRATIONS.append(
@@ -2296,8 +2529,6 @@ SCHEMA_MIGRATIONS.append(
             "ALTER TABLE user_settings ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
             "ALTER TABLE sessions ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
             "ALTER TABLE sessions ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
-            "UPDATE user_settings SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
-            "UPDATE sessions SET narrative_pacing = 'concise', verbosity = 'normal' WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')",
         ],
     )
 )
@@ -2309,6 +2540,8 @@ SCHEMA_MIGRATIONS.append(
         [],
     )
 )
+
+CURRENT_SCHEMA_VERSION: int = SCHEMA_MIGRATIONS[-1][0]
 
 
 def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
@@ -2430,6 +2663,12 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         except Exception as e:
             print(f"[migration 57] Warning: anomalous locations integrity backfill encountered: {e}")
 
+    if 58 in newly_applied or 59 in newly_applied:
+        try:
+            _migrate_narrative_pacing_values_v58(conn)
+        except Exception as e:
+            print(f"[migration 58] Warning: narrative pacing backfill encountered: {e}")
+
     if 60 in newly_applied:
         try:
             _migrate_outlaw_factions_v60(conn)
@@ -2442,6 +2681,20 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         print(f"[schema] Warning: session FK cleanup encountered: {e}")
 
     return newly_applied
+
+
+def _migrate_narrative_pacing_values_v58(conn: sqlite3.Connection) -> None:
+    """Safely backfills narrative_pacing='concise' from legacy verbosity values when both columns exist."""
+    for tbl in ("user_settings", "sessions"):
+        cols = {
+            (r["name"] if isinstance(r, sqlite3.Row) else r[1])
+            for r in conn.execute(f"PRAGMA table_info({tbl})").fetchall()
+        }
+        if "verbosity" in cols and "narrative_pacing" in cols:
+            conn.execute(
+                f"UPDATE {tbl} SET narrative_pacing = 'concise', verbosity = 'normal' "
+                "WHERE LOWER(COALESCE(verbosity, '')) IN ('concise', 'direct')"
+            )
 
 
 def _ensure_living_world_indexes_v55(conn: sqlite3.Connection) -> None:
@@ -3476,64 +3729,187 @@ def _migrate_contacts_intimacy_profiles(conn: sqlite3.Connection) -> int:
     return migrated_count
 
 
-def init_db(force: bool = False):
-    with get_conn() as conn:
-        conn.execute("PRAGMA journal_mode = WAL")
-        conn.executescript(CREATE_SESSION_LOCKS_TABLE)
-        if not force:
-            try:
-                has_migrations = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
-                ).fetchone()
-                has_sessions = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'"
-                ).fetchone()
-                if has_migrations and has_sessions:
-                    run_schema_migrations(conn)
-                    return
-            except Exception:
-                pass
-            try:
-                conn.executescript(SCHEMA)
-                run_schema_migrations(conn)
-            except sqlite3.OperationalError as e:
-                if "no such column" not in str(e).lower():
-                    raise
-                buf: list[str] = []
-                post_stmts: list[str] = []
-                in_trigger = False
-                for line in SCHEMA.splitlines():
-                    stripped = line.strip()
-                    if not stripped or stripped.startswith("--"):
-                        continue
-                    buf.append(line)
-                    up = stripped.upper()
-                    if up.startswith("CREATE TRIGGER"):
-                        in_trigger = True
-                    stmt_done = (in_trigger and up == "END;") or (not in_trigger and stripped.endswith(";"))
-                    if stmt_done:
-                        in_trigger = False
-                        stmt_sql = "\n".join(buf).strip()
-                        buf = []
-                        if stmt_sql.upper().startswith(("CREATE TABLE", "CREATE VIRTUAL TABLE")):
-                            conn.execute(stmt_sql)
-                        else:
-                            post_stmts.append(stmt_sql)
-                run_schema_migrations(conn)
-                for p_sql in post_stmts:
-                    try:
-                        conn.execute(p_sql)
-                    except sqlite3.OperationalError as idx_err:
-                        if "no such column" not in str(idx_err).lower():
-                            raise
-            return
+def _get_user_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("PRAGMA user_version").fetchone()
+    return int(row[0]) if row else 0
+
+
+def _set_user_version(conn: sqlite3.Connection, version: int) -> None:
+    conn.execute(f"PRAGMA user_version = {int(version)}")
+
+
+def _all_migrations_recorded(conn: sqlite3.Connection) -> bool:
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()
+        return bool(row and int(row[0]) == len(SCHEMA_MIGRATIONS))
+    except sqlite3.OperationalError:
+        return False
+
+
+def _exec_schema_with_legacy_fallback(conn: sqlite3.Connection) -> None:
+    """Applies SCHEMA on pre-schema_migrations legacy DBs, deferring index creation until columns exist."""
+    try:
         conn.executescript(SCHEMA)
         run_schema_migrations(conn)
+    except sqlite3.OperationalError as e:
+        if "no such column" not in str(e).lower():
+            raise
+        buf: list[str] = []
+        post_stmts: list[str] = []
+        in_trigger = False
+        for line in SCHEMA.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("--"):
+                continue
+            buf.append(line)
+            up = stripped.upper()
+            if up.startswith("CREATE TRIGGER"):
+                in_trigger = True
+            stmt_done = (in_trigger and up == "END;") or (not in_trigger and stripped.endswith(";"))
+            if stmt_done:
+                in_trigger = False
+                stmt_sql = "\n".join(buf).strip()
+                buf = []
+                if stmt_sql.upper().startswith(("CREATE TABLE", "CREATE VIRTUAL TABLE")):
+                    conn.execute(stmt_sql)
+                else:
+                    post_stmts.append(stmt_sql)
+        run_schema_migrations(conn)
+        for p_sql in post_stmts:
+            try:
+                conn.execute(p_sql)
+            except sqlite3.OperationalError as idx_err:
+                if "no such column" not in str(idx_err).lower():
+                    raise
+
+
+def init_db(force: bool = False):
+    with get_conn() as conn:
+        # 1. Warm fast-path: user_version matches AND schema_migrations table is complete.
+        #    Dual-check preserves compatibility with tests that DELETE rows from schema_migrations.
+        if not force and _get_user_version(conn) == CURRENT_SCHEMA_VERSION and _all_migrations_recorded(conn):
+            if conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_locks'"
+            ).fetchone() is None:
+                conn.executescript(CREATE_SESSION_LOCKS_TABLE)
+            return
+
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.executescript(CREATE_SESSION_LOCKS_TABLE)
+
+        has_sessions = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sessions'"
+        ).fetchone() is not None
+
+        if not force:
+            # 2. Brand-new DB fast-path: canonical SCHEMA already includes all v60 tables/columns/indexes.
+            if not has_sessions:
+                conn.executescript(SCHEMA)
+                now = time.time()
+                conn.executemany(
+                    "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
+                    [(v, name, now) for v, name, _ in SCHEMA_MIGRATIONS],
+                )
+                _set_user_version(conn, CURRENT_SCHEMA_VERSION)
+                return
+
+            # 3. Existing legacy DB (user_version == 0, partial migrations, or deleted migration rows).
+            has_migrations = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
+            ).fetchone() is not None
+            if has_migrations:
+                try:
+                    run_schema_migrations(conn)
+                    if _all_migrations_recorded(conn):
+                        _set_user_version(conn, CURRENT_SCHEMA_VERSION)
+                    return
+                except Exception:
+                    pass
+            _exec_schema_with_legacy_fallback(conn)
+
+            if _all_migrations_recorded(conn):
+                _set_user_version(conn, CURRENT_SCHEMA_VERSION)
+            return
+
+        if force:
+            with _VERIFIED_TABLE_GROUPS_LOCK:
+                _VERIFIED_TABLE_GROUPS.clear()
+        _exec_schema_with_legacy_fallback(conn)
+        if _all_migrations_recorded(conn):
+            _set_user_version(conn, CURRENT_SCHEMA_VERSION)
+
+
+def prune_session_turn_snapshots(
+    conn: sqlite3.Connection,
+    session_id: int,
+    keep_last: int = DEFAULT_SNAPSHOT_KEEP_LAST,
+) -> dict[str, int]:
+    """Trims turn-indexed snapshot tables to the most recent `keep_last` turns for a session."""
+    deleted: dict[str, int] = {}
+    if not session_id:
+        return deleted
+    sid = int(session_id)
+    for spec in get_snapshot_prune_specs():
+        tcol = spec.snapshot_table_turn_col
+        if not tcol:
+            continue
+        effective_keep = max(2, int(keep_last if keep_last != DEFAULT_SNAPSHOT_KEEP_LAST else spec.snapshot_keep_last))
+        try:
+            cur = conn.execute(
+                f"""DELETE FROM {spec.name}
+                    WHERE session_id = ?
+                      AND {tcol} NOT IN (
+                          SELECT {tcol} FROM {spec.name}
+                          WHERE session_id = ?
+                          ORDER BY {tcol} DESC
+                          LIMIT ?
+                      )""",
+                (sid, sid, effective_keep),
+            )
+            deleted[spec.name] = int(cur.rowcount or 0)
+        except sqlite3.OperationalError:
+            deleted[spec.name] = 0
+    return deleted
+
+
+def maybe_run_wal_maintenance(
+    conn: sqlite3.Connection | None = None,
+    *,
+    force: bool = False,
+) -> bool:
+    """Periodically runs PRAGMA optimize and passive WAL checkpointing outside active write transactions."""
+    global _TURNS_SINCE_MAINTENANCE
+    with _MAINTENANCE_LOCK:
+        _TURNS_SINCE_MAINTENANCE += 1
+        if not force and _TURNS_SINCE_MAINTENANCE < WAL_MAINTENANCE_TURN_INTERVAL:
+            return False
+        _TURNS_SINCE_MAINTENANCE = 0
+
+    def _run_maint(c: sqlite3.Connection) -> None:
+        try:
+            c.execute("PRAGMA optimize")
+        except sqlite3.Error:
+            pass
+        try:
+            c.execute("PRAGMA wal_checkpoint(PASSIVE)")
+        except sqlite3.Error:
+            pass
+
+    if conn is not None:
+        _run_maint(conn)
+    else:
+        with get_conn() as c:
+            _run_maint(c)
+    return True
 
 
 def vacuum_database() -> None:
     """Reclaims unused disk space by rebuilding the database file."""
     with get_conn() as conn:
+        try:
+            conn.execute("PRAGMA optimize")
+        except sqlite3.Error:
+            pass
         conn.execute("VACUUM")
 
 def _to_str(val, default: str = "") -> str:
@@ -3667,7 +4043,7 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
             if isinstance(npc.get("micro_blocking"), dict):
                 clean_entry["micro_blocking"] = dict(npc["micro_blocking"])
             for k in (
-                "composure_state", "stage_role", "attention_ring", "gender", "race",
+                "composure_state", "stage_role", "attention_ring", "gender", "race", "age_group",
                 "club", "grade", "clique", "faction", "activity", "public_role",
                 "attribute", "combat_archetype", "ability_medium", "anomalous_npc_tag",
                 "npc_type", "social_role_type", "sapience", "temperament",
@@ -3679,12 +4055,20 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
                 if npc.get(k):
                     clean_entry[k] = str(npc[k]).strip()[:80]
             for bool_k in (
-                "is_anomalous_entity", "is_disguised", "uncanny_presence",
+                "is_anomalous_entity", "is_anomalous", "anomalous", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
                 "activity_is_telltale", "telltale_revealed",
             ):
                 if bool_k in npc and npc.get(bool_k) is not None:
                     clean_entry[bool_k] = bool(npc.get(bool_k))
+            bi = npc.get("basic_info")
+            if isinstance(bi, dict):
+                if not clean_entry.get("anomalous_npc_tag") and bi.get("anomalous_npc_tag"):
+                    clean_entry["anomalous_npc_tag"] = str(bi["anomalous_npc_tag"]).strip()[:80]
+                if not clean_entry.get("is_anomalous_entity") and (
+                    bi.get("is_anomalous_entity") or bi.get("is_anomalous") or bi.get("anomalous")
+                ):
+                    clean_entry["is_anomalous_entity"] = True
             if npc.get("visible_tell_text"):
                 clean_entry["visible_tell_text"] = str(npc["visible_tell_text"]).strip()[:200]
             if npc.get("focus_dc_mod") is not None:
@@ -3730,14 +4114,14 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
             for field in (
                 "level", "hp", "max_hp", "mp", "max_mp", "temp_hp", "mood", "micro_blocking",
                 "composure_state", "composure_ttl", "stage_role", "attention_ring",
-                "gender", "race", "club", "grade", "clique", "faction", "activity",
+                "gender", "race", "age_group", "club", "grade", "clique", "faction", "activity",
                 "public_role", "description", "appearance", "is_summon", "is_autonomous_construct", "in_party",
                 "owner_user_id", "summoner_key", "summoner_name", "atk", "taunt_weight",
                 "queued_windup", "queued_construct_action",
                 "attribute", "combat_archetype", "ability_medium", "anomalous_npc_tag",
                 "npc_type", "social_role_type", "sapience", "temperament",
                 "quest_id", "sub_obj_id", "incursion_id", "disposition",
-                "is_anomalous_entity", "is_disguised", "uncanny_presence",
+                "is_anomalous_entity", "is_anomalous", "anomalous", "is_disguised", "uncanny_presence",
                 "non_hostile_anomaly", "talkable", "pattern_observable", "dossier_revealed",
                 "activity_key", "activity_id", "activity_tag", "activity_mode",
                 "secondary_tag", "npc_id", "person_key",
@@ -3767,19 +4151,7 @@ def _sanitize_npcs_list(session_id: int, npcs: list) -> list:
             deduped.append(entry)
     return deduped
 
-SESSION_CHILD_TABLES = (
-    "session_locations", "world_nodes", "world_edges", "lorebook", "school_directory", "contacts", "factions",
-    "quests", "quest_waypoints", "session_clues", "phone_messages", "phone_daily_interactions",
-    "phone_gossip_feed", "commitments_ledger", "session_digests",
-    "session_chronicles", "npc_memories", "session_members", "households", "intimate_events",
-    "social_persons", "social_ties", "actor_physical_states", "actor_garments",
-    "actor_physical_turn_snapshots", "world_events",
-    "campaign_spines", "quest_dossiers", "session_anomaly_records", "player_properties",
-    "npc_social_composure", "character_social_daily", "social_topic_states",
-    "contact_dossier_discoveries", "social_turn_snapshots",
-    "session_entity_contracts", "session_contract_grudges", "session_contract_turn_snapshots",
-    "world_roster", "epistemic_facts", "epistemic_knowledge"
-)
+SESSION_CHILD_TABLES = get_session_child_table_names()
 
 STAT_COLUMN = {"STR": "str_", "PER": "per_", "END": "end_", "CHA": "cha",
                "INT": "int_", "AGI": "agi", "LUK": "luk"}
@@ -3844,6 +4216,10 @@ def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir
     backup_path = os.path.join(custom_dir, backup_filename)
 
     with get_conn() as src:
+        try:
+            src.execute("PRAGMA optimize")
+        except sqlite3.Error:
+            pass
         dest = sqlite3.connect(backup_path)
         try:
             src.backup(dest)

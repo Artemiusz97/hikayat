@@ -1074,7 +1074,8 @@ async def generate_chapter_plan_with_resilience(
         except Exception as exc:
             last_errors = [str(exc)]
             log.info("ChapterPlan attempt %d failed for %s: %s", attempt + 1, quest_id, exc)
-            if isinstance(exc, asyncio.TimeoutError):
+            cause = getattr(exc, "__cause__", None)
+            if isinstance(exc, (TimeoutError, asyncio.TimeoutError)) or isinstance(cause, (TimeoutError, asyncio.TimeoutError)) or "timed out" in str(exc).lower():
                 break
 
     return None
@@ -1428,7 +1429,7 @@ async def compile_or_apply_eager_quest_plan(
     session_id: int,
     quest_id: str,
     *,
-    timeout_seconds: float = 10.0,
+    timeout_seconds: float = 25.0,
     dossier: Optional[Dict[str, Any]] = None,
     defer_apply: bool = False,
 ) -> Optional[Dict[str, Any]]:

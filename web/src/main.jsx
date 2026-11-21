@@ -1,8 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { MotionConfig } from 'motion/react'
 import './i18n.js'
 import App from './App.jsx'
 import { ThemeProvider } from './theme/ThemeProvider.jsx'
+import { UiPreferencesProvider } from './theme/UiPreferencesProvider.jsx'
 import './index.css'
 
 // Dynamically sync visible viewport height (excluding Edge/Chrome mobile bottom address bar and toolbars)
@@ -59,7 +61,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ErrorBoundary>
       <ThemeProvider>
-        <App />
+        <UiPreferencesProvider>
+          <MotionConfig reducedMotion="user">
+            <App />
+          </MotionConfig>
+        </UiPreferencesProvider>
       </ThemeProvider>
     </ErrorBoundary>
   </React.StrictMode>,

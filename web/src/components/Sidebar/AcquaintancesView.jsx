@@ -12,6 +12,7 @@ import {
 import { getRelationshipTier } from './CodexPanel';
 import KnownRoutineCard from './KnownRoutineCard';
 import KnownWardrobeCard from './KnownWardrobeCard';
+import { resolveNpcDemographics } from '../../utils/npcDemographics';
 
 const formatItemText = (item) => {
   if (!item) return '';
@@ -19,7 +20,7 @@ const formatItemText = (item) => {
   return item.trait || item.name || item.label || '';
 };
 
-const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = '', t }) => {
+const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = '', onMessageContact = null, t }) => {
   const [expandedKey, setExpandedKey] = useState(null);
 
   if (loading && acquaintances.length === 0) {
@@ -53,7 +54,7 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
   }
 
   return (
-    <div className="space-y-3 flex-1 flex flex-col">
+    <div className="divide-y divide-fantasy-border/30 flex-1 flex flex-col">
       {acquaintances.map((acq) => {
         const cardKey = acq.npc_key || acq.npc_id || acq.id || acq.name;
         const isExpanded = expandedKey === cardKey;
@@ -69,11 +70,12 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
         const desc = basic.description || acq.appearance?.summary || acq.description || '';
         const isDmLocked = acq.can_dm === false;
         const maskedSlot = t('social.masked_slot', '???');
+        const demographics = resolveNpcDemographics(acq, t);
 
         return (
           <div
             key={cardKey}
-            className="bg-black/50 border border-fantasy-border rounded-lg p-3 space-y-2.5 transition-all hover:border-fantasy-accent/30"
+            className="py-3 space-y-2.5 transition-colors"
           >
             <div
               role="button"
@@ -118,6 +120,27 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                         </span>
                       )}
                     </div>
+
+                    {demographics?.hasAny && (
+                      <div className="flex flex-wrap items-center gap-1 text-[9.5px] leading-tight">
+                        {demographics.ageCategory && (
+                          <span className={`px-1.5 py-0.5 rounded border font-medium ${demographics.ageCategory.pillClass}`}>
+                            {demographics.ageCategory.label}
+                          </span>
+                        )}
+                        {demographics.genderInfo && (
+                          <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border ${demographics.genderInfo.pillClass}`}>
+                            {demographics.genderInfo.symbol && (
+                              <span aria-hidden="true">{demographics.genderInfo.symbol}</span>
+                            )}
+                            <span>{demographics.genderInfo.label}</span>
+                          </span>
+                        )}
+                        {demographics.raceLabel && (
+                          <span className="hk-chip text-[9.5px]">{demographics.raceLabel}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -125,7 +148,7 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                   <span className={`text-[11px] font-bold ${tier.color}`}>
                     {tier.label}
                   </span>
-                  <span className="text-[10px] font-mono text-gray-400">
+                  <span className="text-[10px] font-mono tabular-nums text-gray-400">
                     {score >= 0 ? `+${score}` : score}
                   </span>
                 </div>
@@ -152,6 +175,18 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
                     <Lock size={10} />
                     <span>{t('contacts.dm_locked_badge', 'DM Locked')}</span>
                   </span>
+                ) : onMessageContact ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMessageContact(acq);
+                    }}
+                    className="inline-flex items-center gap-1 py-0.5 px-2 rounded text-[10px] font-semibold bg-cyan-950/50 hover:bg-cyan-900/70 border border-cyan-700/50 hover:border-cyan-500/70 text-cyan-200 transition-colors cursor-pointer"
+                  >
+                    <MessageCircle size={10} />
+                    <span>{t('contacts.message_btn', 'Message')}</span>
+                  </button>
                 ) : (
                   <span className="inline-flex items-center gap-1 py-0.5 px-2 rounded text-[10px] font-semibold bg-cyan-950/50 border border-cyan-700/50 text-cyan-200">
                     <MessageCircle size={10} />

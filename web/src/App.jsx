@@ -1,15 +1,18 @@
+import { AnimatePresence, motion } from 'motion/react';
 import { useAuth } from './hooks/useAuth';
 import { useGameSession } from './hooks/useGameSession';
 import AuthView from './views/AuthView';
 import DashboardView from './views/DashboardView';
 import GameView from './views/GameView';
+import ScenarioBackdrop from './components/Common/ScenarioBackdrop';
+import { EASE_OUT } from './components/Common/MotionPrimitives';
 import { useScenarioTheme } from './theme/ThemeProvider';
 
 const Splash = ({ label }) => (
-  <div className="flex h-full items-center justify-center">
-    <div className="flex flex-col items-center gap-4 hk-enter">
-      <div className="h-10 w-10 rounded-full border-2 border-fantasy-accent/25 border-t-fantasy-accent animate-spin" />
-      <span className="hk-display text-sm text-gray-400">{label}</span>
+  <div className="flex h-full items-center justify-center p-4">
+    <div className="hk-acrylic-pill px-6 py-4 flex items-center gap-3.5 hk-enter">
+      <div className="h-6 w-6 rounded-full border-2 border-fantasy-accent/30 border-t-fantasy-accent animate-spin shrink-0" />
+      <span className="hk-display text-sm text-gray-100">{label}</span>
     </div>
   </div>
 );
@@ -23,7 +26,7 @@ function App() {
 
   const {
     session, setSession, pausedOnDashboard, loading: sessionLoading, processingTurn, pendingAction, isStreaming, isThinking, cancellingTurn, streamingNarrative, streamingState,
-    waitingForParty, partyStatus, lastSyncTimestamp,
+    waitingForParty, partyStatus, lastSyncTimestamp, wsStatus,
     partyChatMessages, onlineUserIds, sendPartyChat,
     startSession, joinSession, submitAction, cancelTurn,
     exitToDashboard, resumeSession, resumeSessionSlot, endSession, endSessionById, retryGeneration,
@@ -35,21 +38,22 @@ function App() {
   // Auto theme follows whichever scenario is in focus (active or paused session).
   useScenarioTheme(session);
 
+  const inGame = Boolean(user && !authLoading && session && !pausedOnDashboard && !sessionLoading);
+
+  let viewKey = 'game';
+  let view = null;
   if (authLoading) {
-    return <Splash label="Loading..." />;
-  }
-
-  if (!user) {
-    return <AuthView loginGuest={loginGuest} loginDiscord={loginDiscord} />;
-  }
-
-  // Cold-start initial loading: Only show full-screen loader when there is no session and user is not on dashboard
-  if (sessionLoading && !session && !pausedOnDashboard) {
-    return <Splash label="Summoning Reality..." />;
-  }
-
-  if (!session || pausedOnDashboard) {
-    return (
+    viewKey = 'splash';
+    view = <Splash label="Loading..." />;
+  } else if (!user) {
+    viewKey = 'auth';
+    view = <AuthView loginGuest={loginGuest} loginDiscord={loginDiscord} />;
+  } else if (sessionLoading && !session && !pausedOnDashboard) {
+    viewKey = 'splash';
+    view = <Splash label="Summoning Reality..." />;
+  } else if (!session || pausedOnDashboard) {
+    viewKey = 'dashboard';
+    view = (
       <DashboardView
         user={user}
         character={character}
@@ -75,45 +79,64 @@ function App() {
         }}
       />
     );
-  }
-
-  if (sessionLoading) {
-    return <Splash label="Summoning Reality..." />;
+  } else if (sessionLoading) {
+    viewKey = 'splash';
+    view = <Splash label="Summoning Reality..." />;
+  } else {
+    viewKey = 'game';
+    view = (
+      <GameView
+        user={user}
+        character={character}
+        refreshCharacter={refreshCharacter}
+        allocateStatPoint={allocateStatPoint}
+        session={session}
+        setSession={setSession}
+        refreshSession={refreshSession}
+        lastSyncTimestamp={lastSyncTimestamp}
+        wsStatus={wsStatus}
+        processingTurn={processingTurn}
+        pendingAction={pendingAction}
+        isStreaming={isStreaming}
+        isThinking={isThinking}
+        cancellingTurn={cancellingTurn}
+        streamingNarrative={streamingNarrative}
+        streamingState={streamingState}
+        waitingForParty={waitingForParty}
+        partyStatus={partyStatus}
+        partyChatMessages={partyChatMessages}
+        onlineUserIds={onlineUserIds}
+        sendPartyChat={sendPartyChat}
+        submitAction={submitAction}
+        cancelTurn={cancelTurn}
+        exitToDashboard={exitToDashboard}
+        endSession={endSession}
+        retryGeneration={retryGeneration}
+        rerollImage={rerollImage}
+        rerollingImage={rerollingImage}
+        actionError={actionError}
+        clearActionError={clearActionError}
+        leaveSession={logout}
+      />
+    );
   }
 
   return (
-    <GameView
-      user={user}
-      character={character}
-      refreshCharacter={refreshCharacter}
-      allocateStatPoint={allocateStatPoint}
-      session={session}
-      setSession={setSession}
-      refreshSession={refreshSession}
-      lastSyncTimestamp={lastSyncTimestamp}
-      processingTurn={processingTurn}
-      pendingAction={pendingAction}
-      isStreaming={isStreaming}
-      isThinking={isThinking}
-      cancellingTurn={cancellingTurn}
-      streamingNarrative={streamingNarrative}
-      streamingState={streamingState}
-      waitingForParty={waitingForParty}
-      partyStatus={partyStatus}
-      partyChatMessages={partyChatMessages}
-      onlineUserIds={onlineUserIds}
-      sendPartyChat={sendPartyChat}
-      submitAction={submitAction}
-      cancelTurn={cancelTurn}
-      exitToDashboard={exitToDashboard}
-      endSession={endSession}
-      retryGeneration={retryGeneration}
-      rerollImage={rerollImage}
-      rerollingImage={rerollingImage}
-      actionError={actionError}
-      clearActionError={clearActionError}
-      leaveSession={logout}
-    />
+    <div className="relative h-full w-full overflow-hidden">
+      <ScenarioBackdrop session={inGame ? session : null} isMenu={!inGame} />
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={viewKey}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.22, ease: EASE_OUT }}
+          className="relative h-full w-full min-w-0"
+        >
+          {view}
+        </motion.div>
+      </AnimatePresence>
+    </div>
   );
 }
 

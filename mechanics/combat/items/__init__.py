@@ -79,6 +79,8 @@ from mechanics.combat.items.consumables import (
     classify_and_enrich_ad_hoc_item, create_digital_media_item,
     is_digital_item, parse_digital_item_metadata, is_giftable_item,
     is_key_item,
+    classify_consumable_usage_mode,
+    is_hostile_or_covert_consumable,
     evaluate_gift_reaction, POTION_SCALING, FOOD_SCALING, DRINK_SCALING,
     POTION_PURPOSE_TAGS, POTION_EFFECT_TAGS, FOOD_TASTE_TAGS, FOOD_EFFECT_TAGS,
     DRINK_TASTE_TAGS, DRINK_EFFECT_TAGS,

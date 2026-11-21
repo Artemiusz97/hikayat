@@ -20,6 +20,8 @@ from .metadata import (
     is_key_item,
     is_giftable_item,
     parse_item_effect,
+    classify_consumable_usage_mode,
+    is_hostile_or_covert_consumable,
 )
 from .generators import (
     generate_potion_name,
@@ -56,6 +58,8 @@ __all__ = [
     "is_key_item",
     "is_giftable_item",
     "parse_item_effect",
+    "classify_consumable_usage_mode",
+    "is_hostile_or_covert_consumable",
     "generate_potion_name",
     "generate_food_name",
     "generate_drink_name",

@@ -65,6 +65,10 @@ scratch/
 # Generated Media / Scene Artwork
 data/generated_images/
 
+# User-supplied Custom Fonts (keep README only)
+custom_fonts/*
+!custom_fonts/README.txt
+
 # Dependencies & Executables
 node_modules/
 frontend/node_modules/

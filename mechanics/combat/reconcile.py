@@ -33,6 +33,116 @@ from .types import CombatantState, StatusEffectInstance, get_combatant_stat
 
 logger = logging.getLogger(__name__)
 
+def award_post_combat_auto_loot(
+    session: Dict[str, Any],
+    party: Optional[List[Any]],
+    dead_enemies: List[Any],
+    llm_outcome: Dict[str, Any],
+    *,
+    confiscated: bool = False,
+    killed_non_hostiles_count: int = 0,
+) -> List[str]:
+    """
+    Immediately rolls and awards level-scaled post-combat spoils per living party member
+    upon victory (unless confiscated or all defeated targets were non-hostile).
+    Overflow when a player's backpack is full is handled by reducers.py into dropped_items.
+    """
+    if confiscated or not dead_enemies or killed_non_hostiles_count >= len(dead_enemies):
+        return []
+    if not isinstance(llm_outcome, dict):
+        return []
+
+    scen_key = str((session or {}).get("scenario") or "fantasy").strip() or "fantasy"
+    from mechanics.combat.items.consumables.generators import generate_random_consumable
+    from mechanics.combat.items import generate_random_equipment
+
+    c_outcomes = llm_outcome.setdefault("character_outcomes", [])
+    auth_loot = llm_outcome.setdefault("_authorized_loot", [])
+    auth_meta = llm_outcome.setdefault("_authorized_loot_meta", {})
+
+    # Estimate highest tier from defeated enemies
+    max_tier = 3
+    for de in dead_enemies:
+        if isinstance(de, dict):
+            t_val = de.get("tier") or de.get("tier_rank")
+            if isinstance(t_val, int):
+                max_tier = min(max_tier, max(1, min(3, t_val)))
+
+    loot_display_names: List[str] = []
+    living_chars: List[Dict[str, Any]] = []
+    for p_entry in (party or []):
+        c_dict = p_entry[0] if isinstance(p_entry, (tuple, list)) and p_entry else (p_entry if isinstance(p_entry, dict) else None)
+        if not isinstance(c_dict, dict) or not c_dict.get("name"):
+            continue
+        p_nm = str(c_dict["name"]).strip()
+        cur_hp = int(c_dict.get("hp", 10) if c_dict.get("hp") is not None else 10)
+        matching_co = next(
+            (co for co in c_outcomes if isinstance(co, dict) and str(co.get("name") or "").strip().lower() == p_nm.lower()),
+            None,
+        )
+        proj_hp = cur_hp + (int(matching_co.get("hp_change", 0) or 0) if matching_co else 0)
+        if proj_hp > 0:
+            living_chars.append(c_dict)
+
+    for c_dict in living_chars:
+        p_nm = str(c_dict["name"]).strip()
+        p_lvl = max(1, int(c_dict.get("level", 1) or 1))
+        p_luk = int(c_dict.get("luk", c_dict.get("luk_", 5)) or 5)
+
+        drops: List[Dict[str, Any]] = []
+        try:
+            cons = generate_random_consumable(scenario=scen_key, party_level=p_lvl)
+            if isinstance(cons, dict) and cons.get("name"):
+                drops.append(cons)
+        except Exception:
+            pass
+
+        equip_chance = 0.25 + max(0, p_luk - 5) * 0.02 + (0.15 if len(dead_enemies) > 1 or max_tier < 3 else 0.0)
+        if random.random() < min(0.75, equip_chance):
+            try:
+                eq_slot = random.choice(("Weapon", "Armor", "Accessory 1", "Gloves", "Shoes"))
+                eq_tier = max_tier if random.random() < 0.5 else (1 if p_lvl >= 10 else (2 if p_lvl >= 5 else 3))
+                eq = generate_random_equipment(scenario=scen_key, slot=eq_slot, tier=eq_tier)
+                if isinstance(eq, dict) and eq.get("name"):
+                    drops.append(eq)
+            except Exception:
+                pass
+
+        if not drops:
+            continue
+
+        co_entry = next(
+            (co for co in c_outcomes if isinstance(co, dict) and str(co.get("name") or "").strip().lower() == p_nm.lower()),
+            None,
+        )
+        if co_entry is None:
+            co_entry = {"name": p_nm, "hp_change": 0, "mp_change": 0, "gold_change": 0, "xp_change": 0, "items_gained": []}
+            c_outcomes.append(co_entry)
+        gained_list = co_entry.setdefault("items_gained", [])
+
+        for drop in drops:
+            d_name = str(drop["name"]).strip()
+            if not d_name:
+                continue
+            gained_list.append(d_name)
+            if d_name not in auth_loot:
+                auth_loot.append(d_name)
+            auth_meta[d_name.lower()] = {
+                "name": d_name,
+                "item_type": str(drop.get("item_type") or "Potion"),
+                "effect": str(drop.get("effect") or drop.get("description") or ""),
+                "slot_cost": int(drop["slot_cost"]) if drop.get("slot_cost") is not None else 1,
+            }
+            loot_display_names.append(d_name)
+
+    if loot_display_names:
+        cur_notice = str(llm_outcome.get("_combat_resolved_notice") or "").strip()
+        spoils_line = f"🎒 **Spoils Recovered:** {', '.join(loot_display_names)}"
+        if spoils_line not in cur_notice:
+            llm_outcome["_combat_resolved_notice"] = f"{cur_notice}\n{spoils_line}".strip()
+    return loot_display_names
+
+
 def _enemy_has_unsealed_tether(enemy: dict) -> bool:
     """True when an anomaly is still anchored by an unsealed Vessel Tether (no Vault capture until sealed)."""
     if not isinstance(enemy, dict) or enemy.get("tether_sealed") or enemy.get("taboo_exploited"):
@@ -563,45 +673,16 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
         loc = session.get("current_location") or "area"
         llm_choices = llm_outcome.get("next_choices") or llm_outcome.get("choices") or []
 
-        # 1. Dynamically identify or construct the dedicated Free Loot Choice at the top (Slot 1)
-        dynamic_loot_label = None
-        if isinstance(llm_choices, list):
-            for c in llm_choices:
-                if isinstance(c, dict):
-                    lbl = str(c.get("label", "")).strip()
-                    lbl_lower = lbl.lower()
-                    if any(kw in lbl_lower for kw in ("loot", "search the fallen", "scavenge the fallen", "search the bodies", "search and loot", "inspect the fallen", "scavenge the remains", "gather spoils")):
-                        dynamic_loot_label = lbl
-                        break
-
-        if not dynamic_loot_label:
-            if dead_enemies and len(dead_enemies) == 1:
-                e_name = dead_enemies[0].get("name") if isinstance(dead_enemies[0], dict) else str(dead_enemies[0])
-                dynamic_loot_label = f"Search and loot the fallen {e_name}"
-            else:
-                dynamic_loot_label = "Search and loot the fallen enemies"
-
-        loot_choice = None
-        if dead_enemies:
-            loot_choice = {
-                "label": dynamic_loot_label[:100],
-                "stat": "FREE",
-                "requirement": 0,
-                "mp_cost": 0
-            }
-
-        # 2. Filter LLM's natural scene/conversation/event choices (discarding leftover weapon attack actions against dead foes)
+        # 1. Filter LLM's natural scene/conversation/event choices (discarding leftover combat attacks & obsolete post-combat loot prompts)
         contextual_choices = []
         if isinstance(llm_choices, list):
             for c in llm_choices:
                 if isinstance(c, dict):
                     lbl = str(c.get("label", "")).strip()
                     lbl_lower = lbl.lower()
-                    # Skip leftover combat attacks targeting dead hostiles
                     if any(kw in lbl_lower for kw in ("attack", "strike with", "slash with", "thrust into", "fire 9mm", "shoot with", "channel spell against", "roundhouse kick")):
                         continue
-                    # Skip duplicate loot options generated by LLM
-                    if any(kw in lbl_lower for kw in ("loot", "search the body", "search the bodies", "search the fallen", "inspect the corpse", "strip the gear")):
+                    if any(kw in lbl_lower for kw in ("loot", "search the body", "search the bodies", "search the fallen", "inspect the corpse", "strip the gear", "gather spoils")):
                         continue
                     contextual_choices.append({
                         "label": lbl[:120],
@@ -610,7 +691,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                         "mp_cost": max(0, int(c.get("mp_cost", 0)))
                     })
 
-        # 3. If LLM returned fewer than 3 valid contextual choices, supplement with procedural scene choices
+        # 2. If LLM returned fewer than 3 valid contextual choices, supplement with procedural scene choices
         if len(contextual_choices) < 3:
             from mechanics.narrative.choice_generator import generate_procedural_scene_choices
             scen_key = session.get("scenario", "fantasy")
@@ -622,10 +703,7 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
                 if not any(s_lbl.lower() in cc["label"].lower() for cc in contextual_choices):
                     contextual_choices.append(s)
 
-        # 4. Final choices: Slot 1 is ALWAYS the Loot Option (if applicable), followed by contextual choices
-        if confiscate_anomalous_loot or suppress_non_hostile_loot:
-            loot_choice = None
-        final_post_combat_choices = ([loot_choice] if loot_choice else []) + contextual_choices[:3]
+        final_post_combat_choices = contextual_choices[:4]
 
         llm_outcome["next_choices"] = final_post_combat_choices
         llm_outcome["choices"] = final_post_combat_choices
@@ -702,6 +780,16 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
         if total_xp_gain > 0:
             _auth_xp_map = llm_outcome.setdefault("_auth_combat_xp", {})
             _auth_xp_map[p_name.lower()] = int(_auth_xp_map.get(p_name.lower(), 0) or 0) + int(total_xp_gain)
+
+    if dead_enemies and not enemies:
+        award_post_combat_auto_loot(
+            session,
+            party,
+            dead_enemies,
+            llm_outcome,
+            confiscated=confiscate_anomalous_loot,
+            killed_non_hostiles_count=len(killed_non_hostiles),
+        )
 
     finalize_post_combat_state(
         session=session,

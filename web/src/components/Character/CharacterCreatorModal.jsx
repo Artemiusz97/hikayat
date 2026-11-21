@@ -1,6 +1,7 @@
-import { useState, useId } from 'react';
+import { useState, useEffect, useId, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Sparkles, Heart, Zap, Package, RotateCcw } from 'lucide-react';
+import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
 
 const STAT_KEYS = [
   { key: 'str', code: 'STR', label: 'Strength', emoji: '💪' },
@@ -10,6 +11,19 @@ const STAT_KEYS = [
   { key: 'int', code: 'INT', label: 'Intelligence', emoji: '🧠' },
   { key: 'agi', code: 'AGI', label: 'Agility', emoji: '🏹' },
   { key: 'luk', code: 'LUK', label: 'Luck', emoji: '🍀' },
+];
+
+const GENDER_OPTIONS = [
+  { value: 'Male', labelKey: 'creator.gender_male', fallback: 'Male' },
+  { value: 'Female', labelKey: 'creator.gender_female', fallback: 'Female' },
+];
+
+const RACE_OPTIONS = [
+  { value: 'Human', labelKey: 'creator.race_human', fallback: 'Human' },
+  { value: 'Elf', labelKey: 'creator.race_elf', fallback: 'Elf' },
+  { value: 'Dwarf', labelKey: 'creator.race_dwarf', fallback: 'Dwarf' },
+  { value: 'Beastfolk / Anthro', labelKey: 'creator.race_beastfolk', fallback: 'Beastfolk / Anthro' },
+  { value: 'Cyborg', labelKey: 'creator.race_cyborg', fallback: 'Cyborg' },
 ];
 
 const DEFAULT_STATS = { str: 1, per: 1, end: 1, cha: 1, int: 1, agi: 1, luk: 1 };
@@ -32,6 +46,26 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const [stats, setStats] = useState({ ...DEFAULT_STATS });
   const [focusedStat, setFocusedStat] = useState('STR');
 
+  const resetForm = useCallback(() => {
+    setSubmitting(false);
+    setError(null);
+    setName('');
+    setGender('Male');
+    setCustomGender('');
+    setRace('Human');
+    setCustomRace('');
+    setRaceDescription('');
+    setPreviewMediumSynergy('');
+    setStats({ ...DEFAULT_STATS });
+    setFocusedStat('STR');
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      resetForm();
+    }
+  }, [isOpen, resetForm]);
+
   const maxTotalPoints = 12;
   const totalAllocated = Object.values(stats).reduce((acc, v) => acc + Number(v || 1), 0);
   const pointsRemaining = maxTotalPoints - totalAllocated;
@@ -39,8 +73,6 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const derivedHp = 200 + stats.end * 100;
   const derivedMp = 50 + stats.end * 25;
   const derivedCap = 30 + stats.str * 3;
-
-  if (!isOpen) return null;
 
   const effectiveGender = gender === '__custom__' ? customGender.trim() || 'Non-binary' : gender;
   const effectiveRace = race === '__custom__' ? customRace.trim() || 'Human' : race;
@@ -60,9 +92,10 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name.trim()) {
-      setError('Please enter a character name.');
+      setError(t('creator.err_name_required', 'Please enter a character name.'));
       return;
     }
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -80,74 +113,76 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         luk: stats.luk,
       });
 
-      setName('');
-      setStats({ ...DEFAULT_STATS });
+      resetForm();
       onClose();
     } catch (err) {
-      setError(err.message || 'Character creation failed');
+      setError(err.message || t('creator.err_create_failed', 'Character creation failed'));
     } finally {
       setSubmitting(false);
     }
   };
 
   const statEffects = {
-    STR: 'Strength determines physical power, carry capacity, and melee damage.',
-    PER: 'Perception affects accuracy, observation skills, and detecting hidden objects.',
-    END: 'Endurance governs health points (HP), stamina, and resistance to damage/poison.',
-    CHA: 'Charisma improves social interactions, persuasion, and trading prices.',
-    INT: 'Intelligence affects magical ability, hacking, learning speed, and skill points.',
-    AGI: 'Agility improves evasion, stealth, initiative in combat, and movement speed.',
-    LUK: 'Luck influences critical hit chance, finding rare loot, and random encounters.'
+    STR: t('creator.stat_effects.STR', 'Strength determines physical power, carry capacity, and melee damage.'),
+    PER: t('creator.stat_effects.PER', 'Perception affects accuracy, observation skills, and detecting hidden objects.'),
+    END: t('creator.stat_effects.END', 'Endurance governs health points (HP), stamina, and resistance to damage/poison.'),
+    CHA: t('creator.stat_effects.CHA', 'Charisma improves social interactions, persuasion, and trading prices.'),
+    INT: t('creator.stat_effects.INT', 'Intelligence affects magical ability, hacking, learning speed, and skill points.'),
+    AGI: t('creator.stat_effects.AGI', 'Agility improves evasion, stealth, initiative in combat, and movement speed.'),
+    LUK: t('creator.stat_effects.LUK', 'Luck influences critical hit chance, finding rare loot, and random encounters.'),
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-
-      <div className="relative w-full max-w-4xl bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[calc(var(--app-height,100dvh)-2rem)]">
+    <AcrylicModal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={t('creator.title', 'Character Creation Studio')}
+      maxWidthClass="max-w-4xl"
+      zIndexClass="z-[60]"
+    >
         {/* Header */}
-        <div className="p-4 border-b border-fantasy-border bg-black/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-fantasy-accent/15 border border-fantasy-accent/40 text-fantasy-accent">
+        <div className="px-4 py-3.5 border-b border-fantasy-border/35 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-fantasy-accent/15 border border-fantasy-accent/40 text-fantasy-accent shrink-0">
               <Sparkles size={18} />
             </div>
-            <div>
-              <h2 className="font-rpg font-bold text-lg text-fantasy-accent">
-                Character Creation Studio
+            <div className="min-w-0">
+              <h2 className="font-rpg font-bold text-lg text-fantasy-accent truncate">
+                {t('creator.title', 'Character Creation Studio')}
               </h2>
-              <p className="text-xs text-gray-400">
-                Define your hero's basic identity and allocate S.P.E.C.I.A.L. stats.
+              <p className="text-xs text-gray-400 truncate">
+                {t('creator.subtitle', "Define your hero's basic identity and allocate S.P.E.C.I.A.L. stats.")}
               </p>
             </div>
           </div>
 
-          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-white rounded">
+          <MotionButton onClick={onClose} aria-label={t('common.close', 'Close')} className="hk-icon-btn h-8 min-w-8 shrink-0">
             <X size={18} />
-          </button>
+          </MotionButton>
         </div>
 
         {error && (
-          <div className="mx-5 mt-3 p-2.5 rounded bg-red-950/70 border border-red-800 text-red-200 text-xs flex items-center justify-between shrink-0">
+          <div className="mx-5 mt-3 p-2.5 rounded-xl bg-red-500/15 border border-red-500/40 text-red-200 text-xs flex items-center justify-between shrink-0">
             <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-gray-400 hover:text-white">
+            <button type="button" onClick={() => setError(null)} className="text-gray-400 hover:text-white">
               <X size={13} />
             </button>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
-          <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4 space-y-4">
-            <div className="flex items-center justify-between border-b border-fantasy-border/50 pb-2.5">
+        <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar px-5 py-3">
+          <section className="hk-flat-section space-y-4">
+            <div className="flex items-center justify-between border-b border-fantasy-border/35 pb-2.5">
               <div className="flex items-center gap-2">
                 <span className="px-2 py-0.5 rounded bg-fantasy-accent/20 border border-fantasy-accent/50 text-fantasy-accent text-[10px] font-bold uppercase tracking-wider">
-                  Section 1
+                  {t('creator.section_1', 'Section 1')}
                 </span>
                 <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100">
-                  Basic Character Identity &amp; S.P.E.C.I.A.L. Allocation
+                  {t('creator.identity_heading', 'Basic Character Identity & S.P.E.C.I.A.L. Allocation')}
                 </h3>
               </div>
               <span className="text-[11px] text-gray-400 hidden sm:inline">
-                Core identity &amp; attributes persist across scenarios
+                {t('creator.persist_hint', 'Core identity & attributes persist across scenarios')}
               </span>
             </div>
 
@@ -157,7 +192,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                 <div className="space-y-3.5">
                   <div>
                     <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mb-1">
-                      Hero Name
+                      {t('creator.hero_name', 'Hero Name')}
                     </label>
                     <input
                       type="text"
@@ -172,15 +207,17 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mb-1">
-                        Gender
+                        {t('creator.gender', 'Gender')}
                       </label>
                       <select
                         value={gender}
                         onChange={(e) => setGender(e.target.value)}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-sm text-gray-100 focus:outline-none focus:border-fantasy-accent"
                       >
-                        {['Male', 'Female'].map((g) => (
-                          <option key={g} value={g}>{g}</option>
+                        {GENDER_OPTIONS.map((g) => (
+                          <option key={g.value} value={g.value}>
+                            {t(g.labelKey, g.fallback)}
+                          </option>
                         ))}
                         <option value="__custom__">{t('creator.custom_option', 'Custom...')}</option>
                       </select>
@@ -188,15 +225,17 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
 
                     <div>
                       <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-400 mb-1">
-                        Race / Species
+                        {t('creator.race_label', 'Race / Species')}
                       </label>
                       <select
                         value={race}
                         onChange={(e) => setRace(e.target.value)}
                         className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-sm text-gray-100 focus:outline-none focus:border-fantasy-accent"
                       >
-                        {['Human', 'Elf', 'Dwarf', 'Beastfolk / Anthro', 'Cyborg'].map((r) => (
-                          <option key={r} value={r}>{r}</option>
+                        {RACE_OPTIONS.map((r) => (
+                          <option key={r.value} value={r.value}>
+                            {t(r.labelKey, r.fallback)}
+                          </option>
                         ))}
                         <option value="__custom__">{t('creator.custom_race_option', 'Custom Race...')}</option>
                       </select>
@@ -239,45 +278,48 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                 {/* Live Derived Vitals Preview */}
                 <div className="space-y-1.5">
                   <span className="block text-[10px] uppercase tracking-wider font-bold text-gray-400">
-                    Derived Starting Vitals
+                    {t('creator.derived_vitals', 'Derived Starting Vitals')}
                   </span>
-                  <div className="bg-black/40 border border-fantasy-border/60 p-3 rounded-lg grid grid-cols-3 gap-2 text-center">
-                    <div className="bg-black/40 border border-red-900/40 rounded p-2">
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div className="bg-gray-500/10 border border-red-500/30 rounded-xl p-2">
                       <div className="text-[10px] uppercase text-gray-400 flex items-center justify-center gap-1">
-                        <Heart size={11} className="text-red-400" /> Max HP
+                        <Heart size={11} className="text-red-400" /> {t('creator.max_hp', 'Max HP')}
                       </div>
-                      <div className="text-sm font-bold font-mono text-red-300 mt-0.5">{derivedHp}</div>
+                      <div className="text-sm font-bold font-mono tabular-nums text-red-300 mt-0.5">{derivedHp}</div>
                     </div>
-                    <div className="bg-black/40 border border-blue-900/40 rounded p-2">
+                    <div className="bg-gray-500/10 border border-blue-500/30 rounded-xl p-2">
                       <div className="text-[10px] uppercase text-gray-400 flex items-center justify-center gap-1">
-                        <Zap size={11} className="text-blue-400" /> Max MP
+                        <Zap size={11} className="text-blue-400" /> {t('creator.max_mp', 'Max MP')}
                       </div>
-                      <div className="text-sm font-bold font-mono text-blue-300 mt-0.5">{derivedMp}</div>
+                      <div className="text-sm font-bold font-mono tabular-nums text-blue-300 mt-0.5">{derivedMp}</div>
                     </div>
-                    <div className="bg-black/40 border border-amber-900/40 rounded p-2">
+                    <div className="bg-gray-500/10 border border-amber-500/30 rounded-xl p-2">
                       <div className="text-[10px] uppercase text-gray-400 flex items-center justify-center gap-1">
-                        <Package size={11} className="text-amber-400" /> Pack Slots
+                        <Package size={11} className="text-amber-400" /> {t('creator.pack_slots', 'Pack Slots')}
                       </div>
-                      <div className="text-sm font-bold font-mono text-amber-300 mt-0.5">{derivedCap}</div>
+                      <div className="text-sm font-bold font-mono tabular-nums text-amber-300 mt-0.5">{derivedCap}</div>
                     </div>
                   </div>
                 </div>
 
-                <p className="pt-2 border-t border-fantasy-border/40 text-[10px] text-gray-500 leading-relaxed">
+                <p className="pt-2 border-t border-fantasy-border/35 text-[10px] text-gray-400 leading-relaxed">
                   {t('creator.anatomy_deferred_hint', '🔞 Intimate anatomy is configured when you embark on an NSFW scenario, then remembered for future NSFW adventures.')}
                 </p>
               </div>
 
               {/* Right Side: S.P.E.C.I.A.L. Point-Buy */}
-              <div className="lg:col-span-7 bg-black/40 border border-fantasy-border/70 p-3.5 rounded-lg flex flex-col justify-between space-y-3">
+              <div className="lg:col-span-7 lg:border-l lg:border-fantasy-border/35 lg:pl-5 flex flex-col justify-between space-y-3">
                 <div>
                   <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                     <div>
                       <h4 className="text-xs uppercase tracking-wider font-bold text-fantasy-accent">
-                        S.P.E.C.I.A.L. Point-Buy
+                        {t('creator.point_buy_title', 'S.P.E.C.I.A.L. Point-Buy')}
                       </h4>
                       <p className="text-[11px] text-gray-400">
-                        Base 1 per stat • 5 bonus points ({maxTotalPoints} total)
+                        {t('creator.point_buy_sub', {
+                          max: maxTotalPoints,
+                          defaultValue: `Base 1 per stat • 5 bonus points (${maxTotalPoints} total)`,
+                        })}
                       </p>
                     </div>
 
@@ -291,20 +333,20 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                         <span>{t('creator.reset', 'Reset')}</span>
                       </button>
                       <span
-                        className={`px-2.5 py-1 rounded text-xs font-mono font-bold border ${
+                        className={`px-2.5 py-1 rounded text-xs font-mono tabular-nums font-bold border ${
                           pointsRemaining > 0
                             ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
                             : 'bg-emerald-950/60 border-emerald-700/50 text-emerald-300'
                         }`}
                       >
-                        {pointsRemaining} pts left
+                        {t('creator.pts_left', { count: pointsRemaining, defaultValue: `${pointsRemaining} pts left` })}
                       </span>
                     </div>
                   </div>
 
                   <div className="mb-2.5 flex items-center justify-between gap-2 bg-cyan-950/15 border border-cyan-900/40 rounded px-2.5 py-1.5">
                     <label htmlFor={`${creatorResId}-med-syn`} className="text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-                      🧬 {t('awakened.synergy_badge', 'Medium Synergy')} Preview:
+                      🧬 {t('creator.medium_synergy_preview', 'Medium Synergy Preview')}:
                     </label>
                     <select
                       id={`${creatorResId}-med-syn`}
@@ -346,10 +388,10 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                             <div className="truncate">
                               <span className="text-xs font-bold text-gray-200">{s.code}</span>
                               <span className="text-[11px] text-gray-400 ml-1 truncate">
-                                {s.label}
+                                {t(`creator.stat_labels.${s.key}`, s.label)}
                               </span>
                               {hasMedSyn && (
-                                <span className="ml-1 text-[9px] px-1 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono uppercase">
+                                <span className="ml-1 text-[9px] px-1 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono uppercase">
                                   ⚡
                                 </span>
                               )}
@@ -368,7 +410,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                             >
                               -
                             </button>
-                            <span className="w-5 text-center font-mono text-sm font-bold text-fantasy-accent">
+                            <span className="w-5 text-center font-mono tabular-nums text-sm font-bold text-fantasy-accent">
                               {val}
                             </span>
                             <button
@@ -390,7 +432,7 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
                 </div>
 
                 {/* Focused Stat Tooltip */}
-                <div className="p-2 rounded bg-black/50 border border-fantasy-border/60 text-[11px] text-gray-300 leading-relaxed min-h-[40px]">
+                <div className="p-2.5 rounded-xl bg-gray-500/10 border border-fantasy-border/35 text-[11px] text-gray-300 leading-relaxed min-h-[40px]">
                   <strong className="text-fantasy-accent">{focusedStat}:</strong>{' '}
                   {statEffects[focusedStat]}
                 </div>
@@ -400,32 +442,35 @@ const CharacterCreatorModal = ({ isOpen, onClose, onCreateCharacter }) => {
         </form>
 
         {/* Footer Submit */}
-        <div className="p-4 border-t border-fantasy-border bg-black/40 flex flex-wrap items-center justify-between gap-3 shrink-0">
+        <div className="px-4 py-3 border-t border-fantasy-border/35 flex flex-wrap items-center justify-between gap-3 shrink-0">
           <span className="text-xs text-gray-400">
             {pointsRemaining > 0
-              ? `${pointsRemaining} unspent point(s) will be saved for later allocation.`
-              : 'All starting attribute points allocated!'}
+              ? t('creator.unspent_points_hint', {
+                  count: pointsRemaining,
+                  defaultValue: `${pointsRemaining} unspent point(s) will be saved for later allocation.`,
+                })
+              : t('creator.all_points_allocated', 'All starting attribute points allocated!')}
           </span>
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
+          <div className="flex items-center gap-2.5">
+            <MotionButton
               onClick={onClose}
-              className="px-4 py-2 rounded border border-fantasy-border text-xs text-gray-300 hover:text-white"
+              className="px-4 py-2 rounded-lg border border-fantasy-border/60 text-xs text-gray-300 hover:text-white hover:bg-gray-500/10"
             >
-              Cancel
-            </button>
-            <button
+              {t('common.cancel', 'Cancel')}
+            </MotionButton>
+            <MotionButton
               type="submit"
               onClick={handleSubmit}
               disabled={submitting || !name.trim()}
-              className="px-5 py-2 rounded bg-fantasy-accent hover:bg-amber-400 text-black font-bold text-xs uppercase tracking-wider disabled:opacity-40 transition-colors"
+              className="px-5 py-2 rounded-lg bg-fantasy-accent hover:bg-amber-400 text-black font-bold text-xs uppercase tracking-wider disabled:opacity-40 transition-colors"
             >
-              {submitting ? 'Forging Hero...' : 'Forge Hero'}
-            </button>
+              {submitting
+                ? t('creator.forging_hero', 'Forging Hero...')
+                : t('creator.forge_hero', 'Forge Hero')}
+            </MotionButton>
           </div>
         </div>
-      </div>
-    </div>
+    </AcrylicModal>
   );
 };
 

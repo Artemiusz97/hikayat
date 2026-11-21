@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.5.0** | 2026-11-22 | Minor | Zero-Turn Scene Examine & Tactical Intel, Declarative 41-Table Session Registry (`db/registry.py`) & Pooled `ReadUnitOfWork`, Acrylic Glassmorphism UI & 12 `.webp` Scenario Backdrops, Drop-In Custom Fonts (`custom_fonts/`), 5-Mode Consumables & Scenario Currencies. |
 | **v3.4.0** | 2026-11-20 | Minor | Outlaw Factions & 10-Wing HQs (Migration v60), 68 Special Agent Blueprints & 3-Stage Population Engine, Native `<dialog>` World Map Modal Overhaul, Narrative Pacing & Prose Styles (v58/v59), Hybrid Reasoning Streaming. |
 | **v3.3.0** | 2026-11-17 | Minor | Migration v57 Anomalous Locations Integrity, Procedural Urban City Profiles, Unified Merchant UI Authority, Quest Climax & Remote Travel Guards, and Code Hygiene Sweep. |
 | **v3.2.0** | 2026-11-16 | Minor | Dynamic NPC Wardrobe & Continuity Engine (`mechanics/social/wardrobe/`), SDXL Attire Prompt Synthesis, `KnownWardrobeCard` Fog-of-War UI & 5-Language Parity. |
@@ -57,6 +58,21 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.5.0] - 2026-11-22
+
+#### Added & Enhanced
+- **Zero-Turn Scene Examine & Tactical Intel (`mechanics/narrative/examine.py`, `services/examine_service.py`, `api/adventure.py`, `cogs/adventure/views/choices.py`, `web/src/components/Modals/ExamineModal.jsx`)**:
+  - Added deterministic zero-turn snapshot inspection (`build_examine_snapshot`), LRU/TTL async sensory prose caching (`get_examine_payload`, `invalidate_examine_cache`, `scrub_examine_prose`), `GET /api/adventure/examine`, ephemeral Discord examine embeds, React `ExamineModal.jsx`, and generic look-around choice deduplication (`_is_generic_examine_choice`).
+- **Declarative 41-Table Session Registry, Pooled `ReadUnitOfWork` & Typed `TurnExecutionContext` (`db/registry.py`, `db/core.py`, `db/saves.py`, `db/sessions.py`, `game_engine/turn_context.py`, `game_engine/state/reducers.py`, `scripts/static_check.py`)**:
+  - Centralized all 41 session-scoped child tables (`SESSION_TABLE_REGISTRY` / `SessionTableSpec`) driving FK-safe purge, tiered save/load slot ID remapping, rollback, and ring-buffer snapshot pruning, enforced statically by `raw-conn-commit-outside-core` and `unregistered-session-table` gates.
+  - Added pooled read connections (`ReadUnitOfWork`), `PRAGMA user_version` fast-path checks, batched action/party preloaders (`preload_prepare_action_bundle`, `preload_turn_party_bundle`), typed turn stage dataclasses (`TurnClockStage`, `CombatStageState`, `EpistemicAndWorldStage`, `TurnNotices`), and extracted state reducers.
+- **Acrylic Glassmorphism UI, 12 Scenario Backdrops & Drop-In Custom Fonts (`api/fonts.py`, `custom_fonts/`, `web/`)**:
+  - Added `UiPreferencesProvider.jsx` & `AcrylicModeSwitcher.jsx` (*Full, Focused, Solid*, 5%–95% opacity, 70%–130% text scale, `12h`/`24h` clock format), 12 bundled `.webp` backdrops (`ScenarioBackdrop.jsx`) with OKLCH time-of-day atmospheric grading & optional ambient scene blur, drop-in custom font loading (`GET /api/fonts`, `GET /fonts/{filename}`), searchable `TurnHistoryModal.jsx` (replacing `TurnOutcomePanel.jsx`), modular 8-app `PhoneModal`, and split `QuestLogPanel` sub-tabs.
+- **5-Mode Consumables, Scenario Currencies & Post-Combat Auto-Loot (`mechanics/combat/items/consumables/`, `mechanics/combat/reconcile.py`, `scenario_data.py`, `web/src/utils/`)**:
+  - Added `classify_consumable_usage_mode` (*non_consumable, throwable, mechanical, narrative, hybrid*), `is_hostile_or_covert_consumable`, `award_post_combat_auto_loot`, `transfer_item_between_users`, NPC gift possession tracking, stackable inventory grouping, and unified scenario currencies (`get_scenario_currency`, `CurrencyBadge.jsx`).
+- **Quest Cast Hydration, Inquiry Sanitization, Stealth Toggle Sync & Demographics (`mechanics/`, `game_engine/choices_cleaner.py`, `web/src/utils/npcDemographics.js`)**:
+  - Added deterministic quest cast & waypoint NPC hydration (`_resolve_and_register_quest_cast_npc`, `_hydrate_and_backfill_quest_waypoint_npc`, `roll_scenario_npc_race`), quest inquiry sanitization, dynamic stealth choice synchronization (`sync_stealth_choices_for_toggle`), localized NPC demographic pills, and 5-language UI parity.
 
 ### [v3.4.0] - 2026-11-20
 

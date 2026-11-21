@@ -17,8 +17,12 @@ import hashlib
 from typing import Any, Mapping
 
 import db
+import scenario_data
+from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
 from mechanics.social.activity_tags import resolve_actor_activity_bundle
+from mechanics.social.persona.intimacy.ledger import normalize_gender
 from mechanics.social.population_seeder import hydrate_roster_npc_on_scene
+from mechanics.social.races import roll_scenario_npc_race
 from mechanics.world.anchor_schedule import resolve_anchor_schedule_nodes
 from mechanics.world.locations import location_has_merchant_shop
 from mechanics.world.locations.residence_fog import (
@@ -309,6 +313,122 @@ def _collect_tier3_candidate_waypoints(ctx: _PresenceContext) -> list[dict[str, 
     return candidate_wps
 
 
+def _hydrate_and_backfill_quest_waypoint_npc(
+    ctx: _PresenceContext,
+    base_stage_rec: dict[str, Any],
+    t_npc: str,
+    wp_node: str,
+    r_row: Mapping[str, Any] | None,
+    c_row: Mapping[str, Any] | None,
+    cast_meta: Mapping[str, Any] | None,
+    syn_meta: Mapping[str, Any] | None,
+    is_transient_synthetic: bool,
+) -> None:
+    """Hydrates demographic metadata for a staged Tier-3 quest NPC and backfills legacy bare quest NPCs into `world_roster`."""
+    ex_merged = merge_npc_records(r_row, c_row)
+    ex_bi = parse_dict(ex_merged.get("basic_info"))
+    is_placeholder = bool(_PLACEHOLDER_ACTOR_RE.search(t_npc))
+
+    raw_g = normalize_gender(
+        base_stage_rec.get("gender")
+        or ex_merged.get("gender")
+        or ex_bi.get("gender")
+        or (cast_meta or {}).get("gender")
+        or (syn_meta or {}).get("gender")
+        or ""
+    )
+    if raw_g in ("male", "female", "non-binary"):
+        eff_g = raw_g
+    elif not is_placeholder:
+        from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
+
+        eff_g = resolve_quest_npc_fallback_gender(t_npc, session_id=ctx.sid)
+    else:
+        eff_g = ""
+
+    raw_race = str(
+        base_stage_rec.get("race")
+        or ex_merged.get("race")
+        or ex_bi.get("race")
+        or (cast_meta or {}).get("race")
+        or (syn_meta or {}).get("race")
+        or ""
+    ).strip()
+    if raw_race.lower() in ("unknown", "none", "null", "n/a"):
+        raw_race = ""
+    eff_race = raw_race or (
+        roll_scenario_npc_race(ctx.scen_key, seed=f"quest_wp:{ctx.sid}:{t_npc.lower()}")
+        if not is_placeholder
+        else ""
+    )
+
+    slot_name = str((cast_meta or {}).get("slot") or "").strip().lower()
+    default_role = "Informant" if slot_name == "informant" else "Quest Contact"
+    eff_role = str(
+        base_stage_rec.get("role")
+        or ex_merged.get("role")
+        or ex_bi.get("role")
+        or (cast_meta or {}).get("role")
+        or (syn_meta or {}).get("role")
+        or default_role
+    ).strip()
+
+    is_hs_scen = bool(
+        scenario_data.is_high_school_scenario(ctx.scen_key)
+        or scenario_data.is_anomalous_high_school_scenario(ctx.scen_key)
+    )
+    default_age = "teen" if (is_hs_scen and slot_name in ("informant", "accomplice", "witness")) else "adult"
+    eff_age = str(
+        (cast_meta or {}).get("age_group")
+        or ex_bi.get("age_group")
+        or ex_merged.get("age_group")
+        or default_age
+    ).strip()
+
+    if eff_g and not base_stage_rec.get("gender"):
+        base_stage_rec["gender"] = eff_g
+    if eff_race and not base_stage_rec.get("race"):
+        base_stage_rec["race"] = eff_race
+    if eff_role and not base_stage_rec.get("role"):
+        base_stage_rec["role"] = eff_role
+    if eff_role:
+        base_stage_rec.setdefault("occupation", eff_role)
+    base_bi = dict(parse_dict(base_stage_rec.get("basic_info")))
+    if eff_age:
+        base_bi.setdefault("age_group", eff_age)
+    if base_bi:
+        base_stage_rec["basic_info"] = base_bi
+    base_stage_rec.setdefault("origin", "quest_seed")
+
+    if r_row is None and c_row is None and not is_transient_synthetic and not is_placeholder and ctx.sid > 0:
+        roster_payload: dict[str, Any] = {
+            "npc_id": str(base_stage_rec.get("npc_id") or slugify_key(t_npc)),
+            "name": t_npc,
+            "gender": eff_g,
+            "race": eff_race,
+            "role": eff_role,
+            "origin": "quest_seed",
+            "tier_status": "seeded",
+            "workplace_node_id": str(wp_node or ctx.eff_node_id or "").strip(),
+            "basic_info": {
+                "role": eff_role,
+                "occupation": eff_role,
+                "age_group": eff_age,
+                "quest_id": str((cast_meta or {}).get("quest_id") or ""),
+                "quest_cast_slot": slot_name,
+                "visual_hydrated": False,
+            },
+        }
+        if ctx.persist_db:
+            upserted = db.upsert_world_roster_npc(ctx.sid, roster_payload, turn_number=ctx.eff_turn)
+            stored_row = upserted or roster_payload
+            for rk in {t_npc.lower(), slugify_key(t_npc), str(stored_row.get("npc_id") or "").lower()}:
+                if rk:
+                    ctx.roster_by_key[rk] = stored_row
+        else:
+            ctx.staged_roster_ops.setdefault("quest_seed_backfills", []).append(roster_payload)
+
+
 def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
     for wp in _collect_tier3_candidate_waypoints(ctx):
         t_npc = str(wp.get("target_npc") or "").strip()
@@ -320,12 +440,27 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
             continue
 
         syn_meta = ctx.synthetic_npcs_by_key.get(t_npc.lower()) or ctx.synthetic_npcs_by_key.get(slugify_key(t_npc))
+        cast_meta = ctx.quest_cast_by_key.get(t_npc.lower()) or ctx.quest_cast_by_key.get(slugify_key(t_npc))
         is_transient_synthetic = bool(isinstance(syn_meta, dict) and r_row is None and c_row is None)
         base_stage_rec: dict[str, Any] = {
             "name": t_npc,
             "npc_id": (c_row or r_row or {}).get("npc_id") or slugify_key(t_npc),
         }
+        if isinstance(cast_meta, dict):
+            if cast_meta.get("gender"):
+                base_stage_rec["gender"] = str(cast_meta["gender"])
+            if cast_meta.get("race"):
+                base_stage_rec["race"] = str(cast_meta["race"])
+            if cast_meta.get("role"):
+                base_stage_rec["role"] = str(cast_meta["role"])
+                base_stage_rec["occupation"] = str(cast_meta["role"])
+            if cast_meta.get("age_group"):
+                base_stage_rec["basic_info"] = {"age_group": str(cast_meta["age_group"])}
         if is_transient_synthetic and isinstance(syn_meta, dict):
+            if syn_meta.get("gender"):
+                base_stage_rec.setdefault("gender", str(syn_meta["gender"]))
+            if syn_meta.get("race"):
+                base_stage_rec.setdefault("race", str(syn_meta["race"]))
             if syn_meta.get("role"):
                 base_stage_rec["role"] = str(syn_meta["role"])
                 base_stage_rec["occupation"] = str(syn_meta["role"])
@@ -347,6 +482,9 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
                 continue
             if is_crisis:
                 ctx.tier3_crisis_aliases.update(wp_aliases)
+            _hydrate_and_backfill_quest_waypoint_npc(
+                ctx, base_stage_rec, t_npc, wp_node, r_row, c_row, cast_meta, syn_meta, is_transient_synthetic
+            )
             ctx.stage(base_stage_rec, 3, "quest_pin")
             continue
 
@@ -421,6 +559,9 @@ def _resolve_tier3_waypoints(ctx: _PresenceContext) -> None:
         if r_row is None and c_row is None and not is_transient_synthetic and not (420 <= (int(ctx.safe_min) % 1440) < 1320):
             continue
         if not sched_info.get("is_off_duty"):
+            _hydrate_and_backfill_quest_waypoint_npc(
+                ctx, base_stage_rec, t_npc, wp_node, r_row, c_row, cast_meta, syn_meta, is_transient_synthetic
+            )
             ctx.stage(base_stage_rec, 3, "quest_pin")
 
 
@@ -974,7 +1115,7 @@ def resolve_node_presence(
     for npc_entry in present_list:
         r_origin = str(npc_entry.get("origin") or "").strip().lower()
         r_basic = npc_entry.get("basic_info") if isinstance(npc_entry.get("basic_info"), dict) else {}
-        if r_origin in ("district_merchant", "civic_staff", "roaming_citizen", "campus_seed", "roaming_merchant", "seeded") or r_basic.get("visual_hydrated") is False:
+        if r_origin in ("district_merchant", "civic_staff", "roaming_citizen", "campus_seed", "roaming_merchant", "seeded", "quest_seed") or r_basic.get("visual_hydrated") is False:
             patch = hydrate_roster_npc_on_scene(npc_entry, ctx.scen_key)
             if isinstance(patch, dict):
                 npc_entry["appearance"] = dict(patch["appearance"])

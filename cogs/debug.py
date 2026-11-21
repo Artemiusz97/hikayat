@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import Optional
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -6,7 +10,9 @@ import db
 
 
 def build_debug_embed(user_id: int) -> discord.Embed:
-    s = db.get_settings(user_id)
+    with db.ReadUnitOfWork():
+        s = db.get_settings(user_id)
+        char = db.get_character(user_id)
     stat_mode = s.get("debug_stat_mode", "off")
     check_mode = s.get("debug_check_mode", "off")
     reveal_mode = s.get("debug_reveal_all_info", 0)
@@ -38,7 +44,6 @@ def build_debug_embed(user_id: int) -> discord.Embed:
     embed.add_field(name="6. Always Critical Failure", value=opt6, inline=False)
     embed.add_field(name="7. Reveal All NPC Profiles & History", value=opt7, inline=False)
 
-    char = db.get_character(user_id)
     if char:
         vitals = f"❤️ HP: **{char['hp']}/{char['max_hp']}** | 🔷 MP: **{char['mp']}/{char['max_mp']}**"
     else:
@@ -73,97 +78,148 @@ class DebugMenuView(discord.ui.View):
 
     @discord.ui.button(label="1. Max Stats", style=discord.ButtonStyle.primary, row=0)
     async def toggle_max_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_stat_mode") == "max" else "max"
-        db.update_settings(self.user_id, debug_stat_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_stat_mode") == "max" else "max"
+                db.update_settings(self.user_id, debug_stat_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="2. Min Stats", style=discord.ButtonStyle.secondary, row=0)
     async def toggle_min_stats(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_stat_mode") == "min" else "min"
-        db.update_settings(self.user_id, debug_stat_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_stat_mode") == "min" else "min"
+                db.update_settings(self.user_id, debug_stat_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="3. Always Success", style=discord.ButtonStyle.success, row=1)
     async def toggle_always_success(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_check_mode") == "always_success" else "always_success"
-        db.update_settings(self.user_id, debug_check_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_check_mode") == "always_success" else "always_success"
+                db.update_settings(self.user_id, debug_check_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="4. Always Fail", style=discord.ButtonStyle.danger, row=1)
     async def toggle_always_fail(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_check_mode") == "always_fail" else "always_fail"
-        db.update_settings(self.user_id, debug_check_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_check_mode") == "always_fail" else "always_fail"
+                db.update_settings(self.user_id, debug_check_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="5. Always Crit Success", style=discord.ButtonStyle.success, row=2)
     async def toggle_always_crit_success(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_check_mode") == "always_crit_success" else "always_crit_success"
-        db.update_settings(self.user_id, debug_check_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_check_mode") == "always_crit_success" else "always_crit_success"
+                db.update_settings(self.user_id, debug_check_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="6. Always Crit Fail", style=discord.ButtonStyle.danger, row=2)
     async def toggle_always_crit_fail(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = "off" if s.get("debug_check_mode") == "always_crit_fail" else "always_crit_fail"
-        db.update_settings(self.user_id, debug_check_mode=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = "off" if s.get("debug_check_mode") == "always_crit_fail" else "always_crit_fail"
+                db.update_settings(self.user_id, debug_check_mode=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Reduce HP to 1", style=discord.ButtonStyle.danger, emoji="🩸", row=3)
     async def set_hp_to_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        char = db.get_character(self.user_id)
-        if not char:
+        def _op() -> Optional[discord.Embed]:
+            with db.UnitOfWork():
+                char = db.get_character(self.user_id)
+                if not char:
+                    return None
+                db.set_hp_to_one(self.user_id)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
+        if embed is None:
             await interaction.response.send_message("❌ No active character found.", ephemeral=True)
             return
-        db.set_hp_to_one(self.user_id)
-        embed = build_debug_embed(self.user_id)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Full Heal", style=discord.ButtonStyle.success, emoji="💖", row=3)
     async def full_heal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
-        char = db.get_character(self.user_id)
-        if not char:
+        def _op() -> Optional[discord.Embed]:
+            with db.UnitOfWork():
+                char = db.get_character(self.user_id)
+                if not char:
+                    return None
+                db.heal_full(self.user_id)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
+        if embed is None:
             await interaction.response.send_message("❌ No active character found.", ephemeral=True)
             return
-        db.heal_full(self.user_id)
-        embed = build_debug_embed(self.user_id)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="7. Force Enemy", style=discord.ButtonStyle.danger, row=3)
     async def force_enemy(self, interaction: discord.Interaction, button: discord.ui.Button):
-        session_id = db.get_active_session_id_for_user(self.user_id)
-        if session_id:
-            from mechanics.combat.enemies import generate_scenario_enemy
-            dummy = generate_scenario_enemy("fantasy", "Debug", 1, custom_name="Debug Training Dummy", custom_archetype="Guardian")
-            dummy["hp"] = 100
-            dummy["max_hp"] = 100
-            db.update_session_enemies(session_id, [dummy])
+        def _op() -> bool:
+            with db.UnitOfWork():
+                session_id = db.get_active_session_id_for_user(self.user_id)
+                if not session_id:
+                    return False
+                from mechanics.combat.enemies import generate_scenario_enemy
+                dummy = generate_scenario_enemy("fantasy", "Debug", 1, custom_name="Debug Training Dummy", custom_archetype="Guardian")
+                dummy["hp"] = 100
+                dummy["max_hp"] = 100
+                db.update_session_enemies(session_id, [dummy])
+                return True
+
+        spawned = await db.adb(_op)
+        if spawned:
             await interaction.response.send_message("Enemy encounter triggered! Combat will begin on the next turn. It will automatically disable once the enemy is defeated.", ephemeral=True)
         else:
             await interaction.response.send_message("No active session to trigger an encounter in.", ephemeral=True)
 
     @discord.ui.button(label="8. Reveal All NPC Info", style=discord.ButtonStyle.primary, row=4)
     async def toggle_reveal_all(self, interaction: discord.Interaction, button: discord.ui.Button):
-        s = db.get_settings(self.user_id)
-        new_mode = 0 if s.get("debug_reveal_all_info") else 1
-        db.update_settings(self.user_id, debug_reveal_all_info=new_mode)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                s = db.get_settings(self.user_id)
+                new_mode = 0 if s.get("debug_reveal_all_info") else 1
+                db.update_settings(self.user_id, debug_reveal_all_info=new_mode)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="Reset All Overrides", style=discord.ButtonStyle.secondary, row=4)
     async def reset_all(self, interaction: discord.Interaction, button: discord.ui.Button):
-        db.update_settings(self.user_id, debug_stat_mode="off", debug_check_mode="off", debug_reveal_all_info=0)
-        embed = build_debug_embed(self.user_id)
+        def _op() -> discord.Embed:
+            with db.UnitOfWork():
+                db.update_settings(self.user_id, debug_stat_mode="off", debug_check_mode="off", debug_reveal_all_info=0)
+                return build_debug_embed(self.user_id)
+
+        embed = await db.adb(_op)
         await interaction.response.edit_message(embed=embed, view=self)
 
 
@@ -187,49 +243,58 @@ class DebugCog(commands.Cog):
     ])
     async def debug_command(self, interaction: discord.Interaction, option: app_commands.Choice[str] | None = None):
         user_id = interaction.user.id
-        if option is not None:
-            val = option.value
-            if val == "max_stats":
-                s = db.get_settings(user_id)
-                new_stat = "off" if s.get("debug_stat_mode") == "max" else "max"
-                db.update_settings(user_id, debug_stat_mode=new_stat)
-            elif val == "min_stats":
-                s = db.get_settings(user_id)
-                new_stat = "off" if s.get("debug_stat_mode") == "min" else "min"
-                db.update_settings(user_id, debug_stat_mode=new_stat)
-            elif val in ("always_success", "always_fail", "always_crit_success", "always_crit_fail"):
-                s = db.get_settings(user_id)
-                new_check = "off" if s.get("debug_check_mode") == val else val
-                db.update_settings(user_id, debug_check_mode=new_check)
-            elif val == "force_enemy":
-                session_id = db.get_active_session_id_for_user(user_id)
-                if session_id:
-                    from mechanics.combat.enemies import generate_scenario_enemy
-                    dummy = generate_scenario_enemy("fantasy", "Debug", 1, custom_name="Debug Training Dummy", custom_archetype="Guardian")
-                    dummy["hp"] = 100
-                    dummy["max_hp"] = 100
-                    db.update_session_enemies(session_id, [dummy])
-                    await interaction.response.send_message("Enemy encounter triggered! Combat will begin on the next turn.", ephemeral=True)
-                    return
-                else:
-                    await interaction.response.send_message("No active session to trigger an encounter in.", ephemeral=True)
-                    return
-            elif val == "reveal_all_info":
-                s = db.get_settings(user_id)
-                new_rev = 0 if s.get("debug_reveal_all_info") else 1
-                db.update_settings(user_id, debug_reveal_all_info=new_rev)
-            elif val == "hp_to_1":
-                char = db.get_character(user_id)
-                if char:
-                    db.set_hp_to_one(user_id)
-            elif val == "full_heal":
-                char = db.get_character(user_id)
-                if char:
-                    db.heal_full(user_id)
-            elif val == "off":
-                db.update_settings(user_id, debug_stat_mode="off", debug_check_mode="off", debug_reveal_all_info=0)
+        opt_val = option.value if option is not None else None
 
-        embed = build_debug_embed(user_id)
+        def _apply_debug_command_and_build() -> tuple[Optional[bool], Optional[discord.Embed]]:
+            with db.UnitOfWork():
+                if opt_val is not None:
+                    if opt_val == "max_stats":
+                        s = db.get_settings(user_id)
+                        new_stat = "off" if s.get("debug_stat_mode") == "max" else "max"
+                        db.update_settings(user_id, debug_stat_mode=new_stat)
+                    elif opt_val == "min_stats":
+                        s = db.get_settings(user_id)
+                        new_stat = "off" if s.get("debug_stat_mode") == "min" else "min"
+                        db.update_settings(user_id, debug_stat_mode=new_stat)
+                    elif opt_val in ("always_success", "always_fail", "always_crit_success", "always_crit_fail"):
+                        s = db.get_settings(user_id)
+                        new_check = "off" if s.get("debug_check_mode") == opt_val else opt_val
+                        db.update_settings(user_id, debug_check_mode=new_check)
+                    elif opt_val == "force_enemy":
+                        session_id = db.get_active_session_id_for_user(user_id)
+                        if session_id:
+                            from mechanics.combat.enemies import generate_scenario_enemy
+                            dummy = generate_scenario_enemy("fantasy", "Debug", 1, custom_name="Debug Training Dummy", custom_archetype="Guardian")
+                            dummy["hp"] = 100
+                            dummy["max_hp"] = 100
+                            db.update_session_enemies(session_id, [dummy])
+                            return True, None
+                        return False, None
+                    elif opt_val == "reveal_all_info":
+                        s = db.get_settings(user_id)
+                        new_rev = 0 if s.get("debug_reveal_all_info") else 1
+                        db.update_settings(user_id, debug_reveal_all_info=new_rev)
+                    elif opt_val == "hp_to_1":
+                        char = db.get_character(user_id)
+                        if char:
+                            db.set_hp_to_one(user_id)
+                    elif opt_val == "full_heal":
+                        char = db.get_character(user_id)
+                        if char:
+                            db.heal_full(user_id)
+                    elif opt_val == "off":
+                        db.update_settings(user_id, debug_stat_mode="off", debug_check_mode="off", debug_reveal_all_info=0)
+
+                return None, build_debug_embed(user_id)
+
+        forced_res, embed = await db.adb(_apply_debug_command_and_build)
+        if forced_res is True:
+            await interaction.response.send_message("Enemy encounter triggered! Combat will begin on the next turn.", ephemeral=True)
+            return
+        if forced_res is False:
+            await interaction.response.send_message("No active session to trigger an encounter in.", ephemeral=True)
+            return
+
         view = DebugMenuView(user_id)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 

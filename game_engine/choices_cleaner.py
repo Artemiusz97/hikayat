@@ -15,10 +15,48 @@ DEFAULT_STAT_FALLBACK_LABELS = {
     'AGI': 'Attempt a swift movement',
     'END': 'Brace and endure the situation',
     'INT': 'Analyze the situation carefully',
-    'PER': 'Observe the surroundings',
+    'PER': 'Assess a nearby detail',
     'CHA': 'Speak with someone nearby',
     'LUK': 'Take a spontaneous chance',
 }
+
+_GENERIC_EXAMINE_LABEL_RE = re.compile(
+    r"^(?:carefully\s+|quickly\s+|quietly\s+)?(?:observe|examine|survey|scan|look\s+around|inspect|take\s+in)\s+"
+    r"(?:(?:your\s+)?surroundings|the\s+(?:immediate\s+)?(?:room|area|vicinity|scene|hall|hallway|clearing|corridor|courtyard|campus)(?:\s+around\s+you)?|"
+    r"around(?:\s+the\s+(?:room|area))?|those\s+present)\b",
+    re.IGNORECASE,
+)
+
+
+def _is_generic_examine_choice(choice: dict, label_str: str) -> bool:
+    """Returns True for generic room/surroundings observe choices replaced by zero-turn Examine."""
+    if not isinstance(choice, dict):
+        return False
+    if (
+        choice.get("is_quest_action")
+        or choice.get("is_climax_action")
+        or choice.get("is_anomaly_inquiry")
+        or choice.get("incursion_action")
+        or choice.get("site_action")
+        or choice.get("clue_pair_ids")
+        or str(choice.get("sub_intent") or "").lower() in ("deduce_clues", "pickup_item")
+    ):
+        return False
+    lbl_clean = re.sub(r"^[^a-z0-9]+", "", str(label_str or "").strip().lower())
+    if not lbl_clean:
+        return False
+    if _GENERIC_EXAMINE_LABEL_RE.search(lbl_clean):
+        return True
+    c_intent = str(choice.get("intent") or "").strip().lower()
+    stat_up = str(choice.get("stat") or "").strip().upper()
+    if (
+        c_intent == "area_scout"
+        and not str(choice.get("target_npc") or "").strip()
+        and stat_up in ("PER", "INT", "NONE", "FREE", "")
+        and any(w in lbl_clean for w in ("surroundings", "look around", "survey", "observe", "examine the", "scan the", "scout the area", "check the room"))
+    ):
+        return True
+    return False
 
 
 def _strip_wrapping_quotes(val: Any) -> str:
@@ -705,6 +743,120 @@ def _sanitize_choice_labels(choices: list) -> list:
     return choices
 
 
+def order_choices_canonically(
+    choices: list,
+    *,
+    in_dialogue: bool = False,
+    in_combat: bool = False,
+    in_intimate: bool = False,
+) -> list:
+    """Stably sort non-combat/non-intimate choices: Barriers -> Story Quest -> Bounty/Quest -> Engine Priority -> General -> Utilities/Exits."""
+    if not choices:
+        return []
+    items = list(choices)
+    if in_combat or in_intimate or any(not isinstance(c, dict) for c in items):
+        return items
+    if any(
+        c.get("_intimate_scene_choice")
+        or c.get("_stage_2_ultimatum_locked")
+        or str(c.get("sub_intent") or "").startswith("combat_")
+        or str(c.get("choice_type") or "") in ("attack", "spell", "tactic", "flee")
+        for c in items
+    ):
+        return items
+
+    def _sort_key(c: Dict[str, Any]) -> Tuple[int, int]:
+        lbl_low = str(c.get("label") or "").strip().lower()
+        intent_low = str(c.get("intent") or "").strip().lower()
+        sub_intent_low = str(c.get("sub_intent") or "").strip().lower()
+        stat_up = str(c.get("stat") or "NONE").strip().upper()
+        qid_up = str(c.get("quest_id") or "").strip().upper()
+        ctype_low = str(c.get("contract_type") or "").strip().lower()
+
+        is_q_handoff = bool(c.get("_quest_dialogue_handoff"))
+        is_verified_q = bool(
+            c.get("is_quest_action")
+            or c.get("_python_verified_quest")
+            or is_q_handoff
+            or (c.get("incursion_action") and qid_up)
+        )
+        is_story_q = bool(c.get("is_story_quest") or (is_verified_q and qid_up.startswith("SQ-")))
+        is_climax_q = bool(c.get("is_climax_action") or ctype_low == "climax")
+        is_premature_climax = bool(c.get("is_premature_climax") or c.get("rush_climax"))
+
+        # Tier 0: Hard scene locks / barriers / restraint break-free overrides
+        if (
+            c.get("_access_barrier")
+            or "break free from" in lbl_low
+            or "cut the bindings" in lbl_low
+            or lbl_low.startswith("cover yourself")
+        ):
+            return (0, 0)
+
+        # Tier 1: Main / Story Quest (ALWAYS FIRST)
+        if is_climax_q and not is_premature_climax:
+            return (1, 0)
+        if is_story_q and not is_premature_climax:
+            return (1, 1)
+        if (is_climax_q or is_story_q) and is_premature_climax:
+            return (1, 2)
+
+        # Tier 2: Bounty / Side Quest / Caseboard Synthesis (IMMEDIATELY AFTER STORY QUEST)
+        if is_verified_q:
+            return (2, 0)
+        if sub_intent_low == "deduce_clues" or bool(c.get("clue_pair_ids")):
+            return (2, 1)
+
+        # Tier 5: Trailing exits & free utility actions
+        if not is_q_handoff and (
+            c.get("_pinned_dialogue_exit")
+            or intent_low == "dialogue_exit"
+            or bool(c.get("ends_dialogue"))
+        ):
+            return (5, 2)
+        if "observe your surroundings" in lbl_low or (
+            intent_low == "area_scout"
+            and stat_up in ("FREE", "NONE", "")
+            and int(c.get("requirement") or 0) <= 0
+        ):
+            return (5, 1)
+        if (
+            sub_intent_low == "redress"
+            or "redress / get dressed" in lbl_low
+            or "put down what you are carrying" in lbl_low
+            or "retrieve your clothes and get dressed" in lbl_low
+        ):
+            return (5, 0)
+
+        # Dialogue Band 3 Pre-Exit Utilities (stay right before dialogue_exit)
+        if in_dialogue and (
+            intent_low in ("phone_contact_exchange", "party_recruit", "join_activity", "epistemic_containment")
+            or bool(c.get("_convince_stay") or c.get("departure_action") == "convince_stay")
+            or bool(c.get("is_privacy_nudge") or c.get("_privacy_nudge") or sub_intent_low == "privacy_nudge")
+            or "walk with " in lbl_low
+            or "for privacy" in lbl_low
+            or (intent_low == "movement" and "quieter" in lbl_low)
+        ):
+            return (4, 1)
+
+        # Tier 3: Non-quest priority engine slots & ambient scene encounters (open exploration)
+        if not in_dialogue:
+            if c.get("_priority_slot"):
+                return (3, 0)
+            if any(k in lbl_low for k in ("[meetup]", "[wait]")):
+                return (3, 1)
+            if (
+                intent_low in ("anomalous_incursion_action", "anomalous_site_action")
+                or bool(c.get("site_action") or c.get("site_id"))
+            ):
+                return (3, 2)
+
+        # Tier 4: Contextual roleplay, skill checks, present-NPC speak, and non-quest travel
+        return (4, 0)
+
+    return sorted(items, key=_sort_key)
+
+
 def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: str = "", char: dict = None, dialogue_partner: str = None, current_npcs: list = None, session_id: int = None, departed_npcs: list = None) -> list:
     from scenario_data import is_mechanic_enabled, is_non_combat_scenario, has_tag
     is_non_combat = (
@@ -759,6 +911,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 else ""
             )
             if not label_str or is_malformed_choice_label(label_str):
+                continue
+            if _is_generic_examine_choice(c, label_str):
                 continue
             label_lower = label_str.lower()
 
@@ -976,6 +1130,8 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 "event_key", "_active_quest_inquiry", "_is_world_rumor_inquiry",
                 "_is_break_the_news", "linked_quest_id", "_topic_sig",
                 "_deterministic_supplement", "_quest_dialogue_handoff", "_access_barrier",
+                "site_action", "site_id", "_intimate_scene_choice",
+                "pickup_item_name", "_stealth_injected",
             ):
                 if _extra_k in c and c[_extra_k] is not None:
                     val_extra = c[_extra_k]
@@ -1925,20 +2081,55 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                     })
 
             if missing_npc_choices:
-                # If choices list is getting long, deduplicate redundant travel options
+                # If choices list is getting long, deduplicate redundant non-quest travel options
                 if len(cleaned) + len(missing_npc_choices) > 5:
                     travel_choices = []
                     non_travel_choices = []
+                    observe_choices = []
+                    active_wp_leaves: set[str] = set()
+                    if session_id:
+                        try:
+                            from mechanics.world.waypoints.matching import get_story_quest_climax_location
+                            raw_wp_locs: list[str] = []
+                            for wp_row in (db.get_all_session_active_waypoints(session_id) or []):
+                                if isinstance(wp_row, dict) and wp_row.get("target_location"):
+                                    raw_wp_locs.append(str(wp_row["target_location"]))
+                            _, climax_loc_tr = get_story_quest_climax_location(session_id)
+                            if climax_loc_tr:
+                                raw_wp_locs.append(str(climax_loc_tr))
+                            for r_loc in raw_wp_locs:
+                                for part in r_loc.replace("->", "➔").split("➔"):
+                                    p_clean = part.strip().lower()
+                                    if len(p_clean) >= 4 and p_clean not in ("main area", "area"):
+                                        active_wp_leaves.add(p_clean)
+                        except Exception:
+                            pass
                     for c in cleaned:
                         raw_l = c.get("label", "").lower()
+                        if "observe your surroundings" in raw_l:
+                            observe_choices.append(c)
+                            continue
                         is_tr = any(k in raw_l for k in ["travel ", "head for ", "head to ", "head toward ", "leave the ", "slip through "])
                         if is_tr:
                             travel_choices.append(c)
                         else:
                             non_travel_choices.append(c)
-                    # Keep max 1-2 distinct travel options
-                    travel_choices = travel_choices[:1]
-                    cleaned = non_travel_choices + travel_choices
+                    protected_tr = []
+                    other_tr = []
+                    for tc in travel_choices:
+                        tc_lbl = str(tc.get("label") or "").lower()
+                        is_protected_tr = bool(
+                            tc.get("is_quest_action")
+                            or tc.get("is_story_quest")
+                            or tc.get("quest_id")
+                            or any(leaf in tc_lbl for leaf in active_wp_leaves)
+                        )
+                        if is_protected_tr:
+                            protected_tr.append(tc)
+                        else:
+                            other_tr.append(tc)
+                    travel_choices = protected_tr + other_tr[:2]
+                    cleaned = non_travel_choices + travel_choices + observe_choices
 
                 # If Choice #1 is a primary quest action or skill check, preserve it at index 0 and insert NPC choices immediately after
                 if cleaned and (
@@ -2434,7 +2625,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
 
     # Prune unwarranted stealth choices and locked-out failed stealth choices (Issues 1 & 11)
     try:
-        from mechanics.stealth import is_stealth_context_warranted, is_stealth_choice_locked_out
+        from mechanics.stealth import is_stealth_context_warranted, is_stealth_choice_locked_out, any_actor_hidden
         sess_st_check = db.get_session(session_id) if session_id else {"scenario": scenario, "current_location": location}
         if isinstance(sess_st_check, dict):
             sess_st_check = dict(sess_st_check)
@@ -2442,7 +2633,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 sess_st_check["current_location"] = location
             if scenario:
                 sess_st_check["scenario"] = scenario
-        st_warranted = is_stealth_context_warranted(sess_st_check)
+        st_warranted = is_stealth_context_warranted(sess_st_check) or bool(any_actor_hidden(sess_st_check))
         filtered_st: list[dict] = []
         for c in cleaned:
             if not isinstance(c, dict):
@@ -2453,6 +2644,7 @@ def clean_choices_impl(cls, choices: list, scenario: str = "fantasy", location: 
                 continue
             is_barrier_c = bool(
                 c.get("_priority_slot")
+                or c.get("_stealth_injected")
                 or c.get("is_phase2_choice")
                 or "outside the locked entrance" in str(location or "").lower()
             )
@@ -2696,7 +2888,11 @@ def build_hybrid_turn_choices(
     )
 
     if in_active_intimate_turn:
-        return _sanitize_choice_labels(cleaned[:5])
+        intimate_out = _sanitize_choice_labels(cleaned[:5])
+        for _ic in intimate_out:
+            if isinstance(_ic, dict):
+                _ic["_intimate_scene_choice"] = True
+        return intimate_out
 
     # 3b. Guarantee Quest / Story Climax Action Choices when at an active waypoint (or remote Story Quest travel / dialogue handoff)
     _adv_qids_raw: list[str] = []
@@ -3057,18 +3253,48 @@ def build_hybrid_turn_choices(
             "_server_stamped": True,
         })
 
-    if not in_active_dialogue_turn and not in_active_intimate_turn:
-        if not any("observe your surroundings" in str(c.get("label", "")).lower() for c in merged_choices):
-            merged_choices.append({
-                "label": "Observe your surroundings and inspect those present",
-                "stat": "FREE",
-                "requirement": 0,
-                "mp_cost": 0,
-                "intent": "area_scout",
-                "_server_stamped": True,
-            })
-    elif in_active_dialogue_turn and not in_active_intimate_turn and not has_access_barrier:
+    if not in_active_intimate_turn:
+        pickable_candidates: list[tuple[str, str]] = []
+        seen_pick_lows: set[str] = set()
+        for d_item in (phys.get("dropped_items") or [] if isinstance(phys, dict) else []):
+            raw_d = str(d_item.get("name") or "").strip() if isinstance(d_item, dict) else str(d_item or "").strip()
+            clean_d = re.sub(r"\s*\[(?:GEAR|ITEM|CONSUMABLE|SPELLBOOK|DIGITAL)_JSON:.*$", "", raw_d, flags=re.IGNORECASE).strip()
+            if clean_d and clean_d.lower() not in seen_pick_lows:
+                seen_pick_lows.add(clean_d.lower())
+                pickable_candidates.append((clean_d, raw_d))
+        props_map_ch = phys.get("props") if isinstance(phys, dict) and isinstance(phys.get("props"), dict) else {}
+        for pk, pv in props_map_ch.items():
+            clean_pk = str(pk or "").strip()
+            state_low = str(pv or "").strip().lower()
+            if (
+                clean_pk
+                and clean_pk.lower() not in seen_pick_lows
+                and any(w in state_low for w in ("dropped", "floor", "ground", "table", "desk", "counter", "loose", "discarded", "left behind"))
+            ):
+                seen_pick_lows.add(clean_pk.lower())
+                pickable_candidates.append((clean_pk, clean_pk))
+        existing_pick_lbls = {str(c.get("label") or "").strip().lower() for c in merged_choices if isinstance(c, dict)}
+        for clean_nm, raw_nm in pickable_candidates[:3]:
+            pick_lbl = f"Pick up {clean_nm}"
+            if pick_lbl.lower() not in existing_pick_lbls and not any(clean_nm.lower() in ex and "pick up" in ex for ex in existing_pick_lbls):
+                merged_choices.append({
+                    "label": pick_lbl,
+                    "stat": "FREE",
+                    "requirement": 0,
+                    "mp_cost": 0,
+                    "intent": "general_action",
+                    "sub_intent": "pickup_item",
+                    "pickup_item_name": raw_nm,
+                    "_server_stamped": True,
+                })
+                existing_pick_lbls.add(pick_lbl.lower())
+
+    if in_active_dialogue_turn and not in_active_intimate_turn and not has_access_barrier:
         from mechanics.social.conversation_choices import pin_dialogue_exit_last
         merged_choices = pin_dialogue_exit_last(merged_choices, new_partners, max_total=8)
 
+    merged_choices = order_choices_canonically(
+        merged_choices,
+        in_dialogue=in_active_dialogue_turn,
+    )
     return _sanitize_choice_labels(merged_choices)

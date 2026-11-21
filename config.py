@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-APP_VERSION = "3.4.0"
+APP_VERSION = "3.5.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -127,6 +127,13 @@ GENERATED_IMAGES_DIR = os.getenv(
     os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "generated_images"))
 )
 os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+
+# Drop-in directory for user-supplied custom fonts (.woff2, .woff, .ttf, .otf)
+CUSTOM_FONTS_DIR = os.getenv(
+    "CUSTOM_FONTS_DIR",
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "custom_fonts")),
+)
+os.makedirs(CUSTOM_FONTS_DIR, exist_ok=True)
 
 # Sanity checks at import time so the bot fails fast with a clear message
 # instead of dying deep inside a Discord event handler.

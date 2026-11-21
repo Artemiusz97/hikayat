@@ -89,16 +89,20 @@ def _conn_ctx(conn: sqlite3.Connection | None):
 
 def _ensure_epistemic_tables(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
-    has_facts = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='epistemic_facts' LIMIT 1"
-    ).fetchone()
-    has_know = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='epistemic_knowledge' LIMIT 1"
-    ).fetchone()
-    if has_facts and has_know:
-        return
-    for sql in EPISTEMIC_V55_DDL:
-        conn.execute(sql)
+    def _check(c: sqlite3.Connection) -> None:
+        has_facts = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='epistemic_facts' LIMIT 1"
+        ).fetchone()
+        has_know = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='epistemic_knowledge' LIMIT 1"
+        ).fetchone()
+        if has_facts and has_know:
+            return
+        for sql in EPISTEMIC_V55_DDL:
+            c.execute(sql)
+
+    from .core import ensure_table_group_once
+    ensure_table_group_once(conn, "epistemic_v55", _check)
 
 
 def _opt_int(val: Any) -> int | None:

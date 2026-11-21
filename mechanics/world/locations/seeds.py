@@ -1445,7 +1445,6 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
                                 "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
                                 (primary_hq, wn.get("node_id") or "", session_id, faction_name),
                             )
-                            conn.commit()
                     return primary_hq
             for loc_row in existing_locs_check:
                 if (loc_row.get("sub_name") or "").strip().lower() == hq_low:
@@ -1456,7 +1455,6 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
                                 "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
                                 (primary_hq, matched_nid, session_id, faction_name),
                             )
-                            conn.commit()
                     return primary_hq
 
             # Resolve parent wing facility (General Student Clubroom Wing / Cultural & Student Clubroom Wing)
@@ -1540,7 +1538,6 @@ def provision_faction_hq_tier2_location(session_id: int, faction_name: str, scen
                         "UPDATE factions SET hq_location_id = ?, hq_node_id = COALESCE(NULLIF(?, ''), hq_node_id) WHERE session_id = ? AND lower(name) = lower(?)",
                         (primary_hq, matched_nid, session_id, faction_name),
                     )
-                    conn.commit()
             return primary_hq
 
         # Major School Club: if already seeded cleanly with sub-locations, do not append duplicate rooms

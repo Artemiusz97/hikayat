@@ -1,12 +1,28 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { 
-  Sparkles, Swords, ScrollText, Heart, ShieldAlert, Coins, Gift, ChevronDown, ChevronUp,
-  Compass, MapPin, Map, Calendar, Users
+import {
+  Sparkles,
+  Swords,
+  ScrollText,
+  Heart,
+  ShieldAlert,
+  Coins,
+  Gift,
+  ChevronDown,
+  History,
+  Users,
 } from 'lucide-react';
 import { getOutcomeTierTheme } from '../StoryFeed/HistoryCard';
 import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
+import { resolveNpcDemographics } from '../../utils/npcDemographics';
+import { isAnomalousNpc } from '../../utils/sceneTargets';
+import { formatScenarioCurrency } from '../../utils/currency';
+import {
+  AcrylicPanel,
+  CollapsibleSection,
+  MotionButton,
+} from '../Common/MotionPrimitives';
 
 export const formatSocialFeedbackPill = (pill, t) => {
   if (!pill) return '';
@@ -23,23 +39,21 @@ export const formatSocialFeedbackPill = (pill, t) => {
   return String(pill.label || detail || key || '');
 };
 
-const parseLocationTiers = (rawLocation, fallbackTitle) => {
-  const loc = String(rawLocation || fallbackTitle || 'Local Region').trim();
-  const parts = loc.split(/\s*(?:➔|->|>)\s*/).map(s => s.trim()).filter(Boolean);
-  return parts.length > 0 ? parts : ['Local Region'];
-};
-
 const parseClues = (raw) => {
   if (!raw) return [];
   if (Array.isArray(raw)) {
     return raw
-      .map(c => String(typeof c === 'string' ? c : (c?.text || c?.lead || '')).replace(/^[\s•*\-\d.)]+/, '').trim())
+      .map((c) =>
+        String(typeof c === 'string' ? c : c?.text || c?.lead || '')
+          .replace(/^[\s•*\-\d.)]+/, '')
+          .trim()
+      )
       .filter(Boolean);
   }
   return String(raw)
     .split(/\r?\n/)
-    .map(line => line.replace(/^[\s•*\-\d.)]+/, '').trim())
-    .filter(line => line.length > 0);
+    .map((line) => line.replace(/^[\s•*\-\d.)]+/, '').trim())
+    .filter((line) => line.length > 0);
 };
 
 const normalizeClue = (str) => {
@@ -50,74 +64,115 @@ const normalizeClue = (str) => {
     .trim();
 };
 
-export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), seenCompletedSubs = new Set()) => {
+export const extractTurnOutcomes = (
+  entry,
+  turnNumber,
+  seenClues = new Set(),
+  seenCompletedSubs = new Set()
+) => {
   if (!entry || typeof entry !== 'object' || entry.type === 'scene') return null;
 
-  const outcome = typeof entry.outcome === 'object' && entry.outcome ? entry.outcome : {};
+  const outcome =
+    typeof entry.outcome === 'object' && entry.outcome ? entry.outcome : {};
   const rawCheck = entry.check || outcome.check || outcome.skill_check || {};
-  const checkTier = entry.tier || entry.check_tier || outcome.check_tier || rawCheck.check_tier || rawCheck.tier || null;
-  const tierLabel = entry.tier_label || outcome.tier_label || rawCheck.tier_label || checkTier || null;
+  const checkTier =
+    entry.tier ||
+    entry.check_tier ||
+    outcome.check_tier ||
+    rawCheck.check_tier ||
+    rawCheck.tier ||
+    null;
+  const tierLabel =
+    entry.tier_label ||
+    outcome.tier_label ||
+    rawCheck.tier_label ||
+    checkTier ||
+    null;
   const checkStat = entry.stat || outcome.stat || rawCheck.stat || null;
-  const checkChance = entry.chance ?? outcome.chance ?? rawCheck.chance ?? rawCheck.success_pct ?? null;
+  const checkChance =
+    entry.chance ??
+    outcome.chance ??
+    rawCheck.chance ??
+    rawCheck.success_pct ??
+    null;
   const checkRoll = entry.roll ?? outcome.roll ?? rawCheck.roll ?? null;
 
   const xpGained = Number(entry.xp_gained || outcome.xp_gained || 0);
-  const levelsGained = Array.isArray(entry.levels_gained) ? entry.levels_gained : [];
+  const levelsGained = Array.isArray(entry.levels_gained)
+    ? entry.levels_gained
+    : [];
   const mpSpent = Number(entry.mp_spent || 0);
 
-  // Character outcomes (HP, MP, Gold, Items, Status)
   const charOutcomes = Array.isArray(entry.character_outcomes)
     ? entry.character_outcomes
-    : (Array.isArray(outcome.character_outcomes) ? outcome.character_outcomes : []);
+    : Array.isArray(outcome.character_outcomes)
+      ? outcome.character_outcomes
+      : [];
 
   let hpDelta = 0;
   let mpDelta = mpSpent > 0 ? -mpSpent : 0;
-  let goldDelta = Number(entry.gold_delta ?? outcome.gold_delta ?? outcome.gold_change ?? 0);
+  let goldDelta = Number(
+    entry.gold_delta ?? outcome.gold_delta ?? outcome.gold_change ?? 0
+  );
   const itemsGained = new Set();
   const itemsLost = new Set();
   const statusEffects = new Set();
 
-  (Array.isArray(entry.items_gained) ? entry.items_gained : []).forEach(it => {
+  (Array.isArray(entry.items_gained) ? entry.items_gained : []).forEach((it) => {
     const name = typeof it === 'string' ? it : it?.name;
     if (name) itemsGained.add(name);
   });
-  (Array.isArray(entry.loot) ? entry.loot : []).forEach(it => {
+  (Array.isArray(entry.loot) ? entry.loot : []).forEach((it) => {
     const name = typeof it === 'string' ? it : it?.name;
     if (name) itemsGained.add(name);
   });
 
-  charOutcomes.forEach(co => {
+  charOutcomes.forEach((co) => {
     if (!co || typeof co !== 'object') return;
     hpDelta += Number(co.hp_change || 0);
     mpDelta += Number(co.mp_change || 0);
     goldDelta += Number(co.gold_change || 0);
-    (Array.isArray(co.items_gained) ? co.items_gained : []).forEach(it => {
+    (Array.isArray(co.items_gained) ? co.items_gained : []).forEach((it) => {
       const name = typeof it === 'string' ? it : it?.name;
       if (name) itemsGained.add(name);
     });
-    (Array.isArray(co.loot) ? co.loot : []).forEach(it => {
+    (Array.isArray(co.loot) ? co.loot : []).forEach((it) => {
       const name = typeof it === 'string' ? it : it?.name;
       if (name) itemsGained.add(name);
     });
-    (Array.isArray(co.items_lost) ? co.items_lost : []).forEach(it => {
+    (Array.isArray(co.items_lost) ? co.items_lost : []).forEach((it) => {
       const name = typeof it === 'string' ? it : it?.name;
       if (name) itemsLost.add(name);
     });
-    (Array.isArray(co.status_effects) ? co.status_effects : []).forEach(st => {
-      const name = String(typeof st === 'string' ? st : (st?.name || '')).trim();
-      if (name && !['[]', '{}', '""', "''", 'none', 'null'].includes(name.toLowerCase())) {
+    (Array.isArray(co.status_effects) ? co.status_effects : []).forEach((st) => {
+      const name = String(
+        typeof st === 'string' ? st : st?.name || ''
+      ).trim();
+      if (
+        name &&
+        !['[]', '{}', '""', "''", 'none', 'null'].includes(name.toLowerCase())
+      ) {
         statusEffects.add(name);
       }
     });
   });
 
-  // Relationships & Factions
-  const rawRelUpdates = (Array.isArray(entry.relationship_updates) ? entry.relationship_updates : (outcome.relationship_updates || []))
-    .filter(r => r && (typeof r === 'string' || Number(r.delta_score ?? r.delta ?? 0) !== 0 || r.milestone_event));
+  const rawRelUpdates = (
+    Array.isArray(entry.relationship_updates)
+      ? entry.relationship_updates
+      : outcome.relationship_updates || []
+  ).filter(
+    (r) =>
+      r &&
+      (typeof r === 'string' ||
+        Number(r.delta_score ?? r.delta ?? 0) !== 0 ||
+        r.milestone_event)
+  );
   const seenRelNames = new Set();
   const relUpdates = [];
-  rawRelUpdates.forEach(r => {
-    const rawName = typeof r === 'string' ? r : (r.npc_name || r.npc || r.name || '');
+  rawRelUpdates.forEach((r) => {
+    const rawName =
+      typeof r === 'string' ? r : r.npc_name || r.npc || r.name || '';
     const cleanName = String(rawName).trim().toLowerCase();
     if (cleanName) {
       if (!seenRelNames.has(cleanName)) {
@@ -128,19 +183,26 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
       relUpdates.push(r);
     }
   });
-  const facUpdates = (Array.isArray(entry.faction_updates) ? entry.faction_updates : (outcome.faction_updates || []))
-    .filter(f => f && (typeof f === 'string' || Number(f.delta_score ?? f.delta ?? 0) !== 0));
+  const facUpdates = (
+    Array.isArray(entry.faction_updates)
+      ? entry.faction_updates
+      : outcome.faction_updates || []
+  ).filter(
+    (f) =>
+      f &&
+      (typeof f === 'string' || Number(f.delta_score ?? f.delta ?? 0) !== 0)
+  );
 
-  // Quests & Objectives with strict turn-by-turn Clue & Sub-objective deduplication
-  const rawQuests = Array.isArray(entry.quest_updates) ? entry.quest_updates : (outcome.quest_updates || []);
+  const rawQuests = Array.isArray(entry.quest_updates)
+    ? entry.quest_updates
+    : outcome.quest_updates || [];
   const questUpdates = [];
-  rawQuests.forEach(q => {
+  rawQuests.forEach((q) => {
     if (!q || typeof q !== 'object') return;
 
-    // Filter clues to only ones discovered on THIS specific turn
     const allClues = parseClues(q.current_clues);
     const newCluesThisTurn = [];
-    allClues.forEach(clue => {
+    allClues.forEach((clue) => {
       const norm = normalizeClue(clue);
       if (norm && !seenClues.has(norm)) {
         seenClues.add(norm);
@@ -148,11 +210,14 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
       }
     });
 
-    // Filter completed sub-quests to only ones completed on THIS specific turn
-    const rawSubs = Array.isArray(q.completed_sub_quest_ids) ? q.completed_sub_quest_ids : [];
+    const rawSubs = Array.isArray(q.completed_sub_quest_ids)
+      ? q.completed_sub_quest_ids
+      : [];
     const newCompletedSubs = [];
-    const qKey = String(q.quest_id || q.title || 'quest').toLowerCase().trim();
-    rawSubs.forEach(subId => {
+    const qKey = String(q.quest_id || q.title || 'quest')
+      .toLowerCase()
+      .trim();
+    rawSubs.forEach((subId) => {
       const subKey = `${qKey}_sub_${subId}`;
       if (!seenCompletedSubs.has(subKey)) {
         seenCompletedSubs.add(subKey);
@@ -160,11 +225,11 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
       }
     });
 
-    const hasStatusChange = q.status === 'Completed' || q.status === 'Failed';
+    const hasStatusChange =
+      q.status === 'Completed' || q.status === 'Failed';
     const hasCompletedSubs = newCompletedSubs.length > 0;
     const hasNewClues = newCluesThisTurn.length > 0;
 
-    // Only surface quest update if something NEW actually happened this turn
     if (hasStatusChange || hasCompletedSubs || hasNewClues) {
       questUpdates.push({
         ...q,
@@ -174,25 +239,37 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
     }
   });
 
-  // Combat Log
-  const rawCombat = entry.combat_log || outcome.combat_log || outcome._combat_log || [];
+  const rawCombat =
+    entry.combat_log || outcome.combat_log || outcome._combat_log || [];
   const combatLines = Array.isArray(rawCombat)
     ? rawCombat.filter(Boolean).map(String)
-    : (typeof rawCombat === 'string' && rawCombat.trim() ? rawCombat.split('\n').filter(Boolean) : []);
+    : typeof rawCombat === 'string' && rawCombat.trim()
+      ? rawCombat.split('\n').filter(Boolean)
+      : [];
   if (entry.enemy_attack_notice) {
     combatLines.push(String(entry.enemy_attack_notice));
   }
 
-  const rawSocialPills = entry.social_feedback_pills || outcome.social_feedback_pills || [];
+  const rawSocialPills =
+    entry.social_feedback_pills || outcome.social_feedback_pills || [];
   const socialFeedbackPills = Array.isArray(rawSocialPills)
-    ? rawSocialPills.filter(Boolean).map((p) => (
+    ? rawSocialPills.filter(Boolean).map((p) =>
         typeof p === 'string'
           ? { label: p, tone: 'neutral' }
-          : { key: p.key || '', label: p.label || '', detail: p.detail || '', tone: p.tone || 'neutral' }
-      ))
+          : {
+              key: p.key || '',
+              label: p.label || '',
+              detail: p.detail || '',
+              tone: p.tone || 'neutral',
+            }
+      )
     : [];
-  const intimateUpdate = outcome.intimate_update || entry.intimate_update || null;
-  const refractoryNotice = outcome._refractory_recovered_notice || entry._refractory_recovered_notice || null;
+  const intimateUpdate =
+    outcome.intimate_update || entry.intimate_update || null;
+  const refractoryNotice =
+    outcome._refractory_recovered_notice ||
+    entry._refractory_recovered_notice ||
+    null;
 
   return {
     turnNumber,
@@ -221,56 +298,36 @@ export const extractTurnOutcomes = (entry, turnNumber, seenClues = new Set(), se
   };
 };
 
-const WorldOutcomeSidebar = ({
-  session,
-  onOpenWorldMap,
-  onSelectContact,
-  onQuickAction,
-  isMobileDrawer = false,
-}) => {
-  const { t } = useTranslation();
-  const [expandedTurnMap, setExpandedTurnMap] = useState({});
-
-  const toggleTurnExpanded = (turnNumber, defaultExpanded) => {
-    setExpandedTurnMap((prev) => {
-      const current = prev[turnNumber] !== undefined ? prev[turnNumber] : defaultExpanded;
-      return { ...prev, [turnNumber]: !current };
-    });
-  };
-
-  const locationTiers = parseLocationTiers(session?.current_location, session?.scene_title);
-  const currentPlace = locationTiers[locationTiers.length - 1];
-  const parentRegions = locationTiers.slice(0, -1);
-
-  const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
-  const dialoguePartners = new Set(
-    (() => {
-      let list = [];
-      if (Array.isArray(session?.dialogue_partners)) {
-        list = session.dialogue_partners;
-      } else if (session?.dialogue_partner) {
-        const dp = session.dialogue_partner;
-        if (Array.isArray(dp)) {
-          list = dp;
-        } else if (typeof dp === 'string') {
-          const trimmed = dp.trim();
-          if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
-            try {
-              const parsed = JSON.parse(trimmed);
-              list = Array.isArray(parsed) ? parsed : [dp];
-            } catch {
-              list = [dp];
-            }
-          } else {
-            list = [dp];
-          }
+const resolveDialoguePartners = (session) => {
+  let list = [];
+  if (Array.isArray(session?.dialogue_partners)) {
+    list = session.dialogue_partners;
+  } else if (session?.dialogue_partner) {
+    const dp = session.dialogue_partner;
+    if (Array.isArray(dp)) {
+      list = dp;
+    } else if (typeof dp === 'string') {
+      const trimmed = dp.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          list = Array.isArray(parsed) ? parsed : [dp];
+        } catch {
+          list = [dp];
         }
+      } else {
+        list = [dp];
       }
-      return list;
-    })().map(n => String(n || '').toLowerCase().trim()).filter(Boolean)
+    }
+  }
+  return new Set(
+    list
+      .map((n) => String(n || '').toLowerCase().trim())
+      .filter(Boolean)
   );
+};
 
-  // Extract turn outcomes chronologically with persistent deduplication, then display newest first
+const computeTurnOutcomesList = (session) => {
   const rawHistory = Array.isArray(session?.history) ? session.history : [];
   let actionCount = 0;
   const turnOutcomes = [];
@@ -280,1002 +337,1193 @@ const WorldOutcomeSidebar = ({
   rawHistory.forEach((entry) => {
     if (entry && typeof entry === 'object' && entry.type !== 'scene') {
       actionCount += 1;
-      const parsed = extractTurnOutcomes(entry, actionCount, seenClues, seenCompletedSubs);
+      const parsed = extractTurnOutcomes(
+        entry,
+        actionCount,
+        seenClues,
+        seenCompletedSubs
+      );
       if (parsed) {
         turnOutcomes.push(parsed);
       }
     }
   });
   turnOutcomes.reverse();
+  return turnOutcomes;
+};
 
-  const rawTime = session?.formatted_time || 'Day 1 • 08:00';
-  const localizedTime = rawTime.replace(/\bDay\b/gi, t('scene.day', 'Day'));
+export const EpistemicWatchStrip = ({
+  session,
+  collapsed = false,
+  onToggleCollapse,
+  isSheet = false,
+  className = '',
+}) => {
+  const { t } = useTranslation();
+  const ep = session?.epistemic_hud;
+  if (!ep || typeof ep !== 'object') return null;
+
+  const risk = String(ep.leak_risk || 'none').toLowerCase();
+  const spotted = Array.isArray(ep.spotted_witnesses) ? ep.spotted_witnesses : [];
+  const knownW = Array.isArray(ep.known_witnesses) ? ep.known_witnesses : [];
+  const alibis = Array.isArray(ep.active_alibis) ? ep.active_alibis : [];
+  const secrets = Array.isArray(ep.held_npc_secrets) ? ep.held_npc_secrets : [];
+  if (
+    risk === 'none' &&
+    spotted.length === 0 &&
+    knownW.length === 0 &&
+    alibis.length === 0 &&
+    secrets.length === 0
+  ) {
+    return null;
+  }
+
+  const riskClass =
+    risk === 'critical'
+      ? 'bg-red-950/90 border-red-400/70 text-red-100 font-semibold'
+      : risk === 'high'
+        ? 'bg-red-950/80 border-red-500/50 text-red-200'
+        : risk === 'moderate' || risk === 'medium'
+          ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
+          : 'bg-yellow-950/70 border-yellow-600/40 text-yellow-200';
+
+  const riskLabel =
+    risk === 'critical'
+      ? t('scene.leak_risk_critical', 'Leak Risk: Critical')
+      : risk === 'high'
+        ? t('scene.leak_risk_high', 'Leak Risk: High')
+        : risk === 'moderate'
+          ? t('scene.leak_risk_moderate', 'Leak Risk: Moderate')
+          : risk === 'medium'
+            ? t('scene.leak_risk_medium', 'Leak Risk: Medium')
+            : t('scene.leak_risk_low', 'Leak Risk: Low');
+
+  const content = (
+    <div className="px-3 py-2 text-[11px] space-y-1.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-semibold uppercase tracking-wider text-gray-200 flex items-center gap-1.5 min-w-0 truncate">
+          <span aria-hidden="true">🕵️</span>
+          <span className="truncate">
+            {t('scene.epistemic_watch', 'Epistemic Watch')}
+          </span>
+        </span>
+        <div className="flex items-center gap-1 shrink-0">
+          {risk !== 'none' && (
+            <span
+              className={`px-1.5 py-0.5 rounded border font-mono text-[10px] ${riskClass}`}
+            >
+              {riskLabel}
+            </span>
+          )}
+          {!isSheet && onToggleCollapse && (
+            <MotionButton
+              onClick={onToggleCollapse}
+              className="hk-icon-btn h-6 min-w-6 text-gray-400 hover:text-gray-100"
+              aria-expanded={!collapsed}
+              aria-label={
+                collapsed
+                  ? t('nav.expand', 'Expand')
+                  : t('nav.collapse', 'Collapse')
+              }
+              title={
+                collapsed
+                  ? t('nav.expand', 'Expand')
+                  : t('nav.collapse', 'Collapse')
+              }
+            >
+              <ChevronDown
+                size={13}
+                className={`transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+              />
+            </MotionButton>
+          )}
+        </div>
+      </div>
+
+      <CollapsibleSection isOpen={isSheet || !collapsed}>
+        <div className="flex flex-wrap gap-1 pt-0.5 text-[10px] text-gray-300">
+          {spotted.length > 0 && (
+            <span className="hk-chip bg-rose-500/20 text-rose-200">
+              {t('scene.spotted_witnesses', 'Spotted Witnesses')}:{' '}
+              {spotted.length}
+            </span>
+          )}
+          {knownW.length > 0 && (
+            <span className="hk-chip">
+              {t('scene.known_witnesses', 'Known Witnesses')}: {knownW.length}
+            </span>
+          )}
+          {alibis.length > 0 && (
+            <span className="hk-chip">
+              {t('scene.active_alibis', 'Active Alibis')}: {alibis.length}
+            </span>
+          )}
+          {secrets.length > 0 && (
+            <span className="hk-chip bg-purple-500/20 text-purple-200">
+              {t('scene.held_secrets', 'Secrets Held')}: {secrets.length}
+            </span>
+          )}
+        </div>
+      </CollapsibleSection>
+    </div>
+  );
+
+  if (isSheet) {
+    return (
+      <div className={`hk-flat-section border-b border-fantasy-border/35 ${className}`.trim()}>
+        {content}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-full bg-fantasy-panel text-gray-200 select-none">
-      {/* SECTION 1: World & Scene Context (Location, Map, Day/Time, Present NPCs) - Desktop only (hidden in mobile drawer) */}
-      {!isMobileDrawer && (
-        <div className="p-3.5 sm:p-4 border-b border-fantasy-border bg-black/40 space-y-3 shrink-0">
-          {/* Header Row: Region & Day/Time */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2 text-xs sm:text-sm font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
-              <Compass size={16} />
-              <span>{t('scene.title', 'Scene & World')}</span>
-            </div>
-            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-950/70 border border-amber-600/60 text-[11px] font-mono font-bold text-amber-300 shadow-sm">
-              <Calendar size={12} className="text-amber-400" />
-              <span>{localizedTime}</span>
+    <AcrylicPanel
+      variant="pill"
+      origin="right"
+      className={`shrink-0 ${className}`.trim()}
+    >
+      {content}
+    </AcrylicPanel>
+  );
+};
+
+export const PresentNpcsCard = ({
+  session,
+  onSelectContact,
+  onQuickAction,
+  collapsed = false,
+  onToggleCollapse,
+  isSheet = false,
+  className = '',
+}) => {
+  const { t } = useTranslation();
+  const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
+  const dialoguePartners = useMemo(
+    () => resolveDialoguePartners(session),
+    [session?.dialogue_partners, session?.dialogue_partner]
+  );
+  const turnOutcomes = useMemo(
+    () => computeTurnOutcomesList(session),
+    [session?.history]
+  );
+
+  const header = (
+    <div className="px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0 border-b border-fantasy-border/25">
+      <div className="flex items-center gap-1.5 min-w-0">
+        <Users size={14} className="text-fantasy-accent shrink-0" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-200 truncate">
+          {t('scene.present', 'Present in Scene')}
+        </span>
+        {session?.crowd_state?.density &&
+          session.crowd_state.density !== 'empty' && (
+            <span
+              className="hk-chip hk-chip-accent text-[10px] shrink-0"
+              title={session.crowd_state.flavor || ''}
+            >
+              {t(
+                `scene.crowd_density_${session.crowd_state.density}`,
+                session.crowd_state.density
+              )}
             </span>
-          </div>
+          )}
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <span className="hk-chip tabular-nums">{npcs.length}</span>
+        {!isSheet && onToggleCollapse && (
+          <MotionButton
+            onClick={onToggleCollapse}
+            className="hk-icon-btn h-7 min-w-7 text-gray-400 hover:text-gray-100"
+            aria-expanded={!collapsed}
+            aria-label={
+              collapsed
+                ? t('nav.expand', 'Expand')
+                : t('nav.collapse', 'Collapse')
+            }
+            title={
+              collapsed
+                ? t('nav.expand', 'Expand')
+                : t('nav.collapse', 'Collapse')
+            }
+          >
+            <ChevronDown
+              size={14}
+              className={`transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+            />
+          </MotionButton>
+        )}
+      </div>
+    </div>
+  );
 
-          {/* Location Card + World Map Button */}
-          <div className="p-3 rounded-xl bg-gradient-to-b from-black/70 to-black/90 border border-fantasy-border/90 space-y-2.5 shadow-md">
-            <div className="flex items-start gap-2">
-              <MapPin size={16} className="text-fantasy-accent shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1">
-                {parentRegions.length > 0 && (
-                  <div className="text-[11px] font-mono text-gray-400 truncate mb-0.5">
-                    {parentRegions.join(' ➔ ')}
-                  </div>
-                )}
-                <div className="text-sm sm:text-base font-rpg font-bold text-amber-100 leading-snug break-words">
-                  {currentPlace}
-                </div>
-              </div>
-            </div>
+  const listBody = (
+    <div className="overflow-y-auto overscroll-contain [scrollbar-gutter:stable] custom-scrollbar px-3 py-1.5 flex-1 min-h-0">
+      {npcs.length === 0 ? (
+        <p className="py-5 text-center text-xs text-gray-400 italic">
+          {t('scene.no_npcs', 'No other characters in the immediate area.')}
+        </p>
+      ) : (
+        <div className="divide-y divide-fantasy-border/25">
+          {npcs.map((npc, idx) => {
+            const name =
+              typeof npc === 'string' ? npc : npc?.name || 'Unknown';
+            const isPartner = dialoguePartners.has(name.toLowerCase().trim());
+            const clothing =
+              typeof npc === 'object' ? npc?.clothing_status : null;
+            const anomTag =
+              typeof npc === 'object'
+                ? npc?.anomalous_npc_tag || npc?.basic_info?.anomalous_npc_tag
+                : null;
+            const isAnomaly = isAnomalousNpc(npc);
+            const statusEffects = (
+              typeof npc === 'object' && Array.isArray(npc?.status_effects)
+                ? npc.status_effects
+                : []
+            ).filter((eff) => {
+              const str = (
+                typeof eff === 'string' ? eff : eff?.name || ''
+              ).trim();
+              const low = str.toLowerCase();
+              return (
+                str &&
+                str !== '[]' &&
+                str !== '{}' &&
+                str !== '""' &&
+                str !== "''" &&
+                low !== 'none' &&
+                low !== 'null' &&
+                low !== 'present' &&
+                low !== 'absent' &&
+                low !== 'nearby'
+              );
+            });
 
-            {onOpenWorldMap && (
-              <button
-                type="button"
-                onClick={onOpenWorldMap}
-                className="w-full py-2 px-3 rounded-lg bg-fantasy-accent/20 hover:bg-fantasy-accent/30 border border-fantasy-accent/50 hover:border-fantasy-accent text-fantasy-accent text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-[0.99]"
-              >
-                <Map size={14} />
-                <span>{t('scene.open_map', 'Open World Map & Fast Travel')}</span>
-              </button>
-            )}
-          </div>
+            const score = npc?.relationship_score ?? npc?.affinity ?? 0;
+            const isRomantic =
+              npc?.track === 'romantic' || npc?.relations?.track === 'romantic';
+            const tier = getRelationshipTier(
+              score,
+              isRomantic ? 'romantic' : 'platonic',
+              t
+            );
 
-          {/* Present NPCs in Scene */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-xs font-mono uppercase tracking-wider text-gray-300">
-              <span className="flex items-center gap-1.5">
-                <Users size={14} className="text-fantasy-accent/90" />
-                <span>{t('scene.present', 'Present in Scene')}</span>
-                {session?.crowd_state?.density && session.crowd_state.density !== 'empty' && (
-                  <span
-                    className="px-1.5 py-0.2 rounded bg-amber-950/70 border border-amber-600/50 text-[10px] text-amber-200 font-semibold normal-case"
-                    title={session.crowd_state.flavor || ''}
-                  >
-                    {t(`scene.crowd_density_${session.crowd_state.density}`, session.crowd_state.density)}
-                  </span>
-                )}
-              </span>
-              <span className="px-1.5 py-0.2 rounded bg-black/70 border border-fantasy-border text-[11px] text-gray-200 font-bold">
-                {npcs.length}
-              </span>
-            </div>
-
-            {npcs.length > 0 ? (
-              <div className="flex flex-col gap-1.5 max-h-64 sm:max-h-72 overflow-y-auto custom-scrollbar pr-0.5">
-                {npcs.map((npc, idx) => {
-                  const name = typeof npc === 'string' ? npc : (npc?.name || 'Unknown');
-                  const isPartner = dialoguePartners.has(name.toLowerCase().trim());
-                  const clothing = typeof npc === 'object' ? npc?.clothing_status : null;
-                  const anomTag = typeof npc === 'object' ? (npc?.anomalous_npc_tag || npc?.basic_info?.anomalous_npc_tag) : null;
-                  const isAnomaly = Boolean(
-                    typeof npc === 'object' && (
-                      npc?.is_anomalous_entity ||
-                      npc?.npc_type === 'anomaly' ||
-                      npc?.social_role_type === 'anomaly' ||
-                      anomTag === 'anomaly_entity'
-                    )
-                  );
-                  const statusEffects = (typeof npc === 'object' && Array.isArray(npc?.status_effects) ? npc.status_effects : []).filter(eff => {
-                    const str = (typeof eff === 'string' ? eff : (eff?.name || '')).trim();
-                    const low = str.toLowerCase();
-                    return str && str !== '[]' && str !== '{}' && str !== '""' && str !== "''" && low !== 'none' && low !== 'null' && low !== 'present' && low !== 'absent' && low !== 'nearby';
-                  });
-
-                  // 1. Affinity Meter resolution
-                  const score = npc?.relationship_score ?? npc?.affinity ?? 0;
-                  const isRomantic = (npc?.track === 'romantic') || (npc?.relations?.track === 'romantic');
-                  const tier = getRelationshipTier(score, isRomantic ? 'romantic' : 'platonic', t);
-
-                  // 2. Excitement Meter resolution (when applicable)
-                  const physExc = session?.physical_state?.excitement;
-                  const physActors = (physExc?.actors && typeof physExc.actors === 'object') ? physExc.actors : {};
-                  let actorExc = (npc?.excitement_meter !== undefined && npc?.excitement_meter !== null) ? {
+            const physExc = session?.physical_state?.excitement;
+            const physActors =
+              physExc?.actors && typeof physExc.actors === 'object'
+                ? physExc.actors
+                : {};
+            let actorExc =
+              npc?.excitement_meter !== undefined &&
+              npc?.excitement_meter !== null
+                ? {
                     meter: Number(npc.excitement_meter),
                     status: npc.excitement_status,
                     climaxed: npc.excitement_climaxed,
-                    active: npc.excitement_active
-                  } : null;
-
-                  if (!actorExc && physActors) {
-                    const cleanN = name.toLowerCase().trim();
-                    for (const [k, v] of Object.entries(physActors)) {
-                      const cleanK = String(k || '').toLowerCase().trim();
-                      if (cleanK && (cleanK === cleanN || cleanN.includes(cleanK) || cleanK.includes(cleanN))) {
-                        actorExc = v;
-                        break;
-                      }
-                    }
+                    active: npc.excitement_active,
                   }
+                : null;
 
-                  if (!actorExc) {
-                    const latestTurn = turnOutcomes[0];
-                    const intUp = latestTurn?.intimateUpdate;
-                    if (intUp?.active) {
-                      const cleanN = name.toLowerCase().trim();
-                      const pMatch = (intUp.partner_meters || []).find(pm => {
-                        const pName = String(pm?.name || '').toLowerCase().trim();
-                        return pName && (pName === cleanN || cleanN.includes(pName) || pName.includes(cleanN));
-                      });
-                      if (pMatch) {
-                        actorExc = pMatch;
-                      } else if (intUp.partner_meter !== undefined && isPartner) {
-                        actorExc = {
-                          meter: intUp.partner_meter,
-                          status: intUp.act_type,
-                          climaxed: intUp.simultaneous_partner_climax
-                        };
-                      }
-                    }
-                  }
+            if (!actorExc && physActors) {
+              const cleanN = name.toLowerCase().trim();
+              for (const [k, v] of Object.entries(physActors)) {
+                const cleanK = String(k || '').toLowerCase().trim();
+                if (
+                  cleanK &&
+                  (cleanK === cleanN ||
+                    cleanN.includes(cleanK) ||
+                    cleanK.includes(cleanN))
+                ) {
+                  actorExc = v;
+                  break;
+                }
+              }
+            }
 
-                  const excMeter = actorExc?.meter !== undefined && actorExc?.meter !== null ? Number(actorExc.meter) : null;
-                  const isExcActive = Boolean(actorExc?.active || physExc?.active || (excMeter !== null && excMeter > 0));
-                  const showExcitement = !isAnomaly && isExcActive && excMeter !== null;
-                  const isBystanderCompact = !isAnomaly && !isPartner && typeof npc === 'object' && npc?.is_spotlight === false;
-                  if (isBystanderCompact) {
-                    const roleText = String(npc?.role || npc?.basic_info?.role || '').trim();
-                    return (
-                      <div
-                        key={`${name}-${idx}`}
-                        className="flex items-center justify-between gap-1.5 px-2 py-1 rounded-md border border-neutral-800/75 bg-black/35 text-[11px] text-gray-300"
-                        title={roleText ? `${name} — ${roleText}` : name}
-                      >
-                        <div className="flex items-center gap-1.5 min-w-0 truncate">
-                          <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
-                          <span className="font-semibold text-gray-200 truncate">{name}</span>
-                          {roleText && (
-                            <span className="text-[10px] text-gray-400 truncate">({roleText})</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {npc?.activity_tag && (
-                            <span className="text-[9.5px] px-1.5 py-0.2 rounded bg-fantasy-950/50 border border-fantasy-border/30 text-amber-200/80">
-                              {npc.activity_tag}
-                            </span>
-                          )}
-                          {npc?.telltale_revealed && npc?.visible_tell_text && (
-                            <span className="text-[9.5px] px-1 rounded bg-purple-950/60 border border-purple-500/40 text-purple-200" title={npc.visible_tell_text}>
-                              👁️
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
+            if (!actorExc) {
+              const latestTurn = turnOutcomes[0];
+              const intUp = latestTurn?.intimateUpdate;
+              if (intUp?.active) {
+                const cleanN = name.toLowerCase().trim();
+                const pMatch = (intUp.partner_meters || []).find((pm) => {
+                  const pName = String(pm?.name || '').toLowerCase().trim();
                   return (
-                    <div
-                      key={`${name}-${idx}`}
-                      className={`flex flex-col gap-1.5 p-2 rounded-lg border text-xs transition-all shadow-sm ${
-                        isPartner
-                          ? 'bg-purple-950/45 border-purple-500/60 shadow-purple-950/40'
-                          : isAnomaly
-                          ? 'bg-amber-950/20 border-amber-700/50 hover:border-amber-600/70'
-                          : 'bg-black/50 border-neutral-800/90 hover:border-neutral-700 hover:bg-black/70'
-                      }`}
-                    >
-                      {/* Row 1: Dot + Character Name + Talking Badge + Clothing Status */}
-                      <div className="flex items-center justify-between gap-1.5">
-                        <button
-                          type="button"
-                          onClick={() => !isAnomaly && onSelectContact && onSelectContact(name)}
-                          className={`inline-flex items-center gap-1.5 font-bold transition-colors text-left truncate ${
-                            isAnomaly ? 'cursor-default text-amber-100' : ''
-                          } ${
-                            isPartner
-                              ? 'text-purple-200 hover:text-purple-100'
-                              : !isAnomaly
-                              ? 'text-gray-100 hover:text-fantasy-accent'
-                              : ''
-                          }`}
-                          title={
-                            isAnomaly
-                              ? `${name}${npc?.role ? ` — ${npc.role}` : ''}`
-                              : (onSelectContact ? `View ${name} in Codex` : name)
-                          }
-                        >
-                          <span
-                            className={`w-2 h-2 rounded-full shrink-0 ${
-                              isPartner
-                                ? 'bg-purple-400 animate-pulse'
-                                : isAnomaly
-                                ? 'bg-amber-400 animate-pulse'
-                                : 'bg-emerald-400'
-                            }`}
-                          />
-                          <span className="truncate max-w-[150px] text-xs">{name}</span>
-                          {isAnomaly && (npc?.is_disguised || npc?.uncanny_presence) && (
-                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-purple-950/85 text-purple-200 border border-purple-500/60 font-bold shrink-0">
-                              🎭 {t('scene.uncanny_presence', 'Uncanny Presence')}
-                            </span>
-                          )}
-                          {isAnomaly && !(npc?.is_disguised || npc?.uncanny_presence) && (
-                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-amber-950/85 text-amber-300 border border-amber-600/60 font-bold shrink-0">
-                              👁️ {t('codex.anomaly_entity', 'Anomaly')}
-                            </span>
-                          )}
-                          {!isAnomaly && anomTag === 'special_agent' && (
-                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-700/50 font-bold shrink-0">
-                              ⚡ {t('codex.special_agent', 'Special Agent')}
-                            </span>
-                          )}
-                          {!isAnomaly && anomTag === 'civilian' && (
-                            <span className="text-[8.5px] font-mono uppercase px-1 py-0.2 rounded bg-slate-900/80 text-slate-300 border border-slate-700/60 font-semibold shrink-0">
-                              {t('codex.civilian', 'Civilian')}
-                            </span>
-                          )}
-                          {isPartner && (
-                            <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-purple-900/90 text-purple-200 font-bold shrink-0">
-                              {isAnomaly && (npc?.sapience === 'compulsive' || npc?.pattern_observable)
-                                ? t('scene.observing', 'Observing')
-                                : t('scene.talking', 'Talking')}
-                            </span>
-                          )}
-                        </button>
-                        {isPartner && npc?.dialogue_mood?.mood_key && (
-                          <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border font-semibold shrink-0 ${
-                            npc.dialogue_mood.mood_key === 'Engaged'
-                              ? 'bg-emerald-950/85 text-emerald-300 border-emerald-700/60'
-                              : npc.dialogue_mood.mood_key === 'Guarded'
-                              ? 'bg-amber-950/85 text-amber-300 border-amber-700/60'
-                              : npc.dialogue_mood.mood_key === 'Upset'
-                              ? 'bg-rose-950/85 text-rose-300 border-rose-700/60'
-                              : 'bg-slate-900/85 text-slate-300 border-slate-700/60'
-                          }`}>
-                            {t(`social.moods.${npc.dialogue_mood.mood_key}`, npc.dialogue_mood.mood_label || npc.dialogue_mood.mood_key)}
-                          </span>
-                        )}
-                        {!isAnomaly && clothing && (
-                          <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-neutral-900/95 border border-neutral-700 text-gray-300 font-normal shrink-0">
-                            {clothing}
-                          </span>
-                        )}
-                      </div>
+                    pName &&
+                    (pName === cleanN ||
+                      cleanN.includes(pName) ||
+                      pName.includes(cleanN))
+                  );
+                });
+                if (pMatch) {
+                  actorExc = pMatch;
+                } else if (intUp.partner_meter !== undefined && isPartner) {
+                  actorExc = {
+                    meter: intUp.partner_meter,
+                    status: intUp.act_type,
+                    climaxed: intUp.simultaneous_partner_climax,
+                  };
+                }
+              }
+            }
 
-                      {/* Row 2: Anomaly Manifestation Metadata OR Human Affinity Meter Bar */}
-                      {isAnomaly ? (
-                        <div className="flex items-center justify-between gap-1.5 pt-1 border-t border-amber-800/35 text-[10px]">
-                          <span className="text-amber-200/85 truncate">
-                            {(npc?.is_disguised || npc?.uncanny_presence)
-                              ? (npc?.role || t('scene.uncanny_stranger', 'Uncanny Stranger'))
-                              : (npc?.role || 'Non-Hostile Anomaly')}
-                          </span>
-                          <span className="font-mono font-semibold px-1.5 py-0.2 rounded bg-black/60 border border-amber-700/50 text-amber-300 shrink-0">
-                            {(npc?.is_disguised || npc?.uncanny_presence)
-                              ? `🎭 ${t('scene.uncanny_presence', 'Uncanny Presence')}`
-                              : (npc?.dossier_revealed
-                                ? `📜 ${t('codex.dossier_revealed', 'Dossier Known')}`
-                                : (npc?.temperament || (npc?.talkable ? 'Sapient' : (npc?.sapience === 'compulsive' ? 'Compulsive' : 'Observed'))))}
-                          </span>
-                        </div>
-                      ) : (
-                        <div className="space-y-0.5 pt-1 border-t border-fantasy-border/25">
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className={`font-semibold ${tier.color}`}>
-                              {tier.label}
-                            </span>
-                            <span className="font-mono font-bold text-gray-300">
-                              {score > 0 ? `+${score}` : score}
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/40">
-                            <div 
-                              className={`h-full ${tier.bg} transition-all duration-300`}
-                              style={{ width: `${Math.max(5, Math.min(100, ((score + 100) / 400) * 100))}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
+            const excMeter =
+              actorExc?.meter !== undefined && actorExc?.meter !== null
+                ? Number(actorExc.meter)
+                : null;
+            const isExcActive = Boolean(
+              actorExc?.active ||
+                physExc?.active ||
+                (excMeter !== null && excMeter > 0)
+            );
+            const showExcitement =
+              !isAnomaly && isExcActive && excMeter !== null;
+            const demographics =
+              !isAnomaly && typeof npc === 'object'
+                ? resolveNpcDemographics(npc, t)
+                : null;
+            const isBystanderCompact =
+              !isAnomaly &&
+              !isPartner &&
+              typeof npc === 'object' &&
+              npc?.is_spotlight === false;
 
-                      {/* Row 3: Excitement Meter (When Applicable) */}
-                      {showExcitement && (
-                        <div className="space-y-0.5 pt-1 border-t border-rose-900/40">
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className="font-semibold text-rose-300 flex items-center gap-1">
-                              <span>💋</span>
-                              <span>{t('scene.excitement', 'Excitement')}</span>
-                              {actorExc?.climaxed && <span className="text-amber-300 font-bold ml-0.5">💥</span>}
-                              {actorExc?.status && (
-                                <span className="text-[9px] font-mono font-normal text-rose-400 ml-0.5">
-                                  ({actorExc.status})
-                                </span>
-                              )}
-                            </span>
-                            <span className="font-mono font-bold text-rose-300">
-                              {excMeter}%
-                            </span>
-                          </div>
-                          <div className="h-1.5 w-full bg-neutral-900/90 rounded-full overflow-hidden border border-rose-900/60 p-0.5">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-rose-500 via-pink-500 to-red-500 ${
-                                excMeter >= 80 ? 'animate-pulse' : ''
-                              }`}
-                              style={{ width: `${Math.min(100, Math.max(0, excMeter))}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Row 3.5: Activity Tag, Epistemic Badge, Join Button & Revealed Telltale */}
-                      {(npc?.activity_tag || npc?.epistemic_tag || (npc?.telltale_revealed && npc?.visible_tell_text) || (npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function')) && (
-                        <div className="flex flex-wrap items-center gap-1 pt-1 border-t border-fantasy-border/20 text-[10px]">
-                          {npc?.activity_tag && (() => {
-                            const actMode = String(npc?.activity_mode || '').toLowerCase();
-                            const actToneClass =
-                              actMode === 'joined'
-                                ? 'bg-emerald-950/70 border-emerald-500/45 text-emerald-200'
-                                : actMode === 'waiting'
-                                  ? 'bg-sky-950/70 border-sky-500/45 text-sky-200'
-                                  : actMode === 'packing_up'
-                                    ? 'bg-slate-900/75 border-slate-500/40 text-slate-300'
-                                    : 'bg-fantasy-950/60 border-fantasy-border/40 text-amber-200/90';
-                            return (
-                              <span
-                                className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border ${actToneClass}`}
-                                title={t('scene.activity_prefix', 'Doing')}
-                              >
-                                <span aria-hidden="true">🎯</span>
-                                <span>{npc.activity_tag}</span>
-                              </span>
-                            );
-                          })()}
-                          {npc?.epistemic_tag && (
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-950/75 border border-rose-500/50 text-rose-200 font-semibold"
-                              title={t('scene.epistemic_watch', 'Epistemic Watch')}
-                            >
-                              <span aria-hidden="true">⚠️</span>
-                              <span>
-                                {npc.epistemic_tag === 'spotted_you'
-                                  ? t('scene.spotted_you_badge', 'Spotted You!')
-                                  : npc.epistemic_tag}
-                              </span>
-                            </span>
-                          )}
-                          {npc?.telltale_revealed && npc?.visible_tell_text && (
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-purple-950/65 border border-purple-500/40 text-purple-200"
-                              title={t('scene.visible_tell_prefix', 'Noticeable Tell')}
-                            >
-                              <span aria-hidden="true">👁️</span>
-                              <span>{npc.visible_tell_text}</span>
-                            </span>
-                          )}
-                          {npc?.joinable_activity && npc?.activity_mode !== 'joined' && typeof onQuickAction === 'function' && (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onQuickAction({
-                                  intent: 'join_activity',
-                                  direct_choice: {
-                                    intent: 'join_activity',
-                                    target_npc: npc.name || npc.npc_id || '',
-                                    activity_key: npc?.join_activity_seed?.activity_key || npc?.activity_key || '',
-                                    label: `${t('scene.join_activity_btn', 'Join Activity')}: ${npc.name || ''}`.trim(),
-                                  },
-                                });
-                              }}
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-900/50 hover:bg-amber-800/70 border border-amber-500/50 text-amber-100 font-semibold transition-colors cursor-pointer"
-                            >
-                              <span aria-hidden="true">🤝</span>
-                              <span>{t('scene.join_activity_btn', 'Join Activity')}</span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Row 4: Active Status Effects */}
-                      {statusEffects && statusEffects.length > 0 && (
-                        <div className="flex flex-wrap gap-1 pt-1 border-t border-fantasy-border/20">
-                          {statusEffects.map((eff, eIdx) => (
-                            <StatusEffectBadge key={eIdx} effect={eff} />
-                          ))}
-                        </div>
+            if (isBystanderCompact) {
+              const roleText = String(
+                npc?.role || npc?.basic_info?.role || ''
+              ).trim();
+              return (
+                <div
+                  key={`${name}-${idx}`}
+                  className="py-2 flex flex-col gap-1 text-[11px] text-gray-300"
+                  title={roleText ? `${name} — ${roleText}` : name}
+                >
+                  <div className="flex items-center justify-between gap-1.5 min-w-0">
+                    <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
+                      <span className="font-semibold text-gray-200 truncate">
+                        {name}
+                      </span>
+                      {roleText && (
+                        <span className="text-[10px] text-gray-400 truncate">
+                          ({roleText})
+                        </span>
                       )}
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {npc?.activity_tag && (
+                        <span className="hk-chip text-[9.5px]">
+                          {npc.activity_tag}
+                        </span>
+                      )}
+                      {npc?.telltale_revealed && npc?.visible_tell_text && (
+                        <span
+                          className="hk-chip bg-purple-500/20 text-purple-200 text-[9.5px]"
+                          title={npc.visible_tell_text}
+                        >
+                          👁️
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {demographics?.hasAny && (
+                    <div className="flex flex-wrap items-center gap-1 pl-3 text-[9.5px] leading-tight">
+                      {demographics.ageCategory && (
+                        <span
+                          className={`px-1 py-0.5 rounded border font-medium ${demographics.ageCategory.pillClass}`}
+                        >
+                          {demographics.ageCategory.label}
+                        </span>
+                      )}
+                      {demographics.genderInfo && (
+                        <span
+                          className={`inline-flex items-center gap-0.5 px-1 py-0.5 rounded border ${demographics.genderInfo.pillClass}`}
+                        >
+                          {demographics.genderInfo.symbol && (
+                            <span aria-hidden="true">
+                              {demographics.genderInfo.symbol}
+                            </span>
+                          )}
+                          <span>{demographics.genderInfo.label}</span>
+                        </span>
+                      )}
+                      {demographics.raceLabel && (
+                        <span className="hk-chip text-[9.5px]">
+                          {demographics.raceLabel}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            return (
+              <div
+                key={`${name}-${idx}`}
+                className={`py-2.5 flex flex-col gap-1.5 text-xs ${
+                  isPartner
+                    ? 'border-l-2 border-purple-400 pl-2.5'
+                    : isAnomaly
+                      ? 'border-l-2 border-amber-400/80 pl-2.5'
+                      : ''
+                }`}
+              >
+                {/* Row 1: Dot + Name + Badges + Clothing */}
+                <div className="flex items-center justify-between gap-1.5 min-w-0 flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      !isAnomaly && onSelectContact && onSelectContact(name)
+                    }
+                    className={`inline-flex items-center gap-1.5 font-semibold text-left min-w-0 max-w-full transition-colors ${
+                      isAnomaly
+                        ? 'cursor-default text-amber-100'
+                        : isPartner
+                          ? 'text-purple-200 hover:text-purple-100'
+                          : 'text-gray-100 hover:text-fantasy-accent'
+                    }`}
+                    title={
+                      isAnomaly
+                        ? `${name}${npc?.role ? ` — ${npc.role}` : ''}`
+                        : onSelectContact
+                          ? `View ${name} in Codex`
+                          : name
+                    }
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full shrink-0 ${
+                        isPartner
+                          ? 'bg-purple-400 animate-pulse'
+                          : isAnomaly
+                            ? 'bg-amber-400 animate-pulse'
+                            : 'bg-emerald-400'
+                      }`}
+                    />
+                    <span className="truncate">{name}</span>
+                  </button>
+
+                  <div className="flex flex-wrap items-center gap-1 shrink-0">
+                    {isAnomaly && (npc?.is_disguised || npc?.uncanny_presence) && (
+                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200 font-bold">
+                        🎭 {t('scene.uncanny_presence', 'Uncanny Presence')}
+                      </span>
+                    )}
+                    {isAnomaly && !(npc?.is_disguised || npc?.uncanny_presence) && (
+                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-200 font-bold">
+                        👁️ {t('codex.anomaly_entity', 'Anomaly')}
+                      </span>
+                    )}
+                    {!isAnomaly && anomTag === 'special_agent' && (
+                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-200 font-bold">
+                        ⚡ {t('codex.special_agent', 'Special Agent')}
+                      </span>
+                    )}
+                    {!isAnomaly && anomTag === 'civilian' && (
+                      <span className="hk-chip text-[9px] font-mono uppercase">
+                        {t('codex.civilian', 'Civilian')}
+                      </span>
+                    )}
+                    {isPartner && (
+                      <span className="text-[9px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-500/25 text-purple-200 font-bold">
+                        {isAnomaly &&
+                        (npc?.sapience === 'compulsive' ||
+                          npc?.pattern_observable)
+                          ? t('scene.observing', 'Observing')
+                          : t('scene.talking', 'Talking')}
+                      </span>
+                    )}
+                    {isPartner && npc?.dialogue_mood?.mood_key && (
+                      <span
+                        className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold ${
+                          npc.dialogue_mood.mood_key === 'Engaged'
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : npc.dialogue_mood.mood_key === 'Guarded'
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : npc.dialogue_mood.mood_key === 'Upset'
+                                ? 'bg-rose-500/20 text-rose-300'
+                                : 'bg-slate-500/20 text-slate-300'
+                        }`}
+                      >
+                        {t(
+                          `social.moods.${npc.dialogue_mood.mood_key}`,
+                          npc.dialogue_mood.mood_label ||
+                            npc.dialogue_mood.mood_key
+                        )}
+                      </span>
+                    )}
+                    {!isAnomaly && clothing && (
+                      <span className="hk-chip text-[9.5px] font-mono">
+                        {clothing}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Row 1.5: Demographics */}
+                {!isAnomaly && demographics?.hasAny && (
+                  <div className="flex flex-wrap items-center gap-1 text-[10px] leading-tight">
+                    {demographics.ageCategory && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded border font-medium ${demographics.ageCategory.pillClass}`}
+                      >
+                        {demographics.ageCategory.label}
+                      </span>
+                    )}
+                    {demographics.genderInfo && (
+                      <span
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded border ${demographics.genderInfo.pillClass}`}
+                      >
+                        {demographics.genderInfo.symbol && (
+                          <span aria-hidden="true">
+                            {demographics.genderInfo.symbol}
+                          </span>
+                        )}
+                        <span>{demographics.genderInfo.label}</span>
+                      </span>
+                    )}
+                    {demographics.raceLabel && (
+                      <span className="hk-chip text-[10px]">
+                        {demographics.raceLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Row 2: Anomaly Role OR Affinity Meter */}
+                {isAnomaly ? (
+                  <div className="flex items-center justify-between gap-1.5 text-[10px] text-amber-200/85">
+                    <span className="truncate">
+                      {npc?.is_disguised || npc?.uncanny_presence
+                        ? npc?.role ||
+                          t('scene.uncanny_stranger', 'Uncanny Stranger')
+                        : npc?.role || 'Non-Hostile Anomaly'}
+                    </span>
+                    <span className="hk-chip font-mono text-amber-200 shrink-0">
+                      {npc?.is_disguised || npc?.uncanny_presence
+                        ? `🎭 ${t('scene.uncanny_presence', 'Uncanny Presence')}`
+                        : npc?.dossier_revealed
+                          ? `📜 ${t('codex.dossier_revealed', 'Dossier Known')}`
+                          : npc?.temperament ||
+                            (npc?.talkable
+                              ? 'Sapient'
+                              : npc?.sapience === 'compulsive'
+                                ? 'Compulsive'
+                                : 'Observed')}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className={`font-semibold ${tier.color}`}>
+                        {tier.label}
+                      </span>
+                      <span className="font-mono font-bold text-gray-300 tabular-nums">
+                        {score > 0 ? `+${score}` : score}
+                      </span>
+                    </div>
+                    <div className="h-1 w-full bg-gray-500/20 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full ${tier.bg} transition-all duration-300`}
+                        style={{
+                          width: `${Math.max(
+                            5,
+                            Math.min(100, ((score + 100) / 400) * 100)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 3: Excitement Meter */}
+                {showExcitement && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between text-[10px]">
+                      <span className="font-semibold text-rose-300 flex items-center gap-1">
+                        <span>💋</span>
+                        <span>{t('scene.excitement', 'Excitement')}</span>
+                        {actorExc?.climaxed && (
+                          <span className="text-amber-300 font-bold">💥</span>
+                        )}
+                        {actorExc?.status && (
+                          <span className="text-[9px] font-mono font-normal text-rose-400">
+                            ({actorExc.status})
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-mono font-bold text-rose-300 tabular-nums">
+                        {excMeter}%
+                      </span>
+                    </div>
+                    <div className="h-1 w-full bg-gray-500/20 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-rose-500 via-pink-500 to-red-500 ${
+                          excMeter >= 80 ? 'animate-pulse' : ''
+                        }`}
+                        style={{
+                          width: `${Math.min(100, Math.max(0, excMeter))}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 3.5: Activity, Epistemic, Tell & Join Activity */}
+                {(npc?.activity_tag ||
+                  npc?.epistemic_tag ||
+                  (npc?.telltale_revealed && npc?.visible_tell_text) ||
+                  (npc?.joinable_activity &&
+                    npc?.activity_mode !== 'joined' &&
+                    typeof onQuickAction === 'function')) && (
+                  <div className="flex flex-wrap items-center gap-1 text-[10px]">
+                    {npc?.activity_tag &&
+                      (() => {
+                        const actMode = String(
+                          npc?.activity_mode || ''
+                        ).toLowerCase();
+                        const actToneClass =
+                          actMode === 'joined'
+                            ? 'bg-emerald-500/20 text-emerald-200'
+                            : actMode === 'waiting'
+                              ? 'bg-sky-500/20 text-sky-200'
+                              : actMode === 'packing_up'
+                                ? 'bg-slate-500/20 text-slate-300'
+                                : 'bg-amber-500/15 text-amber-200';
+                        return (
+                          <span
+                            className={`hk-chip ${actToneClass}`}
+                            title={t('scene.activity_prefix', 'Doing')}
+                          >
+                            <span aria-hidden="true">🎯</span>
+                            <span>{npc.activity_tag}</span>
+                          </span>
+                        );
+                      })()}
+                    {npc?.epistemic_tag && (
+                      <span
+                        className="hk-chip bg-rose-500/25 text-rose-200 font-semibold"
+                        title={t('scene.epistemic_watch', 'Epistemic Watch')}
+                      >
+                        <span aria-hidden="true">⚠️</span>
+                        <span>
+                          {npc.epistemic_tag === 'spotted_you'
+                            ? t('scene.spotted_you_badge', 'Spotted You!')
+                            : npc.epistemic_tag}
+                        </span>
+                      </span>
+                    )}
+                    {npc?.telltale_revealed && npc?.visible_tell_text && (
+                      <span
+                        className="hk-chip bg-purple-500/20 text-purple-200"
+                        title={t(
+                          'scene.visible_tell_prefix',
+                          'Noticeable Tell'
+                        )}
+                      >
+                        <span aria-hidden="true">👁️</span>
+                        <span>{npc.visible_tell_text}</span>
+                      </span>
+                    )}
+                    {npc?.joinable_activity &&
+                      npc?.activity_mode !== 'joined' &&
+                      typeof onQuickAction === 'function' && (
+                        <MotionButton
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onQuickAction({
+                              intent: 'join_activity',
+                              direct_choice: {
+                                intent: 'join_activity',
+                                target_npc: npc.name || npc.npc_id || '',
+                                activity_key:
+                                  npc?.join_activity_seed?.activity_key ||
+                                  npc?.activity_key ||
+                                  '',
+                                label: `${t(
+                                  'scene.join_activity_btn',
+                                  'Join Activity'
+                                )}: ${npc.name || ''}`.trim(),
+                              },
+                            });
+                          }}
+                          className="hk-chip hk-chip-accent hover:bg-fantasy-accent/30 cursor-pointer font-semibold"
+                        >
+                          <span aria-hidden="true">🤝</span>
+                          <span>
+                            {t('scene.join_activity_btn', 'Join Activity')}
+                          </span>
+                        </MotionButton>
+                      )}
+                  </div>
+                )}
+
+                {/* Row 4: Status Effects */}
+                {statusEffects && statusEffects.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {statusEffects.map((eff, eIdx) => (
+                      <StatusEffectBadge key={eIdx} effect={eff} />
+                    ))}
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="p-3 rounded-lg bg-black/40 border border-neutral-800 text-center text-xs text-gray-400 italic">
-                {t('scene.no_npcs', 'No other characters in the immediate area.')}
-              </div>
-            )}
-          </div>
+            );
+          })}
         </div>
       )}
+    </div>
+  );
 
-      {/* B7 Server Fog-of-War Epistemic HUD (strictly player_aware == 1 only) */}
-      {(() => {
-        const ep = session?.epistemic_hud;
-        if (!ep || typeof ep !== 'object') return null;
-        const risk = String(ep.leak_risk || 'none').toLowerCase();
-        const spotted = Array.isArray(ep.spotted_witnesses) ? ep.spotted_witnesses : [];
-        const knownW = Array.isArray(ep.known_witnesses) ? ep.known_witnesses : [];
-        const alibis = Array.isArray(ep.active_alibis) ? ep.active_alibis : [];
-        const secrets = Array.isArray(ep.held_npc_secrets) ? ep.held_npc_secrets : [];
-        if (risk === 'none' && spotted.length === 0 && knownW.length === 0 && alibis.length === 0 && secrets.length === 0) {
-          return null;
-        }
-        const riskClass =
-          risk === 'critical'
-            ? 'bg-red-950/90 border-red-400/70 text-red-100 font-semibold'
-            : risk === 'high'
-              ? 'bg-red-950/80 border-red-500/50 text-red-200'
-              : risk === 'moderate' || risk === 'medium'
-                ? 'bg-amber-950/80 border-amber-500/50 text-amber-200'
-                : 'bg-yellow-950/70 border-yellow-600/40 text-yellow-200';
-        const riskLabel =
-          risk === 'critical'
-            ? t('scene.leak_risk_critical', 'Leak Risk: Critical')
-            : risk === 'high'
-              ? t('scene.leak_risk_high', 'Leak Risk: High')
-              : risk === 'moderate'
-                ? t('scene.leak_risk_moderate', 'Leak Risk: Moderate')
-                : risk === 'medium'
-                  ? t('scene.leak_risk_medium', 'Leak Risk: Medium')
-                  : t('scene.leak_risk_low', 'Leak Risk: Low');
-        return (
-          <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/50 space-y-1.5 text-[11px] shrink-0">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1">
-                <span aria-hidden="true">🕵️</span>
-                <span>{t('scene.epistemic_watch', 'Epistemic Watch')}</span>
-              </span>
-              {risk !== 'none' && (
-                <span className={`px-1.5 py-0.5 rounded border font-mono text-[10px] ${riskClass}`}>
-                  {riskLabel}
-                </span>
-              )}
-            </div>
-            {spotted.length > 0 && (
-              <div className="text-amber-200/90 leading-snug">
-                <span className="font-semibold">{t('scene.spotted_witnesses', 'Spotted Witnesses')}:</span>{' '}
-                {spotted.slice(0, 4).map((w) => String(w?.holder_actor_key || 'Unknown').replace(/_/g, ' ')).join(', ')}
-              </div>
-            )}
-            <div className="flex flex-wrap gap-1.5 text-[10px] text-gray-300">
-              {knownW.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-neutral-700/60">
-                  {t('scene.known_witnesses', 'Known Witnesses')}: {knownW.length}
-                </span>
-              )}
-              {alibis.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-neutral-700/60">
-                  {t('scene.active_alibis', 'Active Alibis')}: {alibis.length}
-                </span>
-              )}
-              {secrets.length > 0 && (
-                <span className="px-1.5 py-0.5 rounded bg-black/50 border border-purple-700/50 text-purple-200">
-                  {t('scene.held_secrets', 'Secrets Held')}: {secrets.length}
-                </span>
-              )}
-            </div>
-          </div>
-        );
-      })()}
+  if (isSheet) {
+    return (
+      <div className={`flex flex-col min-h-0 flex-1 ${className}`.trim()}>
+        {header}
+        {listBody}
+      </div>
+    );
+  }
 
-      {/* SECTION 2: Outcomes & Changes Header */}
-      <div className="px-3.5 py-2 border-b border-fantasy-border bg-black/60 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-2 text-xs font-rpg font-bold uppercase tracking-wider text-fantasy-accent">
-          <ScrollText size={14} />
-          <span>{t('scene.outcomes_title', 'Outcomes & Changes')}</span>
-        </div>
-        <span className="text-[11px] font-mono font-bold text-gray-300 bg-black/70 px-2 py-0.5 rounded border border-fantasy-border">
-          {turnOutcomes.length === 1
-            ? t('scene.turns_count_one', { count: 1, defaultValue: '1 Turn' })
-            : t('scene.turns_count_other', { count: turnOutcomes.length, defaultValue: `${turnOutcomes.length} Turns` })}
+  return (
+    <AcrylicPanel
+      variant="panel"
+      origin="right"
+      className={`flex flex-col min-h-0 overflow-hidden ${className}`.trim()}
+    >
+      {header}
+      <CollapsibleSection
+        isOpen={!collapsed}
+        className="min-h-0 flex-1 flex flex-col"
+      >
+        {listBody}
+      </CollapsibleSection>
+    </AcrylicPanel>
+  );
+};
+
+const OutcomeDetailsBlock = ({ item, session }) => {
+  const { t } = useTranslation();
+  const theme = getOutcomeTierTheme(
+    item.checkTier,
+    item.tierLabel,
+    item.checkStat
+  );
+  const statPrefix =
+    item.checkStat && item.checkStat !== 'NONE' && item.checkStat !== 'FREE'
+      ? `${item.checkStat} • `
+      : '';
+  const tierText = (item.tierLabel || theme.defaultLabel).toUpperCase();
+  const chanceText =
+    item.checkChance !== null &&
+    item.checkChance !== undefined &&
+    item.checkStat !== 'NONE' &&
+    item.checkStat !== 'FREE'
+      ? ` (${Math.round(Number(item.checkChance))}%)`
+      : '';
+
+  return (
+    <div className="space-y-2.5 text-xs">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="text-[10.5px] font-mono uppercase tracking-wider text-fantasy-accent font-bold">
+          {t('scene.turn_number', {
+            number: item.turnNumber,
+            defaultValue: `Turn #${item.turnNumber}`,
+          })}
+        </span>
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase px-2 py-0.5 text-[10px] ${theme.badgeClass}`}
+        >
+          <span>{theme.icon}</span>
+          <span>
+            {statPrefix}
+            {tierText}
+            {chanceText}
+          </span>
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2.5">
-        {turnOutcomes.length === 0 ? (
-          /* Clean & balanced empty state that does not force a scrollbar */
-          <div className="text-center py-10 px-4 text-xs text-gray-400 space-y-2.5">
-            <div className="w-10 h-10 rounded-xl bg-fantasy-dark border border-fantasy-accent/40 flex items-center justify-center mx-auto shadow-md">
-              <Sparkles size={18} className="text-fantasy-accent" />
-            </div>
-            <p className="font-semibold text-gray-200 text-sm">{t('scene.no_outcomes_title', 'No Turn Outcomes Yet')}</p>
-            <p className="text-xs text-gray-400 leading-relaxed max-w-xs mx-auto">
-              {t('scene.no_outcomes_desc', 'Skill check rolls, EXP gains, combat logs, loot, and newly discovered clues will appear here as your story unfolds.')}
-            </p>
+      <div className="font-semibold text-gray-100 leading-snug pl-2.5 border-l-2 border-fantasy-accent">
+        {item.label}
+      </div>
+
+      {/* Mechanical Delta Pills */}
+      <div className="flex flex-wrap gap-1">
+        {item.xpGained > 0 && (
+          <span className="hk-chip bg-amber-500/20 text-amber-300 font-mono">
+            ✨ +{item.xpGained} EXP
+          </span>
+        )}
+        {item.levelsGained.length > 0 && (
+          <span className="hk-chip bg-yellow-500/25 text-yellow-200 font-mono font-bold animate-pulse">
+            🎉 {t('outcomes.level_up', 'LEVEL UP')} (Lv.
+            {item.levelsGained[item.levelsGained.length - 1]})
+          </span>
+        )}
+        {item.hpDelta !== 0 && (
+          <span
+            className={`hk-chip font-mono ${
+              item.hpDelta > 0
+                ? 'bg-emerald-500/20 text-emerald-300'
+                : 'bg-red-500/25 text-red-300'
+            }`}
+          >
+            <Heart size={10} />
+            {item.hpDelta > 0 ? `+${item.hpDelta}` : item.hpDelta} HP
+          </span>
+        )}
+        {item.mpDelta !== 0 && (
+          <span
+            className={`hk-chip font-mono ${
+              item.mpDelta > 0
+                ? 'bg-blue-500/20 text-blue-300'
+                : 'bg-indigo-500/20 text-indigo-300'
+            }`}
+          >
+            💧 {item.mpDelta > 0 ? `+${item.mpDelta}` : item.mpDelta} MP
+          </span>
+        )}
+        {item.goldDelta !== 0 && (
+          <span
+            className={`hk-chip font-mono tabular-nums ${
+              item.goldDelta > 0
+                ? 'bg-amber-500/20 text-amber-300'
+                : 'bg-orange-500/20 text-orange-300'
+            }`}
+          >
+            <Coins size={10} />
+            {item.goldDelta > 0
+              ? `+${formatScenarioCurrency(item.goldDelta, session?.scenario)}`
+              : `-${formatScenarioCurrency(Math.abs(item.goldDelta), session?.scenario)}`}
+          </span>
+        )}
+        {item.itemsGained.map((it, iIdx) => (
+          <span
+            key={`gain-${iIdx}`}
+            className="hk-chip bg-cyan-500/20 text-cyan-200"
+          >
+            <Gift size={10} /> +{it}
+          </span>
+        ))}
+        {item.itemsLost.map((it, iIdx) => (
+          <span
+            key={`lost-${iIdx}`}
+            className="hk-chip line-through text-gray-400"
+          >
+            -{it}
+          </span>
+        ))}
+        {item.statusEffects.map((st, sIdx) => (
+          <span
+            key={`st-${sIdx}`}
+            className="hk-chip bg-rose-500/20 text-rose-200"
+          >
+            <ShieldAlert size={10} /> {st}
+          </span>
+        ))}
+        {item.relUpdates.map((ru, rIdx) => {
+          const label =
+            typeof ru === 'string'
+              ? ru
+              : `${ru.npc_name || ru.npc || ru.name || 'NPC'}: ${
+                  (ru.delta_score ?? ru.delta ?? 0) > 0
+                    ? `+${ru.delta_score ?? ru.delta}`
+                    : (ru.delta_score ?? ru.delta ?? '')
+                }`;
+          return (
+            <span
+              key={`rel-${rIdx}`}
+              className="hk-chip bg-pink-500/20 text-pink-200"
+            >
+              💕 {label}
+            </span>
+          );
+        })}
+        {(item.socialFeedbackPills || []).map((pill, pIdx) => {
+          const pillText = formatSocialFeedbackPill(pill, t);
+          if (!pillText) return null;
+          return (
+            <span
+              key={`soc-pill-${pIdx}`}
+              className="hk-chip bg-indigo-500/20 text-indigo-200"
+            >
+              💬 {pillText}
+            </span>
+          );
+        })}
+        {item.facUpdates.map((fu, fIdx) => {
+          const label =
+            typeof fu === 'string'
+              ? fu
+              : `${fu.faction_name || fu.faction || fu.name || 'Faction'}: ${
+                  (fu.delta_score ?? fu.delta ?? 0) > 0
+                    ? `+${fu.delta_score ?? fu.delta}`
+                    : (fu.delta_score ?? fu.delta ?? 0)
+                } Rep`;
+          return (
+            <span
+              key={`fac-${fIdx}`}
+              className="hk-chip bg-purple-500/20 text-purple-200"
+            >
+              🚩 {label}
+            </span>
+          );
+        })}
+      </div>
+
+      {item.refractoryNotice && (
+        <div className="pt-2 border-t border-fantasy-border/25 text-emerald-300 flex items-center gap-1.5 font-semibold">
+          <span>⚡</span>
+          <span>{item.refractoryNotice}</span>
+        </div>
+      )}
+
+      {item.intimateUpdate && item.intimateUpdate.active && (
+        <div className="pt-2 border-t border-fantasy-border/25 space-y-1.5">
+          <div className="flex items-center justify-between font-semibold text-pink-300 text-[11px]">
+            <span className="flex items-center gap-1">
+              <span>💋</span>
+              <span>{t('outcomes.intimate_excitement', 'Intimate Excitement & Arousal')}</span>
+            </span>
+            {item.intimateUpdate.act_type && (
+              <span className="hk-chip bg-pink-500/20 text-pink-200 text-[9px] uppercase font-mono">
+                {item.intimateUpdate.act_type === 'foreplay_nongenital'
+                  ? t('outcomes.foreplay', 'Foreplay')
+                  : item.intimateUpdate.act_type.replace(/_/g, ' ')}
+              </span>
+            )}
           </div>
-        ) : (
-          turnOutcomes.map((item, idx) => {
-            const isLatest = idx === 0;
-            const isExpanded = expandedTurnMap[item.turnNumber] !== undefined ? expandedTurnMap[item.turnNumber] : isLatest;
-            const theme = getOutcomeTierTheme(item.checkTier, item.tierLabel, item.checkStat);
-            const statPrefix = item.checkStat && item.checkStat !== 'NONE' && item.checkStat !== 'FREE' ? `${item.checkStat} • ` : '';
-            const tierText = (item.tierLabel || theme.defaultLabel).toUpperCase();
-            const chanceText =
-              item.checkChance !== null && item.checkChance !== undefined && item.checkStat !== 'NONE' && item.checkStat !== 'FREE'
-                ? ` (${Math.round(Number(item.checkChance))}%)`
-                : '';
+          <div className="space-y-0.5 text-[10px]">
+            <div className="flex justify-between text-pink-100">
+              <span>
+                {item.characterName} (You){' '}
+                {item.intimateUpdate.player_climaxed ? '💥' : ''}
+              </span>
+              <span className="font-mono text-pink-300 font-bold">
+                {item.intimateUpdate.player_meter}%
+              </span>
+            </div>
+            <div className="w-full bg-gray-500/20 rounded-full h-1.5 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-pink-500 via-rose-500 to-red-500"
+                style={{
+                  width: `${Math.min(100, item.intimateUpdate.player_meter)}%`,
+                }}
+              />
+            </div>
+          </div>
+          {(item.intimateUpdate.partner_meters?.length > 0
+            ? item.intimateUpdate.partner_meters
+            : [
+                {
+                  name:
+                    session?.dialogue_partner ||
+                    item.intimateUpdate.partner_name ||
+                    'Partner',
+                  meter: item.intimateUpdate.partner_meter,
+                },
+              ]
+          ).map((p, pIdx) => (
+            <div key={`pm-${pIdx}`} className="space-y-0.5 text-[10px]">
+              <div className="flex justify-between text-pink-100">
+                <span>
+                  {p.name || 'Partner'} {p.climaxed ? '💥' : ''}
+                </span>
+                <span className="font-mono text-rose-300 font-bold">
+                  {p.meter}%
+                </span>
+              </div>
+              <div className="w-full bg-gray-500/20 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-rose-500 via-pink-500 to-red-500"
+                  style={{ width: `${Math.min(100, p.meter)}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-            return (
-              <React.Fragment key={`turn-outcome-${item.turnNumber}`}>
-                {!isExpanded ? (
-                  /* Compact Collapsed Row */
-                  <div
-                    onClick={() => toggleTurnExpanded(item.turnNumber, isLatest)}
-                    className={`rounded-lg cursor-pointer transition-all ${
-                      isLatest
-                        ? 'p-2.5 bg-gradient-to-b from-amber-950/30 to-black/85 border border-fantasy-accent/60 hover:border-fantasy-accent'
-                        : 'p-2 bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border hover:bg-black/70'
-                    }`}
-                    title={t('outcomes.expand_turn_details', 'Click to expand turn details')}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {isLatest ? (
-                          <span className="px-1.5 py-0.5 rounded bg-fantasy-accent/20 border border-fantasy-accent/60 text-fantasy-accent text-[10px] font-mono font-bold uppercase shrink-0">
-                            {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
-                          </span>
-                        ) : (
-                          <span className="text-[10px] font-mono uppercase text-gray-400 font-semibold shrink-0">
-                            {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
-                          </span>
-                        )}
-                        <span className="text-xs text-gray-200 truncate font-medium">
-                          {item.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase px-2 py-0.5 text-[10px] ${theme.badgeClass}`}>
-                          <span>{theme.icon}</span>
-                          <span>{tierText}</span>
-                        </span>
-                        <ChevronDown size={14} className="text-gray-400" />
-                      </div>
-                    </div>
-                  </div>
-                ) : (
-                  /* Expanded Outcome Box */
-                  <div
-                    className={`rounded-xl transition-all ${
-                      isLatest
-                        ? 'p-3.5 bg-gradient-to-b from-amber-950/25 via-black/85 to-fantasy-panel/95 border-2 border-fantasy-accent/80 shadow-[0_0_20px_rgba(217,119,6,0.18)] ring-1 ring-fantasy-accent/40 space-y-2.5 relative overflow-hidden'
-                        : 'p-2.5 bg-black/50 border border-fantasy-border/70 hover:border-fantasy-border hover:bg-black/70 space-y-2'
-                    }`}
-                  >
-                    {/* Turn Header & Check Result Badge */}
-                    <div className="flex items-center justify-between gap-2">
-                      {isLatest ? (
-                        <div className="flex items-center gap-2">
-                          <span className="relative flex h-2 w-2">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-fantasy-accent opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2 w-2 bg-fantasy-accent"></span>
-                          </span>
-                          <span className="px-2 py-0.5 rounded-full bg-fantasy-accent/20 border border-fantasy-accent/60 text-fantasy-accent text-[11px] font-mono font-bold uppercase tracking-wider shadow-sm">
-                            {t('scene.latest_outcome', { number: item.turnNumber, defaultValue: `Latest Outcome • Turn #${item.turnNumber}` })}
-                          </span>
-                        </div>
-                      ) : (
-                        <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-semibold">
-                          {t('scene.turn_number', { number: item.turnNumber, defaultValue: `Turn #${item.turnNumber}` })}
-                        </span>
-                      )}
-
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full border font-mono font-bold uppercase shadow-sm ${
-                            isLatest ? 'px-2.5 py-0.5 text-[11px]' : 'px-2 py-0.5 text-[10px]'
-                          } ${theme.badgeClass}`}
-                        >
-                          <span>{theme.icon}</span>
-                          <span>{statPrefix}{tierText}{chanceText}</span>
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => toggleTurnExpanded(item.turnNumber, isLatest)}
-                          className="p-1 rounded text-gray-400 hover:text-gray-200 hover:bg-white/10 transition-colors"
-                          title={t('outcomes.collapse_outcome', 'Collapse outcome')}
-                        >
-                          <ChevronUp size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Chosen Action Label */}
-                    <div
-                      className={`font-semibold leading-snug ${
-                        isLatest
-                          ? 'text-xs sm:text-sm text-white pl-2.5 py-0.5 bg-white/[0.05] border-l-4 border-fantasy-accent rounded-r'
-                          : 'text-xs text-gray-200 pl-2 py-0.5 border-l-2 border-fantasy-accent/40'
-                      }`}
-                    >
-                      {item.label}
-                    </div>
-
-                    {/* Mechanical Deltas Pills (EXP, Level Up, HP, MP, Gold, Loot, Status) */}
-                    <div className="flex flex-wrap gap-1 pt-0.5">
-                      {item.xpGained > 0 && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded bg-amber-950/70 border border-amber-600/60 text-amber-300 font-mono font-bold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          }`}
-                        >
-                          ✨ +{item.xpGained} EXP
-                        </span>
-                      )}
-
-                      {item.levelsGained.length > 0 && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded bg-yellow-500/30 border border-yellow-400 text-yellow-300 font-mono font-extrabold animate-pulse ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          }`}
-                        >
-                          🎉 {t('outcomes.level_up', 'LEVEL UP')} (Lv.{item.levelsGained[item.levelsGained.length - 1]})
-                        </span>
-                      )}
-
-                      {item.hpDelta !== 0 && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          } ${
-                            item.hpDelta > 0
-                              ? 'bg-emerald-950/70 border-emerald-700/60 text-emerald-300'
-                              : 'bg-red-950/80 border-red-700/70 text-red-300'
-                          }`}
-                        >
-                          <Heart size={isLatest ? 11 : 9} />
-                          {item.hpDelta > 0 ? `+${item.hpDelta}` : item.hpDelta} HP
-                        </span>
-                      )}
-
-                      {item.mpDelta !== 0 && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          } ${
-                            item.mpDelta > 0
-                              ? 'bg-blue-950/70 border-blue-700/60 text-blue-300'
-                              : 'bg-indigo-950/80 border-indigo-700/70 text-indigo-300'
-                          }`}
-                        >
-                          💧 {item.mpDelta > 0 ? `+${item.mpDelta}` : item.mpDelta} MP
-                        </span>
-                      )}
-
-                      {item.goldDelta !== 0 && (
-                        <span
-                          className={`inline-flex items-center gap-1 rounded border font-mono font-bold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          } ${
-                            item.goldDelta > 0
-                              ? 'bg-amber-950/80 border-amber-600/60 text-amber-300'
-                              : 'bg-orange-950/80 border-orange-700/60 text-orange-300'
-                          }`}
-                        >
-                          <Coins size={isLatest ? 11 : 9} />
-                          {item.goldDelta > 0 ? `+${item.goldDelta}` : item.goldDelta} Gold
-                        </span>
-                      )}
-
-                      {item.itemsGained.map((it, iIdx) => (
-                        <span
-                          key={`gain-${iIdx}`}
-                          className={`inline-flex items-center gap-1 rounded bg-cyan-950/70 border border-cyan-700/60 text-cyan-200 font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          }`}
-                        >
-                          <Gift size={isLatest ? 11 : 9} /> +{it}
-                        </span>
-                      ))}
-
-                      {item.itemsLost.map((it, iIdx) => (
-                        <span
-                          key={`lost-${iIdx}`}
-                          className={`inline-flex items-center gap-1 rounded bg-neutral-900 border border-neutral-700 text-gray-400 line-through ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          }`}
-                        >
-                          -{it}
-                        </span>
-                      ))}
-
-                      {item.statusEffects.map((st, sIdx) => (
-                        <span
-                          key={`st-${sIdx}`}
-                          className={`inline-flex items-center gap-1 rounded bg-rose-950/70 border border-rose-700/60 text-rose-200 font-semibold ${
-                            isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                          }`}
-                        >
-                          <ShieldAlert size={isLatest ? 11 : 9} /> {st}
-                        </span>
-                      ))}
-
-                      {item.relUpdates.map((ru, rIdx) => {
-                        const label = typeof ru === 'string'
-                          ? ru
-                          : `${ru.npc_name || ru.npc || ru.name || 'NPC'}: ${(ru.delta_score ?? ru.delta ?? 0) > 0 ? `+${ru.delta_score ?? ru.delta}` : (ru.delta_score ?? ru.delta ?? '')}`;
-                        return (
-                          <span
-                            key={`rel-${rIdx}`}
-                            className={`inline-flex items-center gap-1 rounded bg-pink-950/70 border border-pink-700/60 text-pink-200 font-semibold ${
-                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                            }`}
-                          >
-                            💕 {label}
-                          </span>
-                        );
-                      })}
-
-                      {(item.socialFeedbackPills || []).map((pill, pIdx) => {
-                        const pillText = formatSocialFeedbackPill(pill, t);
-                        if (!pillText) return null;
-                        return (
-                          <span
-                            key={`soc-pill-${pIdx}`}
-                            className={`inline-flex items-center gap-1 rounded bg-indigo-950/70 border border-indigo-700/60 text-indigo-200 font-semibold ${
-                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                            }`}
-                          >
-                            💬 {pillText}
-                          </span>
-                        );
-                      })}
-
-                      {item.facUpdates.map((fu, fIdx) => {
-                        const label = typeof fu === 'string'
-                          ? fu
-                          : `${fu.faction_name || fu.faction || fu.name || 'Faction'}: ${(fu.delta_score ?? fu.delta ?? 0) > 0 ? `+${fu.delta_score ?? fu.delta}` : (fu.delta_score ?? fu.delta ?? 0)} Rep`;
-                        return (
-                          <span
-                            key={`fac-${fIdx}`}
-                            className={`inline-flex items-center gap-1 rounded bg-purple-950/70 border border-purple-700/60 text-purple-200 font-semibold ${
-                              isLatest ? 'px-2 py-0.5 text-xs' : 'px-1.5 py-0.5 text-[10px]'
-                            }`}
-                          >
-                            🚩 {label}
-                          </span>
-                        );
-                      })}
-                    </div>
-
-                    {/* Refractory Recovery Banner */}
-                    {item.refractoryNotice && (
-                      <div className="rounded-lg p-2 bg-emerald-950/50 border border-emerald-600/60 text-emerald-300 text-xs flex items-center gap-1.5">
-                        <span className="text-sm">⚡</span>
-                        <span className="font-semibold">{item.refractoryNotice}</span>
-                      </div>
-                    )}
-
-                    {/* Intimate Excitement & Arousal Gauge Block */}
-                    {item.intimateUpdate && item.intimateUpdate.active && (
-                      <div
-                        className={`rounded-lg space-y-1.5 border ${
-                          isLatest
-                            ? 'p-2.5 bg-rose-950/45 border-pink-600/60 text-xs shadow-sm'
-                            : 'p-2 bg-rose-950/30 border-pink-800/40 text-[10px]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between font-bold text-pink-300">
-                          <span className="flex items-center gap-1">
-                            <span>💋</span> Intimate Excitement & Arousal
-                          </span>
-                          <div className="flex items-center gap-1">
-                            {item.intimateUpdate.mutual_group_climax && (
-                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-400/50 animate-pulse">
-                                ✨ Group Climax
-                              </span>
-                            )}
-                            {!item.intimateUpdate.mutual_group_climax && item.intimateUpdate.simultaneous_partner_climax && (
-                              <span className="text-[9px] uppercase font-bold font-mono tracking-wider px-1.5 py-0.2 rounded bg-rose-500/30 text-rose-200 border border-rose-400/50 animate-pulse">
-                                {item.intimateUpdate.partner_meters?.filter(p => p.climaxed).length > 2 ? '💥 Multi Climax' : '💥 Dual Climax'}
-                              </span>
-                            )}
-                            {item.intimateUpdate.act_type && (
-                              <span className="text-[9px] uppercase font-mono font-bold tracking-wider px-1.5 py-0.2 rounded bg-pink-900/60 text-pink-200">
-                                {item.intimateUpdate.act_type === 'foreplay_nongenital' ? 'Foreplay' : item.intimateUpdate.act_type.replace(/_/g, ' ')}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Player Progress Bar */}
-                        <div className="space-y-0.5">
-                          <div className="flex justify-between items-center text-[10px]">
-                            <span className="font-semibold text-pink-100">
-                              {item.characterName} (You)
-                              {item.intimateUpdate.player_climaxed && (
-                                <span className="text-[10px] font-bold text-amber-300 ml-1">💥</span>
-                              )}
-                            </span>
-                            <span className="font-mono text-pink-300 font-bold">
-                              {item.intimateUpdate.player_meter}%
-                              {item.intimateUpdate.player_delta > 0 && (
-                                <span className="text-[9px] text-pink-400 font-normal ml-1">
-                                  (+{item.intimateUpdate.player_delta}%)
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                          <div className="w-full bg-neutral-900/90 rounded-full h-1.5 sm:h-2 overflow-hidden border border-pink-900/60 p-0.5">
-                            <div
-                              className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-pink-500 via-rose-500 to-red-500 ${
-                                item.intimateUpdate.player_meter >= 80 ? 'animate-pulse' : ''
-                              }`}
-                              style={{ width: `${Math.min(100, item.intimateUpdate.player_meter)}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        {/* Partner Progress Bar(s) */}
-                        {(item.intimateUpdate.partner_meters && item.intimateUpdate.partner_meters.length > 0
-                          ? item.intimateUpdate.partner_meters
-                          : [{
-                              name: session?.dialogue_partner || item.intimateUpdate.partner_name || 'Partner',
-                              meter: item.intimateUpdate.partner_meter,
-                              delta: item.intimateUpdate.partner_delta
-                            }]
-                        ).map((p, pIdx) => (
-                          <div key={`partner-meter-${pIdx}`} className="space-y-0.5">
-                            <div className="flex justify-between items-center text-[10px]">
-                              <span className="font-semibold text-pink-100">
-                                {p.name || 'Partner'}
-                                {p.climaxed && (
-                                  <span className="text-[10px] font-bold text-amber-300 ml-1">💥</span>
-                                )}
-                                {!p.climaxed && (p.status?.includes('Recoiling') || p.status?.includes('Turned Off')) && (
-                                  <span className="text-[10px] font-bold text-amber-400 ml-1" title={p.status}>⚠️</span>
-                                )}
-                              </span>
-                              <span className="font-mono text-rose-300 font-bold">
-                                {p.meter}%
-                                {p.delta > 0 && (
-                                  <span className="text-[9px] text-rose-400 font-normal ml-1">
-                                    (+{p.delta}%)
-                                  </span>
-                                )}
-                              </span>
-                            </div>
-                            <div className="w-full bg-neutral-900/90 rounded-full h-1.5 sm:h-2 overflow-hidden border border-rose-900/60 p-0.5">
-                              <div
-                                className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r from-rose-500 via-pink-500 to-red-500 ${
-                                  p.meter >= 80 ? 'animate-pulse' : ''
-                                }`}
-                                style={{ width: `${Math.min(100, p.meter)}%` }}
-                              />
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Sensitive Spot Notification */}
-                        {item.intimateUpdate.sensitive_spot_matched && item.intimateUpdate.matched_spot && (
-                          <div className="text-[10px] text-amber-300 font-semibold pt-0.5 flex items-center gap-1">
-                            <span>✨</span> Sensitive Spot Triggered: {item.intimateUpdate.matched_spot} (+6% bonus!)
-                          </div>
-                        )}
-
-                        {/* Climax & Refractory Alerts */}
-                        {item.intimateUpdate.mutual_group_climax && (
-                          <div className="text-[10px] text-pink-300 font-semibold pt-0.5 flex items-center gap-1">
-                            <span>✨</span> Mutual Group Climax! Shared peak in passionate release.
-                          </div>
-                        )}
-                        {!item.intimateUpdate.mutual_group_climax && item.intimateUpdate.simultaneous_partner_climax && (
-                          <div className="text-[10px] text-pink-300 font-semibold pt-0.5 flex items-center gap-1">
-                            <span>✨</span> Simultaneous Climax! Multiple partners peak together.
-                          </div>
-                        )}
-                        {item.intimateUpdate.premature_finish && (
-                          <div className="text-[10px] text-amber-300 font-semibold pt-0.5 flex items-center gap-1">
-                            <span>⚠️</span> Spent: Stamina depleted while {
-                              item.intimateUpdate.unsatisfied_partners && item.intimateUpdate.unsatisfied_partners.length >= 2
-                                ? `${item.intimateUpdate.unsatisfied_partners.slice(0, -1).join(', ')} and ${item.intimateUpdate.unsatisfied_partners.slice(-1)} remain unsatisfied.`
-                                : `${item.intimateUpdate.unsatisfied_partner || 'partner'} remains unsatisfied.`
-                            }
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {/* Quest & Objective Progress Block */}
-                    {item.questUpdates.length > 0 && (
-                      <div
-                        className={`rounded-lg space-y-1.5 border ${
-                          isLatest
-                            ? 'p-2.5 bg-emerald-950/40 border-emerald-600/60 text-xs shadow-sm'
-                            : 'p-2 bg-emerald-950/25 border-emerald-800/40 text-[10px]'
-                        }`}
-                      >
-                        {item.questUpdates.map((q, qIdx) => (
-                          <div key={`q-${qIdx}`} className="space-y-1">
-                            <div className="flex items-center justify-between gap-1.5 font-bold text-emerald-300">
-                              <span className="truncate">📜 {q.title || q.quest_id || 'Quest Updated'}</span>
-                              {q.status && (
-                                <span className="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-emerald-900/80 border border-emerald-500/60 shadow-sm shrink-0">
-                                  {q.status}
-                                </span>
-                              )}
-                            </div>
-                            {Array.isArray(q.completed_sub_quest_ids) && q.completed_sub_quest_ids.length > 0 && (
-                              <div className={`text-emerald-200 font-semibold ${isLatest ? 'text-xs' : 'text-[10px]'}`}>
-                                ✅ Sub-objective #{q.completed_sub_quest_ids.join(', #')} completed!
-                              </div>
-                            )}
-                            {Array.isArray(q.new_clues) && q.new_clues.length > 0 && (
-                              <div className="space-y-1 pt-0.5">
-                                {q.new_clues.map((clue, cIdx) => (
-                                  <div
-                                    key={`clue-${cIdx}`}
-                                    className={`rounded border flex items-start gap-1.5 ${
-                                      isLatest
-                                        ? 'p-2 bg-amber-950/40 border-amber-500/60 text-amber-100 text-xs shadow-sm'
-                                        : 'p-1.5 bg-amber-950/25 border-amber-700/40 text-amber-200 text-[10px]'
-                                    }`}
-                                  >
-                                    <Sparkles size={isLatest ? 13 : 11} className="text-amber-400 shrink-0 mt-0.5" />
-                                    <div className="leading-relaxed">
-                                      <span className="font-bold text-amber-300 uppercase tracking-wider text-[9px] block mb-0.5">
-                                        Clue Discovered:
-                                      </span>
-                                      <span className="italic">{clue}</span>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Combat Log Block */}
-                    {item.combatLines.length > 0 && (
-                      <div
-                        className={`rounded-lg bg-red-950/35 border border-red-800/50 space-y-1 font-mono text-red-200 shadow-sm ${
-                          isLatest ? 'p-2.5 text-xs' : 'p-2 text-[10px]'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1.5 text-red-300 font-bold uppercase tracking-wider">
-                          <Swords size={isLatest ? 12 : 10} />
-                          <span>{t('outcomes.combat_log', 'Combat Log')}</span>
-                        </div>
-                        {item.combatLines.map((line, lIdx) => (
-                          <div key={`c-${lIdx}`} className="leading-relaxed text-gray-200">
-                            • {line}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+      {item.questUpdates.length > 0 && (
+        <div className="pt-2 border-t border-fantasy-border/25 space-y-1.5">
+          {item.questUpdates.map((q, qIdx) => (
+            <div key={`q-${qIdx}`} className="space-y-1">
+              <div className="flex items-center justify-between gap-1.5 font-semibold text-emerald-300">
+                <span className="truncate">
+                  📜 {q.title || q.quest_id || t('outcomes.quest_updated', 'Quest Updated')}
+                </span>
+                {q.status && (
+                  <span className="hk-chip bg-emerald-500/20 text-emerald-200 text-[9px] font-mono uppercase">
+                    {q.status}
+                  </span>
+                )}
+              </div>
+              {Array.isArray(q.completed_sub_quest_ids) &&
+                q.completed_sub_quest_ids.length > 0 && (
+                  <div className="text-emerald-200 text-[11px]">
+                    ✅ #{q.completed_sub_quest_ids.join(', #')}
                   </div>
                 )}
-
-                {/* Clear Visual Divider between Latest Turn and Past Turns */}
-                {isLatest && turnOutcomes.length > 1 && (
-                  <div className="flex items-center gap-2 pt-1 pb-0.5">
-                    <div className="h-px bg-fantasy-border/70 flex-1" />
-                    <span className="text-[10px] font-mono uppercase tracking-wider text-gray-400 font-semibold px-2 py-0.2 rounded-full bg-black/70 border border-fantasy-border/70 shadow-sm">
-                      Previous Turns ({turnOutcomes.length - 1})
-                    </span>
-                    <div className="h-px bg-fantasy-border/70 flex-1" />
+              {Array.isArray(q.new_clues) &&
+                q.new_clues.map((clue, cIdx) => (
+                  <div
+                    key={`clue-${cIdx}`}
+                    className="pl-2 border-l-2 border-amber-400/70 text-amber-100 text-[11px] italic"
+                  >
+                    {clue}
                   </div>
-                )}
-              </React.Fragment>
-            );
-          })
+                ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {item.combatLines.length > 0 && (
+        <div className="pt-2 border-t border-fantasy-border/25 space-y-0.5 font-mono text-[11px] text-red-200">
+          <div className="flex items-center gap-1.5 text-red-300 font-bold uppercase tracking-wider">
+            <Swords size={11} />
+            <span>{t('outcomes.combat_log', 'Combat Log')}</span>
+          </div>
+          {item.combatLines.map((line, lIdx) => (
+            <div key={`c-${lIdx}`} className="leading-relaxed text-gray-200">
+              • {line}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const LatestOutcomeCard = ({
+  session,
+  collapsed = false,
+  onToggleCollapse,
+  onOpenHistory,
+  isSheet = false,
+  className = '',
+}) => {
+  const { t } = useTranslation();
+  const turnOutcomes = useMemo(
+    () => computeTurnOutcomesList(session),
+    [session?.history]
+  );
+  const latest = turnOutcomes[0] || null;
+
+  const header = (
+    <div
+      className={`px-3.5 py-2.5 flex items-center justify-between gap-2 shrink-0 ${
+        isSheet || !collapsed ? 'border-b border-fantasy-border/25' : ''
+      }`}
+    >
+      <div className="flex items-center gap-1.5 min-w-0">
+        <ScrollText size={14} className="text-fantasy-accent shrink-0" />
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-200 truncate">
+          {t('scene.outcomes_title', 'Outcomes')}
+        </span>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {onOpenHistory && (
+          <MotionButton
+            onClick={onOpenHistory}
+            className="hk-icon-btn h-7 min-w-7 text-gray-400 hover:text-fantasy-accent"
+            title={t('history.view_turns', 'View Turns History')}
+            aria-label={t('history.view_turns', 'View Turns History')}
+          >
+            <History size={14} />
+          </MotionButton>
+        )}
+        {!isSheet && onToggleCollapse && (
+          <MotionButton
+            onClick={onToggleCollapse}
+            className="hk-icon-btn h-7 min-w-7 text-gray-400 hover:text-gray-100"
+            aria-expanded={!collapsed}
+            aria-label={
+              collapsed
+                ? t('nav.expand', 'Expand')
+                : t('nav.collapse', 'Collapse')
+            }
+            title={
+              collapsed
+                ? t('nav.expand', 'Expand')
+                : t('nav.collapse', 'Collapse')
+            }
+          >
+            <ChevronDown
+              size={14}
+              className={`transition-transform duration-200 ${collapsed ? '' : 'rotate-180'}`}
+            />
+          </MotionButton>
         )}
       </div>
+    </div>
+  );
+
+  const body = (
+    <div className="overflow-y-auto overscroll-contain [scrollbar-gutter:stable] custom-scrollbar px-3.5 py-2.5 flex-1 min-h-0">
+      {!latest ? (
+        <div className="text-center py-4 px-2 text-xs text-gray-400 space-y-1">
+          <Sparkles size={15} className="text-fantasy-accent mx-auto" />
+          <p className="font-semibold text-gray-200">
+            {t('scene.no_outcomes_title', 'No Turn Outcomes Yet')}
+          </p>
+          <p className="text-[11px] leading-relaxed">
+            {t(
+              'scene.no_outcomes_desc',
+              'Skill check rolls, EXP gains, combat logs, loot, and newly discovered clues will appear here as your story unfolds.'
+            )}
+          </p>
+        </div>
+      ) : (
+        <OutcomeDetailsBlock item={latest} session={session} />
+      )}
+    </div>
+  );
+
+  if (isSheet) {
+    return (
+      <div className={`flex flex-col min-h-0 flex-1 ${className}`.trim()}>
+        {header}
+        {body}
+      </div>
+    );
+  }
+
+  return (
+    <AcrylicPanel
+      variant="panel"
+      origin="right"
+      className={`flex flex-col min-h-0 overflow-hidden ${className}`.trim()}
+    >
+      {header}
+      <CollapsibleSection
+        isOpen={!collapsed}
+        className="min-h-0 flex-1 flex flex-col"
+      >
+        {body}
+      </CollapsibleSection>
+    </AcrylicPanel>
+  );
+};
+
+const WorldOutcomeSidebar = ({
+  session,
+  onSelectContact,
+  onQuickAction,
+  onOpenHistory,
+  isMobileDrawer = false,
+}) => {
+  return (
+    <div className="flex flex-col h-full min-h-0 gap-2.5 select-none">
+      <EpistemicWatchStrip session={session} isSheet={isMobileDrawer} />
+      <PresentNpcsCard
+        session={session}
+        onSelectContact={onSelectContact}
+        onQuickAction={onQuickAction}
+        isSheet={isMobileDrawer}
+        className="flex-1"
+      />
+      <LatestOutcomeCard
+        session={session}
+        onOpenHistory={onOpenHistory}
+        isSheet={isMobileDrawer}
+        className="flex-1"
+      />
     </div>
   );
 };

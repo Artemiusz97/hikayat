@@ -32,6 +32,8 @@ from mechanics.combat.items import (
     is_digital_item,
     parse_consumable_metadata,
     classify_and_enrich_ad_hoc_item,
+    classify_consumable_usage_mode,
+    is_hostile_or_covert_consumable,
 )
 from mechanics.combat.merchant import MERCHANT_ARCHETYPES
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
@@ -44,6 +46,7 @@ from mechanics.world.locations import (
 )
 from skill_check import resolve_check
 import game_engine
+from services.examine_service import invalidate_examine_cache
 from .deps import (
     EquipRequest,
     UnequipRequest,
@@ -61,6 +64,23 @@ router = APIRouter()
 def _validate_or_clear_faction_quartermaster(session_id: int, loc: str, merchant: dict) -> tuple[bool, dict]:
     """Verify `is_faction_quartermaster` is anchored to a Faction HQ; clear stale flags if not."""
     return validate_or_clear_faction_quartermaster(session_id, loc, merchant)
+
+
+def _annotate_stock_items(raw_stock: list[dict], shop_ctx: dict, discount_pct: int) -> list[dict]:
+    """Annotate in-stock merchant items with effective prices and faction pricing badges."""
+    annotated: list[dict] = []
+    for item in raw_stock or []:
+        if not isinstance(item, dict) or item.get("quantity", 1) <= 0:
+            continue
+        base_price = int(item.get("price", 15) or 15)
+        final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
+        entry = dict(item)
+        entry["base_price"] = base_price
+        entry["final_price"] = final_price
+        if shop_ctx.get("pricing_badge"):
+            entry["faction_pricing_badge"] = shop_ctx["pricing_badge"]
+        annotated.append(entry)
+    return annotated
 
 
 def _is_spellbook(item: dict) -> bool:
@@ -358,6 +378,9 @@ def _enrich_inventory_item(item: dict, char: dict, equipment: dict) -> dict:
         "category_label": category_label,
         "is_usable": item_is_usable,
         "is_equippable": bool(valid_slots),
+        "usage_mode": classify_consumable_usage_mode(it),
+        "is_hostile_consumable": bool(is_hostile_or_covert_consumable(it)),
+        "is_key_item": bool(key_flag),
         "stats_summary": " • ".join(stats_badges) if stats_badges else clean_effect,
         "stat_badges": stats_badges,
         "arcane_compatible": arcane_compatible,
@@ -447,6 +470,11 @@ async def drop_item(req: ItemDropRequest, request: Request = None):
             raise HTTPException(status_code=404, detail="Item not found or could not be removed")
         if target_item:
             await adb(db.drop_item_to_session_floor, req.user_id, target_item)
+        if lock_sid:
+            try:
+                invalidate_examine_cache(lock_sid)
+            except Exception:
+                pass
         return {"success": True}
 
 
@@ -470,6 +498,26 @@ async def use_item(req: ItemUseRequest, request: Request = None):
             if sess_row:
                 session = dict(sess_row)
 
+        eff_ttype = str(req.target_type or "self").strip().lower()
+        if isinstance(session, dict):
+            from mechanics.combat import is_in_combat as _inv_is_combat
+            if _inv_is_combat(session):
+                raise HTTPException(status_code=400, detail="In combat, using an item consumes a turn.")
+        if eff_ttype in ("npc", "contact"):
+            raise HTTPException(status_code=400, detail="Using an item on an NPC requires a story turn.")
+        u_mode = classify_consumable_usage_mode(target_item)
+        if u_mode == "narrative":
+            raise HTTPException(status_code=400, detail="Narrative consumables must be used during a story turn.")
+
+        eff_target_uid = int(req.user_id)
+        if eff_ttype == "player" and req.target_user_id is not None:
+            if not lock_sid:
+                raise HTTPException(status_code=400, detail="Active session required to target another player.")
+            allowed_uids = set(await adb(db.get_session_participant_user_ids, lock_sid) or [])
+            if allowed_uids and int(req.target_user_id) not in allowed_uids:
+                raise HTTPException(status_code=403, detail="Target player is not in your session.")
+            eff_target_uid = int(req.target_user_id)
+
         if (
             target_item.get("item_type") in ("Potion", "Food", "Drink", "Consumable")
             and not parse_consumable_metadata(target_item)
@@ -483,10 +531,11 @@ async def use_item(req: ItemUseRequest, request: Request = None):
             apply_item_to_target,
             req.user_id,
             target_item,
-            req.target_type or "self",
+            eff_ttype or "self",
             req.target_name or "self",
             session=session,
-            target_user_id=req.user_id
+            target_user_id=eff_target_uid,
+            mode="use",
         )
         if not success:
             raise HTTPException(status_code=400, detail=message)
@@ -804,19 +853,7 @@ async def get_merchant_shop(
         for s_it in raw_stock:
             if isinstance(s_it, dict) and int(s_it.get("quantity", 1) or 1) > 1:
                 s_it["quantity"] = 1
-    stock = []
-    if is_shop_open:
-        for item in raw_stock:
-            if item.get("quantity", 1) <= 0:
-                continue
-            base_price = int(item.get("price", 15) or 15)
-            final_price = compute_effective_shop_item_price(item, shop_ctx=shop_ctx, discount_pct=discount_pct)
-            entry = dict(item)
-            entry["base_price"] = base_price
-            entry["final_price"] = final_price
-            if shop_ctx.get("pricing_badge"):
-                entry["faction_pricing_badge"] = shop_ctx["pricing_badge"]
-            stock.append(entry)
+    stock = _annotate_stock_items(raw_stock, shop_ctx, discount_pct) if is_shop_open else []
 
     # Compute sellable items from player inventory
     inv_items = await adb(db.get_inventory, user_id)
@@ -991,6 +1028,27 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
 
         await adb(db.save_merchant_state, req.session_id, merchant)
         total_discount = _compute_charisma_discount(char, merchant)
+        haggle_shop_ctx = await adb(
+            get_anomalous_shop_faction_context,
+            session,
+            session.get("current_location", ""),
+            bool(req.is_phone_shop),
+            req.user_id,
+        )
+        raw_haggle_stock = list(
+            (merchant.get("phone_stock") if bool(req.is_phone_shop) else merchant.get("stock"))
+            or (
+                (merchant.get("catalogues") or {}).get(active_key, {}).get("stock", [])
+                if (not bool(req.is_phone_shop) and active_key and isinstance(merchant.get("catalogues"), dict))
+                else []
+            )
+        )
+        if (
+            haggle_shop_ctx.get("shop_faction_archetype") == "monastic_order"
+            and haggle_shop_ctx.get("player_faction_archetype") == "monastic_order"
+        ):
+            raw_haggle_stock = [dict(s_it, quantity=1) if isinstance(s_it, dict) and int(s_it.get("quantity", 1) or 1) > 1 else s_it for s_it in raw_haggle_stock[:3]]
+        annotated_stock = _annotate_stock_items(raw_haggle_stock, haggle_shop_ctx, total_discount)
 
         return {
             "success": True,
@@ -1001,6 +1059,7 @@ async def merchant_haggle(req: MerchantHaggleRequest, request: Request = None):
             "haggle_attempts_left": max(0, 3 - merchant["haggle_attempts"]),
             "haggle_discount_pct": int(merchant.get("discount_pct", 0) or 0),
             "discount_pct": total_discount,
+            "stock": annotated_stock,
             "message": note,
         }
 
@@ -1197,7 +1256,14 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
         price = compute_effective_shop_item_price(stock_item, shop_ctx=shop_ctx, discount_pct=discount_pct)
 
         if (char.get("gold", 0) or 0) < price:
-            raise HTTPException(status_code=400, detail=f"Not enough gold! Need {price}g, have {char.get('gold', 0)}g.")
+            scen_key = session.get("scenario", "fantasy")
+            cur_meta = scenario_data.get_scenario_currency(scen_key)
+            need_fmt = scenario_data.format_scenario_currency(price, scen_key)
+            have_fmt = scenario_data.format_scenario_currency(char.get("gold", 0) or 0, scen_key)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Not enough {cur_meta['name'].lower()}! Need {need_fmt}, have {have_fmt}.",
+            )
 
         slot_cost = int(stock_item.get("slot_cost", 1) or 1)
 
@@ -1277,18 +1343,7 @@ async def merchant_buy(req: MerchantBuyRequest, request: Request = None):
             bool(req.is_phone_shop),
             req.user_id,
         )
-        annotated_stock = []
-        for s_item in stock:
-            if s_item.get("quantity", 1) <= 0:
-                continue
-            b_price = int(s_item.get("price", 15) or 15)
-            f_price = compute_effective_shop_item_price(s_item, shop_ctx=post_shop_ctx, discount_pct=discount_pct)
-            s_copy = dict(s_item)
-            s_copy["base_price"] = b_price
-            s_copy["final_price"] = f_price
-            if post_shop_ctx.get("pricing_badge"):
-                s_copy["faction_pricing_badge"] = post_shop_ctx["pricing_badge"]
-            annotated_stock.append(s_copy)
+        annotated_stock = _annotate_stock_items(stock, post_shop_ctx, discount_pct)
 
         return {
             "success": True,

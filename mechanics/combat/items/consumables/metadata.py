@@ -363,3 +363,197 @@ def parse_item_effect(item: Dict[str, Any]) -> Dict[str, Any]:
         "category": "utility"
     }
 
+
+_HOSTILE_COVERT_KEYWORDS = (
+    "sleep",
+    "sleeping",
+    "sedative",
+    "tranquil",
+    "poison",
+    "toxin",
+    "venom",
+    "paralyz",
+    "chloroform",
+    "aphrodisiac",
+    "love potion",
+    "truth serum",
+    "drugged",
+    "spiked",
+    "smoke bomb",
+    "flashbang",
+    "grenade",
+    "acid flask",
+    "firebomb",
+)
+
+_NARRATIVE_CONSUMABLE_KEYWORDS = (
+    "tea",
+    "coffee",
+    "latte",
+    "boba",
+    "wine",
+    "ale",
+    "beer",
+    "sake",
+    "cider",
+    "whiskey",
+    "cocktail",
+    "snack",
+    "bento",
+    "meal",
+    "cake",
+    "chocolate",
+    "candy",
+    "perfume",
+    "incense",
+    "aphrodisiac",
+    "draught",
+    "sedative",
+    "sleeping",
+    "love potion",
+    "truth serum",
+    "pheromone",
+)
+
+_NON_CONSUMABLE_TYPES = {
+    "weapon",
+    "armor",
+    "shield",
+    "accessory",
+    "helmet",
+    "head",
+    "headwear",
+    "boots",
+    "shoes",
+    "gloves",
+    "ring",
+    "amulet",
+    "cloak",
+    "clothing",
+    "top",
+    "bottom",
+    "outerwear",
+    "lingerie",
+    "bra",
+    "underwear",
+    "misc",
+    "gift",
+    "novelty",
+    "key item",
+    "quest",
+    "quest item",
+    "narrative artifact",
+    "narrative",
+    "spellbook",
+}
+
+_CONSUMABLE_TYPES = {"potion", "consumable", "food", "drink", "remedy", "tonic", "scroll", "elixir"}
+
+
+def is_hostile_or_covert_consumable(item: Dict[str, Any]) -> bool:
+    """Returns True if using this consumable on an NPC is hostile, harmful, sedative, or covert."""
+    if not item or not isinstance(item, dict):
+        return False
+    if bool(item.get("equipped")) or is_key_item(item) or is_digital_item(item):
+        return False
+
+    parsed = parse_item_effect(item)
+    meta = parse_consumable_metadata(item) or {}
+    purpose_tags = [str(p).lower() for p in (meta.get("purpose_tags") or [])]
+    effect_tags = [str(e).lower() for e in (meta.get("effect_tags") or [])]
+
+    if int(parsed.get("damage", 0) or 0) > 0:
+        return True
+    if parsed.get("inflict_status"):
+        return True
+    if "throwable" in purpose_tags or "debuff" in purpose_tags:
+        return True
+    if any(t in {"explosive_fire", "corrosive_acid", "toxic_cloud", "paralyze", "sleep"} for t in effect_tags):
+        return True
+
+    combined = f"{item.get('name', '')} {item.get('effect', '')} {item.get('description', '')}".lower()
+    return any(kw in combined for kw in _HOSTILE_COVERT_KEYWORDS)
+
+
+def classify_consumable_usage_mode(item: Dict[str, Any]) -> str:
+    """
+    Classifies an inventory item's out-of-combat consumable usage mode:
+      - 'non_consumable': weapons, armor, key items, digital media, spellbooks, gifts
+      - 'throwable': offensive/damage consumables (always consumes a turn / combat throw)
+      - 'mechanical': pure HP/MP/cure/combat stat buffs (instant Quick Use on self/party)
+      - 'narrative': social/story consumables with zero mechanical combat delta (always consumes a turn)
+      - 'hybrid': both mechanical stats and narrative/social effects (prompts Quick Use vs Use in Story)
+    """
+    if not item or not isinstance(item, dict):
+        return "non_consumable"
+
+    item_type = str(item.get("item_type") or item.get("type") or "").strip().lower()
+    name_low = str(item.get("name") or "").strip().lower()
+    eff_raw = str(item.get("effect") or "").strip()
+    eff_low = eff_raw.lower()
+
+    if is_key_item(item) or is_digital_item(item):
+        return "non_consumable"
+    if (
+        item_type == "spellbook"
+        or eff_raw.startswith("[SPELLBOOK_JSON]")
+        or any(name_low.startswith(p) for p in ("spellbook:", "grimoire:", "tome:", "datapad:", "schematic:"))
+    ):
+        return "non_consumable"
+    if eff_raw.startswith(("[GEAR_JSON]", "[ITEM_JSON]")) and item_type not in _CONSUMABLE_TYPES:
+        return "non_consumable"
+    if item_type in _NON_CONSUMABLE_TYPES and item_type not in _CONSUMABLE_TYPES:
+        # Fallback for misc items explicitly described as potions/tonics/elixirs
+        if not any(kw in name_low for kw in ("potion", "elixir", "tonic", "draught", "remedy", "aphrodisiac", "sedative")):
+            return "non_consumable"
+
+    meta = parse_consumable_metadata(item) or {}
+    parsed = parse_item_effect(item)
+    purpose_tags = [str(p).lower() for p in (meta.get("purpose_tags") or [])]
+    effect_tags = [str(e).lower() for e in (meta.get("effect_tags") or [])]
+    taste_tags = [str(t).lower() for t in (meta.get("taste_tags") or [])]
+
+    if (
+        int(parsed.get("damage", 0) or 0) > 0
+        or "throwable" in purpose_tags
+        or any(t in {"explosive_fire", "corrosive_acid", "toxic_cloud"} for t in effect_tags)
+    ):
+        return "throwable"
+
+    buffs = parsed.get("buffs") if isinstance(parsed.get("buffs"), dict) else {}
+    mech_buff_keys = {"atk_pct", "dr", "dt", "eva", "atk", "def", "mdef", "matk", "str", "agi", "end", "per", "int", "luk"}
+    has_mech = bool(
+        int(parsed.get("hp_restore", 0) or 0) > 0
+        or int(parsed.get("mp_restore", 0) or 0) > 0
+        or bool(parsed.get("cure_status"))
+        or any(k in buffs for k in mech_buff_keys)
+    )
+    if not has_mech and eff_raw and not eff_raw.startswith("["):
+        if re.search(r"(?:heal|restor(?:e|es)|\+|cure)\w*\s*\d*\s*(?:hp|mp|health|mana|poison|bleed|burn)", eff_low):
+            has_mech = True
+
+    has_narrative = bool(
+        taste_tags
+        or item_type in {"food", "drink"}
+        or "morale_boost" in effect_tags
+        or "charisma_buff" in effect_tags
+        or "cha" in buffs
+        or "alcohol" in taste_tags
+        or is_hostile_or_covert_consumable(item)
+        or any(kw in f"{name_low} {eff_low}" for kw in _NARRATIVE_CONSUMABLE_KEYWORDS)
+    )
+
+    if not has_mech and not has_narrative:
+        if item_type in _CONSUMABLE_TYPES or any(
+            kw in name_low for kw in ("potion", "elixir", "tonic", "draught", "remedy", "snack", "bread", "ration", "tea", "perfume")
+        ):
+            return "narrative"
+        return "non_consumable"
+
+    if has_mech and has_narrative:
+        return "hybrid"
+    if has_mech:
+        return "mechanical"
+    return "narrative"
+
+

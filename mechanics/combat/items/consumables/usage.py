@@ -16,6 +16,49 @@ from .metadata import (
 )
 
 
+def _remove_inventory_item_entry(user_id: int, item: Dict[str, Any], *, force: bool = False) -> bool:
+    """Removes the exact item row by ID when present, falling back to name lookup."""
+    it_id = item.get("id") if isinstance(item, dict) else None
+    if it_id is not None:
+        try:
+            if db.remove_item(user_id, int(it_id), force=force):
+                return True
+        except Exception:
+            pass
+    it_name = item.get("name", "") if isinstance(item, dict) else ""
+    if it_name:
+        return bool(db.remove_item_by_name(user_id, it_name, force=force))
+    return False
+
+
+def _record_npc_gift_possession(
+    session_id: Optional[int],
+    target_name: str,
+    char: Dict[str, Any],
+    contact: Optional[Dict[str, Any]],
+    item_name: str,
+    turn_index: int = 0,
+) -> Optional[Dict[str, Any]]:
+    """Logs gifted item ownership onto NPC memories and contact basic_info without consuming effects."""
+    if not session_id or not target_name or not item_name:
+        return None
+    player_name = str(char.get("name") or "Protagonist").strip() or "Protagonist"
+    try:
+        db.add_npc_memory(
+            int(session_id),
+            target_name,
+            int(turn_index or 0),
+            f"Received '{item_name}' as a gift from {player_name}.",
+            importance=2,
+        )
+    except Exception:
+        pass
+    prev_info = (contact.get("basic_info") or {}) if isinstance(contact, dict) and isinstance(contact.get("basic_info"), dict) else {}
+    existing_gifts = list(prev_info.get("received_gifts") or [])
+    existing_gifts.append(item_name)
+    return {"received_gifts": existing_gifts[-15:]}
+
+
 def evaluate_gift_reaction(
     user_id: int,
     item: Dict[str, Any],
@@ -115,6 +158,8 @@ def evaluate_gift_reaction(
 
     score_delta = base_gain
     badge = "⚪ Standard" if tier == 3 else ("🔷 Superior" if tier == 2 else "👑 Masterwork")
+    turn_idx = int((session or {}).get("turn_count") or len((session or {}).get("history") or []) or 0)
+    force_remove = bool(item.get("is_quest_locked") or is_key_item(item))
 
     # 2. Resolve Disliked Path with Charisma Check
     if is_disliked:
@@ -123,8 +168,16 @@ def evaluate_gift_reaction(
             # Failed CHA check -> Relationship penalty
             score_delta = dislike_penalty
             if session_id:
-                db.upsert_contact(session_id, target_name.lower().replace(" ", "_"), target_name, character_id=char.get("id", 0), delta_score=score_delta)
-            db.remove_item_by_name(user_id, item.get("name"))
+                gift_info = _record_npc_gift_possession(session_id, target_name, char, contact, item_name, turn_idx)
+                db.upsert_contact(
+                    session_id,
+                    target_name.lower().replace(" ", "_"),
+                    target_name,
+                    character_id=char.get("id", 0),
+                    basic_info=gift_info,
+                    delta_score=score_delta,
+                )
+            _remove_inventory_item_entry(user_id, item, force=force_remove)
             return True, (
                 f"💢 **Disliked Gift!** You offered {badge} **{item_name}** to **{target_name}**, but they strongly dislike {dislike_keyword or 'this kind of gift'}!\n"
                 f"🎲 *CHA Check Failed ({check.chance}% chance — {check.tier_label})*\n"
@@ -134,8 +187,16 @@ def evaluate_gift_reaction(
             # Passed CHA check -> Smooth recovery
             score_delta = 1
             if session_id:
-                db.upsert_contact(session_id, target_name.lower().replace(" ", "_"), target_name, character_id=char.get("id", 0), delta_score=score_delta)
-            db.remove_item_by_name(user_id, item.get("name"))
+                gift_info = _record_npc_gift_possession(session_id, target_name, char, contact, item_name, turn_idx)
+                db.upsert_contact(
+                    session_id,
+                    target_name.lower().replace(" ", "_"),
+                    target_name,
+                    character_id=char.get("id", 0),
+                    basic_info=gift_info,
+                    delta_score=score_delta,
+                )
+            _remove_inventory_item_entry(user_id, item, force=force_remove)
             return True, (
                 f"💬 **Charming Recovery!** **{target_name}** isn't fond of {dislike_keyword or 'this gift'}, but your charm and pleasant words saved the gesture!\n"
                 f"🎲 *CHA Check Succeeded ({check.chance}% chance — {check.tier_label})*\n"
@@ -173,7 +234,15 @@ def evaluate_gift_reaction(
 
     worn_note = ""
     if session_id:
-        db.upsert_contact(session_id, target_name.lower().replace(" ", "_"), target_name, character_id=char.get("id", 0), delta_score=score_delta)
+        gift_info = _record_npc_gift_possession(session_id, target_name, char, contact, item_name, turn_idx)
+        db.upsert_contact(
+            session_id,
+            target_name.lower().replace(" ", "_"),
+            target_name,
+            character_id=char.get("id", 0),
+            basic_info=gift_info,
+            delta_score=score_delta,
+        )
         try:
             from mechanics.social.physical_state import apply_wearable_gift_to_npc
             slot_equipped = apply_wearable_gift_to_npc(
@@ -187,7 +256,7 @@ def evaluate_gift_reaction(
                 worn_note = f"\n👗 **{target_name}** gladly tries on and wears **{item_name}**!"
         except Exception:
             pass
-    db.remove_item_by_name(user_id, item.get("name"))
+    _remove_inventory_item_entry(user_id, item, force=force_remove)
 
     return True, (
         f"{feedback_title}\n{reaction_text}{worn_note}\n"
@@ -201,7 +270,9 @@ def apply_item_to_target(
     target_type: str,
     target_name: str,
     session: Optional[Dict[str, Any]] = None,
-    target_user_id: Optional[int] = None
+    target_user_id: Optional[int] = None,
+    *,
+    mode: str = "use",
 ) -> Tuple[bool, str]:
     """
     Executes item usage on a designated target (Self, Companion, Other Player, Monster, NPC, or Ground).
@@ -338,7 +409,7 @@ def apply_item_to_target(
                 for c in cured:
                     db.remove_status_effect(user_id, c)
 
-        db.remove_item_by_name(user_id, item_name)
+        _remove_inventory_item_entry(user_id, item)
 
         feedback = []
         if actual_hp > 0:
@@ -381,50 +452,115 @@ def apply_item_to_target(
             for c in parsed["cure_status"]:
                 db.remove_status_effect(target_user_id, c)
 
-        db.remove_item_by_name(user_id, item_name)
+        feedback = []
+        if actual_hp > 0:
+            feedback.append(f"+{actual_hp} ❤️")
+        if actual_mp > 0:
+            feedback.append(f"+{actual_mp} 💙")
+        if parsed.get("buffs"):
+            dur = int(parsed.get("duration", 3) or 3)
+            for k, v in parsed["buffs"].items():
+                if k == "atk_pct":
+                    lbl = f"+{int(v * 100)}% ATK"
+                elif k == "dr":
+                    lbl = f"+{int(v * 100)}% DR"
+                elif k == "dt":
+                    lbl = f"+{v} DT"
+                elif k == "eva":
+                    lbl = f"+{v}% EVA"
+                else:
+                    lbl = f"+{v} {k.upper()}"
+                feedback.append(lbl)
+                db.add_status_effect(target_user_id, f"[{lbl}] [{dur} turns]")
+        if parsed["cure_status"]:
+            feedback.append(f"cleansed {', '.join(parsed['cure_status'])}")
+
+        _remove_inventory_item_entry(user_id, item)
         new_target = db.get_character(target_user_id)
-        return True, f"✨ You gave **{item_name}** to **{target_char['name']}**! (+{actual_hp} ❤️)\n**{target_char['name']}** is now at ❤️ **{new_target['hp']}/{new_target['max_hp']}**."
+        desc = f" ({', '.join(feedback)})" if feedback else ""
+        return True, (
+            f"✨ You used **{item_name}** on **{target_char['name']}**!{desc}\n"
+            f"❤️ **{new_target['hp']}/{new_target['max_hp']}** | 💙 **{new_target['mp']}/{new_target['max_mp']}**"
+        )
 
-    # 3. Target: COMPANION / NPC (Gifting or Consuming)
+    # 3. Target: COMPANION / NPC
     elif target_type in ("companion", "npc", "contact"):
-        npcs = session.get("current_npcs") or [] if session else []
-        companion = next((npc for npc in npcs if isinstance(npc, dict) and npc.get("name", "").lower() == target_name.lower()), None)
+        if mode == "gift":
+            if is_giftable_item(item) or is_key_item(item) or item.get("item_type"):
+                ok, gift_msg, _delta = evaluate_gift_reaction(user_id, item, target_name, session=session, target_user_id=target_user_id)
+                return ok, gift_msg
 
-        # If targeting a companion with healing/cure consumable, apply directly to companion
-        is_medical = (parsed["hp_restore"] > 0 or parsed["mp_restore"] > 0 or bool(parsed["cure_status"]))
-        if companion and is_medical and target_type == "companion":
-            db.remove_item_by_name(user_id, item_name)
-            max_hp = companion.get("max_hp", 40)
-            curr_hp = companion.get("hp", max_hp)
-            actual_hp = min(parsed["hp_restore"], max_hp - curr_hp) if parsed["hp_restore"] > 0 else 0
-            companion["hp"] = min(max_hp, curr_hp + actual_hp)
+        npcs = list(session.get("current_npcs") or []) if session else []
+        target_low = str(target_name or "").strip().lower()
+        npc_idx = next((idx for idx, n in enumerate(npcs) if isinstance(n, dict) and n.get("name", "").strip().lower() == target_low), None)
+        target_npc = npcs[npc_idx] if npc_idx is not None else None
 
-            max_mp = companion.get("max_mp", 20)
-            curr_mp = companion.get("mp", max_mp)
-            actual_mp = min(parsed["mp_restore"], max_mp - curr_mp) if parsed["mp_restore"] > 0 else 0
-            companion["mp"] = min(max_mp, curr_mp + actual_mp)
+        _remove_inventory_item_entry(user_id, item)
 
-            if parsed["cure_status"] and companion.get("status_effects"):
-                companion["status_effects"] = [s for s in companion["status_effects"] if s not in parsed["cure_status"]]
+        if target_npc is not None:
+            max_hp = int(target_npc.get("max_hp", 40) or 40)
+            curr_hp = int(target_npc.get("hp", max_hp) if target_npc.get("hp") is not None else max_hp)
+            actual_hp = min(parsed["hp_restore"], max(0, max_hp - curr_hp)) if parsed["hp_restore"] > 0 else 0
+            target_npc["hp"] = min(max_hp, curr_hp + actual_hp)
 
-            if session:
+            max_mp = int(target_npc.get("max_mp", 20) or 20)
+            curr_mp = int(target_npc.get("mp", max_mp) if target_npc.get("mp") is not None else max_mp)
+            actual_mp = min(parsed["mp_restore"], max(0, max_mp - curr_mp)) if parsed["mp_restore"] > 0 else 0
+            target_npc["mp"] = min(max_mp, curr_mp + actual_mp)
+
+            status_list = list(target_npc.get("status_effects") or [])
+            cured_any = False
+            if parsed["cure_status"] and status_list:
+                before_len = len(status_list)
+                if "all" in [str(c).lower() for c in parsed["cure_status"]]:
+                    status_list = []
+                else:
+                    cure_low = {str(c).lower() for c in parsed["cure_status"]}
+                    status_list = [s for s in status_list if str(s).lower() not in cure_low]
+                cured_any = len(status_list) < before_len
+            if parsed["inflict_status"]:
+                for inf_s in parsed["inflict_status"]:
+                    if inf_s not in status_list:
+                        status_list.append(inf_s)
+            if parsed.get("buffs"):
+                for k in parsed["buffs"].keys():
+                    tag = f"+{k.upper()}"
+                    if tag not in status_list:
+                        status_list.append(tag)
+            target_npc["status_effects"] = status_list
+
+            if session and session.get("id"):
                 db.update_session_npcs(session["id"], npcs)
+                session["current_npcs"] = npcs
+                if (actual_hp > 0 or cured_any) and not parsed["inflict_status"]:
+                    actor_char = db.get_character(user_id) or {}
+                    db.upsert_contact(
+                        int(session["id"]),
+                        target_npc.get("name", target_name).lower().replace(" ", "_"),
+                        target_npc.get("name", target_name),
+                        character_id=int(actor_char.get("id", 0) or 0),
+                        delta_score=3,
+                    )
 
-            return True, f"✨ You used **{item_name}** on **{companion['name']}**! (+{actual_hp} ❤️)\n**{companion['name']}** is at ❤️ **{companion['hp']}/{companion['max_hp']}**."
+            parts = []
+            if actual_hp > 0:
+                parts.append(f"+{actual_hp} ❤️")
+            if actual_mp > 0:
+                parts.append(f"+{actual_mp} 💙")
+            if cured_any:
+                parts.append("ailments cleansed")
+            if parsed["inflict_status"]:
+                parts.append(f"inflicted {', '.join(parsed['inflict_status'])}")
+            desc = f" ({', '.join(parts)})" if parts else ""
+            return True, f"✨ You used **{item_name}** on **{target_npc.get('name', target_name)}**!{desc}"
 
-        # Otherwise evaluate as gift if item is giftable
-        if is_giftable_item(item):
-            ok, gift_msg, delta = evaluate_gift_reaction(user_id, item, target_name, session=session, target_user_id=target_user_id)
-            return ok, gift_msg
-
-        db.remove_item_by_name(user_id, item_name)
         return True, f"✨ You used **{item_name}** on **{target_name}**."
 
     # 4. Target: MONSTER / ENEMY (Combat Throwable or distraction)
     elif target_type in ("monster", "enemy") and session:
         monsters = session.get("nearby_enemies") or []
         monster = next((m for m in monsters if isinstance(m, dict) and m.get("name", "").lower() == target_name.lower()), None)
-        db.remove_item_by_name(user_id, item_name)
+        _remove_inventory_item_entry(user_id, item)
 
         if monster and parsed["damage"] > 0:
             monster["hp"] = max(0, monster.get("hp", 30) - parsed["damage"])
@@ -439,8 +575,8 @@ def apply_item_to_target(
 
         return True, f"🎯 You used **{item_name}** on **{target_name}**!"
 
-    # 5. Generic / Environment / NPC Fallback
+    # 5. Generic / Environment / Fallback
     else:
-        db.remove_item_by_name(user_id, item_name)
+        _remove_inventory_item_entry(user_id, item)
         return True, f"🎯 You used **{item_name}** on **{target_name}**!"
 

@@ -12,12 +12,17 @@ Use this runbook when working on `services/turn_service.py`, `game_engine/`, `mo
 ## 1. End-to-End Turn Lifecycle
 
 1. **Pre-Turn Preparation (`services/turn_service.py` -> `TurnService.prepare_and_roll_action`)**
+   - Hydrates session, character, settings, world-events snapshot, and inventory in one read envelope via `db.preload_prepare_action_bundle()` (reusing preloaded inventory across downstream item/stealth checks).
    - Normalizes inputs across Web and Discord (`choice_index`, `direct_choice`, `custom_action_text`, `combat_target`, `intent`, `skip_minutes`, `sleep_mode`, `is_stealth` / `stance == "stealth"`, `is_item_action` / `stat == "ITEM"`).
    - Classifies custom text via `mechanics/narrative/intent.py` (`classify_action_intent`) into canonical `_VALID_INTENTS` and `_VALID_SUB_INTENTS` (`models/llm_schemas.py`).
    - Applies trait DC modifiers (`mechanics/combat/traits`) and persona/intimacy DC modifiers (`mechanics/social/persona`), deducts MP/consumables/currency, and rolls `skill_check.CheckResult`.
    - **Idempotency Guard**: If `raw_pick` already carries a resolved `check` + `char`, `prepare_and_roll_action` coerces dict `check` back into `CheckResult` without double-rolling or double-charging MP.
 
-2. **Deterministic Phases 1–5 (`game_engine/turn/`, `game_engine/npcs/`, `game_engine/state/`)**
+2. **Typed Execution Context & Transaction Envelopes (`game_engine/turn_context.py`, `services/turn_service.py`)**
+   - `TurnExecutionContext` (aliased as `TurnContext`) hydrates cached world/quest/contact/appointment snapshots inside `db.ReadUnitOfWork()` (`hydrate_snapshot()` / `load_snapshot()`) and carries typed sub-dataclasses (`TurnClockStage`, `CombatStageState`, `EpistemicAndWorldStage`, `TurnNotices`) across `TurnService`, `game_engine.resolve_turn()`, `game_engine.apply_outcome()`, and `game_engine/state/reducers.py` (with dict fallbacks when omitted). `TurnNotices.apply_to_outcome()` projects the 10 `_...` notice keys onto `outcome` for Discord cogs and tests.
+   - `_resolve_action_inner` loads party state via `db.preload_turn_party_bundle()`, batches pre-turn snapshot/events setup in one `db.UnitOfWork()`, keeps `game_engine.apply_outcome()` in its own `db.UnitOfWork()` call, and folds all post-`apply_outcome` sync hooks, single post-turn snapshot capture, choice enrichment, XP grants, history update, snapshot ring-buffer pruning, and readback into one `_post_turn_finalize_and_commit_bundle` inside `db.UnitOfWork()` (followed by `db.maybe_run_wal_maintenance()` outside commit).
+
+3. **Deterministic Phases 1–5 (`game_engine/turn/`, `game_engine/npcs/`, `game_engine/state/`)**
    *(Phase names below are conceptual labels for the pipeline, not code identifiers.)*
    - **Phase 1 — Cast & Dialogue Authority**:
      - Managed by `game_engine/npcs/cast_planner.py` (`CastPlan`), `presence.py`, `stage_manager.py`, `dialogue_tracking.py`, and `reconciliation.py`.

@@ -12,6 +12,7 @@ import scenario_data
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
+from game_engine.turn_context import resolve_target_turn
 from mechanics.world.locations import (
     extract_movement_destination,
     get_primary_location_name,
@@ -75,26 +76,16 @@ def _resolve_facility_node_for_stage(
 
 
 def _resolve_active_turn_1based(session: Optional[dict], default: int = 1) -> int:
-    """Resolve active 1-based turn number, preferring `_target_turn` over stale pre-commit `turn_count`."""
+    """Resolve active 1-based turn number, preferring `ctx.clock.target_turn` or `_target_turn` over stale pre-commit `turn_count`."""
     if not isinstance(session, dict):
         return max(1, int(default))
-    raw_target = session.get("_target_turn")
-    if raw_target is not None:
-        try:
-            val = int(raw_target)
-            if val > 0:
-                return val
-        except (TypeError, ValueError):
-            pass
-    raw_tc = session.get("turn_count")
-    if raw_tc is not None:
-        try:
-            return max(1, int(raw_tc) + 1)
-        except (TypeError, ValueError):
-            pass
-    hist = session.get("history")
-    if isinstance(hist, list):
-        return len(hist) + 1
+    if (
+        session.get("_ctx") is not None
+        or session.get("_target_turn") is not None
+        or session.get("turn_count") is not None
+        or isinstance(session.get("history"), list)
+    ):
+        return resolve_target_turn(None, session)
     return max(1, int(default))
 
 

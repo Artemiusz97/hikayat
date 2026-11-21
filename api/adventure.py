@@ -14,8 +14,12 @@ import scenario_data
 import character_data as cd
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
+from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
+from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
+from mechanics.social.races import roll_scenario_npc_race
 from mechanics.social.relationships import is_contact_eligible
 from mechanics.world import evaluate_shop_staff_availability, resolve_scene_merchant_ui_state
+from services.examine_service import invalidate_examine_cache
 from services.turn_service import TurnService
 from mechanics.system.concurrency import (
     distributed_adventure_lock,
@@ -117,6 +121,35 @@ def _spawn_background_task(coro) -> asyncio.Task:
     return task
 
 
+_UNNAMED_ACTOR_TOKENS: frozenset[str] = frozenset(
+    {
+        "stranger", "crowd", "passerby", "bystander", "unknown", "someone", "figure",
+        "somebody", "pedestrian", "onlooker", "shadow", "voice", "unnamed", "anonymous",
+        "man", "woman", "boy", "girl", "person",
+    }
+)
+
+
+def _is_unnamed_or_generic_actor(name: str, npc_dict: dict[str, Any]) -> bool:
+    clean = str(name or "").strip()
+    if not clean or _PLACEHOLDER_ACTOR_RE.search(clean):
+        return True
+    if bool(
+        npc_dict.get("is_monster")
+        or npc_dict.get("is_enemy")
+        or npc_dict.get("is_anomalous_entity")
+        or npc_dict.get("npc_type") == "anomaly"
+        or npc_dict.get("social_role_type") == "anomaly"
+        or npc_dict.get("anomalous_npc_tag") == "anomaly_entity"
+    ):
+        return True
+    low = clean.lower()
+    if low.startswith(("a ", "an ", "the ", "unnamed ", "unknown ")):
+        return True
+    words = set(re.sub(r"[^a-z]+", " ", low).split())
+    return bool(words & _UNNAMED_ACTOR_TOKENS)
+
+
 def _sanitize_enemy_telegraph_view(e_view: dict) -> None:
     """Strips internal raw interrupt HP thresholds while keeping qualitative stagger_pct."""
     tel = e_view.get("telegraphed_skill")
@@ -204,9 +237,11 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
 
     scen_key_check = scenario_data.resolve_scenario_key(session.get("scenario"))
     from scenario_data import is_nsfw_scenario, get_scenario_tags, get_scenario_display_name
+    from mechanics.system.phone import scenario_has_smartphone
     session["is_nsfw"] = is_nsfw_scenario(scen_key_check)
     session["scenario_tags"] = get_scenario_tags(scen_key_check)
     session["scenario_display_name"] = get_scenario_display_name(scen_key_check)
+    session["smartphone_available"] = bool(scenario_has_smartphone(scen_key_check))
     current_loc_check = str(session.get("current_location") or "")
     from mechanics.system.time_engine import get_location_sleep_context
     session["sleep_context"] = get_location_sleep_context(
@@ -248,7 +283,22 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
 
     day = int(session.get("current_day", 1) or 1)
     minute = int(session.get("current_minute", 480) or 480)
-    session["formatted_time"] = f"Day {day} • {(minute // 60) % 24:02d}:{minute % 60:02d}"
+    try:
+        from mechanics.system.time_engine import get_day_of_week, get_time_of_day_phase
+        from mechanics.world.world_schedule import is_weekend
+        day_name = get_day_of_week(day)
+        phase_name, _, _ = get_time_of_day_phase(minute)
+        weekend_flag = bool(is_weekend(day))
+    except Exception:
+        _days = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+        _didx = max(0, day - 1) % 7
+        day_name = _days[_didx]
+        phase_name = "Day"
+        weekend_flag = _didx in (5, 6)
+    session["day_name"] = day_name
+    session["is_weekend"] = weekend_flag
+    session["time_of_day"] = phase_name
+    session["formatted_time"] = f"{day_name} • {(minute // 60) % 24:02d}:{minute % 60:02d}"
     try:
         from mechanics.stealth import is_stealth_context_warranted
         session["stealth_available"] = bool(is_stealth_context_warranted(session))
@@ -637,6 +687,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
 
         is_anom_sess = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
         agent_roster_names = None
+        agent_roster_by_name: dict[str, dict] = {}
         if is_anom_sess:
             raw_roster = session.get("anomalous_agent_roster")
             if not isinstance(raw_roster, list) or not raw_roster:
@@ -653,8 +704,75 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 for r in raw_roster
                 if isinstance(r, dict) and r.get("name")
             }
+            agent_roster_by_name = {
+                str(r.get("name") or "").strip().lower(): r
+                for r in raw_roster
+                if isinstance(r, dict) and r.get("name")
+            }
+
+        from mechanics.social.roster_tags import derive_age_group as _derive_age_group
+
+        legacy_roster_by_name: dict[str, dict] | None = None
+        quest_cast_by_name: dict[str, dict[str, Any]] | None = None
+
+        def _clean_demo_str(val: Any) -> str:
+            s = str(val or "").strip()
+            if not s or s.lower() in ("unknown", "none", "null", "n/a"):
+                return ""
+            return s
+
+        def _age_group_from_numeric_age(val: Any) -> str:
+            try:
+                if val is None or isinstance(val, bool):
+                    return ""
+                num_str = str(val).strip()
+                if not num_str:
+                    return ""
+                age_val = int(float(num_str))
+            except (TypeError, ValueError):
+                return ""
+            if age_val <= 0:
+                return ""
+            if age_val < 13:
+                return "child"
+            if age_val <= 19:
+                return "teen"
+            if age_val <= 25:
+                return "young_adult"
+            if age_val <= 59:
+                return "adult"
+            return "elder"
+
+        def _pick_demo_field(
+            sources: list[dict | None],
+            keys: tuple[str, ...],
+            *,
+            check_appearance: bool = False,
+        ) -> str:
+            for src in sources:
+                if not isinstance(src, dict):
+                    continue
+                for k in keys:
+                    v = _clean_demo_str(src.get(k))
+                    if v:
+                        return v
+                bi = src.get("basic_info")
+                if isinstance(bi, dict):
+                    for k in keys:
+                        v = _clean_demo_str(bi.get(k))
+                        if v:
+                            return v
+                if check_appearance:
+                    app = src.get("appearance")
+                    if isinstance(app, dict):
+                        for k in keys:
+                            v = _clean_demo_str(app.get(k))
+                            if v:
+                                return v
+            return ""
 
         def _enrich_npc_entry(npc_item):
+            nonlocal legacy_roster_by_name, quest_cast_by_name
             if isinstance(npc_item, str):
                 n_dict = {"name": npc_item.strip()}
             elif isinstance(npc_item, dict):
@@ -678,7 +796,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 matched_lore = lore_characters.get(m_l_key)
             matched_wr = world_roster_by_name.get(n_name.lower()) if world_roster_by_name else None
             if isinstance(matched_wr, dict):
-                for _wk in ("origin", "tier_status", "role", "gender"):
+                for _wk in ("origin", "tier_status", "role", "gender", "race"):
                     if not n_dict.get(_wk) and matched_wr.get(_wk):
                         n_dict[_wk] = matched_wr.get(_wk)
                 for _wbk in ("is_unique_proprietor", "met_in_person"):
@@ -687,16 +805,93 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                 if isinstance(matched_wr.get("basic_info"), dict):
                     _cur_bi = n_dict.get("basic_info") if isinstance(n_dict.get("basic_info"), dict) else {}
                     n_dict["basic_info"] = {**matched_wr["basic_info"], **_cur_bi}
+            matched_agent = agent_roster_by_name.get(n_name.lower()) if agent_roster_by_name else None
+            if not matched_agent and agent_roster_by_name:
+                m_a_key = _match_actor_key(n_name, agent_roster_by_name)
+                matched_agent = agent_roster_by_name.get(m_a_key)
             c_rec = matched_contact or matched_lore
-            c_appr = (c_rec.get("appearance") or {}) if isinstance(c_rec, dict) else {}
-            n_gender = (
-                (c_appr.get("gender") if isinstance(c_appr, dict) else None)
-                or (c_rec.get("gender") if isinstance(c_rec, dict) else None)
-                or (matched_wr.get("gender") if isinstance(matched_wr, dict) else None)
-                or n_dict.get("gender")
-                or "Female"
-            )
-            n_dict["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=n_gender)
+            demo_sources: list[dict | None] = [n_dict, c_rec, matched_wr, matched_agent]
+            resolved_gender = _pick_demo_field(demo_sources, ("gender",), check_appearance=True)
+            resolved_race = _pick_demo_field(demo_sources, ("race",), check_appearance=True)
+            resolved_age_group = _pick_demo_field(demo_sources, ("age_group",), check_appearance=False)
+            if sess_id and (not resolved_gender or not resolved_race or not resolved_age_group):
+                if legacy_roster_by_name is None:
+                    try:
+                        legacy_rows = db.get_world_roster(sess_id, include_legacy_rosters=True) or []
+                        legacy_roster_by_name = {
+                            str(w.get("name") or "").strip().lower(): w
+                            for w in legacy_rows
+                            if isinstance(w, dict) and w.get("name")
+                        }
+                    except Exception:
+                        legacy_roster_by_name = {}
+                matched_legacy = None
+                if legacy_roster_by_name:
+                    matched_legacy = legacy_roster_by_name.get(n_name.lower())
+                    if not matched_legacy:
+                        m_leg_key = _match_actor_key(n_name, legacy_roster_by_name)
+                        matched_legacy = legacy_roster_by_name.get(m_leg_key)
+                if isinstance(matched_legacy, dict):
+                    demo_sources.append(matched_legacy)
+                    if not resolved_gender:
+                        resolved_gender = _pick_demo_field([matched_legacy], ("gender",), check_appearance=True)
+                    if not resolved_race:
+                        resolved_race = _pick_demo_field([matched_legacy], ("race",), check_appearance=True)
+                    if not resolved_age_group:
+                        resolved_age_group = _pick_demo_field([matched_legacy], ("age_group",), check_appearance=False)
+
+            if (not resolved_gender or not resolved_race) and not _is_unnamed_or_generic_actor(n_name, n_dict):
+                matched_qcast = None
+                if sess_id:
+                    if quest_cast_by_name is None:
+                        quest_cast_by_name = {}
+                        try:
+                            for dos_q in (db.get_session_quest_dossiers(sess_id, status_stage="compiled") or []):
+                                if not isinstance(dos_q, dict):
+                                    continue
+                                cb_q = dos_q.get("cast_bindings") or {}
+                                if not isinstance(cb_q, dict):
+                                    continue
+                                for slot_q, bind_q in cb_q.items():
+                                    if not isinstance(bind_q, dict):
+                                        continue
+                                    bq_name = str(bind_q.get("name") or "").strip()
+                                    if bq_name and bq_name.lower() not in quest_cast_by_name:
+                                        quest_cast_by_name[bq_name.lower()] = {
+                                            **bind_q,
+                                            "slot": str(slot_q or "").strip(),
+                                        }
+                        except Exception:
+                            quest_cast_by_name = {}
+                    matched_qcast = quest_cast_by_name.get(n_name.lower())
+                if isinstance(matched_qcast, dict):
+                    if not resolved_gender:
+                        resolved_gender = _clean_demo_str(matched_qcast.get("gender")).lower()
+                    if not resolved_race:
+                        resolved_race = _clean_demo_str(matched_qcast.get("race"))
+                    if not resolved_age_group:
+                        resolved_age_group = _clean_demo_str(matched_qcast.get("age_group"))
+                    if not n_dict.get("role"):
+                        slot_q = str(matched_qcast.get("slot") or "").strip().lower()
+                        fallback_q_role = {
+                            "client": "Quest Patron",
+                            "informant": "Informant",
+                            "target": "Quest Target",
+                            "accomplice": "Suspect Associate",
+                        }.get(slot_q, "Quest Contact")
+                        n_dict["role"] = str(matched_qcast.get("role") or fallback_q_role)
+                alpha_words = [tok for tok in n_name.split() if any(ch.isalpha() for ch in tok)]
+                if matched_qcast is not None or len(alpha_words) >= 2:
+                    if not resolved_gender:
+                        resolved_gender = resolve_quest_npc_fallback_gender(n_name, session_id=int(sess_id or 0))
+                    if not resolved_race:
+                        resolved_race = roll_scenario_npc_race(
+                            str(session.get("scenario") or "fantasy"),
+                            seed=f"quest_wp:{int(sess_id or 0)}:{n_name.lower()}",
+                        )
+
+            clothing_gender = resolved_gender or "Female"
+            n_dict["clothing_status"] = compute_clothing_summary_badge(n_act_data.get("clothing"), gender=clothing_gender)
 
             # 1. Synchronize active status effects from all sources
             raw_effs = []
@@ -817,6 +1012,71 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                         n_dict["deceased"] = True
                 except Exception:
                     pass
+
+            if resolved_gender:
+                n_dict["gender"] = resolved_gender
+            if resolved_race:
+                n_dict["race"] = resolved_race
+
+            is_anom_entity = bool(
+                n_dict.get("is_anomalous_entity")
+                or n_dict.get("npc_type") == "anomaly"
+                or n_dict.get("social_role_type") == "anomaly"
+                or n_dict.get("anomalous_npc_tag") == "anomaly_entity"
+            )
+            if not is_anom_entity:
+                final_age_group = ""
+                if resolved_age_group:
+                    final_age_group = resolved_age_group.lower().replace("-", "_").replace(" ", "_")
+                else:
+                    raw_age = _pick_demo_field(demo_sources, ("age",), check_appearance=True)
+                    if raw_age:
+                        final_age_group = _age_group_from_numeric_age(raw_age)
+                if not final_age_group:
+                    eff_origin = _pick_demo_field([n_dict, matched_wr], ("origin",)).lower()
+                    eff_shift = _pick_demo_field(demo_sources, ("shift_profile",)).lower()
+                    eff_grade = _pick_demo_field(demo_sources, ("grade", "standing"))
+                    eff_grade_low = eff_grade.lower()
+                    is_student_grade = any(
+                        sg in eff_grade_low
+                        for sg in ("freshman", "sophomore", "junior", "senior", "student", "youth peer")
+                    ) and not eff_grade_low.startswith("tier ")
+                    if (
+                        eff_origin in ("venue_seed", "replacement_hire", "district_merchant", "civic_staff", "roaming_merchant")
+                        and eff_shift != "student"
+                        and not is_student_grade
+                    ):
+                        final_age_group = "adult"
+                    else:
+                        eff_role = _pick_demo_field(demo_sources, ("role",))
+                        eff_occ = _pick_demo_field(demo_sources, ("occupation",))
+                        role_probe = (
+                            f"{eff_role} {eff_occ}".strip()
+                            if (eff_role and eff_occ and eff_occ.lower() not in eff_role.lower())
+                            else (eff_role or eff_occ)
+                        )
+                        eff_srt = _pick_demo_field(demo_sources, ("social_role_type",))
+                        is_fam = False
+                        for _fsrc in demo_sources:
+                            if not isinstance(_fsrc, dict):
+                                continue
+                            _fbi = _fsrc.get("basic_info") if isinstance(_fsrc.get("basic_info"), dict) else {}
+                            if (
+                                _fsrc.get("is_adult_family")
+                                or _fbi.get("is_adult_family")
+                                or _fsrc.get("household_role") in ("father", "mother", "guardian")
+                            ):
+                                is_fam = True
+                                break
+                        final_age_group = _derive_age_group(
+                            grade=eff_grade,
+                            role=role_probe,
+                            social_role_type=eff_srt,
+                            scen_key=str(session.get("scenario") or ""),
+                            is_family=is_fam,
+                        )
+                if final_age_group:
+                    n_dict["age_group"] = final_age_group
 
             # F1 Server-Side Fog-of-War: never serialize internal/unrevealed telltale tags or hidden secrets
             n_dict.pop("telltale_tag", None)
@@ -1486,6 +1746,11 @@ async def _execute_action_locked(
             "sleep_mode": getattr(req, "sleep_mode", None) or (req.action.get("sleep_mode") if isinstance(req.action, dict) else None),
             "is_stealth": is_stealth_req,
             "stance": stance_req,
+            "item_id": getattr(req, "item_id", None) if getattr(req, "item_id", None) is not None else (req.action.get("item_id") if isinstance(req.action, dict) else None),
+            "target_type": getattr(req, "target_type", None) or (req.action.get("target_type") if isinstance(req.action, dict) else None),
+            "target_name": getattr(req, "target_name", None) or (req.action.get("target_name") if isinstance(req.action, dict) else None),
+            "target_user_id": getattr(req, "target_user_id", None) if getattr(req, "target_user_id", None) is not None else (req.action.get("target_user_id") if isinstance(req.action, dict) else None),
+            "use_mode": getattr(req, "use_mode", None) or (req.action.get("use_mode") if isinstance(req.action, dict) else None),
             "action": req.action if isinstance(req.action, dict) else None,
             "_untrusted_client_pick": True,
         }
@@ -1801,6 +2066,22 @@ async def execute_action(req: ActionRequest, request: Request = None):
     return await _execute_action_locked(req, request, broadcast_error=False)
 
 
+@router.get("/api/adventure/examine")
+async def examine_adventure_scene(
+    session_id: int,
+    user_id: int,
+    include_prose: bool = False,
+    request: Request = None,
+):
+    """Zero-turn read-only scene inspection snapshot + optional cached async sensory prose."""
+    await verify_session_participant(request, session_id, user_id)
+    from services.examine_service import get_examine_payload
+    try:
+        return await get_examine_payload(session_id, user_id, include_prose=bool(include_prose))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.post("/api/adventure/toggle_stealth")
 async def toggle_adventure_stealth(req: ToggleStealthRequest, request: Request = None):
     """Toggles persistent stealth stance ON/OFF for an active adventure session."""
@@ -1819,11 +2100,17 @@ async def toggle_adventure_stealth(req: ToggleStealthRequest, request: Request =
             is_actor_hidden,
             project_stealth_state_for_user,
             get_alert_badge_data,
+            sync_stealth_choices_for_toggle,
         )
         currently_hidden = is_actor_hidden(session, req.user_id)
         new_active = req.active if req.active is not None else not currently_hidden
         toggle_stealth_stance(session, new_active, user_id=req.user_id)
-        await adb(db.update_session, req.session_id, stealth_state=session["stealth_state"])
+        updated_choices = await adb(sync_stealth_choices_for_toggle, session, req.user_id, bool(new_active))
+        await adb(db.update_session, req.session_id, stealth_state=session["stealth_state"], choices=updated_choices)
+        try:
+            invalidate_examine_cache(req.session_id)
+        except Exception:
+            pass
         fresh = await adb(db.get_session, req.session_id)
         fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
 
@@ -1838,12 +2125,15 @@ async def toggle_adventure_stealth(req: ToggleStealthRequest, request: Request =
             "user_id": req.user_id,
             "stealth_state": projected_st,
             "stealth_badge": badge_data,
+            "choices": fresh.get("choices", []),
+            "session": fresh,
         })
 
         return {
             "success": True,
             "stealth_state": projected_st,
             "stealth_badge": badge_data,
+            "choices": fresh.get("choices", []),
             "session": fresh,
         }
 
@@ -2181,7 +2471,7 @@ async def retry_adventure_scene(req: RetryAdventureRequest, request: Request = N
                     try:
                         from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
                         return await compile_or_apply_eager_quest_plan(
-                            req.session_id, sq_qid, timeout_seconds=10.0, defer_apply=True
+                            req.session_id, sq_qid, timeout_seconds=25.0, defer_apply=True
                         )
                     except Exception as _bg_retry_err:
                         logger.debug("Ch.1 retry eager ChapterPlan skipped: %s", _bg_retry_err)
@@ -2408,6 +2698,13 @@ async def load_slot(req: LoadSlotRequest, request: Request = None):
             raise HTTPException(status_code=404, detail=str(e))
 
     session_id = res.get("id") or res.get("session_id")
+    try:
+        if active_sid:
+            invalidate_examine_cache(active_sid)
+        if session_id and session_id != active_sid:
+            invalidate_examine_cache(session_id)
+    except Exception:
+        pass
     updated_session = await adb(db.get_session, session_id) if session_id else res
     if updated_session:
         updated_session = await adb(_enrich_session_for_client, updated_session, req.user_id)

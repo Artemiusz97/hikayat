@@ -58,8 +58,23 @@ from .quest_agency import (
 )
 from .state import *
 from .turn import *
-from .turn_context import TurnContext
-from .choices_cleaner import clean_choices_impl, sanitize_and_diversify_choices, build_hybrid_turn_choices, is_malformed_choice_label
+from .turn_context import (
+    TurnExecutionContext,
+    TurnContext,
+    TurnClockStage,
+    CombatStageState,
+    EpistemicAndWorldStage,
+    TurnNotices,
+    resolve_target_turn,
+    resolve_pre_turn_quest_res,
+)
+from .choices_cleaner import (
+    clean_choices_impl,
+    sanitize_and_diversify_choices,
+    build_hybrid_turn_choices,
+    is_malformed_choice_label,
+    order_choices_canonically,
+)
 from .choice_icons import (
     get_choice_quest_icon,
     get_choice_skill_emoji,

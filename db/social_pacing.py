@@ -126,8 +126,21 @@ def canon_social_npc_id(npc_id: str) -> str:
 
 
 def _ensure_social_v50_tables(conn: sqlite3.Connection) -> None:
-    for sql in SOCIAL_V50_DDL_STATEMENTS:
-        conn.execute(sql)
+    """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
+    def _check(c: sqlite3.Connection) -> None:
+        has_comp = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='npc_social_composure' LIMIT 1"
+        ).fetchone()
+        has_snaps = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='social_turn_snapshots' LIMIT 1"
+        ).fetchone()
+        if has_comp and has_snaps:
+            return
+        for sql in SOCIAL_V50_DDL_STATEMENTS:
+            c.execute(sql)
+
+    from .core import ensure_table_group_once
+    ensure_table_group_once(conn, "social_v50", _check)
 
 
 def get_npc_social_composure(

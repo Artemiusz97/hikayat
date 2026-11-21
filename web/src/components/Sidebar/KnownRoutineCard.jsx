@@ -45,7 +45,7 @@ const KnownRoutineCard = ({ npc, t }) => {
     const legacyStr = String(legacyText || '');
     const isLegacyMasked = npc?.schedule_revealed === false || legacyStr.includes('???');
     return (
-      <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
+      <div className="pt-2.5 border-t border-fantasy-border/30 text-xs text-gray-300 leading-relaxed">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5 mb-1">
           <Clock size={12} className="text-fantasy-accent" />
           {t('social.schedule_header', 'Schedule & Routine')}
@@ -63,7 +63,7 @@ const KnownRoutineCard = ({ npc, t }) => {
   const resUnlocked = Boolean(routine.residence_unlocked);
 
   return (
-    <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 space-y-2">
+    <div className="pt-2.5 border-t border-fantasy-border/30 text-xs text-gray-300 space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
           <Clock size={12} className="text-fantasy-accent" />
@@ -137,7 +137,7 @@ const KnownRoutineCard = ({ npc, t }) => {
                 <span aria-hidden="true">{icon}</span>
                 <span>{t(`social.routine_blocks.${key}`, fallback)}</span>
                 {slotTag && (
-                  <span className="px-1 py-0.2 rounded bg-fantasy-900/70 border border-fantasy-border/40 text-[9px] uppercase font-mono text-amber-300/90">
+                  <span className="px-1 py-0.5 rounded bg-fantasy-900/70 border border-fantasy-border/40 text-[9px] uppercase font-mono text-amber-300/90">
                     {slotTag}
                   </span>
                 )}

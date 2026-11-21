@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+from typing import Any, Optional
+
 from .generation import get_narrative_requirements, log
 from .constants import *
+import db
 from db import adb
 from mechanics.world.locations import *
 from mechanics.social.persona import *
@@ -9,7 +13,7 @@ from mechanics.social.relationships import safe_get_contacts
 from mechanics.narrative.intent import *
 from .dialogue import _build_dialogue_prompt_block, _compute_dialogue_intent
 from .prompts import _build_quest_and_bounty_directives, _build_player_actions_text, _build_history_context
-from game_engine.turn_context import TurnContext
+from game_engine.turn_context import TurnContext, TurnExecutionContext
 import json
 import random
 from config import LLM_PASS2_TIMEOUT, LLM_STREAM_TOTAL_DEADLINE
@@ -338,22 +342,45 @@ def ensure_enemy_encounter_narrative(
     return result, appended_paragraph
 
 
-async def resolve_turn(session: dict, party: list, actions: list, stream_callback=None, is_retry: bool = False) -> TurnOutcome:
+async def resolve_turn(
+    session: dict,
+    party: list,
+    actions: list,
+    stream_callback=None,
+    is_retry: bool = False,
+    ctx: Optional[TurnExecutionContext] = None,
+) -> TurnOutcome:
     try:
-        return await _resolve_turn_inner(session, party, actions, stream_callback=stream_callback, is_retry=is_retry)
+        return await _resolve_turn_inner(
+            session,
+            party,
+            actions,
+            stream_callback=stream_callback,
+            is_retry=is_retry,
+            ctx=ctx,
+        )
     finally:
         if isinstance(session, dict):
             session.pop("_ctx", None)
 
 
-async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_callback=None, is_retry: bool = False) -> TurnOutcome:
-    import db
+async def _resolve_turn_inner(
+    session: dict,
+    party: list,
+    actions: list,
+    stream_callback=None,
+    is_retry: bool = False,
+    ctx: Optional[TurnExecutionContext] = None,
+) -> TurnOutcome:
     from mechanics.system.time_engine import format_llm_time_context, calculate_action_time_cost, advance_time, apply_sleep_rest, is_sleep_action
     session_id_val = session.get('id')
-    if session_id_val:
-        ctx = await db.adb(TurnContext.load_snapshot, session_id_val, session, party, actions)
-    else:
-        ctx = TurnContext(session_id_val, session, party=party, actions=actions)
+    if ctx is None:
+        if session_id_val:
+            ctx = await adb(TurnExecutionContext.load_snapshot, session_id_val, session, party, actions)
+        else:
+            ctx = TurnExecutionContext(session_id_val, session, party=party, actions=actions)
+    elif session_id_val and "world_bundle" not in ctx._cache:
+        await adb(ctx.hydrate_snapshot)
     if isinstance(session, dict):
         session["_ctx"] = ctx
 
@@ -389,6 +416,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
         session["_prev_turn_day"] = prev_day
         session["_prev_turn_minute"] = prev_min
+        ctx.clock.prev_turn_day = prev_day
+        ctx.clock.prev_turn_minute = prev_min
 
         party_uids = []
         for char in (party or []):
@@ -599,6 +628,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
             if _staged_time_op is not None:
                 session["_staged_time_op"] = _staged_time_op
+                ctx.clock.staged_time_op = _staged_time_op
     else:
         _stage_clock_after_movement = None
 
@@ -631,6 +661,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 "fatigue_applied": [],
             }
             session["_staged_time_op"] = _staged_time_op
+            ctx.clock.staged_time_op = _staged_time_op
     new_partners = stage_info["new_partners"]
     has_exited_convo = stage_info["has_exited_convo"]
     effective_location = stage_info["effective_location"]
@@ -989,6 +1020,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         _p_uid = int(_p_char["user_id"])
                         if _p_uid not in eq_by_uid:
                             eq_by_uid[_p_uid] = db.get_equipment(_p_uid) or {}
+                ctx.combat.preloaded_equipment_by_uid = eq_by_uid
                 if isinstance(session, dict):
                     session["_preloaded_equipment_by_uid"] = eq_by_uid
                 return eq_by_uid, precompute_combat_turn(session, party, actions)
@@ -996,6 +1028,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
         try:
             _, precomputed = await adb(_load_combat_precomputed_bundle)
         finally:
+            ctx.combat.preloaded_equipment_by_uid = {}
             if isinstance(session, dict):
                 session.pop("_preloaded_equipment_by_uid", None)
 
@@ -1097,35 +1130,51 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     _anom_domain_res: dict = {}
     try:
         from mechanics.world.anomalous_sites.domain_rules import evaluate_turn_domain_effects
-        _dom_node = None
-        if session.get("id"):
-            _dom_nid = str(stage_info.get("effective_node_id") or session.get("current_node_id") or "")
-            if _dom_nid:
-                _dom_node = db.get_world_node(int(session["id"]), _dom_nid)
-        _anom_domain_res = evaluate_turn_domain_effects(
-            int(session.get("id") or 0),
-            session,
-            party,
-            curr_node=_dom_node,
-            actions=actions,
-            persist_db=True,
-            is_retry=is_retry,
-        )
+
+        def _eval_domain_effects_bundle() -> dict:
+            _dom_node = None
+            _dom_sid = int(session.get("id") or 0)
+            if _dom_sid:
+                _dom_nid = str(stage_info.get("effective_node_id") or session.get("current_node_id") or "")
+                with db.UnitOfWork():
+                    if _dom_nid:
+                        _dom_node = db.get_world_node(_dom_sid, _dom_nid)
+                    _res_dom = evaluate_turn_domain_effects(
+                        _dom_sid,
+                        session,
+                        party,
+                        curr_node=_dom_node,
+                        actions=actions,
+                        persist_db=True,
+                        is_retry=is_retry,
+                    )
+                    if _res_dom.get("composure_shift") or _res_dom.get("wet_flag"):
+                        from mechanics.social.physical_state import find_player_actor_key, upsert_actor_physical_state
+                        _phys_dom = db.get_session_physical_state(_dom_sid)
+                        if isinstance(_phys_dom, dict) and isinstance(_phys_dom.get("actors"), dict):
+                            _pk_dom = find_player_actor_key(_phys_dom["actors"], party=party, session_id=_dom_sid)
+                            if _pk_dom:
+                                _u_dom = {}
+                                if _res_dom.get("composure_shift"):
+                                    _u_dom["composure"] = _res_dom["composure_shift"]
+                                if _res_dom.get("wet_flag"):
+                                    _u_dom["is_wet"] = True
+                                upsert_actor_physical_state(_dom_sid, _pk_dom, _u_dom)
+                    return _res_dom
+            return evaluate_turn_domain_effects(
+                0,
+                session,
+                party,
+                curr_node=None,
+                actions=actions,
+                persist_db=True,
+                is_retry=is_retry,
+            )
+
+        _anom_domain_res = await adb(_eval_domain_effects_bundle)
         for _dd in (_anom_domain_res.get("stage_directives") or []):
             if _dd and _dd not in directive_note:
                 directive_note += f"\n{_dd}\n"
-        if (_anom_domain_res.get("composure_shift") or _anom_domain_res.get("wet_flag")) and session.get("id"):
-            from mechanics.social.physical_state import find_player_actor_key, upsert_actor_physical_state
-            _phys_dom = db.get_session_physical_state(int(session["id"]))
-            if isinstance(_phys_dom, dict) and isinstance(_phys_dom.get("actors"), dict):
-                _pk_dom = find_player_actor_key(_phys_dom["actors"], party=party, session_id=int(session["id"]))
-                if _pk_dom:
-                    _u_dom = {}
-                    if _anom_domain_res.get("composure_shift"):
-                        _u_dom["composure"] = _anom_domain_res["composure_shift"]
-                    if _anom_domain_res.get("wet_flag"):
-                        _u_dom["is_wet"] = True
-                    upsert_actor_physical_state(int(session["id"]), _pk_dom, _u_dom)
     except (NameError, UnboundLocalError, ImportError):
         raise
     except Exception as _dom_err:
@@ -1146,6 +1195,8 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     if effective_location:
         session["current_location"] = effective_location
     pre_quest_res = resolve_pre_turn_quests_and_clues(session, party, actions, persist_db=False)
+    if isinstance(pre_quest_res, dict):
+        ctx.world_stage.pre_turn_quest_res = pre_quest_res
     if _old_loc_for_quests:
         session["current_location"] = _old_loc_for_quests
     for q_dir in (pre_quest_res.get("directives") or []):
@@ -1211,17 +1262,21 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
     if is_in_combat(session) and session.get("id"):
         session["_last_combat_turn"] = _turn_now
         session["_last_combat_location"] = _enc_loc
+        ctx.combat.last_combat_turn = _turn_now
+        ctx.combat.last_combat_location = _enc_loc
         try:
-            db.update_session(
+            await adb(
+                db.update_session,
                 int(session["id"]),
                 extra={"_last_combat_turn": _turn_now, "_last_combat_location": _enc_loc},
             )
         except Exception:
             pass
-    _last_cbt_turn = session.get("_last_combat_turn")
+    _last_cbt_turn = ctx.combat.last_combat_turn if ctx.combat.last_combat_turn is not None else session.get("_last_combat_turn")
     _turns_since_combat = (_turn_now - int(_last_cbt_turn)) if isinstance(_last_cbt_turn, (int, float)) else 99
+    _eff_last_combat_loc = ctx.combat.last_combat_location or str(session.get("_last_combat_location") or "")
     _same_room_as_last_combat = bool(
-        _enc_loc and str(session.get("_last_combat_location") or "").strip().lower() == _enc_loc.strip().lower()
+        _enc_loc and _eff_last_combat_loc.strip().lower() == _enc_loc.strip().lower()
     )
     _random_ambush_on_cooldown = _turns_since_combat <= 2
     _act_dicts = [a for a in (actions or []) if isinstance(a, dict)]
@@ -1263,145 +1318,144 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             }
             from mechanics.world.waypoints.matching import check_location_matches_waypoint as _chk_loc_match
             _enc_loc_low = _enc_loc.strip().lower()
-            _q_dossiers = db.get_session_quest_dossiers(int(session["id"]), status_stage="compiled") or []
-            for _qd in _q_dossiers:
-                _qid = str(_qd.get("quest_id") or "")
-                if not _qid or _qid in _completed_qids_pre:
-                    continue
-                _q_row = db.get_quest_by_id(int(session["id"]), _qid)
-                if not _q_row or str(_q_row.get("status") or "").lower() != "active":
-                    continue
-                _climax = _qd.get("climax_spec") or {}
-                _c_loc = str(_climax.get("location") or "").strip().lower()
-                _c_target = str(_climax.get("target_npc") or "").strip().lower()
-                _talking_to_target = bool(_c_target) and any(_c_target in p or p in _c_target for p in _pre_turn_dialogue_partners)
-                _has_incomplete_main = any(
-                    isinstance(_ms, dict)
-                    and not _ms.get("is_climax_stage")
-                    and str(_ms.get("status") or "").lower() not in ("completed", "bypassed")
-                    for _ms in (_climax.get("main_stages") or [])
-                )
-                _boss_raw_cur = _climax.get("boss_sheet") if isinstance(_climax.get("boss_sheet"), dict) else {}
-                _already_rushed_climax = bool(_boss_raw_cur.get("rushed_un_nerfed"))
-                _is_rush_action = any(
-                    bool(a.get("rush_climax")) and str(a.get("quest_id") or "") == _qid
-                    for a in _act_dicts
-                )
-                if _has_incomplete_main and not _is_rush_action and not _already_rushed_climax:
-                    continue
-                _climax_escalated = bool(
-                    not _climax.get("boss_escalation_only")
-                    or _climax.get("escalated")
-                    or _climax.get("ambush_unlocked")
-                    or _hostile_action
-                    or _is_rush_action
-                )
-                if (
-                    _climax.get("is_unlocked")
-                    and not _climax.get("boss_defeated")
-                    and isinstance(_climax.get("boss_sheet"), dict)
-                    and _climax_escalated
-                    and not (_peaceful_dialogue_action and not _talking_to_target)
-                    and _c_loc
-                    and _chk_loc_match(_enc_loc, str(_climax.get("location") or ""), session_id=int(session["id"]))
-                ):
-                    if _is_rush_action:
-                        try:
-                            from game_engine.quest_turn_resolver import evaluate_nonlinear_leads_and_climax_gate as _eval_rush
-                            _eval_rush(int(session["id"]), _qid, rush_climax=True)
-                            _qd_rushed = db.get_quest_dossier(int(session["id"]), _qid)
-                            if _qd_rushed and isinstance(_qd_rushed.get("climax_spec"), dict):
-                                _climax = _qd_rushed["climax_spec"]
-                        except (NameError, UnboundLocalError, ImportError):
-                            raise
-                        except Exception as _rush_exc:
-                            log.warning("Climax rush evaluation failed for %s: %s", _qid, _rush_exc, exc_info=True)
-                    _boss_unit = dict(_climax["boss_sheet"])
-                    try:
-                        from mechanics.narrative.dossier_compiler import hydrate_boss_sheet_from_quest_blueprint
-                        _boss_unit = hydrate_boss_sheet_from_quest_blueprint(_boss_unit, _q_row)
-                    except Exception:
-                        pass
-                    _boss_unit["linked_quest_id"] = _qid
-                    _reinf_units = []
-                    for _rf in (_climax.get("reinforcements") or []):
-                        if isinstance(_rf, dict) and int(_rf.get("hp", 1) or 1) > 0:
-                            _rf_copy = dict(_rf)
-                            _rf_copy["linked_quest_id"] = _qid
-                            _reinf_units.append(_rf_copy)
-                    _spawned_q_enemies = [_boss_unit] + _reinf_units
-                    _q_enc_meta = {"quest_id": _qid, "is_climax_boss": True}
-                    session["nearby_enemies"] = _spawned_q_enemies
-                    session["_active_quest_encounter"] = _q_enc_meta
-                    new_partners = []
-                    _in_dialogue_mode = False
-                    _names = ", ".join(m["name"] for m in _spawned_q_enemies if m.get("name"))
-                    party_names_str = ", ".join(
-                        c.get("name", "Hero")
-                        for c, _ in (party or [])
-                        if isinstance(c, dict) and c.get("name")
-                    ) or "the player"
-                    present_npc_names = [
-                        game_engine._get_npc_name(n)
-                        for n in (session.get("current_npcs") or [])
-                        if game_engine._get_npc_name(n) and game_engine._get_npc_name(n).lower() != "none"
-                    ]
-                    npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
+            _q_sp_sid = int(session["id"])
+
+            def _eval_quest_encounter_spawner() -> Optional[tuple[list[dict], dict, bool]]:
+                with db.UnitOfWork():
+                    _q_dossiers = db.get_session_quest_dossiers(_q_sp_sid, status_stage="compiled") or []
+                    for _qd in _q_dossiers:
+                        _qid = str(_qd.get("quest_id") or "")
+                        if not _qid or _qid in _completed_qids_pre:
+                            continue
+                        _q_row = db.get_quest_by_id(_q_sp_sid, _qid)
+                        if not _q_row or str(_q_row.get("status") or "").lower() != "active":
+                            continue
+                        _climax = _qd.get("climax_spec") or {}
+                        _c_loc = str(_climax.get("location") or "").strip().lower()
+                        _c_target = str(_climax.get("target_npc") or "").strip().lower()
+                        _talking_to_target = bool(_c_target) and any(_c_target in p or p in _c_target for p in _pre_turn_dialogue_partners)
+                        _has_incomplete_main = any(
+                            isinstance(_ms, dict)
+                            and not _ms.get("is_climax_stage")
+                            and str(_ms.get("status") or "").lower() not in ("completed", "bypassed")
+                            for _ms in (_climax.get("main_stages") or [])
+                        )
+                        _boss_raw_cur = _climax.get("boss_sheet") if isinstance(_climax.get("boss_sheet"), dict) else {}
+                        _already_rushed_climax = bool(_boss_raw_cur.get("rushed_un_nerfed"))
+                        _is_rush_action = any(
+                            bool(a.get("rush_climax")) and str(a.get("quest_id") or "") == _qid
+                            for a in _act_dicts
+                        )
+                        if _has_incomplete_main and not _is_rush_action and not _already_rushed_climax:
+                            continue
+                        _climax_escalated = bool(
+                            not _climax.get("boss_escalation_only")
+                            or _climax.get("escalated")
+                            or _climax.get("ambush_unlocked")
+                            or _hostile_action
+                            or _is_rush_action
+                        )
+                        if (
+                            _climax.get("is_unlocked")
+                            and not _climax.get("boss_defeated")
+                            and isinstance(_climax.get("boss_sheet"), dict)
+                            and _climax_escalated
+                            and not (_peaceful_dialogue_action and not _talking_to_target)
+                            and _c_loc
+                            and _chk_loc_match(_enc_loc, str(_climax.get("location") or ""), session_id=_q_sp_sid)
+                        ):
+                            if _is_rush_action:
+                                try:
+                                    from game_engine.quest_turn_resolver import evaluate_nonlinear_leads_and_climax_gate as _eval_rush
+                                    _eval_rush(_q_sp_sid, _qid, rush_climax=True)
+                                    _qd_rushed = db.get_quest_dossier(_q_sp_sid, _qid)
+                                    if _qd_rushed and isinstance(_qd_rushed.get("climax_spec"), dict):
+                                        _climax = _qd_rushed["climax_spec"]
+                                except (NameError, UnboundLocalError, ImportError):
+                                    raise
+                                except Exception as _rush_exc:
+                                    log.warning("Climax rush evaluation failed for %s: %s", _qid, _rush_exc, exc_info=True)
+                            _boss_unit = dict(_climax["boss_sheet"])
+                            try:
+                                from mechanics.narrative.dossier_compiler import hydrate_boss_sheet_from_quest_blueprint
+                                _boss_unit = hydrate_boss_sheet_from_quest_blueprint(_boss_unit, _q_row)
+                            except Exception:
+                                pass
+                            _boss_unit["linked_quest_id"] = _qid
+                            _reinf_units = []
+                            for _rf in (_climax.get("reinforcements") or []):
+                                if isinstance(_rf, dict) and int(_rf.get("hp", 1) or 1) > 0:
+                                    _rf_copy = dict(_rf)
+                                    _rf_copy["linked_quest_id"] = _qid
+                                    _reinf_units.append(_rf_copy)
+                            return (
+                                [_boss_unit] + _reinf_units,
+                                {"quest_id": _qid, "is_climax_boss": True},
+                                True,
+                            )
+                        for _ld in (_qd.get("leads_graph") or []):
+                            if not isinstance(_ld, dict):
+                                continue
+                            _ld_loc = str(_ld.get("target_location") or _ld.get("location") or "").strip().lower()
+                            if (
+                                _ld.get("encounter_roster")
+                                and not _ld.get("roster_cleared")
+                                and not _peaceful_dialogue_action
+                                and str(_ld.get("status") or "").lower() != "completed"
+                                and _ld_loc
+                                and (_ld_loc in _enc_loc_low or _enc_loc_low in _ld_loc)
+                            ):
+                                _spawned_lead = []
+                                for _le in (_ld.get("encounter_roster") or []):
+                                    if isinstance(_le, dict):
+                                        _le_copy = dict(_le)
+                                        _le_copy.setdefault("hp", int(_le_copy.get("max_hp") or 24))
+                                        _le_copy["linked_quest_id"] = _qid
+                                        _spawned_lead.append(_le_copy)
+                                if _spawned_lead:
+                                    return (
+                                        _spawned_lead,
+                                        {"quest_id": _qid, "is_climax_boss": False, "lead_id": _ld.get("lead_id")},
+                                        False,
+                                    )
+                    return None
+
+            _q_sp_res = await adb(_eval_quest_encounter_spawner)
+            if _q_sp_res is not None:
+                _spawned_units, _q_enc_meta, _is_climax_enc = _q_sp_res
+                session["nearby_enemies"] = _spawned_units
+                session["_active_quest_encounter"] = _q_enc_meta
+                ctx.combat.active_quest_encounter = _q_enc_meta
+                new_partners = []
+                _in_dialogue_mode = False
+                _names = ", ".join(m["name"] for m in _spawned_units if m.get("name"))
+                party_names_str = ", ".join(
+                    c.get("name", "Hero")
+                    for c, _ in (party or [])
+                    if isinstance(c, dict) and c.get("name")
+                ) or "the player"
+                present_npc_names = [
+                    game_engine._get_npc_name(n)
+                    for n in (session.get("current_npcs") or [])
+                    if game_engine._get_npc_name(n) and game_engine._get_npc_name(n).lower() != "none"
+                ]
+                npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
+                if _is_climax_enc:
                     directive_note += (
                         f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Predetermined quest adversaries ({_names}) confront the party! "
                         f"You MUST dramatically narrate their reveal and hostile confrontation in `@@OUTCOME` and `@@NEXT`, "
                         f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
                         f"DO NOT resolve the battle this turn; set the stage for combat!\n"
                     )
-                    break
-                _matched_lead = False
-                for _ld in (_qd.get("leads_graph") or []):
-                    if not isinstance(_ld, dict):
-                        continue
-                    _ld_loc = str(_ld.get("target_location") or _ld.get("location") or "").strip().lower()
-                    if (
-                        _ld.get("encounter_roster")
-                        and not _ld.get("roster_cleared")
-                        and not _peaceful_dialogue_action
-                        and str(_ld.get("status") or "").lower() != "completed"
-                        and _ld_loc
-                        and (_ld_loc in _enc_loc_low or _enc_loc_low in _ld_loc)
-                    ):
-                        _spawned_lead = []
-                        for _le in (_ld.get("encounter_roster") or []):
-                            if isinstance(_le, dict):
-                                _le_copy = dict(_le)
-                                _le_copy.setdefault("hp", int(_le_copy.get("max_hp") or 24))
-                                _le_copy["linked_quest_id"] = _qid
-                                _spawned_lead.append(_le_copy)
-                        if _spawned_lead:
-                            _q_enc_meta = {"quest_id": _qid, "is_climax_boss": False, "lead_id": _ld.get("lead_id")}
-                            session["nearby_enemies"] = _spawned_lead
-                            session["_active_quest_encounter"] = _q_enc_meta
-                            new_partners = []
-                            _in_dialogue_mode = False
-                            _names = ", ".join(m["name"] for m in _spawned_lead if m.get("name"))
-                            party_names_str = ", ".join(
-                                c.get("name", "Hero")
-                                for c, _ in (party or [])
-                                if isinstance(c, dict) and c.get("name")
-                            ) or "the player"
-                            present_npc_names = [
-                                game_engine._get_npc_name(n)
-                                for n in (session.get("current_npcs") or [])
-                                if game_engine._get_npc_name(n) and game_engine._get_npc_name(n).lower() != "none"
-                            ]
-                            npc_react_clause = f" and present characters ({', '.join(present_npc_names)})" if present_npc_names else ""
-                            directive_note += (
-                                f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Hostile guards/adversaries ({_names}) confront the party! "
-                                f"You MUST dramatically narrate their confrontation in `@@OUTCOME` and `@@NEXT`, "
-                                f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
-                                f"DO NOT resolve the battle this turn; set the stage for combat!\n"
-                            )
-                            _matched_lead = True
-                            break
-                if _matched_lead:
-                    break
+                else:
+                    directive_note += (
+                        f"\n[MANDATORY QUEST ENCOUNTER DIRECTIVE]: Hostile guards/adversaries ({_names}) confront the party! "
+                        f"You MUST dramatically narrate their confrontation in `@@OUTCOME` and `@@NEXT`, "
+                        f"and explicitly describe how {party_names_str}{npc_react_clause} react to the encounter. "
+                        f"DO NOT resolve the battle this turn; set the stage for combat!\n"
+                    )
+        except (NameError, UnboundLocalError, ImportError):
+            raise
         except Exception:
             pass
     if (
@@ -1693,7 +1747,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
     def _pre_prompt_read_bundle() -> tuple:
         sid_val = session.get("id")
-        uow_cm = db.UnitOfWork() if sid_val else nullcontext()
+        uow_cm = db.ReadUnitOfWork() if sid_val else nullcontext()
         with uow_cm:
             dlg_blk = _build_dialogue_prompt_block(session, ctx, new_partners, party, actions)
             if sid_val:
@@ -1746,10 +1800,16 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                         except Exception:
                             pass
 
-            we_snap_res = session.get("_world_events_snapshot")
-            if we_snap_res is None and sid_val:
+            we_snap_res = (
+                ctx.world_stage.world_events_snapshot
+                if ctx.world_stage.world_events_snapshot
+                else session.get("_world_events_snapshot")
+            )
+            if not we_snap_res and session.get("_world_events_snapshot") is None and sid_val:
                 try:
                     we_snap_res = db.get_world_events_snapshot(int(sid_val))
+                    if isinstance(we_snap_res, dict):
+                        ctx.world_stage.world_events_snapshot = we_snap_res
                 except Exception:
                     we_snap_res = None
 
@@ -2323,19 +2383,29 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
                     result["_combat_resolved_notice"] = msg
 
-                # Inject a loot choice unless confiscated or non-hostile target destroyed
+                try:
+                    from mechanics.combat.reconcile import award_post_combat_auto_loot
+                    award_post_combat_auto_loot(
+                        session,
+                        party,
+                        dot_dead_dicts or dot_dead,
+                        result,
+                        confiscated=dot_confiscated,
+                        killed_non_hostiles_count=len(dot_killed_non_hostile),
+                    )
+                except Exception:
+                    pass
+
+                # Filter out obsolete weapon attacks and post-combat loot prompts (auto-loot already awarded)
                 c_list = result.get("next_choices") or result.get("choices") or []
-                filtered_c = [c for c in c_list if not any(kw in (str(c.get("label", "")) if isinstance(c, dict) else str(c)).lower() for kw in ("attack", "strike with", "loot", "search the fallen"))]
-                if not dot_confiscated and len(dot_killed_non_hostile) < len(dot_dead_dicts):
-                    loot_choice = {
-                        "label": "Search and loot the fallen enemies",
-                        "stat": "FREE",
-                        "requirement": 0,
-                        "mp_cost": 0,
-                    }
-                    c_list = [loot_choice] + filtered_c[:3]
-                else:
-                    c_list = filtered_c[:3]
+                filtered_c = [
+                    c for c in c_list
+                    if not any(
+                        kw in (str(c.get("label", "")) if isinstance(c, dict) else str(c)).lower()
+                        for kw in ("attack", "strike with", "loot", "search the fallen", "search the bodies", "gather spoils")
+                    )
+                ]
+                c_list = filtered_c[:4]
 
                 result["next_choices"] = c_list
 
@@ -2743,42 +2813,56 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
         old_loc = session.get("current_location", "")
-        curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(session["id"], old_loc) if session.get("id") else None)
-        has_graph = bool(curr_nid)
         if result.get("_anomalous_extracted"):
             new_loc = result.get("location") or old_loc
             new_node_id = result.get("current_node_id") or session.get("current_node_id")
             focal_point = None
             stage_info.pop("focal_point", None)
         else:
-            if stage_info.get("is_movement"):
-                new_loc = effective_location or old_loc
-            elif has_graph:
-                new_loc = old_loc
-                # Allow valid post-LLM reachable node transitions when triggered by a movement, quest, or accompanied action
-                cand_post_nid = result.get("destination_node_id") or (
-                    db.resolve_node_id_from_location(session["id"], result.get("location"))
-                    if session.get("id") and result.get("location") and result.get("location") != old_loc
-                    else None
-                )
-                if cand_post_nid and cand_post_nid != curr_nid and session.get("id"):
-                    try:
-                        from mechanics.world.locations.pathfinding import find_spatial_path
-                        from mechanics.world.locations.movement import is_movement_action
-                        has_move_or_quest_trigger = any(
-                            (isinstance(a, dict) and (a.get("is_quest_action") or a.get("quest_id") or a.get("target_location") or a.get("target_node_id") or a.get("intent") in ("movement", "travel", "fast_travel", "move", "social_invite", "accompanied_travel")))
-                            or is_movement_action(a.get("label", "") if isinstance(a, dict) else str(a))
-                            for a in (actions or [])
+            def _resolve_post_llm_location() -> tuple[str, Any, Any, Optional[str]]:
+                with db.ReadUnitOfWork() if session.get("id") else nullcontext():
+                    curr_nid = session.get("current_node_id") or (
+                        db.resolve_node_id_from_location(session["id"], old_loc) if session.get("id") else None
+                    )
+                    has_graph = bool(curr_nid)
+                    eff_nid_ov: Optional[str] = None
+                    if stage_info.get("is_movement"):
+                        r_loc = effective_location or old_loc
+                    elif has_graph:
+                        r_loc = old_loc
+                        cand_post_nid = result.get("destination_node_id") or (
+                            db.resolve_node_id_from_location(session["id"], result.get("location"))
+                            if session.get("id") and result.get("location") and result.get("location") != old_loc
+                            else None
                         )
-                        if has_move_or_quest_trigger and find_spatial_path(session["id"], curr_nid, cand_post_nid):
-                            new_loc = db.format_node_tiered_location(session["id"], cand_post_nid) or result.get("location") or old_loc
-                            stage_info["effective_node_id"] = cand_post_nid
-                    except Exception:
-                        pass
-            else:
-                new_loc = result.get("location") or old_loc
-            new_node_id = stage_info.get("effective_node_id") or (db.resolve_node_id_from_location(session["id"], new_loc) if session.get("id") and new_loc else None) or session.get("current_node_id")
-            focal_point = stage_info.get("focal_point") if stage_info.get("focal_point") is not None else result.get("focal_point")
+                        if cand_post_nid and cand_post_nid != curr_nid and session.get("id"):
+                            try:
+                                from mechanics.world.locations.pathfinding import find_spatial_path
+                                from mechanics.world.locations.movement import is_movement_action
+                                has_move_or_quest_trigger = any(
+                                    (isinstance(a, dict) and (a.get("is_quest_action") or a.get("quest_id") or a.get("target_location") or a.get("target_node_id") or a.get("intent") in ("movement", "travel", "fast_travel", "move", "social_invite", "accompanied_travel")))
+                                    or is_movement_action(a.get("label", "") if isinstance(a, dict) else str(a))
+                                    for a in (actions or [])
+                                )
+                                if has_move_or_quest_trigger and find_spatial_path(session["id"], curr_nid, cand_post_nid):
+                                    r_loc = db.format_node_tiered_location(session["id"], cand_post_nid) or result.get("location") or old_loc
+                                    eff_nid_ov = cand_post_nid
+                            except Exception:
+                                pass
+                    else:
+                        r_loc = result.get("location") or old_loc
+                    r_nid = (
+                        eff_nid_ov
+                        or stage_info.get("effective_node_id")
+                        or (db.resolve_node_id_from_location(session["id"], r_loc) if session.get("id") and r_loc else None)
+                        or session.get("current_node_id")
+                    )
+                    r_fp = stage_info.get("focal_point") if stage_info.get("focal_point") is not None else result.get("focal_point")
+                    return r_loc, r_nid, r_fp, eff_nid_ov
+
+            new_loc, new_node_id, focal_point, _eff_nid_ov = await adb(_resolve_post_llm_location)
+            if _eff_nid_ov:
+                stage_info["effective_node_id"] = _eff_nid_ov
 
         result["location"] = new_loc
         result["current_node_id"] = new_node_id
@@ -2823,52 +2907,64 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 eff_day = int(
                     result.get("_staged_day")
                     or session.get("_staged_day")
+                    or (ctx.clock.staged_day if ctx is not None else None)
                     or session.get("current_day")
                     or 1
                 )
                 eff_min = (
                     session.get("_staged_minute")
                     if session.get("_staged_minute") is not None
-                    else session.get("current_minute")
+                    else (
+                        ctx.clock.staged_minute
+                        if ctx is not None and ctx.clock.staged_minute is not None
+                        else session.get("current_minute")
+                    )
                 )
                 probes = []
                 for p_probe in (new_node_id, new_loc):
                     if p_probe and str(p_probe) not in probes:
                         probes.append(str(p_probe))
 
-                window_appts = []
-                seen_cids = set()
-                for loc_probe in probes:
-                    for r in get_active_rendezvous_at_node(
-                        session["id"],
-                        loc_probe,
-                        current_day=eff_day,
-                        current_minute=eff_min,
-                        enforce_window=True,
-                    ):
-                        cid = r.get("id") or r.get("commitment_key")
-                        if cid not in seen_cids:
-                            seen_cids.add(cid)
-                            window_appts.append(r)
+                def _load_rendezvous_bundle() -> tuple[list[dict], dict[str, dict], dict[str, dict]]:
+                    w_appts: list[dict] = []
+                    seen_cids: set = set()
+                    c_by_k: dict[str, dict] = {}
+                    pa_by_k: dict[str, dict] = {}
+                    with db.ReadUnitOfWork():
+                        for loc_probe in probes:
+                            for r in get_active_rendezvous_at_node(
+                                session["id"],
+                                loc_probe,
+                                current_day=eff_day,
+                                current_minute=eff_min,
+                                enforce_window=True,
+                            ):
+                                cid = r.get("id") or r.get("commitment_key")
+                                if cid not in seen_cids:
+                                    seen_cids.add(cid)
+                                    w_appts.append(r)
+
+                        if w_appts:
+                            contacts_now = safe_get_contacts(session["id"], ensure_scene=False)
+                            for kc in contacts_now:
+                                k_nm = str(kc.get("name") or "").strip()
+                                k_id = str(kc.get("npc_id") or "").strip()
+                                for kk in (k_id, k_nm, _canon_key(k_nm) if k_nm else ""):
+                                    if kk:
+                                        c_by_k[str(kk).strip().lower()] = kc
+
+                            try:
+                                for pa in (db.get_active_rendezvous_appointments(session["id"]) or []):
+                                    for pak in (pa.get("npc_id"), pa.get("npc_name"), _canon_key(str(pa.get("npc_name") or ""))):
+                                        if pak:
+                                            pa_by_k[str(pak).strip().lower()] = pa
+                            except Exception:
+                                pass
+                    return w_appts, c_by_k, pa_by_k
+
+                window_appts, contact_by_key, phone_appts_by_key = await adb(_load_rendezvous_bundle)
 
                 if window_appts:
-                    contacts_now = safe_get_contacts(session["id"], ensure_scene=False)
-                    contact_by_key = {}
-                    for kc in contacts_now:
-                        k_nm = str(kc.get("name") or "").strip()
-                        k_id = str(kc.get("npc_id") or "").strip()
-                        for kk in (k_id, k_nm, _canon_key(k_nm) if k_nm else ""):
-                            if kk:
-                                contact_by_key[str(kk).strip().lower()] = kc
-
-                    phone_appts_by_key = {}
-                    try:
-                        for pa in (db.get_active_rendezvous_appointments(session["id"]) or []):
-                            for pak in (pa.get("npc_id"), pa.get("npc_name"), _canon_key(str(pa.get("npc_name") or ""))):
-                                if pak:
-                                    phone_appts_by_key[str(pak).strip().lower()] = pa
-                    except Exception:
-                        pass
 
                     departed_lows = {
                         str(d.get("name") if isinstance(d, dict) else (d or "")).strip().lower()
@@ -3019,8 +3115,9 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
 
         if session.get("cast_state"):
             result["_staged_cast_state"] = session["cast_state"]
-        if session.get("_active_quest_encounter"):
-            result["_active_quest_encounter"] = session["_active_quest_encounter"]
+        _ctx_q_enc = session.get("_active_quest_encounter") or (ctx.combat.active_quest_encounter if ctx is not None else None)
+        if _ctx_q_enc:
+            result["_active_quest_encounter"] = _ctx_q_enc
         if session.get("nearby_enemies") and not result.get("nearby_enemies"):
             result["nearby_enemies"] = session["nearby_enemies"]
         if stage_info.get("unlocked_edges") or stage_info.get("unlocked_nodes") or stage_info.get("consumed_key_items"):
@@ -3210,7 +3307,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                                 tgt = tgt_partners[0]
                         if tgt:
                             try:
-                                db.set_contact_request_cooldown(session["id"], str(tgt), hours=24, until_next_day=True)
+                                await adb(db.set_contact_request_cooldown, session["id"], str(tgt), hours=24, until_next_day=True)
                                 log.info("[ContactCooldown] Registered failed contact exchange cooldown for '%s' in session %s until next day.", tgt, session["id"])
                             except Exception:
                                 pass
@@ -3398,34 +3495,65 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     eff_loc_end = str(res.get("location") or session.get("current_location") or "")
                     eff_nid_end = str(res.get("current_node_id") or session.get("current_node_id") or "")
                     from mechanics.world.waypoints.core import get_active_local_quest_hooks
-                    local_q_hooks = get_active_local_quest_hooks(int(session["id"]), eff_loc_end) or []
-                    nh_q_wp = next(
-                        (
-                            w for w in local_q_hooks
-                            if is_non_hostile_entity_containment_waypoint(
-                                w,
-                                all_wps=db.get_quest_waypoints(int(session["id"]), str(w.get("quest_id") or ""), w.get("sub_obj_id")) or [],
+                    lead_uid_ch = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+
+                    def _load_incursion_choice_context() -> tuple[Any, list[dict], Any, list[dict], list[dict]]:
+                        with db.ReadUnitOfWork():
+                            local_q_hooks = get_active_local_quest_hooks(int(session["id"]), eff_loc_end) or []
+                            nh_wp = next(
+                                (
+                                    w for w in local_q_hooks
+                                    if is_non_hostile_entity_containment_waypoint(
+                                        w,
+                                        all_wps=db.get_quest_waypoints(int(session["id"]), str(w.get("quest_id") or ""), w.get("sub_obj_id")) or [],
+                                    )
+                                ),
+                                None,
                             )
-                        ),
-                        None,
-                    )
+                            if nh_wp:
+                                q_id_r = str(nh_wp.get("quest_id") or "")
+                                so_id_r = nh_wp.get("sub_obj_id")
+                                ent_r = extract_non_hostile_entity_name(nh_wp)
+                                nh_c = build_non_hostile_narrative_choices(
+                                    ent_r,
+                                    mode="quest",
+                                    char=lead_char_end if isinstance(lead_char_end, dict) else None,
+                                    quest_id=q_id_r,
+                                    sub_obj_id=so_id_r,
+                                    stage_index=int(nh_wp.get("stage_index", 2) or 2),
+                                    is_story_quest=bool(nh_wp.get("is_story_quest")),
+                                    contract_type=str(nh_wp.get("completion_trigger") or "skill_check"),
+                                    session_id=int(session["id"]),
+                                    include_converse=True,
+                                )
+                                return nh_wp, nh_c, None, [], []
+                            act_inc = get_active_incursion_at_location(
+                                int(session["id"]),
+                                location_str=eff_loc_end,
+                                node_id=eff_nid_end,
+                            )
+                            inc_nh_c: list[dict] = []
+                            lrn_sp: list[dict] = []
+                            if act_inc and not act_inc.get("resolved"):
+                                if act_inc.get("subtype") == "non_hostile_entity":
+                                    inc_nh_c = build_non_hostile_narrative_choices(
+                                        act_inc["entity_name"],
+                                        mode="incursion",
+                                        char=lead_char_end if isinstance(lead_char_end, dict) else None,
+                                        incursion_id=act_inc["incursion_id"],
+                                        breach_id=act_inc["incursion_id"],
+                                        session_id=int(session["id"]),
+                                        include_converse=True,
+                                    )
+                                if lead_uid_ch and act_inc.get("subtype") != "hostile_breach":
+                                    lrn_sp = db.get_learned_spells(lead_uid_ch) or []
+                            return None, [], act_inc, inc_nh_c, lrn_sp
+
+                    nh_q_wp, nh_q_choices, active_inc, inc_nh_choices, learned_sp = await adb(_load_incursion_choice_context)
                     if nh_q_wp:
                         q_id_nh = str(nh_q_wp.get("quest_id") or "")
-                        so_id_nh = nh_q_wp.get("sub_obj_id")
                         ent_nm_q = extract_non_hostile_entity_name(nh_q_wp)
                         temp_q = get_non_hostile_entity_temperament(seed_key=q_id_nh, quest_notes=str(nh_q_wp.get("quest_notes") or ""))
-                        nh_q_choices = build_non_hostile_narrative_choices(
-                            ent_nm_q,
-                            mode="quest",
-                            char=lead_char_end if isinstance(lead_char_end, dict) else None,
-                            quest_id=q_id_nh,
-                            sub_obj_id=so_id_nh,
-                            stage_index=int(nh_q_wp.get("stage_index", 2) or 2),
-                            is_story_quest=bool(nh_q_wp.get("is_story_quest")),
-                            contract_type=str(nh_q_wp.get("completion_trigger") or "skill_check"),
-                            session_id=int(session["id"]),
-                            include_converse=True,
-                        )
                         existing_apps = {
                             str(c.get("approach") or "")
                             for c in hybrid_choices
@@ -3449,11 +3577,6 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                                 + f"\n\n🕊️ **[NON-HOSTILE ENTITY ENCOUNTER]**: {temp_hint_q}"
                             ).strip()
                     else:
-                        active_inc = get_active_incursion_at_location(
-                            int(session["id"]),
-                            location_str=eff_loc_end,
-                            node_id=eff_nid_end,
-                        )
                         if active_inc and not active_inc.get("resolved"):
                             inc_id = active_inc["incursion_id"]
                             ent_nm = active_inc["entity_name"]
@@ -3482,17 +3605,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                                     "breach_id": inc_id,
                                 })
                             elif active_inc.get("subtype") == "non_hostile_entity":
-                                inc_opts.extend(
-                                    build_non_hostile_narrative_choices(
-                                        ent_nm,
-                                        mode="incursion",
-                                        char=lead_char_end if isinstance(lead_char_end, dict) else None,
-                                        incursion_id=inc_id,
-                                        breach_id=inc_id,
-                                        session_id=int(session["id"]),
-                                        include_converse=True,
-                                    )
-                                )
+                                inc_opts.extend(inc_nh_choices)
                             else:
                                 inc_opts.append({
                                     "label": f"🔬 Analyze & Seal {ent_nm} (Optional)",
@@ -3505,20 +3618,17 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                                     "breach_id": inc_id,
                                 })
                             # Offer Sacred/Sealing Ability option if operative knows any ability
-                            lead_uid_ch = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                            if lead_uid_ch and active_inc.get("subtype") != "hostile_breach":
-                                learned_sp = db.get_learned_spells(lead_uid_ch) or []
-                                if learned_sp:
-                                    inc_opts.append({
-                                        "label": f"✨ Use Sealing Ability on {ent_nm} (Optional)",
-                                        "stat": "INT",
-                                        "requirement": 5,
-                                        "mp_cost": 8,
-                                        "intent": "anomalous_incursion_action",
-                                        "incursion_action": "seal_ability",
-                                        "incursion_id": inc_id,
-                                        "breach_id": inc_id,
-                                    })
+                            if lead_uid_ch and active_inc.get("subtype") != "hostile_breach" and learned_sp:
+                                inc_opts.append({
+                                    "label": f"✨ Use Sealing Ability on {ent_nm} (Optional)",
+                                    "stat": "INT",
+                                    "requirement": 5,
+                                    "mp_cost": 8,
+                                    "intent": "anomalous_incursion_action",
+                                    "incursion_action": "seal_ability",
+                                    "incursion_id": inc_id,
+                                    "breach_id": inc_id,
+                                })
                             existing_lbls_inc = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
                             hybrid_choices = [o for o in inc_opts if o["label"] not in existing_lbls_inc] + hybrid_choices[:3]
                             if ent_nm.lower() not in str(res.get("next_narrative") or "").lower():
@@ -3552,42 +3662,48 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                     _site_loc_end = str(res.get("location") or session.get("current_location") or "")
                     _site_nid_end = str(res.get("current_node_id") or session.get("current_node_id") or "")
                     _site_inv_end = (party[0][1] if (party and isinstance(party[0], (tuple, list)) and len(party[0]) > 1) else [])
-                    try:
-                        _site_day_end, _site_min_end, _ = db.get_session_time(int(session["id"]))
-                    except Exception:
-                        _site_day_end = int(session.get("current_day", 1) or 1)
-                        _site_min_end = int(session.get("current_minute", 720) or 720)
-                    _has_site_prio = has_quest_or_breach_priority_at_node(
-                        int(session["id"]),
-                        location_str=_site_loc_end,
-                        node_id=_site_nid_end,
-                    )
-                    if not _has_site_prio:
-                        _puz_opts = build_site_puzzle_choices(
-                            int(session["id"]),
-                            location_str=_site_loc_end,
-                            node_id=_site_nid_end,
-                            scen_key=scen_key,
-                            current_day=int(_site_day_end or 1),
-                            current_minute=int(_site_min_end or 720),
-                            inventory=_site_inv_end,
-                            has_priority_event=False,
-                            session=session,
-                        )
-                        _har_opts = build_site_harvest_choices(
-                            int(session["id"]),
-                            location_str=_site_loc_end,
-                            node_id=_site_nid_end,
-                            scen_key=scen_key,
-                            current_day=int(_site_day_end or 1),
-                            has_priority_event=False,
-                        )
-                        _site_opts = _puz_opts + _har_opts
-                        if _site_opts:
-                            _existing_site_lbls = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
-                            _new_site_opts = [o for o in _site_opts if o.get("label") not in _existing_site_lbls]
-                            if _new_site_opts:
-                                hybrid_choices = _new_site_opts + hybrid_choices[: max(1, 5 - len(_new_site_opts))]
+
+                    def _build_site_post_choices_bundle() -> list[dict]:
+                        with db.ReadUnitOfWork():
+                            try:
+                                _site_day_end, _site_min_end, _ = db.get_session_time(int(session["id"]))
+                            except Exception:
+                                _site_day_end = int(session.get("current_day", 1) or 1)
+                                _site_min_end = int(session.get("current_minute", 720) or 720)
+                            _has_site_prio = has_quest_or_breach_priority_at_node(
+                                int(session["id"]),
+                                location_str=_site_loc_end,
+                                node_id=_site_nid_end,
+                            )
+                            if _has_site_prio:
+                                return []
+                            _puz_opts = build_site_puzzle_choices(
+                                int(session["id"]),
+                                location_str=_site_loc_end,
+                                node_id=_site_nid_end,
+                                scen_key=scen_key,
+                                current_day=int(_site_day_end or 1),
+                                current_minute=int(_site_min_end or 720),
+                                inventory=_site_inv_end,
+                                has_priority_event=False,
+                                session=session,
+                            )
+                            _har_opts = build_site_harvest_choices(
+                                int(session["id"]),
+                                location_str=_site_loc_end,
+                                node_id=_site_nid_end,
+                                scen_key=scen_key,
+                                current_day=int(_site_day_end or 1),
+                                has_priority_event=False,
+                            )
+                            return _puz_opts + _har_opts
+
+                    _site_opts = await adb(_build_site_post_choices_bundle)
+                    if _site_opts:
+                        _existing_site_lbls = {str(c.get("label") or "") for c in hybrid_choices if isinstance(c, dict)}
+                        _new_site_opts = [o for o in _site_opts if o.get("label") not in _existing_site_lbls]
+                        if _new_site_opts:
+                            hybrid_choices = _new_site_opts + hybrid_choices[: max(1, 5 - len(_new_site_opts))]
             except Exception as _site_ch_err:
                 log.warning("Failed anomalous site choice injection: %s", _site_ch_err)
 
@@ -3616,6 +3732,12 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
             except Exception as _pin_err:
                 log.warning("Failed pinning dialogue exit choice: %s", _pin_err)
 
+        hybrid_choices = game_engine.order_choices_canonically(
+            hybrid_choices,
+            in_dialogue=bool(new_partners and not _in_intimate_for_core),
+            in_combat=bool(game_engine.get_active_enemies(res) or game_engine.get_active_enemies(session)),
+            in_intimate=bool(_in_intimate_for_core),
+        )
         res["choices"] = hybrid_choices
         res["next_choices"] = hybrid_choices
         res["_hybrid_choices_built"] = True
@@ -3639,7 +3761,7 @@ async def _resolve_turn_inner(session: dict, party: list, actions: list, stream_
                 if "previous_node_id" in session:
                     db_updates["extra"] = {"previous_node_id": session["previous_node_id"]}
                 if db_updates:
-                    db.update_session(session["id"], **db_updates)
+                    await adb(db.update_session, session["id"], **db_updates)
             except Exception:
                 pass
         if stage_info.get("schedule_departed_npcs"):
@@ -3664,9 +3786,8 @@ async def evaluate_action(
     history_text: str = "",
 ) -> dict:
     """Evaluate a synthetic or system-initiated action against a session via resolve_turn."""
-    import db
     from skill_check import CheckResult
-    session = db.get_session(session_id) or {
+    session = (await adb(db.get_session, session_id)) or {
         "id": session_id,
         "current_location": current_location,
         "current_npcs": current_npcs or [],

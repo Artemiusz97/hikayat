@@ -27,6 +27,7 @@ from .security import (
     verify_session_participant,
     verify_user_access,
 )
+from services.examine_service import invalidate_examine_cache
 
 
 async def _verify_missing_session_codex_auth(request: Request | None, user_id: int | str | None) -> None:
@@ -344,13 +345,13 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
             "weapon_profile": eval_res.get("weapon_profile", {}),
         }
 
-    if rec_cost > 0:
-        if char_gold < rec_cost:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{npc_name} requires at least Friend standing (100 affinity) to join for free, or {rec_cost} gold to recruit (you have {char_gold} gold)."
-            )
-        await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-rec_cost)
+    if rec_cost > 0 and char_gold < rec_cost:
+        cost_fmt = scenario_data.format_scenario_currency(rec_cost, scen_key)
+        have_fmt = scenario_data.format_scenario_currency(char_gold, scen_key)
+        raise HTTPException(
+            status_code=400,
+            detail=f"{npc_name} requires at least Friend standing (100 affinity) to join for free, or {cost_fmt} to recruit (you have {have_fmt})."
+        )
 
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
@@ -367,6 +368,13 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     added = await adb(db.add_session_party_npc, req.session_id, npc_payload)
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
+
+    if rec_cost > 0:
+        try:
+            await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-rec_cost)
+        except Exception:
+            await adb(db.remove_session_party_npc, req.session_id, npc_payload["name"])
+            raise
 
     # Recruited companions enter Party & Known Characters; only >= 100 or explicitly unlocked contacts appear in personal Contacts
     existing_in_contacts = any((c.get("name") or "").strip().lower() == npc_name.lower() for c in contacts)
@@ -453,6 +461,60 @@ def _infer_school_grade_badge(role: str, current_grade: str, scen_key: str) -> s
     return normalize_standing(role=role, grade=current_grade, scen_key=scen_key)
 
 
+def _format_world_lore_entity_for_ui(ent: dict[str, Any]) -> dict[str, Any]:
+    """Formats internal world_lore entries (such as `_macro_world_state`) for player-facing Codex UI."""
+    out = dict(ent)
+    raw_name = str(out.get("name") or "").strip()
+    raw_type = str(out.get("entity_type") or "").strip()
+    raw_desc = str(out.get("description") or "").strip()
+
+    is_macro = bool(
+        raw_name == "_macro_world_state"
+        or "| CURRENT RUMOR:" in raw_desc
+        or "| FLASHPOINT:" in raw_desc
+    )
+    if raw_type:
+        out["entity_type_label"] = "World Lore" if raw_type.lower() == "world_lore" else raw_type.replace("_", " ").title()
+
+    if is_macro:
+        out["is_macro_world_state"] = True
+        if raw_name == "_macro_world_state":
+            out["raw_name"] = raw_name
+            out["name"] = "Regional Power Dynamics"
+            out["display_name"] = "Regional Power Dynamics"
+
+        macro_conflict = raw_desc
+        current_rumor = str(out.get("current_rumor") or "").strip()
+        flashpoint = str(out.get("flashpoint") or "").strip()
+
+        segments = re.split(r"\s*\|\s*(?=(?:CURRENT\s+RUMOR|FLASHPOINT)\s*:)", raw_desc, flags=re.IGNORECASE)
+        conflict_parts: list[str] = []
+        for seg in segments:
+            s_clean = seg.strip()
+            if not s_clean:
+                continue
+            m_rumor = re.match(r"^CURRENT\s+RUMOR\s*:\s*(.+)$", s_clean, flags=re.IGNORECASE | re.DOTALL)
+            m_flash = re.match(r"^FLASHPOINT\s*:\s*(.+)$", s_clean, flags=re.IGNORECASE | re.DOTALL)
+            if m_rumor:
+                current_rumor = m_rumor.group(1).strip()
+            elif m_flash:
+                flashpoint = m_flash.group(1).strip()
+            else:
+                conflict_parts.append(s_clean)
+        if conflict_parts:
+            macro_conflict = " ".join(conflict_parts).strip()
+
+        out["description"] = macro_conflict
+        if current_rumor:
+            out["current_rumor"] = current_rumor
+        if flashpoint:
+            out["flashpoint"] = flashpoint
+            if not out.get("location"):
+                out["location"] = flashpoint
+
+    return out
+
+
 @router.get("/api/lorebook/{session_id}")
 async def get_lorebook(session_id: int, user_id: int | None = Query(None), request: Request = None):
     """Fetches lorebook entities grouped by category, restricting person entities to discovered characters."""
@@ -521,7 +583,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
     all_entities = []
 
     if isinstance(grouped, dict):
-        for cat, items in grouped.items():
+        for cat, items in list(grouped.items()):
+            formatted_non_person: list[dict[str, Any]] = []
             for it in items:
                 it_dict = dict(it)
                 is_person = (cat == "person" or it_dict.get("entity_type") == "person")
@@ -670,7 +733,11 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
                     all_entities.append(it_dict)
                 else:
                     # Non-person world lore entry (place, faction, artifact, world concept)
-                    all_entities.append(it_dict)
+                    formatted_ent = _format_world_lore_entity_for_ui(it_dict)
+                    all_entities.append(formatted_ent)
+                    formatted_non_person.append(formatted_ent)
+            if cat != "person" and formatted_non_person:
+                grouped[cat] = formatted_non_person
 
         # Merge in any discovered contacts not yet in all_entities
         for c in contacts:
@@ -1933,10 +2000,12 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             )
 
         cur_gold = int(char.get("gold", 0) or 0)
+        cost_fmt = scenario_data.format_scenario_currency(500, scen_key)
+        cur_fmt = scenario_data.format_scenario_currency(cur_gold, scen_key)
         if cur_gold < 500:
             raise HTTPException(
                 status_code=400,
-                detail=f"Telemetry Calibration requires 500G (you currently have {cur_gold}G).",
+                detail=f"Telemetry Calibration requires {cost_fmt} (you currently have {cur_fmt}).",
             )
 
         inv_items = await adb(db.get_inventory, req.user_id)
@@ -1944,6 +2013,8 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             (
                 it for it in (inv_items or [])
                 if not it.get("equipped")
+                and not it.get("is_quest_locked")
+                and not it.get("is_pact_locked")
                 and any(
                     kw in str(it.get("name") or "").strip().lower()
                     for kw in ("hume core", "resonance core", "anomalous core")
@@ -1957,10 +2028,39 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 detail="Telemetry Calibration requires 1x Hume Core in your unequipped inventory.",
             )
 
-        await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
-        await adb(db.remove_item, req.user_id, int(core_item["id"]))
-        await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
-        await adb(sync_equipped_anomalous_spells, req.user_id)
+        # Remove item first and verify success so currency is never deducted without consuming the core
+        removed = await adb(db.remove_item, req.user_id, int(core_item["id"]))
+        if not removed:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not consume Hume Core (item locked or no longer available).",
+            )
+
+        gold_deducted = False
+        try:
+            await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
+            gold_deducted = True
+            await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
+            await adb(sync_equipped_anomalous_spells, req.user_id)
+        except Exception:
+            if gold_deducted:
+                try:
+                    await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, 500)
+                except Exception:
+                    pass
+            try:
+                await adb(
+                    db.add_item,
+                    req.user_id,
+                    core_item["name"],
+                    core_item.get("item_type") or "Material",
+                    core_item.get("effect") or "",
+                    int(core_item.get("slot_cost", 1) or 1),
+                    True,
+                )
+            except Exception:
+                pass
+            raise
 
         cal_map[arc_key] = int(cal_map.get(arc_key, 0) or 0) + 1
         await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
@@ -1977,7 +2077,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             "message": (
                 f"HQ Telemetry Calibration complete! Re-attuned to "
                 f"{new_attr.replace('_', ' ').title()} / {new_arch.replace('_', ' ').title()} / "
-                f"{new_med.replace('_', ' ').title()} (-500G, -1 {core_item['name']})."
+                f"{new_med.replace('_', ' ').title()} (-{cost_fmt}, -1 {core_item['name']})."
             ),
             **payload,
         })
@@ -2792,6 +2892,11 @@ async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest, request
 
     async with distributed_session_lock(session_id):
         res = await scour_feed_for_rumor(dict(session), req.user_id)
+    if res.get("discovered_rumor") or res.get("success"):
+        try:
+            invalidate_examine_cache(session_id)
+        except Exception:
+            pass
     social_state = await adb(get_social_state_summary, session_id, session)
     gossip = res.get("gossip_feed")
     if not gossip:

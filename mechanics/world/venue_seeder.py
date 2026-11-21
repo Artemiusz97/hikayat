@@ -190,6 +190,7 @@ def _build_roster_payload(
     basic: dict[str, Any] = {
         "role": role,
         "occupation": occupation,
+        "age_group": "teen" if shift_profile == "student" else "adult",
         "merchant_archetypes": list(merchant_archetypes or ()),
         "is_24h_station": bool(is_24h_station),
         "is_unique_proprietor": bool(is_unique_proprietor),

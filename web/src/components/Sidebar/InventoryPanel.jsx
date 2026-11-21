@@ -2,8 +2,15 @@ import { useState, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Shield, Sword, Sparkles, Trash2, BookOpen,
-  Coins, Camera, Video, Package, Check, X, HardHat, Footprints, User, Skull, Globe
+  Camera, Video, Package, Check, X, HardHat, Footprints, User, Users, Skull, AlertTriangle, FlaskConical, Zap
 } from 'lucide-react';
+import CurrencyBadge from '../Common/CurrencyBadge';
+import {
+  getAllowedUseActions,
+  isHostileConsumable,
+  isUsableConsumable,
+} from '../../utils/consumables';
+import { groupInventoryItems, isAnomalousNpc, normalizeActorName } from '../../utils/sceneTargets';
 
 const SLOT_ICONS = {
   Weapon: Sword,
@@ -32,16 +39,6 @@ const getItemCategory = (item) => {
   if (slots.includes('Weapon') || type.includes('weapon')) return 'Weapons';
   if (slots.some((s) => ['Armor', 'Shield', 'Head', 'Gloves', 'Shoes', 'Top', 'Bottom'].includes(s)) || type.includes('armor') || type.includes('shield') || type.includes('helm') || type.includes('boot')) return 'Armor';
   return 'Misc';
-};
-
-const isItemUsable = (item) => {
-  if (typeof item?.inspect_data?.is_usable === 'boolean') {
-    return item.inspect_data.is_usable;
-  }
-  const cat = getItemCategory(item);
-  if (cat === 'Usables' || cat === 'Digital' || cat === 'Quest' || cat === 'Misc') return true;
-  const eff = (item.clean_effect || item.effect || '').toLowerCase();
-  return eff.includes('restore') || eff.includes('heal') || eff.includes('spellbook_json') || eff.includes('consumable');
 };
 
 const getInferredValidSlots = (item) => {
@@ -73,7 +70,16 @@ const getInferredValidSlots = (item) => {
   return [];
 };
 
-const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, sessionId, session }) => {
+const InventoryPanel = ({
+  inventoryHook,
+  onRefreshCharacter,
+  onRefreshCodex,
+  sessionId,
+  session,
+  onAction = null,
+  inCombat = false,
+  currentUserId = null,
+}) => {
   const { t } = useTranslation();
   const {
     items, equipment, capacity, propertyBonusSlots = 0, usedSlots, gold,
@@ -90,12 +96,16 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
   const [useFeedback, setUseFeedback] = useState(null);
 
   // Extract present NPCs, companions, and nearby enemies for the inline target picker
-  const partyCompanions = (session?.party_npcs || []).map(n => (typeof n === 'string' ? n : n?.name)).filter(Boolean);
-  const sceneNpcs = (session?.current_npcs || []).filter(n => !(typeof n === 'object' && (n?.is_anomalous_entity || n?.npc_type === 'anomaly' || n?.anomalous_npc_tag === 'anomaly_entity')))
-    .map(n => (typeof n === 'string' ? n : n?.name))
-    .filter(n => n && !partyCompanions.includes(n));
+  const partyCompanions = (session?.party_npcs || [])
+    .filter((n) => !isAnomalousNpc(n))
+    .map((n) => normalizeActorName(n))
+    .filter(Boolean);
+  const sceneNpcs = (session?.current_npcs || [])
+    .filter((n) => !isAnomalousNpc(n))
+    .map((n) => normalizeActorName(n))
+    .filter((n) => n && !partyCompanions.includes(n));
   const nearbyEnemies = (session?.nearby_enemies || session?.monsters || [])
-    .map(e => (typeof e === 'string' ? e : e?.name))
+    .map((e) => normalizeActorName(e))
     .filter(Boolean);
 
   const handleEquip = async (itemId, targetSlot) => {
@@ -125,13 +135,40 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
     }
   };
 
-  const handleUse = async (itemId, targetType = 'self', targetName = 'self') => {
+  const [selectedPickerTarget, setSelectedPickerTarget] = useState(null);
+
+  const partyPlayers = useMemo(() => {
+    const raw = Array.isArray(session?.party_members) ? session.party_members : [];
+    return raw
+      .filter(
+        (m) =>
+          m &&
+          !(currentUserId !== null && currentUserId !== undefined && String(m.user_id) === String(currentUserId))
+      )
+      .map((m) => ({
+        userId: m.user_id,
+        name: String(m.name || m.char_name || m.username || `Adventurer ${m.user_id}`).trim(),
+      }));
+  }, [session?.party_members, currentUserId]);
+
+  const mergedEnemies = useMemo(() => {
+    const activeCombat = inCombat && Array.isArray(session?.combat_state?.enemies)
+      ? session.combat_state.enemies
+          .filter((e) => e && !e.defeated && Number(e.hp ?? e.max_hp ?? 1) > 0)
+          .map((e) => String(e.name || '').trim())
+          .filter(Boolean)
+      : [];
+    return Array.from(new Set([...(Array.isArray(nearbyEnemies) ? nearbyEnemies : []), ...activeCombat]));
+  }, [inCombat, session?.combat_state?.enemies, nearbyEnemies]);
+
+  const handleUse = async (itemId, targetType = 'self', targetName = 'self', targetUserId = null) => {
     if (!useItem) return;
     setActionInProgress(itemId);
     setTargetPickerItemId(null);
+    setSelectedPickerTarget(null);
     setUseFeedback(null);
     try {
-      const res = await useItem(itemId, sessionId, targetType, targetName);
+      const res = await useItem(itemId, sessionId, targetType, targetName, targetUserId);
       if (res?.message) {
         setUseFeedback({ type: 'success', text: res.message.replace(/\*\*/g, '') });
       }
@@ -142,6 +179,32 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
     } finally {
       setActionInProgress(null);
     }
+  };
+
+  const handleStoryUse = (item, targetType = 'self', targetName = 'self', targetUserId = null) => {
+    if (!onAction) return;
+    setTargetPickerItemId(null);
+    setSelectedPickerTarget(null);
+    setUseFeedback(null);
+    const storyText =
+      targetType === 'self'
+        ? `Use ${item.name} on myself.`
+        : targetType === 'monster'
+          ? `Use ${item.name} against ${targetName}.`
+          : `Use ${item.name} on ${targetName}.`;
+    const mode = getAllowedUseActions({ item, targetType, inCombat }).mode;
+    onAction({
+      choice_index: null,
+      intent: 'use_item',
+      item_id: item.id,
+      target_type: targetType,
+      target_name: targetName,
+      target_npc: targetType === 'npc' || targetType === 'companion' ? targetName : null,
+      target_user_id: targetUserId ?? null,
+      use_mode: mode,
+      combat_target: targetType === 'monster' ? targetName : null,
+      custom_action_text: storyText,
+    });
   };
 
   const handleDrop = async (itemId) => {
@@ -163,20 +226,10 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
   const backpackItems = items.filter(it => !it.equipped);
 
   // Group duplicate unequipped items by name + item_type + effect
-  const groupedItems = useMemo(() => {
-    const map = new Map();
-    for (const it of backpackItems) {
-      const key = `${it.name || ''}::${it.item_type || it.type || ''}::${it.effect || ''}`;
-      if (map.has(key)) {
-        const existing = map.get(key);
-        existing.count += 1;
-        existing.groupedIds.push(it.id);
-      } else {
-        map.set(key, { ...it, count: 1, groupedIds: [it.id] });
-      }
-    }
-    return Array.from(map.values());
-  }, [backpackItems]);
+  const groupedItems = useMemo(
+    () => groupInventoryItems(backpackItems),
+    [backpackItems]
+  );
 
   const filteredItems = groupedItems.filter(it => {
     if (filterCat === 'All') return true;
@@ -188,11 +241,11 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
   const isFull = encumbrancePct >= 100;
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5">
+    <div className="space-y-3 min-w-0">
 
       {/* Top Bar: Subtabs & Gold */}
-      <div className="flex items-center justify-between border-b border-fantasy-border pb-2">
-        <div className="flex items-center gap-1 bg-black/60 p-0.5 rounded-md border border-fantasy-border/60">
+      <div className="flex items-center justify-between gap-2 border-b border-fantasy-border/35 pb-2.5">
+        <div className="flex items-center gap-1">
           <button
             onClick={() => setActiveTab('backpack')}
             className={`px-2.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
@@ -215,11 +268,11 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
           </button>
         </div>
 
-        <div className="flex items-center gap-1 bg-black/50 border border-amber-900/40 px-2 py-0.5 rounded text-amber-300 font-mono text-xs">
-          <Coins size={12} className="text-amber-400" />
-          <span className="font-bold">{gold}</span>
-          <span className="text-[10px] text-amber-500/80">G</span>
-        </div>
+        <CurrencyBadge
+          amount={gold}
+          scenario={session?.scenario}
+          size="md"
+        />
       </div>
 
       {/* Item Action Feedback Banner */}
@@ -290,11 +343,11 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
           </div>
 
           {/* Items List */}
-          <div className="space-y-1.5 max-h-96 overflow-y-auto custom-scrollbar pr-1">
+          <div className="divide-y divide-fantasy-border/30">
             {loading && items.length === 0 ? (
               <p className="text-xs text-gray-500 italic text-center py-6">{t('inventory.checking_pack')}</p>
             ) : filteredItems.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
+              <div className="text-center py-8 text-gray-400">
                 <Package size={24} className="mx-auto mb-1.5 opacity-40" />
                 <p className="text-xs">{t('inventory.no_items')}</p>
               </div>
@@ -302,12 +355,12 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
               filteredItems.map(item => {
                 const category = getItemCategory(item);
                 const validSlots = getInferredValidSlots(item);
-                const usable = isItemUsable(item);
                 const isSpellbook = (item.item_type || '').toLowerCase() === 'spellbook' || (item.name || '').toLowerCase().match(/^(spellbook|grimoire|tome):/);
                 const isDigital = category === 'Digital';
                 const isKeyItem = Boolean(item.is_key_item || category === 'Quest');
                 const isPactLocked = Boolean(item.is_pact_locked);
                 const isDirectOnly = isSpellbook || isDigital;
+                const usable = isDirectOnly || isUsableConsumable(item);
                 const isBusy = actionInProgress === item.id;
                 const showTargetPicker = targetPickerItemId === item.id;
                 const showSlotPicker = slotPickerItemId === item.id;
@@ -334,7 +387,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                 return (
                   <div
                     key={item.id}
-                    className="bg-black/50 border border-fantasy-border/60 hover:border-fantasy-border rounded p-2.5 transition-colors space-y-2"
+                    className="py-2.5 space-y-2"
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0 flex-1">
@@ -354,27 +407,27 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                           )}
                           <span className="font-medium text-xs text-gray-200 truncate">{item.name}</span>
                           {item.count > 1 && (
-                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 bg-fantasy-accent/20 text-fantasy-accent rounded border border-fantasy-accent/40">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 bg-fantasy-accent/20 text-fantasy-accent rounded border border-fantasy-accent/40">
                               x{item.count}
                             </span>
                           )}
                           {item.count > 1 && ['potion', 'food', 'drink', 'consumable'].includes((item.item_type || item.type || '').toLowerCase()) && (item.slot_cost ?? 1) > 0 && (
-                            <span className="text-[9px] font-mono px-1 py-0.2 bg-emerald-950/70 text-emerald-300 rounded border border-emerald-800/60" title={t('inventory.stack_tooltip', 'Consumables stack up to 5 per slot')}>
+                            <span className="text-[9px] font-mono px-1 py-0.5 bg-emerald-950/70 text-emerald-300 rounded border border-emerald-800/60" title={t('inventory.stack_tooltip', 'Consumables stack up to 5 per slot')}>
                               {Math.ceil(item.count / 5) * (item.slot_cost ?? 1)} slot{Math.ceil(item.count / 5) * (item.slot_cost ?? 1) > 1 ? 's' : ''}
                             </span>
                           )}
                           {isKeyItem && (
-                            <span className="text-[9px] px-1.5 py-0.2 bg-amber-950/80 text-amber-300 rounded border border-amber-700/60 font-bold flex items-center gap-0.5">
+                            <span className="text-[9px] px-1.5 py-0.5 bg-amber-950/80 text-amber-300 rounded border border-amber-700/60 font-bold flex items-center gap-0.5">
                               🔒 {t('inventory.key_item')}
                             </span>
                           )}
                           {isPactLocked && (
-                            <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold flex items-center gap-0.5" title={t('contracts.pact_bound_locked', 'Bound to an active Entity Contract — sever the covenant to remove.')}>
+                            <span className="text-[9px] px-1.5 py-0.5 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold flex items-center gap-0.5" title={t('contracts.pact_bound_locked', 'Bound to an active Entity Contract — sever the covenant to remove.')}>
                               🩸 {t('contracts.pact_bound', 'Pact-Bound')}
                             </span>
                           )}
                           {item.slot_cost === 0 && (
-                            <span className="text-[9px] px-1 py-0.2 bg-cyan-950 text-cyan-300 rounded border border-cyan-800">
+                            <span className="text-[9px] px-1 py-0.5 bg-cyan-950 text-cyan-300 rounded border border-cyan-800">
                               0-Slot
                             </span>
                           )}
@@ -544,51 +597,148 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                       </div>
                     )}
 
-                    {/* Inline Target Picker Popover */}
-                    {showTargetPicker && (
-                      <div className="pt-2 border-t border-fantasy-border/50 flex flex-wrap gap-1.5 items-center bg-black/40 p-2 rounded">
-                        <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">{t('inventory.target')}</span>
-                        <button
-                          onClick={() => handleUse(item.id, 'self', 'self')}
-                          className="flex items-center gap-1 px-2 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-200 text-[10px] font-semibold"
-                        >
-                          <User size={10} /> {t('inventory.target_yourself')}
-                        </button>
-                        {partyCompanions.map(name => (
-                          <button
-                            key={`comp-${name}`}
-                            onClick={() => handleUse(item.id, 'companion', name)}
-                            className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-700/60 text-cyan-200 text-[10px] font-semibold"
-                          >
-                            <Sparkles size={10} /> {name} ({t('inventory.target_party')})
-                          </button>
-                        ))}
-                        {sceneNpcs.map(name => (
-                          <button
-                            key={`npc-${name}`}
-                            onClick={() => handleUse(item.id, 'npc', name)}
-                            className="flex items-center gap-1 px-2 py-1 rounded bg-pink-950/60 hover:bg-pink-900 border border-pink-700/60 text-pink-200 text-[10px] font-semibold"
-                          >
-                            🎁 {t('inventory.gift_to_npc', { name, defaultValue: `Gift to ${name}` })}
-                          </button>
-                        ))}
-                        {nearbyEnemies.map(name => (
-                          <button
-                            key={`enemy-${name}`}
-                            onClick={() => handleUse(item.id, 'monster', name)}
-                            className="flex items-center gap-1 px-2 py-1 rounded bg-red-950/60 hover:bg-red-900 border border-red-700/60 text-red-200 text-[10px] font-semibold"
-                          >
-                            <Skull size={10} /> {t('inventory.throw')}: {name}
-                          </button>
-                        ))}
-                        <button
-                          onClick={() => handleUse(item.id, 'ground', 'ground')}
-                          className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/60 hover:bg-amber-900 border border-amber-700/60 text-amber-200 text-[10px] font-semibold"
-                        >
-                          <Globe size={10} /> 🌐 {t('inventory.ground_env')}
-                        </button>
-                      </div>
-                    )}
+                    {/* Inline Contextual Target Picker Popover */}
+                    {showTargetPicker && (() => {
+                      const pickerTargets = [
+                        {
+                          key: 'self:self',
+                          type: 'self',
+                          name: 'self',
+                          label: t('inventory.target_yourself'),
+                          userId: currentUserId ?? null,
+                        },
+                        ...partyPlayers.map((p) => ({
+                          key: `player:${p.userId}`,
+                          type: 'player',
+                          name: p.name,
+                          label: `${p.name} (${t('inventory.target_party')})`,
+                          userId: p.userId,
+                        })),
+                        ...partyCompanions.map((name) => ({
+                          key: `companion:${name}`,
+                          type: 'companion',
+                          name,
+                          label: `${name} (${t('inventory.target_party')})`,
+                          userId: null,
+                        })),
+                        ...sceneNpcs.map((name) => ({
+                          key: `npc:${name}`,
+                          type: 'npc',
+                          name,
+                          label: name,
+                          userId: null,
+                        })),
+                        ...mergedEnemies.map((name) => ({
+                          key: `monster:${name}`,
+                          type: 'monster',
+                          name,
+                          label: name,
+                          userId: null,
+                        })),
+                      ];
+
+                      const activeTarget =
+                        (selectedPickerTarget?.itemId === item.id &&
+                          pickerTargets.find((tgt) => tgt.key === selectedPickerTarget.key)) ||
+                        pickerTargets[0];
+
+                      const { canQuickUse, canTurnUse } = getAllowedUseActions({
+                        item,
+                        targetType: activeTarget.type,
+                        inCombat,
+                      });
+                      const showHostileWarn =
+                        isHostileConsumable(item) && activeTarget.type === 'npc';
+
+                      return (
+                        <div className="pt-2 border-t border-fantasy-border/50 space-y-2 bg-black/40 p-2 rounded">
+                          <div className="flex flex-wrap gap-1 items-center">
+                            <span className="text-[10px] uppercase tracking-wider text-gray-400 font-bold mr-1">
+                              {t('inventory.target')}
+                            </span>
+                            {pickerTargets.map((tgt) => {
+                              const isSelected = activeTarget.key === tgt.key;
+                              return (
+                                <button
+                                  key={tgt.key}
+                                  type="button"
+                                  onClick={() =>
+                                    setSelectedPickerTarget({ itemId: item.id, key: tgt.key })
+                                  }
+                                  className={`flex items-center gap-1 px-2 py-0.5 rounded border text-[10px] font-semibold transition-colors ${
+                                    isSelected
+                                      ? 'bg-fantasy-accent/25 border-fantasy-accent text-fantasy-accent'
+                                      : tgt.type === 'monster'
+                                        ? 'bg-red-950/40 hover:bg-red-900/60 border-red-800/50 text-red-200'
+                                        : tgt.type === 'npc'
+                                          ? 'bg-amber-950/40 hover:bg-amber-900/60 border-amber-800/50 text-amber-200'
+                                          : tgt.type === 'player' || tgt.type === 'companion'
+                                            ? 'bg-cyan-950/40 hover:bg-cyan-900/60 border-cyan-800/50 text-cyan-200'
+                                            : 'bg-emerald-950/40 hover:bg-emerald-900/60 border-emerald-800/50 text-emerald-200'
+                                  }`}
+                                >
+                                  {tgt.type === 'self' && <User size={10} />}
+                                  {(tgt.type === 'player' || tgt.type === 'companion') && <Users size={10} />}
+                                  {tgt.type === 'monster' && <Skull size={10} />}
+                                  <span>{tgt.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {showHostileWarn && (
+                            <div className="rounded px-2 py-1 bg-amber-500/15 border border-amber-400/35 text-[10px] text-amber-200 flex items-center gap-1">
+                              <AlertTriangle size={11} className="shrink-0 text-amber-300" />
+                              <span>
+                                {t(
+                                  'quickbelt.hostile_warning',
+                                  'Covert/hostile item: triggers an AGI/CHA check on NPCs; failure damages affinity & spikes detection.'
+                                )}
+                              </span>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center justify-end gap-1.5">
+                            {canQuickUse && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleUse(
+                                    item.id,
+                                    activeTarget.type,
+                                    activeTarget.name,
+                                    activeTarget.userId
+                                  )
+                                }
+                                className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-900/60 hover:bg-emerald-800 border border-emerald-500/50 text-emerald-200 text-[10px] font-bold disabled:opacity-40"
+                              >
+                                <Zap size={10} />
+                                <span>{t('quickbelt.quick_use', 'Quick Use (0 Turns)')}</span>
+                              </button>
+                            )}
+                            {canTurnUse && onAction && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() =>
+                                  handleStoryUse(
+                                    item,
+                                    activeTarget.type,
+                                    activeTarget.name,
+                                    activeTarget.userId
+                                  )
+                                }
+                                className="flex items-center gap-1 px-2.5 py-1 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/35 border border-fantasy-accent/55 text-fantasy-accent text-[10px] font-bold disabled:opacity-40"
+                              >
+                                <FlaskConical size={10} />
+                                <span>{t('quickbelt.use_in_story', 'Use in Story (1 Turn)')}</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 );
               })
@@ -599,7 +749,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
 
       {/* Equipped Gear View */}
       {activeTab === 'gear' && (
-        <div className="space-y-2">
+        <div className="divide-y divide-fantasy-border/30">
           {Object.entries(equipment || {}).map(([slot, equippedItem]) => {
             const Icon = SLOT_ICONS[slot] || Shield;
             const isBusy = actionInProgress === slot;
@@ -608,7 +758,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
             return (
               <div
                 key={slot}
-                className="bg-black/50 border border-fantasy-border/60 rounded p-2.5 flex items-center justify-between gap-2"
+                className="py-2.5 flex items-center justify-between gap-2"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className={`w-8 h-8 rounded border flex items-center justify-center shrink-0 ${
@@ -625,7 +775,7 @@ const InventoryPanel = ({ inventoryHook, onRefreshCharacter, onRefreshCodex, ses
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-xs font-semibold text-gray-200 truncate">{equippedItem.name}</span>
                           {equippedItem.is_pact_locked && (
-                            <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold">
+                            <span className="text-[9px] px-1.5 py-0.5 bg-rose-950/85 text-rose-200 rounded border border-rose-600/60 font-bold">
                               🩸 {t('contracts.pact_bound', 'Pact-Bound')}
                             </span>
                           )}

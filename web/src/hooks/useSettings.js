@@ -39,19 +39,6 @@ export const useSettings = (userId) => {
           localStorage.setItem('hikayat_ui_language', uiLang);
         }
       }
-      try {
-        const dbg = await apiCall(`/api/debug/${userId}`);
-        if (dbg) {
-          setDebugState({
-            debug_stat_mode: dbg.debug_stat_mode || 'off',
-            debug_check_mode: dbg.debug_check_mode || 'off',
-            debug_reveal_all_info: dbg.debug_reveal_all_info ?? 0,
-            telemetry: dbg.telemetry || null
-          });
-        }
-      } catch {
-        // ignore debug fetch errors
-      }
     } catch (err) {
       console.error('Failed to fetch settings:', err);
       setError(err.message || 'Could not load settings');
