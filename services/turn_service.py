@@ -9,7 +9,6 @@ import os
 import random
 import re
 import tempfile
-import time
 from typing import Dict, List, Any, Optional, Tuple, Callable
 import httpx
 from openai import APIError as OpenAIAPIError
@@ -1292,7 +1291,6 @@ class TurnService:
         Single source of truth for pre-turn action classification, MP/Item/Gold deduction,
         NPC trait & intimate DC modifiers, and deterministic skill check rolling across Web and Discord.
         """
-        import random
         import skill_check
         from mechanics.narrative.intent import classify_action_intent
         from mechanics.world.mobility import get_session_dialogue_partners
@@ -2841,7 +2839,6 @@ class TurnService:
 
         import uuid
         turn_id = str(uuid.uuid4())
-        import copy
         prev_st_rollback = None
         for a in actions:
             if isinstance(a, dict) and isinstance(a.get("_prev_stealth_state"), dict) and prev_st_rollback is None:

@@ -41,16 +41,26 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE_PATH = ROOT / "scripts" / "static_baseline.json"
-SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models"]
+def _discover_script_files() -> List[str]:
+    scripts_dir = ROOT / "scripts"
+    if not scripts_dir.is_dir():
+        return []
+    return [f"scripts/{p.name}" for p in sorted(scripts_dir.glob("*.py"))]
+
+
+SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models", "localization", "bin"]
 SCAN_ROOT_FILES = [
-    "server.py",
-    "llm_client.py",
+    "bot.py",
     "character_data.py",
+    "config.py",
+    "image_client.py",
+    "llm_client.py",
+    "namegen.py",
     "scenario_data.py",
-    "catalog.py",
-    "scripts/cleanup_stale_sessions.py",
-    "scripts/package_release.py",
-    "scripts/static_check.py",
+    "scenario_variants.py",
+    "server.py",
+    "skill_check.py",
+    *_discover_script_files(),
 ]
 
 # High-signal pylint checks only: each of these is a crash (or silently swallowed crash) at runtime.
@@ -1088,6 +1098,268 @@ def analyze_unregistered_session_tables(
 
 
 # ---------------------------------------------------------------------------
+# Analyzers 6-7: Unused imports & shadowing local imports
+# ---------------------------------------------------------------------------
+
+
+def _is_type_checking_if(node: ast.If) -> bool:
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    if (
+        isinstance(test, ast.Attribute)
+        and isinstance(test.value, ast.Name)
+        and test.value.id == "typing"
+        and test.attr == "TYPE_CHECKING"
+    ):
+        return True
+    return False
+
+
+def _extract_string_elts(expr: Optional[ast.AST]) -> Set[str]:
+    out: Set[str] = set()
+    if expr is None:
+        return out
+    if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+        for elt in expr.elts:
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                out.add(elt.value)
+    elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        out |= _extract_string_elts(expr.left)
+        out |= _extract_string_elts(expr.right)
+    elif isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        out.add(expr.value)
+    return out
+
+
+def _extract_all_exports(tree: ast.Module) -> Set[str]:
+    exports: Set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets):
+            exports |= _extract_string_elts(stmt.value)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__":
+            exports |= _extract_string_elts(stmt.value)
+        elif (
+            isinstance(stmt, ast.AugAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.target.id == "__all__"
+            and isinstance(stmt.op, ast.Add)
+        ):
+            exports |= _extract_string_elts(stmt.value)
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+            if (
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "__all__"
+                and call.func.attr in ("extend", "append")
+                and call.args
+            ):
+                exports |= _extract_string_elts(call.args[0])
+    return exports
+
+
+_IDENT_TOKEN_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+
+
+def _collect_annotation_tokens(expr: Optional[ast.AST], out: Set[str]) -> None:
+    if expr is None:
+        return
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            out.update(_IDENT_TOKEN_RE.findall(sub.value))
+
+
+def _collect_used_names(root_node: ast.AST) -> Set[str]:
+    used: Set[str] = set()
+
+    def _walk(node: ast.AST) -> None:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            used.add(node.id)
+        elif isinstance(node, ast.arg):
+            _collect_annotation_tokens(node.annotation, used)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _collect_annotation_tokens(node.returns, used)
+        elif isinstance(node, ast.AnnAssign):
+            _collect_annotation_tokens(node.annotation, used)
+        elif hasattr(ast, "TypeAlias") and isinstance(node, ast.TypeAlias):
+            _collect_annotation_tokens(node.value, used)
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            is_cast = (
+                (isinstance(fn, ast.Name) and fn.id == "cast")
+                or (
+                    isinstance(fn, ast.Attribute)
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "typing"
+                    and fn.attr == "cast"
+                )
+            )
+            if is_cast:
+                if node.args:
+                    _collect_annotation_tokens(node.args[0], used)
+                for kw in node.keywords:
+                    if kw.arg == "typ":
+                        _collect_annotation_tokens(kw.value, used)
+        for child in ast.iter_child_nodes(node):
+            _walk(child)
+
+    _walk(root_node)
+    return used
+
+
+def _iter_direct_control_imports(
+    stmts: Iterable[ast.stmt],
+    *,
+    skip_type_checking: bool = False,
+) -> Iterator[ast.stmt]:
+    for stmt in stmts:
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            yield stmt
+        elif isinstance(stmt, ast.If):
+            if skip_type_checking and _is_type_checking_if(stmt):
+                yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+            else:
+                yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+                yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+        elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+            for h in stmt.handlers:
+                yield from _iter_direct_control_imports(h.body, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(stmt.finalbody, skip_type_checking=skip_type_checking)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(getattr(stmt, "orelse", ()), skip_type_checking=skip_type_checking)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                yield from _iter_direct_control_imports(case.body, skip_type_checking=skip_type_checking)
+
+
+def _iter_nested_callables(stmts: Iterable[ast.stmt], prefix: str) -> Iterator[Tuple[ast.AST, str]]:
+    for stmt in stmts:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield stmt, q
+            yield from _iter_nested_callables(stmt.body, q)
+        elif isinstance(stmt, ast.ClassDef):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield from _iter_nested_callables(stmt.body, q)
+        elif isinstance(stmt, ast.If):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            yield from _iter_nested_callables(stmt.orelse, prefix)
+        elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            for h in stmt.handlers:
+                yield from _iter_nested_callables(h.body, prefix)
+            yield from _iter_nested_callables(stmt.orelse, prefix)
+            yield from _iter_nested_callables(stmt.finalbody, prefix)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            yield from _iter_nested_callables(getattr(stmt, "orelse", ()), prefix)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                yield from _iter_nested_callables(case.body, prefix)
+
+
+def _bound_import_aliases(stmt: ast.stmt) -> Iterator[Tuple[str, int]]:
+    if isinstance(stmt, ast.ImportFrom) and stmt.level == 0 and stmt.module == "__future__":
+        return
+    for alias in getattr(stmt, "names", ()):
+        if alias.name == "*":
+            continue
+        if isinstance(stmt, ast.Import):
+            bound = alias.asname or alias.name.split(".")[0]
+        else:
+            bound = alias.asname or alias.name
+        alias_line = getattr(alias, "lineno", None) or stmt.lineno
+        yield bound, alias_line
+
+
+def analyze_unused_imports(path: Path, rel: str) -> List[Finding]:
+    """Flag unused module-level and function-local imports (exempting __init__.py, __all__, TYPE_CHECKING, and string annotations)."""
+    if path.name == "__init__.py":
+        return []
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+    norm_rel = rel.replace("\\", "/")
+    lines = source.splitlines()
+    all_exports = _extract_all_exports(tree)
+    module_used = _collect_used_names(tree)
+    findings: List[Finding] = []
+
+    for stmt in _iter_direct_control_imports(tree.body, skip_type_checking=True):
+        for bound, alias_line in _bound_import_aliases(stmt):
+            if bound in all_exports or bound in module_used:
+                continue
+            if _is_suppressed_line(lines, alias_line, "unused-import") or _is_suppressed_line(lines, stmt.lineno, "unused-import"):
+                continue
+            findings.append(Finding(
+                norm_rel,
+                alias_line,
+                "unused-import",
+                "<module>",
+                f"imported name '{bound}' is unused",
+            ))
+
+    for fn, qual in _iter_nested_callables(tree.body, ""):
+        fn_used = _collect_used_names(fn)
+        for stmt in _iter_direct_control_imports(getattr(fn, "body", ()), skip_type_checking=True):
+            for bound, alias_line in _bound_import_aliases(stmt):
+                if bound in fn_used:
+                    continue
+                if _is_suppressed_line(lines, alias_line, "unused-import") or _is_suppressed_line(lines, stmt.lineno, "unused-import"):
+                    continue
+                findings.append(Finding(
+                    norm_rel,
+                    alias_line,
+                    "unused-import",
+                    qual,
+                    f"local imported name '{bound}' is unused",
+                ))
+    return findings
+
+
+def analyze_shadowing_local_imports(path: Path, rel: str) -> List[Finding]:
+    """Flag function-local imports whose bound name shadows a module-level import (risks UnboundLocalError)."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+    module_imported: Set[str] = set()
+    for stmt in _iter_direct_control_imports(tree.body, skip_type_checking=True):
+        for bound, _ in _bound_import_aliases(stmt):
+            module_imported.add(bound)
+    if not module_imported:
+        return []
+
+    norm_rel = rel.replace("\\", "/")
+    lines = source.splitlines()
+    findings: List[Finding] = []
+    for fn, qual in _iter_nested_callables(tree.body, ""):
+        for stmt in _iter_direct_control_imports(getattr(fn, "body", ()), skip_type_checking=True):
+            for bound, alias_line in _bound_import_aliases(stmt):
+                if bound not in module_imported:
+                    continue
+                if _is_suppressed_line(lines, alias_line, "shadowing-local-import") or _is_suppressed_line(lines, stmt.lineno, "shadowing-local-import"):
+                    continue
+                findings.append(Finding(
+                    norm_rel,
+                    alias_line,
+                    "shadowing-local-import",
+                    qual,
+                    f"local import '{bound}' shadows module-level import of the same name (risks UnboundLocalError)",
+                ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
 # Analyzer 1: pylint (error subset)
 # ---------------------------------------------------------------------------
 
@@ -1231,6 +1503,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         findings.extend(analyze_possibly_unbound(p, rel))
         findings.extend(analyze_sync_db_in_async(p, rel, pure_helpers=pure_helpers))
         findings.extend(analyze_raw_conn_commit(p, rel))
+        findings.extend(analyze_unused_imports(p, rel))
+        findings.extend(analyze_shadowing_local_imports(p, rel))
     if any(r.replace("\\", "/") in ("db/core.py", "db/registry.py") for r in rels):
         findings.extend(analyze_unregistered_session_tables())
     if not args.no_pylint:
@@ -1264,7 +1538,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for f in new:
             print("  " + f.render())
         print("\nFix them. Only for verified false positives, suppress inline with")
-        print("`# pylint: disable=<check>` (pylint checks) or `# static-check: ignore[possibly-unbound-local]`.")
+        print("`# pylint: disable=<check>` (pylint checks) or `# static-check: ignore[<rule>]`.")
         return 1
     print(f"static_check: OK - 0 new findings in {scope} ({len(findings)} baselined).")
     return 0

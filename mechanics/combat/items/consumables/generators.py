@@ -1,31 +1,13 @@
 from __future__ import annotations
-import re
 import random
-from typing import Dict, Any, Tuple, Optional, List
-import db
-from skill_check import resolve_check
+from typing import Dict, Any, List
 
 from .metadata import (
-    POTION_PURPOSE_TAGS,
-    POTION_EFFECT_TAGS,
-    FOOD_TASTE_TAGS,
-    FOOD_EFFECT_TAGS,
-    DRINK_TASTE_TAGS,
-    DRINK_EFFECT_TAGS,
     POTION_SCALING,
     FOOD_SCALING,
     DRINK_SCALING,
     serialize_consumable_metadata,
-    parse_consumable_metadata,
-    serialize_digital_item_metadata,
-    parse_digital_item_metadata,
-    is_digital_item,
-    create_digital_media_item,
     normalize_consumable_scenario,
-    parse_item_tier,
-    is_key_item,
-    is_giftable_item,
-    parse_item_effect,
 )
 
 

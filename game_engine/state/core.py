@@ -1,20 +1,14 @@
 from __future__ import annotations
 from typing import Any, Optional
-from .constants import ENABLE_DYNAMIC_MULTIPASS, _ITEM_BLOCKLIST
 from game_engine.turn_context import (
     TurnExecutionContext,
     resolve_target_turn,
 )
 import db
 import re
-import json
 import random
 import logging
-from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine
-from db import adb
-import mechanics.narrative.event_handlers
-from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
 
 log = logging.getLogger(__name__)
 
@@ -1567,7 +1561,6 @@ def push_history(history: list, entry: str, limit: int | None = None) -> list:
     The default limit is RAW_HISTORY_LIMIT (4) from mechanics.system.memory.digest.
     """
     from mechanics.system.memory.digest import RAW_HISTORY_LIMIT
-    import game_engine
     
     if limit is None:
         limit = RAW_HISTORY_LIMIT
@@ -1587,5 +1580,5 @@ def push_history(history: list, entry: str, limit: int | None = None) -> list:
 
 
 
-from .reducers import _evaluate_npc_milestones, _reduce_quests_and_waypoints, _reduce_vitals_and_inventory, _reduce_factions, _reduce_deterministic_waypoints, _reduce_physical_state_and_memories, _reduce_entities_and_gifts, _reduce_media_capture
+from .reducers import _reduce_quests_and_waypoints, _reduce_vitals_and_inventory, _reduce_factions, _reduce_deterministic_waypoints, _reduce_physical_state_and_memories, _reduce_entities_and_gifts, _reduce_media_capture
 from .social import _reduce_social_and_milestones

@@ -5,7 +5,7 @@ Maintains 100% JSON safety across WebSockets, Discord bot embeds, and SQLite ses
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 
 class StatusEffectInstance(TypedDict, total=False):

@@ -2,11 +2,10 @@ from __future__ import annotations
 from .constants import *
 import json
 import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple
 import db
 from .seeds import *
-from .seeds import _load_seeds, _slugify, _SEED_PATH
+from .seeds import _slugify
 
 ATMOSPHERE_ADJECTIVE_BLACKLIST = frozenset({
     "area", "spot", "your", "main", "room", "place", "zone",
@@ -223,7 +222,7 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
     primary = re.sub(r"[*_`]", "", str(primary)).strip()
     sub = re.sub(r"[*_`]", "", str(sub)).strip()
 
-    from .hierarchy import _build_session_zone_index, _build_session_spatial_index, resolve_default_sublocation
+    from .hierarchy import resolve_default_sublocation
     zones_index = _build_session_zone_index(session_id, scenario_key)
     primaries, subs_idx = _build_session_spatial_index(session_id, scenario_key)
 
@@ -615,7 +614,6 @@ def is_incongruous_container(primary_place: str, sub_spot: str, session_id: int 
     # This must run before the ENCLOSED_ROOM_KEYWORDS gate so it catches exterior
     # and transitional containers (e.g. School Gates, Residential Walkway) too.
     if session_id:
-        from .hierarchy import _build_session_zone_index, _build_session_spatial_index
         zones_index = _build_session_zone_index(session_id, scenario_key)
         primaries, subs_idx = _build_session_spatial_index(session_id, scenario_key)
 
@@ -755,7 +753,7 @@ def auto_heal_incongruous_location(zone: str, primary: str, sub: str, session_id
 
     if session_id:
 
-        from .hierarchy import _build_session_zone_index, _build_session_spatial_index, resolve_default_sublocation
+        from .hierarchy import resolve_default_sublocation
         zones_index = _build_session_zone_index(session_id, scenario_key)
 
         primaries_idx, _ = _build_session_spatial_index(session_id, scenario_key)
@@ -1067,7 +1065,6 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
     existing = db.get_session_locations(session_id)
     if not existing and session_id:
         try:
-            from mechanics.world.locations.seeding import ensure_session_locations_seeded
             ensure_session_locations_seeded(session_id, scen_key, char_name=char_name)
             existing = db.get_session_locations(session_id)
         except Exception:
@@ -1331,7 +1328,6 @@ def extract_movement_destination(action_text: str, session_id: int, current_zone
         return (exact_matches[0][0], exact_matches[0][1])
 
     # 1b. Zone & Semantic Alias Matching
-    from .hierarchy import _build_session_zone_index, _build_session_spatial_index
     zones_index = _build_session_zone_index(session_id, scen_key)
 
     for z_lower, (z_name, z_gw_p, z_gw_s) in zones_index.items():
@@ -2030,7 +2026,6 @@ def reconcile_movement_location(session_id: int, current_loc: str, result_loc: s
 
                 if (res_zone and res_zone.lower() in z_clean) or (comm_zone and comm_zone.lower() in z_clean) or any(k in z_clean for k in ("residential", "commercial", "town", "quarter", "neighborhood", "campsite", "forest", "harbor", "bay")):
 
-                    from .hierarchy import _build_session_spatial_index
 
                     primaries_idx, _ = _build_session_spatial_index(session_id, scen_key)
 

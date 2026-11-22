@@ -19,14 +19,15 @@ const TurnHistoryModal = ({
   const scrollRef = useRef(null);
   const effScenario = scenario || session?.scenario || 'fantasy';
 
-  const rawHistory = Array.isArray(session?.history) ? session.history : [];
+  const rawHistory = session?.history;
 
   const historyRows = useMemo(() => {
+    const entries = Array.isArray(rawHistory) ? rawHistory : [];
     const seenClues = new Set();
     const seenCompletedSubs = new Set();
     let actionCount = 0;
 
-    return rawHistory.map((entry, idx) => {
+    return entries.map((entry, idx) => {
       const prevTitle =
         idx > 0
           ? rawHistory[idx - 1]?.scene_title ||

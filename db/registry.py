@@ -280,25 +280,25 @@ SESSION_TABLE_REGISTRY: tuple[SessionTableSpec, ...] = (
     SessionTableSpec(
         name="npc_social_composure",
         rollback_mode="handler",
-        rollback_handler="db.social.rollback_social_pacing_state_after_turn",
+        rollback_handler="db.social_pacing.rollback_social_pacing_state_after_turn",
     ),
     SessionTableSpec(
         name="character_social_daily",
         char_id_policy="if_host_or_empty",
         rollback_mode="handler",
-        rollback_handler="db.social.rollback_social_pacing_state_after_turn",
+        rollback_handler="db.social_pacing.rollback_social_pacing_state_after_turn",
     ),
     SessionTableSpec(
         name="social_topic_states",
         char_id_policy="if_host_or_empty",
         rollback_mode="handler",
-        rollback_handler="db.social.rollback_social_pacing_state_after_turn",
+        rollback_handler="db.social_pacing.rollback_social_pacing_state_after_turn",
     ),
     SessionTableSpec(
         name="contact_dossier_discoveries",
         char_id_policy="dossier_zero_default",
         rollback_mode="handler",
-        rollback_handler="db.social.rollback_social_pacing_state_after_turn",
+        rollback_handler="db.social_pacing.rollback_social_pacing_state_after_turn",
     ),
     SessionTableSpec(
         name="social_turn_snapshots",
@@ -306,7 +306,7 @@ SESSION_TABLE_REGISTRY: tuple[SessionTableSpec, ...] = (
         save_order_col="turn_number",
         row_transform_hook="remap_social_turn_snapshot_json",
         rollback_mode="handler",
-        rollback_handler="db.social.rollback_social_pacing_state_after_turn",
+        rollback_handler="db.social_pacing.rollback_social_pacing_state_after_turn",
         snapshot_table_turn_col="turn_number",
         snapshot_keep_last=10,
     ),

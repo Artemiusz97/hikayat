@@ -8,6 +8,8 @@ export const useAuth = () => {
   const [loading, setLoading] = useState(true);
   const authEpochRef = useRef(0);
   const fetchAbortRef = useRef(null);
+  const userRef = useRef(user);
+  userRef.current = user;
 
   // Re-hydrate from localStorage on mount
   useEffect(() => {
@@ -23,15 +25,65 @@ export const useAuth = () => {
           username: resolvedName,
           display_name: resolvedName
         });
-      } catch (e) {
+      } catch {
         localStorage.removeItem('cf_user');
       }
     }
     setLoading(false);
   }, []);
 
+  const userId = user?.user_id;
+
+  const fetchCharacters = useCallback(async (epoch = authEpochRef.current, signal = null) => {
+    const curUser = userRef.current;
+    if (!curUser || signal?.aborted || epoch !== authEpochRef.current) return;
+    try {
+      const data = await apiCall(`/api/characters/${curUser.user_id}`, signal ? { signal } : {});
+      if (signal?.aborted || epoch !== authEpochRef.current) return;
+      const roster = data.characters || [];
+      // Keep characters stably ordered by creation ID so their positions never jump when switching
+      setCharacters([...roster].sort((a, b) => (a.id || 0) - (b.id || 0)));
+    } catch (e) {
+      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
+      console.warn("Failed to fetch characters roster");
+    }
+  }, []);
+
+  const fetchActiveCharacter = useCallback(async (epoch = authEpochRef.current, signal = null) => {
+    const curUser = userRef.current;
+    if (!curUser || signal?.aborted || epoch !== authEpochRef.current) return;
+    try {
+      const data = await apiCall(`/api/character/${curUser.user_id}`, signal ? { signal } : {});
+      if (signal?.aborted || epoch !== authEpochRef.current) return;
+      if (data && data.character) {
+        const canonicalId = data.character.user_id_str || String(data.character.user_id);
+        if (userRef.current && userRef.current.user_id !== canonicalId) {
+          const updatedUser = { ...userRef.current, user_id: canonicalId, user_id_str: canonicalId };
+          localStorage.setItem('cf_user', JSON.stringify(updatedUser));
+          setUser(updatedUser);
+        }
+        setCharacter({
+          ...data.character,
+          user_id: canonicalId,
+          combat_attributes: data.combat_attributes,
+          inventory_capacity: data.inventory_capacity,
+          used_inventory_slots: data.used_inventory_slots,
+          learned_spells: data.learned_spells,
+          equipment: data.equipment,
+          stat_names: data.stat_names,
+          stat_effects: data.stat_effects
+        });
+      } else {
+        setCharacter(data);
+      }
+    } catch (e) {
+      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
+      setCharacter(null);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!user) return undefined;
+    if (!userId) return undefined;
     if (fetchAbortRef.current) {
       fetchAbortRef.current.abort();
     }
@@ -46,7 +98,7 @@ export const useAuth = () => {
         fetchAbortRef.current = null;
       }
     };
-  }, [user]);
+  }, [userId, fetchCharacters, fetchActiveCharacter]);
 
   const loginGuest = async (displayName) => {
     const cleanName = (displayName || '').trim();
@@ -107,52 +159,6 @@ export const useAuth = () => {
     window.addEventListener('hikayat:auth-expired', handleExpired);
     return () => window.removeEventListener('hikayat:auth-expired', handleExpired);
   }, [logout]);
-
-  const fetchCharacters = async (epoch = authEpochRef.current, signal = null) => {
-    if (!user || signal?.aborted || epoch !== authEpochRef.current) return;
-    try {
-      const data = await apiCall(`/api/characters/${user.user_id}`, signal ? { signal } : {});
-      if (signal?.aborted || epoch !== authEpochRef.current) return;
-      const roster = data.characters || [];
-      // Keep characters stably ordered by creation ID so their positions never jump when switching
-      setCharacters([...roster].sort((a, b) => (a.id || 0) - (b.id || 0)));
-    } catch (e) {
-      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
-      console.warn("Failed to fetch characters roster");
-    }
-  };
-
-  const fetchActiveCharacter = async (epoch = authEpochRef.current, signal = null) => {
-    if (!user || signal?.aborted || epoch !== authEpochRef.current) return;
-    try {
-      const data = await apiCall(`/api/character/${user.user_id}`, signal ? { signal } : {});
-      if (signal?.aborted || epoch !== authEpochRef.current) return;
-      if (data && data.character) {
-        const canonicalId = data.character.user_id_str || String(data.character.user_id);
-        if (user && user.user_id !== canonicalId) {
-          const updatedUser = { ...user, user_id: canonicalId, user_id_str: canonicalId };
-          localStorage.setItem('cf_user', JSON.stringify(updatedUser));
-          setUser(updatedUser);
-        }
-        setCharacter({
-          ...data.character,
-          user_id: canonicalId,
-          combat_attributes: data.combat_attributes,
-          inventory_capacity: data.inventory_capacity,
-          used_inventory_slots: data.used_inventory_slots,
-          learned_spells: data.learned_spells,
-          equipment: data.equipment,
-          stat_names: data.stat_names,
-          stat_effects: data.stat_effects
-        });
-      } else {
-        setCharacter(data);
-      }
-    } catch (e) {
-      if (e?.name === 'AbortError' || signal?.aborted || epoch !== authEpochRef.current) return;
-      setCharacter(null);
-    }
-  };
 
   const allocateStatPoint = async (stat) => {
     if (!user) return;

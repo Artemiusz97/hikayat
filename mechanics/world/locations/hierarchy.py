@@ -2,11 +2,9 @@ from __future__ import annotations
 from .constants import *
 import json
 import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, Optional, Tuple
 import db
 from .seeds import *
-from .seeds import _load_seeds, _slugify, _SEED_PATH
 
 def get_clean_leaf_location(location_str: str, default: str = "Local Area") -> str:
     """Returns the concise 3rd tier sub-location name from a tiered location string."""
@@ -1545,7 +1543,6 @@ def parse_tiered_location(raw_location: Any, scenario_key: str = "fantasy", sess
 
     # PHYSICAL CONTAINER COMPATIBILITY GUARD:
 
-    from .movement import is_incongruous_container
     if is_incongruous_container(p, s, session_id=session_id, scenario_key=scenario_key):
 
         z, p, s = auto_heal_incongruous_location(z, p, s, session_id=session_id, scenario_key=scenario_key)
@@ -1637,7 +1634,6 @@ def parse_zone_environment_data(atm_data: Any) -> dict:
 
         if atm_data.startswith("{"):
 
-            import json
 
             try:
 

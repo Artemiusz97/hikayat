@@ -2,7 +2,7 @@ from __future__ import annotations
 """
 Data tables, archetype registries, and preference catalogs for Hikayat traits.
 """
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List
 
 # -----------------------------------------------------------------------------
 # MASTER TRAIT REGISTRY

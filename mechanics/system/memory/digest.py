@@ -17,10 +17,8 @@ LLM_MODEL — no special setup required.
 """
 
 import asyncio
-import json
 import logging
 import re
-from typing import TYPE_CHECKING
 
 log = logging.getLogger("hikayat.memory.digest")
 

@@ -11,13 +11,11 @@ from discord.ext import commands
 
 import db
 from db import adb
-import character_data as cd
 from character_data import (
     EQUIPMENT_SLOTS,
     EQUIPMENT_SLOT_EMOJI,
     DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE,
-    inventory_capacity,
-    get_item_icon
+    get_item_icon,
 )
 from mechanics.combat.items import apply_item_to_target, parse_item_effect
 

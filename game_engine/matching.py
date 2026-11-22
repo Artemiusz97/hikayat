@@ -8,7 +8,7 @@ clause-aware negation detection, and compiled pattern caching.
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Pattern, Sequence, Set, Tuple, Union
+from typing import Dict, Pattern, Sequence, Set, Tuple
 
 # Common English negation indicators and refusal markers
 NEGATION_MARKERS: Set[str] = {

@@ -4,32 +4,20 @@ Post-LLM combat reconciliation, defeat routing, loot distribution, and session s
 """
 import logging
 import random
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import db
 import scenario_data
-from scenario_data import is_mechanic_enabled
 from .formulas import (
     calculate_opposed_dc,
-    get_elemental_multiplier,
-    try_inflict_status,
-    calculate_tactical_damage,
-    calculate_turn_damage,
-    tick_status_timers,
-)
-from .sparring import (
-    is_sparring_monster,
-    resolve_sparring_defeat,
-    make_sparring_monster,
 )
 from .status_effects import normalize_status_effect
 from .post_combat import (
-    cleanup_anomalous_combat_session_state,
-    decay_round_threat,
+    cleanup_anomalous_combat_session_state,  # static-check: ignore[unused-import]
+    decay_round_threat,  # static-check: ignore[unused-import]
     finalize_post_combat_state,
-    prune_dead_combat_state,
+    prune_dead_combat_state,  # static-check: ignore[unused-import]
 )
-from .types import CombatantState, StatusEffectInstance, get_combatant_stat
 
 logger = logging.getLogger(__name__)
 

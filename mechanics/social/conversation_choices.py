@@ -21,8 +21,6 @@ import namegen
 import scenario_data
 from mechanics.social import deck, pacing
 from mechanics.social.band_fallbacks import (
-    _PRONOUNS_BY_GENDER,
-    _build_contextual_role_and_leisure_phrases,
     _is_similar_to_recent,
     generate_band1_quest_and_rumor_fallbacks as _gen_b1_impl,
     generate_band2_social_choices as _gen_b2_impl,
@@ -31,7 +29,6 @@ from mechanics.social.band_fallbacks import (
     synthesize_choice_from_seed,
 )
 from mechanics.social.departure import (
-    _CONVINCE_STAY_RE,
     _apply_stage1_hurry_gate,
     _canon_npc_key,
     _locations_match,
@@ -39,7 +36,7 @@ from mechanics.social.departure import (
     is_convince_stay_action,
     relocate_departed_npcs_impl,
     run_departure_turn_evaluation,
-    save_npc_departure_states,
+    save_npc_departure_states,  # static-check: ignore[unused-import]
 )
 from mechanics.social.relationships import (
     clamp_score,

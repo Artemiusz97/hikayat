@@ -1403,10 +1403,10 @@ def build_contact_detail_embed(
     embed.add_field(name="Skill Check Modifier", value=f"`{mod_str}`", inline=True)
 
     # Basic Info
-    from mechanics.social.races import format_race_display
     from mechanics.social.persona import (
-        format_persona_embed_fields, infer_contact_gender,
-        categorize_likes_and_dislikes, sanitize_npc_description
+        format_persona_embed_fields,
+        infer_contact_gender,
+        sanitize_npc_description,
     )
     info_lines = []
     race_val = contact.get("race") or basic.get("race") or ""

@@ -8,8 +8,7 @@ and migrates existing sessions to the Relational Spatial Graph model.
 import json
 import logging
 import re
-import time
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
 
 import db
 from .seeds import (
@@ -17,8 +16,6 @@ from .seeds import (
     _slugify,
     get_facility_contextual_sublocations,
     is_entrance_sublocation,
-    get_facility_entrance_name,
-    get_contextual_interior_name,
     is_urban_anomalous_scenario,
     get_session_urban_zone_name,
     get_session_urban_facility_name,
@@ -61,7 +58,6 @@ from .seeding import (
     get_session_abandoned_campus_name,
     get_session_agency_hq_name,
     get_session_agency_residence_name,
-    get_session_planet_name,
 )
 from .hierarchy import resolve_session_location_tokens
 
@@ -392,7 +388,6 @@ _FACILITY_CATEGORY_ATMOSPHERE_FALLBACKS: dict[str, dict[str, str]] = {
 
 def infer_facility_atmosphere(fac_id: str, fac_name: str, zone_id: str, raw_fac: dict, session_id: int = 0, scenario_key: str = "", char_name: str = "") -> str:
     """Returns a serialized JSON atmosphere for any facility, prioritizing explicit seed fields with functional fallback."""
-    from .hierarchy import resolve_session_location_tokens
     if "theme" in raw_fac or "sensory" in raw_fac:
         return json.dumps({
             "theme": resolve_session_location_tokens(session_id, raw_fac.get("theme", ""), scenario_key, char_name),

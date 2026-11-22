@@ -1,4 +1,3 @@
-import React from 'react';
 import { MapPin, Search, Sparkles, User, Zap } from 'lucide-react';
 import { cleanProseLocations, formatCleanLocation } from '../../../utils/locationFormat';
 

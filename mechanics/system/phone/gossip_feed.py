@@ -15,7 +15,7 @@ def _resolve_phone_llm_fn():
     if call_llm_json is not _ORIG_CALL_LLM_JSON:
         return call_llm_json
     return getattr(_phone_pkg, "call_llm_json", call_llm_json)
-from skill_check import resolve_check
+import skill_check
 from .embeds import get_phone_branding
 
 GOSSIP_FEED_SCHEMA = """{
@@ -272,9 +272,8 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         stat_val = int_val
 
     dc = 14  # High DC to simulate unreliability/noise of internet forum digging
-    from skill_check import resolve_check
     luk_val = char.get("luk", 3) if char else 3
-    check_res = resolve_check(stat_val, dc, luck=luk_val)
+    check_res = skill_check.resolve_check(stat_val, dc, luck=luk_val)
     check = {
         "stat": stat_name,
         "chance": check_res.chance,

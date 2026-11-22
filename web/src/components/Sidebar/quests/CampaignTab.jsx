@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle2, Circle, MapPin, ScrollText } from 'lucide-react';
 import { cleanProseLocations, formatCleanLocation } from '../../../utils/locationFormat';
 

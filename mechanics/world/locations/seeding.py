@@ -2,13 +2,12 @@ from __future__ import annotations
 from .constants import *
 import json
 import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any, List, Tuple
 import db
 import scenario_data
 from .seeds import *
 import sqlite3
-from .seeds import _load_seeds, _slugify, _SEED_PATH, _is_school_campus_hq, _SCHOOL_CAMPUS_HQ_KEYWORDS
+from .seeds import _slugify, _is_school_campus_hq, _SCHOOL_CAMPUS_HQ_KEYWORDS
 
 def get_default_tiered_location(scenario_key: str = "fantasy", session_id: int = 0, char_name: str = "") -> Tuple[str, str, str]:
 
@@ -417,7 +416,7 @@ def _reconcile_faction_hq_locations(session_id: int, scenario_key: str = "high_s
         existing_ids = {(r.get("location_id") or "").strip().lower() for r in existing_locs}
         world_nodes_present = bool(db.get_session_world_nodes(session_id))
 
-        from .seeds import _is_school_campus_hq, is_major_school_club
+        from .seeds import is_major_school_club
 
         # Remove any legacy standalone Tier 2 facilities belonging to Minor School Clubs when Tier 3 campus rooms exist
         legacy_minor_tier2_names = {

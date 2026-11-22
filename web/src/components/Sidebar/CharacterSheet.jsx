@@ -123,11 +123,11 @@ export const parseAndTranslateStatus = (effect, t) => {
     ? effName
         .split(' & ')
         .map(part => {
-          const pk = part.trim().toLowerCase().replace(/[\s\-]+/g, '_');
+          const pk = part.trim().toLowerCase().replace(/[\s-]+/g, '_');
           return t(`conditions.${pk}`, part.trim());
         })
         .join(' & ')
-    : t(`conditions.${effName.toLowerCase().replace(/[\s\-]+/g, '_')}`, effName);
+    : t(`conditions.${effName.toLowerCase().replace(/[\s-]+/g, '_')}`, effName);
 
   const stackSuffix = stacks > 1 ? ` x${stacks}` : '';
   const formattedText = duration !== null && duration > 0
@@ -146,7 +146,7 @@ const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
   const s = String(sizeStr || (isMale ? 'Average' : 'Modest B-Cup')).replace(/^[()]+|[()]+$/g, '').trim();
   const tStr = String(texStr || '').replace(/^[()]+|[()]+$/g, '').trim();
   
-  const bKey = s.toLowerCase().replace(/[\s\-]+/g, '_');
+  const bKey = s.toLowerCase().replace(/[\s-]+/g, '_');
   const bTranslated = t ? t(`anatomy.${bKey}`, s) : s;
   
   if (!tStr) return formatTitle(bTranslated);
@@ -158,7 +158,7 @@ const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
     return formatTitle(bTranslated);
   }
 
-  const texKey = tStr.toLowerCase().replace(/[\s\-&]+/g, '_');
+  const texKey = tStr.toLowerCase().replace(/[\s-&]+/g, '_');
   const texTranslated = t ? t(`anatomy.${texKey}`, tStr) : tStr;
 
   if (!isMale) {
@@ -172,7 +172,7 @@ const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
     if (filtered) return `${formatTitle(texTranslated)} ${formatTitle(filtered)}`;
     return `${formatTitle(texTranslated)} ${formatTitle(bTranslated)}`;
   } else {
-    const inchMatch = s.match(/(\d+(?:\.\d+)?\s*(?:\"|inch(?:es)?))/i);
+    const inchMatch = s.match(/(\d+(?:\.\d+)?\s*(?:"|inch(?:es)?))/i);
     if (inchMatch) {
       let inchPart = inchMatch[1].trim();
       if (/inch/i.test(inchPart)) {
@@ -238,13 +238,18 @@ const CharacterSheet = ({
   const [combatStatsOpen, setCombatStatsOpen] = useState(true);
   const [skillsOpen, setSkillsOpen] = useState(true);
 
+  const charPresent = Boolean(character);
+  const charBSize = character?.appearance?.breast_size || character?.breast_size || 'average';
+  const charPSize = character?.appearance?.penis_size || character?.penis_size || 'average';
+  const charAssetTex = character?.appearance?.asset_texture || character?.asset_texture || '';
+
   useEffect(() => {
-    if (character) {
-      setEditBSize(character.appearance?.breast_size || character.breast_size || 'average');
-      setEditPSize(character.appearance?.penis_size || character.penis_size || 'average');
-      setEditTexture(character.appearance?.asset_texture || character.asset_texture || '');
+    if (charPresent) {
+      setEditBSize(charBSize);
+      setEditPSize(charPSize);
+      setEditTexture(charAssetTex);
     }
-  }, [character?.id, showAppearanceModal]);
+  }, [charPresent, charBSize, charPSize, charAssetTex, showAppearanceModal]);
 
   const charGender = (character?.gender || '').toLowerCase();
   const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => charGender.includes(kw)) && !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => charGender.includes(kw));

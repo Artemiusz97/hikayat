@@ -3,17 +3,12 @@ from typing import Any
 import mechanics.system.phone
 import json
 import logging
-import random
-import re
 import time
-import discord
-from discord import app_commands
 import db
 import scenario_data
-from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
 from game_engine.prompt_layout import build_side_channel_language_directive
-from skill_check import resolve_check, success_chance, CheckResult
+from skill_check import resolve_check, CheckResult
 from mechanics.social.relationships import clamp_score, is_contact_eligible
 from mechanics.system.input_sanitizer import fence_player_message, sanitize_prompt_lore
 
@@ -33,19 +28,15 @@ from .dm_grounding import (
     get_dm_requirement,
     detect_custom_message_intent,
     is_meetup_reschedule_request,
-    is_meetup_confirmation_message,
     resolve_rendezvous_location,
     evaluate_dm_in_person_gate,
     build_meetup_candidates_and_hint,
 )
-from .player_dm import generate_player_chat_message
+from .player_dm import generate_player_chat_message  # static-check: ignore[unused-import]
 from .dm_outcomes import handle_dm_over_limit, persist_dm_media_item_and_milestone
 
 from .media_captions import (
     generate_npc_photo_caption,
-    generate_player_photo_caption,
-    generate_player_casual_photo,
-    generate_player_spicy_photo
 )
 
 def build_dm_epistemic_context(

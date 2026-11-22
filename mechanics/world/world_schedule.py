@@ -35,7 +35,7 @@ with deep support for High School scenarios:
      `isekai`, and `fantasy`, plus automatic fallback for any future genre/scenario.
 """
 from __future__ import annotations
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional
 
 
 # Canonical scenario schedule profiles for all current and future genres

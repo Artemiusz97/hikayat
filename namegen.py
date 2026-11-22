@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional
+from typing import Any
 """
 Procedural name generator with scenario-specific name pools.
 
@@ -2137,7 +2137,6 @@ def generate_agency_name(scenario: str = "urban_anomalies", hash_val: int = None
         dm = domains[(hash_val * 19 + 13) % len(domains)]
         bd = bodies[(hash_val * 23 + 17) % len(bodies)]
     else:
-        import random
         sc = random.choice(scopes)
         dm = random.choice(domains)
         bd = random.choice(bodies)
@@ -3399,7 +3398,6 @@ def generate_npc_profile(
 ) -> dict:
     """Generate an NPC name and resolved gender dictionary matching scenario skew constraints."""
     if rng is None:
-        import random
         rng = random
     if not gender:
         import scenario_data

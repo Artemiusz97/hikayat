@@ -1,6 +1,5 @@
 from __future__ import annotations
 from .constants import (
-    ASSET_SIZE_TIERS,
     FEMALE_ASSET_TEXTURE_TEMPLATES,
     MALE_ASSET_TEXTURE_TEMPLATES,
     SPECIES_TEXTURE_AFFINITIES,
@@ -11,7 +10,7 @@ import json
 import hashlib
 import random
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from ..core import *
 
 def extract_appearance_from_text(text: str, name: str = "") -> Dict[str, str]:

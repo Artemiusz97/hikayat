@@ -5,7 +5,7 @@ and Anomalous Incursions conditional danger-zone encounter rules.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Tuple
 
 
 def get_enemy_armor_profile(archetype: str) -> dict:

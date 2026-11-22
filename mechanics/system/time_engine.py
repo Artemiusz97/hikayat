@@ -144,7 +144,7 @@ def scenario_allows_camp_sleep(scen_key: str = "") -> bool:
     if any(k in s for k in MODERN_OR_URBAN_TAGS):
         return False
     try:
-        from scenario_data import get_scenario, has_tag
+        from scenario_data import has_tag
         for t in MODERN_OR_URBAN_TAGS:
             if has_tag(s, t):
                 return False

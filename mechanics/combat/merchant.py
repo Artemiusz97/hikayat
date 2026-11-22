@@ -8,12 +8,11 @@ and Discord UI views (MerchantView, MerchantVoteView, BuySelectView, SellSelectV
 import json
 import logging
 import random
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Optional, Dict, Any, List, Tuple
 
 import db
 import namegen
 import scenario_data
-from scenario_data import is_nsfw_scenario
 from llm_client import call_llm_json
 
 log = logging.getLogger(__name__)
@@ -1016,7 +1015,6 @@ def calculate_balanced_price(
         QUALITY_PRICE_MULTIPLIERS,
         ENCHANTMENT_PREMIUMS,
         LEGACY_TIER_TO_DUAL_AXIS,
-        derive_legacy_tier,
     )
     from mechanics.combat.items import parse_item_tier
 

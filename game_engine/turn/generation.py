@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Optional, List
 from .constants import *
 import db
 import re
@@ -8,18 +8,16 @@ import scenario_data
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.narrative.intent import *
-from game_engine.core import SYSTEM_PROMPT, VALID_STATS, is_nsfw_scenario
+from game_engine.core import VALID_STATS, is_nsfw_scenario
 from game_engine.schemas import CLASSIFY_SCHEMA
 from config import LLM_PASS1_TIMEOUT
 import namegen
-import random
 import logging
 log = logging.getLogger(__name__)
 import game_engine
 from db import adb
-import asyncio
 from game_engine.turn_context import TurnContext
-from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
+from models.llm_schemas import ActionClassification, OpeningScene
 
 def get_narrative_requirements(
     verbosity: str,
@@ -1580,7 +1578,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     """
 
-    from mechanics.combat.items import generate_starter_equipment_loadout, _infer_class_archetype_profile
+    from mechanics.combat.items import generate_starter_equipment_loadout
 
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
@@ -1598,9 +1596,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     from mechanics.combat.items.accessories import generate_random_equipment as gen_acc
 
-    from mechanics.combat.equipment import parse_equipment_metadata
 
-    from mechanics.combat.items.envelope import serialize_item
 
     from scenario_data import uses_nsfw_model
 

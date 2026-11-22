@@ -1,28 +1,16 @@
 from __future__ import annotations
 from typing import Any
-import json
 import re
-import random
+import db
+import namegen
 import game_engine
 from game_engine.core import *
-from game_engine.core import _get_npc_name, _norm_dialogue_name
 from mechanics.social.relationships import safe_get_contacts
+from mechanics.world.locations import get_primary_location_name, get_zone_location_name
 
 from .dialogue_tracking import (
-    DIALOGUE_STALL_VERBS,
-    count_dialogue_stall_turns,
-    format_dialogue_stall_directive,
-    build_scene_escalation_and_consequence_directives,
-    get_session_dialogue_partners,
     is_dialogue_partner,
     is_npc_invited_in_action,
-)
-from .presence import (
-    sync_hostile_entities,
-    classify_scene_npcs,
-    is_mentioned_only_in_absence_or_memory,
-    reset_departed_guest_locations,
-    _distribute_fallback_locations,
 )
 
 
@@ -104,7 +92,6 @@ def _build_canonical_name_resolver(
         _register_full_name(nm)
 
     # Map given names, surnames, and formal titles to unique full names (excluding standalone honorifics/particles)
-    import namegen
     first_groups: dict[str, list[str]] = {}
     for fn in full_names:
         fn_low = fn.strip().lower()
@@ -161,27 +148,17 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
 
     from mechanics.world.mobility import (
-
         is_campus_co_located,
-
         is_character_mobile,
-
         is_rendezvous_target,
-
         has_active_physical_presence,
-
         has_narrative_continuity_bridge,
-
-        is_dialogue_partner,
-
-        sync_contact_locations
-
+        sync_contact_locations,
     )
 
 
 
     # Collect human player names (all active and inactive characters owned by session members) to strictly exclude from current_npcs
-    import namegen
     player_names = set()
 
     def _add_player_name(raw_pn: Any) -> None:
@@ -848,7 +825,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
                 continue
 
-            import namegen
             if not namegen.is_valid_entity_name(name_clean) or namegen.is_collective_entity_name(name_clean):
 
                 continue
@@ -932,7 +908,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
                 continue
 
-            import namegen
             if not namegen.is_valid_entity_name(name_clean) or namegen.is_collective_entity_name(name_clean):
 
                 continue

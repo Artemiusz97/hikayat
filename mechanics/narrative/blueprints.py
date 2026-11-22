@@ -6,7 +6,6 @@ Handles item parsing, quantity tracking, equipped-item safety, and spatial white
 from __future__ import annotations
 
 import re
-from typing import Optional, Any
 
 # -----------------------------------------------------------------------------
 # 1. Ten Canonical Mechanical Blueprints

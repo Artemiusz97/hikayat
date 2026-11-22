@@ -232,7 +232,6 @@ def acquire_single_instance_lock():
     and '40060 Already acknowledged' errors."""
     global _lock_file_handle
     import os
-    import sys
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
     lock_path = os.path.join(base_dir, ".bot.lock")

@@ -1,19 +1,15 @@
 from __future__ import annotations
-from typing import Optional, Any, Dict, List
+from typing import Optional, Any
 import db
-import asyncio
 import json
 import logging
 import time
 
 log = logging.getLogger(__name__)
-from contextlib import contextmanager
-import re
 import sqlite3
-from config import DB_PATH
 import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _json_dataclass_default
+from .core import _delete_session_records, _to_str, _sanitize_npcs_list, _json_dataclass_default
 from .registry import get_purge_specs, get_simple_rollback_specs
 
 def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
@@ -1066,7 +1062,8 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
     from .world_events import rollback_world_events_after_turn
     from .dossiers import rollback_quest_dossiers_after_turn, rollback_session_anomaly_logs_after_turn
     from .memory import MAX_ROLLING_DIGEST_BULLETS, rebuild_session_digests_fts
-    from .social import rollback_actor_physical_state_after_turn, rollback_social_pacing_state_after_turn
+    from .social import rollback_actor_physical_state_after_turn
+    from .social_pacing import rollback_social_pacing_state_after_turn
     from .properties import rollback_player_properties_after_turn, grant_or_relocate_starter_quarters
     from .contracts import rollback_entity_contracts_after_turn
     from .roster import rollback_world_roster_after_turn

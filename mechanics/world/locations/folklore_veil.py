@@ -763,8 +763,8 @@ def get_folklore_sanctuary_rest_multiplier(
 
 
 from .folklore_veil_lifecycle import (  # noqa: E402
-    apply_sanctuary_treaty_violation,
-    backfill_zone_split_and_hidden_villages_v49,
-    preview_sanctuary_treaty_violation,
-    rollback_folklore_veil_state_after_turn,
+    apply_sanctuary_treaty_violation,  # static-check: ignore[unused-import]
+    backfill_zone_split_and_hidden_villages_v49,  # static-check: ignore[unused-import]
+    preview_sanctuary_treaty_violation,  # static-check: ignore[unused-import]
+    rollback_folklore_veil_state_after_turn,  # static-check: ignore[unused-import]
 )

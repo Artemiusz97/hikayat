@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import nullcontext
 from typing import Any, Optional
 
-from .generation import get_narrative_requirements, log
+from .generation import log
 from .constants import *
 import db
 from db import adb
@@ -11,20 +11,18 @@ from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.social.relationships import safe_get_contacts
 from mechanics.narrative.intent import *
-from .dialogue import _build_dialogue_prompt_block, _compute_dialogue_intent
+from .dialogue import _build_dialogue_prompt_block
 from .prompts import _build_quest_and_bounty_directives, _build_player_actions_text, _build_history_context
-from game_engine.turn_context import TurnContext, TurnExecutionContext
+from game_engine.turn_context import TurnExecutionContext
 import json
 import random
 from config import LLM_PASS2_TIMEOUT, LLM_STREAM_TOTAL_DEADLINE
 import scenario_data
 from game_engine.core import is_nsfw_scenario, uses_nsfw_model
 import namegen
-from mechanics.combat.merchant import merchant_prompt_note
-import logging
 import game_engine
 import re
-from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene, DeterministicTurnNarration, DeterministicCombatNarration
+from models.llm_schemas import TurnOutcome, DeterministicTurnNarration, DeterministicCombatNarration
 
 
 def _get_enemy_base_name(name: str) -> str:

@@ -827,7 +827,6 @@ def _collect_anomalous_bounty_candidate_locations(
                     candidates.append(loc_full)
         except Exception:
             pass
-    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
     return _filter_locations_anti_self_target(
         [c for c in candidates if not is_safe_sanctuary_location(c)],
         ex_arch,
@@ -844,7 +843,6 @@ def _build_anomalous_fallback_bounties(
 ) -> list[dict]:
     """Builds 3 deterministic scenario-specific bounties for Anomalous Incursions with faction flavor bias and pre-generated AnomalyBlueprints."""
     from mechanics.world.anomaly_engine import generate_anomaly_blueprint
-    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
 
     sess = db.get_session(session_id) or {}
     scen_key = str(sess.get("scenario") or "anomalous_incursions")
@@ -983,7 +981,7 @@ def _extract_bounties_list(result: Any) -> list:
 
 async def generate_bounty_board(session: dict | int, force_refresh: bool = False) -> list[dict]:
     """Generates 3 dynamic bounty board postings for a session using LLM JSON completion."""
-    from game_engine import _scenario_block, is_nsfw_scenario
+    from game_engine import _scenario_block
     if isinstance(session, (int, str)):
         session_id = int(session)
         session = await db.adb(db.get_session, session_id) or {"id": session_id}
@@ -1714,7 +1712,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     """
     Generate 3 faction-exclusive bounty board postings rewarding both gold/XP and faction reputation.
     """
-    from game_engine import _scenario_block, call_llm_json, is_nsfw_scenario
+    from game_engine import _scenario_block
     session_id = session["id"]
     faction_id = faction.get("faction_id", "")
     faction_name = faction.get("name", "Faction")
@@ -1846,7 +1844,6 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
                 seed_offset=sum(ord(c) for c in str(faction_id or faction_name)),
             )
         else:
-            from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
             from mechanics.world.locations import get_discovered_primary_locations
             zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
             all_disc = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
@@ -2082,8 +2079,6 @@ def build_consequence_followup_bounty(session_id: int, session: dict = None) -> 
     betrayed client, or failed strikes) and synthesizes a dedicated follow-up bounty.
     Tags the parent quest with 'followup_spawned:1'.
     """
-    import re
-    import db
     from mechanics.narrative.blueprints import has_quest_note_flag, roll_quest_deadline
     from db.quests import append_quest_note_flag_in_db
     if not session_id:
@@ -2254,7 +2249,6 @@ def seed_contact_commission_if_eligible(session_id: int, session: dict = None) -
     Checks for high-affinity contacts (relationship_score >= 25) without an active or prior commission.
     Seeds a bespoke high-paying Personal Commission ('COMM-...') and dispatches an incoming comms DM.
     """
-    import db
     from mechanics.narrative.blueprints import roll_quest_deadline
     if not session_id:
         return None
@@ -2417,7 +2411,6 @@ def replenish_daily_bounties_deterministic(
     2. Checks for Contact Personal Commissions ('COMM-...').
     3. Fills remaining slots with deterministic blueprint templates without blocking LLM calls.
     """
-    import db
     from mechanics.narrative.blueprints import roll_quest_deadline
     if not session_id:
         return []
@@ -2447,7 +2440,6 @@ def replenish_daily_bounties_deterministic(
 
     # 3. Deterministic Templates if still < 3
     from mechanics.world.locations import get_discovered_primary_locations
-    from mechanics.narrative.dossier_compiler import is_safe_sanctuary_location
     zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
     discovered_locs = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
     alt_locs = [dl for dl in discovered_locs if dl.strip().lower() != cur_loc.strip().lower() and not is_safe_sanctuary_location(dl)]
@@ -2743,7 +2735,6 @@ def dispatch_anomalous_mandatory_daily_bounty(
 
     import namegen
     from mechanics.narrative.blueprints import get_blueprint_for_archetype
-    from mechanics.world.waypoints import ensure_multi_stage_waypoints
     from mechanics.social.factions import get_anomalous_faction_state, save_anomalous_faction_state
 
     preferred = ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS.get(arch, ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["public_agency"])

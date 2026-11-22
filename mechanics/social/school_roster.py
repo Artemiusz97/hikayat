@@ -12,7 +12,6 @@ Generates and manages a persistent 88-character High School & Town directory:
 7. Just-In-Time Facility Queries & Progressive Hydration: Supplies schedule-aware local residents without prompt bloat.
 """
 import hashlib
-import json
 import random
 import re
 from typing import Dict, Any, List, Optional, Tuple
@@ -2206,7 +2205,6 @@ def hydrate_school_character(session_id: int, char_dict: dict) -> bool:
 
     formal_title = char_dict.get("formal_title", "")
     if not formal_title and is_faculty:
-        import namegen
         f_last = namegen.extract_first_and_last_name(name)[1]
         f_base = namegen.normalize_base_surname(f_last) or f_last
         r_low = role.lower()

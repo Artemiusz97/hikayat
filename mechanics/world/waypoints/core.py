@@ -2,9 +2,8 @@ from __future__ import annotations
 """
 Waypoint LLM prompt blocks, UI markers, and session persistence.
 """
-import json
 import re
-from typing import Optional, Any
+from typing import Optional
 
 import db
 from .templates import ensure_multi_stage_waypoints

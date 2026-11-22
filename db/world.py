@@ -1,16 +1,11 @@
 import db
-import asyncio
 import json
 import time
-from contextlib import contextmanager
 import re
-import sqlite3
-from config import DB_PATH
-import character_data as cd
 import heapq
 from collections import defaultdict
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _find_anomalous_agent_entry
+from .core import _to_str, _find_anomalous_agent_entry
 
 def save_merchant_state(session_id: int, merchant: dict):
     """Persists the full merchant encounter/shop blob for a session -- see
@@ -71,7 +66,6 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                 scen = "fantasy"
             if not gender and session_id:
                 try:
-                    import db
                     p_gen = db.get_session_player_gender(session_id)
                     from scenario_data import should_skew_female_npcs
                     if should_skew_female_npcs(scen, p_gen):

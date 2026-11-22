@@ -12,7 +12,6 @@ from config import (
 )
 from llm_client import call_llm_text, get_candidate_models
 import scenario_data
-from scenario_data import is_nsfw_scenario
 
 
 class SettingsCog(commands.Cog):

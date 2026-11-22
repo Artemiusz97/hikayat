@@ -1,16 +1,9 @@
 from __future__ import annotations
-import json
 import logging
-import random
-import re
-import time
 import discord
-from discord import app_commands
 import db
 import scenario_data
-from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
-from skill_check import resolve_check, success_chance, CheckResult
 from mechanics.social.relationships import can_player_dm_contact, safe_get_contacts
 
 from .embeds import (
@@ -23,6 +16,7 @@ from .embeds import (
     _build_social_profile_embed,
 )
 from .messaging import *
+from .media_captions import generate_player_photo_caption
 
 class PhoneOwnerRestrictedView(discord.ui.View):
     """Base phone view enforcing strict device ownership (fail-closed) without Layer-4 imports."""

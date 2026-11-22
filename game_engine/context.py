@@ -1,7 +1,19 @@
 from __future__ import annotations
 import json
 from typing import Any
+import db
+import scenario_data
 import game_engine
+from character_data import inventory_capacity
+from mechanics.social.factions import (
+    format_llm_faction_context,
+    format_llm_player_faction_block,
+    get_npc_affiliation_chance,
+)
+from mechanics.social.relationships import format_llm_relationship_context
+from mechanics.social.persona import format_persona_summary
+from mechanics.social.races import format_race_display
+from mechanics.world.locations import format_llm_location_context, is_location_engine_enabled
 from .core import *
 
 
@@ -62,7 +74,6 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
         fenced_cls_desc = wrap_custom_lore(char["class_description"], max_len=800)
         if fenced_cls_desc:
             class_line += f" -- {fenced_cls_desc}"
-    from mechanics.social.races import format_race_display
     raw_race = char.get("race") or "human"
     race_display = format_race_display(raw_race)
     if char.get("race_description"):
@@ -700,7 +711,6 @@ def _world_canon_text(session_id: int, world: dict | None = None,
         lines.append("COMPANION CANON: The party companions listed in the current scene travel everywhere with the player and fight alongside them. Include their distinct spoken dialogue, banter, and reactions.")
 
     if scenario_data.is_mechanic_enabled(scen_key, "faction_reputation") and factions:
-        from mechanics.social.factions import format_llm_faction_context, get_npc_affiliation_chance
         # Roster only (leaders / officers / rivals); live reputation goes in the scene zone.
         fac_block = format_llm_faction_context(_by_name(factions), max_items=max_factions, include_standing=False)
         if fac_block:
@@ -1274,7 +1284,7 @@ def _scene_context_text(session_id: int, current_location: str,
                     player_title = char.get("faction_title", "") or ""
         except Exception:
             pass
-        from mechanics.social.factions import format_llm_faction_standings, format_llm_player_faction_block
+        from mechanics.social.factions import format_llm_faction_standings
         standings = format_llm_faction_standings(
             _by_name(factions), max_items=10,
             player_faction_id=player_faction_id,

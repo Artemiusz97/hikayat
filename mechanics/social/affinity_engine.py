@@ -14,16 +14,13 @@ with additive modifiers derived from the 5 core character dimensions:
 
 import re
 import logging
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Tuple
 
 from mechanics.narrative.intent import (
     IntentCategory,
-    classify_action_intent,
     resolve_action_intent,
-    ActionIntent,
 )
 from mechanics.combat.traits.data import (
-    TRAIT_REGISTRY,
     SOCIAL_STANCES_LIKES,
     SOCIAL_STANCES_DISLIKES,
 )

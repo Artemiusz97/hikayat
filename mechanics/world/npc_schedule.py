@@ -34,14 +34,14 @@ import re
 import db
 from .anchor_schedule import (
     _ANCHOR_ORIGINS,
-    SHIFT_PROFILES,
-    is_npc_on_active_shift,
+    SHIFT_PROFILES,  # static-check: ignore[unused-import]
+    is_npc_on_active_shift,  # static-check: ignore[unused-import]
     resolve_anchor_schedule_nodes,
 )
 from .locations.residences import SHARED_ABSTRACT_RESIDENCE_NODE
 from .schedule_blocks import (
-    BLOCK_BOUNDARIES,
-    SCHEDULE_TIME_BLOCKS,
+    BLOCK_BOUNDARIES,  # static-check: ignore[unused-import]
+    SCHEDULE_TIME_BLOCKS,  # static-check: ignore[unused-import]
     get_detailed_npc_time_phase,
     get_time_block_key,
 )

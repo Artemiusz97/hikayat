@@ -4,15 +4,10 @@ Romance, intimacy, and oral/intercourse action keyword registries and
 deterministic comparative cliché sanitization filter for Hikayat.
 """
 import re
-from typing import Any, Dict, List, Optional, Tuple, Set
+from typing import Any
 
 from game_engine.matching import (
-    MatchResult,
-    matches_keyword,
-    matches_keyword_boundary,
-    find_keyword_match,
-    normalize_text,
-    _KEYWORD_REGEX_CACHE,
+    matches_keyword_boundary,  # static-check: ignore[unused-import]
 )
 
 NPC_ORAL_RECEIVE_KEYWORDS = (

@@ -450,9 +450,8 @@ def get_probe_candidate_groups() -> dict[str, list[dict]]:
         }
     """
     from config import (
-    EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL,
-        LLM_MODEL, LLM_UTILITY_MODEL, LLM_FALLBACK_MODELS,
-        NSFW_LLM_MODEL, NSFW_LLM_UTILITY_MODEL, NSFW_LLM_FALLBACK_MODELS,
+        LLM_UTILITY_MODEL,
+        NSFW_LLM_UTILITY_MODEL,
     )
 
     std_models: list[dict] = []

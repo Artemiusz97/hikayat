@@ -9,7 +9,6 @@ Handles:
 4. Fog-of-War `"???"` Dossier fact selection, Gift preference auto-unmasking, and co-op earshot fan-out.
 """
 
-import json
 import re
 from typing import Any
 

@@ -69,7 +69,7 @@ export const useGameSession = (user, character) => {
       setStreamingState(null);
       safetyTimerRef.current = null;
     }, ms);
-  }, [clearSafetyTimer]);
+  }, [clearSafetyTimer, setProcessingState]);
 
   const closeSocket = useCallback(() => {
     hasConnectedOnceRef.current = false;
@@ -85,7 +85,7 @@ export const useGameSession = (user, character) => {
       ws.onclose = null;
       try {
         ws.close();
-      } catch (e) {}
+      } catch {}
     }
   }, []);
 
@@ -124,7 +124,7 @@ export const useGameSession = (user, character) => {
             imagePollIntervalRef.current = null;
           }
         }
-      } catch (e) {
+      } catch {
         if (attempts >= maxAttempts) {
           clearInterval(interval);
           if (imagePollIntervalRef.current === interval) {
@@ -158,7 +158,7 @@ export const useGameSession = (user, character) => {
       prevWs.onclose = null;
       try {
         prevWs.close();
-      } catch (e) {}
+      } catch {}
     }
 
     setWsStatus(hasConnectedOnceRef.current ? 'reconnecting' : 'connecting');
@@ -233,7 +233,7 @@ export const useGameSession = (user, character) => {
               }
             }
           }
-        } catch (e) {}
+        } catch {}
       }
     };
 
@@ -464,7 +464,7 @@ export const useGameSession = (user, character) => {
     ws.onerror = () => {
       try {
         ws.close();
-      } catch (e) {}
+      } catch {}
     };
   }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage, armSafetyTimer, clearSafetyTimer, setProcessingState]);
 
@@ -606,10 +606,10 @@ export const useGameSession = (user, character) => {
             }
           }
         }
-      } catch (e) {}
+      } catch {}
     }, 5000);
     return () => clearInterval(pollId);
-  }, [processingTurn, session?.id, user?.user_id, clearSafetyTimer, pollForSceneImage]);
+  }, [processingTurn, session?.id, user?.user_id, clearSafetyTimer, pollForSceneImage, setProcessingState]);
 
   const sendPartyChat = useCallback((messageText, senderName) => {
     const clean = (messageText || '').trim();
@@ -1007,7 +1007,7 @@ export const useGameSession = (user, character) => {
     if (pendingAsyncPostRef.current) {
       try {
         await pendingAsyncPostRef.current;
-      } catch (e) {}
+      } catch {}
     }
     if (turnAbortControllerRef.current) {
       turnAbortControllerRef.current.abort();
@@ -1044,7 +1044,7 @@ export const useGameSession = (user, character) => {
     } finally {
       setCancellingTurn(false);
     }
-  }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer]);
+  }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer, setProcessingState]);
 
   const [rerollingImage, setRerollingImage] = useState(false);
 

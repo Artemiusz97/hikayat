@@ -21,7 +21,7 @@ import sqlite3
 import time
 from typing import Any, Literal, Mapping, Sequence
 
-from .core import UnitOfWork, get_conn
+from .core import get_conn
 
 MAX_TURN_SNAPSHOTS = 10
 

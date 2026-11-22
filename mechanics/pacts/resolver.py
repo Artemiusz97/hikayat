@@ -25,7 +25,6 @@ from mechanics.combat.enemies import build_monster_stat_sheet
 
 from .appraisal import (
     RESONANCE_XP_THRESHOLDS,
-    apply_active_pact_modifiers,
     can_afford_stat_locks,
     compute_pact_cast_costs,
     compute_tier_locks_for_patron,

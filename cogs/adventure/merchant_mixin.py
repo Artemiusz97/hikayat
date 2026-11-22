@@ -4,7 +4,6 @@ import db
 from db import adb
 import game_engine
 import scenario_data
-from character_data import inventory_capacity
 from skill_check import resolve_check
 from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)

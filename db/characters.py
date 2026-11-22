@@ -1,14 +1,9 @@
 from __future__ import annotations
 import db
 import logging
-import asyncio
 import json
 import time
 from typing import Any, Optional
-from contextlib import contextmanager
-import re
-import sqlite3
-from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records
@@ -139,8 +134,6 @@ def apply_adventure_loadout(
             (scenario, char_class, class_description, cd.STARTING_GOLD, eff_attr, eff_arch, eff_med, char_id)
         )
 
-    from mechanics.combat.equipment import parse_equipment_metadata
-    from mechanics.combat.items.envelope import serialize_item
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
     # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear

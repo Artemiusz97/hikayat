@@ -25,10 +25,9 @@ from .realty_catalog import (
     resolve_starter_quarters_spec,
 )
 from .residence_fog import (
-    RESIDENCE_UNLOCK_REASONS,
-    SHARED_ABSTRACT_RESIDENCE_NODE,
-    can_materialize_npc_residence,
-    unlock_npc_residence_node,
+    SHARED_ABSTRACT_RESIDENCE_NODE,  # static-check: ignore[unused-import]
+    can_materialize_npc_residence,  # static-check: ignore[unused-import]
+    unlock_npc_residence_node,  # static-check: ignore[unused-import]
 )
 
 

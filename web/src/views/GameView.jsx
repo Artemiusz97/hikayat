@@ -305,37 +305,46 @@ const GameView = ({
   }, [session?.nearby_enemies, session?.monsters, selectedCombatTarget]);
 
   const prevSessionIdForRefreshRef = useRef(session?.id ?? null);
+  const sidebarRefreshRef = useRef({
+    refreshCharacter,
+    refreshInventory: inventory.refreshInventory,
+    refreshCodex: codex.refreshCodex,
+    refreshPhone: phone.refreshPhone,
+  });
+  sidebarRefreshRef.current = {
+    refreshCharacter,
+    refreshInventory: inventory.refreshInventory,
+    refreshCodex: codex.refreshCodex,
+    refreshPhone: phone.refreshPhone,
+  };
+
   useEffect(() => {
     const nextId = session?.id ?? null;
     if (prevSessionIdForRefreshRef.current === nextId) return;
     prevSessionIdForRefreshRef.current = nextId;
     if (isValidSessionId(nextId)) {
-      refreshCharacter();
-      inventory.refreshInventory();
+      sidebarRefreshRef.current.refreshCharacter();
+      sidebarRefreshRef.current.refreshInventory();
     }
   }, [session?.id]);
 
   const prevSyncTimestampRef = useRef(lastSyncTimestamp);
-
-  const refreshAllSidebars = () => {
-    refreshCharacter();
-    inventory.refreshInventory();
-    codex.refreshCodex();
-    phone.refreshPhone();
-  };
 
   useEffect(() => {
     if (lastSyncTimestamp <= 0 || prevSyncTimestampRef.current === lastSyncTimestamp) {
       return;
     }
     prevSyncTimestampRef.current = lastSyncTimestamp;
-    refreshAllSidebars();
+    sidebarRefreshRef.current.refreshCharacter();
+    sidebarRefreshRef.current.refreshInventory();
+    sidebarRefreshRef.current.refreshCodex();
+    sidebarRefreshRef.current.refreshPhone();
   }, [lastSyncTimestamp]);
 
   useEffect(() => {
-    const serverStealth = session?.stealth_state;
-    if (serverStealth && typeof serverStealth.is_hidden === 'boolean') {
-      setIsStealthActive(serverStealth.is_hidden);
+    const isHidden = session?.stealth_state?.is_hidden;
+    if (typeof isHidden === 'boolean') {
+      setIsStealthActive(isHidden);
     }
   }, [session?.stealth_state?.is_hidden]);
 
@@ -419,7 +428,10 @@ const GameView = ({
       setSession(loadedSession);
     }
     if (!loadedSession?.id || String(loadedSession.id) === String(session?.id)) {
-      refreshAllSidebars();
+      sidebarRefreshRef.current.refreshCharacter();
+      sidebarRefreshRef.current.refreshInventory();
+      sidebarRefreshRef.current.refreshCodex();
+      sidebarRefreshRef.current.refreshPhone();
     }
   };
 

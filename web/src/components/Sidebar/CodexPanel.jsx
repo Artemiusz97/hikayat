@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useRef, useId } from 'react';
+import { useState, useEffect, useMemo, useRef, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { 
-  BookOpen, Users, Flag, Globe, Heart, Shield, 
-  Sparkles, Search, MessageCircle, MapPin, ChevronDown, ChevronRight, User, UserMinus,
+  BookOpen, Users, Flag, Globe, Heart, 
+  Search, MapPin, ChevronDown, ChevronRight, User, UserMinus,
   Crown, ShoppingBag, Swords, BedDouble, Lock, Scroll, Calendar, Clock, Smartphone
 } from 'lucide-react';
 import { apiCall } from '../../api/client';
@@ -55,7 +55,7 @@ const renderBulletPoints = (lines, t = null) => {
   return (
     <div className="space-y-1">
       {lines.map((line, idx) => {
-        let clean = String(line).replace(/^[•\-\*]\s*/, '').trim();
+        let clean = String(line).replace(/^[•*-]\s*/, '').trim();
         clean = clean.replace(/\bNude\s*\/\s*Beige\b/gi, 'Beige / Skin-Tone');
         const match = clean.match(/^\*\*([^*]+)\*\*:\s*(.*)$/) || clean.match(/^([^:]+):\s*(.*)$/);
         if (match) {
@@ -346,29 +346,26 @@ const CodexPanel = ({
   const [debugDossierTab, setDebugDossierTab] = useState('persona');
   const [expandedFaction, setExpandedFaction] = useState(null);
   const [factionDomainFilter, setFactionDomainFilter] = useState('all'); // 'all' | 'school' | 'regular'
-  const [loreFilter, setLoreFilter] = useState('all'); // 'all' | 'commitments'
   const [companionBusy, setCompanionBusy] = useState(null);
   const [factionBusy, setFactionBusy] = useState(null);
   const [cancellingCommitmentId, setCancellingCommitmentId] = useState(null);
   const [companionFeedback, setCompanionFeedback] = useState(null);
   const [busyRumorId, setBusyRumorId] = useState(null);
   const calibId = useId();
-  const [calAttr, setCalAttr] = useState(session?.player_3axis?.attribute || 'fire');
-  const [calArch, setCalArch] = useState(session?.player_3axis?.combat_archetype || 'vanguard');
-  const [calMed, setCalMed] = useState(session?.player_3axis?.ability_medium || 'direct_manifestation');
+  const agentAxis3 = agentDossier?.character_3axis;
+  const playerAxis3 = session?.player_3axis;
+  const [calAttr, setCalAttr] = useState(playerAxis3?.attribute || 'fire');
+  const [calArch, setCalArch] = useState(playerAxis3?.combat_archetype || 'vanguard');
+  const [calMed, setCalMed] = useState(playerAxis3?.ability_medium || 'direct_manifestation');
 
   useEffect(() => {
-    const src3 = agentDossier?.character_3axis || session?.player_3axis;
+    const src3 = agentAxis3 || playerAxis3;
     if (src3?.attribute) setCalAttr(src3.attribute);
     if (src3?.combat_archetype) setCalArch(src3.combat_archetype);
     if (src3?.ability_medium) setCalMed(src3.ability_medium);
   }, [
-    agentDossier?.character_3axis?.attribute,
-    agentDossier?.character_3axis?.combat_archetype,
-    agentDossier?.character_3axis?.ability_medium,
-    session?.player_3axis?.attribute,
-    session?.player_3axis?.combat_archetype,
-    session?.player_3axis?.ability_medium,
+    agentAxis3,
+    playerAxis3,
   ]);
 
   const handleTrackRumor = async (eventKey) => {
@@ -561,13 +558,13 @@ const CodexPanel = ({
       return Boolean(f.is_school_club || f.category_tag?.domain === 'school');
     }
     if (factionDomainFilter === 'regular') {
-      return !Boolean(f.is_school_club || f.category_tag?.domain === 'school');
+      return !(f.is_school_club || f.category_tag?.domain === 'school');
     }
     return true;
   });
 
   const hasSchoolFactions = factions.some(f => Boolean(f.is_school_club || f.category_tag?.domain === 'school'));
-  const hasRegularFactions = factions.some(f => !Boolean(f.is_school_club || f.category_tag?.domain === 'school'));
+  const hasRegularFactions = factions.some(f => !(f.is_school_club || f.category_tag?.domain === 'school'));
 
   // World lore entities (strictly non-person entries: world events, locations, factions, artifacts, history)
   const loreEntities = (lorebook.entities || []).filter(e => e.entity_type !== 'person');
@@ -824,13 +821,6 @@ const CodexPanel = ({
                   basic.deceased ||
                   String(npc.disposition || '').toLowerCase() === 'dead'
                 );
-                const isMerchant = Boolean(
-                  npc.is_merchant ||
-                  basic.is_merchant ||
-                  /merchant|shopkeeper|vendor|apothecary|peddler|trader/i.test(basic.role || basic.occupation || npc.name || '')
-                );
-                const isNonCombatScen = ['high_school_drama', 'high_school', 'slice_of_life', 'cozy_cafe'].includes((session?.scenario || '').toLowerCase());
-                const isDetailedUnlocked = score >= 100 || isInParty || isDebugRevealed;
                 const isCombatDossierUnlocked = Boolean(
                   (npc.dossier_stage ?? 1) >= 2 ||
                   score >= 15 ||
@@ -838,7 +828,6 @@ const CodexPanel = ({
                   isDebugRevealed ||
                   npc.same_faction_colleague
                 );
-                const canRecruit = !isNonCombatScen && !isMerchant && !isCivilianTag && !isDeceased;
                 const traits = npc.unlocked_traits || [];
                 const rawDislikes = npc.dislikes || basic.dislikes || [];
                 const dislikes = rawDislikes.map(d => typeof d === 'string' ? d : (d.dislike || d.name || ''));
@@ -858,12 +847,10 @@ const CodexPanel = ({
                     if (dislikePrefixes.includes(firstWord)) return false;
                     return true;
                   });
-                const memories = npc.intimate_memories || [];
                 const appearance = npc.appearance || {};
                 const familyTree = npc.family_tree || {};
                 const relations = npc.relations || {};
                 const infoLevel = npc.info_level ?? 0;
-                const skillMod = npc.skill_modifier ?? Math.floor(Math.max(0, score) / 20);
                 const rawGender = String(basic.gender || npc.gender || appearance.gender || 'female').toLowerCase();
                 const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => rawGender.includes(kw)) && !['female', 'woman'].some(kw => rawGender.includes(kw));
                 const isNsfwScenario = Boolean(

@@ -1,24 +1,18 @@
 from __future__ import annotations
 
 import db
-import asyncio
 import json
 import time
-from contextlib import contextmanager
 from typing import Any, Optional
 import re
 import sqlite3
-from config import DB_PATH
-import character_data as cd
 from .core import *
-from .core import UnitOfWork, _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import UnitOfWork, _safe_int_db
 from .dossiers import (
     _enrich_dossier_dict,
     append_dossier_state_event,
     get_effective_session_turn,
     get_quest_dossier,
-    get_prewarmed_quest_dossier,
-    promote_prewarmed_dossier,
 )
 
 _TRANSIENT_SUB_OBJ_KEYS = {

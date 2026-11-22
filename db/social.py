@@ -1,17 +1,13 @@
 import db
-import asyncio
 import json
 import threading
 import time
 import hashlib
 import random
-from contextlib import contextmanager
 import re
 import sqlite3
-from config import DB_PATH
-import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _find_anomalous_agent_entry
+from .core import _find_anomalous_agent_entry
 
 def get_recruitment_cooldown(session_id: int, npc_name: str) -> int:
     with get_conn() as conn:
@@ -1760,7 +1756,6 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
             if tc and tc.get("name"):
                 party_char_names.add(str(tc["name"]).strip().lower())
 
-        import namegen
         from mechanics.world.mobility import get_session_dialogue_partners
         dialogue_partners = {p.lower() for p in get_session_dialogue_partners(sess)}
 
@@ -4261,25 +4256,3 @@ def get_school_directory_batch(session_id: int) -> dict[str, dict]:
 
 
 
-from .social_pacing import (
-    backfill_exempt_and_legacy_contact_discoveries,
-    canon_social_npc_id,
-    clear_clear_the_air_gate,
-    get_character_social_daily,
-    get_character_social_daily_batch,
-    get_contact_dossier_discoveries,
-    get_contact_dossier_discoveries_batch,
-    get_npc_social_composure,
-    get_npc_social_composure_batch,
-    get_player_fow_exemption_sets,
-    get_social_topic_states,
-    get_social_topic_states_batch,
-    record_contact_dossier_discoveries,
-    rollback_social_pacing_state_after_turn,
-    set_clear_the_air_gate,
-    snapshot_session_social_state_for_turn,
-    upsert_character_social_daily,
-    upsert_npc_social_composure,
-    upsert_social_topic_state,
-    upsert_wardrobe_preset_discoveries_batch,
-)

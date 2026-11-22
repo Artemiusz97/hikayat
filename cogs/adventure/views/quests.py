@@ -1,47 +1,13 @@
 from __future__ import annotations
 from .base import SessionRestrictedView
 from .constants import *
-import asyncio
-import json
-import logging
-import random
-import re
-import time
 import discord
-from discord import app_commands
-from discord.ext import commands
 import db
 from db import adb
 import game_engine
-import image_client
-from character_data import (
-    XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items, inventory_capacity
-)
-from cogs.character import build_character_sheet_embed
-from db import STAT_COLUMN
-from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
-from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
-    apply_merchant_encounter_result as _apply_merchant_encounter_result,
-    handle_talk_to_merchant as _handle_talk_to_merchant,
-    build_merchant_embed as _merchant_embed,
-    MerchantView,
-    MerchantVoteView,
-    BuySelectView,
-    SellSelectView,
-    RumorView,
-)
-from mechanics.social.races import normalize_race
-from mechanics.social.persona import normalize_appearance
-from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
-from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
-from mechanics.combat.items import parse_item_effect, apply_item_to_target
+from mechanics.narrative.bounty import get_quest_type_icon as _quest_type_icon
 from mechanics.system.concurrency import distributed_session_lock
-from localization import get_quest_ui_label
-import unicodedata
-from ..embeds import _RESULT_COLORS, _RESULT_TITLES, _scenario_command_choices, _parse_status_effects, _party_vitals_text, _location_text, _safe_int, _truncate_field_value, _truncate_field_name, _safe_add_field, _norm_name, _is_dialogue_partner, _format_tracker_entity, _tracker_group_text, _strip_leading_emojis, _get_choice_quest_icon, _get_choice_skill_emoji, _get_choice_emoji, _format_items_gained, _format_items_gained_multi, _tracker_header, _truncate_embed_text, _get_quest_scenario_labels, _build_campaign_goals_embed, _build_chronicle_tapestry_embed, _build_main_quest_embed, _build_bounties_embed, _build_history_embed, _build_caseboard_embed, _build_quest_log_embed, _build_bounty_board_embed
+from ..embeds import _get_quest_scenario_labels, _build_chronicle_tapestry_embed, _build_quest_log_embed, _build_bounty_board_embed
 
 class ActiveBountySelect(discord.ui.Select):
     def __init__(self, session_id: int, bounties: list[dict], selected_quest_id: str | None = None):

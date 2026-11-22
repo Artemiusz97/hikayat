@@ -10,9 +10,7 @@ Execution flow (called from cogs/adventure/cog.py::launch_opening_scene):
 """
 
 
-import json
 import logging
-from typing import TYPE_CHECKING
 
 import db
 import scenario_data
@@ -140,7 +138,6 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
     Returns the generated dict, or None on failure (graceful fallback).
     """
     import game_engine
-    from scenario_data import is_nsfw_scenario
 
     factions = db.get_factions(session_id)
     if not factions:

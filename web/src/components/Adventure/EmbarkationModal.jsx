@@ -61,7 +61,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [previewStartingItems, setPreviewStartingItems] = useState(null);
   
   const [templates, setTemplates] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({ str: 1, per: 1, end: 1, cha: 1, int: 1, agi: 1, luk: 1 });
@@ -164,9 +164,11 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       cancelled = true;
       publicUrlController.abort();
     };
-  }, [isOpen, character]);
+  }, [isOpen, character, isMale]);
 
   const tagsParam = useMemo(() => (scenario === 'custom' ? customTags.join(',') : ''), [scenario, customTags]);
+  const charClassRef = useRef(charClass);
+  charClassRef.current = charClass;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -183,7 +185,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         setTemplates(data);
         const activeClassesObj = data?.classes || {};
         const classNames = Object.keys(activeClassesObj);
-        if (classNames.length > 0 && !classNames.includes(charClass)) {
+        if (classNames.length > 0 && !classNames.includes(charClassRef.current)) {
           setCharClass(classNames[0]);
         }
         setRegeneratedLoadout(null);
@@ -307,7 +309,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     return templates?.classes || {};
   }, [isAnomalousIncursions, templates, effectiveFaction]);
 
-  const activeClassInfo = activeClassesMap[charClass] || {};
+  const activeClassInfo = useMemo(
+    () => activeClassesMap[charClass] || {},
+    [activeClassesMap, charClass]
+  );
   
   const weaponsList = useMemo(() => {
     if (isAnomalousIncursions && templates?.faction_starting_weapons?.[effectiveFaction]) {
@@ -330,16 +335,18 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }
   }, [weaponsList, startingWeapon]);
 
-  const resolveGenderSlashLabel = (labelStr) => {
-    if (!labelStr || !String(labelStr).includes(' / ')) return labelStr;
-    const parts = String(labelStr).split(' / ').map((s) => s.trim());
-    if (parts.length === 2) return isMale ? parts[1] : parts[0];
-    return labelStr;
-  };
-
-  const weaponsDisplayMap = templates?.starting_weapons_localized || {};
+  const weaponsDisplayMap = useMemo(
+    () => templates?.starting_weapons_localized || {},
+    [templates?.starting_weapons_localized]
+  );
 
   const displayedLoadout = useMemo(() => {
+    const resolveGenderSlashLabel = (labelStr) => {
+      if (!labelStr || !String(labelStr).includes(' / ')) return labelStr;
+      const parts = String(labelStr).split(' / ').map((s) => s.trim());
+      if (parts.length === 2) return isMale ? parts[1] : parts[0];
+      return labelStr;
+    };
     let loadout = {};
     const locGear = activeClassInfo?.starter_gear_localized || {};
     if (regeneratedLoadout) {

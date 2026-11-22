@@ -1,4 +1,3 @@
-import re
 XP_REWARDS = {'crit_success': 25, 'success': 18, 'fail': 10, 'crit_fail': 15}
 STATS = ['STR', 'PER', 'END', 'CHA', 'INT', 'AGI', 'LUK']
 STAT_NAMES = {'STR': 'Strength', 'PER': 'Perception', 'END': 'Endurance', 'CHA': 'Charisma', 'INT': 'Intelligence', 'AGI': 'Agility', 'LUK': 'Luck'}

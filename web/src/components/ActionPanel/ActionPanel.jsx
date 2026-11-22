@@ -15,14 +15,16 @@ const STAT_EMOJI = {
   ITEM: '🎒',
 };
 
-const LOCALIZED_QUEST_BRACKET_RE = /^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Main|Side|Optional[^\]\r\n]*)\]\s*)+/i;
+const LOCALIZED_QUEST_BRACKET_RE = /^(?:(?:⭐|🎯|⚡|💌|🔹|🌙|⏳|🤝|\s)+|\s*\[(?:Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Main|Side|Optional[^\]\r\n]*)\]\s*)+/i;
 
 const cleanChoiceDisplayLabel = (choice, questIcon) => {
   const rawDisplayLabel = String(choice?.label || choice?.text || '');
   const hasQuestMeta = Boolean(questIcon || choice?.is_quest_action || choice?.is_story_quest || choice?.is_climax_action);
-  let stripped = rawDisplayLabel.replace(/^[🚶🧭📍✨🔍💬🗣️🎭💖🎲📜🏕️☕🛋️🖐️🎒🚪⛓️🛡️👔🧩📱\s]+/, '').replace(LOCALIZED_QUEST_BRACKET_RE, '');
+  let stripped = rawDisplayLabel
+    .replace(/^(?:🚶|🧭|📍|✨|🔍|💬|🗣️|🎭|💖|🎲|📜|🏕️|☕|🛋️|🖐️|🎒|🚪|⛓️|🛡️|👔|🧩|📱|\s)+/u, '')
+    .replace(LOCALIZED_QUEST_BRACKET_RE, '');
   if (hasQuestMeta) {
-    stripped = stripped.replace(/^(?:[⭐🎯⚡💌🔹🌙⏳🤝🚶🧭📍\s]+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
+    stripped = stripped.replace(/^(?:(?:⭐|🎯|⚡|💌|🔹|🌙|⏳|🤝|🚶|🧭|📍|\s)+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
   }
   return stripped.replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '').trim() || rawDisplayLabel;
 };
@@ -330,10 +332,8 @@ const ActionPanel = ({
   onAction,
   onRetry,
   onOpenMerchant,
-  onOpenPhone,
   onClosePhone,
   phoneOpen,
-  phoneHook,
   showPercentages = true,
   showEnemyHp = true,
   showEnemyIntent = true,
@@ -342,7 +342,6 @@ const ActionPanel = ({
   isStreaming,
   waitingForParty,
   partyStatus,
-  onSelectContact,
   actionError,
   clearActionError,
   collapsed = undefined,
@@ -354,6 +353,8 @@ const ActionPanel = ({
   const combatTabRefs = useRef({});
   const [isChoicesCollapsed, setIsChoicesCollapsed] = useState(false);
   const [isCustomCollapsed, setIsCustomCollapsed] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState(null);
   const isCollapsed = collapsed !== undefined ? collapsed : isChoicesCollapsed;
   const handleToggleCollapse = () => {
     if (onToggleCollapse) onToggleCollapse();
@@ -376,7 +377,6 @@ const ActionPanel = ({
     return false;
   };
 
-  const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = new Set(
     (() => {
       let list = [];
@@ -560,8 +560,6 @@ const ActionPanel = ({
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
 
   const isGameOver = Boolean(session?.status === 'finished' || session?.is_game_over);
-  const [reloading, setReloading] = useState(false);
-  const [reloadError, setReloadError] = useState(null);
 
   const handleReloadCheckpoint = async () => {
     setReloading(true);

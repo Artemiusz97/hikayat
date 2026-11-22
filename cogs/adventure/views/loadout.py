@@ -1,44 +1,21 @@
 from .constants import *
-import asyncio
-import json
-import logging
 import random
-import re
-import time
 import discord
-from discord import app_commands
-from discord.ext import commands
 import db
 from db import adb
-import game_engine
-import image_client
 from character_data import (
-    XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items, inventory_capacity
+    STATS,
+    STAT_NAMES,
+    STAT_EMOJI,
+    MAX_STAT_VALUE,
+    get_class_templates,
+    get_starting_weapons,
+    get_starter_gear_by_class,
+    get_starting_items,
 )
 from cogs.character import build_character_sheet_embed
 from db import STAT_COLUMN
-from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
-from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import (
-    apply_merchant_encounter_result as _apply_merchant_encounter_result,
-)
-from .merchant import (
-    handle_talk_to_merchant as _handle_talk_to_merchant,
-    build_merchant_embed as _merchant_embed,
-    MerchantView,
-    MerchantVoteView,
-    BuySelectView,
-    SellSelectView,
-    RumorView,
-)
-from mechanics.social.races import normalize_race
 from mechanics.social.persona import normalize_appearance
-from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
-from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
-from mechanics.combat.items import parse_item_effect, apply_item_to_target
-import unicodedata
 
 class StatPointView(discord.ui.View):
     """Shown when a character has unspent stat points from leveling up.
@@ -1001,7 +978,6 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         if char:
             gender = char.get("gender", "Male")
             if val == "auto":
-                from mechanics.social.persona import normalize_appearance
                 app = normalize_appearance(
                     {},
                     gender=gender,
@@ -1076,8 +1052,8 @@ class LoadoutEquipmentPreviewView(discord.ui.View):
         is_nsfw = self._is_nsfw()
 
         if is_custom_class:
-            import game_engine.turn
-            gear_map = await game_engine.turn.generate_custom_starter_gear(
+            from game_engine import turn as _ge_turn
+            gear_map = await _ge_turn.generate_custom_starter_gear(
                 char_class=self.char_class,
                 class_description=self.class_description,
                 scenario=scenario,

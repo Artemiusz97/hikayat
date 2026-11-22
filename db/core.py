@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Callable, Optional, Union, Dict, List, Tuple
+from typing import Any, Callable, Optional, Dict, List, Tuple
 import db
 """
 SQLite persistence layer.
@@ -28,7 +28,6 @@ import contextvars
 _log = logging.getLogger(__name__)
 
 from config import DB_PATH
-import character_data as cd
 from .registry import (
     get_purge_specs,
     get_session_child_table_names,
@@ -2903,7 +2902,6 @@ def _migrate_combat_evolution_v53(conn: sqlite3.Connection) -> int:
     """Idempotently normalizes status effects across characters, sessions, contacts,
     and adventure saves to StatusEffectInstance schemas, and ensures combat threat
     and telegraph columns are initialized."""
-    import json
     from mechanics.combat.status_effects import normalize_status_effect
 
     count = 0
@@ -3304,9 +3302,6 @@ def _is_legacy_player_key_val(val: str) -> bool:
 
 def _migrate_clean_cutover_v30(conn: sqlite3.Connection) -> None:
     """One-time startup normalization retiring runtime legacy shims and key aliases."""
-    import json
-    import re
-    import time
 
     # 1. Backfill any remaining phone_appointments into commitments_ledger
     _migrate_phone_appointments_to_commitments(conn)
@@ -3586,8 +3581,6 @@ def _migrate_self_heal_main_area_and_roster_drift_v32(conn: sqlite3.Connection) 
 
 def _migrate_phone_appointments_to_commitments(conn: sqlite3.Connection) -> int:
     """Migrates existing phone_appointments rows into the unified commitments_ledger table."""
-    import json
-    import time
     cursor = conn.cursor()
     tbl = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='phone_appointments'").fetchone()
     if not tbl:
@@ -3681,7 +3674,6 @@ def _migrate_contacts_intimacy_profiles(conn: sqlite3.Connection) -> int:
     4. Computes deterministic tracks and caches them in intimate_profile_json['tracks'].
     5. Cleans up appearance_json so it only contains physical traits.
     """
-    import json
     import hashlib
     from mechanics.social.persona.intimacy.ledger import (
         record_intimate_event,
@@ -4406,7 +4398,6 @@ def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir
     Maintains a rolling window of the last `max_backups` snapshot files.
     """
     import os
-    import time
 
     if not os.path.isabs(custom_dir):
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -4454,7 +4445,6 @@ def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir
 
 def set_db_path(new_path: str):
     """Dynamically switches the active SQLite database path and resets connection pools."""
-    import db
     import config
     close_all_connections()
     db.DB_PATH = new_path
@@ -4494,7 +4484,6 @@ def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = 
     """Safely closes connections and cleans up temporary simulation database files on disk."""
     import os
     import gc
-    import time
 
     prev_path = _ISOLATED_PREV_DB_PATHS.pop(target_path, None)
     active_path = str(getattr(db, "DB_PATH", "") or DB_PATH or "")
@@ -4518,7 +4507,6 @@ def cleanup_simulation_db(target_path: str, keep: bool = False, is_temp: bool = 
 @contextmanager
 def use_temporary_db(custom_path: str | None = None, keep_on_exit: bool = False, prefix: str = "hikayat_sim_"):
     """Context manager for running tests or simulations against an isolated SQLite database."""
-    import db
     old_path = db.DB_PATH
     target_path, is_temp = isolate_simulation_db(explicit_path=custom_path, prefix=prefix)
     try:

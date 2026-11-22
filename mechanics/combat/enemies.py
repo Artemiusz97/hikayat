@@ -5,23 +5,19 @@ import re
 
 from .loadouts import (
     ALL_STATS,
-    ARCHETYPE_RULES,
-    ROLE_TIER_MULTIPLIERS,
     TIER_RANK_TO_ROLE,
     build_combatant_stat_sheet,
     ensure_combatant_loadout,
 )
 from .enemy_profiles import (
-    ANOMALOUS_FACILITY_NAME_KEYWORDS,
-    ANOMALOUS_TIER2_FACILITY_IDS,
     GENERIC_ENEMY_KEYWORDS,
     SCENARIO_ENEMIES,
     SCENARIO_ENEMY_TEMPLATES,
     _resolve_enemy_scenario_key,
     get_enemy_armor_profile,
     get_enemy_weapon_profile,
-    is_anomalous_danger_zone,
-    should_allow_random_encounter,
+    is_anomalous_danger_zone,  # static-check: ignore[unused-import]
+    should_allow_random_encounter,  # static-check: ignore[unused-import]
 )
 
 # Scenario Archetype Stat Rules

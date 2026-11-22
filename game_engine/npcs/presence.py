@@ -1,15 +1,14 @@
-import json
 import re
 import random
 import db
+import namegen
+import scenario_data
 import game_engine
 from game_engine.core import *
-from game_engine.core import _get_npc_name, _norm_dialogue_name
+from mechanics.world.locations import get_primary_location_name, get_zone_location_name
 
 from .dialogue_tracking import (
     get_session_dialogue_partners,
-    is_dialogue_partner,
-    is_npc_invited_in_action,
 )
 
 def sync_hostile_entities(result: dict, session: dict) -> dict:
@@ -25,7 +24,6 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
 
 
     # NON-COMBAT SCENARIO GUARD: Strictly disable combat and nearby_enemies in non-combat genres
-    import scenario_data
     scen_key = (session.get("scenario") if session else None) or "fantasy"
     if scenario_data.has_tag(scen_key, "non_combat") or str(scen_key).lower() in ("high_school", "high_school_drama"):
         session["nearby_enemies"] = []
@@ -38,7 +36,6 @@ def sync_hostile_entities(result: dict, session: dict) -> dict:
         return result
 
     from mechanics.combat.enemies import disambiguate_enemy_list, is_generic_enemy_name, generate_scenario_enemy
-    import re
 
     def get_base_name(n: str) -> str:
         return re.sub(r'\s+(?:#?\d+|[A-Z])$', '', str(n).strip())
@@ -327,7 +324,6 @@ def reconcile_implied_hostile_encounter(
     if result.get("_combat_resolved_notice"):
         return result
 
-    import scenario_data
     scen_key = str(session.get("scenario") or "fantasy")
     if scenario_data.is_non_combat_scenario(scen_key):
         return result
@@ -656,7 +652,6 @@ def classify_scene_npcs(
     # Load formal party NPC names (these always travel, dismissal is explicit)
     formal_party_names: set[str] = set()
     temp_companion_names: set[str] = set()
-    import namegen
     presence_peer_pool = list(old_npcs or []) + list(active_dialogue_names)
     if session.get("id"):
         for p in db.get_session_party_npcs(session["id"]):
@@ -916,7 +911,6 @@ def is_mentioned_only_in_absence_or_memory(npc_name: str, narr_prose: str) -> bo
     if not npc_name or not narr_prose:
         return False
 
-    import namegen
     narr_prose = narr_prose.lower()
     n_lower = npc_name.lower().strip()
 
@@ -1078,7 +1072,6 @@ def _distribute_fallback_locations(session_id: int, scen_key: str, sub_waypoints
         for p in prims:
             all_locs.append(f"{z} -> {p}")
 
-    import random
     used_locs = set()
     for so in sub_objs:
         so_id = so["id"]

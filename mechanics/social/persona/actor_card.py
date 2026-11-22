@@ -17,7 +17,7 @@ Implements 3-Tier Situational Persona Gating:
       act preferences, intimate experience canon, excitement meter and climax rules.
 """
 from __future__ import annotations
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional
 import hashlib
 import json
 import re
@@ -34,7 +34,6 @@ from mechanics.combat.traits import format_trait_behavioral_prompt
 from mechanics.social.persona.intimacy.formatting import (
     format_demeanor_prompt_directive,
     format_dynamic_prompt_directive,
-    format_turn_ons_prompt_directive,
     format_desires_and_turn_offs_prompt_directive,
     format_fetish_prompt_directive,
     format_act_preferences_prompt_directive,

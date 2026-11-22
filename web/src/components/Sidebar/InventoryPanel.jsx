@@ -83,7 +83,7 @@ const InventoryPanel = ({
   const { t } = useTranslation();
   const {
     items, equipment, capacity, propertyBonusSlots = 0, usedSlots, gold,
-    loading, equipItem, unequipSlot, dropItem, useItem
+    loading, equipItem, unequipSlot, dropItem, useItem: applyUseItem
   } = inventoryHook;
 
   const [activeTab, setActiveTab] = useState('backpack');
@@ -162,13 +162,13 @@ const InventoryPanel = ({
   }, [inCombat, session?.combat_state?.enemies, nearbyEnemies]);
 
   const handleUse = async (itemId, targetType = 'self', targetName = 'self', targetUserId = null) => {
-    if (!useItem) return;
+    if (!applyUseItem) return;
     setActionInProgress(itemId);
     setTargetPickerItemId(null);
     setSelectedPickerTarget(null);
     setUseFeedback(null);
     try {
-      const res = await useItem(itemId, sessionId, targetType, targetName, targetUserId);
+      const res = await applyUseItem(itemId, sessionId, targetType, targetName, targetUserId);
       if (res?.message) {
         setUseFeedback({ type: 'success', text: res.message.replace(/\*\*/g, '') });
       }
@@ -531,7 +531,7 @@ const InventoryPanel = ({
                             onClick={() => handleEquip(item.id, slotName)}
                             className="px-2 py-0.5 rounded bg-fantasy-accent/20 hover:bg-fantasy-accent/35 text-fantasy-accent border border-fantasy-accent/50 text-[10px] font-bold transition-colors"
                           >
-                            {t('inventory.' + slotName.toLowerCase().replace(/[\s\-]+/g, '_'), slotName)}
+                            {t('inventory.' + slotName.toLowerCase().replace(/[\s-]+/g, '_'), slotName)}
                           </button>
                         ))}
                       </div>
@@ -769,7 +769,7 @@ const InventoryPanel = ({
                     <Icon size={16} />
                   </div>
                   <div className="min-w-0">
-                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">{t('inventory.' + slot.toLowerCase().replace(/[\s\-]+/g, '_'), slot)}</span>
+                    <span className="text-[10px] uppercase font-bold text-gray-500 tracking-wider block">{t('inventory.' + slot.toLowerCase().replace(/[\s-]+/g, '_'), slot)}</span>
                     {equippedItem ? (
                       <div>
                         <div className="flex items-center gap-1.5 flex-wrap">

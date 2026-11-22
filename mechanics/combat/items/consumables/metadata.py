@@ -1,9 +1,7 @@
 from __future__ import annotations
 import re
-import random
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Optional, List
 import db
-from skill_check import resolve_check
 
 # -----------------------------------------------------------------------------
 # PROCEDURAL TAXONOMY & EFFECT SCALING

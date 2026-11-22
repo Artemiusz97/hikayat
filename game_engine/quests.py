@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-import game_engine
-from .core import *
+import json
 import logging
+import re
+import time
+
+import db
+import game_engine
+import scenario_data
+from mechanics.world.locations import is_school_scenario, process_llm_location_update
+from .core import *
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +45,7 @@ def create_contextual_story_quest_data(
 
     from mechanics.world.locations import (
         get_discovered_primary_locations,
-        is_school_scenario,
         sanitize_location_target,
-        process_llm_location_update,
         resolve_session_location_tokens,
         format_clean_location_prose,
         clean_narrative_location_arrows,
@@ -58,7 +63,6 @@ def create_contextual_story_quest_data(
         select_chapter_storylet,
     )
     from mechanics.narrative.blueprints import get_blueprint_for_archetype
-    import scenario_data
 
     eff_lang = normalize_quest_locale(raw_lang)
 
@@ -480,7 +484,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
     ) if goals else "No campaign goals defined."
 
     scen_key = session.get("scenario", "fantasy")
-    from mechanics.world.locations import get_discovered_primary_locations, process_llm_location_update
+    from mechanics.world.locations import get_discovered_primary_locations
     zones_dict = get_discovered_primary_locations(session_id, scen_key)
     avail_locs_list = []
     for z, prims in zones_dict.items():
@@ -488,7 +492,6 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             avail_locs_list.append(f"{z} -> {p}")
     avail_locs_text = ", ".join(avail_locs_list[:12]) if avail_locs_list else loc
 
-    import scenario_data
     from mechanics.narrative.blueprints import get_max_campaign_chapters, generate_anomalous_campaign_blueprint
     max_chapters = get_max_campaign_chapters(scen_key)
     is_anom_story = scenario_data.is_anomalous_incursions_scenario(scen_key)
@@ -576,7 +579,6 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         context_line = "This is Chapter #1: The opening chapter of the campaign.\n"
 
     school_context = ""
-    from mechanics.world.locations import is_school_scenario
     if is_school_scenario(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = ensure_school_directory_exists(session)
@@ -641,7 +643,6 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             max_tokens=4096, retries=2, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")), use_utility=True
         )
     except Exception as e:
-        import logging
         logging.getLogger(__name__).warning("generate_story_quest Pass 1 failed for Session %s: %s. Initiating Emergency Pass 2.", session_id, e)
 
     # PASS 2: Emergency Pass (Streamlined, low-latency prompt with standard model)
@@ -664,7 +665,6 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
                 max_tokens=2048, retries=1, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")), use_utility=False
             )
         except Exception as e2:
-            import logging
             logging.getLogger(__name__).warning("generate_story_quest Emergency Pass 2 failed for Session %s: %s. Using deterministic fallback.", session_id, e2)
             result = None
 
@@ -737,7 +737,6 @@ def _is_valid_investigation_note(clue: str) -> bool:
     return 10 <= len(s) <= 250 and len(s.split()) <= 40
 
 def _is_similar_clue(new_clue: str, existing_clues: list[str]) -> bool:
-    import re
     if not new_clue or not new_clue.strip():
         return True
     new_clean = new_clue.strip().lower()
@@ -1257,8 +1256,6 @@ def evaluate_quest_state_predicates(
     - NEUTRALIZATION / ESCORT quests: handles NPCStatusChangedEvent to advance waypoints if target NPC status changed.
     Returns list of notification/update dicts.
     """
-    import db
-    import time
     from mechanics.narrative.blueprints import (
         get_blueprint_for_archetype,
         infer_required_item_and_count_from_text,
@@ -1461,7 +1458,6 @@ def grant_stage_acquisition_item_if_needed(
     if completed_stage_index >= total_stages:
         return None
 
-    import db
     from mechanics.narrative.blueprints import (
         get_blueprint_for_archetype,
         infer_required_item_and_count_from_text,
@@ -1533,7 +1529,6 @@ def consume_quest_delivery_item_if_needed(
     When an ACQUISITION quest or sub-objective completes, removes the required number
     of unequipped matching items from player inventory. Strictly preserves equipped items.
     """
-    import db
     if sub_obj and sub_obj.get("delivery_consumed"):
         return None
 
@@ -1625,7 +1620,6 @@ def send_quest_comms_message(
     Sends a scenario-appropriate Phone DM / Guild Courier message, persists it to phone_messages,
     and returns the narrator directive string (truthy on success, None on failure).
     """
-    import db
     from mechanics.narrative.blueprints import format_quest_comms_message
     if not session_id or not sender_npc_id:
         return None
@@ -1658,7 +1652,6 @@ def trigger_stage2_midquest_comms_if_eligible(
     Checks if a quest has advanced to Stage >= 2 and dispatches the mid-quest tactical intel or plea DM.
     Returns the narrator directive string when sent (truthy), or None if not eligible.
     """
-    import db
     from mechanics.narrative.blueprints import has_quest_note_flag
     from db.quests import append_quest_note_flag_in_db
     qid = quest.get("quest_id", "")
@@ -1719,7 +1712,6 @@ def apply_quest_approach_effects(
     Spare/Fake-Death contact & lorebook updates, or Counter-Offer Betrayal).
     Returns dict with optional 'directive', 'terminated_by_betrayal', etc.
     """
-    import db
     from mechanics.narrative.blueprints import calculate_quest_buyout_cost
     app = (approach or "").lower()
     qid = quest.get("quest_id", "")
@@ -1827,7 +1819,6 @@ def apply_quest_approach_effects(
 
     # 6. Anomalous Incursions: Out-of-Combat Non-Hostile Entity Containment & Stage 1 Dossier Reveal
     try:
-        import scenario_data
         sess_chk = session if isinstance(session, dict) else (db.get_session(session_id) or {})
         scen_chk = str(sess_chk.get("scenario") or "fantasy")
         if scenario_data.is_anomalous_incursions_scenario(scen_chk):
@@ -1924,8 +1915,6 @@ def apply_quest_failure_consequences(
     Applies hard failure to side/faction bounties, including client affinity drop,
     sponsoring faction reputation penalty, and queuing a Delayed Travel Ambush or PeerPulse scandal.
     """
-    import db
-    import time
     qid = quest.get("quest_id", "")
     client_npc = quest.get("client_npc") or ""
     lead_uid = party_user_ids[0] if party_user_ids else 1
@@ -2003,7 +1992,6 @@ def apply_quest_failure_consequences(
     # Anomalous Incursions Mandatory Daily Bounty failure penalty (-15 Promotion Rep, guarded against midnight double-penalty)
     promotion_penalty_notice = ""
     try:
-        import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(scen) and (
             "mandatory_daily:1" in q_notes or str(qid).upper().startswith("MAND-")
         ):
@@ -2050,7 +2038,6 @@ def apply_quest_failure_consequences(
 
     # PeerPulse Scandal for Social or School scenarios
     try:
-        from mechanics.world.locations.seeds import is_school_scenario
         is_school = is_school_scenario(scen)
     except Exception:
         is_school = False
@@ -2130,7 +2117,6 @@ def trigger_pending_retaliation_if_eligible(
     if any(sw in current_location.lower() for sw in safe_words):
         return None
 
-    import db
     enemy_name = retaliation.get("enemy_name") or "Vengeful Mercenary"
     ambush_enemy = {
         "name": enemy_name,
@@ -2164,7 +2150,6 @@ def is_quest_in_turn_in_grace_period(session_id: int, quest: dict | str) -> bool
     Returns True if the quest has reached its final Client Turn-In stage (Stage >= 3 or final stage
     targeting the client / delivery), freezing the deadline timer so it can never expire while turning in.
     """
-    import db
     if isinstance(quest, str):
         qid = quest
         quest = db.get_quest_by_id(session_id, qid) or {}
@@ -2201,8 +2186,6 @@ def check_and_expire_overdue_quests(
     - Applies Rival Claim / Expired Contract mild fallout (-5 client affinity, -5 faction rep, no ambush).
     - Tags quests within 24 hours of deadline with '[⏰ <24h Left]'.
     """
-    import db
-    import time
     if not session_id:
         return {"expired_quests": [], "directives": []}
 
@@ -2317,7 +2300,6 @@ def resolve_pre_turn_quests_and_clues(
     When persist_db=False (live turn pipeline), executes inside a rolled-back SQLite SAVEPOINT
     so LLM failures never mutate DB state, and commits atomically inside apply_outcome (D3).
     """
-    import db
     session_id = (session.get("id") or 0) if isinstance(session, dict) else 0
     if not persist_db and session_id:
         pre_ch = session.get("chapter", 1) if isinstance(session, dict) else 1
@@ -2367,7 +2349,6 @@ def _resolve_pre_turn_quests_impl(
     actions: list = None,
     persist_db: bool = True,
 ) -> dict:
-    import db
     from mechanics.world.waypoints import (
         try_advance_on_arrival,
         try_complete_on_skill_check,
@@ -3182,7 +3163,6 @@ def _resolve_pre_turn_quests_impl(
                                 )
 
     # Award rewards deterministically for newly completed quests
-    import time
     reward_notices = []
     for cq in completed_quests:
         cq_id = cq["quest_id"]
@@ -3380,7 +3360,6 @@ def forfeit_side_bounty(
     Delegates side-bounty forfeit/abandonment to `quest_lifecycle.forfeit_side_bounty`
     (enforcing Co-op Host Guard and Commitment Point-of-No-Return anti-cheese rules).
     """
-    import db
     from game_engine.quest_lifecycle import forfeit_side_bounty as _lifecycle_forfeit
 
     q = db.get_quest_by_id(session_id, quest_id) or {}
@@ -3406,7 +3385,6 @@ def forfeit_side_bounty(
 
 def can_accept_side_bounty(session_id: int, quest: dict | None = None) -> bool:
     """Checks if session is below the max active side bounties concurrency cap of 3 (exempting mandatory dispatches, rumor leads, and loyalty quests)."""
-    import db
     if isinstance(quest, dict):
         q_notes = str(quest.get("quest_notes") or "")
         q_id = str(quest.get("quest_id") or "").upper()
@@ -3435,7 +3413,6 @@ def can_accept_side_bounty(session_id: int, quest: dict | None = None) -> bool:
 
 def can_accept_rumor_investigation(session_id: int) -> bool:
     """Checks if session is below the max active rumor investigations concurrency cap of 2."""
-    import db
     active_rumors = [
         q for q in (db.get_session_quests(session_id, status="Active") or [])
         if str(q.get("quest_id") or "").upper().startswith("RMR-")
@@ -3446,7 +3423,6 @@ def can_accept_rumor_investigation(session_id: int) -> bool:
 
 def can_accept_minor_bounty(session_id: int) -> bool:
     """Checks if session is below the max active minor bounties concurrency cap of 2."""
-    import db
     active_minor = [
         q for q in (db.get_session_quests(session_id, status="Active") or [])
         if str(q.get("quest_id") or "").upper().startswith("MNR-")
@@ -3461,7 +3437,6 @@ def check_and_extract_defeated_suspect_evidence(session_id: int, defeated_npc_na
     If an investigation suspect is defeated in combat before formal interrogation,
     extracts their vital evidence from personal effects into session_clues with genre-grounded wording.
     """
-    import db
     if not session_id or not defeated_npc_name:
         return None
     d_low = defeated_npc_name.strip().lower()

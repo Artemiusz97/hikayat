@@ -3,7 +3,7 @@ from .constants import *
 import json
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 import db
 
 
@@ -2039,7 +2039,6 @@ def get_detailed_node_props(
     Normalizes prop keys via _slugify to prevent case/spacing mismatches.
     """
     raw_props = get_node_props(session_id, node_id, scenario_key=scenario_key, char_name=char_name)
-    import db
     deltas = db.get_world_node_props_state(session_id, node_id) if session_id else {}
 
     detailed: list[dict] = []

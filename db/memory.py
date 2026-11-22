@@ -10,7 +10,6 @@ import json
 import time
 import logging
 
-import db
 from .core import get_conn
 
 log = logging.getLogger("hikayat.db.memory")

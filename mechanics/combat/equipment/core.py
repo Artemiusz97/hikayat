@@ -4,11 +4,15 @@ Procedural equipment generation, card formatting, spellbook generation, and item
 """
 import json
 import random
-import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional
 
 from .tables import *
 from .metadata import *
+from mechanics.combat.items.weapons import WEAPON_ARCHETYPES
+from mechanics.combat.items.armors import ARMOR_ARCHETYPES
+from mechanics.combat.items.shields import SHIELD_ARCHETYPES
+from mechanics.combat.items.accessories import ACCESSORY_ARCHETYPES
+from mechanics.combat.items.envelope import serialize_item
 
 def generate_random_equipment(
     scenario: str = "fantasy",
@@ -653,7 +657,7 @@ def enrich_equipment_item(item: dict, scenario: str = "fantasy") -> dict:
             item["metadata"] = parse_equipment_metadata(item)
         return item
 
-    from mechanics.combat.items import serialize_item, parse_item_tier
+    from mechanics.combat.items import parse_item_tier
 
     # 1. Determine tier
     tier = item.get("tier")

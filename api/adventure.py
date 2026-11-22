@@ -10,7 +10,6 @@ from fastapi.responses import JSONResponse
 import db
 from db import adb
 import game_engine
-import skill_check
 import scenario_data
 import character_data as cd
 from scenario_data import get_scenario_display_name
@@ -18,13 +17,12 @@ from mechanics.combat.loadouts import ensure_combatant_loadout
 from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
 from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
 from mechanics.social.races import roll_scenario_npc_race
-from mechanics.world import evaluate_shop_staff_availability, resolve_scene_merchant_ui_state
+from mechanics.world import resolve_scene_merchant_ui_state
 from services.examine_service import invalidate_examine_cache
 from services.turn_service import TurnService
 from mechanics.system.concurrency import (
     distributed_adventure_lock,
     distributed_session_lock,
-    distributed_user_lock,
 )
 from .security import verify_session_participant, verify_user_access
 from .deps import (
@@ -315,7 +313,7 @@ def _enrich_session_for_client_body(
     )
 
     scen_key_check = scenario_data.resolve_scenario_key(session.get("scenario"))
-    from scenario_data import is_nsfw_scenario, get_scenario_tags, get_scenario_display_name
+    from scenario_data import is_nsfw_scenario, get_scenario_tags
     from mechanics.system.phone import scenario_has_smartphone
     session["is_nsfw"] = is_nsfw_scenario(scen_key_check)
     session["scenario_tags"] = get_scenario_tags(scen_key_check)
@@ -700,7 +698,6 @@ def _enrich_session_for_client_body(
 
     # Dynamic Clothing Status & Present NPC Enrichment
     try:
-        import character_data as cd
         from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
         phys_st = db.get_session_physical_state(session.get("id")) if session.get("id") else None
         phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
@@ -1362,7 +1359,6 @@ async def _trigger_scene_image_broadcast(
                 if raw_hist and isinstance(raw_hist[-1], dict):
                     raw_hist[-1]["scene_image_url"] = local_web_url
                     raw_hist[-1]["scene_image_orientation"] = composed.orientation
-                    import json
                     await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
 
             await manager.broadcast(session_id, {
@@ -2797,7 +2793,6 @@ async def reroll_adventure_image(req: RerollImageRequest, request: Request = Non
 async def list_saves(user_id: int, request: Request = None):
     """Lists all adventure save slots for the user's active character."""
     await verify_user_access(request, user_id)
-    from scenario_data import get_scenario_display_name
     saves = await adb(db.list_adventure_saves, user_id)
     enriched_saves = []
     for s in saves:

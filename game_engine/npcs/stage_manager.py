@@ -1,14 +1,13 @@
 """Pre-turn stage management: Authoritative spatial and NPC presence resolution before LLM generation."""
 from __future__ import annotations
 from contextlib import nullcontext
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Tuple, Optional
 import json
 import logging
 import random
 import re
 
 import db
-import scenario_data
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
@@ -21,16 +20,7 @@ from mechanics.world.locations import (
     is_location_engine_enabled,
 )
 from mechanics.world.mobility import (
-    is_solo_travel_intent,
-    ACCOMPANIED_TRAVEL_PHRASES,
-    is_rendezvous_target,
     get_session_dialogue_partners,
-    is_dialogue_partner,
-)
-from mechanics.narrative.intent import (
-    classify_action_intent,
-    IntentCategory,
-    IntentContext,
 )
 from mechanics.social.persona.actor_card import derive_initial_micro_blocking
 from mechanics.social.relationships import safe_get_contacts
@@ -2778,7 +2768,6 @@ def update_stage_blocking_and_composure_post_turn(
 
     if session.get("id"):
         try:
-            import db
             db.update_session(session["id"], extra={"scene_stage_state": scene_stage_state})
         except Exception:
             pass
@@ -2905,12 +2894,8 @@ def resolve_post_turn_stage_delta(
                 pass
 
     from game_engine.npcs.presence import is_mentioned_only_in_absence_or_memory
-    from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
     from mechanics.world.mobility import (
         is_character_mobile,
-        has_active_physical_presence,
-        is_dialogue_partner,
-        is_rendezvous_target,
     )
 
     # 2. Structured Departures (dismisses_npc action tag; cast_events departures applied by CastPlanner)

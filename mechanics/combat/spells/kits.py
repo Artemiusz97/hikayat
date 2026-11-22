@@ -1,7 +1,6 @@
 from __future__ import annotations
-import random
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 from .registry import get_spell
 

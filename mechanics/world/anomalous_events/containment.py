@@ -3,37 +3,22 @@ from __future__ import annotations
 Combat & narrative anomaly containment resolution, agitated entity spawning,
 killed non-hostile fallout, and hostile incursion victory handling.
 """
-import hashlib
 import json
 import random
-import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import db
-import namegen
-import scenario_data
 from mechanics.world.anomaly_engine import (
-    ANOMALOUS_9_ELEMENTS,
-    NON_HOSTILE_TEMPERAMENT_TYPES,
     evaluate_taboo_interaction,
-    format_anomaly_dossier_summary,
-    generate_anomaly_blueprint,
     instantiate_enemy_from_blueprint,
     parse_blueprint_from_notes,
-    serialize_blueprint_note,
 )
 from mechanics.world.folklore_mechanics import (
-    build_dialogue_trap_choices,
-    build_offering_counter_rite_choice,
     consume_folklore_offering_item,
-    evaluate_dialogue_trap_response,
     evaluate_omen_paradox,
     find_matching_offering_in_inventory,
     get_enemy_tether_state,
-    get_public_anomaly_name,
-    has_active_dialogue_trap,
-    is_blueprint_disguised,
     seal_enemy_tether,
     unmask_blueprint_disguise,
 )

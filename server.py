@@ -68,39 +68,9 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import db
-import game_engine
-import skill_check
-import scenario_data
-import character_data as cd
-from services.turn_service import TurnService
-from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 
 from api.deps import (
-    ConnectionManager,
-    manager,
-    logger,
-    _serializable_action,
-    enrich_choices_with_odds,
-    enrich_session_party_members,
-    GuestAuthRequest,
-    DiscordAuthRequest,
-    CharacterCreateRequest,
-    CharacterSwitchRequest,
-    SpendStatPointRequest,
-    EquipRequest,
-    UnequipRequest,
-    ItemDropRequest,
-    ItemUseRequest,
-    JoinAdventureRequest,
-    StartAdventureRequest,
-    ActionRequest,
-    MerchantBuyRequest,
-    MerchantSellRequest,
-    PhoneMessageRequest,
-    SaveSlotRequest,
-    LoadSlotRequest,
-    SettingsUpdateRequest,
-    DebugUpdateRequest,
+    _serializable_action,  # static-check: ignore[unused-import]
 )
 from api import (
     auth_characters_router,

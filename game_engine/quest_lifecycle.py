@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 
 import db
 from db import adb
-import llm_client
 import namegen
 import scenario_data
 import skill_check

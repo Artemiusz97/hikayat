@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import Any
-import json
 import re
-import random
+import db
+import namegen
+import scenario_data
 import game_engine
 from game_engine.core import *
-from game_engine.core import _get_npc_name, _norm_dialogue_name
+from game_engine.core import _get_npc_name
 from game_engine.matching import matches_keyword_boundary
+from mechanics.world.locations import extract_movement_destination, get_zone_location_name, is_hub_location
 
 
 # ── Canonical dialogue stall verb registry (single source of truth for both npcs.py and turn.py)
@@ -77,7 +78,6 @@ def compute_scene_beat_linger_turns(
         for p in (active_partners or ((session or {}).get("dialogue_partners") or ([session["dialogue_partner"]] if (session or {}).get("dialogue_partner") else [])))
         if p
     ]
-    import namegen
     partner_tokens = set()
     for p in partners:
         partner_tokens.add(p)
@@ -269,7 +269,6 @@ def evaluate_and_tick_scene_tension_timer(
     if not isinstance(session, dict):
         return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
 
-    import scenario_data
     from mechanics.social.physical_state import is_erotic_intimate_contact
 
     scen_key = session.get("scenario") or "fantasy"
@@ -292,7 +291,6 @@ def evaluate_and_tick_scene_tension_timer(
         return {"timer": 0, "expired": False, "spawned_patrol_npc": None, "spawned_hostile_enemy": None, "stage_direction": ""}
 
     # Do not tick or spawn tension-timer enemies inside safe Hub locations or during peaceful 1-on-1 NPC dialogue
-    from mechanics.world.locations import is_hub_location
     from mechanics.world.mobility import get_session_dialogue_partners
     curr_loc_str = str(session.get("current_location") or "")
     if not access_gated and (is_hub_location(curr_loc_str) or bool(get_session_dialogue_partners(session))):
@@ -352,7 +350,6 @@ def evaluate_and_tick_scene_tension_timer(
             for n in curr_npcs
         )
         if not has_authority:
-            import namegen
             patrol_role = "Disciplinary Prefect" if "school" in str(scen_key).lower() else "Security Guard"
             patrol_name = namegen.generate_person_name(scenario=scen_key)
             spawned_patrol = {
@@ -428,7 +425,6 @@ def build_scene_escalation_and_consequence_directives(
 
 
     # 1. Ticking Clock & Scene Escalation Tracker (Combat / Hazard scenarios outside active intimacy)
-    import scenario_data
     from mechanics.social.physical_state import is_erotic_intimate_contact
     scen_key = (session.get("scenario") if isinstance(session, dict) else None) or "fantasy"
     phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or {}
@@ -876,8 +872,6 @@ def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None)
     if not npc_name or not actions:
         return False
 
-    import namegen
-    import re
     n_low = npc_name.lower().strip()
     given_token = namegen.get_given_name(npc_name).lower().strip()
     peer_pool = (session.get("current_npcs") or []) + (session.get("pre_turn_stage_npcs") or []) if isinstance(session, dict) else None
@@ -1022,7 +1016,6 @@ def evaluate_scene_attention_transition(
         sess_id = session.get("id")
         if sess_id:
             try:
-                import db
                 db_party = db.get_session_party_npcs(sess_id)
                 if any(is_dialogue_partner(npc_name, [p.get("name") if isinstance(p, dict) else str(p)]) for p in db_party):
                     return True
@@ -1042,7 +1035,6 @@ def evaluate_scene_attention_transition(
         sess_id = session.get("id")
         if sess_id:
             try:
-                import db
                 # Active Story Quest
                 sq = db.get_active_story_quest(sess_id)
                 if sq:
@@ -1073,7 +1065,6 @@ def evaluate_scene_attention_transition(
                     a_txt = str(a.get("label", "") if isinstance(a, dict) else a).strip()
                     if a_txt:
                         try:
-                            from mechanics.world.locations import extract_movement_destination, get_zone_location_name
                             curr_l = str(session.get("current_location") or "")
                             act_dest = extract_movement_destination(
                                 a_txt,

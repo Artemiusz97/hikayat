@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Dict, Any, List, Optional
+from typing import Optional
 import copy
 
 HANDEDNESS = ["1H", "2H", "Versatile"]

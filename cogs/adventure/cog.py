@@ -7,59 +7,37 @@ from .world_pulse_mixin import WorldPulseMixin
 import asyncio
 import json
 import logging
-import random
 import re
-import time
 import discord
-from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
 from discord import app_commands
 from discord.ext import commands
 logger = logging.getLogger("hikayat.adventure")
 import db
 from db import adb
 import game_engine
-from services.turn_service import TurnService
 import image_client
 from character_data import (
-    XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items, inventory_capacity
+    XP_REWARDS,
+    MAX_LEVEL,
 )
-from cogs.character import build_character_sheet_embed
-from db import STAT_COLUMN
-from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
+from scenario_data import resolve_scenario_key
 from cogs.scenario_picker import (
     ScenarioVariantSelectView, channel_allows_nsfw, hidden_nsfw_note, needs_variant_step,
 )
-from skill_check import resolve_check, success_chance, CheckResult
+from skill_check import CheckResult
 from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
     apply_merchant_encounter_result as _apply_merchant_encounter_result,
-    handle_talk_to_merchant as _handle_talk_to_merchant,
-    build_merchant_embed as _merchant_embed,
-    MerchantView,
-    MerchantVoteView,
-    BuySelectView,
-    SellSelectView,
-    RumorView,
 )
 from mechanics.social.races import normalize_race
 from mechanics.social.persona import normalize_appearance
-from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
-from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
-from mechanics.combat.items import parse_item_effect, apply_item_to_target
-import unicodedata
 
 from .embeds import (
-    MODE_LABELS, build_world_map_embed, prepare_discord_image, scene_embed, sync_scene_embed,
-    _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
-    _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
-    _build_main_quest_embed, _build_quest_log_embed,
-    _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
-    _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
-    _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,
-    _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int,
-    _scenario_command_choices, _strip_leading_emojis, _tracker_group_text,
-    _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value,
+    MODE_LABELS,
+    build_world_map_embed,
+    prepare_discord_image,
+    scene_embed,
+    sync_scene_embed,
+    _scenario_command_choices,
 )
 
 from .views import *
@@ -374,7 +352,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             settings["image_gen_enabled"])
         effective_result_display = settings.get("result_display", "detailed")
 
-        from scenario_data import resolve_scenario_or_custom_key, resolve_scenario_key, get_scenario
+        from scenario_data import resolve_scenario_or_custom_key, get_scenario
         scen_val = scenario.value if scenario else "fantasy"
         if scen_val == "custom":
             if not tags:
@@ -476,7 +454,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
     @start.autocomplete("tags")
     async def start_tags_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         from scenario_data import load_genres
-        import re
         try:
             genres_dict = load_genres()
         except Exception:
@@ -771,7 +748,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                     raw_hist = list(fresh_s.get("history") or [])
                     if raw_hist and isinstance(raw_hist[-1], dict):
                         raw_hist[-1]["scene_image_url"] = local_url
-                        import json
                         await adb(db.update_session, sid, history_json=json.dumps(raw_hist, default=str))
             return image_result
         except Exception as e:
@@ -822,7 +798,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
           3. Greedily select the highest-scoring sentences until max_chars.
           4. Re-join in original sentence order for readability.
         """
-        import re
         text = (text or "").strip()
         if len(text) <= max_chars:
             return text

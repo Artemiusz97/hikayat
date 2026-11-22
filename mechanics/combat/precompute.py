@@ -33,12 +33,9 @@ from .reconcile import cleanup_anomalous_combat_session_state
 from .sparring import resolve_sparring_defeat
 from .status_effects import apply_status_effect
 from .targeting import (
-    apply_boss_cc_stagger_surge,
-    arm_boss_telegraph,
+    arm_boss_telegraph,  # static-check: ignore[unused-import]
     check_boss_telegraph_interrupt,
-    compute_party_scaled_interrupt_threshold,
-    populate_enemy_hud_telemetry,
-    resolve_threat_target,
+    resolve_threat_target,  # static-check: ignore[unused-import]
     update_threat_on_action,
 )
 from .types import get_combatant_stat

@@ -884,7 +884,6 @@ def resolve_waypoint_target_npc(session_id: int, wp: dict) -> str:
         curr_npcs = session.get("current_npcs")
         if curr_npcs:
             if isinstance(curr_npcs, str):
-                import json
                 try:
                     curr_npcs = json.loads(curr_npcs)
                 except Exception:
@@ -1006,7 +1005,6 @@ def is_waypoint_npc_present_in_scene(
         curr_npcs = session.get("current_npcs")
         if curr_npcs:
             if isinstance(curr_npcs, str):
-                import json
                 try:
                     curr_npcs = json.loads(curr_npcs)
                 except Exception:
