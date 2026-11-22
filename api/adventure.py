@@ -121,7 +121,7 @@ async def _load_error_session_snapshot(session_id: int, user_id: int | None) -> 
         if not err_sess_row:
             return None
         eff_uid = user_id or err_sess_row.get("host_user_id")
-        err_sess = await adb(_enrich_session_for_client, err_sess_row, eff_uid)
+        err_sess = await adb(enrich_session_for_client, err_sess_row, eff_uid)
         if isinstance(err_sess, dict):
             err_sess["in_flight_turn"] = None
         return err_sess
@@ -181,7 +181,7 @@ def _sanitize_enemy_telegraph_view(e_view: dict) -> None:
         e_view["telegraphed_skill"] = sanitized_tel
 
 
-def _enrich_session_for_client(
+def enrich_session_for_client(
     session: dict,
     user_id: int,
     ui_lang: str | None = None,
@@ -236,6 +236,9 @@ def _enrich_session_for_client(
         except Exception:
             pass
     return enriched
+
+
+_enrich_session_for_client = enrich_session_for_client
 
 
 def _enrich_session_for_client_body(
@@ -1389,39 +1392,18 @@ async def get_session_image(session_id: int):
 
 
 
-def _fetch_open_lobbies() -> list[dict]:
-    with db.get_conn() as conn:
-        rows = conn.execute(
-            """SELECT id, mode, capacity, host_user_id, scenario, scene_title, current_location, status, created_at
-               FROM sessions
-               WHERE status IN ('waiting', 'active') AND (mode IN ('turn', 'sync', 'multi') OR capacity > 1)
-               ORDER BY updated_at DESC LIMIT 20"""
-        ).fetchall()
-        lobbies = []
-        for r in rows:
-            sid = r["id"]
-            members = db.get_session_members(sid)
-            host_char = db.get_character(r["host_user_id"])
-            lobbies.append({
-                "id": sid,
-                "mode": r["mode"],
-                "capacity": r["capacity"],
-                "member_count": len(members),
-                "host_user_id": r["host_user_id"],
-                "host_name": host_char["name"] if host_char else f"User {r['host_user_id']}",
-                "scenario": r["scenario"],
-                "scenario_display_name": get_scenario_display_name(r["scenario"]),
-                "scene_title": r["scene_title"] or get_scenario_display_name(r["scenario"]),
-                "current_location": r["current_location"] or "",
-                "status": r["status"],
-            })
-        return lobbies
-
-
 @router.get("/api/adventure/lobbies")
 async def list_open_lobbies():
     """Lists open multiplayer adventure sessions available to join."""
-    lobbies = await adb(_fetch_open_lobbies)
+    raw_lobbies = await adb(db.list_open_lobbies_with_members, 20)
+    lobbies = []
+    for row in raw_lobbies:
+        disp = get_scenario_display_name(row["scenario"])
+        lobbies.append({
+            **row,
+            "scenario_display_name": disp,
+            "scene_title": row.get("scene_title") or disp,
+        })
     return {"lobbies": lobbies}
 
 
@@ -1437,7 +1419,7 @@ async def get_character_sessions_endpoint(character_id: int, request: Request = 
     def _load_and_enrich_char_sessions() -> list[dict]:
         with db.ReadUnitOfWork():
             sessions = db.get_character_sessions(character_id)
-            return [_enrich_session_for_client(s, user_id, read_only=True) for s in sessions]
+            return [enrich_session_for_client(s, user_id, read_only=True) for s in sessions]
 
     enriched = await adb(_load_and_enrich_char_sessions)
     return {"sessions": enriched}
@@ -1472,7 +1454,7 @@ async def resume_session_endpoint(req: ResumeSessionRequest, request: Request = 
     except Exception:
         pass
 
-    enriched = await adb(_enrich_session_for_client, dict(session_row), canonical_id)
+    enriched = await adb(enrich_session_for_client, dict(session_row), canonical_id)
     return {"success": True, "session": enriched}
 
 
@@ -1488,7 +1470,7 @@ async def get_active_session(user_id: int, request: Request = None):
     if not session:
         return {"has_active_session": False, "session": None}
 
-    session = await adb(_enrich_session_for_client, session, user_id, read_only=True)
+    session = await adb(enrich_session_for_client, session, user_id, read_only=True)
 
     return {
         "has_active_session": True,
@@ -1580,7 +1562,7 @@ async def start_adventure(req: StartAdventureRequest, request: Request = None):
         scenario_key = start_result["scenario_key"]
         scene = start_result["scene"]
         updated_session = start_result["session"]
-        updated_session = await adb(_enrich_session_for_client, updated_session, req.user_id)
+        updated_session = await adb(enrich_session_for_client, updated_session, req.user_id)
 
         await manager.broadcast(session_id, {
             "type": "NEW_SCENE",
@@ -1628,36 +1610,12 @@ async def join_adventure(req: JoinAdventureRequest, request: Request = None):
         if not char:
             raise HTTPException(status_code=404, detail="Character not found. Create a character first.")
 
-        def _join_multiplayer_session_sync() -> dict:
-            with db.UnitOfWork() as conn:
-                s_cur = db.get_session(session_id)
-                if not s_cur or s_cur.get("status") not in ("waiting", "active"):
-                    raise HTTPException(status_code=404, detail="Active adventure session not found with that invite code.")
-                cur_members = list(db.get_session_members(session_id) or [])
-                turn_order = [int(u) for u in (s_cur.get("turn_order") or []) if u is not None]
-                participants = {int(u) for u in cur_members} | set(turn_order)
-                if s_cur.get("host_user_id") is not None:
-                    participants.add(int(s_cur["host_user_id"]))
-                cap = max(1, int(s_cur.get("capacity") or 1))
-                if int(canonical_id) not in participants and len(participants) >= cap:
-                    raise HTTPException(status_code=400, detail="This adventure session is already full.")
-                db.add_session_member(session_id, canonical_id)
-                if int(canonical_id) not in turn_order:
-                    turn_order.append(int(canonical_id))
-                new_status = (
-                    "active"
-                    if s_cur.get("status") == "active" or len(turn_order) >= cap
-                    else "waiting"
-                )
-                conn.execute(
-                    "UPDATE sessions SET turn_order=?, status=?, updated_at=? WHERE id=?",
-                    (json.dumps(turn_order), new_status, time.time(), session_id),
-                )
-                db.set_character_active_session(char["id"], session_id)
-                return db.get_session(session_id)
-
-        session_fresh = await adb(_join_multiplayer_session_sync)
-        session = await adb(_enrich_session_for_client, dict(session_fresh), canonical_id)
+        session_fresh, join_err = await adb(db.join_multiplayer_session, session_id, canonical_id, char["id"])
+        if join_err == "not_found":
+            raise HTTPException(status_code=404, detail="Active adventure session not found with that invite code.")
+        if join_err == "full":
+            raise HTTPException(status_code=400, detail="This adventure session is already full.")
+        session = await adb(enrich_session_for_client, dict(session_fresh), canonical_id)
 
     return {"success": True, "session": session}
 
@@ -1982,7 +1940,7 @@ async def _execute_action_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         fresh_session = await adb(db.get_session, req.session_id)
-        fresh_session = await adb(_enrich_session_for_client, fresh_session, req.user_id)
+        fresh_session = await adb(enrich_session_for_client, fresh_session, req.user_id)
         if isinstance(fresh_session, dict):
             fresh_session["in_flight_turn"] = None
 
@@ -2107,7 +2065,7 @@ async def execute_action(req: ActionRequest, request: Request = None):
                     try:
                         fresh = await adb(db.get_session, req.session_id)
                         if fresh:
-                            fresh = await adb(_enrich_session_for_client, fresh, req.user_id)
+                            fresh = await adb(enrich_session_for_client, fresh, req.user_id)
                             if isinstance(fresh, dict):
                                 fresh["in_flight_turn"] = None
                         await manager.broadcast(req.session_id, {
@@ -2204,7 +2162,7 @@ async def toggle_adventure_stealth(req: ToggleStealthRequest, request: Request =
         except Exception:
             pass
         fresh = await adb(db.get_session, req.session_id)
-        fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
+        fresh = await adb(enrich_session_for_client, dict(fresh), req.user_id)
 
         projected_st = project_stealth_state_for_user(session, req.user_id)
         badge_data = get_alert_badge_data(
@@ -2247,7 +2205,7 @@ async def toggle_adventure_non_lethal(req: ToggleNonLethalRequest, request: Requ
         new_val = req.active if req.active is not None else not cur_val
         await adb(db.update_session, req.session_id, extra={"non_lethal_mode": new_val})
         fresh = await adb(db.get_session, req.session_id)
-        fresh = await adb(_enrich_session_for_client, dict(fresh), req.user_id)
+        fresh = await adb(enrich_session_for_client, dict(fresh), req.user_id)
 
         await manager.broadcast(req.session_id, {
             "type": "SESSION_UPDATED",
@@ -2398,7 +2356,7 @@ async def _execute_retry_narration_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         updated_session = await adb(db.get_session, req.session_id)
-        enriched_session = await adb(_enrich_session_for_client, updated_session, eff_uid)
+        enriched_session = await adb(enrich_session_for_client, updated_session, eff_uid)
         if isinstance(enriched_session, dict):
             enriched_session["in_flight_turn"] = None
 
@@ -2564,7 +2522,7 @@ async def _execute_opening_retry_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         updated_session = await adb(db.get_session, req.session_id)
-        enriched_session = await adb(_enrich_session_for_client, updated_session, eff_uid)
+        enriched_session = await adb(enrich_session_for_client, updated_session, eff_uid)
         if isinstance(enriched_session, dict):
             enriched_session["in_flight_turn"] = None
 
@@ -2677,7 +2635,7 @@ async def retry_adventure_scene(req: RetryAdventureRequest, request: Request = N
                     try:
                         fresh = await adb(db.get_session, req.session_id)
                         if fresh:
-                            fresh = await adb(_enrich_session_for_client, fresh, eff_uid)
+                            fresh = await adb(enrich_session_for_client, fresh, eff_uid)
                             if isinstance(fresh, dict):
                                 fresh["in_flight_turn"] = None
                         await manager.broadcast(req.session_id, {
@@ -2743,7 +2701,7 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
 
     fresh_session = await adb(db.get_session, req.session_id)
     enriched_session = (
-        await adb(_enrich_session_for_client, fresh_session, eff_uid)
+        await adb(enrich_session_for_client, fresh_session, eff_uid)
         if fresh_session
         else None
     )
@@ -2840,7 +2798,7 @@ async def load_slot(req: LoadSlotRequest, request: Request = None):
         pass
     updated_session = await adb(db.get_session, session_id) if session_id else res
     if updated_session:
-        updated_session = await adb(_enrich_session_for_client, updated_session, req.user_id)
+        updated_session = await adb(enrich_session_for_client, updated_session, req.user_id)
         await manager.broadcast(session_id, {
             "type": "NEW_SCENE",
             "session": updated_session,

@@ -15,13 +15,12 @@ Implements:
   never serializes `player_aware == 0` gossip hops.
 """
 
-from contextlib import nullcontext
 import json
 import sqlite3
 import time
 from typing import Any, Literal, Mapping, Sequence
 
-from .core import get_conn
+from .core import _conn_ctx, _opt_int
 
 MAX_TURN_SNAPSHOTS = 10
 
@@ -83,10 +82,6 @@ EPISTEMIC_V55_DDL: tuple[str, ...] = (
 )
 
 
-def _conn_ctx(conn: sqlite3.Connection | None):
-    return nullcontext(conn) if conn is not None else get_conn()
-
-
 def _ensure_epistemic_tables(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
     def _check(c: sqlite3.Connection) -> None:
@@ -103,15 +98,6 @@ def _ensure_epistemic_tables(conn: sqlite3.Connection) -> None:
 
     from .core import ensure_table_group_once
     ensure_table_group_once(conn, "epistemic_v55", _check)
-
-
-def _opt_int(val: Any) -> int | None:
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
 
 
 def _parse_json_dict(raw: Any) -> dict[str, Any]:

@@ -4,13 +4,14 @@ import json
 import logging
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import WebSocket
+from fastapi import HTTPException, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 import db
 from db import adb
 import skill_check
 import character_data as cd
+from services.crash_capture import to_json_safe as _crash_to_json_safe
 
 logger = logging.getLogger("hikayat-server")
 
@@ -144,30 +145,19 @@ _JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_sn
 
 
 def _to_json_safe(val, _seen: set[int] | None = None):
-    if val is None or isinstance(val, (str, int, float, bool)):
-        return val
-    if _seen is None:
-        _seen = set()
-    val_id = id(val)
-    if val_id in _seen:
-        return None
-    _seen.add(val_id)
-    try:
-        if hasattr(val, "model_dump") and callable(val.model_dump) and not isinstance(val, type):
-            return _to_json_safe(val.model_dump(), _seen)
-        if isinstance(val, dict):
-            return {
-                str(k): _to_json_safe(v, _seen)
-                for k, v in val.items()
-                if str(k) not in _JSON_SAFE_TRANSIENT_KEYS and not str(k).startswith("__")
-            }
-        if isinstance(val, (list, tuple, set, frozenset)):
-            return [_to_json_safe(v, _seen) for v in val]
-        if hasattr(val, "__dict__") and not isinstance(val, type):
-            return _to_json_safe(vars(val), _seen)
-        return val
-    finally:
-        _seen.discard(val_id)
+    return _crash_to_json_safe(
+        val,
+        _seen,
+        transient_keys=_JSON_SAFE_TRANSIENT_KEYS,
+        sanitize_paths=False,
+        stringify_unknown=False,
+    )
+
+
+def require_active_session(session: Optional[Dict[str, Any]]) -> None:
+    """Raise HTTP 400 if the adventure session is missing or no longer active."""
+    if not session or str(session.get("status") or "active").strip().lower() != "active":
+        raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
 
 
 def _serializable_action(action: dict) -> dict:
@@ -263,85 +253,12 @@ def _parse_status_effects_list(raw_val: Any) -> List[Any]:
     return list(raw_val) if isinstance(raw_val, (tuple, set)) else []
 
 
-def _hydrate_party_char_row(
-    row: Any,
-    settings_by_uid: Dict[int, Dict[str, Any]],
-    *,
-    session_id: Optional[int] = None,
-) -> Tuple[int, Dict[str, Any]]:
-    u_key = int(row["user_id"])
-    raw_eff = row["status_effects"] if "status_effects" in row.keys() else None
-    hydrated = db._apply_debug_stat_override(
-        dict(row),
-        settings=settings_by_uid.get(u_key, {}),
-        session_id=session_id,
-    )
-    hydrated["status_effects"] = _parse_status_effects_list(raw_eff)
-    return u_key, hydrated
-
-
 def _batch_load_party_characters(
     missing_uids: List[int],
     *,
     session_id: Optional[int] = None,
 ) -> Dict[int, Dict[str, Any]]:
-    loaded: Dict[int, Dict[str, Any]] = {}
-    req_to_canon = {int(u): int(db.resolve_canonical_user_id(int(u))) for u in missing_uids}
-    canon_uids = list(dict.fromkeys(req_to_canon.values()))
-    uids_json = json.dumps(canon_uids)
-    try:
-        with db.get_conn() as conn:
-            sess_char_id = -1
-            if session_id is not None:
-                s_row = conn.execute(
-                    "SELECT character_id FROM sessions WHERE id = ?",
-                    (int(session_id),),
-                ).fetchone()
-                if s_row and s_row["character_id"] is not None:
-                    sess_char_id = int(s_row["character_id"])
-            eff_sid = int(session_id) if session_id else -1
-            rows = conn.execute(
-                """SELECT * FROM characters
-                   WHERE user_id IN (SELECT value FROM json_each(?))
-                     AND (
-                         id = ?
-                         OR (? > 0 AND active_session_id = ?)
-                         OR is_active = 1
-                     )
-                   ORDER BY
-                       CASE
-                           WHEN id = ? THEN 0
-                           WHEN (? > 0 AND active_session_id = ?) THEN 1
-                           WHEN is_active = 1 THEN 2
-                           ELSE 3
-                       END ASC,
-                       is_active DESC,
-                       id DESC""",
-                (uids_json, sess_char_id, eff_sid, eff_sid, sess_char_id, eff_sid, eff_sid),
-            ).fetchall()
-            s_rows = conn.execute(
-                "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
-                (uids_json,),
-            ).fetchall()
-        settings_by_uid = {
-            int(sr["user_id"]): dict(sr)
-            for sr in s_rows
-            if sr and sr["user_id"] is not None
-        }
-        best_by_canon: Dict[int, Any] = {}
-        for r in rows:
-            cu = int(r["user_id"])
-            if cu not in best_by_canon:
-                best_by_canon[cu] = r
-        for req_uid, canon_uid in req_to_canon.items():
-            chosen = best_by_canon.get(canon_uid)
-            if chosen is not None:
-                _, hydrated = _hydrate_party_char_row(chosen, settings_by_uid, session_id=session_id)
-                loaded[req_uid] = hydrated
-        return loaded
-    except Exception as exc:
-        logger.debug("Batch party character preload fallback: %s", exc)
-        return {}
+    return db.batch_load_party_characters(missing_uids, session_id=session_id)
 
 
 def _format_party_member_entry(

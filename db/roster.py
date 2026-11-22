@@ -8,14 +8,13 @@ tracking, promotion to `contacts`, and atomic turn rollback parity. Legacy roste
 adaptation is delegated to `db.roster_adapters`.
 """
 
-from contextlib import nullcontext
 import json
 import sqlite3
 import time
 from typing import Any, Callable
 
 import db
-from .core import UnitOfWork, ensure_table_group_once, get_conn
+from .core import UnitOfWork, _conn_ctx, _opt_int, ensure_table_group_once
 from .roster_adapters import (
     ALLOWED_ROSTER_ORIGINS,
     ALLOWED_ROSTER_TIERS,
@@ -74,10 +73,6 @@ WORLD_ROSTER_V54_DDL: tuple[str, ...] = (
 )
 
 
-def _conn_ctx(conn: sqlite3.Connection | None):
-    return nullcontext(conn) if conn is not None else get_conn()
-
-
 def _ensure_world_roster_table(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
     def _create_if_missing(c: sqlite3.Connection) -> None:
@@ -87,15 +82,6 @@ def _ensure_world_roster_table(conn: sqlite3.Connection) -> None:
             c.execute(sql)
 
     ensure_table_group_once(conn, "world_roster_v54", _create_if_missing)
-
-
-def _opt_int(val: Any) -> int | None:
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
 
 
 def _merge_discovered_slots(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, dict[str, str]]:

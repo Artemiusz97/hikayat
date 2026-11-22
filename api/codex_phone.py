@@ -238,9 +238,9 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         removed = await adb(db.remove_session_party_npc, req.session_id, npc_name)
         if not removed:
             raise HTTPException(status_code=404, detail=f"{npc_name} is not currently in your party")
-        from .adventure import _enrich_session_for_client
+        from .adventure import enrich_session_for_client
         updated_sess = await adb(db.get_session, req.session_id) or {}
-        enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+        enriched_sess = await adb(enrich_session_for_client, updated_sess, req.user_id)
         party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
         return {
             "success": True,
@@ -415,7 +415,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         appearance=c_app if isinstance(c_app, dict) else None,
     )
 
-    from .adventure import _enrich_session_for_client
+    from .adventure import enrich_session_for_client
     try:
         from mechanics.world.world_events.social_hooks import handle_mid_rumor_npc_promotion
         await adb(handle_mid_rumor_npc_promotion, req.session_id, npc_name=npc_payload["name"])
@@ -434,7 +434,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         )
     except Exception:
         pass
-    enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+    enriched_sess = await adb(enrich_session_for_client, updated_sess, req.user_id)
     party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
     return {
         "success": True,
@@ -972,11 +972,7 @@ def _preload_fog_of_war_context(
         except (sqlite3.Error, AttributeError, TypeError, ValueError):
             primary_property = None
         try:
-            with db.get_conn() as conn_ties:
-                t_rows = conn_ties.execute(
-                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
-                    (sid,),
-                ).fetchall()
+            t_rows = db.get_session_active_social_ties(sid)
             for tr in t_rows:
                 td = dict(tr)
                 pa = str(td.get("person_a_key") or "").strip().lower()

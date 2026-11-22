@@ -860,22 +860,7 @@ async def delete_character_endpoint(user_id: int, character_id: int, request: Re
     """Deletes a specific character by character_id and returns updated character roster."""
     canonical_id = await adb(db.resolve_canonical_user_id, user_id)
 
-    def _collect_char_session_ids() -> list[int]:
-        with db.get_conn() as conn:
-            c_row = conn.execute(
-                "SELECT active_session_id FROM characters WHERE id=? AND user_id=?",
-                (int(character_id), int(canonical_id)),
-            ).fetchone()
-            s_rows = conn.execute(
-                "SELECT id FROM sessions WHERE character_id=?",
-                (int(character_id),),
-            ).fetchall()
-            sids = {int(r["id"]) for r in s_rows if r and r["id"]}
-            if c_row and c_row["active_session_id"]:
-                sids.add(int(c_row["active_session_id"]))
-            return sorted(sids)
-
-    lock_sids = await adb(_collect_char_session_ids)
+    lock_sids = await adb(db.get_character_session_ids, character_id, canonical_id)
     async with distributed_adventure_lock(canonical_id, lock_sids):
         deleted = await adb(db.delete_character_by_id, canonical_id, character_id)
     if not deleted:

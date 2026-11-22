@@ -405,15 +405,17 @@ def ensure_story_quest_exists(session: dict) -> dict | None:
                     clues_required=sq.get("clues_required") or len(sq_sub),
                     sub_objectives=sq_sub
                 )
-                with db.get_conn() as conn:
-                    wp_rows = conn.execute("SELECT id, target_location, stage_label FROM quest_waypoints WHERE session_id=? AND quest_id=?", (session_id, sq["quest_id"])).fetchall()
-                    for wp_r in wp_rows:
-                        tl = wp_r["target_location"] or ""
-                        sl = wp_r["stage_label"] or ""
-                        tl_f = resolve_session_location_tokens(session_id, tl, scen_key)
-                        sl_f = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, sl, scen_key))
-                        if tl_f != tl or sl_f != sl:
-                            conn.execute("UPDATE quest_waypoints SET target_location=?, stage_label=? WHERE id=?", (tl_f, sl_f, wp_r["id"]))
+                wp_rows = db.get_quest_waypoint_labels(session_id, sq["quest_id"])
+                wp_updates: list[tuple[str, str, int]] = []
+                for wp_r in wp_rows:
+                    tl = wp_r["target_location"] or ""
+                    sl = wp_r["stage_label"] or ""
+                    tl_f = resolve_session_location_tokens(session_id, tl, scen_key)
+                    sl_f = clean_narrative_location_arrows(resolve_session_location_tokens(session_id, sl, scen_key))
+                    if tl_f != tl or sl_f != sl:
+                        wp_updates.append((tl_f, sl_f, wp_r["id"]))
+                if wp_updates:
+                    db.batch_update_quest_waypoint_labels(wp_updates)
                 sq = db.get_active_story_quest(session_id)
             try:
                 from game_engine.quest_lifecycle import compile_campaign_spine_at_turn_zero

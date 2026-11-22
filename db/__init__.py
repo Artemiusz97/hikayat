@@ -49,7 +49,11 @@ from .dossiers import (
     upsert_quest_dossier,
     user_has_folklore_recognition,
 )
-from .sessions import get_session_characters
+from .sessions import (
+    get_session_characters,
+    join_multiplayer_session,
+    list_open_lobbies_with_members,
+)
 from .inventory import (
     atomic_merchant_purchase,
     get_inventories_for_characters,
@@ -134,11 +138,21 @@ PURE_IN_MEMORY_DB_HELPERS: frozenset[str] = frozenset({
     "get_snapshot_prune_specs",
     "get_simple_rollback_specs",
 })
-from .characters import _apply_debug_stat_override, delete_character_by_id, get_character_3axis, set_character_3axis
+from .characters import (
+    _apply_debug_stat_override,
+    batch_load_party_characters,
+    delete_character_by_id,
+    get_character_3axis,
+    get_character_session_ids,
+    get_raw_character_stats,
+    set_character_3axis,
+)
 from .quests import (
     _enrich_quest_dict,
+    batch_update_quest_waypoint_labels,
     compute_quest_main_progress_ratio,
     get_minimal_story_quest,
+    get_quest_waypoint_labels,
     get_quest_waypoint_target_location,
     is_quest_main_objectives_complete,
     reconcile_structured_quest_split_brain,
@@ -152,6 +166,7 @@ from .social import (
     _parse_faction_row,
     delete_contact,
     get_school_directory_batch,
+    get_session_active_social_ties,
     rollback_actor_physical_state_after_turn,
     snapshot_session_physical_state_for_turn,
 )

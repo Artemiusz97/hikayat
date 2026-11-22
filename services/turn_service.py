@@ -254,15 +254,7 @@ class TurnService:
             and any(v is not None for v in stats_override.values())
             and str(user_settings.get("debug_stat_mode") or "off").lower() == "off"
         ):
-            def _fetch_raw_char_stats(cid: int) -> dict:
-                with db.get_conn() as conn:
-                    r = conn.execute(
-                        "SELECT str_, per_, end_, cha, int_, agi, luk FROM characters WHERE id=?",
-                        (int(cid),),
-                    ).fetchone()
-                    return dict(r) if r else {}
-
-            raw_stats_row = await adb(_fetch_raw_char_stats, char["id"])
+            raw_stats_row = await adb(db.get_raw_character_stats, char["id"])
             raw_defaults = {
                 "str": int(raw_stats_row.get("str_") or cd.BASE_STAT_VALUE),
                 "per": int(raw_stats_row.get("per_") or cd.BASE_STAT_VALUE),

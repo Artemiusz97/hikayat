@@ -7,7 +7,7 @@ import random
 import re
 import sqlite3
 from .core import *
-from .core import _find_anomalous_agent_entry
+from .core import _find_anomalous_agent_entry, _restore_session_table_rows
 
 def get_recruitment_cooldown(session_id: int, npc_name: str) -> int:
     with get_conn() as conn:
@@ -3803,32 +3803,11 @@ def get_phone_daily_limits(session_id: int, npc_id: str, current_day: int) -> di
         ).fetchone()
         has_active_appt = bool(appt_row)
 
-        try:
-            rows = conn.execute(
-                "SELECT intent, attempt_count, success_count, over_limit_count, last_outcome, metadata_json "
-                "FROM phone_daily_interactions WHERE session_id=? AND npc_id=? AND current_day=?",
-                (session_id, clean_npc_id, int(current_day))
-            ).fetchall()
-        except sqlite3.OperationalError as e:
-            if "no such table: phone_daily_interactions" in str(e).lower():
-                conn.execute("""CREATE TABLE IF NOT EXISTS phone_daily_interactions (
-                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id          INTEGER NOT NULL,
-                    npc_id              TEXT NOT NULL,
-                    current_day         INTEGER NOT NULL,
-                    intent              TEXT NOT NULL,
-                    attempt_count       INTEGER DEFAULT 0,
-                    success_count       INTEGER DEFAULT 0,
-                    over_limit_count    INTEGER DEFAULT 0,
-                    last_outcome        TEXT DEFAULT '',
-                    metadata_json       TEXT DEFAULT '{}',
-                    updated_at          REAL NOT NULL,
-                    UNIQUE(session_id, npc_id, current_day, intent)
-                )""")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day)")
-                rows = []
-            else:
-                raise
+        rows = conn.execute(
+            "SELECT intent, attempt_count, success_count, over_limit_count, last_outcome, metadata_json "
+            "FROM phone_daily_interactions WHERE session_id=? AND npc_id=? AND current_day=?",
+            (session_id, clean_npc_id, int(current_day))
+        ).fetchall()
 
         for r in rows:
             intent = r["intent"]
@@ -3907,32 +3886,11 @@ def record_phone_daily_interaction(session_id: int, npc_id: str, current_day: in
         norm_intent = "chat"
 
     with get_conn() as conn:
-        try:
-            row = conn.execute(
-                "SELECT attempt_count, success_count, over_limit_count, metadata_json FROM phone_daily_interactions "
-                "WHERE session_id=? AND npc_id=? AND current_day=? AND intent=?",
-                (session_id, clean_npc_id, int(current_day), norm_intent)
-            ).fetchone()
-        except sqlite3.OperationalError as e:
-            if "no such table: phone_daily_interactions" in str(e).lower():
-                conn.execute("""CREATE TABLE IF NOT EXISTS phone_daily_interactions (
-                    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id          INTEGER NOT NULL,
-                    npc_id              TEXT NOT NULL,
-                    current_day         INTEGER NOT NULL,
-                    intent              TEXT NOT NULL,
-                    attempt_count       INTEGER DEFAULT 0,
-                    success_count       INTEGER DEFAULT 0,
-                    over_limit_count    INTEGER DEFAULT 0,
-                    last_outcome        TEXT DEFAULT '',
-                    metadata_json       TEXT DEFAULT '{}',
-                    updated_at          REAL NOT NULL,
-                    UNIQUE(session_id, npc_id, current_day, intent)
-                )""")
-                conn.execute("CREATE INDEX IF NOT EXISTS idx_phone_daily_lookup ON phone_daily_interactions(session_id, npc_id, current_day)")
-                row = None
-            else:
-                raise
+        row = conn.execute(
+            "SELECT attempt_count, success_count, over_limit_count, metadata_json FROM phone_daily_interactions "
+            "WHERE session_id=? AND npc_id=? AND current_day=? AND intent=?",
+            (session_id, clean_npc_id, int(current_day), norm_intent)
+        ).fetchone()
 
         now = time.time()
         succeeded = outcome in ("success", "crit_success")
@@ -4176,15 +4134,6 @@ def rollback_actor_physical_state_after_turn(
         except Exception:
             room_meta = {}
 
-        state_cols = {
-            r["name"] if isinstance(r, sqlite3.Row) else r[1]
-            for r in c.execute("PRAGMA table_info(actor_physical_states)").fetchall()
-        }
-        garment_cols = {
-            r["name"] if isinstance(r, sqlite3.Row) else r[1]
-            for r in c.execute("PRAGMA table_info(actor_garments)").fetchall()
-        }
-
         c.execute("DELETE FROM actor_physical_states WHERE session_id = ?", (sid,))
         c.execute("DELETE FROM actor_garments WHERE session_id = ?", (sid,))
         c.execute(
@@ -4192,39 +4141,8 @@ def rollback_actor_physical_state_after_turn(
             (json.dumps(room_meta, default=str), sid),
         )
 
-        restored_states = 0
-        for st in (states if isinstance(states, list) else []):
-            if not isinstance(st, dict):
-                continue
-            row_dict = {
-                k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
-                for k, v in st.items()
-                if k in state_cols and k not in ("id", "session_id")
-            }
-            if not row_dict:
-                continue
-            row_dict["session_id"] = sid
-            cols_sql = ",".join(row_dict.keys())
-            qmarks = ",".join("?" * len(row_dict))
-            c.execute(f"INSERT INTO actor_physical_states ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
-            restored_states += 1
-
-        restored_garments = 0
-        for gm in (garments if isinstance(garments, list) else []):
-            if not isinstance(gm, dict):
-                continue
-            row_dict = {
-                k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
-                for k, v in gm.items()
-                if k in garment_cols and k not in ("id", "session_id")
-            }
-            if not row_dict:
-                continue
-            row_dict["session_id"] = sid
-            cols_sql = ",".join(row_dict.keys())
-            qmarks = ",".join("?" * len(row_dict))
-            c.execute(f"INSERT INTO actor_garments ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
-            restored_garments += 1
+        restored_states = _restore_session_table_rows(c, "actor_physical_states", sid, states)
+        restored_garments = _restore_session_table_rows(c, "actor_garments", sid, garments)
 
         return {
             "physical_actors_restored": restored_states,
@@ -4251,6 +4169,18 @@ def get_school_directory_batch(session_id: int) -> dict[str, dict]:
             if r["name"]:
                 result[str(r["name"]).strip().lower()] = dict(r)
     return result
+
+
+def get_session_active_social_ties(session_id: int) -> list[dict[str, Any]]:
+    """Fetch active social_ties rows for a session ordered newest-updated first."""
+    if not session_id:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
+            (int(session_id),),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 

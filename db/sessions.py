@@ -1520,3 +1520,88 @@ def get_session_characters(session_id: int | dict) -> list[dict]:
     return out
 
 
+def list_open_lobbies_with_members(limit: int = 20) -> list[dict[str, Any]]:
+    """Return open multiplayer lobbies with batched member counts and host names."""
+    lim = max(1, int(limit or 20))
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, mode, capacity, host_user_id, scenario, scene_title, current_location, status, created_at
+               FROM sessions
+               WHERE status IN ('waiting', 'active') AND (mode IN ('turn', 'sync', 'multi') OR capacity > 1)
+               ORDER BY updated_at DESC LIMIT ?""",
+            (lim,),
+        ).fetchall()
+        if not rows:
+            return []
+        sids = [int(r["id"]) for r in rows]
+        host_uids = list(dict.fromkeys(int(r["host_user_id"]) for r in rows if r["host_user_id"] is not None))
+        member_counts: dict[int, int] = {}
+        for mr in conn.execute(
+            "SELECT session_id, COUNT(*) AS cnt FROM session_members WHERE session_id IN (SELECT value FROM json_each(?)) GROUP BY session_id",
+            (json.dumps(sids),),
+        ).fetchall():
+            member_counts[int(mr["session_id"])] = int(mr["cnt"] or 0)
+        host_names: dict[int, str] = {}
+        if host_uids:
+            for hr in conn.execute(
+                """SELECT user_id, name FROM characters
+                   WHERE user_id IN (SELECT value FROM json_each(?))
+                   ORDER BY is_active DESC, id DESC""",
+                (json.dumps(host_uids),),
+            ).fetchall():
+                u = int(hr["user_id"])
+                if u not in host_names and hr["name"]:
+                    host_names[u] = str(hr["name"])
+        lobbies: list[dict[str, Any]] = []
+        for r in rows:
+            sid = int(r["id"])
+            h_uid = int(r["host_user_id"]) if r["host_user_id"] is not None else 0
+            lobbies.append({
+                "id": sid,
+                "mode": r["mode"],
+                "capacity": r["capacity"],
+                "member_count": member_counts.get(sid, 0),
+                "host_user_id": r["host_user_id"],
+                "host_name": host_names.get(h_uid) or f"User {r['host_user_id']}",
+                "scenario": r["scenario"],
+                "scene_title": r["scene_title"] or "",
+                "current_location": r["current_location"] or "",
+                "status": r["status"],
+            })
+        return lobbies
+
+
+def join_multiplayer_session(
+    session_id: int,
+    user_id: int,
+    char_id: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Atomically join an active/waiting multiplayer session inside one UnitOfWork."""
+    with UnitOfWork() as conn:
+        s_cur = get_session(session_id)
+        if not s_cur or s_cur.get("status") not in ("waiting", "active"):
+            return None, "not_found"
+        cur_members = list(get_session_members(session_id) or [])
+        turn_order = [int(u) for u in (s_cur.get("turn_order") or []) if u is not None]
+        participants = {int(u) for u in cur_members} | set(turn_order)
+        if s_cur.get("host_user_id") is not None:
+            participants.add(int(s_cur["host_user_id"]))
+        cap = max(1, int(s_cur.get("capacity") or 1))
+        if int(user_id) not in participants and len(participants) >= cap:
+            return None, "full"
+        add_session_member(session_id, int(user_id))
+        if int(user_id) not in turn_order:
+            turn_order.append(int(user_id))
+        new_status = (
+            "active"
+            if s_cur.get("status") == "active" or len(turn_order) >= cap
+            else "waiting"
+        )
+        conn.execute(
+            "UPDATE sessions SET turn_order=?, status=?, updated_at=? WHERE id=?",
+            (json.dumps(turn_order), new_status, time.time(), int(session_id)),
+        )
+        db.set_character_active_session(int(char_id), int(session_id))
+        return get_session(session_id), None
+
+

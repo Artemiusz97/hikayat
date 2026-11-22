@@ -254,7 +254,6 @@ def append_chapter_digest(
     turn_start: int,
     turn_end: int,
     bullets: list[str],
-    embeddings: list[list[float]] = None,  # Deprecated post-Migration 37 compatibility shim (ignored)
     entities: list[str] | None = None,
     location_tag: str = "",
     quest_ids: list[str] | None = None,
@@ -728,7 +727,7 @@ def get_chapter_digest(session_id: int) -> list[str]:
         return []
 
 
-def search_chapter_digests(session_id: int, query_text: str, limit: int = 6, query_embedding: list[float] = None) -> list[str]:
+def search_chapter_digests(session_id: int, query_text: str, limit: int = 6) -> list[str]:
     """Search chapter digest bullets using 5-language + CJK bigram FTS5 BM25 matching."""
     from mechanics.system.memory.tokenization import sanitize_fts_query
 
@@ -849,7 +848,6 @@ def format_digest_prompt_block(
     query_context: str = "",
     max_recent: int = 6,
     max_relevant: int = 6,
-    query_embedding: list[float] = None,
     present_npcs: list[str] | None = None,
     current_location: str = "",
     active_quest_ids: list[str] | None = None,

@@ -23,11 +23,7 @@ from mechanics.world.locations.realty_catalog import (
     resolve_starter_quarters_spec,
 )
 
-from .core import UnitOfWork, get_conn
-
-
-def _conn_ctx(conn: sqlite3.Connection | None):
-    return nullcontext(conn) if conn is not None else get_conn()
+from .core import UnitOfWork, _conn_ctx
 
 
 def _uow_ctx(conn: sqlite3.Connection | None):

@@ -2532,3 +2532,25 @@ def expire_quest_and_waypoints(
     )
 
 
+def get_quest_waypoint_labels(session_id: int, quest_id: str) -> list[dict[str, Any]]:
+    """Fetch id, target_location, and stage_label rows for a quest's waypoints."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, target_location, stage_label FROM quest_waypoints WHERE session_id=? AND quest_id=?",
+            (int(session_id), str(quest_id)),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def batch_update_quest_waypoint_labels(updates: list[tuple[str, str, int]]) -> int:
+    """Batch-update target_location and stage_label for quest_waypoints rows inside one transaction."""
+    if not updates:
+        return 0
+    with UnitOfWork() as conn:
+        conn.executemany(
+            "UPDATE quest_waypoints SET target_location=?, stage_label=? WHERE id=?",
+            [(str(tl), str(sl), int(wid)) for tl, sl, wid in updates],
+        )
+    return len(updates)
+
+

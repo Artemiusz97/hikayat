@@ -16,7 +16,7 @@ import time
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import db
-from .core import UnitOfWork, get_conn
+from .core import UnitOfWork, _restore_session_table_rows, get_conn
 
 log = logging.getLogger(__name__)
 
@@ -1341,36 +1341,8 @@ def rollback_entity_contracts_after_turn(
         grudges_restored = 0
 
         if snap_row is not None:
-            def _restore(tbl: str, raw_json: str) -> int:
-                try:
-                    items = json.loads(raw_json or "[]")
-                except Exception:
-                    items = []
-                valid_cols = {
-                    r["name"] if isinstance(r, sqlite3.Row) else r[1]
-                    for r in c.execute(f"PRAGMA table_info({tbl})").fetchall()
-                }
-                c.execute(f"DELETE FROM {tbl} WHERE session_id = ?", (sid,))
-                cnt = 0
-                for item in (items if isinstance(items, list) else []):
-                    if not isinstance(item, dict):
-                        continue
-                    rd = {
-                        k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
-                        for k, v in item.items()
-                        if k in valid_cols and k not in ("id", "session_id")
-                    }
-                    if not rd:
-                        continue
-                    rd["session_id"] = sid
-                    cols_sql = ",".join(rd.keys())
-                    qmarks = ",".join("?" * len(rd))
-                    c.execute(f"INSERT INTO {tbl} ({cols_sql}) VALUES ({qmarks})", list(rd.values()))
-                    cnt += 1
-                return cnt
-
-            contracts_restored = _restore("session_entity_contracts", snap_row["contracts_json"])
-            grudges_restored = _restore("session_contract_grudges", snap_row["grudges_json"])
+            contracts_restored = _restore_session_table_rows(c, "session_entity_contracts", sid, snap_row["contracts_json"])
+            grudges_restored = _restore_session_table_rows(c, "session_contract_grudges", sid, snap_row["grudges_json"])
         else:
             c.execute(
                 "DELETE FROM session_entity_contracts WHERE session_id = ? AND turn_signed > ?",

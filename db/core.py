@@ -20,7 +20,7 @@ import itertools
 import json
 import logging
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 import re
 import sqlite3
 import contextvars
@@ -534,24 +534,6 @@ CREATE TABLE IF NOT EXISTS phone_gossip_feed (
     created_at          REAL NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS phone_appointments (
-    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id          INTEGER NOT NULL,
-    npc_id              TEXT NOT NULL,
-    npc_name            TEXT NOT NULL,
-    rendezvous_location TEXT NOT NULL,
-    target_node_id      TEXT DEFAULT '',
-    topic               TEXT DEFAULT '',
-    is_confidential     INTEGER DEFAULT 0,
-    origin              TEXT DEFAULT 'phone',             -- 'phone' | 'dialogue'
-    created_minute      INTEGER DEFAULT 0,
-    expiry_minute       INTEGER DEFAULT 0,
-    reminder_sent       INTEGER DEFAULT 0,
-    status              TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'arrived' | 'completed' | 'stood_up' | 'cancelled'
-    created_at          REAL NOT NULL,
-    UNIQUE(session_id, npc_id)
-);
-
 CREATE TABLE IF NOT EXISTS phone_daily_interactions (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id          INTEGER NOT NULL,
@@ -702,7 +684,6 @@ CREATE INDEX IF NOT EXISTS idx_inventory_char_user ON inventory(character_id, us
 CREATE INDEX IF NOT EXISTS idx_inventory_user_linked_quest ON inventory(user_id, linked_quest_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_pact_contract ON inventory(linked_contract_key) WHERE linked_contract_key != '';
 CREATE INDEX IF NOT EXISTS idx_phone_messages_session ON phone_messages(session_id, contact_npc_id);
-CREATE INDEX IF NOT EXISTS idx_phone_appointments_sess ON phone_appointments(session_id);
 CREATE INDEX IF NOT EXISTS idx_phone_gossip_sess ON phone_gossip_feed(session_id);
 CREATE INDEX IF NOT EXISTS idx_saves_user_char ON adventure_saves(user_id, character_id);
 CREATE INDEX IF NOT EXISTS idx_commitments_session ON commitments_ledger(session_id, status);
@@ -1511,6 +1492,58 @@ def get_conn():
             _uow_db_path_var.reset(path_token)
             _uow_conn_var.reset(token)
             _release_pooled_conn(pool, conn)
+
+
+def _conn_ctx(conn: sqlite3.Connection | None):
+    return nullcontext(conn) if conn is not None else get_conn()
+
+
+def _opt_int(val: Any) -> Optional[int]:
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _restore_session_table_rows(
+    conn: sqlite3.Connection,
+    table_name: str,
+    session_id: int,
+    rows_or_json: Any,
+) -> int:
+    """Replace a session's rows in `table_name` from a JSON string or list of row dicts."""
+    if isinstance(rows_or_json, str):
+        try:
+            items = json.loads(rows_or_json or "[]")
+        except Exception:
+            items = []
+    else:
+        items = rows_or_json
+    valid_cols = {
+        r["name"] if isinstance(r, sqlite3.Row) else r[1]
+        for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    sid = int(session_id)
+    conn.execute(f"DELETE FROM {table_name} WHERE session_id = ?", (sid,))
+    restored = 0
+    for item in (items if isinstance(items, list) else []):
+        if not isinstance(item, dict):
+            continue
+        row_dict = {
+            k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
+            for k, v in item.items()
+            if k in valid_cols and k not in ("id", "session_id")
+        }
+        if not row_dict:
+            continue
+        row_dict["session_id"] = sid
+        cols_sql = ",".join(row_dict.keys())
+        qmarks = ",".join("?" * len(row_dict))
+        conn.execute(f"INSERT INTO {table_name} ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
+        restored += 1
+    return restored
 
 _MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
@@ -2701,7 +2734,12 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
             try:
                 conn.execute(sql)
             except sqlite3.OperationalError as e:
-                if "duplicate column name" not in str(e).lower():
+                msg = str(e).lower()
+                if "duplicate column name" in msg:
+                    pass
+                elif version in (18, 19) and "no such table: phone_appointments" in msg:
+                    pass
+                else:
                     raise
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
