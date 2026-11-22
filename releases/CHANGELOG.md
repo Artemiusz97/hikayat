@@ -23,6 +23,7 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 
 | Version | Release Date | Type | Primary Milestone / Theme |
 | :--- | :--- | :--- | :--- |
+| **v3.6.0** | 2026-11-22 | Minor | Core Monolith Package Decompositions (`db/core/`, `db/social/`, `api/adventure/`, `services/turn/`, `game_engine/turn/`), Persistence SQL Purity, Expanded Python & ESLint 9 Quality Gates, and Concurrency/Audit Hardening. |
 | **v3.5.0** | 2026-11-22 | Minor | Zero-Turn Scene Examine & Tactical Intel, Declarative 41-Table Session Registry (`db/registry.py`) & Pooled `ReadUnitOfWork`, Acrylic Glassmorphism UI & 12 `.webp` Scenario Backdrops, Drop-In Custom Fonts (`custom_fonts/`), 5-Mode Consumables & Scenario Currencies. |
 | **v3.4.0** | 2026-11-20 | Minor | Outlaw Factions & 10-Wing HQs (Migration v60), 68 Special Agent Blueprints & 3-Stage Population Engine, Native `<dialog>` World Map Modal Overhaul, Narrative Pacing & Prose Styles (v58/v59), Hybrid Reasoning Streaming. |
 | **v3.3.0** | 2026-11-17 | Minor | Migration v57 Anomalous Locations Integrity, Procedural Urban City Profiles, Unified Merchant UI Authority, Quest Climax & Remote Travel Guards, and Code Hygiene Sweep. |
@@ -58,6 +59,18 @@ Hikayat uses a product-adapted **Semantic Versioning** scheme (`MAJOR.MINOR.PATC
 ---
 
 ## Release Details
+
+### [v3.6.0] - 2026-11-22
+
+#### Added & Enhanced
+- **Core Monolith-to-Package Decompositions (`db/core/`, `db/social/`, `api/adventure/`, `services/turn/`, `game_engine/turn/`)**:
+  - Decomposed `db/core.py` into `db/core/` (`__init__.py`, `connection.py`, `lifecycle.py`, `migrations.py`, `migrations_backfills.py`, `module_proxy.py`, `schema.py`) with lossless `_SubmoduleProxyModule` forwarding (`install_submodule_proxy`, `unwrap_callable_target`, `callable_accepts_kwarg`).
+  - Decomposed `db/social.py` into `db/social/` (`contacts_enrichment.py`, `contacts_repo.py`, `cooldowns.py`, `households_factions.py`, `phone_commitments.py`, `rosters_snapshots.py`), extracted `db/world_constants.py`, and cleaned package-root exports in `db/__init__.py`.
+  - Extracted `services/turn/` (`embark.py`, `models.py`, `prepare.py`, `resolve.py`) behind `services/turn_service.py`, modularized `api/adventure/` (`enrichment.py`, `in_flight.py`, `locations.py`, `routes_session.py`, `routes_turn.py`), and split `game_engine/turn/` into `pre_turn.py`, `post_turn.py`, `encounter_narrative.py`, `prompt_assembly.py`, and typed `phase_state.py` (`PreTurnState`, `PromptAssemblyState`).
+- **Expanded Static Gate & Flat ESLint 9 (`scripts/static_check.py`, `web/eslint.config.js`)**:
+  - Added unused-import, shadowed-import, and package-facade static checks in `scripts/static_check.py`, and configured ESLint 9 (`web/eslint.config.js`, `npm run lint`) with React and React Hooks rules across `web/src/`.
+- **Persistence SQL Purity, Shim Retirement & Concurrency Hardening (`db/`, `config.py`, `api/`, `cogs/`, `mechanics/`, `web/`)**:
+  - Migrated remaining raw SQL from `api/` and `services/` into `db/`, retired post-v37 compatibility shims, fixed phantom roster SQL and `v53` save migration backfills, deferred runtime secret validation (`validate_runtime_config` + `HIKAYAT_TEST_MODE` in `config.py`), offloaded synchronous DB calls off asyncio event loops across `api/`, `cogs/`, `services/`, and `mechanics/system/`, hardened `ReadUnitOfWork` pooling, resolved SPA/WebSocket races (`useAuth.js`, `useGameSession.js`, `useSettings.js`), and updated `scripts/package_release.py` to include `bin/tunnel.py` while excluding `.exe` binaries.
 
 ### [v3.5.0] - 2026-11-22
 

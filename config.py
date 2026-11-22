@@ -9,7 +9,7 @@ _IS_TEST_MODE = os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() in ("1", "tru
 if not _IS_TEST_MODE:
     load_dotenv()
 
-APP_VERSION = "3.5.0"
+APP_VERSION = "3.6.0"
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
