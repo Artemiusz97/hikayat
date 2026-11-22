@@ -29,40 +29,36 @@ EXCLUDE_DIRS = {
     'venv', 'env', 'ENV', '.venv',
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
-    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', 'custom_fonts', '_norton_', 'reports',
+    'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', 'custom_fonts', '_norton_', 'reports',
     'crash_reports', 'htmlcov'
 }
 
 EXCLUDE_EXTS = {
     '.pyc', '.pyo', '.pyd',
     '.db', '.db-wal', '.db-shm', '.db-journal', '.sqlite', '.sqlite3',
-    '.zip', '.lock', '.pid', '.tmp', '.bak', '.log'
+    '.zip', '.lock', '.pid', '.tmp', '.bak', '.log', '.exe',
 }
 
 EXCLUDE_EXACT_FILES = {
     '.env', '.DS_Store', 'Thumbs.db',
     'pytest.ini', 'run_tests.bat', 'requirements-dev.txt',
-    'AGENTS.md', 'GEMINI.md', '.testmondata',
+    'AGENTS.md', 'GEMINI.md', '.testmon', '.testmondata',
     'run_tests.py', 'package_release.py', 'playthrough_bot.py',
     'static_check.py', 'static_baseline.json', '.coverage',
 }
 
 
-def package_release(dry_run: bool = False) -> str:
-    releases_dir = os.path.join(BASE_DIR, "releases")
-    os.makedirs(releases_dir, exist_ok=True)
-    target_zip = os.path.join(releases_dir, f"hikayat-v{APP_VERSION}-clean.zip")
-
-    files_to_pack = []
+def collect_release_files(base_dir: str = BASE_DIR) -> tuple[list[tuple[str, str]], list[tuple[str, int]]]:
+    files_to_pack: list[tuple[str, str]] = []
     _p_tokens = [
         bytes([97, 105, 109, 97, 110]).decode('ascii'),
         bytes([99, 58, 92, 117, 115, 101, 114, 115]).decode('ascii'),
         bytes([99, 58, 47, 117, 115, 101, 114, 115]).decode('ascii'),
     ]
     personal_info_pattern = re.compile('|'.join(re.escape(t) for t in _p_tokens), re.IGNORECASE)
-    violations = []
+    violations: list[tuple[str, int]] = []
 
-    for root, dirs, files in os.walk(BASE_DIR):
+    for root, dirs, files in os.walk(base_dir):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS and not d.startswith('.')]
         for file in files:
             if file in EXCLUDE_EXACT_FILES:
@@ -78,7 +74,7 @@ def package_release(dry_run: bool = False) -> str:
                 continue
 
             filepath = os.path.join(root, file)
-            arcname = os.path.relpath(filepath, BASE_DIR).replace(os.sep, '/')
+            arcname = os.path.relpath(filepath, base_dir).replace(os.sep, '/')
 
             # Check for personal path leaks in text files
             if not file.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.ico', '.exe', '.woff', '.woff2', '.ttf', '.otf')):
@@ -91,6 +87,16 @@ def package_release(dry_run: bool = False) -> str:
                     pass
 
             files_to_pack.append((filepath, arcname))
+
+    return files_to_pack, violations
+
+
+def package_release(dry_run: bool = False) -> str:
+    releases_dir = os.path.join(BASE_DIR, "releases")
+    os.makedirs(releases_dir, exist_ok=True)
+    target_zip = os.path.join(releases_dir, f"hikayat-v{APP_VERSION}-clean.zip")
+
+    files_to_pack, violations = collect_release_files(BASE_DIR)
 
     if violations:
         print("[ERROR] Found potential personal info leaks in candidate files:")

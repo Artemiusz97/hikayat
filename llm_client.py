@@ -236,6 +236,13 @@ def reset_circuit_breakers() -> None:
     _model_cooldowns.clear()
 
 
+def reset_llm_telemetry() -> None:
+    """Clears recent LLM call records and resets rolling telemetry counters in-place."""
+    _recent_calls.clear()
+    for key in list(_telemetry_totals.keys()):
+        _telemetry_totals[key] = 0.0 if key == "total_latency_ms" else 0
+
+
 def record_llm_telemetry(
     model_name: str,
     latency_ms: float,
