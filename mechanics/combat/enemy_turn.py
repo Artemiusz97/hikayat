@@ -13,7 +13,7 @@ from typing import Any, Dict, List
 
 import db
 from mechanics.combat.damage import apply_damage_to_combatant
-from mechanics.combat.enemies import get_enemy_armor_profile, get_enemy_weapon_profile, get_intent_code
+from mechanics.combat.enemies import get_enemy_weapon_profile, get_intent_code
 from mechanics.combat.equipment import parse_equipment_metadata
 from mechanics.social.attributes import calculate_combat_attributes
 from mechanics.stealth import is_actor_combat_vanished

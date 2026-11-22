@@ -262,10 +262,8 @@ export const usePhone = (sessionId, user) => {
 
   return {
     phoneData,
-    isSupported: Boolean(phoneData?.is_supported ?? phoneData?.supported ?? true),
     branding: phoneData?.branding || {
       device_name: '📱 Smartphone',
-      os_name: 'Mobile OS',
       gallery_app_name: 'Photos',
       dm_app_name: 'Messages',
       feed_app_name: 'Feed',

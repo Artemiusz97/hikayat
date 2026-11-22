@@ -1632,6 +1632,7 @@
   },
   "social": {
     "mood_prefix": "Suasana Hati",
+    "conversation_paused": "{{name}} sudah kehabisan bual kosong buat masa ini. Datang semula nanti, atau cuba sesuatu yang lain.",
     "schedule_header": "Jadual & Rutin",
     "masked_slot": "???",
     "bond_settling_dm": "Ikatan Sedang Serasi Hari Ini — perbualan lanjut masih membuka maklumat baharu.",

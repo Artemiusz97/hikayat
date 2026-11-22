@@ -8,7 +8,7 @@ visitor sleepwear modesty, soiled cleanup, romantic date prep, and non-armored
 player cosmetic sync.
 """
 
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from mechanics.world.world_schedule import is_weekend
 

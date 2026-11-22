@@ -3,7 +3,7 @@ from __future__ import annotations
 Discord UI Views and Embed Builders for Merchant Encounters.
 Extracted from mechanics/combat/merchant.py to respect Layer 4 separation of concerns.
 """
-from typing import TYPE_CHECKING, List, Dict, Any, Optional
+from typing import TYPE_CHECKING, Optional
 import discord
 
 import db
@@ -13,7 +13,6 @@ from mechanics.world import evaluate_shop_staff_availability
 from mechanics.combat.merchant import (
     MERCHANT_ARCHETYPES,
     compute_effective_shop_item_price,
-    discounted_price,
 )
 
 if TYPE_CHECKING:

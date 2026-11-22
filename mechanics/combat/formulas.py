@@ -2,9 +2,8 @@ from __future__ import annotations
 """
 Combat formulas, DC calculation, damage modifiers, and status effect logic.
 """
-from typing import Optional, Dict, Any, List, Tuple, Union
+from typing import Optional, Union
 import random
-import re
 
 def calculate_opposed_dc(player_stat_val: int, enemy_stat_val: int, player_luk: int = 5) -> int:
     """Calculates dynamic DC requirement (2-12) based on Player Stat vs Enemy Stat."""

@@ -7,7 +7,7 @@ academic standings, contact eligibility, visual badges, and localized dialogue r
 directives for the narrative LLM.
 """
 import re
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from models.llm_schemas import CharacterBadges, AgeGroup
 
 AGE_GROUP_TEEN: AgeGroup = "teen"

@@ -1632,6 +1632,7 @@
   },
   "social": {
     "mood_prefix": "Stimmung",
+    "conversation_paused": "{{name}} ist für den Moment mit dem Smalltalk durch. Komm später am Tag wieder oder versuch etwas anderes.",
     "schedule_header": "Tagesablauf & Routine",
     "masked_slot": "???",
     "bond_settling_dm": "Bindung festigt sich heute — weitere Gespräche enthüllen Details ohne Zuneigungsdruck.",

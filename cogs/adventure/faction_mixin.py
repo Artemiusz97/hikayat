@@ -4,7 +4,6 @@ import discord
 import db
 from db import adb
 from mechanics.social.factions import (
-    check_rival_or_hostile_turf_block,
     infer_anomalous_faction_archetype,
     is_nsfw_salon_faction,
     validate_club_quartermaster_hours,
@@ -67,7 +66,7 @@ class FactionMixin:
             await interaction.response.send_message(subroom_err, ephemeral=True)
             return
         if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
-            from mechanics.social.factions import infer_anomalous_faction_archetype, join_or_transfer_anomalous_faction
+            from mechanics.social.factions import join_or_transfer_anomalous_faction
 
             target_fac = (
                 infer_anomalous_faction_archetype(faction)
@@ -352,7 +351,7 @@ class FactionMixin:
 
         char = await adb(db.get_character, user_id)
         rep = faction.get("reputation_score", 0)
-        from mechanics.social.factions import get_eligible_rank, get_hierarchy, get_rank_title, get_incumbent_at_rank, get_promotion_trial_directive
+        from mechanics.social.factions import get_eligible_rank, get_rank_title, get_incumbent_at_rank, get_promotion_trial_directive
         
         template = faction.get("hierarchy_template", "default")
         eligible = get_eligible_rank(template, rep)

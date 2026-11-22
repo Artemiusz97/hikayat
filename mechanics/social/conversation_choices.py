@@ -21,8 +21,6 @@ import namegen
 import scenario_data
 from mechanics.social import deck, pacing
 from mechanics.social.band_fallbacks import (
-    _PRONOUNS_BY_GENDER,
-    _build_contextual_role_and_leisure_phrases,
     _is_similar_to_recent,
     generate_band1_quest_and_rumor_fallbacks as _gen_b1_impl,
     generate_band2_social_choices as _gen_b2_impl,
@@ -31,7 +29,6 @@ from mechanics.social.band_fallbacks import (
     synthesize_choice_from_seed,
 )
 from mechanics.social.departure import (
-    _CONVINCE_STAY_RE,
     _apply_stage1_hurry_gate,
     _canon_npc_key,
     _locations_match,
@@ -39,7 +36,7 @@ from mechanics.social.departure import (
     is_convince_stay_action,
     relocate_departed_npcs_impl,
     run_departure_turn_evaluation,
-    save_npc_departure_states,
+    save_npc_departure_states,  # static-check: ignore[unused-import]
 )
 from mechanics.social.relationships import (
     clamp_score,
@@ -50,6 +47,9 @@ from mechanics.social.relationships import (
 log = logging.getLogger(__name__)
 
 SPECIAL_STATS_SET = frozenset({"STR", "PER", "END", "CHA", "INT", "AGI", "LUK"})
+
+# Extra small-talk exchanges granted (once per partner per day) when a walk-along offer succeeds.
+WALK_ALONG_BONUS_TURNS = 2
 
 _WALK_WITH_RE = re.compile(
     r"^\s*(?:walk\s+with|stroll\s+with|accompany|go\s+with|head\s+(?:out\s+|over\s+)?with|tag\s+along\s+with|escort)\s+(.+)$",
@@ -195,6 +195,7 @@ def get_partner_conversation_budget_state(
         "is_exhausted": (base_budget + bonus_turns - turns_used) <= 0,
         "asked_labels": [str(x).strip().lower() for x in (entry.get("asked_labels") or []) if str(x).strip()],
         "asked_topic_signatures": [str(x).strip() for x in (entry.get("asked_topic_signatures") or []) if str(x).strip()],
+        "walk_along_bonus_granted": bool(entry.get("walk_along_bonus_granted")),
         "current_block": curr_blk,
         "meetup_key": meetup_key if is_meetup else "",
     }
@@ -222,9 +223,13 @@ def is_non_quest_social_turn_action(
         or action_dict.get("item_name")
     ):
         return False
-    from mechanics.narrative.intent import is_conversational_exit
+    # Band 3 structural utilities (contact exchange, recruit, join activity, epistemic
+    # containment, walk-along, privacy nudges) are not small talk and never spend budget.
+    if _is_pre_exit_utility_choice(action_dict):
+        return False
+    from mechanics.narrative.intent import is_contact_exchange_action, is_conversational_exit
 
-    if is_conversational_exit(lbl):
+    if is_conversational_exit(lbl) or is_contact_exchange_action(lbl):
         return False
     if (
         action_dict.get("is_quest_action")
@@ -242,6 +247,48 @@ def is_non_quest_social_turn_action(
     if not was_already_partner and _OPENING_GREETING_RE.match(lbl) and " about " not in lbl_low:
         return False
     return True
+
+
+def _action_check_succeeded(action_dict: Dict[str, Any]) -> bool:
+    """True when a resolved action's skill check passed (CheckResult, dict check, or bare success flag)."""
+    chk = action_dict.get("check")
+    tier = getattr(chk, "tier", None) or (chk.get("tier") if isinstance(chk, dict) else None)
+    if tier:
+        return str(tier) not in ("fail", "crit_fail")
+    return bool(action_dict.get("success", False))
+
+
+def _is_successful_walk_along_action(action_dict: Any) -> bool:
+    """Detects a passed 'Walk with <partner>' accompany offer (server-stamped or typed)."""
+    if not isinstance(action_dict, dict):
+        return False
+    if str(action_dict.get("intent") or "").lower() == "party_recruit":
+        return False
+    lbl = str(action_dict.get("label") or action_dict.get("text") or action_dict.get("action") or "").strip()
+    if not (action_dict.get("_walk_along_offer") or _WALK_WITH_RE.match(lbl)):
+        return False
+    return _action_check_succeeded(action_dict)
+
+
+def build_walk_along_offer_choice(profile: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Builds the once-per-day CHA 'Walk with <partner> for a bit' offer shown when small talk runs dry."""
+    name = str(profile.get("name") or "").strip()
+    if not name or profile.get("is_companion"):
+        return None
+    dc = max(4, min(12, int(profile.get("convince_stay_dc") or 12) - 3))
+    return {
+        "label": f"Walk with {name} for a bit",
+        "stat": "CHA",
+        "requirement": dc,
+        "mp_cost": 0,
+        "intent": "social_invite",
+        "sub_intent": "accompany",
+        "target_npc": name,
+        "action_category": "social",
+        "_walk_along_offer": True,
+        "_priority_slot": True,
+        "_server_stamped": True,
+    }
 
 
 def record_partner_conversation_turn(
@@ -321,6 +368,9 @@ def record_partner_conversation_turn(
             if not consumed_budget:
                 entry["turns_used"] = int(entry.get("turns_used") or 0) + 1
                 consumed_budget = True
+        if not entry.get("walk_along_bonus_granted") and _is_successful_walk_along_action(a):
+            entry["bonus_turns"] = int(entry.get("bonus_turns") or 0) + WALK_ALONG_BONUS_TURNS
+            entry["walk_along_bonus_granted"] = True
 
     entry["last_time_block"] = curr_blk
     entry["asked_labels"] = asked_labels[-40:]
@@ -1427,9 +1477,33 @@ def enforce_conversation_choice_bands(
         return band1 + [pinned_exit]
 
     if remaining_budget <= 0:
-        convince_only = [u for u in band3_utils if u.get("_convince_stay")]
         out_b1 = [c if c.get("_quest_dialogue_handoff") else _apply_stage1_hurry_gate(c) for c in band1] if (in_stage_1 and urg_profile) else band1
-        return out_b1 + convince_only + [pinned_exit]
+        # Structural utilities survive budget exhaustion (they never spend budget); privacy
+        # nudges are dropped because moving somewhere quieter implies more small talk.
+        kept_utils = [
+            u for u in band3_utils
+            if not (u.get("_privacy_nudge") or str(u.get("sub_intent") or "").lower() == "privacy_nudge"
+                    or "for privacy" in str(u.get("label") or "").lower()
+                    or (str(u.get("intent") or "").lower() == "movement" and "quieter" in str(u.get("label") or "").lower()))
+        ]
+        has_walk_util = any(
+            u.get("_walk_along_offer") or _WALK_WITH_RE.match(str(u.get("label") or ""))
+            for u in kept_utils
+        )
+        walk_offer = None if (comp_locked or has_walk_util or budget_state.get("walk_along_bonus_granted") or len(kept_utils) >= 4) else build_walk_along_offer_choice(lead_profile)
+        if walk_offer and walk_offer["label"].lower() not in set(budget_state.get("asked_labels") or []):
+            kept_utils.append(walk_offer)
+        kept_utils.sort(key=_utility_sort_rank)
+        if in_stage_1 and urg_profile:
+            kept_utils = [u if u.get("_convince_stay") else _apply_stage1_hurry_gate(u) for u in kept_utils]
+        paused_exit = dict(pinned_exit)
+        paused_exit["_conversation_paused"] = True
+        paused_exit["pause_partner"] = lead_partner
+        from mechanics.social.locales import get_conversation_pause_notice
+        paused_exit["pause_notice"] = get_conversation_pause_notice(
+            lead_partner, lang=str(sess.get("language") or "en")
+        )
+        return out_b1 + kept_utils + [paused_exit]
 
     # ── ELASTIC BAND 2 DYNAMIC SOCIAL SUITE (4-6 slots, <= 8 total) ─────────
     avail_for_b2 = max(1, 8 - 1 - len(band1) - len(band3_utils))

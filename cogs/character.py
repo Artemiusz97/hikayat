@@ -4,14 +4,21 @@ from discord.ext import commands
 
 import db
 from db import adb
-import game_engine
-from character_data import (CUSTOM_CLASS_STARTING_ITEMS, POINT_BUY_POOL,
-                             BASE_STAT_VALUE, MAX_STAT_VALUE, STATS, STAT_NAMES, STAT_EMOJI,
-                             STAT_EFFECTS, STARTING_GOLD, EQUIPMENT_SLOTS, EQUIPMENT_SLOT_EMOJI,
-                             DEFAULT_EQUIP_SLOT_FOR_ITEM_TYPE, GENDER_OPTIONS,
-                             get_class_templates, get_all_class_templates, get_starting_weapons, get_all_starting_weapons,
-                             get_starter_gear_by_class, get_starting_items, inventory_capacity, get_item_icon)
-from scenario_data import load_scenarios, get_scenario
+from character_data import (
+    POINT_BUY_POOL,
+                             BASE_STAT_VALUE,
+                             MAX_STAT_VALUE,
+                             STATS,
+                             STAT_NAMES,
+                             STAT_EMOJI,
+                             STAT_EFFECTS,
+                             STARTING_GOLD,
+                             EQUIPMENT_SLOTS,
+                             EQUIPMENT_SLOT_EMOJI,
+                             GENDER_OPTIONS,
+                             get_item_icon,
+)
+from scenario_data import load_scenarios
 
 
 def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str = "") -> discord.Embed:
@@ -263,7 +270,6 @@ class StatAllocationView(discord.ui.View):
             self.stop()
             return
 
-        from mechanics.social.races import format_race_display
         leftover = self.points_remaining
         char = await adb(db.create_character,
             self.user_id, self.name, char_class="Adventurer", class_description="",

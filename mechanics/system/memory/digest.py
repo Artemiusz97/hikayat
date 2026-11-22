@@ -17,10 +17,8 @@ LLM_MODEL — no special setup required.
 """
 
 import asyncio
-import json
 import logging
 import re
-from typing import TYPE_CHECKING
 
 log = logging.getLogger("hikayat.memory.digest")
 
@@ -324,17 +322,15 @@ async def generate_arc_digest(
             f"Extract key_events, commitments, mechanical_summary, and active_hooks as JSON."
         )
         try:
+            sess_row = await _db_dig.adb(_db_dig.get_session, session_id) or {}
+            _dig_dir = build_side_channel_language_directive(
+                sess_row,
+                text_fields=("key_events", "commitments[].description", "mechanical_summary", "active_hooks"),
+                preserve_fields=("commitments[].commitment_type", "commitments[].source_entity", "commitments[].target_entity", "entities", "location_tag", "quest_ids"),
+                style="narrative",
+            )
             result = await llm_client.call_llm_json(
-                system_prompt=(
-                    f"{_DIGEST_SYSTEM}\n\n{_dig_dir}"  # pylint: disable=used-before-assignment
-                    if (_dig_dir := build_side_channel_language_directive(
-                        _db_dig.get_session(session_id) or {},
-                        text_fields=("key_events", "commitments[].description", "mechanical_summary", "active_hooks"),
-                        preserve_fields=("commitments[].commitment_type", "commitments[].source_entity", "commitments[].target_entity", "entities", "location_tag", "quest_ids"),
-                        style="narrative",
-                    ))
-                    else _DIGEST_SYSTEM
-                ),
+                system_prompt=f"{_DIGEST_SYSTEM}\n\n{_dig_dir}" if _dig_dir else _DIGEST_SYSTEM,
                 user_prompt=user_msg,
                 temperature=0.2,
                 max_tokens=600,
@@ -366,7 +362,8 @@ async def generate_arc_digest(
 
     if bullets:
         try:
-            _db.append_chapter_digest(
+            await _db.adb(
+                _db.append_chapter_digest,
                 session_id=session_id,
                 turn_start=turn_start,
                 turn_end=turn_start + len(raw_turns) - 1,
@@ -381,12 +378,12 @@ async def generate_arc_digest(
     if commitments:
         try:
             turn_number = turn_start + len(raw_turns)
-            _db.bulk_add_commitments(session_id, commitments, turn_number=turn_number)
+            await _db.adb(_db.bulk_add_commitments, session_id, commitments, turn_number=turn_number)
         except Exception as exc:
             log.warning("Failed to persist commitments: %s", exc)
 
     try:
-        _db.run_deterministic_tier3_compaction(session_id)
+        await _db.adb(_db.run_deterministic_tier3_compaction, session_id)
     except Exception as exc:
         log.warning("Failed to run tier 3 compaction: %s", exc)
 

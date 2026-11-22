@@ -21,7 +21,6 @@ Each Agent includes:
 import hashlib
 import json
 import logging
-import random
 from typing import Any, Dict, List, Optional, Tuple
 
 import db
@@ -991,7 +990,6 @@ def _resolve_agent_3axis_for_faction(
     role: str,
     seed_str: str,
 ) -> Tuple[str, str, str]:
-    import hashlib
     from mechanics.combat.spells.awakened_kits import (
         ABILITY_MEDIUMS,
         ANOMALOUS_ATTRIBUTES,
@@ -1084,7 +1082,6 @@ def generate_anomalous_special_agents_roster(
         get_anomalous_promotion_tiers_for_archetype,
         infer_anomalous_faction_archetype,
     )
-    from mechanics.combat.spells.kits import get_anomalous_starting_innate_abilities
     from mechanics.social.races import normalize_race
     from mechanics.social.persona import normalize_appearance
     from scenario_data import should_skew_female_npcs

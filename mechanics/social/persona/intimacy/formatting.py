@@ -1,9 +1,7 @@
 from __future__ import annotations
 from .constants import *
-import json
-import hashlib
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from ..core import *
 
 ROMANTIC_MILESTONE_KEYWORDS = (
@@ -1106,7 +1104,6 @@ def format_persona_embed_fields(app_dict: Dict[str, Any], gender: str = "", race
     return fields
 
 
-from .generation import tag_turn_on_items
 
 from .appearance import normalize_appearance
 from .logic import get_erotic_openness_label, enforce_intimacy_safeguard_invariants, partition_sensitivities_and_turn_ons

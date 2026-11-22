@@ -107,7 +107,7 @@ const getQuestBadgeMeta = (kindOrTag, t) => {
 
 const formatMarkerObjective = (rawMarker) => {
   const cleaned = cleanProseLocations(rawMarker || '');
-  const withoutEmoji = cleaned.replace(/^[\p{Extended_Pictographic}\u2600-\u27BF\uFE0F\s]+/u, '');
+  const withoutEmoji = cleaned.replace(/^(?:[\p{Extended_Pictographic}\u2600-\u27BF\s]|\uFE0F|\u200D)+/u, '');
   if (/^\[Bonus Lead\]/i.test(withoutEmoji)) {
     return withoutEmoji.replace(/^\[Bonus Lead\]\s*/i, 'Bonus Lead — ');
   }
@@ -398,7 +398,7 @@ const WorldMapModal = ({
       dialog.removeEventListener('pointerdown', onPointerDown);
       dialog.removeEventListener('pointerup', onPointerUp);
     };
-  }, []);
+  }, [isDrawer]);
 
   const handleDialogClose = () => {
     if (dialogRef.current) {
@@ -407,7 +407,7 @@ const WorldMapModal = ({
     if (onClose) onClose();
   };
 
-  const zones = mapData?.zones || [];
+  const zones = useMemo(() => mapData?.zones || [], [mapData?.zones]);
   const canTravel = mapData?.can_travel !== false;
   const travelBlockedReason = mapData?.travel_blocked_reason || '';
   const activeZoneObj = zones.find(z => z.zone_name === selectedZone) || zones[0] || null;
@@ -470,7 +470,10 @@ const WorldMapModal = ({
     );
   }, [activeQuestDestinations, trimmedQuery]);
 
-  const primaryPlaces = activeZoneObj?.primary_locations || [];
+  const primaryPlaces = useMemo(
+    () => activeZoneObj?.primary_locations || [],
+    [activeZoneObj?.primary_locations]
+  );
   const filteredPlaces = useMemo(() => {
     if (!trimmedQuery) return primaryPlaces;
     const matched = primaryPlaces.filter(p => placeMatchesSearch(p, trimmedQuery));

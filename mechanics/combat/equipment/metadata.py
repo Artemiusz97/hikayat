@@ -4,8 +4,7 @@ Equipment metadata parsing, 2H detection, tier rolling, and JSON effect serializ
 """
 import json
 import random
-import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Tuple
 
 from .tables import *
 

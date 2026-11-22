@@ -1,7 +1,19 @@
 from __future__ import annotations
 import json
 from typing import Any
+import db
+import scenario_data
 import game_engine
+from character_data import inventory_capacity
+from mechanics.social.factions import (
+    format_llm_faction_context,
+    format_llm_player_faction_block,
+    get_npc_affiliation_chance,
+)
+from mechanics.social.relationships import format_llm_relationship_context
+from mechanics.social.persona import format_persona_summary
+from mechanics.social.races import format_race_display
+from mechanics.world.locations import format_llm_location_context, is_location_engine_enabled
 from .core import *
 
 
@@ -40,7 +52,14 @@ def _coerce_status_labels(raw_status: Any) -> list[str]:
 
 
 def _character_sheet_text(char: dict, inventory: list) -> str:
-    equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
+    if inventory is not None:
+        equipment = {
+            item["slot"]: item
+            for item in inventory
+            if isinstance(item, dict) and item.get("equipped") and item.get("slot")
+        }
+    else:
+        equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
     from mechanics.combat.items.tags import is_narrative_item
     equip_items = []
     for slot, item in equipment.items():
@@ -55,7 +74,6 @@ def _character_sheet_text(char: dict, inventory: list) -> str:
         fenced_cls_desc = wrap_custom_lore(char["class_description"], max_len=800)
         if fenced_cls_desc:
             class_line += f" -- {fenced_cls_desc}"
-    from mechanics.social.races import format_race_display
     raw_race = char.get("race") or "human"
     race_display = format_race_display(raw_race)
     if char.get("race_description"):
@@ -309,10 +327,10 @@ def _history_text(
     session_id: int | None = None,
     query_context: str = "",
     budget=None,
-    query_embedding: list[float] = None,
     present_npcs: list[str] | None = None,
     current_location: str = "",
     active_quest_ids: list[str] | None = None,
+    epistemic_matrix: dict | None = None,
 ) -> str:
     """Build the hierarchical RECENT HISTORY prompt block.
 
@@ -365,7 +383,6 @@ def _history_text(
                 query_context=query_context,
                 max_recent=6,
                 max_relevant=6,
-                query_embedding=query_embedding,
                 present_npcs=present_npcs,
                 current_location=current_location,
                 active_quest_ids=active_quest_ids,
@@ -432,7 +449,9 @@ def _history_text(
         if present_npcs and displayed_entries:
             cur_loc_norm = str(current_location or "").strip().lower()
             ep_mat: dict[str, Any] = {}
-            if session_id is not None:
+            if epistemic_matrix is not None:
+                ep_mat = epistemic_matrix or {}
+            elif session_id is not None:
                 try:
                     ep_mat = db.preload_epistemic_matrix(int(session_id)) or {}
                 except Exception:
@@ -603,7 +622,7 @@ def get_active_enemies(data: dict) -> list[dict]:
             res.append({"name": e.strip()})
     return res
 
-def _load_known_world(session_id: int) -> dict:
+def _load_known_world(session_id: int, *, seed_factions: bool = True) -> dict:
     """Single fetch of everything the KNOWN WORLD builders need.
 
     Returned bundle is shared by `_world_canon_text`, `_scene_context_text` and
@@ -614,7 +633,7 @@ def _load_known_world(session_id: int) -> dict:
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     factions = world_data.get("factions") or []
-    if not factions and scenario_data.is_mechanic_enabled(scen_key, "faction_reputation"):
+    if seed_factions and not factions and scenario_data.is_mechanic_enabled(scen_key, "faction_reputation"):
         from mechanics.social.factions import ensure_session_factions_seeded
         factions = ensure_session_factions_seeded(session_id, scen_key) or []
     return {
@@ -690,7 +709,6 @@ def _world_canon_text(session_id: int, world: dict | None = None,
         lines.append("COMPANION CANON: The party companions listed in the current scene travel everywhere with the player and fight alongside them. Include their distinct spoken dialogue, banter, and reactions.")
 
     if scenario_data.is_mechanic_enabled(scen_key, "faction_reputation") and factions:
-        from mechanics.social.factions import format_llm_faction_context, get_npc_affiliation_chance
         # Roster only (leaders / officers / rivals); live reputation goes in the scene zone.
         fac_block = format_llm_faction_context(_by_name(factions), max_items=max_factions, include_standing=False)
         if fac_block:
@@ -713,7 +731,8 @@ def _world_canon_text(session_id: int, world: dict | None = None,
 
 def _scene_context_text(session_id: int, current_location: str,
                         current_npcs: list = None, max_items: int = 4, history_text: str = "",
-                        world: dict | None = None, session: dict | None = None) -> str:
+                        world: dict | None = None, session: dict | None = None,
+                        *, ensure_locations_seeded: bool = True) -> str:
     """Per-turn, scene-relevant slice of KNOWN WORLD (volatile Z2 prompt zone).
 
     Everything that depends on where the party is, who is present, recent
@@ -728,7 +747,13 @@ def _scene_context_text(session_id: int, current_location: str,
     history_lower = (history_text or "").lower()
 
     if is_location_engine_enabled(scen_key):
-        loc_header = format_llm_location_context(session_id, current_location, scen_key, present_npcs=current_npcs)
+        loc_header = format_llm_location_context(
+            session_id,
+            current_location,
+            scen_key,
+            present_npcs=current_npcs,
+            ensure_seeded=ensure_locations_seeded,
+        )
         lines = [loc_header]
     else:
         lines = [f"Current location: {current_location or '(not yet established)'}"]
@@ -1257,7 +1282,7 @@ def _scene_context_text(session_id: int, current_location: str,
                     player_title = char.get("faction_title", "") or ""
         except Exception:
             pass
-        from mechanics.social.factions import format_llm_faction_standings, format_llm_player_faction_block
+        from mechanics.social.factions import format_llm_faction_standings
         standings = format_llm_faction_standings(
             _by_name(factions), max_items=10,
             player_faction_id=player_faction_id,
@@ -1311,7 +1336,12 @@ def _scene_context_text(session_id: int, current_location: str,
 
     sid_int = int(session_id or 0)
     if sid_int > 0:
-        ep_matrix = db.preload_epistemic_matrix(sid_int)
+        ctx_obj = world.get("_ctx") if isinstance(world, dict) else None
+        if ctx_obj is None and isinstance(session, dict):
+            ctx_obj = session.get("_ctx")
+        ep_matrix = getattr(ctx_obj, "epistemic_matrix", None) if ctx_obj is not None else None
+        if ep_matrix is None:
+            ep_matrix = db.preload_epistemic_matrix(sid_int)
         facts_by_key = ep_matrix.get("facts_by_key") or {}
         by_fact = ep_matrix.get("by_fact") or {}
         if facts_by_key:

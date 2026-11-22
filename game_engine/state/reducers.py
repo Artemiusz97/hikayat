@@ -7,8 +7,7 @@ from game_engine.turn_context import (
     resolve_pre_turn_quest_res,
     resolve_target_turn,
 )
-import mechanics.narrative.event_handlers
-from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
+from mechanics.narrative.events import bus, LocationChangedEvent, NPCStatusChangedEvent, ItemGiftedEvent, QuestCompletedEvent
 import json
 from mechanics.social.factions import (
     guess_hierarchy_template,
@@ -22,7 +21,6 @@ log = logging.getLogger(__name__)
 logger = log
 import game_engine
 import db
-import config
 import scenario_data
 
 def _status_effect_text(entry: Any) -> str:
@@ -72,7 +70,6 @@ def _evaluate_npc_milestones(
     Returns: (new_mem, current_intercourse, current_oral, current_manual, track, is_intimate_act, delta_boost)
     """
     from mechanics.social.persona import (
-        transition_intercourse_experience,
         transition_oral_experience,
         transition_manual_experience,
         transition_anal_experience,
@@ -434,7 +431,6 @@ def _reduce_quests_and_waypoints(
     ctx: Optional[TurnExecutionContext] = None,
 ):
     """Extracted Phase 2B Reducer for Quest and Waypoint Updates."""
-    import db, game_engine
       # Process quest_updates array from OUTCOME_SCHEMA (preserving any pre-turn deterministic rewards/sub-quests)
     quest_reward_notices = list(outcome.get("_quest_reward_notices") or [])
     completed_sub_quests = list(outcome.get("_completed_sub_quests") or [])
@@ -584,8 +580,6 @@ def _reduce_quests_and_waypoints(
 
 def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, outcome: dict, mp_already_spent: dict, scen_key: str, is_combat: bool, items_gained_by_user: dict, actions: list | None = None):
     """Deterministic Reducer for Character HP/MP, Gold Closed-Loop, Consumables, Status Effects, and Loot."""
-    import db, re
-    import scenario_data
     from mechanics.system.phone import scenario_has_smartphone
     from mechanics.social.intimate_excitement import is_intimate_action_label
 
@@ -1078,7 +1072,6 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
       # Preserve active timed status effects on character (like Aroused [N turns]) already ticked
       char_status = char.get("status_effects", []) if isinstance(char, dict) else []
       if isinstance(char_status, str):
-          import json
           try:
               char_status = json.loads(char_status)
           except Exception:
@@ -1163,7 +1156,6 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
 
 def _reduce_factions(session_id: int, session: dict, outcome: dict, party: list, first_char_id: int):
     """Extracted Phase 2B Reducer for Faction Discoveries and Promotions."""
-    import db, game_engine
     from scenario_data import is_mechanic_enabled
     _faction_scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     from mechanics.social.factions import infer_default_hq_location
@@ -1368,7 +1360,6 @@ def _reduce_deterministic_waypoints(
     ctx: Optional[TurnExecutionContext] = None,
 ):
     """Extracted Phase 2B Reducer for Deterministic Waypoint Triggers."""
-    import db, game_engine
       # ---------------------------------------------------------------- Waypoint Progression Engine
     # 1. Deterministic Arrival Triggers
     from mechanics.world.waypoints import try_advance_on_arrival, try_complete_on_skill_check
@@ -1655,7 +1646,6 @@ def _reduce_physical_state_and_memories(
     ctx: Optional[TurnExecutionContext] = None,
 ):
     """Extracted Phase 2B Reducer for Physical State, Commitments, and NPC Memories."""
-    import db
     from mechanics.social.physical_state import (
         merge_physical_state_updates,
         handle_location_transition,
@@ -1963,7 +1953,6 @@ def _reduce_physical_state_and_memories(
                         }
 
     # 5. Combat vs Intimate mutual exclusion & Vitals synchronization
-    import game_engine
     active_combat_enemies = game_engine.get_active_enemies(outcome) or game_engine.get_active_enemies(session)
     is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or active_combat_enemies))
     if is_combat:
@@ -2191,10 +2180,13 @@ def _reduce_physical_state_and_memories(
 
             # Excitement Meter Step calculation
             from mechanics.social.intimate_excitement import (
-                compute_excitement_step, check_and_resolve_refractory_clock,
-                format_compact_discord_meter, classify_intimate_act,
-                is_in_refractory_cooldown, format_refractory_status_tag,
-                format_partner_recovery_status_tag, calculate_refractory_duration
+                compute_excitement_step,
+                check_and_resolve_refractory_clock,
+                classify_intimate_act,
+                is_in_refractory_cooldown,
+                format_refractory_status_tag,
+                format_partner_recovery_status_tag,
+                calculate_refractory_duration,
             )
 
             sess_dict = session or (db.get_session(session_id) if session_id else {}) or {}
@@ -3911,10 +3903,8 @@ def _reduce_physical_state_and_memories(
 
 def _reduce_entities_and_gifts(session_id: int, session: dict, outcome: dict, party: list, actions: list, is_combat: bool, scen_key: str):
     """Extracted Phase 2B Reducer for New Entities, Gifts, and Passive Regen."""
-    import db, game_engine
     from mechanics.social.persona import normalize_appearance
     from mechanics.social.races import normalize_race
-    from game_engine import get_combined_narrative
     # 1. Process pre-turn resolved gifts first (single-source-of-truth)
     pre_gifted = (outcome.get("_pre_turn_gifted") if isinstance(outcome, dict) else None) or []
     if pre_gifted:

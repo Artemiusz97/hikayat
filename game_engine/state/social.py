@@ -3,9 +3,6 @@ from typing import Dict, Any, List, Optional, Set
 from .constants import *
 from .helpers import get_combined_narrative, is_check_success
 from .reducers import _evaluate_npc_milestones, _resolve_current_turn_1based
-import mechanics.narrative.event_handlers
-from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
-import json
 import re
 import logging
 import game_engine
@@ -124,7 +121,7 @@ def _resolve_player_social_impression_bonus(session: dict | None, party: list | 
 
 def _reduce_social_and_milestones(session_id: int, session: dict, party: list, outcome: dict, actions: list, scen_key: str, items_gained_by_user: dict, first_char_id: int, first_char_name: str):
     """Extracted Phase 2B Reducer for Relationships, Milestones, and Escorts."""
-    import db, game_engine, json, re
+    import db
     from game_engine.core import (
         PLAYER_ROMANTIC_ACTION_KEYWORDS, PLAYER_INTIMATE_ACTION_KEYWORDS,
         PLAYER_ORAL_ACTION_KEYWORDS, PLAYER_INTERCOURSE_ACTION_KEYWORDS,
@@ -330,7 +327,6 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
     # Process Party Companion / Social Escort Recruitment & Dismissal
     from scenario_data import is_mechanic_enabled
     from mechanics.narrative.intent import (
-        classify_action_intent,
         resolve_action_intent,
         IntentCategory,
         is_contact_exchange_action,
@@ -1130,7 +1126,6 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
         cleaned_rel_updates.append(rel)
     outcome["relationship_updates"] = cleaned_rel_updates
   
-    from mechanics.social.persona import generate_past_intimate_history, format_milestone_memory, VALID_MILESTONE_EVENTS
   
     # Determine if overall player action check was successful
     overall_check_success = True
@@ -1152,7 +1147,7 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
     gift_item_name = None
     confession_target_npc = None
     from mechanics.social.relationships import is_romantic_confession_intent
-    from mechanics.narrative.intent import classify_action_intent, IntentCategory, IntentContext
+    from mechanics.narrative.intent import IntentCategory, IntentContext
     for a in actions:
         a_lbl = str(a.get("label", ""))
         a_chk = a.get("check")
@@ -2337,7 +2332,6 @@ def resolve_pre_turn_social_and_disclosures(
     4. Evaluates witness detection and queues 0ms procedural gossip feed posts.
     """
     import db
-    from skill_check import is_check_success
     from mechanics.social.affinity_engine import calculate_social_affinity_delta
     from mechanics.social.relationships import is_romantic_confession_intent
     from mechanics.system.phone.social_graph import evaluate_pre_turn_witness_detection

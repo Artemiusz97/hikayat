@@ -2,9 +2,6 @@ from __future__ import annotations
 """
 Waypoint templates and multi-stage fallback generators.
 """
-import json
-import random
-from typing import Optional, Any
 
 import db
 
@@ -301,7 +298,6 @@ def ensure_multi_stage_waypoints(
 
     if session_id and not secondary_loc:
         try:
-            import db
             sess_locs = db.get_session_locations(session_id)
             for sl in sess_locs:
                 cand = f"{sl.get('zone_name')} ➔ {sl.get('primary_name')}"

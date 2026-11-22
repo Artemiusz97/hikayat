@@ -11,10 +11,9 @@ Guarantees that:
 
 import json
 import logging
-import random
 import re
 from dataclasses import dataclass, field
-from typing import Dict, Any, List, Optional, Tuple, Set
+from typing import Dict, Any, List, Optional, Tuple
 
 import db
 import game_engine
@@ -22,14 +21,9 @@ import scenario_data
 from mechanics.narrative.intent import (
     is_dialogue_exit_action,
     get_resolved_intent,
-    IntentCategory,
 )
 from mechanics.world.mobility import (
     get_session_dialogue_partners,
-    is_campus_scenario,
-    is_character_mobile,
-    is_solo_travel_intent,
-    ACCOMPANIED_TRAVEL_PHRASES,
 )
 from mechanics.social.relationships import safe_get_contacts
 from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
@@ -279,7 +273,6 @@ def plan_pre_turn(
 
     # 2b. Sync active Non-Hostile Anomaly presence into current_npcs in Anomalous Incursions
     try:
-        import scenario_data
         if scenario_data.is_anomalous_incursions_scenario(str(session.get("scenario") or "")):
             from mechanics.world.anomalous_events import sync_non_hostile_anomaly_scene_presence
             temp_sess_for_anom = dict(session, current_npcs=current_npcs)

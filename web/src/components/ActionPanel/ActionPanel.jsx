@@ -15,14 +15,16 @@ const STAT_EMOJI = {
   ITEM: '🎒',
 };
 
-const LOCALIZED_QUEST_BRACKET_RE = /^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[(?:Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Main|Side|Optional[^\]\r\n]*)\]\s*)+/i;
+const LOCALIZED_QUEST_BRACKET_RE = /^(?:(?:⭐|🎯|⚡|💌|🔹|🌙|⏳|🤝|\s)+|\s*\[(?:Story Quest(?:\s*\|[^\]\r\n]+)?|Hauptquest(?:\s*\|[^\]\r\n]+)?|Misi Utama(?:\s*\|[^\]\r\n]+)?|Zadanie Główne(?:\s*\|[^\]\r\n]+)?|主线任务(?:\s*\|[^\]\r\n]+)?|Story Climax(?:\s*-\s*[^\]\r\n]+)?|Höhepunkt der Geschichte(?:\s*-\s*[^\]\r\n]+)?|Kemuncak Cerita(?:\s*-\s*[^\]\r\n]+)?|Punkt Kulminacyjny(?:\s*-\s*[^\]\r\n]+)?|剧情高潮(?:\s*-\s*[^\]\r\n]+)?|Bounty(?:\s*\|[^\]\r\n]+)?|Kopfgeld(?:\s*\|[^\]\r\n]+)?|Ganjaran(?:\s*\|[^\]\r\n]+)?|Zlecenie(?:\s*\|[^\]\r\n]+)?|悬赏(?:\s*\|[^\]\r\n]+)?|Quest|Meetup|Treffen|Pertemuan|Spotkanie|碰头|碰面|会面|Main|Side|Optional[^\]\r\n]*)\]\s*)+/i;
 
 const cleanChoiceDisplayLabel = (choice, questIcon) => {
   const rawDisplayLabel = String(choice?.label || choice?.text || '');
   const hasQuestMeta = Boolean(questIcon || choice?.is_quest_action || choice?.is_story_quest || choice?.is_climax_action);
-  let stripped = rawDisplayLabel.replace(/^[🚶🧭📍✨🔍💬🗣️🎭💖🎲📜🏕️☕🛋️🖐️🎒🚪⛓️🛡️👔🧩📱\s]+/, '').replace(LOCALIZED_QUEST_BRACKET_RE, '');
+  let stripped = rawDisplayLabel
+    .replace(/^(?:🚶|🧭|📍|✨|🔍|💬|🗣️|🎭|💖|🎲|📜|🏕️|☕|🛋️|🖐️|🎒|🚪|⛓️|🛡️|👔|🧩|📱|\s)+/u, '')
+    .replace(LOCALIZED_QUEST_BRACKET_RE, '');
   if (hasQuestMeta) {
-    stripped = stripped.replace(/^(?:[⭐🎯⚡💌🔹🌙⏳🤝🚶🧭📍\s]+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
+    stripped = stripped.replace(/^(?:(?:⭐|🎯|⚡|💌|🔹|🌙|⏳|🤝|🚶|🧭|📍|\s)+|\s*\[[^\]\r\n]+\]\s*)+/i, '');
   }
   return stripped.replace(/\s*\((?:STR|PER|END|CHA|INT|AGI|LUK)\)\s*$/i, '').trim() || rawDisplayLabel;
 };
@@ -330,10 +332,8 @@ const ActionPanel = ({
   onAction,
   onRetry,
   onOpenMerchant,
-  onOpenPhone,
   onClosePhone,
   phoneOpen,
-  phoneHook,
   showPercentages = true,
   showEnemyHp = true,
   showEnemyIntent = true,
@@ -342,7 +342,6 @@ const ActionPanel = ({
   isStreaming,
   waitingForParty,
   partyStatus,
-  onSelectContact,
   actionError,
   clearActionError,
   collapsed = undefined,
@@ -354,6 +353,8 @@ const ActionPanel = ({
   const combatTabRefs = useRef({});
   const [isChoicesCollapsed, setIsChoicesCollapsed] = useState(false);
   const [isCustomCollapsed, setIsCustomCollapsed] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState(null);
   const isCollapsed = collapsed !== undefined ? collapsed : isChoicesCollapsed;
   const handleToggleCollapse = () => {
     if (onToggleCollapse) onToggleCollapse();
@@ -376,7 +377,6 @@ const ActionPanel = ({
     return false;
   };
 
-  const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = new Set(
     (() => {
       let list = [];
@@ -534,11 +534,32 @@ const ActionPanel = ({
     );
   };
 
+  const renderConversationPauseNotice = () => {
+    if (inCombat || !Array.isArray(choices)) return null;
+    const pausedExit = choices.find((c) => c && typeof c === 'object' && c._conversation_paused);
+    if (!pausedExit) return null;
+    const pauseName = String(pausedExit.pause_partner || '').trim();
+    return (
+      <div
+        role="status"
+        className="flex items-start gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/70 border border-slate-600/40 text-[11px] text-slate-300"
+      >
+        <span aria-hidden="true">⏸️</span>
+        <span>
+          {pauseName
+            ? t('social.conversation_paused', {
+                name: pauseName,
+                defaultValue: pausedExit.pause_notice || `${pauseName} has run out of small talk for now.`,
+              })
+            : pausedExit.pause_notice}
+        </span>
+      </div>
+    );
+  };
+
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
 
   const isGameOver = Boolean(session?.status === 'finished' || session?.is_game_over);
-  const [reloading, setReloading] = useState(false);
-  const [reloadError, setReloadError] = useState(null);
 
   const handleReloadCheckpoint = async () => {
     setReloading(true);
@@ -623,6 +644,25 @@ const ActionPanel = ({
               >
                 {t('actions.close_phone')}
               </MotionButton>
+            )}
+          </div>
+        )}
+
+        {/* Action Error Banner (visible in both exploration & combat, even when collapsed) */}
+        {actionError && (
+          <div className="flex items-center justify-between bg-red-950/80 border border-red-700/80 px-3 py-1.5 rounded-lg text-xs text-red-200 shadow-md">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-red-400 font-bold shrink-0">⚠️ Error:</span>
+              <span className="truncate">{actionError}</span>
+            </div>
+            {clearActionError && (
+              <button
+                type="button"
+                onClick={clearActionError}
+                className="text-gray-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10 shrink-0 ml-2"
+              >
+                ✕
+              </button>
             )}
           </div>
         )}
@@ -914,24 +954,6 @@ const ActionPanel = ({
             ) : (
               /* Non-Combat Choices Grid: Full-width compact horizontal rows with zero scrollbars */
               <div className="space-y-1.5">
-                {actionError && (
-                  <div className="flex items-center justify-between bg-red-950/80 border border-red-700/80 px-3 py-1.5 rounded-lg text-xs text-red-200 shadow-md">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-red-400 font-bold shrink-0">⚠️ Error:</span>
-                      <span className="truncate">{actionError}</span>
-                    </div>
-                    {clearActionError && (
-                      <button
-                        type="button"
-                        onClick={clearActionError}
-                        className="text-gray-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10 shrink-0 ml-2"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                )}
-
                 {session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-700/50 px-3 py-1 rounded text-xs text-amber-200">
                     <span>⚠️ {t('actions.fallback_warning')}</span>
@@ -948,6 +970,7 @@ const ActionPanel = ({
                 )}
 
                 {renderActivePartnerMoodBar()}
+                {renderConversationPauseNotice()}
 
                 {session?.is_truncated_generation && !session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-600/50 px-3 py-1 rounded text-xs text-amber-200">

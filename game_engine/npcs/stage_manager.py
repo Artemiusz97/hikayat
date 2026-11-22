@@ -1,14 +1,13 @@
 """Pre-turn stage management: Authoritative spatial and NPC presence resolution before LLM generation."""
 from __future__ import annotations
 from contextlib import nullcontext
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any, Tuple, Optional
 import json
 import logging
 import random
 import re
 
 import db
-import scenario_data
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
@@ -21,16 +20,7 @@ from mechanics.world.locations import (
     is_location_engine_enabled,
 )
 from mechanics.world.mobility import (
-    is_solo_travel_intent,
-    ACCOMPANIED_TRAVEL_PHRASES,
-    is_rendezvous_target,
     get_session_dialogue_partners,
-    is_dialogue_partner,
-)
-from mechanics.narrative.intent import (
-    classify_action_intent,
-    IntentCategory,
-    IntentContext,
 )
 from mechanics.social.persona.actor_card import derive_initial_micro_blocking
 from mechanics.social.relationships import safe_get_contacts
@@ -151,6 +141,20 @@ def _merge_staged_roster_ops(dest: Optional[dict], src: Optional[dict]) -> dict:
         for item in src["population_seed"]:
             if isinstance(item, dict) and str(item.get("scen_key") or "") not in seen_ps:
                 seen_ps.add(str(item.get("scen_key") or ""))
+                bucket.append(dict(item))
+
+    if src.get("quest_seed_backfills"):
+        bucket = out.setdefault("quest_seed_backfills", [])
+        seen_qsb = {
+            str(x.get("npc_id") or x.get("name") or "").strip().lower()
+            for x in bucket if isinstance(x, dict)
+        }
+        for item in src["quest_seed_backfills"]:
+            if not isinstance(item, dict):
+                continue
+            qk = str(item.get("npc_id") or item.get("name") or "").strip().lower()
+            if qk and qk not in seen_qsb:
+                seen_qsb.add(qk)
                 bucket.append(dict(item))
 
     if src.get("visual_hydrations"):
@@ -293,10 +297,8 @@ def _run_stage_presence_check(
             persist_db=True,
         )
 
-    sp_name = "sp_stage_presence"
     with db.UnitOfWork() as uow_conn:
-        uow_conn.execute(f"SAVEPOINT {sp_name}")
-        try:
+        with db.savepoint(uow_conn, "sp_stage_presence", rollback_always=True):
             _ensure_parent_facility_seeded(
                 int(sess_id),
                 target_node_id,
@@ -322,12 +324,6 @@ def _run_stage_presence_check(
             if isinstance(pres_res, dict) and pres_res.get("staged_roster_ops") and isinstance(staged_ops, dict):
                 _merge_staged_roster_ops(staged_ops, pres_res["staged_roster_ops"])
             return pres_res
-        finally:
-            try:
-                uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-            except Exception:
-                pass
 
 
 def _spawn_canonical_role_npc_pre_turn(
@@ -432,12 +428,14 @@ def _spawn_canonical_role_npc_pre_turn(
             from mechanics.world import ensure_venue_staff_seeded, slot_fill_custom_action_role
             from mechanics.world.venue_templates import is_node_staffable
 
-            sp_name = "sp_preturn_role_fill"
             ctx_mgr = db.UnitOfWork() if not persist_db else nullcontext(None)
             with ctx_mgr as uow_conn:
-                if not persist_db and uow_conn is not None:
-                    uow_conn.execute(f"SAVEPOINT {sp_name}")
-                try:
+                sp_ctx = (
+                    db.savepoint(uow_conn, "sp_preturn_role_fill", rollback_always=True)
+                    if (not persist_db and uow_conn is not None)
+                    else nullcontext()
+                )
+                with sp_ctx:
                     if isinstance(fac_node, dict) and is_node_staffable(fac_node, scen_key=scen_key):
                         ensure_venue_staff_seeded(
                             int(sess_id), fac_nid, scen_key=scen_key, current_day=eff_day, turn_number=eff_turn
@@ -452,9 +450,6 @@ def _spawn_canonical_role_npc_pre_turn(
                         turn_number=eff_turn,
                     )
                     if not isinstance(slot_row, dict) or not slot_row.get("name"):
-                        if not persist_db and uow_conn is not None:
-                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
                         if strict_facility:
                             return {}
                     else:
@@ -470,32 +465,21 @@ def _spawn_canonical_role_npc_pre_turn(
                             appearance=npc_dict["appearance"],
                             traits=npc_dict["unlocked_traits"],
                         )
-                        if not persist_db and uow_conn is not None:
-                            if isinstance(staged_ops, dict):
-                                staged_ops.setdefault("role_slot_fills", []).append({
-                                    "facility_node_id": fac_nid,
-                                    "role_title": clean_role,
-                                    "scen_key": scen_key,
-                                    "current_day": eff_day,
-                                    "current_minute": eff_min,
-                                    "turn_number": eff_turn,
-                                    "name": npc_dict["name"],
-                                    "lorebook_description": lore_desc,
-                                    "gender": npc_dict["gender"],
-                                    "appearance": npc_dict["appearance"],
-                                    "traits": npc_dict["unlocked_traits"],
-                                })
-                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
+                        if not persist_db and uow_conn is not None and isinstance(staged_ops, dict):
+                            staged_ops.setdefault("role_slot_fills", []).append({
+                                "facility_node_id": fac_nid,
+                                "role_title": clean_role,
+                                "scen_key": scen_key,
+                                "current_day": eff_day,
+                                "current_minute": eff_min,
+                                "turn_number": eff_turn,
+                                "name": npc_dict["name"],
+                                "lorebook_description": lore_desc,
+                                "gender": npc_dict["gender"],
+                                "appearance": npc_dict["appearance"],
+                                "traits": npc_dict["unlocked_traits"],
+                            })
                         return npc_dict
-                except Exception:
-                    if not persist_db and uow_conn is not None:
-                        try:
-                            uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                            uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                        except Exception:
-                            pass
-                    raise
         except Exception as _sf_err:
             log.debug("Closed-world slot-fill skipped (%s): %s", clean_role, _sf_err)
             if strict_facility:
@@ -2784,7 +2768,6 @@ def update_stage_blocking_and_composure_post_turn(
 
     if session.get("id"):
         try:
-            import db
             db.update_session(session["id"], extra={"scene_stage_state": scene_stage_state})
         except Exception:
             pass
@@ -2911,12 +2894,8 @@ def resolve_post_turn_stage_delta(
                 pass
 
     from game_engine.npcs.presence import is_mentioned_only_in_absence_or_memory
-    from game_engine.npcs.dialogue_tracking import is_npc_invited_in_action
     from mechanics.world.mobility import (
         is_character_mobile,
-        has_active_physical_presence,
-        is_dialogue_partner,
-        is_rendezvous_target,
     )
 
     # 2. Structured Departures (dismisses_npc action tag; cast_events departures applied by CastPlanner)

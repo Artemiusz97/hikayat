@@ -413,7 +413,6 @@ def generate_procedural_leadership_roster(arg1: str, arg2: str = "",
     Returns list ordered rank 4 (leader) down to rank 1 (entry).
     Each entry: {rank, title, name, is_player, is_vacant}
     """
-    import scenario_data
 
     # Disambiguate arguments
     template = ""
@@ -743,7 +742,6 @@ def get_promotion_trial_directive(current_rank: int, target_rank: int,
 # ---------------------------------------------------------------- NPC Affiliation
 def get_npc_affiliation_chance(scen_key: str) -> float:
     """Return probability (0.0-1.0) that a newly generated NPC belongs to a faction."""
-    from scenario_data import has_tag
     if is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
         return 0.75
     return 0.40
@@ -2098,7 +2096,6 @@ def sync_faction_rosters_with_contacts(session_id: int) -> list[dict]:
     4. Bidirectionally syncs faction officers into school_directory in school scenarios.
     """
     import db
-    from mechanics.world.locations import is_school_scenario
 
     factions = db.get_factions(session_id)
     if not factions:
@@ -2494,8 +2491,6 @@ def _reconcile_school_starter_factions_and_rivals(session_id: int, scen_key: str
     Runs atomically inside a single `db.UnitOfWork()`.
     """
     import db
-    import scenario_data
-    from mechanics.world.locations import is_school_scenario
 
     is_school = is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key)
     if not is_school or not existing:
@@ -2508,7 +2503,6 @@ def _reconcile_school_starter_factions_and_rivals(session_id: int, scen_key: str
 def _reconcile_school_starter_factions_and_rivals_tx(session_id: int, scen_key: str, existing: list[dict]) -> None:
     import db
     import namegen
-    import scenario_data
 
     is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scen_key)
     athletics_node = "loc_school_athletics" if is_anom_hs else "bld_school_athletics"
@@ -2701,8 +2695,6 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
     """
     import db
     import namegen
-    import scenario_data
-    from mechanics.world.locations import is_school_scenario
 
     scen_key = scenario_key or "fantasy"
     existing = db.get_factions(session_id)
@@ -2837,12 +2829,16 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
     return sync_faction_rosters_with_contacts(session_id)
 
 
-def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> Dict[str, Any]:
+def get_anomalous_faction_state(
+    session_id: int,
+    user_id: int | None = None,
+    *,
+    persist_db: bool = True,
+) -> Dict[str, Any]:
     """
     Retrieves or initializes the player's Anomalous Incursions Faction & 5-Tier Promotion Meter state.
     """
     import db
-    import scenario_data
     from mechanics.social.origin_mode import is_student_operative
 
     session = db.get_session(session_id) or {}
@@ -2850,7 +2846,11 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):
         return {}
 
-    factions = ensure_starter_factions(session_id, scen_key)
+    factions = (
+        ensure_starter_factions(session_id, scen_key)
+        if persist_db
+        else (db.get_factions(session_id) or [])
+    )
     lookup_uid = user_id or session.get("host_user_id")
     char = db.get_character(lookup_uid) if lookup_uid else None
     is_student = is_student_operative(session)
@@ -2906,7 +2906,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             "mandatory_bounty_id": str(state.get("mandatory_bounty_id") or ""),
             "last_rollover_day": int(state.get("last_rollover_day", 1) or 1),
         }
-        save_anomalous_faction_state(session_id, state, user_id=lookup_uid)
+        if persist_db:
+            save_anomalous_faction_state(session_id, state, user_id=lookup_uid)
     else:
         arch = state.get("faction_archetype_key", "public_agency")
         rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))
@@ -3367,7 +3368,6 @@ def get_agent_dossier_summary(session_id: int, user_id: int | None = None) -> Di
     """
     import db
     import namegen
-    import scenario_data
     session = db.get_session(session_id) or {}
     scen_key = str(session.get("scenario") or "fantasy")
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):

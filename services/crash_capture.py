@@ -70,12 +70,20 @@ def sanitize_repo_paths(text: str) -> str:
     return cleaned
 
 
-def to_json_safe(val: Any, _seen: Optional[set[int]] = None) -> Any:
+def to_json_safe(
+    val: Any,
+    _seen: Optional[set[int]] = None,
+    *,
+    transient_keys: frozenset[str] = frozenset({"_ctx"}),
+    sanitize_paths: bool = True,
+    stringify_unknown: bool = True,
+) -> Any:
     """Convert arbitrary runtime values (including dataclasses & BaseModels) into JSON-safe objects."""
     if val is None or isinstance(val, (str, int, float, bool)):
         return val
     if isinstance(val, Path):
-        return sanitize_repo_paths(str(val))
+        raw_path = str(val)
+        return sanitize_repo_paths(raw_path) if sanitize_paths else raw_path
     if _seen is None:
         _seen = set()
     val_id = id(val)
@@ -84,20 +92,56 @@ def to_json_safe(val: Any, _seen: Optional[set[int]] = None) -> Any:
     _seen.add(val_id)
     try:
         if dataclasses.is_dataclass(val) and not isinstance(val, type):
-            return to_json_safe(dataclasses.asdict(val), _seen)
+            return to_json_safe(
+                dataclasses.asdict(val),
+                _seen,
+                transient_keys=transient_keys,
+                sanitize_paths=sanitize_paths,
+                stringify_unknown=stringify_unknown,
+            )
         if hasattr(val, "model_dump") and callable(val.model_dump) and not isinstance(val, type):
-            return to_json_safe(val.model_dump(exclude_unset=False), _seen)
+            return to_json_safe(
+                val.model_dump(exclude_unset=False),
+                _seen,
+                transient_keys=transient_keys,
+                sanitize_paths=sanitize_paths,
+                stringify_unknown=stringify_unknown,
+            )
         if isinstance(val, dict):
             return {
-                str(k): to_json_safe(v, _seen)
+                str(k): to_json_safe(
+                    v,
+                    _seen,
+                    transient_keys=transient_keys,
+                    sanitize_paths=sanitize_paths,
+                    stringify_unknown=stringify_unknown,
+                )
                 for k, v in val.items()
-                if not str(k).startswith("__") and str(k) != "_ctx"
+                if not str(k).startswith("__") and str(k) not in transient_keys
             }
         if isinstance(val, (list, tuple, set, frozenset)):
-            return [to_json_safe(v, _seen) for v in val]
+            return [
+                to_json_safe(
+                    v,
+                    _seen,
+                    transient_keys=transient_keys,
+                    sanitize_paths=sanitize_paths,
+                    stringify_unknown=stringify_unknown,
+                )
+                for v in val
+            ]
         if hasattr(val, "__dict__") and not isinstance(val, type):
-            return to_json_safe(vars(val), _seen)
-        return sanitize_repo_paths(str(val))
+            return to_json_safe(
+                vars(val),
+                _seen,
+                transient_keys=transient_keys,
+                sanitize_paths=sanitize_paths,
+                stringify_unknown=stringify_unknown,
+            )
+        if not stringify_unknown:
+            return val
+        raw_str = str(val)
+        return sanitize_repo_paths(raw_str) if sanitize_paths else raw_str
     finally:
         _seen.discard(val_id)
 

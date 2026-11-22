@@ -2,8 +2,6 @@ from __future__ import annotations
 """
 Non-lethal sparring duel logic.
 """
-from typing import Optional, Dict, Any, List, Tuple
-import random
 
 # ---------------------------------------------------------------- Sparring Duel Support
 def is_sparring_monster(monster: dict) -> bool:

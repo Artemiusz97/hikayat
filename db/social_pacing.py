@@ -5,7 +5,7 @@ import sqlite3
 import time
 from typing import Any, Iterable
 
-from .core import get_conn
+from .core import _restore_session_table_rows, get_conn
 
 SOCIAL_V50_DDL_STATEMENTS: tuple[str, ...] = (
     """CREATE TABLE IF NOT EXISTS npc_social_composure (
@@ -153,6 +153,7 @@ def get_npc_social_composure(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, Any] | None:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             "SELECT * FROM npc_social_composure WHERE session_id = ? AND npc_id = ?",
             (int(session_id), nid),
@@ -175,6 +176,7 @@ def get_npc_social_composure_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -338,6 +340,7 @@ def get_character_social_daily(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, Any] | None:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             """SELECT * FROM character_social_daily
                WHERE session_id = ? AND character_id = ? AND npc_id = ? AND current_day = ?""",
@@ -363,6 +366,7 @@ def get_character_social_daily_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -445,6 +449,7 @@ def get_social_topic_states(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         rows = c.execute(
             """SELECT * FROM social_topic_states
                WHERE session_id = ? AND character_id = ? AND npc_id = ?""",
@@ -469,6 +474,7 @@ def get_social_topic_states_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, dict[str, Any]]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -516,6 +522,7 @@ def upsert_social_topic_state(
     now = time.time()
 
     def _run(c: sqlite3.Connection) -> dict[str, Any]:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             """SELECT * FROM social_topic_states
                WHERE session_id = ? AND character_id = ? AND npc_id = ? AND topic_id = ?""",
@@ -583,6 +590,7 @@ def record_contact_dossier_discoveries(
     now = time.time()
 
     def _run(c: sqlite3.Connection) -> int:
+        _ensure_social_v50_tables(c)
         cids: list[int] = []
         for raw_cid in (character_ids or []):
             try:
@@ -641,6 +649,7 @@ def get_contact_dossier_discoveries(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> list[dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         rows = c.execute(
             """SELECT * FROM contact_dossier_discoveries
                WHERE session_id = ? AND character_id IN (?, 0) AND npc_id = ?
@@ -666,6 +675,7 @@ def get_contact_dossier_discoveries_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -942,37 +952,9 @@ def rollback_social_pacing_state_after_turn(
                 "topics_restored": 0,
             }
 
-        def _restore_table(table_name: str, raw_json: str) -> int:
-            try:
-                items = json.loads(raw_json or "[]")
-            except Exception:
-                items = []
-            valid_cols = {
-                r["name"] if isinstance(r, sqlite3.Row) else r[1]
-                for r in c.execute(f"PRAGMA table_info({table_name})").fetchall()
-            }
-            c.execute(f"DELETE FROM {table_name} WHERE session_id = ?", (sid,))
-            count = 0
-            for item in (items if isinstance(items, list) else []):
-                if not isinstance(item, dict):
-                    continue
-                row_dict = {
-                    k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
-                    for k, v in item.items()
-                    if k in valid_cols and k not in ("id", "session_id")
-                }
-                if not row_dict:
-                    continue
-                row_dict["session_id"] = sid
-                cols_sql = ",".join(row_dict.keys())
-                qmarks = ",".join("?" * len(row_dict))
-                c.execute(f"INSERT INTO {table_name} ({cols_sql}) VALUES ({qmarks})", list(row_dict.values()))
-                count += 1
-            return count
-
-        comp_cnt = _restore_table("npc_social_composure", snap_row["composure_json"])
-        daily_cnt = _restore_table("character_social_daily", snap_row["daily_json"])
-        topic_cnt = _restore_table("social_topic_states", snap_row["topic_states_json"])
+        comp_cnt = _restore_session_table_rows(c, "npc_social_composure", sid, snap_row["composure_json"])
+        daily_cnt = _restore_session_table_rows(c, "character_social_daily", sid, snap_row["daily_json"])
+        topic_cnt = _restore_session_table_rows(c, "social_topic_states", sid, snap_row["topic_states_json"])
         return {
             "discoveries_deleted": disc_deleted,
             "composure_restored": comp_cnt,
@@ -1078,6 +1060,7 @@ def upsert_wardrobe_preset_discoveries_batch(
         return 0
 
     def _run(c: sqlite3.Connection) -> int:
+        _ensure_social_v50_tables(c)
         c.executemany(
             """INSERT OR IGNORE INTO contact_dossier_discoveries (
                 session_id, character_id, npc_id, fact_category, fact_key,

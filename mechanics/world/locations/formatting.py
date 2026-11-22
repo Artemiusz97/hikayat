@@ -2,12 +2,10 @@ from __future__ import annotations
 from .constants import *
 import json
 import re
-from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List
 import db
 import scenario_data
 from .seeds import *
-from .seeds import _load_seeds, _slugify, _SEED_PATH
 
 def _is_npc_aware_of_secret_residue(
     npc: Any,
@@ -381,6 +379,7 @@ def format_llm_location_context(
     char_name: str = "",
     *,
     present_npcs: list | None = None,
+    ensure_seeded: bool = True,
 ) -> str:
     """Formats the location context string and real-time movement rules for the LLM prompt."""
 
@@ -390,7 +389,8 @@ def format_llm_location_context(
 
 
 
-    ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
+    if ensure_seeded:
+        ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
 
     zone, primary, sub = parse_tiered_location(current_location_raw, scenario_key, session_id=session_id, char_name=char_name)
 

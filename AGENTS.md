@@ -21,7 +21,7 @@ These architectural contracts apply to **every** code change in Hikayat. They ar
 ## 3. Database, Concurrency & Test Isolation
 - **Never Mutate Live `hikayat.db` in Tests**: In pytest fixtures and `unittest` suites, always redirect **both** `db.DB_PATH` and `db.core.DB_PATH` to an isolated temporary SQLite file (restoring on teardown), or call `db.isolate_simulation_db()` in simulators.
 - **Async DB Execution & Query Hygiene**: Inside `async def` routes, cogs, and `TurnService`, run synchronous SQLite calls through `await adb(db.<fn>, ...)`, respect `distributed_session_lock` / `distributed_user_lock`, and avoid redundant N+1 `await adb(...)` round-trips inside loops when state is already in memory.
-- **Normalized Table Lifecycle Parity**: Any new or modified session-scoped table in `db/` must be wired into save/load slot remapping (`db/saves.py`), turn rollback (`db/sessions.py`), child-record purge (`db/core.py`), and idempotent schema migration (`db.init_db()`). The step-by-step checklist lives in the `hikayat-db-lifecycle-checklist` skill.
+- **Normalized Table Lifecycle Parity**: Any new or modified session-scoped table in `db/` must be wired into save/load slot remapping (`db/saves.py`), turn rollback (`db/sessions.py`), child-record purge (`db/core/lifecycle.py`), and idempotent schema migration (`db.init_db()`). The step-by-step checklist lives in the `hikayat-db-lifecycle-checklist` skill.
 
 ## 4. Headless Omnichannel Parity & Prose Guardrails
 - **Deterministic Single Source of Truth**: Resolve all game mechanics deterministically in `services/turn_service.py`, `game_engine/`, and `mechanics/` with idempotent retry handling. Never fork core game rules exclusively inside Discord `cogs/` or FastAPI `api/`.

@@ -4,11 +4,11 @@ import discord
 import asyncio
 import db
 from db import adb
-import game_engine
 from services.turn_service import TurnService
 from .embeds import *
 from .views.choices import ChoiceView, SyncChoiceView, GameOverView
-from .embeds import _apply_merchant_encounter_result, _format_items_gained, _format_items_gained_multi, _is_dialogue_partner, _safe_int, _get_choice_skill_emoji
+from .embeds import _format_items_gained, _format_items_gained_multi, _get_choice_skill_emoji
+from mechanics.combat.merchant import apply_merchant_encounter_result as _apply_merchant_encounter_result
 from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
 import logging
 logger = logging.getLogger(__name__)

@@ -1,6 +1,6 @@
-# Hikayat (v3.5.0) — Living AI Tabletop RPG & Web Application
+# Hikayat (v3.6.0) — Living AI Tabletop RPG & Web Application
 
-[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](releases/CHANGELOG-v3.5.0.md)
+[![Version](https://img.shields.io/badge/version-3.6.0-blue.svg)](releases/CHANGELOG-v3.6.0.md)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
 [![React 18](https://img.shields.io/badge/react-18.2-61dafb.svg)](web/)
 
@@ -11,9 +11,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 ## 🛠️ 10 Technical Innovations
 *(How the engine actually works under the hood)*
 
-### 1. Deterministic Rule Engine vs. AI Narration (Phases 1–5 Pipeline & Typed `TurnExecutionContext`)
+### 1. Deterministic Rule Engine vs. AI Narration (Phases 1–5 Pipeline & Typed Stage Contexts)
 * **What problem it solves**: In typical AI dungeon masters, the language model invents dice rolls, changes character health arbitrarily, and forgets inventory constraints, leading to hallucinations and broken rules.
-* **How Hikayat works**: The game separates logic from storytelling. Every player action is first processed deterministically through `TurnService` and modular state reducers (`game_engine/state/reducers.py`), coordinating typed stage dataclasses in `TurnExecutionContext` (`TurnClockStage`, `CombatStageState`, `EpistemicAndWorldStage`, `TurnNotices` in `game_engine/turn_context.py`). The engine resolves skill checks, applies Fallout-style Armor DT/DR, deducts item charges, awards post-combat auto-loot recovery, and advances quest state before locking the numbers and asking the LLM to narrate what happened.
+* **How Hikayat works**: The game separates logic from storytelling. Every player action is first processed deterministically through the modular `services/turn/` pipeline, `game_engine/turn/` stage runners (`PreTurnState`, `PromptAssemblyState` in `game_engine/turn/phase_state.py`), and modular state reducers (`game_engine/state/reducers.py`), coordinating typed stage dataclasses in `TurnExecutionContext` (`TurnClockStage`, `CombatStageState`, `EpistemicAndWorldStage`, `TurnNotices` in `game_engine/turn_context.py`). The engine resolves skill checks, applies Fallout-style Armor DT/DR, deducts item charges, awards post-combat auto-loot recovery, and advances quest state before locking the numbers and asking the LLM to narrate what happened.
 
 ### 2. Closed-World NPC Engine, 3-Stage Population Seeder & 6-Tier Presence Resolver (`CastPlanner`, `population_seeder.py`, `presence_resolver.py`)
 * **What problem it solves**: AI story games often suffer from "phantom NPCs"—characters who speak when they are not in the room, invent random shopkeepers every visit, or disappear mid-conversation.
@@ -35,9 +35,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: In most RPGs, NPCs never interact with each other off-screen, and every character magically knows secrets the moment something happens—or never hears rumors at all.
 * **How Hikayat works**: Across time-block boundaries, the engine runs deterministic off-screen NPC autonomy (`mechanics/world/npc_autonomy.py`) alongside World Pulse regional events (`mechanics/world/world_events/`) and an Epistemic Asymmetry Matrix (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`). Witnesses track what they saw, rumors decay or spread 1-hop across social ties with server-side Fog-of-War isolation, alibis are checked for lies, and players can confront, hush, bribe, or leverage secrets deterministically.
 
-### 7. Declarative 41-Table Session Lifecycle Registry, Pooled `ReadUnitOfWork` & Hybrid Memory (`db/registry.py`, `db/core.py`, `mechanics/system/memory/`)
+### 7. Declarative 41-Table Session Lifecycle Registry, Pooled `ReadUnitOfWork` & Hybrid Memory (`db/registry.py`, `db/core/`, `mechanics/system/memory/`)
 * **What problem it solves**: Multi-table SQLite RPGs risk orphaned save-slot rows, broken turn rollbacks, and redundant database round-trips or bloated LLM context windows as campaigns grow.
-* **How Hikayat works**: All 41 session-scoped child tables are governed by a declarative lifecycle contract (`SESSION_TABLE_REGISTRY` / `SessionTableSpec` in `db/registry.py`) driving FK-safe purge ordering, tiered save/load slot ID remapping (`db/saves.py`), deterministic turn rollback (`db/sessions.py`), and ring-buffer snapshot pruning—enforced statically by `scripts/static_check.py`. Thread-safe read connection pooling (`ReadUnitOfWork`), `PRAGMA user_version` fast-path checks, and batched turn preloaders keep queries fast, while FTS5 and vector memory compaction condense older turns so long campaigns stay within token budgets.
+* **How Hikayat works**: All 41 session-scoped child tables are governed by a declarative lifecycle contract (`SESSION_TABLE_REGISTRY` / `SessionTableSpec` in `db/registry.py`) driving FK-safe purge ordering, tiered save/load slot ID remapping (`db/saves.py`), deterministic turn rollback (`db/sessions.py`), and ring-buffer snapshot pruning inside the modular `db/core/` and `db/social/` packages—enforced statically alongside unused/shadow import and facade gates by `scripts/static_check.py`. Thread-safe read connection pooling (`ReadUnitOfWork`), `PRAGMA user_version` fast-path checks, and batched turn preloaders keep queries fast, while FTS5 and vector memory compaction condense older turns so long campaigns stay within token budgets.
 
 ### 8. Hybrid Reasoning Streaming, Dual-Model Cascade & Split Stall Guardrails (`llm_client.py`)
 * **What problem it solves**: Streaming structured JSON from local or hybrid-reasoning models often stalls on long KV prefills, leaks `<think>` blocks, or wastes large-model latency on routine utility classification.
@@ -47,9 +47,9 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 * **What problem it solves**: Multi-language support often breaks formatting, and language models frequently mix up character pronouns or demographic traits during long scenes.
 * **How Hikayat works**: Game actions, combat choices, UI labels, and inventory metadata synchronize across English, Polish, Malay, German, and Simplified Chinese in both Python dictionaries and React i18n JSON bundles. An automated pronoun resolver checks entity genders against database IDs to prevent models from drifting mid-scene.
 
-### 10. Headless Omnichannel Game Loop & Zero-Turn Inspection Service (`services/turn_service.py`, `services/examine_service.py`)
+### 10. Headless Omnichannel Game Loop & Zero-Turn Inspection Service (`services/turn/`, `services/examine_service.py`)
 * **What problem it solves**: Supporting both a Discord bot and a web application usually means duplicating game logic or drifting between interfaces.
-* **How Hikayat works**: Both `TurnService` (turns Phases 1–5) and `get_examine_payload` (zero-turn scene and tactical inspection with LRU/TTL prose caching and strict stat/secret scrubbing) run headlessly in Python services, driving Discord slash commands/buttons and FastAPI REST/WebSocket routes from a single source of truth.
+* **How Hikayat works**: Both `TurnService` (`services/turn/` behind `services/turn_service.py` for turns Phases 1–5) and `get_examine_payload` (`services/examine_service.py` for zero-turn scene and tactical inspection with LRU/TTL prose caching and strict stat/secret scrubbing) run headlessly in Python services, driving Discord slash commands/buttons and the modular FastAPI `api/adventure/` REST/WebSocket routes from a single source of truth.
 
 ---
 
@@ -118,13 +118,13 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 
 ```
 hikayat/
-├── api/                        # FastAPI REST endpoints (adventure, codex, contracts, fonts, realty, security)
-├── bin/                        # Auxiliary network & tunnel utilities
+├── api/                        # FastAPI REST endpoints (adventure/, codex_phone, contracts, fonts, realty, auth)
+├── bin/                        # Auxiliary network & tunnel utilities (tunnel.py)
 ├── cogs/                       # Discord Bot slash command cogs & interactive button views
 ├── custom_fonts/               # Drop-in user font files (.woff2, .woff, .ttf, .otf) served dynamically
 ├── data/                       # Static game catalogs (classes, scenarios, locations, folklore, storylets)
-├── db/                         # SQLite persistence layer & declarative 41-table lifecycle registry (registry.py)
-├── game_engine/                # Core turn pipeline, typed TurnExecutionContext, state reducers, cast planner & quest resolvers
+├── db/                         # Modular SQLite persistence packages (core/, social/, saves, sessions, registry.py)
+├── game_engine/                # Core turn pipeline (turn/ & phase_state.py), TurnExecutionContext, reducers & quests
 ├── localization/               # Multi-language translation dictionaries (en, pl, ms, de, zh)
 ├── mechanics/                  # Domain-specific simulation modules
 │   ├── combat/                 # Combat formulas, weapon/armor DT & DR, 5-mode consumables, spells & auto-loot
@@ -137,12 +137,13 @@ hikayat/
 ├── models/                     # Centralized Pydantic schemas & state models
 ├── releases/                   # Version changelogs & clean release archives
 ├── scripts/                    # Maintenance, release packaging, static bug gate & session cleanup utilities
-├── services/                   # Decoupled headless services (TurnService, ExamineService, CrashCapture)
-├── web/                        # React 18 Single-Page Application (Vite, Tailwind, i18n, Motion)
+├── services/                   # Decoupled headless services (turn/ package, TurnService, ExamineService, CrashCapture)
+├── web/                        # React 18 Single-Page Application (Vite, Tailwind, ESLint 9, i18n, Motion)
 │   ├── dist/                   # Compiled production frontend bundle (served by FastAPI)
 │   ├── public/backgrounds/     # 12 bundled .webp scenario & menu backdrop illustrations
+│   ├── eslint.config.js        # Flat ESLint configuration (React & Hooks rules)
 │   └── src/                    # StoryFeed, ActionPanel, ExamineModal, WorldMapModal, 8 Phone apps, modals & themes
-├── config.py                   # Central configuration & environment loader
+├── config.py                   # Central configuration, deferred secret validation & test-mode isolation
 ├── bot.py                      # Discord Bot entry point
 ├── server.py                   # FastAPI Web & WebSocket server entry point
 ├── requirements.txt            # Python dependencies

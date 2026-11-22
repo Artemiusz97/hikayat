@@ -14,7 +14,7 @@ import db
 from db import adb
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
 from mechanics.world.locations.residences import build_realty_payload
-from .deps import _serializable_action, manager
+from .deps import _serializable_action, manager, require_active_session
 from .security import verify_session_participant
 
 router = APIRouter()
@@ -61,11 +61,6 @@ _REASON_ERROR_MAP: dict[str, tuple[int, str]] = {
 }
 
 
-def _require_active_session(session: dict[str, Any] | None) -> None:
-    if not session or str(session.get("status") or "active").strip().lower() != "active":
-        raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
-
-
 def _raise_for_realty_failure(res: dict[str, Any]) -> None:
     reason = str(res.get("reason") or "invalid_request")
     code, msg = _REASON_ERROR_MAP.get(reason, (400, f"Realty action failed ({reason})."))
@@ -95,12 +90,12 @@ async def purchase_realty_property(
 ) -> dict[str, Any]:
     """Atomically purchases a property deed, unlocks all interior rooms, and updates inventory slots."""
     pre_session, canonical_uid = await verify_session_participant(request, session_id, req.user_id)
-    _require_active_session(pre_session)
+    require_active_session(pre_session)
     eff_uid = int(canonical_uid or req.user_id or (pre_session or {}).get("host_user_id") or 0)
 
     async with distributed_adventure_lock(eff_uid, session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
-        _require_active_session(session)
+        require_active_session(session)
         if not eff_uid:
             eff_uid = int(session.get("host_user_id") or 0)
         res = await adb(
@@ -132,12 +127,12 @@ async def set_realty_primary_home(
 ) -> dict[str, Any]:
     """Designates an owned deed or active starter quarters as the player's Primary Home."""
     pre_session, canonical_uid = await verify_session_participant(request, session_id, req.user_id)
-    _require_active_session(pre_session)
+    require_active_session(pre_session)
     eff_uid = int(canonical_uid or req.user_id or 0)
 
     async with distributed_session_lock(session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
-        _require_active_session(session)
+        require_active_session(session)
         res = await adb(db.set_primary_property, session_id, req.property_id)
         if not res.get("ok"):
             _raise_for_realty_failure(res)
@@ -160,12 +155,12 @@ async def manage_realty_spare_key(
 ) -> dict[str, Any]:
     """Grants or revokes a Spare Key on a permanently purchased deed (`is_starter == 0`)."""
     pre_session, canonical_uid = await verify_session_participant(request, session_id, req.user_id)
-    _require_active_session(pre_session)
+    require_active_session(pre_session)
     eff_uid = int(canonical_uid or req.user_id or 0)
 
     async with distributed_session_lock(session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
-        _require_active_session(session)
+        require_active_session(session)
         if req.revoke:
             res = await adb(db.revoke_property_spare_key, session_id, req.property_id, req.npc_id)
         else:

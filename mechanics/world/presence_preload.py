@@ -432,9 +432,7 @@ def preload_presence_context(
         contacts = []
         roster_rows = []
         with db.UnitOfWork() as uow_conn:
-            sp_name = "sp_presence_preload"
-            uow_conn.execute(f"SAVEPOINT {sp_name}")
-            try:
+            with db.savepoint(uow_conn, "sp_presence_preload", rollback_always=True):
                 pop_seeded_cnt = 0
                 if is_population_seeding_supported(eff_scen):
                     pop_res = ensure_world_population_seeded(
@@ -479,12 +477,6 @@ def preload_presence_context(
                             "scen_key": eff_scen,
                             "turn_number": eff_turn,
                         })
-            finally:
-                try:
-                    uow_conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
-                    uow_conn.execute(f"RELEASE SAVEPOINT {sp_name}")
-                except Exception:
-                    pass
     else:
         contacts = []
         roster_rows = []

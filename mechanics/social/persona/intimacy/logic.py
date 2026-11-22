@@ -1,9 +1,8 @@
 from __future__ import annotations
 from .constants import *
-import json
 import hashlib
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 from ..core import *
 
 def transition_intercourse_experience(current_state: str, action_type: str) -> str:

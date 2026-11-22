@@ -138,7 +138,6 @@ def generate_random_equipment(
     force_anomalous=None,
     force_granted_spell=None,
 ):
-    from mechanics.combat.items.anomalous_gear import is_anomalous_scenario, apply_anomalous_incursions_gear_rules
     is_anom = is_anomalous_scenario(scenario)
 
     if is_clothing_slot(slot):
@@ -664,11 +663,6 @@ def generate_starter_equipment_loadout(
                 item["metadata"] = make_narrative_metadata(item["metadata"])
                 item["effect"] = serialize_item(item["metadata"])
 
-    from .anomalous_gear import (
-        is_anomalous_scenario,
-        apply_anomalous_faction_starter_theme,
-        infer_anomalous_faction_from_class,
-    )
     if is_anomalous_scenario(scenario):
         resolved_fac = starting_faction or infer_anomalous_faction_from_class(char_class) or "public_agency"
         loadout = apply_anomalous_faction_starter_theme(

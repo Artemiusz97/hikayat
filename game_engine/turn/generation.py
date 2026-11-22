@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Optional, List
 from .constants import *
 import db
 import re
@@ -8,18 +8,16 @@ import scenario_data
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.narrative.intent import *
-from game_engine.core import SYSTEM_PROMPT, VALID_STATS, is_nsfw_scenario
+from game_engine.core import VALID_STATS, is_nsfw_scenario
 from game_engine.schemas import CLASSIFY_SCHEMA
 from config import LLM_PASS1_TIMEOUT
 import namegen
-import random
 import logging
 log = logging.getLogger(__name__)
 import game_engine
 from db import adb
-import asyncio
 from game_engine.turn_context import TurnContext
-from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
+from models.llm_schemas import ActionClassification, OpeningScene
 
 def get_narrative_requirements(
     verbosity: str,
@@ -569,10 +567,15 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
         s_nar = (result.get("narrative") or result.get("outcome_narrative") or "").strip()
         loc_to_reconcile = result.get("location") or suggested_loc
-        result["location"] = game_engine.reconcile_movement_location(
-            session["id"], "", loc_to_reconcile,
-            action_text="Begin adventure", narrative=s_nar,
-            scen_key=scen_key, char_name=first_char_name
+        result["location"] = await adb(
+            game_engine.reconcile_movement_location,
+            session["id"],
+            "",
+            loc_to_reconcile,
+            action_text="Begin adventure",
+            narrative=s_nar,
+            scen_key=scen_key,
+            char_name=first_char_name,
         )
 
     res_deep = namegen.resolve_tokens_deep(result, scenario=scen_key)
@@ -638,8 +641,13 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         # Reconcile NPCs present in the opening scene from rosters and audit
         eff_loc = res_deep.get("location") or suggested_loc or ""
         try:
-            res_deep["npcs_present"] = game_engine.process_scene_npcs(
-                res_deep, session, eff_loc, eff_loc, actions=[]
+            res_deep["npcs_present"] = await adb(
+                game_engine.process_scene_npcs,
+                res_deep,
+                session,
+                eff_loc,
+                eff_loc,
+                actions=[],
             )
             if isinstance(session.get("crowd_state"), dict):
                 res_deep["crowd_state"] = dict(session["crowd_state"])
@@ -1396,11 +1404,15 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
         IntentCategory.PHONE_CONTACT_EXCHANGE,
     })
     skip_fast_path = bool(local_quest_beats and parsed.category not in _FAST_PATH_EXEMPT_INTENTS)
-    fast_action = None if skip_fast_path else _fast_path_classify_ambient_action(action_text, ctx, parsed=parsed, session=session)
+    fast_action = (
+        None
+        if skip_fast_path
+        else await adb(_fast_path_classify_ambient_action, action_text, ctx, parsed=parsed, session=session)
+    )
     if fast_action is not None:
         return fast_action
 
-    primitives = _extract_deterministic_action_primitives(action_text, session=session, parsed=parsed)
+    primitives = await adb(_extract_deterministic_action_primitives, action_text, session=session, parsed=parsed)
 
     # Compact <250-token micro-context for nuanced custom action classification
     enemies_compact = ", ".join(
@@ -1534,7 +1546,7 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
         res_dict["_active_recall"] = primitives["_active_recall"]
     elif res_dict.get("is_memory_recall") and res_dict.get("recall_query"):
         from db.memory import active_recall_search
-        recall_results = active_recall_search(session["id"], res_dict["recall_query"])
+        recall_results = await adb(active_recall_search, session["id"], res_dict["recall_query"])
         if recall_results:
             res_dict["_active_recall"] = recall_results
 
@@ -1566,7 +1578,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     """
 
-    from mechanics.combat.items import generate_starter_equipment_loadout, _infer_class_archetype_profile
+    from mechanics.combat.items import generate_starter_equipment_loadout
 
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
@@ -1584,9 +1596,7 @@ async def generate_custom_starter_gear(char_class: str, class_description: str, 
 
     from mechanics.combat.items.accessories import generate_random_equipment as gen_acc
 
-    from mechanics.combat.equipment import parse_equipment_metadata
 
-    from mechanics.combat.items.envelope import serialize_item
 
     from scenario_data import uses_nsfw_model
 

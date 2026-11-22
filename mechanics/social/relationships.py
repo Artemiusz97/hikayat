@@ -245,7 +245,7 @@ def is_contact_eligible(
             return True
 
         # Fast-path: In-memory derivation before querying SQLite
-        from mechanics.social.roster_tags import derive_age_group, _STUDENT_ROLE_EXCEPTIONS, _STUDENT_GRADES
+        from mechanics.social.roster_tags import derive_age_group, _STUDENT_ROLE_EXCEPTIONS
         if grade or social_role_type:
             derived_age = derive_age_group(grade=grade, role=role, social_role_type=social_role_type, scen_key=scenario, is_family=is_adult_family)
             if derived_age == "adult":
@@ -655,13 +655,7 @@ def format_llm_relationship_context(contacts: List[Dict[str, Any]], scenario: st
 # ==============================================================================
 
 from mechanics.narrative.intent import (
-    classify_action_intent,
-    IntentCategory,
     is_romantic_confession_intent as _is_romantic_confession_intent,
-    ROMANTIC_CONFESSION_FRAMES,
-    NON_ROMANTIC_QUALIFIER_RE,
-    ROMANCE_NEGATION_GUARD_RE,
-    THIRD_PARTY_GOSSIP_RE,
 )
 
 
@@ -1720,7 +1714,6 @@ def calculate_contact_exchange_dc(target_npc_data: dict, scenario: str = "defaul
     b_inf = target_npc_data.get("basic_info") or {}
     if isinstance(b_inf, str):
         try:
-            import json
             b_inf = json.loads(b_inf)
         except Exception:
             b_inf = {}
@@ -1729,7 +1722,6 @@ def calculate_contact_exchange_dc(target_npc_data: dict, scenario: str = "defaul
     app = target_npc_data.get("appearance") or {}
     if isinstance(app, str):
         try:
-            import json
             app = json.loads(app)
         except Exception:
             app = {}

@@ -1,8 +1,7 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel
-import inspect
 import json
 import re
 import sqlite3
@@ -54,7 +53,6 @@ async def _get_contacts_ro(session_id: int, character_id: int | None = None) -> 
 
 
 from mechanics.system.phone import (
-    scenario_has_smartphone,
     get_phone_branding,
     detect_custom_message_intent,
     generate_player_chat_message,
@@ -87,12 +85,10 @@ from mechanics.social.factions import (
     get_anomalous_promotion_tiers_for_archetype,
     validate_faction_hq_action_access,
     validate_major_club_subroom_action,
-    check_rival_or_hostile_turf_block,
     is_nsfw_salon_faction,
     validate_club_quartermaster_hours,
     resolve_board_club_faction_for_location,
 )
-from mechanics.narrative.clues import evaluate_clue_deduction
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label, reveal_hidden_club_facility
 from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
 from mechanics.combat.loadouts import build_combatant_stat_sheet, compute_companion_vitals, ensure_combatant_loadout
@@ -242,9 +238,9 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         removed = await adb(db.remove_session_party_npc, req.session_id, npc_name)
         if not removed:
             raise HTTPException(status_code=404, detail=f"{npc_name} is not currently in your party")
-        from .adventure import _enrich_session_for_client
+        from .adventure import enrich_session_for_client
         updated_sess = await adb(db.get_session, req.session_id) or {}
-        enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+        enriched_sess = await adb(enrich_session_for_client, updated_sess, req.user_id)
         party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
         return {
             "success": True,
@@ -382,7 +378,6 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     c_app = matched_contact.get("appearance") or matched_contact.get("appearance_json")
     if isinstance(c_app, str):
         try:
-            import json
             c_app = json.loads(c_app)
         except Exception:
             c_app = {}
@@ -420,7 +415,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         appearance=c_app if isinstance(c_app, dict) else None,
     )
 
-    from .adventure import _enrich_session_for_client
+    from .adventure import enrich_session_for_client
     try:
         from mechanics.world.world_events.social_hooks import handle_mid_rumor_npc_promotion
         await adb(handle_mid_rumor_npc_promotion, req.session_id, npc_name=npc_payload["name"])
@@ -439,7 +434,7 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
         )
     except Exception:
         pass
-    enriched_sess = await adb(_enrich_session_for_client, updated_sess, req.user_id)
+    enriched_sess = await adb(enrich_session_for_client, updated_sess, req.user_id)
     party_npcs = enriched_sess.get("party_npcs") if isinstance(enriched_sess, dict) else await adb(db.get_session_party_npcs, req.session_id)
     return {
         "success": True,
@@ -518,7 +513,6 @@ def _format_world_lore_entity_for_ui(ent: dict[str, Any]) -> dict[str, Any]:
 @router.get("/api/lorebook/{session_id}")
 async def get_lorebook(session_id: int, user_id: int | None = Query(None), request: Request = None):
     """Fetches lorebook entities grouped by category, restricting person entities to discovered characters."""
-    import re
     from mechanics.social.persona import infer_contact_gender
     from mechanics.social.persona.intimacy.appearance import normalize_appearance
 
@@ -978,11 +972,7 @@ def _preload_fog_of_war_context(
         except (sqlite3.Error, AttributeError, TypeError, ValueError):
             primary_property = None
         try:
-            with db.get_conn() as conn_ties:
-                t_rows = conn_ties.execute(
-                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
-                    (sid,),
-                ).fetchall()
+            t_rows = db.get_session_active_social_ties(sid)
             for tr in t_rows:
                 td = dict(tr)
                 pa = str(td.get("person_a_key") or "").strip().lower()
@@ -1815,7 +1805,6 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         }
 
     if action == "quartermaster":
-        from mechanics.social.factions import infer_anomalous_faction_archetype
         fac_arch = infer_anomalous_faction_archetype(faction) if is_anom else ""
         hq_ok, hq_err, hq_code = await adb(
             validate_faction_hq_action_access, session_id, req.user_id, faction, "quartermaster", session
@@ -1956,7 +1945,6 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             )
         from mechanics.social.factions import (
             get_anomalous_faction_state,
-            infer_anomalous_faction_archetype,
         )
         from mechanics.combat.spells.awakened_kits import (
             ABILITY_MEDIUMS,
@@ -3209,7 +3197,7 @@ async def cancel_session_commitment(
     }
 
 
-from .encyclopedia import get_codex_encyclopedia  # noqa: F401
+from .encyclopedia import get_codex_encyclopedia  # noqa: F401  # static-check: ignore[unused-import]
 
 
 

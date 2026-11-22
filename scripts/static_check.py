@@ -41,16 +41,26 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parent.parent
 BASELINE_PATH = ROOT / "scripts" / "static_baseline.json"
-SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models"]
+def _discover_script_files() -> List[str]:
+    scripts_dir = ROOT / "scripts"
+    if not scripts_dir.is_dir():
+        return []
+    return [f"scripts/{p.name}" for p in sorted(scripts_dir.glob("*.py"))]
+
+
+SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models", "localization", "bin"]
 SCAN_ROOT_FILES = [
-    "server.py",
-    "llm_client.py",
+    "bot.py",
     "character_data.py",
+    "config.py",
+    "image_client.py",
+    "llm_client.py",
+    "namegen.py",
     "scenario_data.py",
-    "catalog.py",
-    "scripts/cleanup_stale_sessions.py",
-    "scripts/package_release.py",
-    "scripts/static_check.py",
+    "scenario_variants.py",
+    "server.py",
+    "skill_check.py",
+    *_discover_script_files(),
 ]
 
 # High-signal pylint checks only: each of these is a crash (or silently swallowed crash) at runtime.
@@ -538,7 +548,7 @@ def analyze_possibly_unbound(path: Path, rel: str) -> List[Finding]:
 # Analyzers 3–5: Bundle B DB/Async/Registry Architecture Contracts
 # ---------------------------------------------------------------------------
 
-_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/turn/")
+_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/", "mechanics/", "server.py")
 _ASYNC_SAFE_DB_ATTRS = frozenset({
     "adb",
     "distributed_session_lock",
@@ -589,20 +599,132 @@ def _extract_pure_db_helpers(db_init_path: Optional[Path] = None) -> Set[str]:
     return set()
 
 
-def _collect_db_imports(nodes: Iterable[ast.AST]) -> Tuple[Set[str], Dict[str, str]]:
-    """Collect aliases of `import db` and `from db import fn` bindings in a block."""
+def _discover_db_submodules(db_dir: Optional[Path] = None) -> Set[str]:
+    target = db_dir or (ROOT / "db")
+    if not target.is_dir():
+        return set()
+    subs: Set[str] = set()
+    for p in target.iterdir():
+        if p.name == "__init__.py" or p.name.startswith("__"):
+            continue
+        if p.is_file() and p.suffix == ".py":
+            subs.add(p.stem)
+        elif p.is_dir() and (p / "__init__.py").is_file():
+            subs.add(p.name)
+    return subs
+
+
+_DB_SUBMODULES = _discover_db_submodules()
+
+
+def _collect_db_imports(
+    nodes: Iterable[ast.AST],
+    *,
+    db_submodules: Optional[Set[str]] = None,
+) -> Tuple[Set[str], Dict[str, str]]:
+    """Collect aliases of `import db[.submod]` and `from db[.submod] import fn` bindings in a block."""
+    subs = _DB_SUBMODULES if db_submodules is None else db_submodules
     aliases: Set[str] = set()
     symbols: Dict[str, str] = {}
     for node in nodes:
         if isinstance(node, ast.Import):
             for al in node.names:
-                if al.name == "db":
-                    aliases.add(al.asname or "db")
-        elif isinstance(node, ast.ImportFrom) and node.module == "db" and node.level == 0:
+                if al.name == "db" or al.name.startswith("db."):
+                    if al.asname:
+                        aliases.add(al.asname)
+                    else:
+                        aliases.add(al.name)
+                        aliases.add("db")
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module
+            and (node.module == "db" or node.module.startswith("db."))
+        ):
             for al in node.names:
-                if al.name != "*":
-                    symbols[al.asname or al.name] = al.name
+                if al.name == "*":
+                    continue
+                bound = al.asname or al.name
+                if node.module == "db" and al.name in subs:
+                    aliases.add(bound)
+                else:
+                    symbols[bound] = al.name
     return aliases, symbols
+
+
+def _collect_local_bindings(fn: ast.AST) -> Set[str]:
+    """Collect parameter and direct-scope non-db bindings that shadow outer names in `fn`."""
+    bound: Set[str] = set()
+    args = getattr(fn, "args", None)
+    if isinstance(args, ast.arguments):
+        for a in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs):
+            bound.add(a.arg)
+        if args.vararg is not None:
+            bound.add(args.vararg.arg)
+        if args.kwarg is not None:
+            bound.add(args.kwarg.arg)
+
+    _SCOPE_WALLS = (
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Lambda,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+
+    def _walk(node: ast.AST) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+            return
+        if isinstance(node, _SCOPE_WALLS):
+            return
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                if not (al.name == "db" or al.name.startswith("db.")):
+                    bound.add(al.asname or al.name.split(".")[0])
+            return
+        if isinstance(node, ast.ImportFrom):
+            is_db_imp = (
+                node.level == 0
+                and node.module is not None
+                and (node.module == "db" or node.module.startswith("db."))
+            )
+            if not is_db_imp:
+                for al in node.names:
+                    if al.name != "*":
+                        bound.add(al.asname or al.name)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchAs) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchStar) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and isinstance(node.rest, str):
+            bound.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            _walk(child)
+
+    for stmt in getattr(fn, "body", ()):
+        _walk(stmt)
+    return bound
+
+
+def _dotted_attr_chain(expr: ast.AST) -> Optional[str]:
+    parts: List[str] = []
+    cur = expr
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
 
 
 def analyze_sync_db_in_async(
@@ -624,8 +746,6 @@ def analyze_sync_db_in_async(
     allowed = helpers | _ASYNC_SAFE_DB_ATTRS
     findings: List[Finding] = []
 
-    mod_aliases, mod_symbols = _collect_db_imports(tree.body)
-
     def _iter_direct_imports(body: List[ast.stmt]) -> List[ast.stmt]:
         stmts: List[ast.stmt] = []
         stack: List[ast.AST] = list(body)
@@ -639,6 +759,8 @@ def analyze_sync_db_in_async(
             stack.extend(ast.iter_child_nodes(node))
         return stmts
 
+    mod_aliases, mod_symbols = _collect_db_imports(_iter_direct_imports(tree.body))
+
     def _scan_async_fn(
         fn: ast.AsyncFunctionDef,
         qualname: str,
@@ -647,8 +769,10 @@ def analyze_sync_db_in_async(
     ) -> None:
         local_stmts = _iter_direct_imports(fn.body)
         loc_aliases, loc_symbols = _collect_db_imports(local_stmts)
-        aliases = parent_aliases | loc_aliases
-        symbols = {**parent_symbols, **loc_symbols}
+        shadowed = _collect_local_bindings(fn)
+        aliases = (parent_aliases - shadowed) | loc_aliases
+        symbols = {k: v for k, v in parent_symbols.items() if k not in shadowed}
+        symbols.update(loc_symbols)
 
         def _visit(node: ast.AST) -> None:
             if node is not fn:
@@ -660,9 +784,14 @@ def analyze_sync_db_in_async(
                         _visit(d)
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
                         _visit(d)
-                    # Recurse only into nested async defs inside this sync helper.
+                    # Recurse only into nested async defs inside this sync helper, scoping any local imports to its body.
+                    fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+                    fn_shadowed = _collect_local_bindings(node)
+                    sub_aliases = (aliases - fn_shadowed) | fn_aliases
+                    sub_symbols = {k: v for k, v in symbols.items() if k not in fn_shadowed}
+                    sub_symbols.update(fn_symbols)
                     for sub in node.body:
-                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols)
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", sub_aliases, sub_symbols)
                     return
                 if isinstance(node, ast.Lambda):
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
@@ -675,13 +804,21 @@ def analyze_sync_db_in_async(
                 if isinstance(node, ast.Call):
                     fn_name: Optional[str] = None
                     via_alias = False
-                    if (
-                        isinstance(node.func, ast.Attribute)
-                        and isinstance(node.func.value, ast.Name)
-                        and node.func.value.id in aliases
-                    ):
-                        fn_name = node.func.attr
-                        via_alias = True
+                    if isinstance(node.func, ast.Attribute):
+                        root_chain = _dotted_attr_chain(node.func.value)
+                        if root_chain:
+                            parts = root_chain.split(".")
+                            if (
+                                root_chain in aliases
+                                or (
+                                    len(parts) >= 2
+                                    and parts[0] in aliases
+                                    and parts[1] in _DB_SUBMODULES
+                                    and all(not p.startswith("_") for p in parts[1:])
+                                )
+                            ):
+                                fn_name = node.func.attr
+                                via_alias = True
                     elif isinstance(node.func, ast.Name) and node.func.id in symbols:
                         fn_name = symbols[node.func.id]
 
@@ -714,7 +851,17 @@ def analyze_sync_db_in_async(
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
             _scan_async_fn(node, q, parent_aliases, parent_symbols)
             return
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+        if isinstance(node, ast.FunctionDef):
+            q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
+            fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+            fn_shadowed = _collect_local_bindings(node)
+            sub_aliases = (parent_aliases - fn_shadowed) | fn_aliases
+            sub_symbols = {k: v for k, v in parent_symbols.items() if k not in fn_shadowed}
+            sub_symbols.update(fn_symbols)
+            for sub in node.body:
+                _scan_for_nested_async(sub, q, sub_aliases, sub_symbols)
+            return
+        if isinstance(node, ast.ClassDef):
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
             for sub in node.body:
                 _scan_for_nested_async(sub, q, parent_aliases, parent_symbols)
@@ -729,7 +876,11 @@ def analyze_sync_db_in_async(
 
 def _is_sqlite_conn_producer(expr: Optional[ast.AST]) -> bool:
     """Return True when `expr` constructs or opens a sqlite3 connection / UoW handle."""
-    if expr is None or not isinstance(expr, ast.Call):
+    if expr is None:
+        return False
+    if isinstance(expr, ast.IfExp):
+        return _is_sqlite_conn_producer(expr.body) or _is_sqlite_conn_producer(expr.orelse)
+    if not isinstance(expr, ast.Call):
         return False
     f = expr.func
     name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
@@ -741,9 +892,9 @@ def _is_sqlite_conn_producer(expr: Optional[ast.AST]) -> bool:
 
 
 def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
-    """Flag raw SQLite `conn.commit()` outside `db/core.py` (would release active savepoints)."""
+    """Flag raw SQLite `conn.commit()` outside `db/core` (would release active savepoints)."""
     norm_rel = rel.replace("\\", "/")
-    if norm_rel == "db/core.py":
+    if norm_rel == "db/core.py" or norm_rel.startswith("db/core/"):
         return []
     try:
         source = path.read_text(encoding="utf-8")
@@ -753,27 +904,46 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
     lines = source.splitlines()
     findings: List[Finding] = []
 
-    def _collect_conn_vars(scope_node: ast.AST) -> Set[str]:
-        conn_vars = set(_DEFAULT_SQLITE_CONN_NAMES)
+    def _is_conn_expr(expr: Optional[ast.AST], conn_vars: Set[str]) -> bool:
+        if expr is None:
+            return False
+        if _is_sqlite_conn_producer(expr):
+            return True
+        if isinstance(expr, ast.Name) and expr.id in conn_vars:
+            return True
+        if isinstance(expr, ast.Attribute) and expr.attr in _DEFAULT_SQLITE_CONN_NAMES:
+            return True
+        return False
+
+    def _collect_conn_vars(scope_node: ast.AST, seeded_conns: Set[str]) -> Set[str]:
+        conn_vars = set(seeded_conns)
+        scope_nodes: List[ast.AST] = []
         stack: List[ast.AST] = list(getattr(scope_node, "body", []))
         while stack:
             node = stack.pop()
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
-            if isinstance(node, ast.With):
-                for item in node.items:
-                    if item.optional_vars is not None and _is_sqlite_conn_producer(item.context_expr):
-                        conn_vars.update(_target_names(item.optional_vars))
-            elif isinstance(node, ast.Assign) and _is_sqlite_conn_producer(node.value):
-                for tgt in node.targets:
-                    conn_vars.update(_target_names(tgt))
-            elif isinstance(node, ast.AnnAssign) and _is_sqlite_conn_producer(node.value):
-                conn_vars.update(_target_names(node.target))
+            scope_nodes.append(node)
             stack.extend(ast.iter_child_nodes(node))
+        changed = True
+        while changed:
+            changed = False
+            before = len(conn_vars)
+            for node in scope_nodes:
+                if isinstance(node, ast.With):
+                    for item in node.items:
+                        if item.optional_vars is not None and _is_conn_expr(item.context_expr, conn_vars):
+                            conn_vars.update(_target_names(item.optional_vars))
+                elif isinstance(node, ast.Assign) and _is_conn_expr(node.value, conn_vars):
+                    for tgt in node.targets:
+                        conn_vars.update(_target_names(tgt))
+                elif isinstance(node, ast.AnnAssign) and _is_conn_expr(node.value, conn_vars):
+                    conn_vars.update(_target_names(node.target))
+            changed = len(conn_vars) > before
         return conn_vars
 
     def _scan_scope(node: ast.AST, qualname: str, inherited_conns: Set[str]) -> None:
-        conn_vars = inherited_conns | _collect_conn_vars(node)
+        conn_vars = inherited_conns | _collect_conn_vars(node, inherited_conns)
 
         def _visit(cur: ast.AST) -> None:
             if cur is not node and isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -789,10 +959,16 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
                 val = cur.func.value
                 is_conn = (
                     (isinstance(val, ast.Name) and val.id in conn_vars)
+                    or (isinstance(val, ast.Attribute) and val.attr in _DEFAULT_SQLITE_CONN_NAMES)
                     or _is_sqlite_conn_producer(val)
                 )
                 if is_conn and not _is_suppressed_line(lines, cur.lineno, "raw-conn-commit-outside-core"):
-                    target_desc = val.id if isinstance(val, ast.Name) else "get_conn()"
+                    if isinstance(val, ast.Name):
+                        target_desc = val.id
+                    elif isinstance(val, ast.Attribute):
+                        target_desc = ast.unparse(val) if hasattr(ast, "unparse") else f"obj.{val.attr}"
+                    else:
+                        target_desc = "get_conn()"
                     findings.append(Finding(
                         norm_rel,
                         cur.lineno,
@@ -817,8 +993,8 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
     return findings
 
 
-def _extract_registered_table_names(registry_path: Path) -> Set[str]:
-    """Extract all table names registered in SESSION_TABLE_REGISTRY, GLOBAL_TABLES, FTS5_VIRTUAL_TABLES."""
+def _extract_registered_table_names(registry_path: Path, *, include_global: bool = True) -> Set[str]:
+    """Extract registered table names from SESSION_TABLE_REGISTRY, FTS5_VIRTUAL_TABLES (and optionally GLOBAL_TABLES)."""
     tree = ast.parse(registry_path.read_text(encoding="utf-8"), filename=str(registry_path))
     names: Set[str] = set()
 
@@ -844,6 +1020,7 @@ def _extract_registered_table_names(registry_path: Path) -> Set[str]:
                 if elt.args and isinstance(elt.args[0], ast.Constant) and isinstance(elt.args[0].value, str):
                     names.add(elt.args[0].value.strip().lower())
 
+    allowed_sets = ("GLOBAL_TABLES", "FTS5_VIRTUAL_TABLES") if include_global else ("FTS5_VIRTUAL_TABLES",)
     for stmt in tree.body:
         val_node: Optional[ast.AST] = None
         target_name = ""
@@ -853,7 +1030,7 @@ def _extract_registered_table_names(registry_path: Path) -> Set[str]:
         elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target_name = stmt.targets[0].id
             val_node = stmt.value
-        if target_name in ("GLOBAL_TABLES", "FTS5_VIRTUAL_TABLES"):
+        if target_name in allowed_sets:
             _collect_from_set_var(val_node)
         elif target_name == "SESSION_TABLE_REGISTRY":
             _collect_from_registry(val_node)
@@ -865,15 +1042,22 @@ def analyze_unregistered_session_tables(
     registry_path: Optional[Path] = None,
     rel: str = "db/core.py",
 ) -> List[Finding]:
-    """Flag any SCHEMA table in db/core.py with a `session_id` column missing from db/registry.py."""
-    core_p = db_core_path or (ROOT / "db" / "core.py")
+    """Flag any SCHEMA table in db/core/schema.py (or db/core.py) with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
+    schema_pkg_p = ROOT / "db" / "core" / "schema.py"
+    if db_core_path is not None:
+        core_p = db_core_path
+    elif schema_pkg_p.exists():
+        core_p = schema_pkg_p
+        rel = "db/core/schema.py"
+    else:
+        core_p = ROOT / "db" / "core.py"
     reg_p = registry_path or (ROOT / "db" / "registry.py")
     if not core_p.exists() or not reg_p.exists():
         return []
     try:
         core_source = core_p.read_text(encoding="utf-8")
         core_tree = ast.parse(core_source, filename=str(core_p))
-        registered = _extract_registered_table_names(reg_p)
+        registered = _extract_registered_table_names(reg_p, include_global=False)
     except (SyntaxError, UnicodeDecodeError, OSError):
         return []
 
@@ -895,7 +1079,7 @@ def analyze_unregistered_session_tables(
     core_lines = core_source.splitlines()
     findings: List[Finding] = []
     create_re = re.compile(
-        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:USING\s+[A-Za-z0-9_]+\s*)?\(",
         re.IGNORECASE,
     )
     for m in create_re.finditer(schema_str):
@@ -925,8 +1109,427 @@ def analyze_unregistered_session_tables(
             lineno,
             "unregistered-session-table",
             "SCHEMA",
-            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY / GLOBAL_TABLES)",
+            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY)",
         ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Analyzers 6-7: Unused imports & shadowing local imports
+# ---------------------------------------------------------------------------
+
+
+def _is_type_checking_if(node: ast.If) -> bool:
+    test = node.test
+    if isinstance(test, ast.Name) and test.id == "TYPE_CHECKING":
+        return True
+    if (
+        isinstance(test, ast.Attribute)
+        and isinstance(test.value, ast.Name)
+        and test.value.id == "typing"
+        and test.attr == "TYPE_CHECKING"
+    ):
+        return True
+    return False
+
+
+def _extract_string_elts(expr: Optional[ast.AST]) -> Set[str]:
+    out: Set[str] = set()
+    if expr is None:
+        return out
+    if isinstance(expr, (ast.List, ast.Tuple, ast.Set)):
+        for elt in expr.elts:
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                out.add(elt.value)
+    elif isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
+        out |= _extract_string_elts(expr.left)
+        out |= _extract_string_elts(expr.right)
+    elif isinstance(expr, ast.Constant) and isinstance(expr.value, str):
+        out.add(expr.value)
+    return out
+
+
+def _extract_all_exports(tree: ast.Module) -> Set[str]:
+    exports: Set[str] = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets):
+            exports |= _extract_string_elts(stmt.value)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__":
+            exports |= _extract_string_elts(stmt.value)
+        elif (
+            isinstance(stmt, ast.AugAssign)
+            and isinstance(stmt.target, ast.Name)
+            and stmt.target.id == "__all__"
+            and isinstance(stmt.op, ast.Add)
+        ):
+            exports |= _extract_string_elts(stmt.value)
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            call = stmt.value
+            if (
+                isinstance(call.func, ast.Attribute)
+                and isinstance(call.func.value, ast.Name)
+                and call.func.value.id == "__all__"
+                and call.func.attr in ("extend", "append")
+                and call.args
+            ):
+                exports |= _extract_string_elts(call.args[0])
+    return exports
+
+
+_IDENT_TOKEN_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*\b")
+
+
+def _collect_annotation_tokens(expr: Optional[ast.AST], out: Set[str]) -> None:
+    if expr is None:
+        return
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+            out.update(_IDENT_TOKEN_RE.findall(sub.value))
+
+
+def _collect_direct_scope_locals(
+    stmts: Iterable[ast.stmt],
+    *,
+    fn_args: Optional[ast.arguments] = None,
+) -> Tuple[Set[str], Set[str]]:
+    """Collect local bindings inside a callable body plus global/nonlocal escape names."""
+    locals_bound: Set[str] = set()
+    escaped: Set[str] = set()
+    if isinstance(fn_args, ast.arguments):
+        for a in list(fn_args.posonlyargs) + list(fn_args.args) + list(fn_args.kwonlyargs):
+            locals_bound.add(a.arg)
+        if fn_args.vararg is not None:
+            locals_bound.add(fn_args.vararg.arg)
+        if fn_args.kwarg is not None:
+            locals_bound.add(fn_args.kwarg.arg)
+
+    _INNER_SCOPES = (
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Lambda,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+
+    def _walk_stmt(node: ast.AST) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            locals_bound.add(node.name)
+            return
+        if isinstance(node, _INNER_SCOPES):
+            return
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            escaped.update(node.names)
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for bound, _ in _bound_import_aliases(node):
+                locals_bound.add(bound)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            locals_bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            locals_bound.add(node.name)
+        elif isinstance(node, ast.MatchAs) and isinstance(node.name, str):
+            locals_bound.add(node.name)
+        elif isinstance(node, ast.MatchStar) and isinstance(node.name, str):
+            locals_bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and isinstance(node.rest, str):
+            locals_bound.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            _walk_stmt(child)
+
+    for stmt in stmts:
+        _walk_stmt(stmt)
+    return locals_bound - escaped, escaped
+
+
+def _collect_comp_targets(generators: List[ast.comprehension]) -> Set[str]:
+    targets: Set[str] = set()
+    for gen in generators:
+        for node in ast.walk(gen.target):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                targets.add(node.id)
+    return targets
+
+
+def _collect_scope_used_names(root_node: ast.AST) -> Set[str]:
+    """Collect symbol references visible to `root_node`'s enclosing scope (ignoring inner shadows)."""
+    used: Set[str] = set()
+
+    def _visit_fn_header(fn: ast.FunctionDef | ast.AsyncFunctionDef, out: Set[str]) -> None:
+        for dec in fn.decorator_list:
+            _walk(dec, out)
+        if fn.returns is not None:
+            _collect_annotation_tokens(fn.returns, out)
+            _walk(fn.returns, out)
+        all_args = (
+            list(fn.args.posonlyargs)
+            + list(fn.args.args)
+            + list(fn.args.kwonlyargs)
+            + ([fn.args.vararg] if fn.args.vararg else [])
+            + ([fn.args.kwarg] if fn.args.kwarg else [])
+        )
+        for a in all_args:
+            if a.annotation is not None:
+                _collect_annotation_tokens(a.annotation, out)
+                _walk(a.annotation, out)
+        for d in fn.args.defaults + [x for x in fn.args.kw_defaults if x is not None]:
+            _walk(d, out)
+
+    def _walk(node: ast.AST, out: Set[str]) -> None:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            out.add(node.id)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _visit_fn_header(node, out)
+            inner_used: Set[str] = set()
+            for stmt in node.body:
+                _walk(stmt, inner_used)
+            local_shadows, _ = _collect_direct_scope_locals(node.body, fn_args=node.args)
+            out.update(inner_used - local_shadows)
+            return
+        if isinstance(node, ast.Lambda):
+            for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
+                _walk(d, out)
+            lam_params = {
+                a.arg
+                for a in (
+                    list(node.args.posonlyargs)
+                    + list(node.args.args)
+                    + list(node.args.kwonlyargs)
+                    + ([node.args.vararg] if node.args.vararg else [])
+                    + ([node.args.kwarg] if node.args.kwarg else [])
+                )
+            }
+            inner_used_lam: Set[str] = set()
+            _walk(node.body, inner_used_lam)
+            out.update(inner_used_lam - lam_params)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            if node.generators:
+                _walk(node.generators[0].iter, out)
+            comp_used: Set[str] = set()
+            for idx, gen in enumerate(node.generators):
+                if idx > 0:
+                    _walk(gen.iter, comp_used)
+                for cond in gen.ifs:
+                    _walk(cond, comp_used)
+            for attr in ("elt", "key", "value"):
+                sub = getattr(node, attr, None)
+                if sub is not None:
+                    _walk(sub, comp_used)
+            out.update(comp_used - _collect_comp_targets(node.generators))
+            return
+        if isinstance(node, ast.arg):
+            _collect_annotation_tokens(node.annotation, out)
+        elif isinstance(node, ast.AnnAssign):
+            _collect_annotation_tokens(node.annotation, out)
+        elif hasattr(ast, "TypeAlias") and isinstance(node, ast.TypeAlias):
+            _collect_annotation_tokens(node.value, out)
+        elif isinstance(node, ast.Call):
+            fn = node.func
+            is_cast = (
+                (isinstance(fn, ast.Name) and fn.id == "cast")
+                or (
+                    isinstance(fn, ast.Attribute)
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "typing"
+                    and fn.attr == "cast"
+                )
+            )
+            if is_cast:
+                if node.args:
+                    _collect_annotation_tokens(node.args[0], out)
+                for kw in node.keywords:
+                    if kw.arg == "typ":
+                        _collect_annotation_tokens(kw.value, out)
+        for child in ast.iter_child_nodes(node):
+            _walk(child, out)
+
+    if isinstance(root_node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        for stmt in root_node.body:
+            _walk(stmt, used)
+    else:
+        _walk(root_node, used)
+    return used
+
+
+def _iter_direct_control_imports(
+    stmts: Iterable[ast.stmt],
+    *,
+    skip_type_checking: bool = False,
+) -> Iterator[ast.stmt]:
+    for stmt in stmts:
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            yield stmt
+        elif isinstance(stmt, ast.If):
+            if skip_type_checking and _is_type_checking_if(stmt):
+                yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+            else:
+                yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+                yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+        elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+            for h in stmt.handlers:
+                yield from _iter_direct_control_imports(h.body, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(stmt.orelse, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(stmt.finalbody, skip_type_checking=skip_type_checking)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_direct_control_imports(stmt.body, skip_type_checking=skip_type_checking)
+            yield from _iter_direct_control_imports(getattr(stmt, "orelse", ()), skip_type_checking=skip_type_checking)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                yield from _iter_direct_control_imports(case.body, skip_type_checking=skip_type_checking)
+
+
+def _iter_direct_nested_callables(stmts: Iterable[ast.stmt], prefix: str) -> Iterator[Tuple[ast.AST, str]]:
+    for stmt in stmts:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield stmt, q
+        elif isinstance(stmt, ast.ClassDef):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield from _iter_direct_nested_callables(stmt.body, q)
+        elif isinstance(stmt, ast.If):
+            yield from _iter_direct_nested_callables(stmt.body, prefix)
+            yield from _iter_direct_nested_callables(stmt.orelse, prefix)
+        elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            yield from _iter_direct_nested_callables(stmt.body, prefix)
+            for h in stmt.handlers:
+                yield from _iter_direct_nested_callables(h.body, prefix)
+            yield from _iter_direct_nested_callables(stmt.orelse, prefix)
+            yield from _iter_direct_nested_callables(stmt.finalbody, prefix)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_direct_nested_callables(stmt.body, prefix)
+            yield from _iter_direct_nested_callables(getattr(stmt, "orelse", ()), prefix)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                yield from _iter_direct_nested_callables(case.body, prefix)
+
+
+def _iter_nested_callables(stmts: Iterable[ast.stmt], prefix: str) -> Iterator[Tuple[ast.AST, str]]:
+    for stmt in stmts:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield stmt, q
+            yield from _iter_nested_callables(stmt.body, q)
+        elif isinstance(stmt, ast.ClassDef):
+            q = f"{prefix}.{stmt.name}" if prefix else stmt.name
+            yield from _iter_nested_callables(stmt.body, q)
+        elif isinstance(stmt, ast.If):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            yield from _iter_nested_callables(stmt.orelse, prefix)
+        elif isinstance(stmt, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            for h in stmt.handlers:
+                yield from _iter_nested_callables(h.body, prefix)
+            yield from _iter_nested_callables(stmt.orelse, prefix)
+            yield from _iter_nested_callables(stmt.finalbody, prefix)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith, ast.For, ast.AsyncFor, ast.While)):
+            yield from _iter_nested_callables(stmt.body, prefix)
+            yield from _iter_nested_callables(getattr(stmt, "orelse", ()), prefix)
+        elif hasattr(ast, "Match") and isinstance(stmt, ast.Match):
+            for case in stmt.cases:
+                yield from _iter_nested_callables(case.body, prefix)
+
+
+def _bound_import_aliases(stmt: ast.stmt) -> Iterator[Tuple[str, int]]:
+    if isinstance(stmt, ast.ImportFrom) and stmt.level == 0 and stmt.module == "__future__":
+        return
+    for alias in getattr(stmt, "names", ()):
+        if alias.name == "*":
+            continue
+        if isinstance(stmt, ast.Import):
+            bound = alias.asname or alias.name.split(".")[0]
+        else:
+            bound = alias.asname or alias.name
+        alias_line = getattr(alias, "lineno", None) or stmt.lineno
+        yield bound, alias_line
+
+
+def analyze_unused_imports(path: Path, rel: str) -> List[Finding]:
+    """Flag unused module-level and function-local imports (exempting __init__.py, __all__, TYPE_CHECKING, and string annotations)."""
+    if path.name == "__init__.py":
+        return []
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+    norm_rel = rel.replace("\\", "/")
+    lines = source.splitlines()
+    all_exports = _extract_all_exports(tree)
+    module_used = _collect_scope_used_names(tree)
+    findings: List[Finding] = []
+
+    for stmt in _iter_direct_control_imports(tree.body, skip_type_checking=True):
+        for bound, alias_line in _bound_import_aliases(stmt):
+            if bound in all_exports or bound in module_used:
+                continue
+            if _is_suppressed_line(lines, alias_line, "unused-import") or _is_suppressed_line(lines, stmt.lineno, "unused-import"):
+                continue
+            findings.append(Finding(
+                norm_rel,
+                alias_line,
+                "unused-import",
+                "<module>",
+                f"imported name '{bound}' is unused",
+            ))
+
+    for fn, qual in _iter_nested_callables(tree.body, ""):
+        fn_used = _collect_scope_used_names(fn)
+        for stmt in _iter_direct_control_imports(getattr(fn, "body", ()), skip_type_checking=True):
+            for bound, alias_line in _bound_import_aliases(stmt):
+                if bound in fn_used:
+                    continue
+                if _is_suppressed_line(lines, alias_line, "unused-import") or _is_suppressed_line(lines, stmt.lineno, "unused-import"):
+                    continue
+                findings.append(Finding(
+                    norm_rel,
+                    alias_line,
+                    "unused-import",
+                    qual,
+                    f"local imported name '{bound}' is unused",
+                ))
+    return findings
+
+
+def analyze_shadowing_local_imports(path: Path, rel: str) -> List[Finding]:
+    """Flag function-local imports whose bound name shadows an enclosing import (risks UnboundLocalError)."""
+    try:
+        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(path))
+    except (SyntaxError, UnicodeDecodeError, OSError):
+        return []
+    norm_rel = rel.replace("\\", "/")
+    lines = source.splitlines()
+    findings: List[Finding] = []
+
+    def _scan(stmts: Iterable[ast.stmt], enclosing_imported: Set[str], prefix: str) -> None:
+        local_imported: Set[str] = set()
+        for stmt in _iter_direct_control_imports(stmts, skip_type_checking=True):
+            for bound, alias_line in _bound_import_aliases(stmt):
+                local_imported.add(bound)
+                if prefix and bound in enclosing_imported and not (
+                    _is_suppressed_line(lines, alias_line, "shadowing-local-import")
+                    or _is_suppressed_line(lines, stmt.lineno, "shadowing-local-import")
+                ):
+                    findings.append(Finding(
+                        norm_rel,
+                        alias_line,
+                        "shadowing-local-import",
+                        prefix,
+                        f"local import '{bound}' shadows enclosing import of the same name (risks UnboundLocalError)",
+                    ))
+        next_enclosing = enclosing_imported | local_imported
+        for fn, qual in _iter_direct_nested_callables(stmts, prefix):
+            _scan(getattr(fn, "body", ()), next_enclosing, qual)
+
+    _scan(tree.body, set(), "")
     return findings
 
 
@@ -1074,7 +1677,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         findings.extend(analyze_possibly_unbound(p, rel))
         findings.extend(analyze_sync_db_in_async(p, rel, pure_helpers=pure_helpers))
         findings.extend(analyze_raw_conn_commit(p, rel))
-    if any(r.replace("\\", "/") in ("db/core.py", "db/registry.py") for r in rels):
+        findings.extend(analyze_unused_imports(p, rel))
+        findings.extend(analyze_shadowing_local_imports(p, rel))
+    if any(r.replace("\\", "/") in ("db/core.py", "db/core/schema.py", "db/registry.py") for r in rels):
         findings.extend(analyze_unregistered_session_tables())
     if not args.no_pylint:
         findings.extend(run_pylint(rels))
@@ -1107,7 +1712,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         for f in new:
             print("  " + f.render())
         print("\nFix them. Only for verified false positives, suppress inline with")
-        print("`# pylint: disable=<check>` (pylint checks) or `# static-check: ignore[possibly-unbound-local]`.")
+        print("`# pylint: disable=<check>` (pylint checks) or `# static-check: ignore[<rule>]`.")
         return 1
     print(f"static_check: OK - 0 new findings in {scope} ({len(findings)} baselined).")
     return 0

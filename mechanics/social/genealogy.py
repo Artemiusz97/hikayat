@@ -15,7 +15,6 @@ Implements:
 import hashlib
 import json
 import logging
-import random
 import re
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -23,10 +22,7 @@ logger = logging.getLogger(__name__)
 
 import namegen
 from mechanics.social.races import (
-    format_race_display,
     normalize_race,
-    BEASTFOLK_ALIASES,
-    HALF_BEAST_ALIASES
 )
 
 
@@ -774,7 +770,6 @@ def generate_relationship_status(
     past_partner_role = "Former Classmate"
     for m in memories:
         if "with '" in str(m) or "from '" in str(m):
-            import re
             m_match = re.search(r"['\"]([^'\"]+)['\"]\s*\(([^)]+)\)", str(m))
             if m_match:
                 past_partner_name = m_match.group(1).strip()

@@ -38,12 +38,12 @@ log = logging.getLogger(__name__)
 
 _llm_timeout = httpx.Timeout(LLM_REQUEST_TIMEOUT, connect=60.0, read=LLM_REQUEST_TIMEOUT, write=60.0, pool=60.0)
 _http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
-_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, max_retries=0, http_client=_http_client, timeout=_llm_timeout)
+_client = AsyncOpenAI(api_key=LLM_API_KEY or "hikayat-unconfigured", base_url=LLM_BASE_URL, max_retries=0, http_client=_http_client, timeout=_llm_timeout)
 
 # Optional second client used exclusively for NSFW scenarios.
 # Falls back to _client / LLM_MODEL when NSFW credentials are not configured.
 _embed_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
-_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY, base_url=EMBEDDING_BASE_URL, max_retries=0, http_client=_embed_http_client, timeout=_llm_timeout)
+_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY or LLM_API_KEY or "hikayat-unconfigured", base_url=EMBEDDING_BASE_URL, max_retries=0, http_client=_embed_http_client, timeout=_llm_timeout)
 
 _nsfw_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
 _nsfw_client: AsyncOpenAI | None = (
@@ -234,6 +234,13 @@ def is_model_healthy(model_name: str) -> bool:
 def reset_circuit_breakers() -> None:
     """Clears all active model circuit-breaker cooldowns."""
     _model_cooldowns.clear()
+
+
+def reset_llm_telemetry() -> None:
+    """Clears recent LLM call records and resets rolling telemetry counters in-place."""
+    _recent_calls.clear()
+    for key in list(_telemetry_totals.keys()):
+        _telemetry_totals[key] = 0.0 if key == "total_latency_ms" else 0
 
 
 def record_llm_telemetry(
@@ -443,9 +450,8 @@ def get_probe_candidate_groups() -> dict[str, list[dict]]:
         }
     """
     from config import (
-    EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL,
-        LLM_MODEL, LLM_UTILITY_MODEL, LLM_FALLBACK_MODELS,
-        NSFW_LLM_MODEL, NSFW_LLM_UTILITY_MODEL, NSFW_LLM_FALLBACK_MODELS,
+        LLM_UTILITY_MODEL,
+        NSFW_LLM_UTILITY_MODEL,
     )
 
     std_models: list[dict] = []

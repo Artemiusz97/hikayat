@@ -478,7 +478,6 @@ const ContactsPanel = ({
               (session?.scenario && String(session.scenario).toLowerCase().includes('nsfw')) ||
               (Array.isArray(session?.scenario_tags) && session.scenario_tags.includes('nsfw'))
             );
-            const isSchoolScenario = /school|academy/i.test(String(session?.scenario || ''));
 
             return (
               <div

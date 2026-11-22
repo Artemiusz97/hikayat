@@ -10,14 +10,10 @@ from mechanics.combat.merchant import (
     generate_merchant_shop,
     generate_grounded_merchant_rumors,
     reveal_hidden_node_from_rumor,
-    discounted_price,
-    sell_bonus_price,
-    calculate_balanced_price,
     get_store_key,
     get_or_create_merchant_catalogue,
     update_merchant_catalogue,
     get_anomalous_shop_faction_context,
-    compute_anomalous_resale_price,
     compute_charisma_discount,
     compute_item_resale_payout,
     compute_effective_shop_item_price,
@@ -27,7 +23,6 @@ from mechanics.combat.merchant import (
 )
 from mechanics.combat.items import (
     apply_item_to_target,
-    parse_item_tier,
     is_key_item,
     is_digital_item,
     parse_consumable_metadata,
@@ -42,7 +37,6 @@ from mechanics.world import evaluate_shop_staff_availability
 from mechanics.world.locations import (
     get_available_merchant_types_for_location,
     is_school_scenario,
-    location_has_faction_hq,
 )
 from skill_check import resolve_check
 import game_engine

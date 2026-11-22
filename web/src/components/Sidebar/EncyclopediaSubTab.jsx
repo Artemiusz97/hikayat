@@ -42,13 +42,25 @@ const EncyclopediaSubTab = ({ encyclopedia, searchQuery = '' }) => {
   const [siteFilter, setSiteFilter] = useState('all'); // 'all' | 'stabilized' | 'uncontained' | 'unvisited'
   const [expandedId, setExpandedId] = useState(null);
 
-  const codexEntries = Array.isArray(encyclopedia?.folklore_codex) ? encyclopedia.folklore_codex : [];
+  const codexEntries = useMemo(
+    () => (Array.isArray(encyclopedia?.folklore_codex) ? encyclopedia.folklore_codex : []),
+    [encyclopedia?.folklore_codex]
+  );
   const traditions = Array.isArray(encyclopedia?.traditions) ? encyclopedia.traditions : [];
-  const fieldLog = Array.isArray(encyclopedia?.field_log) ? encyclopedia.field_log : [];
-  const vaultLog = Array.isArray(encyclopedia?.vault_log) ? encyclopedia.vault_log : [];
+  const fieldLog = useMemo(
+    () => (Array.isArray(encyclopedia?.field_log) ? encyclopedia.field_log : []),
+    [encyclopedia?.field_log]
+  );
+  const vaultLog = useMemo(
+    () => (Array.isArray(encyclopedia?.vault_log) ? encyclopedia.vault_log : []),
+    [encyclopedia?.vault_log]
+  );
   const vaultReqs = Array.isArray(encyclopedia?.vault_requisitions) ? encyclopedia.vault_requisitions : [];
   const siteRegistry = encyclopedia?.site_registry || null;
-  const siteCards = Array.isArray(siteRegistry?.sites) ? siteRegistry.sites : [];
+  const siteCards = useMemo(
+    () => (Array.isArray(siteRegistry?.sites) ? siteRegistry.sites : []),
+    [siteRegistry?.sites]
+  );
   const stabCount = Number(siteRegistry?.stabilized_count || 0);
   const totalSiteCount = Number(siteRegistry?.total_sites || 36);
   const chargesUsed = Number(siteRegistry?.resonator_charges_used || 0);

@@ -1,14 +1,6 @@
 import db
-import asyncio
-import json
-import time
-from contextlib import contextmanager
-import re
 import sqlite3
-from config import DB_PATH
-import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
 
 def get_settings(user_id: int) -> dict:
     with get_conn() as conn:
@@ -37,7 +29,6 @@ def get_settings(user_id: int) -> dict:
             d.setdefault("ui_language", d.get("language") or "en")
             d.setdefault("narration_language", d.get("language") or "en")
             return d
-        conn.execute("INSERT INTO user_settings (user_id) VALUES (?)", (user_id,))
         return {
             "user_id": user_id,
             "verbosity": "vivid",
@@ -64,7 +55,7 @@ def save_user_settings(user_id: int, **fields):
         update_settings(user_id, **filtered)
 
 def update_settings(user_id: int, **fields):
-    cur_settings = db.get_settings(user_id)  # ensure row exists
+    cur_settings = db.get_settings(user_id)  # load current/default settings
     if "narrative_style" in fields:
         style_val = fields.pop("narrative_style")
         if style_val is not None:
@@ -87,6 +78,7 @@ def update_settings(user_id: int, **fields):
     elif "language" in fields and "narration_language" not in fields:
         fields["narration_language"] = fields["language"]
     with get_conn() as conn:
+        conn.execute("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user_id,))
         u_cur = conn.execute("PRAGMA table_info(user_settings)")
         user_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in u_cur.fetchall()}
         valid_user_fields = {k: v for k, v in fields.items() if k in user_cols}

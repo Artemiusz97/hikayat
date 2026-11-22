@@ -1,18 +1,10 @@
 from __future__ import annotations
 from .constants import *
 import db
-import re
-import json
-import random
-import logging
 import scenario_data
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 import game_engine
-from db import adb
-import asyncio
-from game_engine.turn_context import TurnContext
-from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
 
 def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = True) -> tuple[str, str]:
     """Extracted Phase 2A Builder for Story Quests and Bounties."""
@@ -44,8 +36,9 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
 
 
 
-    game_engine.ensure_story_quest_exists(session)
-    if hasattr(ctx, "invalidate"):
+    prev_story_quest = ctx.story_quest if hasattr(ctx, "story_quest") else None
+    created_or_updated = game_engine.ensure_story_quest_exists(session)
+    if prev_story_quest is None and created_or_updated and hasattr(ctx, "invalidate"):
         ctx.invalidate("story_quest")
     story_quest = ctx.story_quest
 
@@ -452,7 +445,6 @@ async def _build_history_context(
     pre_turn_stage_npcs: list | None = None,
 ) -> str:
     """Extracted Phase 2A Builder for Memory and History (deterministic 2-signal recall, 0 HTTP embeddings)."""
-    import game_engine
 
     q_loc = str(effective_location or session.get("current_location") or "")
     raw_npcs = pre_turn_stage_npcs if pre_turn_stage_npcs is not None else (session.get("current_npcs") or [])
@@ -491,5 +483,6 @@ async def _build_history_context(
         present_npcs=present_npcs,
         current_location=q_loc,
         active_quest_ids=active_quest_ids,
+        epistemic_matrix=getattr(ctx, "epistemic_matrix", None) if ctx else None,
     )
 

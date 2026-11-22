@@ -93,10 +93,13 @@ async def repair_cast_contract_violations(
     is_closed_world = False
     if sess_id:
         try:
-            is_closed_world = bool(
-                db.get_session_world_nodes(int(sess_id))
-                or db.get_world_roster(int(sess_id), include_legacy_rosters=False)
-            )
+            def _check_closed_world(sid_i: int) -> bool:
+                return bool(
+                    db.get_session_world_nodes(sid_i)
+                    or db.get_world_roster(sid_i, include_legacy_rosters=False)
+                )
+
+            is_closed_world = await db.adb(_check_closed_world, int(sess_id))
         except Exception:
             is_closed_world = False
     has_crowd_directive = any(

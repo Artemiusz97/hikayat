@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
-import random
 import re
-import time
-from typing import Any, Optional
+from typing import Optional
 import discord
 from mechanics.world.locations import (
     format_tiered_location_string,
@@ -15,29 +12,16 @@ from mechanics.world.locations import (
     clean_narrative_location_arrows,
 )
 from discord import app_commands
-from discord.ext import commands
 logger = logging.getLogger("hikayat.adventure")
 import db
-from db import adb
 import game_engine
-import image_client
 from character_data import (
-    XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items
+    get_item_icon,
 )
-from cogs.character import build_character_sheet_embed
-from db import STAT_COLUMN
-from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
-from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import apply_merchant_encounter_result as _apply_merchant_encounter_result
-from mechanics.social.races import normalize_race
-from mechanics.social.persona import normalize_appearance
-from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
-from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
-from mechanics.combat.items import parse_item_effect, apply_item_to_target
+from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios
+from mechanics.narrative.bounty import get_quest_type_icon as _quest_type_icon
 from mechanics.combat.status_effects import format_status_badge
-from localization import get_quest_ui_label, ALL_MOVEMENT_PREFIXES
+from localization import get_quest_ui_label
 try:
     from mechanics.narrative.threat_clock import format_threat_consequence
 except ImportError:
@@ -187,7 +171,7 @@ def _party_vitals_text(session: dict) -> str:
 
 def _location_text(session: dict, char_name: str = "") -> str:
     loc = session.get("current_location") or "Unknown"
-    from mechanics.world.locations import is_transit_location, parse_tiered_location, format_tiered_location_string, get_zone_emoji
+    from mechanics.world.locations import is_transit_location, parse_tiered_location, get_zone_emoji
     if is_transit_location(loc):
         return _truncate_field_value(loc, 1024)
     scen_key = session.get("scenario", "high_school_drama")
@@ -499,7 +483,6 @@ def _strip_leading_emojis(text: str) -> str:
     """Strips leading emoji characters, unicode symbols, or bracketed stat/quest tags from label text."""
     if not text:
         return ""
-    import re
     cleaned = re.sub(
         r'^(?:[\U00010000-\U0010ffff\u2600-\u27bf\u2300-\u23ff\u2b50\u2b55\u200d\ufe0f\s]+|\s*\[[A-Za-z0-9\u00C0-\u024F\u4e00-\u9fff/: _\'\",|+\u2013\u2014-]+\]\s*)+',
         '',
@@ -508,9 +491,9 @@ def _strip_leading_emojis(text: str) -> str:
     return cleaned if cleaned else str(text).strip()
 
 from game_engine.choice_icons import (
-    get_choice_quest_icon as _get_choice_quest_icon,
-    get_choice_skill_emoji as _get_choice_skill_emoji,
-    get_choice_emoji as _get_choice_emoji,
+    get_choice_quest_icon as _get_choice_quest_icon,  # static-check: ignore[unused-import]
+    get_choice_skill_emoji as _get_choice_skill_emoji,  # static-check: ignore[unused-import]
+    get_choice_emoji as _get_choice_emoji,  # static-check: ignore[unused-import]
 )
 
 def _format_items_gained(item_names: list) -> str:
@@ -787,7 +770,6 @@ def build_outcome_embeds(
             if isinstance(_dps, list) and _dps:
                 partner_name = str(_dps[0])
             elif isinstance(_dps, str):
-                import json
                 try:
                     _parsed = json.loads(_dps)
                     partner_name = str(_parsed[0]) if isinstance(_parsed, list) and _parsed else _dps
@@ -1067,6 +1049,15 @@ def _append_dialogue_mood_field(
         _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
 
 
+def _append_conversation_pause_field(dash_embed: discord.Embed, choices: list, enemies: list) -> None:
+    """Explains a trimmed dialogue menu when the partner's daily small-talk budget is exhausted."""
+    if enemies or not isinstance(choices, list):
+        return
+    paused = next((c for c in choices if isinstance(c, dict) and c.get("_conversation_paused")), None)
+    if paused and paused.get("pause_notice"):
+        _safe_add_field(dash_embed, name="⏸️ Conversation Paused", value=str(paused["pause_notice"]), inline=False)
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
@@ -1117,6 +1108,7 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
+        _append_conversation_pause_field(dash_embed, choices, enemies)
 
     if enemies:
         _safe_add_field(
@@ -1196,6 +1188,7 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
+        _append_conversation_pause_field(dash_embed, choices, enemies)
 
     if enemies:
         _safe_add_field(
@@ -1236,7 +1229,6 @@ def _choice_button_label(idx: int, choice: dict, prefix: str, show_percentages: 
         if ord(first_char) > 255:
             full_text = full_text[1:].strip()
         if not show_percentages:
-            import re
             full_text = re.sub(r'\b\d+%\s*', '', full_text).strip()
         return full_text[:80]
 

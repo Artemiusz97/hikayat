@@ -14,7 +14,7 @@ Implements:
 """
 import json
 import random
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 
 # -----------------------------------------------------------------------------
 # 1. D&D 8 SCHOOLS OF MAGIC TAXONOMY

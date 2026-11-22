@@ -18,7 +18,7 @@ import heapq
 import json
 import logging
 import re
-from collections import defaultdict, deque
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import db

@@ -14,7 +14,6 @@ Handles:
 - B15 server-side fencing of LLM EpistemicSignal emissions.
 """
 
-import json
 import random
 from typing import Any, Mapping, Sequence
 

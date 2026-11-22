@@ -1,20 +1,14 @@
 from __future__ import annotations
 from typing import Any, Optional
-from .constants import ENABLE_DYNAMIC_MULTIPASS, _ITEM_BLOCKLIST
 from game_engine.turn_context import (
     TurnExecutionContext,
     resolve_target_turn,
 )
 import db
 import re
-import json
 import random
 import logging
-from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine
-from db import adb
-import mechanics.narrative.event_handlers
-from mechanics.narrative.events import bus, LocationChangedEvent, NPCSpawnedEvent, NPCStatusChangedEvent, ItemGiftedEvent, ItemGainedEvent, FactionLeadershipChangedEvent, QuestCompletedEvent
 
 log = logging.getLogger(__name__)
 
@@ -916,7 +910,7 @@ def apply_outcome(
     if actions is None:
         actions = []
 
-    with db.UnitOfWork():
+    with db.UnitOfWork() as uow_conn:
         party_uids = [char["user_id"] for char, _ in party]
         session = db.get_session(session_id)
 
@@ -924,32 +918,35 @@ def apply_outcome(
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_spatial_mutations"), dict):
             sp_mut = outcome["_staged_spatial_mutations"]
             try:
-                from mechanics.world.locations.access_gate import record_node_unlock
-                for v_nid in (sp_mut.get("unlocked_nodes") or []):
-                    if v_nid:
-                        record_node_unlock(session_id, str(v_nid))
+                with db.savepoint(uow_conn, "sp_apply_unlock_nodes"):
+                    from mechanics.world.locations.access_gate import record_node_unlock
+                    for v_nid in (sp_mut.get("unlocked_nodes") or []):
+                        if v_nid:
+                            record_node_unlock(session_id, str(v_nid))
             except Exception as _sp_e:
                 log.warning("Failed committing staged unlocked_nodes: %s", _sp_e)
             try:
-                unlocked_edges = sp_mut.get("unlocked_edges") or []
-                if unlocked_edges:
-                    with db.get_conn() as conn:
-                        for edge_pair in unlocked_edges:
-                            if isinstance(edge_pair, (tuple, list)) and len(edge_pair) == 2:
-                                u_n, v_n = edge_pair
-                                conn.execute(
-                                    "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
-                                    (session_id, u_n, v_n, v_n, u_n),
-                                )
+                with db.savepoint(uow_conn, "sp_apply_unlock_edges"):
+                    unlocked_edges = sp_mut.get("unlocked_edges") or []
+                    if unlocked_edges:
+                        with db.get_conn() as conn:
+                            for edge_pair in unlocked_edges:
+                                if isinstance(edge_pair, (tuple, list)) and len(edge_pair) == 2:
+                                    u_n, v_n = edge_pair
+                                    conn.execute(
+                                        "UPDATE world_edges SET is_locked = 0 WHERE session_id = ? AND ((from_node_id = ? AND to_node_id = ?) OR (from_node_id = ? AND to_node_id = ? AND is_bidirectional = 1))",
+                                        (session_id, u_n, v_n, v_n, u_n),
+                                    )
             except Exception as _ed_e:
                 log.warning("Failed committing staged unlocked_edges: %s", _ed_e)
             for k_it in (sp_mut.get("consumed_key_items") or []):
                 if isinstance(k_it, dict) and k_it.get("user_id"):
                     try:
-                        if k_it.get("item_id"):
-                            db.remove_item(int(k_it["user_id"]), int(k_it["item_id"]))
-                        elif k_it.get("name"):
-                            db.remove_item_by_name(int(k_it["user_id"]), str(k_it["name"]))
+                        with db.savepoint(uow_conn, "sp_apply_key_item"):
+                            if k_it.get("item_id"):
+                                db.remove_item(int(k_it["user_id"]), int(k_it["item_id"]))
+                            elif k_it.get("name"):
+                                db.remove_item_by_name(int(k_it["user_id"]), str(k_it["name"]))
                     except Exception:
                         pass
 
@@ -959,199 +956,246 @@ def apply_outcome(
             op_kind = str(t_op.get("op") or "")
             t_uids = list(t_op.get("party_uids") or party_uids)
             try:
-                from mechanics.system.time_engine import apply_sleep_rest, apply_nap_rest, advance_time
-                def _merge_time_fields_from_db(include_npcs: bool = False):
-                    fresh_s = db.get_session(session_id)
-                    if isinstance(fresh_s, dict) and isinstance(session, dict):
-                        for _tk in ("current_day", "current_minute", "consecutive_days_awake", "physical_state"):
-                            if _tk in fresh_s:
-                                session[_tk] = fresh_s[_tk]
-                        if include_npcs and "current_npcs" in fresh_s:
-                            session["current_npcs"] = fresh_s["current_npcs"]
+                with db.savepoint(uow_conn, "sp_apply_time_op"):
+                    from mechanics.system.time_engine import apply_sleep_rest, apply_nap_rest, advance_time
+                    def _merge_time_fields_from_db(include_npcs: bool = False):
+                        fresh_s = db.get_session(session_id)
+                        if isinstance(fresh_s, dict) and isinstance(session, dict):
+                            for _tk in ("current_day", "current_minute", "consecutive_days_awake", "physical_state"):
+                                if _tk in fresh_s:
+                                    session[_tk] = fresh_s[_tk]
+                            if include_npcs and "current_npcs" in fresh_s:
+                                session["current_npcs"] = fresh_s["current_npcs"]
 
-                if op_kind == "sleep":
-                    sl_info = apply_sleep_rest(
-                        session_id,
-                        t_uids,
-                        scen_key=str(t_op.get("scen_key") or (session.get("scenario", "fantasy") if session else "fantasy")),
-                        recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
-                        surface_label=str(t_op.get("surface_label") or "Bed"),
-                    )
-                    outcome["_sleep_info"] = sl_info
-                    if isinstance(sl_info.get("morning_npcs"), list):
-                        outcome["npcs_present"] = sl_info["morning_npcs"]
-                    _merge_time_fields_from_db(include_npcs=True)
-                    party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
-                elif op_kind == "nap":
-                    np_info = apply_nap_rest(
-                        session_id,
-                        t_uids,
-                        nap_minutes=int(t_op.get("nap_minutes", 120) or 120),
-                        recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
-                        surface_label=str(t_op.get("surface_label") or "Bed"),
-                    )
-                    outcome["_sleep_info"] = np_info
-                    _merge_time_fields_from_db(include_npcs=False)
-                    party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
-                elif op_kind == "advance":
-                    tm_info = advance_time(
-                        session_id,
-                        int(t_op.get("delta_minutes", 0) or 0),
-                        party_uids=t_uids,
-                    )
-                    outcome["_time_info"] = tm_info
-                    _merge_time_fields_from_db(include_npcs=False)
+                    if op_kind == "sleep":
+                        sl_info = apply_sleep_rest(
+                            session_id,
+                            t_uids,
+                            scen_key=str(t_op.get("scen_key") or (session.get("scenario", "fantasy") if session else "fantasy")),
+                            recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
+                            surface_label=str(t_op.get("surface_label") or "Bed"),
+                        )
+                        outcome["_sleep_info"] = sl_info
+                        if isinstance(sl_info.get("morning_npcs"), list):
+                            outcome["npcs_present"] = sl_info["morning_npcs"]
+                        _merge_time_fields_from_db(include_npcs=True)
+                        party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
+                    elif op_kind == "nap":
+                        np_info = apply_nap_rest(
+                            session_id,
+                            t_uids,
+                            nap_minutes=int(t_op.get("nap_minutes", 120) or 120),
+                            recovery_ratio=float(t_op.get("recovery_ratio", 1.0)),
+                            surface_label=str(t_op.get("surface_label") or "Bed"),
+                        )
+                        outcome["_sleep_info"] = np_info
+                        _merge_time_fields_from_db(include_npcs=False)
+                        party = [(db.get_character(c["user_id"]) or c, inv) for c, inv in party]
+                    elif op_kind == "advance":
+                        tm_info = advance_time(
+                            session_id,
+                            int(t_op.get("delta_minutes", 0) or 0),
+                            party_uids=t_uids,
+                        )
+                        outcome["_time_info"] = tm_info
+                        _merge_time_fields_from_db(include_npcs=False)
             except Exception as _tm_e:
                 log.warning("Failed committing staged time op (%s): %s", op_kind, _tm_e)
+
+        _dom_v = outcome.get("_staged_domain_vitals") if isinstance(outcome, dict) else None
+        if isinstance(_dom_v, dict) and _dom_v.get("user_id"):
+            try:
+                with db.savepoint(uow_conn, "sp_apply_domain_vitals"):
+                    _dv_uid = int(_dom_v["user_id"])
+                    _dv_hp = int(_dom_v.get("hp_delta") or 0)
+                    _dv_mp = int(_dom_v.get("mp_delta") or 0)
+                    _dv_char = db.get_character(_dv_uid, session_id=session_id) if session_id else db.get_character(_dv_uid)
+                    if isinstance(_dv_char, dict):
+                        _cur_hp = int(_dv_char.get("hp", 20) or 20)
+                        _max_hp = int(_dv_char.get("max_hp", _cur_hp) or _cur_hp)
+                        _cur_mp = int(_dv_char.get("mp", 10) or 10)
+                        _max_mp = int(_dv_char.get("max_mp", _cur_mp) or _cur_mp)
+                        _eff_hp = (
+                            max(_dv_hp, 1 - _cur_hp)
+                            if _dv_hp < 0
+                            else min(_dv_hp, max(0, _max_hp - _cur_hp))
+                        )
+                        _eff_mp = (
+                            max(_dv_mp, -_cur_mp)
+                            if _dv_mp < 0
+                            else min(_dv_mp, max(0, _max_mp - _cur_mp))
+                        )
+                        if _eff_hp != 0 or _eff_mp != 0:
+                            db.apply_hp_mp_delta(_dv_uid, hp_delta=_eff_hp, mp_delta=_eff_mp)
+                            for _p_idx, (_pc, _pinv) in enumerate(party):
+                                if isinstance(_pc, dict) and _pc.get("user_id") and int(_pc["user_id"]) == _dv_uid:
+                                    _pc["hp"] = _cur_hp + _eff_hp
+                                    _pc["mp"] = _cur_mp + _eff_mp
+                                    party[_p_idx] = (_pc, _pinv)
+            except Exception as _dv_err:
+                log.warning("Failed committing staged domain vitals: %s", _dv_err)
 
         # ── D3 Atomic Commit Step 3: Staged Rendezvous & Cast State ────────────
         if isinstance(outcome, dict) and outcome.get("_completed_appointment_npc_ids") and session_id:
             for appt_npc_id in (outcome.get("_completed_appointment_npc_ids") or []):
                 if appt_npc_id:
                     try:
-                        db.update_phone_appointment_status(session_id, str(appt_npc_id), "completed")
+                        with db.savepoint(uow_conn, "sp_apply_appt_status"):
+                            db.update_phone_appointment_status(session_id, str(appt_npc_id), "completed")
                     except Exception:
                         pass
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_cast_state"), dict) and isinstance(session, dict):
             try:
-                from game_engine.npcs.cast_planner import save_cast_state
-                save_cast_state(session, outcome["_staged_cast_state"], persist_db=True)
+                with db.savepoint(uow_conn, "sp_apply_cast_state"):
+                    from game_engine.npcs.cast_planner import save_cast_state
+                    save_cast_state(session, outcome["_staged_cast_state"], persist_db=True)
             except Exception as _cs_e:
                 log.warning("Failed committing staged cast_state: %s", _cs_e)
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_folklore_ops"), dict) and session_id:
             try:
-                from mechanics.social.folklore_roster import commit_staged_folklore_ops
-                _fk_ops = outcome["_staged_folklore_ops"]
-                _fk_adv = (not bool(outcome.get("_staged_time_op"))) and (not bool(_fk_ops.get("is_retry")))
-                _fk_committed = commit_staged_folklore_ops(
-                    session_id,
-                    _fk_ops,
-                    session=session,
-                    turn_number=int(
-                        (ctx.clock.target_turn if ctx is not None and ctx.clock.target_turn else None)
-                        or outcome.get("_target_turn")
-                        or (session.get("_target_turn") if isinstance(session, dict) else 0)
-                        or 0
-                    ),
-                    advance_clock_on_expel=_fk_adv,
-                )
-                if _fk_committed.get("treaty_violation") and isinstance(_fk_committed["treaty_violation"], dict):
-                    _tv = _fk_committed["treaty_violation"]
-                    if _tv.get("ejected_location"):
-                        outcome["location"] = _tv["ejected_location"]
-                    if _tv.get("ejected_node_id"):
-                        outcome["current_node_id"] = _tv["ejected_node_id"]
-                        if isinstance(outcome.get("_staged_scene_residue"), dict):
-                            outcome["_staged_scene_residue"]["node_id"] = _tv["ejected_node_id"]
-                    outcome["focal_point"] = None
-                    outcome["nearby_enemies"] = []
-                session = db.get_session(session_id) or session
+                with db.savepoint(uow_conn, "sp_apply_folklore_ops"):
+                    from mechanics.social.folklore_roster import commit_staged_folklore_ops
+                    _fk_ops = outcome["_staged_folklore_ops"]
+                    _fk_adv = (not bool(outcome.get("_staged_time_op"))) and (not bool(_fk_ops.get("is_retry")))
+                    _fk_committed = commit_staged_folklore_ops(
+                        session_id,
+                        _fk_ops,
+                        session=session,
+                        turn_number=int(
+                            (ctx.clock.target_turn if ctx is not None and ctx.clock.target_turn else None)
+                            or outcome.get("_target_turn")
+                            or (session.get("_target_turn") if isinstance(session, dict) else 0)
+                            or 0
+                        ),
+                        advance_clock_on_expel=_fk_adv,
+                    )
+                    if _fk_committed.get("treaty_violation") and isinstance(_fk_committed["treaty_violation"], dict):
+                        _tv = _fk_committed["treaty_violation"]
+                        if _tv.get("ejected_location"):
+                            outcome["location"] = _tv["ejected_location"]
+                        if _tv.get("ejected_node_id"):
+                            outcome["current_node_id"] = _tv["ejected_node_id"]
+                            if isinstance(outcome.get("_staged_scene_residue"), dict):
+                                outcome["_staged_scene_residue"]["node_id"] = _tv["ejected_node_id"]
+                        outcome["focal_point"] = None
+                        outcome["nearby_enemies"] = []
+                    session = db.get_session(session_id) or session
             except Exception as _fk_c_err:
                 log.warning("Failed committing staged folklore ops: %s", _fk_c_err)
 
         if isinstance(outcome, dict) and isinstance(outcome.get("_staged_roster_ops"), dict) and session_id:
             try:
-                _r_ops = outcome["_staged_roster_ops"]
-                from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
-                from mechanics.world.venue_templates import is_node_staffable
-                from mechanics.social.population_seeder import ensure_world_population_seeded
+                with db.savepoint(uow_conn, "sp_apply_roster_ops"):
+                    _r_ops = outcome["_staged_roster_ops"]
+                    from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
+                    from mechanics.world.venue_templates import is_node_staffable
+                    from mechanics.social.population_seeder import ensure_world_population_seeded
 
-                for _ps in (_r_ops.get("population_seed") or []):
-                    if isinstance(_ps, dict):
-                        ensure_world_population_seeded(
+                    for _ps in (_r_ops.get("population_seed") or []):
+                        if isinstance(_ps, dict):
+                            ensure_world_population_seeded(
+                                session_id,
+                                scen_key=str(_ps.get("scen_key") or "fantasy"),
+                                turn_number=int(_ps.get("turn_number") or 0),
+                            )
+
+                    for _vs in (_r_ops.get("venue_seeds") or []):
+                        if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
+                            continue
+                        _vs_nid = str(_vs["facility_node_id"])
+                        _vs_node = db.get_world_node(session_id, _vs_nid)
+                        _vs_scen = str(_vs.get("scen_key") or "fantasy")
+                        if isinstance(_vs_node, dict) and is_node_staffable(_vs_node, scen_key=_vs_scen):
+                            ensure_venue_staff_seeded(
+                                session_id,
+                                _vs_nid,
+                                scen_key=_vs_scen,
+                                current_day=int(_vs.get("current_day") or 1),
+                                turn_number=int(_vs.get("turn_number") or 1),
+                            )
+                    for _rm in (_r_ops.get("roaming_merchants") or []):
+                        if not isinstance(_rm, dict):
+                            continue
+                        ensure_roaming_merchants_seeded(
                             session_id,
-                            scen_key=str(_ps.get("scen_key") or "fantasy"),
-                            turn_number=int(_ps.get("turn_number") or 0),
+                            scen_key=str(_rm.get("scen_key") or "fantasy"),
+                            turn_number=int(_rm.get("turn_number") or 1),
                         )
 
-                for _vs in (_r_ops.get("venue_seeds") or []):
-                    if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
-                        continue
-                    _vs_nid = str(_vs["facility_node_id"])
-                    _vs_node = db.get_world_node(session_id, _vs_nid)
-                    _vs_scen = str(_vs.get("scen_key") or "fantasy")
-                    if isinstance(_vs_node, dict) and is_node_staffable(_vs_node, scen_key=_vs_scen):
-                        ensure_venue_staff_seeded(
-                            session_id,
-                            _vs_nid,
-                            scen_key=_vs_scen,
-                            current_day=int(_vs.get("current_day") or 1),
-                            turn_number=int(_vs.get("turn_number") or 1),
-                        )
-                for _rm in (_r_ops.get("roaming_merchants") or []):
-                    if not isinstance(_rm, dict):
-                        continue
-                    ensure_roaming_merchants_seeded(
-                        session_id,
-                        scen_key=str(_rm.get("scen_key") or "fantasy"),
-                        turn_number=int(_rm.get("turn_number") or 1),
-                    )
-
-                for _sf in (_r_ops.get("role_slot_fills") or []):
-                    if not isinstance(_sf, dict) or not _sf.get("facility_node_id"):
-                        continue
-                    _fnid = str(_sf["facility_node_id"])
-                    _fnode = db.get_world_node(session_id, _fnid)
-                    if isinstance(_fnode, dict) and is_node_staffable(_fnode, scen_key=str(_sf.get("scen_key") or "fantasy")):
-                        ensure_venue_staff_seeded(
+                    for _sf in (_r_ops.get("role_slot_fills") or []):
+                        if not isinstance(_sf, dict) or not _sf.get("facility_node_id"):
+                            continue
+                        _fnid = str(_sf["facility_node_id"])
+                        _fnode = db.get_world_node(session_id, _fnid)
+                        if isinstance(_fnode, dict) and is_node_staffable(_fnode, scen_key=str(_sf.get("scen_key") or "fantasy")):
+                            ensure_venue_staff_seeded(
+                                session_id,
+                                _fnid,
+                                scen_key=str(_sf.get("scen_key") or "fantasy"),
+                                current_day=int(_sf.get("current_day") or 1),
+                                turn_number=int(_sf.get("turn_number") or 0),
+                            )
+                        slot_row = slot_fill_custom_action_role(
                             session_id,
                             _fnid,
+                            str(_sf.get("role_title") or ""),
                             scen_key=str(_sf.get("scen_key") or "fantasy"),
                             current_day=int(_sf.get("current_day") or 1),
+                            current_minute=int(_sf.get("current_minute") if _sf.get("current_minute") is not None else 480),
                             turn_number=int(_sf.get("turn_number") or 0),
                         )
-                    slot_row = slot_fill_custom_action_role(
-                        session_id,
-                        _fnid,
-                        str(_sf.get("role_title") or ""),
-                        scen_key=str(_sf.get("scen_key") or "fantasy"),
-                        current_day=int(_sf.get("current_day") or 1),
-                        current_minute=int(_sf.get("current_minute") if _sf.get("current_minute") is not None else 480),
-                        turn_number=int(_sf.get("turn_number") or 0),
-                    )
-                    if isinstance(slot_row, dict) and slot_row.get("name"):
-                        db.upsert_lorebook_entity(
-                            session_id=session_id,
-                            entity_type="person",
-                            name=slot_row["name"],
-                            description=str(_sf.get("lorebook_description") or f"{slot_row['name']} encountered nearby."),
-                            disposition="neutral",
-                            gender=str(_sf.get("gender") or slot_row.get("gender") or ""),
-                            appearance=_sf.get("appearance") or slot_row.get("appearance"),
-                            traits=list(_sf.get("traits") or []),
+                        if isinstance(slot_row, dict) and slot_row.get("name"):
+                            db.upsert_lorebook_entity(
+                                session_id=session_id,
+                                entity_type="person",
+                                name=slot_row["name"],
+                                description=str(_sf.get("lorebook_description") or f"{slot_row['name']} encountered nearby."),
+                                disposition="neutral",
+                                gender=str(_sf.get("gender") or slot_row.get("gender") or ""),
+                                appearance=_sf.get("appearance") or slot_row.get("appearance"),
+                                traits=list(_sf.get("traits") or []),
+                            )
+                    for _ru in (_r_ops.get("roster_upserts") or []):
+                        if not isinstance(_ru, dict) or not isinstance(_ru.get("roster_payload"), dict):
+                            continue
+                        db.upsert_world_roster_npc(
+                            session_id,
+                            _ru["roster_payload"],
+                            turn_number=int(_ru.get("turn_number") or 0),
                         )
-                for _ru in (_r_ops.get("roster_upserts") or []):
-                    if not isinstance(_ru, dict) or not isinstance(_ru.get("roster_payload"), dict):
-                        continue
-                    db.upsert_world_roster_npc(
-                        session_id,
-                        _ru["roster_payload"],
-                        turn_number=int(_ru.get("turn_number") or 0),
-                    )
-                    if _ru.get("name"):
-                        db.upsert_lorebook_entity(
-                            session_id=session_id,
-                            entity_type="person",
-                            name=str(_ru["name"]),
-                            description=str(_ru.get("lorebook_description") or f"{_ru['name']} encountered nearby."),
-                            disposition="neutral",
-                            gender=str(_ru.get("gender") or ""),
-                            appearance=_ru.get("appearance"),
-                            traits=list(_ru.get("traits") or []),
-                        )
-                _vh_list = [v for v in (_r_ops.get("visual_hydrations") or []) if isinstance(v, dict)]
-                if _vh_list:
-                    db.hydrate_world_roster_visuals(session_id, _vh_list)
+                        if _ru.get("name"):
+                            db.upsert_lorebook_entity(
+                                session_id=session_id,
+                                entity_type="person",
+                                name=str(_ru["name"]),
+                                description=str(_ru.get("lorebook_description") or f"{_ru['name']} encountered nearby."),
+                                disposition="neutral",
+                                gender=str(_ru.get("gender") or ""),
+                                appearance=_ru.get("appearance"),
+                                traits=list(_ru.get("traits") or []),
+                            )
+                    _eff_qsb_turn = resolve_target_turn(ctx, session, outcome)
+                    for _qsb in (_r_ops.get("quest_seed_backfills") or []):
+                        if isinstance(_qsb, dict) and _qsb.get("name"):
+                            db.upsert_world_roster_npc(
+                                session_id,
+                                _qsb,
+                                turn_number=int(_qsb.get("first_seen_turn") or _eff_qsb_turn or 0),
+                            )
+                    _vh_list = [v for v in (_r_ops.get("visual_hydrations") or []) if isinstance(v, dict)]
+                    if _vh_list:
+                        db.hydrate_world_roster_visuals(session_id, _vh_list)
             except Exception as _ro_err:
                 log.warning("Failed committing staged roster ops: %s", _ro_err)
 
         # Commit staged civilian permadeaths from combat outcome inside UnitOfWork (DEF-03)
         if isinstance(outcome, dict) and outcome.get("slain_civilians") and session_id:
             try:
-                from mechanics.social.anomalous_npc_tags import apply_civilian_permadeath
-                for sc in outcome["slain_civilians"]:
-                    if isinstance(sc, dict) and sc.get("name"):
-                        apply_civilian_permadeath(session_id, session, sc["name"], sc.get("killer", "Anomalous Entity"), defer_db=False)
+                with db.savepoint(uow_conn, "sp_apply_civ_permadeath"):
+                    from mechanics.social.anomalous_npc_tags import apply_civilian_permadeath
+                    for sc in outcome["slain_civilians"]:
+                        if isinstance(sc, dict) and sc.get("name"):
+                            apply_civilian_permadeath(session_id, session, sc["name"], sc.get("killer", "Anomalous Entity"), defer_db=False)
             except Exception as _sc_err:
                 log.warning("Failed committing staged civilian permadeath: %s", _sc_err)
 
@@ -1173,101 +1217,121 @@ def apply_outcome(
 
         # ── Entity Contracts Post-Turn Toll, Lethal Overdraw, Breaches & Exorcisms ──
         try:
-            import scenario_data as _pact_sd
-            if session_id and _pact_sd.is_anomalous_incursions_scenario(scen_key):
-                from mechanics.pacts import evaluate_post_turn_pact_costs_and_breaches
-                _eff_pact_turn = resolve_target_turn(ctx, session, outcome)
-                evaluate_post_turn_pact_costs_and_breaches(
-                    int(session_id),
-                    session if isinstance(session, dict) else {},
-                    party,
-                    outcome if isinstance(outcome, dict) else {},
-                    actions,
-                    turn_number=_eff_pact_turn,
-                )
+            with db.savepoint(uow_conn, "sp_apply_pact_costs"):
+                import scenario_data as _pact_sd
+                if session_id and _pact_sd.is_anomalous_incursions_scenario(scen_key):
+                    from mechanics.pacts import evaluate_post_turn_pact_costs_and_breaches
+                    _eff_pact_turn = resolve_target_turn(ctx, session, outcome)
+                    evaluate_post_turn_pact_costs_and_breaches(
+                        int(session_id),
+                        session if isinstance(session, dict) else {},
+                        party,
+                        outcome if isinstance(outcome, dict) else {},
+                        actions,
+                        turn_number=_eff_pact_turn,
+                    )
         except Exception as _pact_err:
             log.warning("Failed evaluating post-turn Entity Contracts: %s", _pact_err)
 
         # ── 0-HP Recovery: Anomalous Extraction OR D8 Non-Combat Hazard Knockout ──
         try:
-            import scenario_data
-            if scenario_data.is_anomalous_incursions_scenario(scen_key) and party_uids and not (isinstance(outcome, dict) and outcome.get("_anomalous_extracted")):
-                downed_uids = [
-                    u for u in party_uids
-                    if int((db.get_character(u) or {}).get("hp", 1) or 0) <= 0
-                ]
-                if downed_uids:
-                    from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
-                    primary_downed_uid = downed_uids[0]
-                    ext_res = resolve_anomalous_emergency_extraction(session_id, primary_downed_uid)
-                    for extra_uid in downed_uids[1:]:
-                        p_ch = db.get_character(extra_uid)
-                        if p_ch and int(p_ch.get("hp", 1) or 0) <= 0:
-                            t_hp = max(1, int(p_ch.get("max_hp", 20) or 20) // 2)
-                            t_mp = max(1, int(p_ch.get("max_mp", 10) or 10) // 2)
-                            db.apply_hp_mp_delta(
-                                extra_uid,
-                                hp_delta=max(0, t_hp - int(p_ch.get("hp", 0) or 0)),
-                                mp_delta=max(0, t_mp - int(p_ch.get("mp", 0) or 0)),
-                            )
-                    if ext_res.get("extracted") and isinstance(outcome, dict):
-                        outcome["_anomalous_extracted"] = True
-                        outcome["location"] = ext_res["destination_location"]
-                        outcome["current_node_id"] = ext_res["destination_node_id"]
-                        outcome["focal_point"] = None
-                        outcome["nearby_enemies"] = []
-                        outcome["npcs_present"] = []
-                        ext_note = ext_res.get("narrative", "")
-                        if ext_note:
-                            outcome["outcome_narrative"] = f"{outcome.get('outcome_narrative', '')}\n\n{ext_note}".strip()
-                        rec_choices = [
-                            {"label": "Check medical telemetry and stabilize your psychic resonance", "stat": "END", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
-                            {"label": "Review field logs and inspect your tactical loadout", "stat": "PER", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
-                            {"label": "Debrief with triage staff before redeploying to the breach", "stat": "CHA", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+            with db.savepoint(uow_conn, "sp_apply_zero_hp_recovery"):
+                import scenario_data
+                _recovery_chars_by_uid: dict[int, dict] = {}
+                def _load_recovery_char(uid_val: Any) -> Optional[dict]:
+                    u_int = int(uid_val)
+                    ch = _recovery_chars_by_uid.get(u_int)
+                    if ch is None:
+                        ch = db.get_character(u_int)
+                        if isinstance(ch, dict):
+                            _recovery_chars_by_uid[u_int] = ch
+                    return ch
+
+                if party_uids and session_id and (
+                    scenario_data.is_anomalous_incursions_scenario(scen_key)
+                    or (not is_combat and not scenario_data.is_non_combat_scenario(scen_key))
+                ):
+                    for _sc in (db.get_session_characters(session_id) or []):
+                        if isinstance(_sc, dict) and _sc.get("user_id") is not None:
+                            _recovery_chars_by_uid[int(_sc["user_id"])] = _sc
+
+                if scenario_data.is_anomalous_incursions_scenario(scen_key) and party_uids and not (isinstance(outcome, dict) and outcome.get("_anomalous_extracted")):
+                    downed_uids = [
+                        u for u in party_uids
+                        if int((_load_recovery_char(u) or {}).get("hp", 1) or 0) <= 0
+                    ]
+                    if downed_uids:
+                        from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
+                        primary_downed_uid = downed_uids[0]
+                        ext_res = resolve_anomalous_emergency_extraction(session_id, primary_downed_uid)
+                        for extra_uid in downed_uids[1:]:
+                            p_ch = _load_recovery_char(extra_uid)
+                            if p_ch and int(p_ch.get("hp", 1) or 0) <= 0:
+                                t_hp = max(1, int(p_ch.get("max_hp", 20) or 20) // 2)
+                                t_mp = max(1, int(p_ch.get("max_mp", 10) or 10) // 2)
+                                db.apply_hp_mp_delta(
+                                    extra_uid,
+                                    hp_delta=max(0, t_hp - int(p_ch.get("hp", 0) or 0)),
+                                    mp_delta=max(0, t_mp - int(p_ch.get("mp", 0) or 0)),
+                                )
+                        if ext_res.get("extracted") and isinstance(outcome, dict):
+                            outcome["_anomalous_extracted"] = True
+                            outcome["location"] = ext_res["destination_location"]
+                            outcome["current_node_id"] = ext_res["destination_node_id"]
+                            outcome["focal_point"] = None
+                            outcome["nearby_enemies"] = []
+                            outcome["npcs_present"] = []
+                            ext_note = ext_res.get("narrative", "")
+                            if ext_note:
+                                outcome["outcome_narrative"] = f"{outcome.get('outcome_narrative', '')}\n\n{ext_note}".strip()
+                            rec_choices = [
+                                {"label": "Check medical telemetry and stabilize your psychic resonance", "stat": "END", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+                                {"label": "Review field logs and inspect your tactical loadout", "stat": "PER", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+                                {"label": "Debrief with triage staff before redeploying to the breach", "stat": "CHA", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+                            ]
+                            outcome.pop("_hybrid_choices_built", None)
+                            outcome["choices"] = rec_choices
+                            outcome["next_choices"] = rec_choices
+                            session = db.get_session(session_id) or session
+                elif (
+                    not is_combat
+                    and not scenario_data.is_non_combat_scenario(scen_key)
+                    and party_uids
+                    and isinstance(outcome, dict)
+                    and not outcome.get("_party_defeated_notice")
+                ):
+                    downed_chars = []
+                    for p_uid in party_uids:
+                        f_ch = _load_recovery_char(p_uid)
+                        if f_ch and int(f_ch.get("hp", 1) or 0) <= 0:
+                            downed_chars.append(f_ch)
+                    if downed_chars:
+                        for d_ch in downed_chars:
+                            d_uid = d_ch["user_id"]
+                            d_max_hp = max(1, int(d_ch.get("max_hp", 30) or 30))
+                            revive_hp = max(1, d_max_hp // 2)
+                            cur_hp = int(d_ch.get("hp", 0) or 0)
+                            db.apply_hp_mp_delta(d_uid, hp_delta=max(1, revive_hp - cur_hp))
+                            cur_effs = db.get_status_effects(d_uid)
+                            if "Exhausted / Recovering" not in cur_effs:
+                                cur_effs.append("Exhausted / Recovering")
+                            db.set_status_effects(d_uid, cur_effs)
+                        if session_id:
+                            from mechanics.system.time_engine import advance_time
+                            ko_time = advance_time(session_id, 60, party_uids=party_uids)
+                            outcome["_time_info"] = ko_time
+                            session = db.get_session(session_id) or session
+                        outcome["_party_defeated_notice"] = (
+                            "💀 **Knocked Out!** Overwhelmed by severe physical hazards, you collapsed unconscious—awakening an hour later, battered and stabilized."
+                        )
+                        ko_choices = [
+                            {"label": "Rest and recuperate from your injuries", "stat": "END", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+                            {"label": "Assess your surroundings and check equipment", "stat": "PER", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
+                            {"label": "Consult with companions about what happened", "stat": "CHA", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
                         ]
                         outcome.pop("_hybrid_choices_built", None)
-                        outcome["choices"] = rec_choices
-                        outcome["next_choices"] = rec_choices
-                        session = db.get_session(session_id) or session
-            elif (
-                not is_combat
-                and not scenario_data.is_non_combat_scenario(scen_key)
-                and party_uids
-                and isinstance(outcome, dict)
-                and not outcome.get("_party_defeated_notice")
-            ):
-                downed_chars = []
-                for p_uid in party_uids:
-                    f_ch = db.get_character(p_uid)
-                    if f_ch and int(f_ch.get("hp", 1) or 0) <= 0:
-                        downed_chars.append(f_ch)
-                if downed_chars:
-                    for d_ch in downed_chars:
-                        d_uid = d_ch["user_id"]
-                        d_max_hp = max(1, int(d_ch.get("max_hp", 30) or 30))
-                        revive_hp = max(1, d_max_hp // 2)
-                        cur_hp = int(d_ch.get("hp", 0) or 0)
-                        db.apply_hp_mp_delta(d_uid, hp_delta=max(1, revive_hp - cur_hp))
-                        cur_effs = db.get_status_effects(d_uid)
-                        if "Exhausted / Recovering" not in cur_effs:
-                            cur_effs.append("Exhausted / Recovering")
-                        db.set_status_effects(d_uid, cur_effs)
-                    if session_id:
-                        from mechanics.system.time_engine import advance_time
-                        ko_time = advance_time(session_id, 60, party_uids=party_uids)
-                        outcome["_time_info"] = ko_time
-                        session = db.get_session(session_id) or session
-                    outcome["_party_defeated_notice"] = (
-                        "💀 **Knocked Out!** Overwhelmed by severe physical hazards, you collapsed unconscious—awakening an hour later, battered and stabilized."
-                    )
-                    ko_choices = [
-                        {"label": "Rest and recuperate from your injuries", "stat": "END", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
-                        {"label": "Assess your surroundings and check equipment", "stat": "PER", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
-                        {"label": "Consult with companions about what happened", "stat": "CHA", "requirement": 4, "mp_cost": 0, "_server_stamped": True},
-                    ]
-                    outcome.pop("_hybrid_choices_built", None)
-                    outcome["choices"] = ko_choices
-                    outcome["next_choices"] = ko_choices
+                        outcome["choices"] = ko_choices
+                        outcome["next_choices"] = ko_choices
         except Exception as e:
             log.warning("Failed 0-HP recovery check: %s", e)
 
@@ -1287,7 +1351,8 @@ def apply_outcome(
             if isinstance(session, dict):
                 session["_just_advanced_quest_ids"] = _just_adv_qids
             try:
-                db.update_session(session_id, extra={"_just_advanced_quest_ids": _just_adv_qids})
+                with db.savepoint(uow_conn, "sp_apply_quest_adv_meta"):
+                    db.update_session(session_id, extra={"_just_advanced_quest_ids": _just_adv_qids})
             except Exception:
                 pass
         _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions, ctx=ctx)
@@ -1400,8 +1465,9 @@ def apply_outcome(
 
         # ── D16 Atomic Commit: Stealth Persistence, Spatial Reset & 100% Escalation ──
         try:
-            from mechanics.stealth import reduce_stealth_turn_outcome
-            reduce_stealth_turn_outcome(session_id, session, party, outcome, actions, scen_key, is_combat)
+            with db.savepoint(uow_conn, "sp_apply_stealth_outcome"):
+                from mechanics.stealth import reduce_stealth_turn_outcome
+                reduce_stealth_turn_outcome(session_id, session, party, outcome, actions, scen_key, is_combat)
         except Exception as _st_e:
             log.warning("Failed reducing stealth turn outcome: %s", _st_e)
 
@@ -1410,15 +1476,16 @@ def apply_outcome(
             sr_info = outcome["_staged_scene_residue"]
             if sr_info.get("node_id"):
                 try:
-                    from mechanics.world.locations.access_gate import record_turn_scene_residue
-                    record_turn_scene_residue(
-                        session_id,
-                        str(sr_info["node_id"]),
-                        session or {},
-                        outcome,
-                        actions,
-                        unlocked_by=str(sr_info.get("unlocked_by") or ""),
-                    )
+                    with db.savepoint(uow_conn, "sp_apply_scene_residue"):
+                        from mechanics.world.locations.access_gate import record_turn_scene_residue
+                        record_turn_scene_residue(
+                            session_id,
+                            str(sr_info["node_id"]),
+                            session or {},
+                            outcome,
+                            actions,
+                            unlocked_by=str(sr_info.get("unlocked_by") or ""),
+                        )
                 except Exception as _sr_e:
                     log.warning("Failed recording turn scene residue: %s", _sr_e)
         # ── Nearby Enemies & Player Resonance Pips Persistence ──
@@ -1456,7 +1523,8 @@ def apply_outcome(
                 sess_updates.setdefault("extra", {})["_active_quest_encounter"] = None
             if sess_updates:
                 try:
-                    db.update_session(session_id, **sess_updates)
+                    with db.savepoint(uow_conn, "sp_apply_sess_updates"):
+                        db.update_session(session_id, **sess_updates)
                 except Exception as _ne_e:
                     log.warning("Failed committing nearby_enemies / player_resonance_pips: %s", _ne_e)
 
@@ -1493,7 +1561,6 @@ def push_history(history: list, entry: str, limit: int | None = None) -> list:
     The default limit is RAW_HISTORY_LIMIT (4) from mechanics.system.memory.digest.
     """
     from mechanics.system.memory.digest import RAW_HISTORY_LIMIT
-    import game_engine
     
     if limit is None:
         limit = RAW_HISTORY_LIMIT
@@ -1513,5 +1580,5 @@ def push_history(history: list, entry: str, limit: int | None = None) -> list:
 
 
 
-from .reducers import _evaluate_npc_milestones, _reduce_quests_and_waypoints, _reduce_vitals_and_inventory, _reduce_factions, _reduce_deterministic_waypoints, _reduce_physical_state_and_memories, _reduce_entities_and_gifts, _reduce_media_capture
+from .reducers import _reduce_quests_and_waypoints, _reduce_vitals_and_inventory, _reduce_factions, _reduce_deterministic_waypoints, _reduce_physical_state_and_memories, _reduce_entities_and_gifts, _reduce_media_capture
 from .social import _reduce_social_and_milestones

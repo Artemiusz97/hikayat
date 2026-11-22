@@ -24,7 +24,7 @@ export const apiCall = async (endpoint, options = {}) => {
         authHeaders['X-Hikayat-Token'] = parsed.auth_token.trim();
       }
     }
-  } catch (e) {
+  } catch {
     // Ignore storage parse issues
   }
 

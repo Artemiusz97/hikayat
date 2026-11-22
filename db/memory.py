@@ -10,7 +10,6 @@ import json
 import time
 import logging
 
-import db
 from .core import get_conn
 
 log = logging.getLogger("hikayat.db.memory")
@@ -142,43 +141,6 @@ def get_active_commitments(
     return [_hydrate_memory_commitment_row(dict(r)) for r in rows]
 
 
-def update_commitment_status(
-    session_id: int, commitment_id: int, status: str
-) -> bool:
-    """Update commitment status via commitments_engine so affinity, memory, and social ties stay synchronized."""
-    status = status.lower().strip()
-    valid_statuses = ("fulfilled", "broken", "active", "flaked", "completed", "cancelled", "voided", "abandoned")
-    if status not in valid_statuses:
-        return False
-    try:
-        from mechanics.system.commitments_engine import (
-            fulfill_commitment,
-            flake_commitment,
-            cancel_commitment,
-            void_commitment,
-            abandon_rendezvous,
-        )
-        if status in ("fulfilled", "completed"):
-            return fulfill_commitment(session_id, commitment_id)
-        if status in ("broken", "flaked"):
-            return bool(flake_commitment(session_id, commitment_id, reason="broken promise" if status == "broken" else "time_window_elapsed"))
-        if status == "cancelled":
-            return cancel_commitment(session_id, commitment_id)
-        if status == "voided":
-            return void_commitment(session_id, commitment_id)
-        if status == "abandoned":
-            return bool(abandon_rendezvous(session_id, commitment_id))
-    except Exception:
-        pass
-    now = time.time()
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE commitments_ledger SET status=?, updated_at=? WHERE id=? AND session_id=?",
-            (status, now, commitment_id, session_id),
-        )
-    return True
-
-
 def bulk_add_commitments(
     session_id: int,
     commitments: list[dict],
@@ -292,7 +254,6 @@ def append_chapter_digest(
     turn_start: int,
     turn_end: int,
     bullets: list[str],
-    embeddings: list[list[float]] = None,  # Deprecated post-Migration 37 compatibility shim (ignored)
     entities: list[str] | None = None,
     location_tag: str = "",
     quest_ids: list[str] | None = None,
@@ -766,7 +727,7 @@ def get_chapter_digest(session_id: int) -> list[str]:
         return []
 
 
-def search_chapter_digests(session_id: int, query_text: str, limit: int = 6, query_embedding: list[float] = None) -> list[str]:
+def search_chapter_digests(session_id: int, query_text: str, limit: int = 6) -> list[str]:
     """Search chapter digest bullets using 5-language + CJK bigram FTS5 BM25 matching."""
     from mechanics.system.memory.tokenization import sanitize_fts_query
 
@@ -887,7 +848,6 @@ def format_digest_prompt_block(
     query_context: str = "",
     max_recent: int = 6,
     max_relevant: int = 6,
-    query_embedding: list[float] = None,
     present_npcs: list[str] | None = None,
     current_location: str = "",
     active_quest_ids: list[str] | None = None,

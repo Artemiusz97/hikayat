@@ -4,13 +4,14 @@ import json
 import logging
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
-from fastapi import WebSocket
+from fastapi import HTTPException, WebSocket
 from pydantic import BaseModel, Field, field_validator
 
 import db
 from db import adb
 import skill_check
 import character_data as cd
+from services.crash_capture import to_json_safe as _crash_to_json_safe
 
 logger = logging.getLogger("hikayat-server")
 
@@ -52,12 +53,31 @@ class ConnectionManager:
             clean_sid = session_id
         if clean_sid not in self.active_connections:
             return
-        members = await adb(db.get_session_members, clean_sid)
-        connected_uids = [c["user_id"] for c in self.active_connections[clean_sid]]
+        def _load_presence_bundle() -> tuple[list, dict[int, dict]]:
+            with db.ReadUnitOfWork():
+                sess_members = list(db.get_session_members(clean_sid) or [])
+                sess_chars = {
+                    int(c["user_id"]): dict(c)
+                    for c in (db.get_session_characters(clean_sid) or [])
+                    if isinstance(c, dict) and c.get("user_id") is not None
+                }
+                for uid in sess_members:
+                    u_int = int(uid)
+                    if u_int not in sess_chars:
+                        ch = db.get_character(u_int)
+                        if isinstance(ch, dict):
+                            sess_chars[u_int] = dict(ch)
+                return sess_members, sess_chars
+
+        members, chars_by_uid = await adb(_load_presence_bundle)
+        conns = list(self.active_connections.get(clean_sid) or [])
+        if not conns:
+            return
+        connected_uids = [c["user_id"] for c in conns]
 
         member_profiles = []
         for uid in members:
-            c = await adb(db.get_character, uid)
+            c = chars_by_uid.get(int(uid))
             member_profiles.append({
                 "user_id": uid,
                 "name": c["name"] if c else f"User {uid}",
@@ -128,30 +148,19 @@ _JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_sn
 
 
 def _to_json_safe(val, _seen: set[int] | None = None):
-    if val is None or isinstance(val, (str, int, float, bool)):
-        return val
-    if _seen is None:
-        _seen = set()
-    val_id = id(val)
-    if val_id in _seen:
-        return None
-    _seen.add(val_id)
-    try:
-        if hasattr(val, "model_dump") and callable(val.model_dump) and not isinstance(val, type):
-            return _to_json_safe(val.model_dump(), _seen)
-        if isinstance(val, dict):
-            return {
-                str(k): _to_json_safe(v, _seen)
-                for k, v in val.items()
-                if str(k) not in _JSON_SAFE_TRANSIENT_KEYS and not str(k).startswith("__")
-            }
-        if isinstance(val, (list, tuple, set, frozenset)):
-            return [_to_json_safe(v, _seen) for v in val]
-        if hasattr(val, "__dict__") and not isinstance(val, type):
-            return _to_json_safe(vars(val), _seen)
-        return val
-    finally:
-        _seen.discard(val_id)
+    return _crash_to_json_safe(
+        val,
+        _seen,
+        transient_keys=_JSON_SAFE_TRANSIENT_KEYS,
+        sanitize_paths=False,
+        stringify_unknown=False,
+    )
+
+
+def require_active_session(session: Optional[Dict[str, Any]]) -> None:
+    """Raise HTTP 400 if the adventure session is missing or no longer active."""
+    if not session or str(session.get("status") or "active").strip().lower() != "active":
+        raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
 
 
 def _serializable_action(action: dict) -> dict:
@@ -247,39 +256,12 @@ def _parse_status_effects_list(raw_val: Any) -> List[Any]:
     return list(raw_val) if isinstance(raw_val, (tuple, set)) else []
 
 
-def _hydrate_party_char_row(row: Any, settings_by_uid: Dict[int, Dict[str, Any]]) -> Tuple[int, Dict[str, Any]]:
-    u_key = int(row["user_id"])
-    raw_eff = row["status_effects"] if "status_effects" in row.keys() else None
-    hydrated = db.characters._apply_debug_stat_override(dict(row), settings=settings_by_uid.get(u_key, {}))
-    hydrated["status_effects"] = _parse_status_effects_list(raw_eff)
-    return u_key, hydrated
-
-
-def _batch_load_party_characters(missing_uids: List[int]) -> Dict[int, Dict[str, Any]]:
-    loaded: Dict[int, Dict[str, Any]] = {}
-    uids_json = json.dumps(missing_uids)
-    try:
-        with db.get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM characters WHERE user_id IN (SELECT value FROM json_each(?)) AND is_active = 1",
-                (uids_json,),
-            ).fetchall()
-            s_rows = conn.execute(
-                "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
-                (uids_json,),
-            ).fetchall()
-        settings_by_uid = {
-            int(sr["user_id"]): dict(sr)
-            for sr in s_rows
-            if sr and sr["user_id"] is not None
-        }
-        for r in rows:
-            u_key, hydrated = _hydrate_party_char_row(r, settings_by_uid)
-            loaded[u_key] = hydrated
-        return loaded
-    except Exception as exc:
-        logger.debug("Batch party character preload fallback: %s", exc)
-        return {}
+def _batch_load_party_characters(
+    missing_uids: List[int],
+    *,
+    session_id: Optional[int] = None,
+) -> Dict[int, Dict[str, Any]]:
+    return db.batch_load_party_characters(missing_uids, session_id=session_id)
 
 
 def _format_party_member_entry(
@@ -337,12 +319,12 @@ def enrich_session_party_members(
     }
     missing_uids = [int(u) for u in uids if u is not None and int(u) not in chars_by_uid]
     if len(missing_uids) > 1:
-        chars_by_uid.update(_batch_load_party_characters(missing_uids))
+        chars_by_uid.update(_batch_load_party_characters(missing_uids, session_id=session_id))
 
     resolved_chars: List[Tuple[Any, Dict[str, Any]]] = []
     for uid in uids:
         u_int = int(uid)
-        c = chars_by_uid[u_int] if u_int in chars_by_uid else db.get_character(uid)
+        c = chars_by_uid[u_int] if u_int in chars_by_uid else db.get_character(uid, session_id=session_id)
         if c:
             resolved_chars.append((uid, c))
 
@@ -353,13 +335,14 @@ def enrich_session_party_members(
         except Exception:
             inv_by_cid = {}
 
+    prop_bonus = db.get_session_property_slot_bonus(int(session_id))
     members: List[Dict[str, Any]] = []
     for uid, c in resolved_chars:
         cid = c.get("id")
         c_inv = inv_by_cid.get(int(cid), []) if cid is not None else []
         try:
             u_slots = db.compute_inventory_used_slots(c_inv)
-            cap = db.get_character_inventory_capacity(int(uid), c, int(session_id))
+            cap = cd.inventory_capacity(int(c.get("str_", 1) or 1), bonus_slots=prop_bonus)
         except Exception:
             u_slots = len(c_inv)
             cap = cd.inventory_capacity(int(c.get("str_", 5) or 5))

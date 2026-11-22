@@ -107,6 +107,7 @@ def sync_and_get_composure(
     scenario: str = "fantasy",
     max_composure: int = DEFAULT_MAX_COMPOSURE,
     turn_updated: int = 0,
+    persist_db: bool = True,
 ) -> dict[str, Any]:
     """Reads NPC composure and applies deterministic block (+50%) or overnight (100%) recovery."""
     cur_d = int(current_day or 1)
@@ -115,6 +116,24 @@ def sync_and_get_composure(
     existing = db.get_npc_social_composure(session_id, npc_name)
 
     if not existing:
+        if not persist_db:
+            return {
+                "session_id": session_id,
+                "npc_id": str(npc_name or "").strip().lower(),
+                "current_composure": max_composure,
+                "max_composure": max_composure,
+                "composure_state": "composed",
+                "mood": "Engaged",
+                "mood_dc_mod": 0,
+                "last_schedule_block": cur_block,
+                "last_interaction_day": cur_d,
+                "last_interaction_minute": cur_m,
+                "lockout_until_day": 0,
+                "lockout_until_minute": 0,
+                "clear_the_air_required": 0,
+                "clear_the_air_reason": "",
+                "turn_updated": turn_updated,
+            }
         return db.upsert_npc_social_composure(
             session_id,
             npc_name,
@@ -170,6 +189,24 @@ def sync_and_get_composure(
         or mood != existing.get("mood")
         or int(existing.get("mood_dc_mod") or 0) != dc_mod
     ):
+        if not persist_db:
+            snap = dict(existing)
+            snap.update({
+                "current_composure": cur_c,
+                "max_composure": max_c,
+                "composure_state": state,
+                "mood": mood,
+                "mood_dc_mod": dc_mod,
+                "last_schedule_block": cur_block,
+                "last_interaction_day": cur_d,
+                "last_interaction_minute": cur_m,
+                "lockout_until_day": lock_day,
+                "lockout_until_minute": lock_min,
+                "clear_the_air_required": 1 if clear_req else 0,
+                "clear_the_air_reason": clear_reason,
+                "turn_updated": int(turn_updated or existing.get("turn_updated") or 0),
+            })
+            return snap
         return db.upsert_npc_social_composure(
             session_id,
             npc_name,

@@ -1090,11 +1090,13 @@ def evaluate_shop_staff_availability(
         return club_shop_decision
 
     world_nodes = db.get_session_world_nodes(sid) if sid > 0 else []
+    merch_state = (eff_session or {}).get("merchant") if isinstance((eff_session or {}).get("merchant"), dict) else {}
     if not world_nodes:
-        merch_state = (eff_session or {}).get("merchant") if isinstance((eff_session or {}).get("merchant"), dict) else {}
         if has_shop_keyword or merch_state.get("is_faction_quartermaster") or (not eff_loc.strip() and bool(merch_state.get("available"))):
             return _availability_result(available=True, reason="legacy_no_graph", reason_message="A shop counter is open for trade.", facility_node_id=resolved_node_id)
         return _availability_result(available=False, reason="no_merchant", reason_message="No open shopkeeper or traveling merchant is stationed here.", facility_node_id=resolved_node_id)
+    if not eff_loc.strip() and not resolved_node_id and bool(merch_state.get("available")):
+        return _availability_result(available=True, reason="legacy_no_graph", reason_message="A shop counter is open for trade.", facility_node_id="")
 
     if is_room_node:
         room_meta = parse_node_state(node)

@@ -23,7 +23,6 @@ Usage (in game_engine/context.py or turn.py)::
 
 import enum
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 # ---------------------------------------------------------------------------
 # Scene Mode Classifier

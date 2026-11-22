@@ -10,7 +10,6 @@ from typing import Dict, Any, List, Optional, Tuple
 import json
 import random
 
-import skill_check
 from skill_check import CheckResult
 import character_data as cd
 from mechanics.stealth.alert_tracker import ALERT_UNAWARE, ALERT_SUSPICIOUS, ALERT_SEARCHING, ALERT_DETECTED

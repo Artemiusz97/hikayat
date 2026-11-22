@@ -4,7 +4,6 @@ import {
   AlertTriangle,
   Check,
   FlaskConical,
-  Heart,
   Loader2,
   Package,
   Sparkles,

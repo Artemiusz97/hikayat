@@ -43,7 +43,6 @@ from .quest_turn_resolver import (
     resolve_clue_source_claim,
     resolve_post_turn_dossier_hooks,
 )
-from mechanics.narrative.bounty import generate_faction_bounty_board
 from .quest_agency import (
     prune_completed_stage_choices,
     resolve_caseboard_deduction,
@@ -95,3 +94,14 @@ from mechanics.social.roster_tags import (
     get_dialogue_register,
     format_dialogue_register_directive,
 )
+from mechanics.narrative.bounty import (
+    generate_bounty_board,
+    generate_faction_bounty_board,
+    BOUNTY_BOARD_SCHEMA,
+)
+from mechanics.combat.merchant import (
+    generate_merchant_shop,
+    merchant_prompt_note,
+    evaluate_items_for_sale,
+)
+from mechanics.world.locations import reconcile_movement_location

@@ -14,8 +14,8 @@ import db
 from db import adb
 from mechanics.pacts import build_contracts_overview_payload, execute_pact_ritual_action
 from mechanics.system.concurrency import distributed_adventure_lock
-from .adventure import _enrich_session_for_client
-from .deps import _serializable_action, manager
+from .adventure import enrich_session_for_client
+from .deps import _serializable_action, manager, require_active_session
 from .security import verify_session_participant
 
 router = APIRouter()
@@ -27,11 +27,6 @@ class ContractRitualRequest(BaseModel):
     tier: int = 1
     use_credits: bool = True
     lang: Optional[str] = None
-
-
-def _require_active_session(session: Optional[Dict[str, Any]]) -> None:
-    if not session or str(session.get("status") or "active").strip().lower() != "active":
-        raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
 
 
 def _resolve_request_lang(explicit_lang: Optional[str], settings: Optional[Dict[str, Any]]) -> str:
@@ -73,12 +68,12 @@ async def perform_entity_contract_ritual(
         raise HTTPException(status_code=400, detail=f"Unsupported contract action: '{ritual_action}'.")
 
     pre_session, canonical_uid = await verify_session_participant(request, session_id, req.user_id)
-    _require_active_session(pre_session)
+    require_active_session(pre_session)
     eff_uid = int(canonical_uid or req.user_id or (pre_session or {}).get("host_user_id") or 0)
 
     async with distributed_adventure_lock(eff_uid, session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
-        _require_active_session(session)
+        require_active_session(session)
         if not eff_uid:
             eff_uid = int(session.get("host_user_id") or 0)
         settings = await adb(db.get_settings, eff_uid) if eff_uid else {}
@@ -102,7 +97,7 @@ async def perform_entity_contract_ritual(
         if res.get("spawned_exorcism_boss") or act_norm in ("sign", "sever"):
             fresh_sess = await adb(db.get_session, session_id)
             if fresh_sess:
-                enriched_session = await adb(_enrich_session_for_client, dict(fresh_sess), eff_uid, eff_lang)
+                enriched_session = await adb(enrich_session_for_client, dict(fresh_sess), eff_uid, eff_lang)
 
     safe_res = _serializable_action({
         "success": True,

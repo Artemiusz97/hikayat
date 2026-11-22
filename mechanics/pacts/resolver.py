@@ -25,7 +25,6 @@ from mechanics.combat.enemies import build_monster_stat_sheet
 
 from .appraisal import (
     RESONANCE_XP_THRESHOLDS,
-    apply_active_pact_modifiers,
     can_afford_stat_locks,
     compute_pact_cast_costs,
     compute_tier_locks_for_patron,
@@ -508,6 +507,7 @@ def get_available_patrons_for_context(
     user_id: int,
     *,
     lang: str = "en",
+    persist_db: bool = True,
 ) -> Dict[str, Any]:
     """
     Evaluates all 5 Discovery Channels for `(session, char, user_id)` and returns
@@ -556,7 +556,7 @@ def get_available_patrons_for_context(
     if sid:
         try:
             from mechanics.social.factions import get_anomalous_faction_state
-            f_st = get_anomalous_faction_state(sid, user_id=user_id)
+            f_st = get_anomalous_faction_state(sid, user_id=user_id, persist_db=persist_db)
             player_fac_key = str(f_st.get("faction_archetype_key") or "").strip().lower()
             player_fac_rank = int(f_st.get("rank_tier") or f_st.get("rank") or 1)
         except Exception:

@@ -2,23 +2,11 @@ from __future__ import annotations
 """
 Equipment tier definitions, archetype mappings, affix pools, and scenario vocabulary.
 """
-import json
-import random
-import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Tuple
 
 # -----------------------------------------------------------------------------
 # 1. ARCHETYPES & ATTRIBUTE TAXONOMY
 # -----------------------------------------------------------------------------
-from mechanics.combat.items.weapons import WEAPON_ARCHETYPES
-from mechanics.combat.items.armors import ARMOR_ARCHETYPES
-from mechanics.combat.items.shields import SHIELD_ARCHETYPES
-from mechanics.combat.items.accessories import ACCESSORY_ARCHETYPES
-from mechanics.combat.items.headwear import HEADWEAR_ARCHETYPES
-from mechanics.combat.items.gloves import GLOVE_ARCHETYPES
-from mechanics.combat.items.shoes import SHOE_ARCHETYPES
-from mechanics.combat.items.clothing import CLOTHING_TOPS, CLOTHING_BOTTOMS
-from mechanics.combat.items.envelope import serialize_item
 
 # -----------------------------------------------------------------------------
 # 2. RARITY & TIER DEFINITIONS (DUAL-AXIS & LEGACY)

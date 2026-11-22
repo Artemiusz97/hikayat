@@ -10,7 +10,7 @@ import json
 import logging
 import random
 import re
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Any
 
 import db
 import scenario_data
@@ -1183,7 +1183,7 @@ def evaluate_node_access_gate(
 
     # 1. Player's own home is always accessible to the player (once off-campus)
     from .residences import get_player_owned_or_starter_property_for_node, is_unpurchased_realty_node
-    from .realty_catalog import is_anomalous_realty_scenario, resolve_realty_entry
+    from .realty_catalog import is_anomalous_realty_scenario
     if (get_player_owned_or_starter_property_for_node(session_id, target_node_id, session=session if isinstance(session, dict) else None) is not None) or (not is_anomalous_realty_scenario(scen_key) and (low_id in ("loc_player_house", "sub_player_bedroom") or "player's house" in display_name.lower())):
         return {"gated": False}
 

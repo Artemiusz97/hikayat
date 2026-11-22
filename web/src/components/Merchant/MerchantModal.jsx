@@ -17,6 +17,8 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
   const loadSeqRef = useRef(0);
   const loadAbortRef = useRef(null);
   const sellTabStaleRef = useRef(false);
+  const selectedStoreTypeRef = useRef(selectedStoreType);
+  selectedStoreTypeRef.current = selectedStoreType;
 
   const scenarioKey = session?.scenario || shop?.scenario || 'fantasy';
 
@@ -29,7 +31,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
 
     setLoading(true);
     try {
-      const mType = overrideType !== undefined ? overrideType : selectedStoreType;
+      const mType = overrideType !== undefined ? overrideType : selectedStoreTypeRef.current;
       const query = mType
         ? `/api/merchant/${session.id}?user_id=${user.user_id}&merchant_type=${encodeURIComponent(mType)}`
         : `/api/merchant/${session.id}?user_id=${user.user_id}`;
@@ -47,7 +49,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
         setLoading(false);
       }
     }
-  }, [session?.id, user?.user_id, selectedStoreType, t]);
+  }, [session?.id, user?.user_id, t]);
 
   useEffect(() => {
     setSelectedStoreType(null);
@@ -66,7 +68,7 @@ const MerchantModal = ({ isOpen, onClose, session, user, onTransactionComplete, 
     return () => {
       loadAbortRef.current?.abort();
     };
-  }, [isOpen, session?.current_location]);
+  }, [isOpen, session?.current_location, loadShop]);
 
   const handleSwitchStore = async (storeType) => {
     setSelectedStoreType(storeType);

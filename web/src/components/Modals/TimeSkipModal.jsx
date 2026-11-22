@@ -43,11 +43,10 @@ const TimeSkipModal = ({
   const [mode, setMode] = useState('auto'); // 'auto', 'sleep', 'nap', 'wait'
 
   useEffect(() => {
-    if (!canSleep) {
-      setMode('wait');
-    } else if (mode === 'wait') {
-      setMode('auto');
-    }
+    setMode((prev) => {
+      if (!canSleep) return 'wait';
+      return prev === 'wait' ? 'auto' : prev;
+    });
   }, [canSleep, isOpen]);
 
   // Recovery preview based on surface and duration (placed before early return to satisfy Rules of Hooks)

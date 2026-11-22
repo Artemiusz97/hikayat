@@ -7,7 +7,6 @@ and turn-rollback reconciliation for veiled folklore villagers.
 """
 from __future__ import annotations
 
-from contextlib import nullcontext
 import json
 import logging
 import time
@@ -25,7 +24,6 @@ from .folklore_roster import (
     _slugify_id,
     build_villager_basic_info_dict,
     ensure_folklore_villager_roster,
-    get_folklore_villager_spec,
     get_scheduled_villagers_for_node,
     is_myobu_fox_race,
 )
@@ -735,6 +733,6 @@ def resolve_glamour_wanderer_interaction(
 
 
 from .folklore_roster_rollback import (  # noqa: E402
-    commit_staged_folklore_ops,
-    rollback_folklore_roster_state_after_turn,
+    commit_staged_folklore_ops,  # static-check: ignore[unused-import]
+    rollback_folklore_roster_state_after_turn,  # static-check: ignore[unused-import]
 )

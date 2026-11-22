@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -122,7 +121,7 @@ def get_protected_quest_cast_names(session_id: int) -> Set[str]:
     return protected
 
 
-from mechanics.world.locations.hierarchy import format_venue_display, format_short_venue_display
+from mechanics.world.locations.hierarchy import format_venue_display, format_short_venue_display  # static-check: ignore[unused-import]
 
 
 SAFE_SANCTUARY_KEYWORDS: Tuple[str, ...] = (

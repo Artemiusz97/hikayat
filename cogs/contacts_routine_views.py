@@ -328,11 +328,7 @@ def preload_discord_social_context(
         except _NON_TRIVIAL_PRELOAD_ERRORS:
             primary_property = None
         try:
-            with db.get_conn() as conn_ties:
-                t_rows = conn_ties.execute(
-                    "SELECT * FROM social_ties WHERE session_id = ? AND status = 'active' ORDER BY updated_at DESC",
-                    (sid,),
-                ).fetchall()
+            t_rows = db.get_session_active_social_ties(sid)
             for tr in t_rows:
                 td = dict(tr)
                 pa = str(td.get("person_a_key") or "").strip().lower()

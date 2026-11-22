@@ -61,7 +61,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [previewStartingItems, setPreviewStartingItems] = useState(null);
   
   const [templates, setTemplates] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [_loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState(null);
   const [stats, setStats] = useState({ str: 1, per: 1, end: 1, cha: 1, int: 1, agi: 1, luk: 1 });
@@ -79,8 +79,19 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef(null);
-  useEffect(() => () => {
-    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  const isMountedRef = useRef(true);
+  const gearAbortRef = useRef(null);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (gearAbortRef.current) {
+        try {
+          gearAbortRef.current.abort();
+        } catch {}
+      }
+    };
   }, []);
 
   const isNsfw = useMemo(() => {
@@ -110,6 +121,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   }, [charGen]);
 
   useEffect(() => {
+    let cancelled = false;
+    const publicUrlController = new AbortController();
     if (isOpen && character) {
       setStats({
         str: character.str_ ?? character.str ?? 1,
@@ -140,14 +153,22 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       setStep(1);
       
       // Fetch share link in background
-      apiCall('/api/server/public-url').then(res => {
+      apiCall('/api/server/public-url', { signal: publicUrlController.signal }).then(res => {
         const publicUrl = res?.public_url || res?.url || '';
-        if (publicUrl) setShareLink(publicUrl);
-      }).catch(() => {});
+        if (!cancelled && publicUrl) setShareLink(publicUrl);
+      }).catch((err) => {
+        if (err?.name === 'AbortError' || err?.isUserAbort || cancelled) return;
+      });
     }
-  }, [isOpen, character]);
+    return () => {
+      cancelled = true;
+      publicUrlController.abort();
+    };
+  }, [isOpen, character, isMale]);
 
   const tagsParam = useMemo(() => (scenario === 'custom' ? customTags.join(',') : ''), [scenario, customTags]);
+  const charClassRef = useRef(charClass);
+  charClassRef.current = charClass;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -164,7 +185,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         setTemplates(data);
         const activeClassesObj = data?.classes || {};
         const classNames = Object.keys(activeClassesObj);
-        if (classNames.length > 0 && !classNames.includes(charClass)) {
+        if (classNames.length > 0 && !classNames.includes(charClassRef.current)) {
           setCharClass(classNames[0]);
         }
         setRegeneratedLoadout(null);
@@ -288,7 +309,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     return templates?.classes || {};
   }, [isAnomalousIncursions, templates, effectiveFaction]);
 
-  const activeClassInfo = activeClassesMap[charClass] || {};
+  const activeClassInfo = useMemo(
+    () => activeClassesMap[charClass] || {},
+    [activeClassesMap, charClass]
+  );
   
   const weaponsList = useMemo(() => {
     if (isAnomalousIncursions && templates?.faction_starting_weapons?.[effectiveFaction]) {
@@ -311,16 +335,18 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }
   }, [weaponsList, startingWeapon]);
 
-  const resolveGenderSlashLabel = (labelStr) => {
-    if (!labelStr || !String(labelStr).includes(' / ')) return labelStr;
-    const parts = String(labelStr).split(' / ').map((s) => s.trim());
-    if (parts.length === 2) return isMale ? parts[1] : parts[0];
-    return labelStr;
-  };
-
-  const weaponsDisplayMap = templates?.starting_weapons_localized || {};
+  const weaponsDisplayMap = useMemo(
+    () => templates?.starting_weapons_localized || {},
+    [templates?.starting_weapons_localized]
+  );
 
   const displayedLoadout = useMemo(() => {
+    const resolveGenderSlashLabel = (labelStr) => {
+      if (!labelStr || !String(labelStr).includes(' / ')) return labelStr;
+      const parts = String(labelStr).split(' / ').map((s) => s.trim());
+      if (parts.length === 2) return isMale ? parts[1] : parts[0];
+      return labelStr;
+    };
     let loadout = {};
     const locGear = activeClassInfo?.starter_gear_localized || {};
     if (regeneratedLoadout) {
@@ -366,9 +392,11 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setRegeneratingGear(true);
     apiCall('/api/character/preview-gear', {
       method: 'POST',
+      signal: controller.signal,
       body: JSON.stringify({
         char_class: charClass,
         scenario,
@@ -385,12 +413,16 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         if (res?.loadout) setRegeneratedLoadout(res.loadout);
         if (res?.starting_items) setPreviewStartingItems(res.starting_items);
       })
-      .catch((err) => console.error(err))
+      .catch((err) => {
+        if (err?.name === 'AbortError' || err?.isUserAbort || cancelled) return;
+        console.error(err);
+      })
       .finally(() => {
         if (!cancelled) setRegeneratingGear(false);
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [isOpen, isAnomalousIncursions, effectiveFaction, charClass, scenario, startingWeapon, character?.gender, character?.race, isNonCombat, customTags]);
 
@@ -412,10 +444,19 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   };
 
   const handleRegenerateEquipment = async () => {
+    if (regeneratingGear) return;
+    if (gearAbortRef.current) {
+      try {
+        gearAbortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    gearAbortRef.current = controller;
     setRegeneratingGear(true);
     try {
       const res = await apiCall('/api/character/preview-gear', {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({
           char_class: charClass,
           scenario,
@@ -427,12 +468,19 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
           starting_faction: isAnomalousIncursions ? effectiveFaction : undefined,
         }),
       });
+      if (!isMountedRef.current || gearAbortRef.current !== controller) return;
       if (res?.loadout) setRegeneratedLoadout(res.loadout);
       if (res?.starting_items) setPreviewStartingItems(res.starting_items);
     } catch (err) {
+      if (err?.name === 'AbortError' || err?.isUserAbort) return;
       console.error(err);
     } finally {
-      setRegeneratingGear(false);
+      if (gearAbortRef.current === controller) {
+        gearAbortRef.current = null;
+      }
+      if (isMountedRef.current) {
+        setRegeneratingGear(false);
+      }
     }
   };
 
@@ -450,6 +498,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   };
 
   const submitEmbark = async () => {
+    if (submitting) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -510,11 +559,11 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         penis_size: finalPSize,
         asset_texture: finalTexture,
       });
-      onClose();
+      if (isMountedRef.current) onClose();
     } catch (err) {
-      setError(err.message || 'Embarkation failed');
+      if (isMountedRef.current) setError(err.message || 'Embarkation failed');
     } finally {
-      setSubmitting(false);
+      if (isMountedRef.current) setSubmitting(false);
     }
   };
 

@@ -7,59 +7,33 @@ from .world_pulse_mixin import WorldPulseMixin
 import asyncio
 import json
 import logging
-import random
 import re
-import time
 import discord
-from mechanics.system.concurrency import distributed_session_lock, LockAcquisitionError
 from discord import app_commands
 from discord.ext import commands
 logger = logging.getLogger("hikayat.adventure")
 import db
 from db import adb
 import game_engine
-from services.turn_service import TurnService
 import image_client
 from character_data import (
-    XP_REWARDS, STATS, STAT_NAMES, STAT_EMOJI, MAX_LEVEL, MAX_STAT_VALUE,
-    get_item_icon, get_class_templates, get_starting_weapons,
-    get_starter_gear_by_class, get_starting_items, inventory_capacity
+    XP_REWARDS,
+    MAX_LEVEL,
 )
-from cogs.character import build_character_sheet_embed
-from db import STAT_COLUMN
-from scenario_data import DEFAULT_SCENARIO, ScenarioError, load_scenarios, resolve_scenario_key
+from scenario_data import resolve_scenario_key
+from services.turn_service import TurnService
 from cogs.scenario_picker import (
     ScenarioVariantSelectView, channel_allows_nsfw, hidden_nsfw_note, needs_variant_step,
 )
-from skill_check import resolve_check, success_chance, CheckResult
-from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
-    apply_merchant_encounter_result as _apply_merchant_encounter_result,
-    handle_talk_to_merchant as _handle_talk_to_merchant,
-    build_merchant_embed as _merchant_embed,
-    MerchantView,
-    MerchantVoteView,
-    BuySelectView,
-    SellSelectView,
-    RumorView,
-)
-from mechanics.social.races import normalize_race
-from mechanics.social.persona import normalize_appearance
-from mechanics.world.locations import is_location_engine_enabled, get_discovered_location_tree, is_hub_location
-from mechanics.narrative.bounty import QUEST_TYPE_ICONS, get_quest_type_icon as _quest_type_icon
-from mechanics.combat.items import parse_item_effect, apply_item_to_target
-import unicodedata
+from skill_check import CheckResult
 
 from .embeds import (
-    MODE_LABELS, build_world_map_embed, prepare_discord_image, scene_embed, sync_scene_embed,
-    _RESULT_COLORS, _RESULT_TITLES, _build_bounties_embed, _build_bounty_board_embed,
-    _build_campaign_goals_embed, _build_caseboard_embed, _build_history_embed,
-    _build_main_quest_embed, _build_quest_log_embed,
-    _format_items_gained, _format_items_gained_multi, _format_tracker_entity,
-    _get_choice_emoji, _get_choice_quest_icon, _get_choice_skill_emoji,
-    _get_quest_scenario_labels, _is_dialogue_partner, _location_text, _norm_name,
-    _parse_status_effects, _party_vitals_text, _safe_add_field, _safe_int,
-    _scenario_command_choices, _strip_leading_emojis, _tracker_group_text,
-    _tracker_header, _truncate_embed_text, _truncate_field_name, _truncate_field_value,
+    MODE_LABELS,
+    build_world_map_embed,
+    prepare_discord_image,
+    scene_embed,
+    sync_scene_embed,
+    _scenario_command_choices,
 )
 
 from .views import *
@@ -374,7 +348,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             settings["image_gen_enabled"])
         effective_result_display = settings.get("result_display", "detailed")
 
-        from scenario_data import resolve_scenario_or_custom_key, resolve_scenario_key, get_scenario
+        from scenario_data import resolve_scenario_or_custom_key, get_scenario
         scen_val = scenario.value if scenario else "fantasy"
         if scen_val == "custom":
             if not tags:
@@ -476,7 +450,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
     @start.autocomplete("tags")
     async def start_tags_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
         from scenario_data import load_genres
-        import re
         try:
             genres_dict = load_genres()
         except Exception:
@@ -592,7 +565,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                 try:
                     from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
                     return await compile_or_apply_eager_quest_plan(
-                        session["id"], sq_qid, timeout_seconds=10.0, defer_apply=True
+                        session["id"], sq_qid, timeout_seconds=25.0, defer_apply=True
                     )
                 except Exception:
                     return None
@@ -612,16 +585,20 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                         pass
             else:
                 scene = await game_engine.generate_opening_scene(session, party)
-            # Safety coercion: generate_opening_scene returns dict; guard against any Pydantic leaks
-            if getattr(scene, "model_dump", None):
-                scene = scene.model_dump(exclude_unset=False)
-            if not isinstance(scene, dict):
-                scene = {}
-            await adb(game_engine.apply_quest_update, session["id"], scene)
+            first_char = party[0][0] if party and party[0] else None
+            committed = await TurnService.commit_opening_scene(
+                session["id"],
+                session,
+                party,
+                scene,
+                char_row=first_char,
+                scenario_key=scen_key,
+            )
+            scene = committed["scene"]
         except Exception as e:
             logger.error("Failed to generate opening scene for session %s: %s", session.get("id"), e, exc_info=True)
             try:
-                await adb(db.finish_session, session["id"])
+                await adb(db.delete_session, session["id"])
             except Exception:
                 pass
             msg = f"⚠️ The LLM failed to generate a scene: {e}\n\nThe session could not be started and was closed. Please try `/adventure start` again."
@@ -635,75 +612,9 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             elif target_channel:
                 await target_channel.send(msg)
             return
-        first_char = party[0][0] if party and party[0] else None
-        raw_choices, narrative, scene_title, partner_arg, npcs = game_engine.extract_scene_fields(scene)
-        location = scene.get("location", "")
-        enemies = scene.get("nearby_enemies", [])
-        _open_partners = [partner_arg] if isinstance(partner_arg, str) and partner_arg.strip() else (list(partner_arg) if isinstance(partner_arg, list) else [])
-        choices = await adb(game_engine.build_hybrid_turn_choices, raw_choices, session=session, party=party, result={**scene, "location": location, "npcs_present": npcs, "dialogue_partners": _open_partners})
-        await adb(db.save_session_scene, session["id"], scene_title,
-                               narrative, choices, history=[],
-                               location=location, nearby_enemies=enemies, current_npcs=npcs,
-                               dialogue_partner=partner_arg,
-                               current_node_id=scene.get("current_node_id"))
-        merchant = await adb(_apply_merchant_encounter_result, session["id"], scene.get("merchant_encounter"))
-        scen_key = session.get("scenario", "fantasy")
-        first_char_id = party[0][0]["id"] if party and party[0][0] else 0
-        present_npc_names = {game_engine._get_npc_name(n).lower() for n in (npcs or []) if game_engine._get_npc_name(n)}
-        enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
-        for entity in scene.get("new_entities", []) or []:
-            ent_type = entity.get("type", "person")
-            ent_name = entity.get("name", "")
-            raw_race = entity.get("race") or "" if ent_type.lower() == "person" else ""
-            norm_race = normalize_race(raw_race, scen_key=scen_key) if raw_race else raw_race
-            raw_app = entity.get("appearance", {}) if ent_type.lower() == "person" else {}
-            gender = entity.get("gender", "")
-            norm_app = normalize_appearance(raw_app, gender=gender, race=norm_race or "human", scen_key=scen_key)
-
-            disp_val = str(entity.get("disposition", "neutral")).lower()
-            await adb(db.upsert_lorebook_entity,
-                session["id"],
-                ent_type,
-                ent_name,
-                entity.get("description", ""),
-                disp_val,
-                faction=entity.get("faction", ""),
-                traits=entity.get("traits", []),
-                motivation=entity.get("motivation", ""),
-                mannerisms=entity.get("mannerisms", ""),
-                race=norm_race,
-                appearance=norm_app,
-            )
-            if ent_type.lower() == "person" and ent_name and ent_name.strip().lower() in present_npc_names and ent_name.strip().lower() not in enemy_names:
-                await adb(db.upsert_contact,
-                    session_id=session["id"],
-                    character_id=first_char_id,
-                    npc_id=ent_name,
-                    name=ent_name,
-                    basic_info={"description": entity.get("description", ""), "role": entity.get("role", ""), "met_in_person": True},
-                    delta_score=0,
-                    new_traits=entity.get("traits", []),
-                    new_preferences=entity.get("preferences", []),
-                    race=norm_race,
-                    gender=gender,
-                    appearance=norm_app,
-                )
-
-        enemy_names = {game_engine._get_npc_name(e).lower() for e in enemies if e}
-        for npc in (npcs or []):
-            n_name = game_engine._get_npc_name(npc)
-            if n_name and n_name.lower() not in enemy_names:
-                await adb(db.upsert_contact,
-                    session_id=session["id"],
-                    character_id=first_char_id,
-                    npc_id=n_name,
-                    name=n_name,
-                    basic_info={"role": npc.get("role", "") if isinstance(npc, dict) else "", "met_in_person": True},
-                    delta_score=0,
-                    race=npc.get("race", "") if isinstance(npc, dict) else "",
-                    gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                    appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
-                )
+        narrative = committed["narrative"]
+        choices = committed["choices"]
+        merchant = committed.get("merchant")
 
         fresh_session = await adb(db.get_session, session["id"])
         image_url = await self._maybe_generate_image(fresh_session, scene.get("image_prompt"), outcome=scene)
@@ -771,7 +682,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                     raw_hist = list(fresh_s.get("history") or [])
                     if raw_hist and isinstance(raw_hist[-1], dict):
                         raw_hist[-1]["scene_image_url"] = local_url
-                        import json
                         await adb(db.update_session, sid, history_json=json.dumps(raw_hist, default=str))
             return image_result
         except Exception as e:
@@ -822,7 +732,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
           3. Greedily select the highest-scoring sentences until max_chars.
           4. Re-join in original sentence order for readability.
         """
-        import re
         text = (text or "").strip()
         if len(text) <= max_chars:
             return text

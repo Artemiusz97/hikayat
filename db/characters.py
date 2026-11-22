@@ -1,14 +1,9 @@
 from __future__ import annotations
 import db
 import logging
-import asyncio
 import json
 import time
 from typing import Any, Optional
-from contextlib import contextmanager
-import re
-import sqlite3
-from config import DB_PATH
 import character_data as cd
 from .core import *
 from .core import _delete_session_records
@@ -139,8 +134,6 @@ def apply_adventure_loadout(
             (scenario, char_class, class_description, cd.STARTING_GOLD, eff_attr, eff_arch, eff_med, char_id)
         )
 
-    from mechanics.combat.equipment import parse_equipment_metadata
-    from mechanics.combat.items.envelope import serialize_item
     from mechanics.combat.items.weapons import generate_random_equipment as gen_weapon
 
     # 0. Seed 5 Fixed Innate Special Abilities for Anomalous Incursions before equipping gear
@@ -477,7 +470,7 @@ def get_character(user_id: int, session_id: int | None = None, *, settings: dict
         row = conn.execute("SELECT * FROM characters WHERE user_id=? AND is_active=1 LIMIT 1", (user_id,)).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
-            if row:
+            if row and not is_in_readonly_uow():
                 conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (row["id"],))
         return _apply_debug_stat_override(dict(row), settings=settings, session_id=session_id) if row else None
 
@@ -1200,5 +1193,123 @@ def set_character_3axis(
         except Exception as e:
             log.warning("Failed re-syncing innate 3-axis spells in set_character_3axis for user %s: %s", user_id, e)
     return True
+
+
+def get_raw_character_stats(char_id: int) -> dict[str, int]:
+    """Fetch un-overridden base stat columns for a character row."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT str_, per_, end_, cha, int_, agi, luk FROM characters WHERE id=?",
+            (int(char_id),),
+        ).fetchone()
+        return dict(row) if row else {}
+
+
+def get_character_session_ids(character_id: int, user_id: int) -> list[int]:
+    """Collect sorted unique session IDs referencing this character."""
+    with get_conn() as conn:
+        c_row = conn.execute(
+            "SELECT active_session_id FROM characters WHERE id=? AND user_id=?",
+            (int(character_id), int(user_id)),
+        ).fetchone()
+        s_rows = conn.execute(
+            "SELECT id FROM sessions WHERE character_id=?",
+            (int(character_id),),
+        ).fetchall()
+        sids = {int(r["id"]) for r in s_rows if r and r["id"]}
+        if c_row and c_row["active_session_id"]:
+            sids.add(int(c_row["active_session_id"]))
+        return sorted(sids)
+
+
+def _coerce_status_effects_list(raw_val: Any) -> list:
+    if isinstance(raw_val, list):
+        return raw_val
+    if isinstance(raw_val, str):
+        try:
+            parsed = json.loads(raw_val)
+            return parsed if isinstance(parsed, list) else []
+        except (TypeError, ValueError):
+            return []
+    return list(raw_val) if isinstance(raw_val, (tuple, set)) else []
+
+
+def batch_load_party_characters(
+    missing_uids: list[int],
+    *,
+    session_id: int | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Batch-load missing party member characters with debug overrides and parsed status effects."""
+    if not missing_uids:
+        return {}
+    loaded: dict[int, dict[str, Any]] = {}
+    req_to_canon = {int(u): int(db.resolve_canonical_user_id(int(u))) for u in missing_uids}
+    canon_uids = list(dict.fromkeys(req_to_canon.values()))
+    uids_json = json.dumps(canon_uids)
+    try:
+        with get_conn() as conn:
+            sess_char_id = -1
+            if session_id is not None:
+                s_row = conn.execute(
+                    "SELECT character_id FROM sessions WHERE id = ?",
+                    (int(session_id),),
+                ).fetchone()
+                if s_row and s_row["character_id"] is not None:
+                    sess_char_id = int(s_row["character_id"])
+            eff_sid = int(session_id) if session_id else -1
+            rows = conn.execute(
+                """SELECT * FROM characters
+                   WHERE user_id IN (SELECT value FROM json_each(?))
+                     AND (
+                         id = ?
+                         OR (? > 0 AND active_session_id = ?)
+                         OR is_active = 1
+                     )
+                   ORDER BY
+                       CASE
+                           WHEN id = ? THEN 0
+                           WHEN (? > 0 AND active_session_id = ?) THEN 1
+                           WHEN is_active = 1 THEN 2
+                           ELSE 3
+                       END ASC,
+                       is_active DESC,
+                       id DESC""",
+                (uids_json, sess_char_id, eff_sid, eff_sid, sess_char_id, eff_sid, eff_sid),
+            ).fetchall()
+            s_rows = conn.execute(
+                "SELECT * FROM user_settings WHERE user_id IN (SELECT value FROM json_each(?))",
+                (uids_json,),
+            ).fetchall()
+            pacts_by_uid: dict[str, list[dict]] = {}
+            if session_id is not None:
+                from .contracts import get_session_pacts_batch
+                pacts_by_uid = get_session_pacts_batch(int(session_id), holder_type="player", conn=conn)
+        settings_by_uid = {
+            int(sr["user_id"]): dict(sr)
+            for sr in s_rows
+            if sr and sr["user_id"] is not None
+        }
+        best_by_canon: dict[int, Any] = {}
+        for r in rows:
+            cu = int(r["user_id"])
+            if cu not in best_by_canon:
+                best_by_canon[cu] = r
+        for req_uid, canon_uid in req_to_canon.items():
+            chosen = best_by_canon.get(canon_uid)
+            if chosen is not None:
+                raw_eff = chosen["status_effects"] if "status_effects" in chosen.keys() else None
+                hydrated = _apply_debug_stat_override(
+                    dict(chosen),
+                    settings=settings_by_uid.get(canon_uid, {}),
+                    session_id=session_id,
+                    active_pacts=pacts_by_uid.get(str(canon_uid), []) if session_id is not None else None,
+                )
+                if hydrated is not None:
+                    hydrated["status_effects"] = _coerce_status_effects_list(raw_eff)
+                    loaded[req_uid] = hydrated
+        return loaded
+    except Exception as exc:
+        log.debug("Batch party character preload fallback: %s", exc)
+        return {}
 
 

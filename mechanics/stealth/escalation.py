@@ -8,7 +8,6 @@ covert exploration tactics when Stealth stance is active outside combat.
 """
 from typing import Dict, Any, List, Optional
 
-from mechanics.stealth.alert_tracker import ALERT_UNAWARE
 from mechanics.stealth.core import (
     any_actor_hidden,
     is_actor_hidden,
@@ -18,7 +17,6 @@ from mechanics.stealth.core import (
     get_session_stealth_state,
     apply_stealth_spatial_transition,
     set_session_stealth_state,
-    toggle_stealth_stance,
     is_stealth_context_warranted,
     is_strict_trespass_or_restricted_stealth_zone,
     record_failed_stealth_lockout,

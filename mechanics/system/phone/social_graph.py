@@ -6,7 +6,7 @@ import json
 import random
 import re
 import db
-from skill_check import resolve_check
+import skill_check
 
 
 def _safe_get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool = False) -> list[dict]:
@@ -457,9 +457,8 @@ def resolve_social_friend_request(session: dict, user_id: int, profile: dict) ->
 
     # Base DC = 11. Effective DC = 11 - bonus
     effective_dc = max(4, 11 - bonus)
-    from skill_check import resolve_check
     luk_val = char.get("luk", 3) if char else 3
-    check_res = resolve_check(cha_val, effective_dc, luck=luk_val)
+    check_res = skill_check.resolve_check(cha_val, effective_dc, luck=luk_val)
     check = {
         "stat": "CHA",
         "chance": check_res.chance,

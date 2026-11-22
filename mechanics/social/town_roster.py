@@ -11,8 +11,7 @@ Provides:
 4. On-shift Shop Clerk resolution for `merchant.py` (including 10% "Classmate Hookup" discount at >= 40 affinity).
 5. Idempotent retroactive seeding of `loc_transit_plaza` (`Commuter Station & Civic Plaza`) for existing saves.
 """
-import hashlib
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import db
 import namegen
@@ -1002,7 +1001,6 @@ def generate_town_roster(
     used = used_names if used_names is not None else set()
     if not player_gender and session_id:
         try:
-            import db
             player_gender = db.get_session_player_gender(session_id)
         except Exception:
             player_gender = ""

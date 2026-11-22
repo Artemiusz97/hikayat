@@ -12,9 +12,7 @@ import scenario_data
 from mechanics.social.factions import (
     get_faction_tier,
     get_active_perks,
-    get_hierarchy,
-    guess_hierarchy_template,
-    ensure_session_factions_seeded
+    ensure_session_factions_seeded,
 )
 
 

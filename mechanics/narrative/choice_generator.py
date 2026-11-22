@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any, Dict, List
+from typing import Optional
 """
 Code-Driven Dynamic Combat Choice Generator.
 Generates 4 non-repetitive combat choices based on:
@@ -499,7 +499,6 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
     if is_anom_combat:
         from mechanics.combat.spells.awakened_kits import (
             get_awakened_basic_strike,
-            get_actor_spell,
             normalize_anomalous_attribute,
         )
         from mechanics.combat.awakened_resonance import resolve_medium_scaling_stat

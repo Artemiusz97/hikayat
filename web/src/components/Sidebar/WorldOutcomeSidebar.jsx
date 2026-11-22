@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Sparkles,
@@ -500,11 +500,11 @@ export const PresentNpcsCard = ({
   const npcs = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
   const dialoguePartners = useMemo(
     () => resolveDialoguePartners(session),
-    [session?.dialogue_partners, session?.dialogue_partner]
+    [session]
   );
   const turnOutcomes = useMemo(
     () => computeTurnOutcomesList(session),
-    [session?.history]
+    [session]
   );
 
   const header = (
@@ -1401,7 +1401,7 @@ export const LatestOutcomeCard = ({
   const { t } = useTranslation();
   const turnOutcomes = useMemo(
     () => computeTurnOutcomesList(session),
-    [session?.history]
+    [session]
   );
   const latest = turnOutcomes[0] || null;
 

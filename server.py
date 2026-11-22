@@ -68,39 +68,9 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 import db
-import game_engine
-import skill_check
-import scenario_data
-import character_data as cd
-from services.turn_service import TurnService
-from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 
 from api.deps import (
-    ConnectionManager,
-    manager,
-    logger,
-    _serializable_action,
-    enrich_choices_with_odds,
-    enrich_session_party_members,
-    GuestAuthRequest,
-    DiscordAuthRequest,
-    CharacterCreateRequest,
-    CharacterSwitchRequest,
-    SpendStatPointRequest,
-    EquipRequest,
-    UnequipRequest,
-    ItemDropRequest,
-    ItemUseRequest,
-    JoinAdventureRequest,
-    StartAdventureRequest,
-    ActionRequest,
-    MerchantBuyRequest,
-    MerchantSellRequest,
-    PhoneMessageRequest,
-    SaveSlotRequest,
-    LoadSlotRequest,
-    SettingsUpdateRequest,
-    DebugUpdateRequest,
+    _serializable_action,  # static-check: ignore[unused-import]
 )
 from api import (
     auth_characters_router,
@@ -172,9 +142,11 @@ def _launch_tunnel_sync(port: int, provider: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
+    if os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() not in ("1", "true", "yes"):
+        config.validate_runtime_config(require_discord=False)
+    await db.adb(db.init_db)
     try:
-        snapshot_path = db.create_database_snapshot(tag="server_startup")
+        snapshot_path = await db.adb(db.create_database_snapshot, tag="server_startup")
         print(f"[Database Snapshot] Automatic backup created at: {snapshot_path}")
     except Exception as e:
         print(f"[Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")
@@ -280,6 +252,7 @@ app.mount(
     "/images",
     SafeStaticFiles(
         directory=config.GENERATED_IMAGES_DIR,
+        check_dir=False,
         default_cache_control="public, max-age=86400",
     ),
     name="generated_images",
@@ -290,6 +263,7 @@ app.mount("/", SafeStaticFiles(directory="web/dist", html=True), name="web")
 
 if __name__ == "__main__":
     import uvicorn
+    config.validate_runtime_config(require_discord=False)
 
     parser = argparse.ArgumentParser(description="Hikayat Web RPG Server")
     parser.add_argument("--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host IP to bind to")

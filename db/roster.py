@@ -8,14 +8,13 @@ tracking, promotion to `contacts`, and atomic turn rollback parity. Legacy roste
 adaptation is delegated to `db.roster_adapters`.
 """
 
-from contextlib import nullcontext
 import json
 import sqlite3
 import time
 from typing import Any, Callable
 
 import db
-from .core import UnitOfWork, get_conn
+from .core import UnitOfWork, _conn_ctx, _opt_int, ensure_table_group_once
 from .roster_adapters import (
     ALLOWED_ROSTER_ORIGINS,
     ALLOWED_ROSTER_TIERS,
@@ -74,25 +73,15 @@ WORLD_ROSTER_V54_DDL: tuple[str, ...] = (
 )
 
 
-def _conn_ctx(conn: sqlite3.Connection | None):
-    return nullcontext(conn) if conn is not None else get_conn()
-
-
 def _ensure_world_roster_table(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
-    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_roster' LIMIT 1").fetchone():
-        return
-    for sql in WORLD_ROSTER_V54_DDL:
-        conn.execute(sql)
+    def _create_if_missing(c: sqlite3.Connection) -> None:
+        if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_roster' LIMIT 1").fetchone():
+            return
+        for sql in WORLD_ROSTER_V54_DDL:
+            c.execute(sql)
 
-
-def _opt_int(val: Any) -> int | None:
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (TypeError, ValueError):
-        return None
+    ensure_table_group_once(conn, "world_roster_v54", _create_if_missing)
 
 
 def _merge_discovered_slots(existing: dict[str, Any], incoming: dict[str, Any]) -> dict[str, dict[str, str]]:
@@ -1060,3 +1049,148 @@ def rollback_world_roster_after_turn(
 
     with _conn_ctx(conn) as c:
         return _run(c)
+
+
+def batch_commit_opening_npcs(
+    session_id: int,
+    char_id: int,
+    npcs_arg: list[Any],
+    *,
+    location: str = "",
+    scenario_key: str = "fantasy",
+    enemy_names: set[str] | None = None,
+    open_party_names: set[str] | None = None,
+    narrative: str = "",
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Atomically persists Turn-0 opening scene NPCs to world_roster, lorebook, and contacts."""
+    if not session_id or not npcs_arg:
+        return 0
+    from .sessions import get_session_party_npcs
+    from .social import get_contact
+    from .world import upsert_lorebook_entity
+    from mechanics.social.relationships import (
+        is_contact_eligible,
+        should_promote_roster_npc_to_contact,
+    )
+
+    sid = int(session_id)
+    cid = int(char_id or 0)
+    enemy_set = {str(e).strip().lower() for e in (enemy_names or set()) if e}
+    party_set = {str(p).strip().lower() for p in (open_party_names or set()) if p}
+
+    def _run(c: sqlite3.Connection) -> int:
+        party_npc_rows = get_session_party_npcs(sid) or []
+        for p in party_npc_rows:
+            if isinstance(p, dict) and p.get("name"):
+                party_set.add(str(p["name"]).strip().lower())
+
+        committed = 0
+        for npc in npcs_arg:
+            if isinstance(npc, dict):
+                raw_n = npc.get("name") or npc.get("npc_name") or npc.get("character")
+                n_name = str(raw_n).strip() if raw_n is not None else ""
+            else:
+                n_name = str(npc or "").strip()
+            if not n_name or n_name.lower() in enemy_set:
+                continue
+
+            b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
+            if isinstance(npc, dict):
+                if "role" in npc and not b_info.get("role"):
+                    b_info["role"] = npc.get("role", "")
+                if "description" in npc and not b_info.get("description"):
+                    b_info["description"] = npc.get("description", "")
+            if not b_info.get("location"):
+                b_info["location"] = location
+            b_info["met_in_person"] = True
+
+            existing_wr = get_world_roster_npc(sid, n_name, include_legacy_rosters=False, conn=c)
+            roster_payload = {
+                "name": n_name,
+                "role": b_info.get("role", "") or (npc.get("role", "") if isinstance(npc, dict) else ""),
+                "gender": npc.get("gender", "") if isinstance(npc, dict) else "",
+                "race": npc.get("race", "") if isinstance(npc, dict) else "",
+                "traits": (npc.get("traits") or []) if isinstance(npc, dict) else [],
+                "appearance": (npc.get("appearance") or {}) if isinstance(npc, dict) else {},
+                "origin": (existing_wr.get("origin") if existing_wr else None) or (npc.get("origin") if isinstance(npc, dict) and npc.get("origin") else "venue_seed"),
+                "tier_status": (existing_wr.get("tier_status") if existing_wr else "acquaintance"),
+                "met_in_person": True,
+                "discovered_turn": 0,
+                "basic_info": b_info,
+            }
+            upsert_world_roster_npc(sid, roster_payload, turn_number=0, conn=c)
+
+            m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+            if not m_val and isinstance(b_info, dict):
+                m_val = b_info.get("mannerisms", "")
+            upsert_lorebook_entity(
+                session_id=sid,
+                entity_type="person",
+                name=n_name,
+                description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                traits=npc.get("traits") if isinstance(npc, dict) else [],
+                mannerisms=m_val,
+                race=npc.get("race", "") if isinstance(npc, dict) else "",
+                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+            )
+
+            existing_c = get_contact(sid, n_name, cid)
+            hh_role = str(
+                (existing_c.get("household_role") if existing_c else "")
+                or (npc.get("household_role") if isinstance(npc, dict) else "")
+                or ""
+            ).strip().lower()
+            is_family = bool(
+                hh_role in ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife")
+                or b_info.get("is_adult_family")
+                or b_info.get("cohabiting_family") is True
+                or (existing_c and ((existing_c.get("basic_info") or {}).get("is_adult_family") or (existing_c.get("basic_info") or {}).get("cohabiting_family") is True))
+                or (existing_wr and str(existing_wr.get("origin") or "").lower() == "household")
+            )
+            in_party = n_name.lower() in party_set
+            eligible = is_family or in_party or is_contact_eligible(
+                name=npc if isinstance(npc, dict) else n_name,
+                role=b_info.get("role", ""),
+                description=b_info.get("description", ""),
+                scenario=scenario_key,
+                session_id=sid,
+            )
+            if eligible:
+                qualifies, promo_reason = should_promote_roster_npc_to_contact(
+                    npc if isinstance(npc, dict) else {"name": n_name, "basic_info": b_info},
+                    affinity=int((existing_c or {}).get("relationship_score") or (existing_wr or {}).get("affinity_score") or 0),
+                    in_party=in_party,
+                    is_family=is_family,
+                    has_quest_link=bool(b_info.get("has_quest_link")),
+                    scenario=scenario_key,
+                    session_id=sid,
+                )
+                if qualifies:
+                    promote_world_roster_to_contact(
+                        sid,
+                        cid,
+                        n_name,
+                        promo_reason or "opening_scene",
+                        has_contact_info=bool(is_family or in_party or b_info.get("exchanged_contact") or b_info.get("added_via_peerpulse")),
+                        turn_number=0,
+                        narrative_text=narrative,
+                    )
+            committed += 1
+        return committed
+
+    if conn is not None:
+        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var
+
+        if _uow_conn_var.get() is None:
+            c_tok = _uow_conn_var.set(conn)
+            p_tok = _uow_db_path_var.set(_resolve_db_path())
+            try:
+                return _run(conn)
+            finally:
+                _uow_db_path_var.reset(p_tok)
+                _uow_conn_var.reset(c_tok)
+        return _run(conn)
+    with UnitOfWork() as uow_conn:
+        return _run(uow_conn)

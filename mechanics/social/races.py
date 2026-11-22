@@ -5,7 +5,7 @@ Modular NPC Race Engine & Genre Templates for Hikayat.
 Handles race normalization, species template mapping, genre restriction rules,
 and UI display formatting across Fantasy, Sci-Fi, Post-Apocalypse, and Slice-of-Life scenarios.
 """
-from typing import Dict, Any, List
+from typing import Dict, List
 
 DEFAULT_RACE = "human"
 

@@ -12,8 +12,6 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from mechanics.stealth.alert_tracker import (
     ALERT_UNAWARE,
-    ALERT_SUSPICIOUS,
-    ALERT_SEARCHING,
     ALERT_DETECTED,
     get_alert_stage,
     accumulate_detection,

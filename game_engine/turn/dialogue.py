@@ -1,12 +1,13 @@
+import re
+import db
+import namegen
+import scenario_data
+from scenario_data import is_nsfw_scenario
 from .constants import *
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.social.relationships import safe_get_contacts
-from game_engine.turn_context import TurnContext
-import json
-import logging
 import game_engine
-from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
 
 def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], bool]:
     """Extracted Phase 2A Builder for Dialogue Partner Intents."""
@@ -98,7 +99,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                     is_departing_venue = True
             elif session.get("id") and label_low:
                 try:
-                    import db
                     w_nodes = db.get_session_world_nodes(session["id"]) or []
                     curr_nid = str(session.get("current_node_id") or "").strip()
                     for wn in sorted(
@@ -141,7 +141,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             has_exited_convo = True
             new_partners = []
             if session.get("id"):
-                import db
                 target_npc = parsed_action.target_entity
                 if not target_npc:
                     tcs = db.get_temporary_companions(session["id"])
@@ -188,7 +187,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                 sess_id = session.get("id")
                 if not action_dest and dest_loc and "➔" not in dest_loc and sess_id:
                     try:
-                        import db
                         all_locs = db.get_session_locations(sess_id)
                         d_low = dest_loc.lower().strip()
                         for r in all_locs:
@@ -200,7 +198,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                     except Exception:
                         pass
                 if sess_id and target_npc and dest_loc:
-                    import db
                     cur_day = int(session.get("current_day") or 1)
                     cur_min = int(session.get("current_minute") or 480)
                     abs_min = max(0, cur_day - 1) * 1440 + cur_min
@@ -225,7 +222,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             sess_id = session.get("id")
             if action_succeeded:
                 if sess_id and target_npc:
-                    import db
                     db.add_temporary_companion(sess_id, target_npc, activity=parsed_action.metadata.get("invite_type", "walking_together"))
                 has_exited_convo = False
                 new_partners = [target_npc] if target_npc else current_partners
@@ -237,14 +233,12 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
             new_partners = []
             has_exited_convo = bool(current_partners)
             if session.get("id"):
-                import db
                 db.clear_temporary_companions(session["id"])
             # Check if this departure action was taken specifically to meet a new NPC at the destination
             # e.g. "Travel to the Gym & Fieldhouse to meet Sofia Anderson"
             from mechanics.world.mobility import is_rendezvous_target
             if session.get("id") and not departure_dest_loc and label_low:
                 try:
-                    import db
                     w_nodes = db.get_session_world_nodes(session["id"]) or []
                     for wn in sorted(
                         (n for n in w_nodes if isinstance(n, dict) and len(str(n.get("name") or "").strip()) >= 3),
@@ -259,7 +253,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                     pass
 
             if session.get("id") and departure_dest_loc:
-                import db
                 try:
                     roster = db.get_school_roster(session["id"]) or []
                     contacts = safe_get_contacts(session["id"], ensure_scene=False)
@@ -321,8 +314,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                         break
 
                 if not detected and session.get("id"):
-                    import db
-                    import namegen
                     try:
                         roster = db.get_school_roster(session["id"])
                         tgt_low = parsed_action.target_entity.lower().strip()
@@ -339,7 +330,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
 
                 if not detected and parsed_action.target_entity:
                     tgt = parsed_action.target_entity.strip()
-                    import namegen
                     if (
                         tgt not in ("Merchant", "Scene", "Shadows", "Surroundings", "Contact", "Phone")
                         and namegen.is_valid_entity_name(tgt)
@@ -410,8 +400,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                                 detected.append(n_name)
 
             if not detected and session.get("id"):
-                import db
-                import namegen
                 try:
                     roster = db.get_school_roster(session["id"])
                     for member in roster:
@@ -474,7 +462,6 @@ def _compute_dialogue_intent(session: dict, actions: list) -> tuple[list[str], b
                 has_male_pronoun = bool(re.search(r'\b(?:him|he)\b', label_low))
                 if has_female_pronoun or has_male_pronoun:
                     try:
-                        import db
                         roster = db.get_school_roster(session.get("id")) if session.get("id") else []
                         for cp in current_partners:
                             cp_low = cp.lower()
@@ -507,7 +494,6 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
     """Extracted Phase 2A Builder for Dialogue Partner Prompts."""
     from mechanics.world.locations.core import extract_movement_destination, get_zone_location_name, get_primary_location_name
     from mechanics.combat import is_in_combat
-    import db, game_engine, scenario_data
     scen_key = session.get('scenario', 'fantasy')
     dialogue_prompt_block = ""
 
@@ -807,7 +793,6 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                         if is_quest_interrogation:
                             break
 
-            import namegen
             contact_peer_pool = [c.get("name", "") for c in contacts if isinstance(c, dict) and c.get("name")]
             stg_npcs_all = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
             stg_peer_pool = [game_engine._get_npc_name(n) for n in stg_npcs_all if isinstance(n, dict) and game_engine._get_npc_name(n)]
@@ -1006,7 +991,6 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             from mechanics.social.physical_state import is_erotic_intimate_contact, _match_actor_key
             from mechanics.social.intimate_excitement import is_in_refractory_cooldown, infer_last_act_from_state
 
-            import namegen
             contact_peer_pool_2 = [c.get("name", "") for c in contacts if isinstance(c, dict) and c.get("name")]
             curr_npcs_list = session.get("current_npcs") or []
             curr_peer_pool_2 = [game_engine._get_npc_name(n) for n in curr_npcs_list if isinstance(n, dict) and game_engine._get_npc_name(n)]
@@ -1185,7 +1169,6 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         _partner_stage_npc = None
         _all_stage = (session.get("pre_turn_stage_npcs") or []) + (session.get("current_npcs") or [])
         if new_partners:
-            import namegen
             _p_first_low = new_partners[0].lower().strip()
             _p_toks = namegen.get_unique_person_tokens(new_partners[0], peer_names=new_partners, min_len=2)
             _partner_stage_npc = next((

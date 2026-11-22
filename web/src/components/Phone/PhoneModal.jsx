@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
@@ -135,6 +135,11 @@ const PhoneModal = ({
     };
   }, [isOpen]);
 
+  const loadChatMessagesRef = useRef(loadChatMessages);
+  loadChatMessagesRef.current = loadChatMessages;
+  const onClearInitialChatNpcRef = useRef(onClearInitialChatNpc);
+  onClearInitialChatNpcRef.current = onClearInitialChatNpc;
+
   // Open requested DM thread (or home screen on false -> true transition) when modal opens
   useEffect(() => {
     const justOpened = isOpen && !wasOpenRef.current;
@@ -146,11 +151,11 @@ const PhoneModal = ({
       setActiveApp('dms');
       setMessagesSubTab('contacts');
       setDmOutcomeBanner(null);
-      if (loadChatMessages) {
-        loadChatMessages(initialChatNpc);
+      if (loadChatMessagesRef.current) {
+        loadChatMessagesRef.current(initialChatNpc);
       }
-      if (onClearInitialChatNpc) {
-        onClearInitialChatNpc();
+      if (onClearInitialChatNpcRef.current) {
+        onClearInitialChatNpcRef.current();
       }
     } else if (justOpened) {
       setSelectedPhoto(null);
@@ -529,26 +534,43 @@ const PhoneModal = ({
             q.quest_type.includes('Gig'))))
   );
 
+  const autoBountiesAttemptedRef = useRef(false);
+  const codexGenerateBountiesRef = useRef(codexHook?.generateBounties);
+  codexGenerateBountiesRef.current = codexHook?.generateBounties;
+  const autoFeedAttemptedRef = useRef(false);
+  const handleRefreshFeedRef = useRef(null);
+  const hasRefreshFeed = Boolean(refreshFeed);
+
   // Auto-generate bounties when opening requests app if none exist
   useEffect(() => {
+    if (!isOpen || activeApp !== 'bounties') {
+      autoBountiesAttemptedRef.current = false;
+      return;
+    }
     if (
-      isOpen &&
-      activeApp === 'bounties' &&
       allAvailableBounties.length === 0 &&
       !generatingBounties &&
-      codexHook?.generateBounties
+      !autoBountiesAttemptedRef.current &&
+      codexGenerateBountiesRef.current
     ) {
+      autoBountiesAttemptedRef.current = true;
       setGeneratingBounties(true);
-      codexHook.generateBounties().finally(() => setGeneratingBounties(false));
+      codexGenerateBountiesRef.current().finally(() => setGeneratingBounties(false));
     }
-  }, [isOpen, activeApp, allAvailableBounties.length]);
+  }, [isOpen, activeApp, allAvailableBounties.length, generatingBounties]);
 
   // Auto-refresh feed when opening feed app if empty
+  handleRefreshFeedRef.current = handleRefreshFeed;
   useEffect(() => {
-    if (isOpen && activeApp === 'feed' && (!gossipFeed || gossipFeed.length === 0) && !feedBusy && refreshFeed) {
-      handleRefreshFeed();
+    if (!isOpen || activeApp !== 'feed') {
+      autoFeedAttemptedRef.current = false;
+      return;
     }
-  }, [isOpen, activeApp, gossipFeed?.length]);
+    if ((!gossipFeed || gossipFeed.length === 0) && !feedBusy && hasRefreshFeed && !autoFeedAttemptedRef.current) {
+      autoFeedAttemptedRef.current = true;
+      handleRefreshFeedRef.current?.();
+    }
+  }, [isOpen, activeApp, gossipFeed, feedBusy, hasRefreshFeed]);
 
   const apps = [
     {
@@ -615,7 +637,7 @@ const PhoneModal = ({
     scenLowForRealty.includes('anomalous_high_school') ||
     scenLowForRealty.includes('urban_anomalies');
 
-  const fetchRealty = async () => {
+  const fetchRealty = useCallback(async () => {
     if (!session?.id) return;
     if (realtyAbortRef.current) {
       try {
@@ -646,7 +668,7 @@ const PhoneModal = ({
         }
       }
     }
-  };
+  }, [session?.id, user?.user_id]);
 
   useEffect(() => {
     if (isOpen && activeApp === 'realty' && session?.id) {
@@ -666,7 +688,7 @@ const PhoneModal = ({
       realtyAbortRef.current = null;
     }
     return undefined;
-  }, [isOpen, activeApp, session?.id]);
+  }, [isOpen, activeApp, session?.id, fetchRealty]);
 
   useEffect(() => {
     if (session?.realty && session.realty.enabled) {

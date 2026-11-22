@@ -1,6 +1,5 @@
 from __future__ import annotations
 import json
-from typing import Dict, Any
 
 ITEM_PREFIX = "[ITEM_JSON]"
 

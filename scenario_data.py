@@ -149,7 +149,6 @@ def resolve_tag_keys(raw_input: str | list[str] | None) -> list[str]:
     else:
         raw_str = str(raw_input)
 
-    import re
     cleaned_str = re.sub(r"\(.*?\)", "", raw_str).lower()
     genres_data = load_genres()
     all_lookup_keys = set(genres_data.keys()) | set(TAG_ALIASES.keys())

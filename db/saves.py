@@ -1,18 +1,16 @@
 from __future__ import annotations
 from typing import Any, Callable, Optional
 import db
-import asyncio
 import json
+import logging
 import time
-from contextlib import contextmanager
 import re
 import sqlite3
-from config import DB_PATH
-import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import _json_dataclass_default
 from .registry import SessionTableSpec, get_load_specs, get_save_specs
 
+_log = logging.getLogger(__name__)
 MAX_SAVE_SLOTS_PER_CHAR = 6
 
 def _remap_single_proof_ref(raw_ref: str, clue_id_map: dict[int, int], inv_id_map: dict[int, int]) -> str:
@@ -175,10 +173,6 @@ def _rewrite_snapshot_json_list_fields(
             pass
 
 
-def _hook_restore_household_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
-    return row_dict
-
-
 def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
     household_id_map: dict[int, int] = load_ctx["id_maps"]["households"]
     household_surname_map: dict[str, int] = load_ctx["household_surname_map"]
@@ -249,7 +243,7 @@ def _hook_remap_world_event_contact_id(row_dict: dict[str, Any], load_ctx: dict[
     old_imp = row_dict.get("implicated_contact_id")
     if old_imp is not None:
         try:
-            row_dict["implicated_contact_id"] = contact_id_map.get(int(old_imp), old_imp)
+            row_dict["implicated_contact_id"] = contact_id_map.get(int(old_imp))
         except (TypeError, ValueError):
             pass
     return row_dict
@@ -316,7 +310,7 @@ def _remap_nested_contact_ids(obj: Any, contact_id_map: dict[int, int]) -> Any:
         for k, v in obj.items():
             if k in _CONTACT_ID_FIELDS and v is not None:
                 try:
-                    out[k] = contact_id_map.get(int(v), v)
+                    out[k] = contact_id_map.get(int(v))
                 except (TypeError, ValueError):
                     out[k] = v
             else:
@@ -346,30 +340,36 @@ def _remap_nested_session_keys(obj: Any, old_sid: int | None, new_sid: int) -> A
 
 
 def _remap_nested_clue_ids(obj: Any, clue_id_map: dict[int, int]) -> Any:
-    if not clue_id_map or not obj:
+    if not obj:
         return obj
     if isinstance(obj, dict):
         out = {}
         for k, v in obj.items():
             if k in ("clue_id", "synthesized_clue_id", "paired_with_clue_id", "clue_a_id", "clue_b_id") and v is not None:
                 try:
-                    out[k] = clue_id_map.get(int(v), v)
+                    out[k] = clue_id_map.get(int(v))
                 except (TypeError, ValueError):
                     out[k] = v
             elif k in ("paired_with", "pairs_with", "consumed_clue_ids"):
                 if isinstance(v, int):
-                    out[k] = clue_id_map.get(v, v)
+                    out[k] = clue_id_map.get(v)
                 elif isinstance(v, str) and v.strip().isdigit():
-                    out[k] = str(clue_id_map.get(int(v.strip()), int(v.strip())))
+                    mapped_str = clue_id_map.get(int(v.strip()))
+                    out[k] = str(mapped_str) if mapped_str is not None else None
                 elif isinstance(v, list):
-                    out[k] = [
-                        clue_id_map.get(p, p)
-                        if isinstance(p, int)
-                        else str(clue_id_map.get(int(p.strip()), int(p.strip())))
-                        if isinstance(p, str) and p.strip().isdigit()
-                        else p
-                        for p in v
-                    ]
+                    remapped_list = []
+                    for p in v:
+                        if isinstance(p, int):
+                            mp = clue_id_map.get(p)
+                            if mp is not None:
+                                remapped_list.append(mp)
+                        elif isinstance(p, str) and p.strip().isdigit():
+                            mp = clue_id_map.get(int(p.strip()))
+                            if mp is not None:
+                                remapped_list.append(str(mp))
+                        else:
+                            remapped_list.append(p)
+                    out[k] = remapped_list
                 else:
                     out[k] = v
             else:
@@ -387,6 +387,10 @@ def _post_sync_loaded_player_properties(load_ctx: dict[str, Any]) -> None:
     try:
         from mechanics.world.locations.realty_catalog import is_anomalous_realty_scenario
         from .properties import grant_or_relocate_starter_quarters, _set_facility_unlock_state
+        conn.execute(
+            "UPDATE player_properties SET buyer_character_id = ? WHERE session_id = ? AND buyer_character_id IS NOT NULL",
+            (int(load_ctx["char_id"]), new_sid),
+        )
         load_scen_row = conn.execute("SELECT scenario FROM sessions WHERE id = ?", (new_sid,)).fetchone()
         load_scen = str((load_scen_row["scenario"] if load_scen_row else "") or "")
         if is_anomalous_realty_scenario(load_scen):
@@ -410,8 +414,6 @@ def _post_rebuild_session_digests_fts(load_ctx: dict[str, Any]) -> None:
 
 def _post_remap_clue_deduction_parents(load_ctx: dict[str, Any]) -> None:
     clue_id_map: dict[int, int] = load_ctx["id_maps"]["session_clues"]
-    if not clue_id_map:
-        return
     conn = load_ctx["conn"]
     new_sid = load_ctx["new_session_id"]
     cl_rows = conn.execute("SELECT id, deduction_parents_json FROM session_clues WHERE session_id = ?", (new_sid,)).fetchall()
@@ -419,7 +421,16 @@ def _post_remap_clue_deduction_parents(load_ctx: dict[str, Any]) -> None:
         try:
             raw_parents = json.loads(cl_r["deduction_parents_json"] or "[]")
             if isinstance(raw_parents, list) and raw_parents:
-                remapped_parents = [clue_id_map.get(int(pid), pid) for pid in raw_parents if pid is not None]
+                remapped_parents = []
+                for pid in raw_parents:
+                    if pid is None:
+                        continue
+                    try:
+                        mapped_pid = clue_id_map.get(int(pid))
+                        if mapped_pid is not None:
+                            remapped_parents.append(mapped_pid)
+                    except (TypeError, ValueError):
+                        pass
                 conn.execute(
                     "UPDATE session_clues SET deduction_parents_json = ? WHERE id = ?",
                     (json.dumps(remapped_parents), cl_r["id"]),
@@ -430,8 +441,6 @@ def _post_remap_clue_deduction_parents(load_ctx: dict[str, Any]) -> None:
 
 def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
     commitment_id_map: dict[int, int] = load_ctx["id_maps"]["commitments_ledger"]
-    if not commitment_id_map:
-        return
     conn = load_ctx["conn"]
     new_sid = load_ctx["new_session_id"]
     cm_rows = conn.execute("SELECT id, metadata_json FROM commitments_ledger WHERE session_id = ?", (new_sid,)).fetchall()
@@ -439,7 +448,17 @@ def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
         try:
             cm_meta = json.loads(cm_r["metadata_json"] or "{}")
             if isinstance(cm_meta, dict) and isinstance(cm_meta.get("conflicting_ids"), list):
-                cm_meta["conflicting_ids"] = [commitment_id_map.get(int(cid), cid) for cid in cm_meta["conflicting_ids"] if cid is not None]
+                remapped_conflicts = []
+                for cid in cm_meta["conflicting_ids"]:
+                    if cid is None:
+                        continue
+                    try:
+                        mapped_cid = commitment_id_map.get(int(cid))
+                        if mapped_cid is not None:
+                            remapped_conflicts.append(mapped_cid)
+                    except (TypeError, ValueError):
+                        pass
+                cm_meta["conflicting_ids"] = remapped_conflicts
                 conn.execute("UPDATE commitments_ledger SET metadata_json = ? WHERE id = ?", (json.dumps(cm_meta), cm_r["id"]))
         except Exception:
             pass
@@ -521,7 +540,17 @@ def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
     try:
         import mechanics.social.relationship_graph as rg
         import mechanics.social.genealogy as gen
+        from .social import _parse_household_row
         scen_key = str(sess_dict.get("scenario") or "fantasy")
+        hh_by_id: dict[int, dict[str, Any]] = {}
+        try:
+            for hh_row in conn.execute("SELECT * FROM households WHERE session_id = ?", (new_sid,)).fetchall():
+                parsed_hh = _parse_household_row(hh_row)
+                if parsed_hh.get("id") is not None:
+                    hh_by_id[int(parsed_hh["id"])] = parsed_hh
+        except sqlite3.OperationalError as hh_exc:
+            if "no such table" not in str(hh_exc).lower():
+                raise
         cloned_contacts = conn.execute("SELECT * FROM contacts WHERE session_id = ?", (new_sid,)).fetchall()
         for cr in cloned_contacts:
             cd_item = dict(cr)
@@ -536,7 +565,13 @@ def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
                     cd_item[out_col] = {}
             mat_rel = rg.materialize_relations(new_sid, cd_item, conn=conn)
             if cd_item.get("household_id"):
-                hh_obj = db.get_household_by_id(cd_item["household_id"])
+                try:
+                    hh_key_id = int(cd_item["household_id"])
+                except (TypeError, ValueError):
+                    hh_key_id = 0
+                hh_obj = hh_by_id.get(hh_key_id)
+                if hh_obj is None and hh_key_id:
+                    hh_obj = db.get_household_by_id(hh_key_id)
                 if hh_obj:
                     hh_hydrated = gen._hydrate_household_entity(hh_obj, cd_item, scen_key)
                     mat_rel["family"] = gen.build_family_tree_for_member(
@@ -559,8 +594,8 @@ def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
                 "UPDATE contacts SET relations_json = ? WHERE id = ?",
                 (json.dumps(mat_rel), cd_item["id"]),
             )
-    except Exception:
-        pass
+    except Exception as exc:
+        _log.warning("Post-load contacts relation rematerialization failed for session %s: %s", new_sid, exc)
 
 
 def _post_inv_remap_quest_dossiers_inventory_ids(load_ctx: dict[str, Any]) -> None:
@@ -620,7 +655,6 @@ def _post_inv_remap_epistemic_proof_refs(load_ctx: dict[str, Any]) -> None:
 
 
 _ROW_TRANSFORM_HOOKS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
-    "restore_household_row": _hook_restore_household_row,
     "restore_contact_row": _hook_restore_contact_row,
     "remap_social_turn_snapshot_json": _hook_remap_social_turn_snapshot_json,
     "remap_entity_contract_holder": _hook_remap_entity_contract_holder,
@@ -707,16 +741,16 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
     if not re.match(r"^[\w\s\-]+$", cleaned_slot, re.UNICODE):
         raise ValueError("Slot name contains invalid characters. Use letters, numbers, spaces, hyphens, or underscores.")
 
-    char = db.get_character(user_id)
-    if not char:
-        raise ValueError("You don't have an active character. Create one with `/character create` first.")
-    char_id = char["id"]
+    with UnitOfWork() as conn:
+        char = db.get_character(user_id)
+        if not char:
+            raise ValueError("You don't have an active character. Create one with `/character create` first.")
+        char_id = char["id"]
 
-    session_id = db.get_active_session_id_for_user(user_id)
-    if not session_id:
-        raise ValueError("You are not currently in an active adventure to save.")
+        session_id = db.get_active_session_id_for_user(user_id)
+        if not session_id:
+            raise ValueError("You are not currently in an active adventure to save.")
 
-    with get_conn() as conn:
         sess_row = conn.execute("SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
         if not sess_row or sess_row["status"] != "active":
             raise ValueError("Your current adventure session is not active.")
@@ -764,8 +798,11 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                     rd.pop("id", None)
                     cleaned_rows.append(rd)
                 child_data[spec.name] = cleaned_rows
-            except Exception:
-                child_data[spec.name] = []
+            except sqlite3.OperationalError as exc:
+                if spec.optional_table and "no such table" in str(exc).lower():
+                    child_data[spec.name] = []
+                else:
+                    raise
 
         # Gather character adventure inventory (including session-scoped quest items where character_id IS NULL)
         inv_rows = conn.execute(
@@ -830,7 +867,7 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
             "character_state": char_state,
             "inventory": cleaned_inv
         }
-        snapshot_json = json.dumps(snapshot)
+        snapshot_json = json.dumps(snapshot, default=_json_dataclass_default)
 
         scenario = sess_dict.get("scenario", "fantasy")
         scene_title = sess_dict.get("scene_title") or "Adventure Continues"
@@ -1254,25 +1291,28 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             )
         )
 
-    try:
-        from scenario_data import is_anomalous_incursions_scenario
-        if is_anomalous_incursions_scenario(sess_data.get("scenario", "")):
-            from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
-            sync_equipped_anomalous_spells(user_id)
-    except Exception:
-        pass
+        try:
+            with savepoint(conn, "sp_load_heal_1"):
+                from scenario_data import is_anomalous_incursions_scenario
+                if is_anomalous_incursions_scenario(sess_data.get("scenario", "")):
+                    from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
+                    sync_equipped_anomalous_spells(user_id)
+        except Exception as exc:
+            _log.warning("Post-load anomalous gear sync failed for session %s: %s", new_session_id, exc)
 
-    try:
-        from mechanics.world.locations import _heal_agency_residence_and_entrances
-        _heal_agency_residence_and_entrances(new_session_id, sess_data.get("scenario", ""))
-    except Exception:
-        pass
+        try:
+            with savepoint(conn, "sp_load_heal_2"):
+                from mechanics.world.locations import _heal_agency_residence_and_entrances
+                _heal_agency_residence_and_entrances(new_session_id, sess_data.get("scenario", ""))
+        except Exception as exc:
+            _log.warning("Post-load agency residence heal failed for session %s: %s", new_session_id, exc)
 
-    try:
-        import game_engine
-        game_engine.heal_session_quests_on_load(new_session_id)
-    except Exception:
-        pass
+        try:
+            with savepoint(conn, "sp_load_heal_3"):
+                import game_engine
+                game_engine.heal_session_quests_on_load(new_session_id)
+        except Exception as exc:
+            _log.warning("Post-load quest heal failed for session %s: %s", new_session_id, exc)
 
     return db.get_session(new_session_id)
 

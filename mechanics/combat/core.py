@@ -77,7 +77,6 @@ from .enemies import (
     GENERIC_ENEMY_KEYWORDS,
     SCENARIO_ENEMIES,
     SCENARIO_ENEMY_TEMPLATES,
-    _resolve_enemy_scenario_key,
     build_companion_stat_sheet,
     build_enemy_stat_sheet,
     build_monster_stat_sheet,

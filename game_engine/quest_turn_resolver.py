@@ -7,15 +7,6 @@ from typing import Any, Dict, List, Optional
 import db
 import scenario_data
 import skill_check
-from game_engine.quest_agency import (
-    acquire_quest_macguffin,
-    build_fog_of_war_quest_payload,
-    build_fog_of_war_quest_prompt_block,
-    evaluate_schedule_curfew_and_coop_precedence,
-    resolve_caseboard_deduction,
-    resolve_quest_turn_in_or_betrayal,
-    resolve_suspect_accusation,
-)
 from game_engine.quest_lifecycle import (
     complete_remediation_bounty_if_linked,
     evaluate_skipped_threatened_optionals,
@@ -980,7 +971,6 @@ def resolve_quest_approach_failure(
                 }
 
             if not unburned_remaining and (q_fresh.get("is_story_quest") or new_alert < max_alert):
-                from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
                 adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
                 nxt_wp = db.get_active_waypoint(session_id, qid, sub_obj_id)
                 return {
@@ -1078,7 +1068,6 @@ def resolve_quest_approach_failure(
             scar_tier=scar_tier_st,
         )
         now = time.time()
-        from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
         so_id_int = int(wp_sub_id or 0)
         adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
         is_final = True if (so_id_int != 0 or not ms_list) else bool(int(stage_idx) >= len(ms_list))

@@ -33,12 +33,9 @@ from .reconcile import cleanup_anomalous_combat_session_state
 from .sparring import resolve_sparring_defeat
 from .status_effects import apply_status_effect
 from .targeting import (
-    apply_boss_cc_stagger_surge,
-    arm_boss_telegraph,
+    arm_boss_telegraph,  # static-check: ignore[unused-import]
     check_boss_telegraph_interrupt,
-    compute_party_scaled_interrupt_threshold,
-    populate_enemy_hud_telemetry,
-    resolve_threat_target,
+    resolve_threat_target,  # static-check: ignore[unused-import]
     update_threat_on_action,
 )
 from .types import get_combatant_stat
@@ -384,7 +381,7 @@ def _hydrate_friendly_allies(
     return friendly_npcs, active_party_npcs, current_npcs, living_allies, active_constructs
 
 
-def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
+def precompute_combat_turn(session: dict, party: list, actions: list, *, persist_db: bool = True) -> dict:
     """Executes the Unified 3-Phase Tactical Combat Round before LLM narration."""
     has_hostiles = session.get("nearby_enemies", [])
     if not has_hostiles:
@@ -480,6 +477,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
         (isinstance(session, dict) and session.get("non_lethal_mode"))
         or any(isinstance(a, dict) and a.get("is_non_lethal") for a in (actions or []))
     )
+    from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
 
     def _register_kill(m: Dict[str, Any]) -> None:
         if m.get("hp", 0) <= 0 and m["name"] not in dead_enemies and m["name"] not in yielded_enemies and m["name"] not in fled_enemies:
@@ -534,7 +532,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
 
         if m.get("hp", 0) <= 0:
             if is_anom_combat:
-                from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
                 if get_enemy_tether_state(m):
                     teth_res = try_resolve_zero_hp_tether(m)
                     if teth_res.get("outcome") == "reformed":
@@ -635,7 +632,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                     gold_gain += int(base_gold * mult)
             elif m.get("hp", 0) <= 0:
                 if is_anom_combat and m["name"] not in dead_enemies:
-                    from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
                     if get_enemy_tether_state(m):
                         teth_res = try_resolve_zero_hp_tether(m)
                         if teth_res.get("outcome") == "reformed":
@@ -737,7 +733,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 p_obj = p_raw[0] if isinstance(p_raw, (tuple, list)) else p_raw
                 if isinstance(p_obj, dict) and p_obj not in player_chars:
                     reset_combatant_cooldowns(p_obj)
-        if sess_id_cbt:
+        if sess_id_cbt and persist_db:
             try:
                 db.set_session_party_npcs(sess_id_cbt, persisted_party_npcs)
             except Exception:

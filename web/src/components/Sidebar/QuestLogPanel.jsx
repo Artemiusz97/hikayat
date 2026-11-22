@@ -1,4 +1,4 @@
-import React, { lazy, useEffect, useRef, useState } from 'react';
+import { lazy, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Archive,

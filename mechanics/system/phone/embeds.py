@@ -1,16 +1,10 @@
 from __future__ import annotations
-import json
 import logging
 import random
-import re
 import time
 import discord
-from discord import app_commands
 import db
-import scenario_data
-from llm_client import call_llm_json
 log = logging.getLogger("hikayat.phone")
-from skill_check import resolve_check, success_chance, CheckResult
 
 
 PHONE_BRANDING = {

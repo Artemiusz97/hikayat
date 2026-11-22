@@ -1,6 +1,4 @@
 from __future__ import annotations
-import asyncio
-import json
 import logging
 
 import db
@@ -316,9 +314,21 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         elif resolved_lead_gender:
             session["lead_character_gender"] = resolved_lead_gender
 
-    from game_engine.prompt_layout import build_language_directive
+    from game_engine.prompt_layout import (
+        build_anomalous_resonance_directive,
+        build_language_directive,
+        build_scenario_genre_zone_rules,
+    )
+    from mechanics.combat.merchant import merchant_prompt_note
+    genre_rules = build_scenario_genre_zone_rules(session, kind="turn")
+    anom_dir = build_anomalous_resonance_directive(session)
+    merch_note = merchant_prompt_note(scen_key=session.get("scenario"))
     lang_dir = build_language_directive(session)
-    sys_zones = tuple(z for z in (narration_core_zone, scenario_str, style_zone, lang_dir) if z)
+    sys_zones = tuple(
+        z
+        for z in (narration_core_zone, scenario_str, style_zone, genre_rules, anom_dir, merch_note, lang_dir)
+        if z
+    )
     sys_prompt = "\n\n".join(sys_zones)
 
     # Check for conversational exit intent in retry pass

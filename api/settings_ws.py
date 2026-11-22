@@ -4,7 +4,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from .security import is_share_mode_active, verify_session_participant, verify_user_access
-from .adventure import _enrich_session_for_client
+from .adventure import enrich_session_for_client
 from services.examine_service import invalidate_examine_cache
 
 import config
@@ -129,7 +129,7 @@ async def save_debug_settings(user_id: int, req: DebugUpdateRequest, request: Re
                 invalidate_examine_cache(debug_sid)
                 updated_session = await adb(db.get_session, debug_sid)
                 if updated_session is not None:
-                    updated_session = await adb(_enrich_session_for_client, dict(updated_session), user_id)
+                    updated_session = await adb(enrich_session_for_client, dict(updated_session), user_id)
                 extra_payload["enemy_spawned"] = enemy
                 extra_payload["nearby_enemies"] = enemies
                 extra_payload["session"] = updated_session
@@ -193,7 +193,10 @@ async def websocket_session(websocket: WebSocket, session_id: int, user_id: int 
                 })
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket)
-        await manager.broadcast_presence(session_id)
+        try:
+            await manager.broadcast_presence(session_id)
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(session_id, websocket)

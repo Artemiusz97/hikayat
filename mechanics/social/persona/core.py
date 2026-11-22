@@ -1,9 +1,8 @@
 from __future__ import annotations
-import json
 import hashlib
 import random
 import re
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 
 EYE_COLORS = {"blue", "brown", "green", "hazel", "amber", "red", "glowing_blue", "glowing_red", "violet", "black", "gold", "silver"}
@@ -684,7 +683,6 @@ def sanitize_beastfolk_features(text: str) -> str:
     contradictions with the character's body coat color."""
     if not text or not isinstance(text, str):
         return ""
-    import re
     res = text
     for pat, rep in BEASTFOLK_COLOR_PATTERNS:
         res = re.sub(pat, rep, res, flags=re.IGNORECASE)
@@ -822,7 +820,6 @@ def infer_humanoid_skin_color(race: str, name: str = "", seed: str = "") -> str:
     - Unmatched names roll from GLOBAL_SKIN_TONE_POOL.
     - Uses deterministic pseudo-random hashing if seed or name is provided.
     """
-    import hashlib, random
     clean_race = str(race or "").strip().lower().replace("-", "_")
 
     # 1. Fantasy humanoid races (sorted longest first to match dark_elf before elf)
@@ -862,7 +859,6 @@ def infer_humanoid_skin_color(race: str, name: str = "", seed: str = "") -> str:
 
 def get_species_key_from_race(race_str: str, desc: str = "", seed: str = "") -> str | None:
     """Extracts the canonical animal/beastfolk sub-species key (cat, wolf, dragon, reptile, etc.) from race and description."""
-    import re
     clean_race = str(race_str or "").strip().lower().replace("-", "_")
     
     # Priority 1: Explicit sub-race tag (e.g. "beastfolk:cat", "half_beast:fox")
@@ -1758,7 +1754,7 @@ def split_traits_and_preferences(
     1. Personality Traits (Normalized from hardcoded trait registry, Max 3)
     2. Preferences & Dislikes (Grounded in-game items & behavioral stances, Max 3 each)
     """
-    from mechanics.combat.traits import normalize_traits, assign_npc_traits, assign_npc_preferences
+    from mechanics.combat.traits import normalize_traits, assign_npc_traits
 
     traits_in = raw_traits if isinstance(raw_traits, list) else []
     prefs_in = raw_prefs if isinstance(raw_prefs, list) else []

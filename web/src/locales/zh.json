@@ -1632,6 +1632,7 @@
   },
   "social": {
     "mood_prefix": "心境",
+    "conversation_paused": "{{name}}暂时没有闲聊的兴致了。稍后再来，或者换个方式试试。",
     "schedule_header": "日程与习惯",
     "masked_slot": "???",
     "bond_settling_dm": "今日羁绊沉淀中——继续交谈仍可解锁人物细节。",
