@@ -2584,38 +2584,6 @@ def get_household_members(household_id: int) -> list[dict]:
         return members
 
 
-def update_household(household_id: int, **fields) -> bool:
-    """Updates fields on an existing household."""
-    if not household_id or not fields:
-        return False
-    allowed = {"household_key", "surname", "father", "mother", "narrative_siblings", "residence_location", "father_json", "mother_json", "narrative_siblings_json"}
-    updates = []
-    vals = []
-    for k, v in fields.items():
-        if k not in allowed:
-            continue
-        if k in ("father", "mother"):
-            updates.append(f"{k}_json = ?")
-            vals.append(json.dumps(v if isinstance(v, dict) else {}))
-        elif k == "narrative_siblings":
-            updates.append("narrative_siblings_json = ?")
-            vals.append(json.dumps(v if isinstance(v, list) else []))
-        else:
-            updates.append(f"{k} = ?")
-            vals.append(v)
-    if not updates:
-        return False
-    updates.append("updated_at = ?")
-    vals.append(time.time())
-    vals.append(household_id)
-    with get_conn() as conn:
-        cursor = conn.execute(
-            f"UPDATE households SET {', '.join(updates)} WHERE id = ?",
-            tuple(vals)
-        )
-        return cursor.rowcount > 0
-
-
 def assign_contact_household(
     session_id: int,
     contact_identifier: int | str,
@@ -3181,22 +3149,6 @@ def set_character_faction_membership(character_id: int, faction_id: str, rank: i
                 params)
         return r.rowcount > 0
 
-def get_character_faction_membership(character_id: int) -> dict:
-    """Return {joined_faction_id, faction_rank, faction_title} for a character."""
-    with get_conn() as conn:
-        r = conn.execute(
-            "SELECT joined_faction_id, faction_rank, faction_title FROM characters WHERE id=?",
-            (character_id,)).fetchone()
-        if not r:
-            r = conn.execute(
-                "SELECT joined_faction_id, faction_rank, faction_title FROM characters WHERE user_id=? AND is_active=1",
-                (character_id,)).fetchone()
-    if not r:
-        return {"joined_faction_id": "", "faction_rank": 0, "faction_title": ""}
-    return {"joined_faction_id": r["joined_faction_id"] or "",
-            "faction_rank": r["faction_rank"] or 0,
-            "faction_title": r["faction_title"] or ""}
-
 def _resolve_phone_contact_keys(conn: sqlite3.Connection, session_id: int, contact_npc_id: str) -> tuple[str, list[str]]:
     raw = str(contact_npc_id or "").strip()
     raw_slug = raw.lower().replace(" ", "_")
@@ -3545,30 +3497,6 @@ def update_phone_appointment_status(session_id: int, npc_id: str, status: str):
                  AND status IN ('pending', 'approaching', 'arrived', 'in_progress', 'active')""",
             (ledger_status, now, session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
         )
-
-
-def mark_rendezvous_reminder_sent(session_id: int, npc_id: str):
-    """Marks in commitments_ledger.metadata_json that an SMS reminder has been sent."""
-    clean_npc_id = npc_id.strip().lower().replace(" ", "_")
-    now = time.time()
-    with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT id, metadata_json FROM commitments_ledger
-               WHERE session_id=? AND commitment_type='rendezvous'
-                 AND status IN ('pending', 'approaching')
-                 AND (lower(target_entity)=? OR lower(source_entity)=? OR lower(participants_json) LIKE ?)""",
-            (session_id, clean_npc_id, clean_npc_id, f"%{clean_npc_id}%")
-        ).fetchall()
-        for r in rows:
-            try:
-                meta = json.loads(r["metadata_json"] or "{}")
-            except Exception:
-                meta = {}
-            meta["reminder_sent"] = True
-            conn.execute(
-                "UPDATE commitments_ledger SET metadata_json=?, updated_at=? WHERE id=?",
-                (json.dumps(meta), now, r["id"])
-            )
 
 
 def get_due_reminder_appointments(session_id: int, current_minute: int) -> list[dict]:

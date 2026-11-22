@@ -137,94 +137,9 @@ export const useGameSession = (user, character) => {
   }, [clearImagePoll]);
 
 
-  const fetchActiveSession = useCallback(async (options = {}) => {
-    const isInitial = isInitialLoadRef.current;
-    const silent = options?.silent ?? !isInitial;
-    if (!user) {
-      if (fetchSessionAbortRef.current) {
-        try {
-          fetchSessionAbortRef.current.abort();
-        } catch {}
-        fetchSessionAbortRef.current = null;
-      }
-      setSession(null);
-      setLoading(false);
-      isInitialLoadRef.current = false;
-      return;
-    }
-    if (fetchSessionAbortRef.current) {
-      try {
-        fetchSessionAbortRef.current.abort();
-      } catch {}
-    }
-    const controller = new AbortController();
-    fetchSessionAbortRef.current = controller;
-    let aborted = false;
-    try {
-      if (!silent) {
-        setLoading(true);
-      }
-      const data = await apiCall(`/api/adventure/active-session/${user.user_id}`, {
-        signal: controller.signal,
-      });
-      if (fetchSessionAbortRef.current !== controller) return;
-      if (data && data.session) {
-        setSession(data.session);
-        if (data.session.in_flight_turn) {
-          setProcessingState(true);
-          setPendingAction(data.session.in_flight_turn.action || { label: 'Resolving Action...' });
-          setIsThinking(data.session.in_flight_turn.status === 'thinking');
-          armSafetyTimer(245000);
-        } else if (!syncTurnRequestRef.current) {
-          clearSafetyTimer();
-          setProcessingState(false);
-          setPendingAction(null);
-          setIsThinking(false);
-          setCancellingTurn(false);
-          setIsStreaming(false);
-          setStreamingNarrative(null);
-          setStreamingState(null);
-        }
-        connectWebSocket(data.session.id);
-      } else {
-        setSession(null);
-      }
-    } catch (e) {
-      if (e?.isUserAbort || e?.name === 'AbortError') {
-        aborted = true;
-        return;
-      }
-      setSession(null);
-    } finally {
-      if (fetchSessionAbortRef.current === controller) {
-        fetchSessionAbortRef.current = null;
-      }
-      if (!aborted) {
-        isInitialLoadRef.current = false;
-        if (!silent) {
-          setLoading(false);
-        }
-      }
-    }
-  }, [user?.user_id, character?.id]);
-
-  useEffect(() => {
-    fetchActiveSession();
-    return () => {
-      if (fetchSessionAbortRef.current) {
-        try {
-          fetchSessionAbortRef.current.abort();
-        } catch {}
-        fetchSessionAbortRef.current = null;
-      }
-      clearImagePoll();
-      clearSafetyTimer();
-      closeSocket();
-    };
-  }, [fetchActiveSession, clearImagePoll, clearSafetyTimer, closeSocket]);
-
   const connectWebSocket = useCallback((sessionId) => {
-    if (!sessionId || sessionId === 'embarking' || !user?.user_id) return;
+    const userId = user?.user_id;
+    if (!sessionId || sessionId === 'embarking' || !userId) return;
     if (activeSessionIdRef.current !== null && String(activeSessionIdRef.current) !== String(sessionId)) {
       hasConnectedOnceRef.current = false;
     }
@@ -250,7 +165,7 @@ export const useGameSession = (user, character) => {
 
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const tokenParam = user?.auth_token ? `&token=${encodeURIComponent(user.auth_token)}` : '';
-    const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}?user_id=${user.user_id}${tokenParam}`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/session/${sessionId}?user_id=${userId}${tokenParam}`;
 
     const ws = new WebSocket(wsUrl);
     ws._sessionId = sessionId;
@@ -283,9 +198,9 @@ export const useGameSession = (user, character) => {
         reconnectTimeoutRef.current = null;
       }
       const expectedSid = String(sessionId);
-      if (processingTurnRef.current && user?.user_id && String(activeSessionIdRef.current) === expectedSid) {
+      if (processingTurnRef.current && userId && String(activeSessionIdRef.current) === expectedSid) {
         try {
-          const res = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+          const res = await apiCall(`/api/adventure/active-session/${userId}`);
           if (
             res?.session &&
             String(activeSessionIdRef.current) === expectedSid &&
@@ -409,12 +324,19 @@ export const useGameSession = (user, character) => {
         if (safetyTimerRef.current) {
           armSafetyTimer(182000);
         }
-      } else if (data.type === 'UPDATE_SCENE') {
-        setSession(prev => ({
-          ...data.session,
-          scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null
-        }));
-        setLastSyncTimestamp(data.sync_timestamp || Date.now());
+      } else if (data.type === 'UPDATE_SCENE' || data.type === 'SESSION_UPDATED') {
+        if (data.session) {
+          setSession(prev => ({
+            ...data.session,
+            scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null,
+            ...(data.non_lethal_mode !== undefined ? { non_lethal_mode: data.non_lethal_mode } : {})
+          }));
+          if (data.type === 'UPDATE_SCENE') {
+            setLastSyncTimestamp(data.sync_timestamp || Date.now());
+          }
+        } else if (data.non_lethal_mode !== undefined) {
+          setSession(prev => (prev ? { ...prev, non_lethal_mode: data.non_lethal_mode } : prev));
+        }
       } else if (data.type === 'PICK_LOCKED') {
         setPartyStatus({
           lockedCount: data.locked_picks || 0,
@@ -477,7 +399,7 @@ export const useGameSession = (user, character) => {
       } else if (data.type === 'STEALTH_STATE_UPDATED') {
         setSession(prev => {
           if (!prev) return prev;
-          const isSameUser = !data.user_id || String(data.user_id) === String(user?.user_id);
+          const isSameUser = !data.user_id || String(data.user_id) === String(userId);
           const nextChoices = Array.isArray(data.choices)
             ? data.choices
             : (Array.isArray(data.session?.choices) ? data.session.choices : null);
@@ -544,7 +466,97 @@ export const useGameSession = (user, character) => {
         ws.close();
       } catch (e) {}
     };
-  }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage]);
+  }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage, armSafetyTimer, clearSafetyTimer, setProcessingState]);
+
+  const userId = user?.user_id;
+  const activeCharacterId = character?.id;
+
+  const fetchActiveSession = useCallback(async (options = {}) => {
+    const isInitial = isInitialLoadRef.current;
+    const silent = options?.silent ?? !isInitial;
+    if (!userId) {
+      if (fetchSessionAbortRef.current) {
+        try {
+          fetchSessionAbortRef.current.abort();
+        } catch {}
+        fetchSessionAbortRef.current = null;
+      }
+      setSession(null);
+      setLoading(false);
+      isInitialLoadRef.current = false;
+      return;
+    }
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    fetchSessionAbortRef.current = controller;
+    let aborted = false;
+    try {
+      if (!silent) {
+        setLoading(true);
+      }
+      const data = await apiCall(`/api/adventure/active-session/${userId}`, {
+        signal: controller.signal,
+      });
+      if (fetchSessionAbortRef.current !== controller) return;
+      if (data && data.session) {
+        setSession(data.session);
+        if (data.session.in_flight_turn) {
+          setProcessingState(true);
+          setPendingAction(data.session.in_flight_turn.action || { label: 'Resolving Action...' });
+          setIsThinking(data.session.in_flight_turn.status === 'thinking');
+          armSafetyTimer(245000);
+        } else if (!syncTurnRequestRef.current) {
+          clearSafetyTimer();
+          setProcessingState(false);
+          setPendingAction(null);
+          setIsThinking(false);
+          setCancellingTurn(false);
+          setIsStreaming(false);
+          setStreamingNarrative(null);
+          setStreamingState(null);
+        }
+        connectWebSocket(data.session.id);
+      } else {
+        setSession(null);
+      }
+    } catch (e) {
+      if (e?.isUserAbort || e?.name === 'AbortError') {
+        aborted = true;
+        return;
+      }
+      setSession(null);
+    } finally {
+      if (fetchSessionAbortRef.current === controller) {
+        fetchSessionAbortRef.current = null;
+      }
+      if (!aborted) {
+        isInitialLoadRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    }
+  }, [userId, connectWebSocket, armSafetyTimer, clearSafetyTimer, setProcessingState]);
+
+  useEffect(() => {
+    void activeCharacterId;
+    fetchActiveSession();
+    return () => {
+      if (fetchSessionAbortRef.current) {
+        try {
+          fetchSessionAbortRef.current.abort();
+        } catch {}
+        fetchSessionAbortRef.current = null;
+      }
+      clearImagePoll();
+      clearSafetyTimer();
+      closeSocket();
+    };
+  }, [fetchActiveSession, activeCharacterId, clearImagePoll, clearSafetyTimer, closeSocket]);
 
   useEffect(() => {
     if (session?.id && session.id !== 'embarking') {
@@ -787,7 +799,8 @@ export const useGameSession = (user, character) => {
         if (recoveryData && recoveryData.session) {
           const recTurnCount = recoveryData.session.turn_count ?? 0;
           const recHistLen = Array.isArray(recoveryData.session.history) ? recoveryData.session.history.length : 0;
-          if (recTurnCount > prevTurnCount || recHistLen > prevHistLen) {
+          const inFlight = recoveryData.session.in_flight_turn;
+          if (inFlight || recTurnCount > prevTurnCount || recHistLen > prevHistLen) {
             setActionError(null);
           }
           setSession(prev => ({
@@ -795,10 +808,18 @@ export const useGameSession = (user, character) => {
             scene_image_url: recoveryData.session?.scene_image_url || prev?.scene_image_url || null
           }));
           setWaitingForParty(false);
-          setIsStreaming(false);
-          setStreamingNarrative(null);
-          setStreamingState(null);
-          setLastSyncTimestamp(Date.now());
+          if (inFlight) {
+            asyncAccepted = true;
+            activeTurnIdRef.current = inFlight.turn_id || null;
+            setPendingAction(inFlight.action || actionData);
+            setIsThinking(inFlight.status === 'thinking');
+            armSafetyTimer(245000);
+          } else {
+            setIsStreaming(false);
+            setStreamingNarrative(null);
+            setStreamingState(null);
+            setLastSyncTimestamp(Date.now());
+          }
           return;
         }
       } catch (recErr) {
@@ -1019,6 +1040,7 @@ export const useGameSession = (user, character) => {
       }
     } catch (e) {
       console.error('Failed to cancel in-flight turn:', e);
+      setActionError(e?.detail || e?.message || 'Failed to cancel turn.');
     } finally {
       setCancellingTurn(false);
     }

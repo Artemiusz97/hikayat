@@ -352,6 +352,15 @@ EXTERIOR_DESTINATION_RE = re.compile(
     r"\b(?:terrace|garden|gardens|courtyard|balcony|rooftop|roof|patio|grounds|plaza|park|promenade|veranda|gazebo)\b",
     re.I
 )
+_EXTERIOR_MOVEMENT_VERB_RE = re.compile(
+    r"\b(?:walk|head|go|step|move|stroll|run|jog|venture|wander|slip|sneak|return)\b",
+    re.I,
+)
+_DIRECT_EXTERIOR_PREP_RE = re.compile(
+    r"\b(?:to|onto|toward|towards)\s+(?:the\s+)?(?:[a-z]+\s+){0,2}"
+    r"(?:terrace|garden|gardens|courtyard|balcony|rooftop|roof|patio|grounds|plaza|park|promenade|veranda|gazebo)\b",
+    re.I,
+)
 
 GENERIC_COMMERCIAL_WORDS: Set[str] = {
     "store", "shop", "market", "bazaar", "outlet", "spot", "center", "centre",
@@ -1011,7 +1020,10 @@ def classify_action_intent(action_text: str, context: Optional[IntentContext] = 
             )
 
         # Check direct exterior destination intents (e.g. "Step out onto the terrace", "Head to the botanical garden")
-        if EXTERIOR_DESTINATION_RE.search(act_lower) and any(pfx in act_lower for pfx in ("to ", "toward ", "onto ", "walk ", "head ", "go ", "step ")):
+        if (
+            (EXTERIOR_DESTINATION_RE.search(act_lower) and _EXTERIOR_MOVEMENT_VERB_RE.search(act_lower))
+            or _DIRECT_EXTERIOR_PREP_RE.search(act_lower)
+        ):
             dest = _extract_movement_target(raw_text) or "Exterior"
             return ActionIntent(
                 category=IntentCategory.MOVEMENT,

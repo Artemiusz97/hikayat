@@ -44,8 +44,9 @@ def _build_quest_and_bounty_directives(session: dict, ctx, include_fow: bool = T
 
 
 
-    game_engine.ensure_story_quest_exists(session)
-    if hasattr(ctx, "invalidate"):
+    prev_story_quest = ctx.story_quest if hasattr(ctx, "story_quest") else None
+    created_or_updated = game_engine.ensure_story_quest_exists(session)
+    if prev_story_quest is None and created_or_updated and hasattr(ctx, "invalidate"):
         ctx.invalidate("story_quest")
     story_quest = ctx.story_quest
 
@@ -491,5 +492,6 @@ async def _build_history_context(
         present_npcs=present_npcs,
         current_location=q_loc,
         active_quest_ids=active_quest_ids,
+        epistemic_matrix=getattr(ctx, "epistemic_matrix", None) if ctx else None,
     )
 

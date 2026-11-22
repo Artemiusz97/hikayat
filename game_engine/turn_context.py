@@ -8,6 +8,29 @@ import db
 from mechanics.narrative.intent import classify_action_intent
 
 
+def _derive_story_quest(all_quests: list[dict] | None) -> dict | None:
+    """Derive the active Story Quest from already-hydrated quest dicts matching SQL ordering."""
+    candidates = [
+        q for q in (all_quests or [])
+        if isinstance(q, dict)
+        and (
+            bool(q.get("is_story_quest"))
+            or str(q.get("quest_type") or "").strip().lower() in ("story quest", "main quest")
+        )
+        and str(q.get("status") or "").strip().lower() == "active"
+    ]
+    if not candidates:
+        return None
+    candidates.sort(
+        key=lambda q: (
+            1 if (q.get("sub_objectives") or (q.get("sub_objectives_json") not in (None, "", "[]"))) else 0,
+            float(q.get("updated_at") or 0.0),
+        ),
+        reverse=True,
+    )
+    return candidates[0]
+
+
 @dataclass
 class TurnClockStage:
     """Typed temporal and turn-counter state for a single turn execution."""
@@ -264,12 +287,21 @@ class TurnExecutionContext:
             self._cache["contacts"] = world_bundle.get("contacts") or []
             self._cache["factions"] = world_bundle.get("factions") or []
             self._cache["party_npcs"] = world_bundle.get("party_npcs") or []
-            self._cache["all_quests"] = db.get_session_quests(self.session_id)
-            self._cache["story_quest"] = db.get_active_story_quest(self.session_id)
-            self._cache["pending_appointments"] = db.get_phone_appointments(self.session_id, status="pending")
-            self._cache["arrived_appointments"] = db.get_phone_appointments(self.session_id, status="arrived")
+            all_quests = db.get_session_quests(self.session_id)
+            self._cache["all_quests"] = all_quests
+            self._cache["story_quest"] = _derive_story_quest(all_quests)
+            active_appts = db.get_active_rendezvous_appointments(self.session_id)
+            self._cache["pending_appointments"] = [
+                a for a in active_appts
+                if str(a.get("status") or "pending").strip().lower() in ("pending", "approaching")
+            ]
+            self._cache["arrived_appointments"] = [
+                a for a in active_appts
+                if str(a.get("status") or "").strip().lower() in ("arrived", "in_progress")
+            ]
             self._cache["active_waypoints"] = db.get_all_session_active_waypoints(self.session_id)
             self._cache["school_directory_map"] = db.get_school_directory_batch(self.session_id)
+            self._cache["epistemic_matrix"] = db.preload_epistemic_matrix(self.session_id) or {}
 
             present_names = [
                 n.get("name", "") if isinstance(n, dict) else str(n)
@@ -367,8 +399,17 @@ class TurnExecutionContext:
     @property
     def story_quest(self) -> dict | None:
         if "story_quest" not in self._cache:
-            self._cache["story_quest"] = db.get_active_story_quest(self.session_id)
+            if "all_quests" in self._cache:
+                self._cache["story_quest"] = _derive_story_quest(self._cache["all_quests"])
+            else:
+                self._cache["story_quest"] = db.get_active_story_quest(self.session_id)
         return self._cache["story_quest"]
+
+    @property
+    def epistemic_matrix(self) -> dict:
+        if "epistemic_matrix" not in self._cache:
+            self._cache["epistemic_matrix"] = db.preload_epistemic_matrix(self.session_id) or {}
+        return self._cache["epistemic_matrix"]
 
     @property
     def all_appointments(self) -> list[dict]:

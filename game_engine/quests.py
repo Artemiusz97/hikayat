@@ -729,12 +729,6 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
         "dossier_stage": "compiled",
     }
 
-async def generate_next_story_quest(session_id: int, session: dict, completed_quest_update: dict) -> dict:
-    """Wrapper calling the unified generate_story_quest for next chapters."""
-    completed_title = completed_quest_update.get("title", "the previous story quest") if isinstance(completed_quest_update, dict) else "the previous story quest"
-    cur_ch = db.get_session_chapter(session_id)
-    return await game_engine.generate_story_quest(session_id, session, chapter_num=cur_ch + 1, previous_completed_title=completed_title)
-
 def _is_valid_investigation_note(clue: str) -> bool:
     """Validates that an investigation note is a meaningful story clue string."""
     if not clue or not isinstance(clue, str):

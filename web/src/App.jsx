@@ -21,7 +21,7 @@ function App() {
   const {
     user, character, characters, loading: authLoading,
     loginGuest, loginDiscord, logout, createCharacter, switchCharacter,
-    deleteCharacter, regenerateStarterGear, refreshCharacter, allocateStatPoint
+    deleteCharacter, refreshCharacter, allocateStatPoint
   } = useAuth();
 
   const {

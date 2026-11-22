@@ -8,7 +8,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
   const [acquaintances, setAcquaintances] = useState([]);
   const [factions, setFactions] = useState([]);
   const [agentDossier, setAgentDossier] = useState(null);
-  const [factionMembership, setFactionMembership] = useState({ joined_faction_id: '', faction_rank: 0, faction_title: '' });
   const [lorebook, setLorebook] = useState({ categories: {}, entities: [] });
   const [worldPulse, setWorldPulse] = useState(null);
   const [commitments, setCommitments] = useState([]);
@@ -21,7 +20,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
   const [campaignSpine, setCampaignSpine] = useState(null);
   const [campaignEndGoals, setCampaignEndGoals] = useState([]);
   const [chapterDigest, setChapterDigest] = useState([]);
-  const [hasBountyBoard, setHasBountyBoard] = useState(false);
   const [noticeBoardLabel, setNoticeBoardLabel] = useState('Bounty Board');
   const [encyclopedia, setEncyclopedia] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -84,9 +82,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         const fData = factionsRes.value || {};
         setFactions(fData.factions || []);
         setAgentDossier(fData.agent_dossier || null);
-        if (fData.membership) {
-          setFactionMembership(fData.membership);
-        }
       }
       if (lorebookRes.status === 'fulfilled') {
         const loreVal = lorebookRes.value || { categories: {}, entities: [] };
@@ -107,7 +102,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         setCampaignSpine(qData.campaign_spine || null);
         setCampaignEndGoals(qData.campaign_end_goals || []);
         setChapterDigest(qData.chapter_digest || []);
-        setHasBountyBoard(Boolean(qData.has_bounty_board));
         if (qData.notice_board_label) {
           setNoticeBoardLabel(qData.notice_board_label);
         }
@@ -158,7 +152,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     });
     if (data?.factions) setFactions(data.factions);
     if (data?.agent_dossier) setAgentDossier(data.agent_dossier);
-    if (data?.membership) setFactionMembership(data.membership);
     return data;
   };
 
@@ -187,7 +180,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     if (data.campaign_spine) setCampaignSpine(data.campaign_spine);
     if (data.chapter_digest) setChapterDigest(data.chapter_digest);
     if (data.campaign_end_goals) setCampaignEndGoals(data.campaign_end_goals);
-    if ('has_bounty_board' in data) setHasBountyBoard(Boolean(data.has_bounty_board));
     if (data.notice_board_label) setNoticeBoardLabel(data.notice_board_label);
   };
 
@@ -320,7 +312,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     acquaintances,
     factions,
     agentDossier,
-    factionMembership,
     lorebook,
     worldPulse,
     commitments,
@@ -333,7 +324,6 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     campaignSpine,
     campaignEndGoals,
     chapterDigest,
-    hasBountyBoard,
     noticeBoardLabel,
     encyclopedia,
     loading,

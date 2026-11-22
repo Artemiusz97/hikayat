@@ -812,6 +812,15 @@ def resolve_effective_waypoint_location(
     session: Optional[dict] = None,
     session_time: Optional[tuple] = None,
     contacts_cache: Optional[dict] = None,
+    *,
+    roster_by_key: Optional[dict] = None,
+    nodes_by_id: Optional[dict] = None,
+    active_events: Optional[list[dict]] = None,
+    primary_property: Optional[dict] = None,
+    primary_property_loaded: bool = False,
+    contacts: Optional[list[dict]] = None,
+    person_ties: Optional[list[Any]] = None,
+    active_commitments: Optional[list[dict]] = None,
 ) -> str:
     """Returns the effective live target location for a waypoint, resolving NPC schedule if tagged."""
     info = get_waypoint_npc_schedule_info(
@@ -820,6 +829,14 @@ def resolve_effective_waypoint_location(
         session=session,
         session_time=session_time,
         contacts_by_name=contacts_cache,
+        roster_by_key=roster_by_key,
+        nodes_by_id=nodes_by_id,
+        active_events=active_events,
+        primary_property=primary_property,
+        primary_property_loaded=primary_property_loaded,
+        contacts=contacts,
+        person_ties=person_ties,
+        active_commitments=active_commitments,
     )
     eff = info["effective_location"]
     if eff and "{" in eff and session_id:

@@ -13,16 +13,8 @@ import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _json_dataclass_default
 from .registry import get_purge_specs, get_simple_rollback_specs
-
-def _json_dataclass_default(obj):
-    import dataclasses
-    if hasattr(obj, "model_dump") and not isinstance(obj, type):
-        return obj.model_dump()
-    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
-        return dataclasses.asdict(obj)
-    return str(obj)
 
 def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                     dialogue_mode: str, image_gen_enabled: bool, choices_style: str = "dropdown",
@@ -266,49 +258,49 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
         "updated_at": time.time(),
     }
 
-    if current_node_id:
-        fields["current_node_id"] = current_node_id
-        if location is None:
-            from .world import get_world_node, get_node_ancestors
-            node = get_world_node(session_id, current_node_id)
-            if node:
-                ancestors = get_node_ancestors(session_id, current_node_id)
-                chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
-                fields["current_location"] = " ➔ ".join(chain)
+    with UnitOfWork() as conn:
+        if current_node_id:
+            fields["current_node_id"] = current_node_id
+            if location is None:
+                from .world import get_world_node, get_node_ancestors
+                node = get_world_node(session_id, current_node_id)
+                if node:
+                    ancestors = get_node_ancestors(session_id, current_node_id)
+                    chain = [a["name"] for a in reversed(ancestors)] + [node["name"]]
+                    fields["current_location"] = " ➔ ".join(chain)
 
-    if focal_point is not None:
-        fields["focal_point"] = _to_str(focal_point)
+        if focal_point is not None:
+            fields["focal_point"] = _to_str(focal_point)
 
-    if location is not None:
-        clean_loc = _to_str(location)
-        if isinstance(location, dict) or (clean_loc.startswith("{") and ("tier" in clean_loc.lower() or "zone" in clean_loc.lower())):
+        if location is not None:
+            clean_loc = _to_str(location)
+            if isinstance(location, dict) or (clean_loc.startswith("{") and ("tier" in clean_loc.lower() or "zone" in clean_loc.lower())):
+                try:
+                    from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+                    z, p, s = parse_tiered_location(location if isinstance(location, dict) else clean_loc)
+                    clean_loc = format_tiered_location_string(z, p, s)
+                except Exception:
+                    pass
+            fields["current_location"] = clean_loc
+
+        if nearby_enemies is not None:
+            json_str = json.dumps(nearby_enemies, default=_json_dataclass_default) if not isinstance(nearby_enemies, str) else nearby_enemies
+            fields["nearby_enemies_json"] = json_str
+        if current_npcs is not None:
+            sanitized_npcs = _sanitize_npcs_list(session_id, current_npcs)
+            fields["current_npcs_json"] = json.dumps(sanitized_npcs, default=_json_dataclass_default)
             try:
-                from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
-                z, p, s = parse_tiered_location(location if isinstance(location, dict) else clean_loc)
-                clean_loc = format_tiered_location_string(z, p, s)
-            except Exception:
-                pass
-        fields["current_location"] = clean_loc
-
-    if nearby_enemies is not None:
-        json_str = json.dumps(nearby_enemies, default=_json_dataclass_default) if not isinstance(nearby_enemies, str) else nearby_enemies
-        fields["nearby_enemies_json"] = json_str
-    if current_npcs is not None:
-        sanitized_npcs = _sanitize_npcs_list(session_id, current_npcs)
-        fields["current_npcs_json"] = json.dumps(sanitized_npcs, default=_json_dataclass_default)
-        try:
-            enemy_set = set()
-            raw_enemies = nearby_enemies if isinstance(nearby_enemies, list) else []
-            for en in raw_enemies:
-                en_name = str(en.get("name") if isinstance(en, dict) else en or "").strip().lower()
-                if en_name:
-                    enemy_set.add(en_name)
-            scene_met_names = []
-            for sn in (sanitized_npcs or []):
-                sn_name = str(sn.get("name") if isinstance(sn, dict) else sn or "").strip()
-                if sn_name and sn_name.lower() != "none" and sn_name.lower() not in enemy_set:
-                    scene_met_names.append(sn_name)
-            with get_conn() as conn:
+                enemy_set = set()
+                raw_enemies = nearby_enemies if isinstance(nearby_enemies, list) else []
+                for en in raw_enemies:
+                    en_name = str(en.get("name") if isinstance(en, dict) else en or "").strip().lower()
+                    if en_name:
+                        enemy_set.add(en_name)
+                scene_met_names = []
+                for sn in (sanitized_npcs or []):
+                    sn_name = str(sn.get("name") if isinstance(sn, dict) else sn or "").strip()
+                    if sn_name and sn_name.lower() != "none" and sn_name.lower() not in enemy_set:
+                        scene_met_names.append(sn_name)
                 ex_row = conn.execute("SELECT extra_json FROM sessions WHERE id=?", (session_id,)).fetchone()
                 ex_dict = {}
                 if ex_row and ex_row["extra_json"]:
@@ -326,42 +318,41 @@ def save_session_scene(session_id: int, scene_title: str, narrative: str, choice
                 if is_fresh_opening or scene_met_names:
                     ex_dict["met_npc_names"] = prev_met
                     fields["extra_json"] = json.dumps(ex_dict, default=str)
-        except Exception:
-            pass
-    is_fresh_opening_scene = isinstance(history, list) and len(history) == 0
-    phys_dict_to_sync: dict | None = None
-    if physical_state is not None:
-        if isinstance(physical_state, dict):
-            if "actors" in physical_state:
-                phys_dict_to_sync = physical_state
-            scene_meta = {k: v for k, v in physical_state.items() if k != "actors"}
-            fields["physical_state_json"] = json.dumps(scene_meta, default=str)
-        elif isinstance(physical_state, str):
-            try:
-                parsed_ps = json.loads(physical_state)
-                if isinstance(parsed_ps, dict):
-                    if "actors" in parsed_ps:
-                        phys_dict_to_sync = parsed_ps
-                    fields["physical_state_json"] = json.dumps({k: v for k, v in parsed_ps.items() if k != "actors"}, default=str)
-                else:
-                    fields["physical_state_json"] = physical_state
             except Exception:
-                fields["physical_state_json"] = physical_state
-        else:
-            fields["physical_state_json"] = json.dumps(physical_state, default=str)
-    if dialogue_partner != "__NOOP__":
-        if isinstance(dialogue_partner, list):
-            fields["dialogue_partner"] = json.dumps(dialogue_partner, default=str) if dialogue_partner else None
-        else:
-            fields["dialogue_partner"] = dialogue_partner if dialogue_partner else None
+                pass
+        is_fresh_opening_scene = isinstance(history, list) and len(history) == 0
+        phys_dict_to_sync: dict | None = None
+        if physical_state is not None:
+            if isinstance(physical_state, dict):
+                if "actors" in physical_state:
+                    phys_dict_to_sync = physical_state
+                scene_meta = {k: v for k, v in physical_state.items() if k != "actors"}
+                fields["physical_state_json"] = json.dumps(scene_meta, default=str)
+            elif isinstance(physical_state, str):
+                try:
+                    parsed_ps = json.loads(physical_state)
+                    if isinstance(parsed_ps, dict):
+                        if "actors" in parsed_ps:
+                            phys_dict_to_sync = parsed_ps
+                        fields["physical_state_json"] = json.dumps({k: v for k, v in parsed_ps.items() if k != "actors"}, default=str)
+                    else:
+                        fields["physical_state_json"] = physical_state
+                except Exception:
+                    fields["physical_state_json"] = physical_state
+            else:
+                fields["physical_state_json"] = json.dumps(physical_state, default=str)
+        if dialogue_partner != "__NOOP__":
+            if isinstance(dialogue_partner, list):
+                fields["dialogue_partner"] = json.dumps(dialogue_partner, default=str) if dialogue_partner else None
+            else:
+                fields["dialogue_partner"] = dialogue_partner if dialogue_partner else None
 
-    if combat_threat_ledger is not None:
-        fields["combat_threat_ledger_json"] = json.dumps(combat_threat_ledger, default=_json_dataclass_default) if not isinstance(combat_threat_ledger, str) else combat_threat_ledger
-    if combat_boss_telegraph is not None:
-        fields["combat_boss_telegraph_json"] = json.dumps(combat_boss_telegraph, default=_json_dataclass_default) if not isinstance(combat_boss_telegraph, str) else combat_boss_telegraph
+        if combat_threat_ledger is not None:
+            fields["combat_threat_ledger_json"] = json.dumps(combat_threat_ledger, default=_json_dataclass_default) if not isinstance(combat_threat_ledger, str) else combat_threat_ledger
+        if combat_boss_telegraph is not None:
+            fields["combat_boss_telegraph_json"] = json.dumps(combat_boss_telegraph, default=_json_dataclass_default) if not isinstance(combat_boss_telegraph, str) else combat_boss_telegraph
 
-    cols = ", ".join(f"{k}=?" for k in fields)
-    with get_conn() as conn:
+        cols = ", ".join(f"{k}=?" for k in fields)
         if phys_dict_to_sync is not None:
             try:
                 import mechanics.social.physical_state as ps
@@ -392,27 +383,6 @@ def update_session(session_id: int, **kwargs):
         if extra_update is None or not isinstance(extra_update, dict):
             extra_update = {}
         extra_update["stealth_state"] = st_val
-    if extra_update and isinstance(extra_update, dict):
-        try:
-            from .dossiers import SESSION_ANOMALY_KEY_TO_RECORD_TYPE, sync_session_anomaly_records_from_extra
-            with get_conn() as conn:
-                synced_anom = sync_session_anomaly_records_from_extra(session_id, extra_update, conn=conn)
-                row = conn.execute("SELECT extra_json FROM sessions WHERE id=?", (session_id,)).fetchone()
-                existing_extra = {}
-                if row and row["extra_json"]:
-                    try:
-                        existing_extra = json.loads(row["extra_json"])
-                    except Exception:
-                        existing_extra = {}
-                existing_extra.update(extra_update)
-                if synced_anom:
-                    for anom_k in SESSION_ANOMALY_KEY_TO_RECORD_TYPE:
-                        existing_extra.pop(anom_k, None)
-                # Filter out None values so callers can delete keys by setting them to None
-                cleaned_extra = {k: v for k, v in existing_extra.items() if v is not None}
-                kwargs["extra_json"] = json.dumps(cleaned_extra, default=str)
-        except Exception:
-            pass
 
     column_aliases = {
         "history": "history_json",
@@ -429,51 +399,71 @@ def update_session(session_id: int, **kwargs):
         "combat_boss_telegraph": "combat_boss_telegraph_json",
     }
 
-    fields = {}
-    phys_update_to_sync: dict | None = None
-    for k, v in kwargs.items():
-        col = column_aliases.get(k, k)
-        if col == "current_npcs_json" and not isinstance(v, str):
-            sanitized = _sanitize_npcs_list(session_id, v)
-            v = json.dumps(sanitized, default=str)
-        elif col == "physical_state_json":
-            if isinstance(v, dict):
-                if "actors" in v:
-                    phys_update_to_sync = v
-                v = json.dumps({pk: pv for pk, pv in v.items() if pk != "actors"}, default=_json_dataclass_default)
-            elif isinstance(v, str):
-                try:
-                    parsed_pv = json.loads(v)
-                    if isinstance(parsed_pv, dict):
-                        if "actors" in parsed_pv:
-                            phys_update_to_sync = parsed_pv
-                        v = json.dumps({pk: pv for pk, pv in parsed_pv.items() if pk != "actors"}, default=_json_dataclass_default)
-                except Exception:
-                    pass
-        elif col.endswith("_json") and not isinstance(v, str):
-            v = json.dumps(v, default=_json_dataclass_default)
-        elif col in ("scene_title", "narrative", "current_location") and v is not None:
-            clean_v = _to_str(v)
-            if col == "current_location" and (isinstance(v, dict) or (clean_v.startswith("{") and ("tier" in clean_v.lower() or "zone" in clean_v.lower()))):
-                try:
-                    from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
-                    z, p, s = parse_tiered_location(v if isinstance(v, dict) else clean_v)
-                    clean_v = format_tiered_location_string(z, p, s)
-                except Exception:
-                    pass
-            v = clean_v
-        elif col == "dialogue_partner":
-            if isinstance(v, list):
-                v = json.dumps(v, default=str) if v else None
-            elif not v:
-                v = None
-        fields[col] = v
+    with UnitOfWork() as conn:
+        if extra_update and isinstance(extra_update, dict):
+            try:
+                from .dossiers import SESSION_ANOMALY_KEY_TO_RECORD_TYPE, sync_session_anomaly_records_from_extra
+                synced_anom = sync_session_anomaly_records_from_extra(session_id, extra_update, conn=conn)
+                row = conn.execute("SELECT extra_json FROM sessions WHERE id=?", (session_id,)).fetchone()
+                existing_extra = {}
+                if row and row["extra_json"]:
+                    try:
+                        existing_extra = json.loads(row["extra_json"])
+                    except Exception:
+                        existing_extra = {}
+                existing_extra.update(extra_update)
+                if synced_anom:
+                    for anom_k in SESSION_ANOMALY_KEY_TO_RECORD_TYPE:
+                        existing_extra.pop(anom_k, None)
+                # Filter out None values so callers can delete keys by setting them to None
+                cleaned_extra = {k: v for k, v in existing_extra.items() if v is not None}
+                kwargs["extra_json"] = json.dumps(cleaned_extra, default=str)
+            except Exception:
+                pass
 
+        fields = {}
+        phys_update_to_sync: dict | None = None
+        for k, v in kwargs.items():
+            col = column_aliases.get(k, k)
+            if col == "current_npcs_json" and not isinstance(v, str):
+                sanitized = _sanitize_npcs_list(session_id, v)
+                v = json.dumps(sanitized, default=str)
+            elif col == "physical_state_json":
+                if isinstance(v, dict):
+                    if "actors" in v:
+                        phys_update_to_sync = v
+                    v = json.dumps({pk: pv for pk, pv in v.items() if pk != "actors"}, default=_json_dataclass_default)
+                elif isinstance(v, str):
+                    try:
+                        parsed_pv = json.loads(v)
+                        if isinstance(parsed_pv, dict):
+                            if "actors" in parsed_pv:
+                                phys_update_to_sync = parsed_pv
+                            v = json.dumps({pk: pv for pk, pv in parsed_pv.items() if pk != "actors"}, default=_json_dataclass_default)
+                    except Exception:
+                        pass
+            elif col.endswith("_json") and not isinstance(v, str):
+                v = json.dumps(v, default=_json_dataclass_default)
+            elif col in ("scene_title", "narrative", "current_location") and v is not None:
+                clean_v = _to_str(v)
+                if col == "current_location" and (isinstance(v, dict) or (clean_v.startswith("{") and ("tier" in clean_v.lower() or "zone" in clean_v.lower()))):
+                    try:
+                        from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string
+                        z, p, s = parse_tiered_location(v if isinstance(v, dict) else clean_v)
+                        clean_v = format_tiered_location_string(z, p, s)
+                    except Exception:
+                        pass
+                v = clean_v
+            elif col == "dialogue_partner":
+                if isinstance(v, list):
+                    v = json.dumps(v, default=str) if v else None
+                elif not v:
+                    v = None
+            fields[col] = v
 
-    fields["updated_at"] = time.time()
+        fields["updated_at"] = time.time()
 
-    cols = ", ".join(f"{k}=?" for k in fields)
-    with get_conn() as conn:
+        cols = ", ".join(f"{k}=?" for k in fields)
         if phys_update_to_sync is not None:
             try:
                 import mechanics.social.physical_state as ps
@@ -596,14 +586,6 @@ def increment_days_adventured(user_id: int, delta: int = 1):
                          (delta, char["id"]))
     except Exception:
         pass
-
-def reset_session_room_props(session_id: int):
-    """Purges location-bound room furniture/props while preserving actor postures, garments, and personal gear."""
-    state = get_session_physical_state(session_id)
-    if state and isinstance(state, dict):
-        state["props"] = {}
-        state["room_layout"] = ""
-        update_session_physical_state(session_id, state)
 
 def update_session_npcs(session_id: int, npcs: list):
     sanitized_npcs = _sanitize_npcs_list(session_id, npcs)
@@ -850,17 +832,17 @@ def reset_character_for_new_adventure(
     )
 
 def finish_session(session_id: int):
-    # Collect all members before we clear their active_session_id
-    members = get_session_members(session_id)
-    sess = get_session(session_id)
-    sess_scenario = sess.get("scenario") if sess else None
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
+        # Collect all members before we clear their active_session_id
+        members = get_session_members(session_id)
+        sess = get_session(session_id)
+        sess_scenario = sess.get("scenario") if sess else None
         conn.execute("UPDATE sessions SET status='finished', updated_at=? WHERE id=?",
                       (time.time(), session_id))
         conn.execute("UPDATE characters SET active_session_id=NULL WHERE active_session_id=?", (session_id,))
-    # Reset each member's transient state so it doesn't bleed into the next adventure
-    for uid in members:
-        reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
+        # Reset each member's transient state so it doesn't bleed into the next adventure
+        for uid in members:
+            reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
 
 def delete_session(session_id: int):
     """Permanently removes a session and all its associated child records."""
@@ -981,7 +963,7 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
     if not session_id:
         return
     from .core import _delete_session_child_records_only
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
         sess_row = conn.execute("SELECT extra_json, host_user_id FROM sessions WHERE id=?", (session_id,)).fetchone()
         eff_uid = int(user_id or (sess_row["host_user_id"] if sess_row and sess_row["host_user_id"] else 0))
         extra_dict: dict = {}
@@ -1027,32 +1009,6 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
                 if inv_row:
                     conn.execute("DELETE FROM inventory WHERE id=?", (inv_row["id"],))
 
-        try:
-            conn.execute(
-                """DELETE FROM inventory
-                   WHERE is_pact_locked = 1
-                     AND linked_contract_key IN (SELECT contract_key FROM session_entity_contracts WHERE session_id = ?)""",
-                (session_id,),
-            )
-            conn.execute(
-                """UPDATE user_patron_compendium
-                   SET is_currently_contracted = 0
-                   WHERE (user_id, patron_id) IN (
-                       SELECT CAST(holder_id AS INTEGER), patron_id
-                       FROM session_entity_contracts
-                       WHERE session_id = ? AND holder_type = 'player'
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM session_entity_contracts sec
-                       WHERE sec.session_id != ? AND sec.holder_type = 'player'
-                         AND CAST(sec.holder_id AS INTEGER) = user_patron_compendium.user_id
-                         AND sec.patron_id = user_patron_compendium.patron_id
-                         AND sec.status = 'active'
-                   )""",
-                (session_id, session_id),
-            )
-        except sqlite3.OperationalError:
-            pass
         _delete_session_child_records_only(conn, session_id, preserve_members=True)
         conn.execute(
             """UPDATE sessions
@@ -1311,15 +1267,20 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
             "SELECT last_turn_snapshot_json, extra_json FROM sessions WHERE id = ?",
             (session_id,),
         ).fetchone()
+        cur_extra: dict[str, Any] = {}
+        extra_dirty = False
+        try:
+            parsed_extra = json.loads((snap_row["extra_json"] if snap_row else None) or "{}")
+            if isinstance(parsed_extra, dict):
+                cur_extra = parsed_extra
+        except Exception:
+            cur_extra = {}
         # Clean up stale chapter transition metadata in extra_json if transition happened after turn T
         try:
-            curr_extra_row = conn.execute("SELECT extra_json FROM sessions WHERE id = ?", (session_id,)).fetchone()
-            if curr_extra_row and curr_extra_row["extra_json"]:
-                e_obj = json.loads(curr_extra_row["extra_json"] or "{}")
-                if isinstance(e_obj, dict) and int(e_obj.get("_last_transition_turn") or -1) > t_num:
-                    e_obj.pop("_last_transition_quest_id", None)
-                    e_obj.pop("_last_transition_turn", None)
-                    conn.execute("UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?", (json.dumps(e_obj), time.time(), session_id))
+            if int(cur_extra.get("_last_transition_turn") or -1) > t_num:
+                cur_extra.pop("_last_transition_quest_id", None)
+                cur_extra.pop("_last_transition_turn", None)
+                extra_dirty = True
         except Exception:
             pass
 
@@ -1376,12 +1337,6 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                         or "anomalous_faction_state" in pre_t
                         or ("daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num)
                     ):
-                        try:
-                            cur_extra = json.loads(snap_row["extra_json"] or "{}")
-                        except Exception:
-                            cur_extra = {}
-                        if not isinstance(cur_extra, dict):
-                            cur_extra = {}
                         for _tk in ("_last_transition_turn", "_last_transition_quest_id", "_chapter_transition_marker"):
                             cur_extra.pop(_tk, None)
                         if "player_resonance_pips" in pre_t:
@@ -1406,10 +1361,7 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                         if "daily_incursions" in pre_t and pre_t.get("daily_incursions") is not None and int(pre_t.get("pre_turn_count", -1)) == t_num:
                             cur_extra["daily_incursions"] = list(pre_t["daily_incursions"])
                             cur_extra["daily_breaches"] = list(pre_t["daily_incursions"])
-                        conn.execute(
-                            "UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?",
-                            (json.dumps(cur_extra, default=str), time.time(), session_id),
-                        )
+                        extra_dirty = True
                     if "party_factions" in pre_t and isinstance(pre_t["party_factions"], dict):
                         for pf_uid_raw, pf_data in pre_t["party_factions"].items():
                             if not isinstance(pf_data, dict):
@@ -1437,6 +1389,11 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                                 )
             except (TypeError, ValueError, json.JSONDecodeError):
                 pass
+        if extra_dirty:
+            conn.execute(
+                "UPDATE sessions SET extra_json = ?, updated_at = ? WHERE id = ?",
+                (json.dumps(cur_extra, default=str), time.time(), session_id),
+            )
         if restore_quarters_arch:
             try:
                 grant_or_relocate_starter_quarters(session_id, restore_quarters_arch, conn=conn)

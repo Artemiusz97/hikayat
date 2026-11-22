@@ -196,16 +196,6 @@ export const useAuth = () => {
     return res;
   };
 
-  const regenerateStarterGear = async () => {
-    if (!user) return null;
-    const res = await apiCall('/api/character/regenerate-gear', {
-      method: 'POST',
-      body: JSON.stringify({ user_id: user.user_id })
-    });
-    await fetchActiveCharacter();
-    return res;
-  };
-
   return {
     user,
     character,
@@ -217,7 +207,6 @@ export const useAuth = () => {
     createCharacter,
     switchCharacter,
     deleteCharacter,
-    regenerateStarterGear,
     allocateStatPoint,
     refreshCharacter: () => fetchActiveCharacter()
   };

@@ -21,17 +21,22 @@ from .matching import (
 
 def build_waypoint_prompt_block(session_id: int, current_location: str, destination_location: str = "", session: Optional[dict] = None) -> str:
     """Builds the [ACTIVE QUEST WAYPOINTS] block for the LLM system prompt."""
+    ctx = session.get("_ctx") if isinstance(session, dict) else None
     if session_id:
         try:
             from mechanics.social.physical_state import is_erotic_intimate_contact
-            phys_st = db.get_session_physical_state(session_id)
+            phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or db.get_session_physical_state(session_id)
             if isinstance(phys_st, dict):
                 ic_str = str(phys_st.get("intimate_contact", "") or "")
                 if is_erotic_intimate_contact(ic_str) or "aftercare" in ic_str.lower():
                     return ""
         except Exception:
             pass
-    active_wps = db.get_all_session_active_waypoints(session_id)
+    active_wps = (
+        list(ctx.active_waypoints)
+        if ctx is not None and getattr(ctx, "_cache", None) and "active_waypoints" in ctx._cache
+        else db.get_all_session_active_waypoints(session_id)
+    )
     story_quest, climax_loc = get_story_quest_climax_location(session_id)
 
     pre_turn_res = session.get("_pre_turn_quest_res") if isinstance(session, dict) else {}
@@ -61,7 +66,11 @@ def build_waypoint_prompt_block(session_id: int, current_location: str, destinat
 
     # --- Phone Appointments: inject meetup NPC presence ---
     appointment_lines = []
-    pending_appointments = db.get_phone_appointments(session_id, status="pending")
+    pending_appointments = (
+        list(ctx.pending_appointments)
+        if ctx is not None and getattr(ctx, "_cache", None) and "pending_appointments" in ctx._cache
+        else db.get_phone_appointments(session_id, status="pending")
+    )
     for appt in pending_appointments:
         appt_loc = appt.get("rendezvous_location", "")
         npc_name = appt.get("npc_name", "")

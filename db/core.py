@@ -2640,8 +2640,6 @@ SCHEMA_MIGRATIONS.append(
 
 _NARRATION_PACING_V58_DDL = [
     "ALTER TABLE user_settings ADD COLUMN narrative_pacing TEXT DEFAULT 'balanced'",
-    "ALTER TABLE user_settings ADD COLUMN show_enemy_hp INTEGER DEFAULT 1",
-    "ALTER TABLE user_settings ADD COLUMN show_enemy_intent INTEGER DEFAULT 1",
     "ALTER TABLE sessions ADD COLUMN narrative_pacing TEXT DEFAULT 'balanced'",
 ]
 
@@ -4093,6 +4091,15 @@ def _to_str(val, default: str = "") -> str:
         return json.dumps(val)
     return str(val)
 
+
+def _json_dataclass_default(obj):
+    import dataclasses
+    if hasattr(obj, "model_dump") and not isinstance(obj, type):
+        return obj.model_dump()
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return dataclasses.asdict(obj)
+    return str(obj)
+
 _JS_DECL_RE = re.compile(r"\b(?:const|let|var)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*=")
 
 
@@ -4443,57 +4450,6 @@ def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir
         pass
 
     return backup_path
-
-
-def safe_cleanup_test_records(min_user_id: int = 800_000, max_user_id: int = 999_999) -> dict[str, int]:
-    """Safely cleans up test users and inventory within a strictly bounded range.
-    Refuses to delete any ID matching Discord snowflakes (>= 10^16).
-    """
-    if min_user_id >= DISCORD_SNOWFLAKE_MIN or max_user_id >= DISCORD_SNOWFLAKE_MIN:
-        raise ValueError(
-            f"Safety guardrail triggered! Range [{min_user_id}, {max_user_id}] overlaps Discord snowflake range."
-        )
-    if min_user_id <= 0 or max_user_id < min_user_id:
-        raise ValueError(f"Invalid test cleanup range [{min_user_id}, {max_user_id}].")
-
-    deleted_counts = {}
-    with get_conn() as conn:
-        c1 = conn.execute(
-            "DELETE FROM inventory WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c2 = conn.execute(
-            "DELETE FROM user_settings WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c3 = conn.execute(
-            "DELETE FROM characters WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c4 = conn.execute(
-            "DELETE FROM adventure_saves WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c5 = conn.execute(
-            "DELETE FROM session_members WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c6 = conn.execute(
-            "DELETE FROM user_folklore_codex WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        c7 = conn.execute(
-            "DELETE FROM user_patron_compendium WHERE user_id BETWEEN ? AND ?",
-            (min_user_id, max_user_id)
-        ).rowcount
-        deleted_counts["inventory"] = c1
-        deleted_counts["user_settings"] = c2
-        deleted_counts["characters"] = c3
-        deleted_counts["adventure_saves"] = c4
-        deleted_counts["session_members"] = c5
-        deleted_counts["user_folklore_codex"] = c6
-        deleted_counts["user_patron_compendium"] = c7
-    return deleted_counts
 
 
 def set_db_path(new_path: str):

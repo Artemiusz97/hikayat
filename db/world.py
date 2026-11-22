@@ -520,25 +520,33 @@ def update_world_node_state(session_id: int, node_id: str, updates: dict) -> dic
     """Merges updates into state_json for a node and returns the updated state dict."""
     if not session_id or not node_id:
         return {}
-    target_id = node_id
-    with get_conn() as conn:
-        exists = conn.execute(
-            "SELECT 1 FROM world_nodes WHERE session_id = ? AND node_id = ?",
-            (session_id, node_id)
+    with UnitOfWork() as conn:
+        target_id = node_id
+        row = conn.execute(
+            "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+            (session_id, node_id),
         ).fetchone()
-        if not exists and node_id in _LEGACY_NODE_ID_ALIASES:
+        if row is None and node_id in _LEGACY_NODE_ID_ALIASES:
             target_id = _LEGACY_NODE_ID_ALIASES[node_id]
-        elif not exists:
-            fb_row, fb_id = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="1")
+            row = conn.execute(
+                "SELECT state_json FROM world_nodes WHERE session_id = ? AND node_id = ?",
+                (session_id, target_id),
+            ).fetchone()
+        elif row is None:
+            fb_row, fb_id = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="state_json")
             if fb_row and fb_id:
                 target_id = fb_id
-    cur_state = get_world_node_state(session_id, target_id)
-    cur_state.update(updates or {})
-    new_json = json.dumps(cur_state)
-    with get_conn() as conn:
+                row = fb_row
+        cur_state: dict = {}
+        if row and row["state_json"]:
+            try:
+                cur_state = json.loads(row["state_json"]) if isinstance(row["state_json"], str) else dict(row["state_json"])
+            except Exception:
+                cur_state = {}
+        cur_state.update(updates or {})
         conn.execute(
             "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
-            (new_json, session_id, target_id)
+            (json.dumps(cur_state), session_id, target_id),
         )
     return cur_state
 
@@ -560,13 +568,14 @@ def update_world_node_prop_delta(session_id: int, node_id: str, prop_name: str, 
         return {}
     from mechanics.world.locations.seeds import slugify_location
     prop_key = slugify_location(prop_name)
-    cur_state = get_world_node_state(session_id, node_id)
-    props_state = dict(cur_state.get("props_state") or {})
-    prop_cur = dict(props_state.get(prop_key) or {})
-    prop_cur.update(delta or {})
-    props_state[prop_key] = prop_cur
-    cur_state["props_state"] = props_state
-    update_world_node_state(session_id, node_id, cur_state)
+    with UnitOfWork():
+        cur_state = get_world_node_state(session_id, node_id)
+        props_state = dict(cur_state.get("props_state") or {})
+        prop_cur = dict(props_state.get(prop_key) or {})
+        prop_cur.update(delta or {})
+        props_state[prop_key] = prop_cur
+        cur_state["props_state"] = props_state
+        update_world_node_state(session_id, node_id, cur_state)
     return prop_cur
 
 
@@ -800,15 +809,38 @@ def get_session_world_edges(session_id: int) -> list[dict]:
 
 def get_node_ancestors(session_id: int, node_id: str) -> list[dict]:
     """Traverses parent_id pointers up to the root zone node."""
-    ancestors = []
-    curr = get_world_node(session_id, node_id)
-    visited = set()
+    if not session_id or not node_id:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM world_nodes WHERE session_id = ?",
+            (session_id,),
+        ).fetchall()
+    by_id = {str(r["node_id"]): dict(r) for r in rows if r["node_id"]}
+
+    def _lookup(nid: str) -> dict | None:
+        if not nid:
+            return None
+        hit = by_id.get(nid)
+        if hit is not None:
+            return hit
+        alias = _LEGACY_NODE_ID_ALIASES.get(nid)
+        if alias and alias in by_id:
+            return by_id[alias]
+        for cand in _SCHOOL_CLUB_NODE_ID_FALLBACKS.get(str(nid).lower(), ()):
+            if cand in by_id:
+                return by_id[cand]
+        return None
+
+    ancestors: list[dict] = []
+    curr = _lookup(node_id)
+    visited: set[str] = set()
     while curr and curr.get("parent_id"):
         p_id = curr["parent_id"]
         if p_id in visited:
             break
         visited.add(p_id)
-        p_node = get_world_node(session_id, p_id)
+        p_node = _lookup(p_id)
         if p_node:
             ancestors.append(p_node)
             curr = p_node

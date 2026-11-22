@@ -207,7 +207,6 @@ SESSION_TABLE_REGISTRY: tuple[SessionTableSpec, ...] = (
         load_tier=10,
         orig_id_alias="_orig_household_id",
         session_key_cols=("household_key",),
-        row_transform_hook="restore_household_row",
         rollback_mode="static_world",
     ),
     SessionTableSpec(

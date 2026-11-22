@@ -141,7 +141,6 @@ from .quests import (
     get_minimal_story_quest,
     get_quest_waypoint_target_location,
     is_quest_main_objectives_complete,
-    promote_locked_quest_waypoints,
     reconcile_structured_quest_split_brain,
     sync_quest_projection_from_dossier,
     unlock_climax_waypoint,

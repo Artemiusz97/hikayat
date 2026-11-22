@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { apiCall } from '../api/client';
 import {
   THEME_DEFAULT_FONT_ID,
   applyFontVariables,
@@ -141,9 +142,7 @@ export const UiPreferencesProvider = ({ children }) => {
   const refreshCustomFonts = useCallback(async () => {
     setCustomFontsLoading(true);
     try {
-      const res = await fetch('/api/fonts', { cache: 'no-store' });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await apiCall('/api/fonts', { cache: 'no-store' });
       const list = Array.isArray(data?.fonts) ? data.fonts : [];
       setCustomFonts(list);
       syncCustomFontFaces(list);

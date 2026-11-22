@@ -142,43 +142,6 @@ def get_active_commitments(
     return [_hydrate_memory_commitment_row(dict(r)) for r in rows]
 
 
-def update_commitment_status(
-    session_id: int, commitment_id: int, status: str
-) -> bool:
-    """Update commitment status via commitments_engine so affinity, memory, and social ties stay synchronized."""
-    status = status.lower().strip()
-    valid_statuses = ("fulfilled", "broken", "active", "flaked", "completed", "cancelled", "voided", "abandoned")
-    if status not in valid_statuses:
-        return False
-    try:
-        from mechanics.system.commitments_engine import (
-            fulfill_commitment,
-            flake_commitment,
-            cancel_commitment,
-            void_commitment,
-            abandon_rendezvous,
-        )
-        if status in ("fulfilled", "completed"):
-            return fulfill_commitment(session_id, commitment_id)
-        if status in ("broken", "flaked"):
-            return bool(flake_commitment(session_id, commitment_id, reason="broken promise" if status == "broken" else "time_window_elapsed"))
-        if status == "cancelled":
-            return cancel_commitment(session_id, commitment_id)
-        if status == "voided":
-            return void_commitment(session_id, commitment_id)
-        if status == "abandoned":
-            return bool(abandon_rendezvous(session_id, commitment_id))
-    except Exception:
-        pass
-    now = time.time()
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE commitments_ledger SET status=?, updated_at=? WHERE id=? AND session_id=?",
-            (status, now, commitment_id, session_id),
-        )
-    return True
-
-
 def bulk_add_commitments(
     session_id: int,
     commitments: list[dict],

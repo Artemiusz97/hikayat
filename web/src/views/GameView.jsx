@@ -315,6 +315,8 @@ const GameView = ({
     }
   }, [session?.id]);
 
+  const prevSyncTimestampRef = useRef(lastSyncTimestamp);
+
   const refreshAllSidebars = () => {
     refreshCharacter();
     inventory.refreshInventory();
@@ -323,9 +325,11 @@ const GameView = ({
   };
 
   useEffect(() => {
-    if (lastSyncTimestamp > 0) {
-      refreshAllSidebars();
+    if (lastSyncTimestamp <= 0 || prevSyncTimestampRef.current === lastSyncTimestamp) {
+      return;
     }
+    prevSyncTimestampRef.current = lastSyncTimestamp;
+    refreshAllSidebars();
   }, [lastSyncTimestamp]);
 
   useEffect(() => {

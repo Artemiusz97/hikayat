@@ -40,7 +40,14 @@ def _coerce_status_labels(raw_status: Any) -> list[str]:
 
 
 def _character_sheet_text(char: dict, inventory: list) -> str:
-    equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
+    if inventory is not None:
+        equipment = {
+            item["slot"]: item
+            for item in inventory
+            if isinstance(item, dict) and item.get("equipped") and item.get("slot")
+        }
+    else:
+        equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
     from mechanics.combat.items.tags import is_narrative_item
     equip_items = []
     for slot, item in equipment.items():
@@ -313,6 +320,7 @@ def _history_text(
     present_npcs: list[str] | None = None,
     current_location: str = "",
     active_quest_ids: list[str] | None = None,
+    epistemic_matrix: dict | None = None,
 ) -> str:
     """Build the hierarchical RECENT HISTORY prompt block.
 
@@ -432,7 +440,9 @@ def _history_text(
         if present_npcs and displayed_entries:
             cur_loc_norm = str(current_location or "").strip().lower()
             ep_mat: dict[str, Any] = {}
-            if session_id is not None:
+            if epistemic_matrix is not None:
+                ep_mat = epistemic_matrix or {}
+            elif session_id is not None:
                 try:
                     ep_mat = db.preload_epistemic_matrix(int(session_id)) or {}
                 except Exception:
@@ -1318,7 +1328,12 @@ def _scene_context_text(session_id: int, current_location: str,
 
     sid_int = int(session_id or 0)
     if sid_int > 0:
-        ep_matrix = db.preload_epistemic_matrix(sid_int)
+        ctx_obj = world.get("_ctx") if isinstance(world, dict) else None
+        if ctx_obj is None and isinstance(session, dict):
+            ctx_obj = session.get("_ctx")
+        ep_matrix = getattr(ctx_obj, "epistemic_matrix", None) if ctx_obj is not None else None
+        if ep_matrix is None:
+            ep_matrix = db.preload_epistemic_matrix(sid_int)
         facts_by_key = ep_matrix.get("facts_by_key") or {}
         by_fact = ep_matrix.get("by_fact") or {}
         if facts_by_key:

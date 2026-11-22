@@ -11,7 +11,7 @@ import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _json_dataclass_default
 from .registry import SessionTableSpec, get_load_specs, get_save_specs
 
 _log = logging.getLogger(__name__)
@@ -175,10 +175,6 @@ def _rewrite_snapshot_json_list_fields(
             row_dict[col_name] = json.dumps(parsed)
         except Exception:
             pass
-
-
-def _hook_restore_household_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
-    return row_dict
 
 
 def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
@@ -663,7 +659,6 @@ def _post_inv_remap_epistemic_proof_refs(load_ctx: dict[str, Any]) -> None:
 
 
 _ROW_TRANSFORM_HOOKS: dict[str, Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]]] = {
-    "restore_household_row": _hook_restore_household_row,
     "restore_contact_row": _hook_restore_contact_row,
     "remap_social_turn_snapshot_json": _hook_remap_social_turn_snapshot_json,
     "remap_entity_contract_holder": _hook_remap_entity_contract_holder,
@@ -876,7 +871,7 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
             "character_state": char_state,
             "inventory": cleaned_inv
         }
-        snapshot_json = json.dumps(snapshot)
+        snapshot_json = json.dumps(snapshot, default=_json_dataclass_default)
 
         scenario = sess_dict.get("scenario", "fantasy")
         scene_title = sess_dict.get("scene_title") or "Adventure Continues"

@@ -210,6 +210,78 @@ def upsert_quest(session_id: int, quest_id: str, quest_type: str, title: str,
 
     return get_quest_by_id(session_id, quest_id)
 
+def _preload_waypoint_schedule_ctx(session_id: int) -> dict[str, Any]:
+    """Preloads session, schedule, roster, world graph, events, commitments, and primary property once per call."""
+    from .sessions import get_session, get_session_time
+    from .social import get_contacts
+    from .roster import get_world_roster
+    from .world import get_session_world_nodes
+    from .world_events import get_world_events
+    from .properties import get_primary_property
+    from mechanics.system.commitments_engine import get_active_commitments
+
+    sched_sess = get_session(session_id)
+    sched_time = get_session_time(session_id)
+    contacts_list = get_contacts(session_id) or []
+    contacts_cache: dict[str, dict] = {}
+    for c in contacts_list:
+        if not isinstance(c, dict):
+            continue
+        c_name = str(c.get("name") or "").strip().lower()
+        c_nid = str(c.get("npc_id") or "").strip().lower()
+        if c_name:
+            contacts_cache[c_name] = c
+            contacts_cache[re.sub(r"[^a-z0-9]+", "_", c_name).strip("_")] = c
+        if c_nid:
+            contacts_cache.setdefault(c_nid, c)
+    roster_by_key: dict[str, dict] = {}
+    for r in (get_world_roster(session_id, include_legacy_rosters=False) or []):
+        if not isinstance(r, dict):
+            continue
+        r_name = str(r.get("name") or "").strip().lower()
+        r_nid = str(r.get("npc_id") or "").strip().lower()
+        if r_name:
+            roster_by_key[r_name] = r
+            roster_by_key[re.sub(r"[^a-z0-9]+", "_", r_name).strip("_")] = r
+        if r_nid:
+            roster_by_key.setdefault(r_nid, r)
+    nodes_by_id = {
+        str(n.get("node_id") or ""): n
+        for n in (get_session_world_nodes(session_id) or [])
+        if isinstance(n, dict) and n.get("node_id")
+    }
+    active_events = get_world_events(session_id, entity_type="macro_event") or []
+    active_commitments = get_active_commitments(session_id, commitment_type="rendezvous", limit=50) or []
+    primary_property = get_primary_property(session_id)
+    person_ties: list[Any] | None = None
+    try:
+        with get_conn() as c_ties:
+            t_rows = c_ties.execute(
+                """SELECT * FROM social_ties
+                   WHERE session_id = ? AND status = 'active'
+                     AND (LOWER(person_a_key) = 'player' OR LOWER(person_b_key) = 'player'
+                          OR LOWER(person_a_key) LIKE 'player:%' OR LOWER(person_b_key) LIKE 'player:%')
+                   ORDER BY updated_at DESC""",
+                (session_id,),
+            ).fetchall()
+        person_ties = [dict(tr) for tr in t_rows]
+    except Exception:
+        person_ties = None
+    return {
+        "session": sched_sess,
+        "session_time": sched_time,
+        "contacts": contacts_list,
+        "contacts_cache": contacts_cache,
+        "roster_by_key": roster_by_key,
+        "nodes_by_id": nodes_by_id,
+        "active_events": active_events,
+        "active_commitments": active_commitments,
+        "primary_property": primary_property,
+        "primary_property_loaded": True,
+        "person_ties": person_ties,
+    }
+
+
 def _hydrate_quest_waypoint_for_enrichment(
     session_id: int,
     wr: Any,
@@ -217,6 +289,7 @@ def _hydrate_quest_waypoint_for_enrichment(
     session_time: Optional[tuple] = None,
     contacts_cache: Optional[dict] = None,
     resolve_schedule: bool = True,
+    preloaded_sched_ctx: Optional[dict] = None,
 ) -> dict:
     w_dict = dict(wr)
     try:
@@ -230,12 +303,21 @@ def _hydrate_quest_waypoint_for_enrichment(
     if resolve_schedule and w_dict.get("follow_npc_schedule") and w_dict.get("target_npc"):
         try:
             from mechanics.world.waypoints.matching import resolve_effective_waypoint_location
+            ctx_map = preloaded_sched_ctx if isinstance(preloaded_sched_ctx, dict) else {}
             eff_loc = resolve_effective_waypoint_location(
                 session_id,
                 w_dict,
-                session=session,
-                session_time=session_time,
-                contacts_cache=contacts_cache,
+                session=ctx_map.get("session", session),
+                session_time=ctx_map.get("session_time", session_time),
+                contacts_cache=ctx_map.get("contacts_cache", contacts_cache),
+                roster_by_key=ctx_map.get("roster_by_key"),
+                nodes_by_id=ctx_map.get("nodes_by_id"),
+                active_events=ctx_map.get("active_events"),
+                primary_property=ctx_map.get("primary_property"),
+                primary_property_loaded=bool(ctx_map.get("primary_property_loaded", False)),
+                contacts=ctx_map.get("contacts"),
+                person_ties=ctx_map.get("person_ties"),
+                active_commitments=ctx_map.get("active_commitments"),
             )
             if eff_loc:
                 norm_eff = _normalize_loc_arrow(eff_loc)
@@ -295,35 +377,18 @@ def _enrich_quest_dict(
             except Exception:
                 wp_rows = []
         raw_wp_dicts = [dict(wr) for wr in (wp_rows or [])]
-        sched_sess = None
-        sched_time = None
-        sched_contacts = None
-        if resolve_schedule and any(w.get("follow_npc_schedule") and w.get("target_npc") for w in raw_wp_dicts):
-            if isinstance(preloaded_sched_ctx, dict):
-                sched_sess = preloaded_sched_ctx.get("session")
-                sched_time = preloaded_sched_ctx.get("session_time")
-                sched_contacts = preloaded_sched_ctx.get("contacts_cache")
-            else:
-                try:
-                    from .sessions import get_session, get_session_time
-                    from .social import get_contacts
-                    sched_sess = get_session(session_id)
-                    sched_time = get_session_time(session_id)
-                    sched_contacts = {
-                        str(c.get("name") or "").strip().lower(): c
-                        for c in (get_contacts(session_id) or [])
-                        if isinstance(c, dict) and c.get("name")
-                    }
-                except Exception:
-                    pass
+        sched_ctx_local = preloaded_sched_ctx if isinstance(preloaded_sched_ctx, dict) else None
+        if sched_ctx_local is None and resolve_schedule and any(w.get("follow_npc_schedule") and w.get("target_npc") for w in raw_wp_dicts):
+            try:
+                sched_ctx_local = _preload_waypoint_schedule_ctx(int(session_id))
+            except Exception:
+                sched_ctx_local = None
         all_wps = [
             _hydrate_quest_waypoint_for_enrichment(
                 session_id,
                 wr,
-                session=sched_sess,
-                session_time=sched_time,
-                contacts_cache=sched_contacts,
                 resolve_schedule=resolve_schedule,
+                preloaded_sched_ctx=sched_ctx_local,
             )
             for wr in raw_wp_dicts
         ]
@@ -587,17 +652,7 @@ def get_session_quests(session_id: int, status: str = None) -> list[dict]:
         for w in wp_list
     ):
         try:
-            from .sessions import get_session, get_session_time
-            from .social import get_contacts
-            sched_ctx = {
-                "session": get_session(session_id),
-                "session_time": get_session_time(session_id),
-                "contacts_cache": {
-                    str(c.get("name") or "").strip().lower(): c
-                    for c in (get_contacts(session_id) or [])
-                    if isinstance(c, dict) and c.get("name")
-                },
-            }
+            sched_ctx = _preload_waypoint_schedule_ctx(session_id)
         except Exception:
             sched_ctx = None
     out: list[dict] = []
@@ -650,8 +705,6 @@ def set_session_chapter(session_id: int, chapter: int):
             "UPDATE sessions SET current_chapter=?, updated_at=? WHERE id=?",
             (chapter, time.time(), session_id)
         )
-
-update_session_chapter = set_session_chapter
 
 def get_session_chapter(session_id: int) -> int:
     session = db.get_session(session_id)
@@ -744,11 +797,11 @@ def update_quest_anomaly_blueprint(
         return cur.rowcount > 0
 
 def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]) -> dict:
-    quest = get_quest_by_id(session_id, quest_id)
-    if not quest or quest.get("reward_claimed"):
-        return {"already_claimed": True}
+    with UnitOfWork() as conn:
+        quest = get_quest_by_id(session_id, quest_id)
+        if not quest or quest.get("reward_claimed"):
+            return {"already_claimed": True}
 
-    with get_conn() as conn:
         claim_cur = conn.execute(
             "UPDATE quests SET reward_claimed=1, status='Completed', updated_at=? WHERE session_id=? AND quest_id=? AND COALESCE(reward_claimed, 0) = 0",
             (time.time(), session_id, quest_id),
@@ -756,190 +809,183 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
         if claim_cur.rowcount == 0:
             return {"already_claimed": True}
 
-    try:
-        from game_engine.quests import consume_quest_delivery_item_if_needed
-        consume_quest_delivery_item_if_needed(session_id, quest, party_user_ids)
-    except Exception:
-        pass
-
-    rxp = quest.get("reward_xp", 100)
-    rgold = quest.get("reward_gold", 25)
-    ritem = quest.get("reward_item") or ""
-    notes = str(quest.get("quest_notes") or "")
-    is_story_q = bool(quest.get("is_story_quest") or quest.get("quest_type") in ("Story Quest", "Main Quest"))
-
-    # Anomalous Incursions: Faction Reward Confiscation, 5-Tier Promotion Meter & Vault Log
-    anom_promotion_result = None
-    anom_reward_note = ""
-    scen_key = "fantasy"
-    try:
-        import scenario_data
-        sess_row = db.get_session(session_id) or {}
-        scen_key = str(sess_row.get("scenario") or "fantasy")
-        if scenario_data.is_anomalous_incursions_scenario(scen_key):
-            from mechanics.social.factions import (
-                faction_bonus_active,
-                get_anomalous_faction_state,
-                update_agent_promotion_reputation,
-            )
-            from mechanics.narrative.bounty import parse_anomalous_quest_board_source
-            lead_uid = party_user_ids[0] if party_user_ids else sess_row.get("host_user_id")
-            fac_st = get_anomalous_faction_state(session_id, user_id=lead_uid)
-            player_arch = str(fac_st.get("faction_archetype_key") or "public_agency")
-            board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
-            is_mandatory = ("mandatory_daily:1" in notes) or str(quest_id or "").upper().startswith("MAND-")
-
-            # 1. Reward & Loot Confiscation / Bonus Rules
-            if player_arch == "public_agency" and (board_src == "public_agency" or is_story_q or is_mandatory):
-                rgold = 0
-                ritem = ""
-                anom_reward_note = "Taxpayer Mandate: 0G / 0 Loot (salaried Public Agency duty)."
-            elif player_arch == "monastic_order" and (board_src == "monastic_order" or is_mandatory):
-                rgold = 0
-                anom_reward_note = "Sacred Shrine Duty: 0G bounty fee (recovered relics/spoils retained)."
-            elif player_arch == "clandestine_faction" and board_src == "clandestine_faction" and rgold > 0:
-                if faction_bonus_active("clandestine_faction", fac_st):
-                    rgold = max(1, int(round(rgold * 1.35)))
-                    anom_reward_note = "Black-Ledger Cut: +35% Hazard Gold bonus applied (loot & relics retained)."
-                else:
-                    anom_reward_note = "Black-Ledger Bonus Suspended (0 Rep — complete Mandatory Dispatch to restore +35% Hazard Gold)."
-
-            # 2. 5-Tier Agent Promotion Meter Progression
-            if player_arch != "freelancer":
-                earns_promo_rep = (
-                    is_mandatory
-                    or (board_src == player_arch)
-                    or is_story_q
-                )
-                if earns_promo_rep:
-                    rep_delta = 15 if (is_mandatory or is_story_q) else 10
-                    anom_promotion_result = update_agent_promotion_reputation(
-                        session_id=session_id,
-                        delta_rep=rep_delta,
-                        reason=f"Completed '{quest.get('title', 'Mission')}'",
-                        is_mandatory_completion=is_mandatory,
-                        user_id=lead_uid,
-                    )
-
-            # 3. Record Non-Hostile Entity / Altered Relic Containment to Vault Log (unless failed-forward via dire_cost)
-            q_type_low = str(quest.get("quest_type") or "").lower()
-            res_app_low = str(quest.get("resolution_approach") or "").lower()
-            if res_app_low != "dire_cost" and any(k in q_type_low for k in ("non-hostile", "non_hostile", "shepherd hunted entity", "poach live specimen", "resonance core", "altered item", "cursed relic", "relic_retrieval")):
-                from mechanics.world.anomalous_events import record_contained_anomaly_to_vault_log, extract_non_hostile_entity_name
-                is_nh_type = "non-hostile" in q_type_low or "non_hostile" in q_type_low
-                ent_disp = (
-                    extract_non_hostile_entity_name(quest)
-                    if is_nh_type
-                    else str(quest.get("required_item") or quest.get("title") or "Anomalous Specimen")
-                )
-                record_contained_anomaly_to_vault_log(
-                    session_id=session_id,
-                    entity_name=ent_disp,
-                    category_tag="cursed_relic" if ("relic" in q_type_low or "item" in q_type_low) else "spatial_warp",
-                    subtype="non_hostile_entity" if is_nh_type else "environmental_phenomenon",
-                    location=str(quest.get("client_location") or sess_row.get("current_location") or "Metropolitan Grid"),
-                    containment_note=f"Secured and logged upon completion of '{quest.get('title', 'Containment Operation')}'.",
-                    resolution_method="Bounty Containment Protocol",
-                    user_id=lead_uid,
-                    quest_id=str(quest_id or ""),
-                )
-    except Exception:
-        pass
-
-    levels_gained_by_user = {}
-    for uid in party_user_ids:
-        lvl_ups = db.add_xp(uid, rxp)
-        if lvl_ups:
-            levels_gained_by_user[uid] = lvl_ups
-
-        db.apply_hp_mp_delta(uid, 0, 0, rgold)
-
-        if ritem:
-            import scenario_data as _sd_q
-            if _sd_q.is_anomalous_incursions_scenario(scen_key):
-                try:
-                    from mechanics.combat.items.consumables.generators import generate_procedural_potion
-                    r_lower = str(ritem).lower()
-                    eff_tags = ["mana_restore"] if any(w in r_lower for w in ("stabilizer", "incense", "ampoule", "focus", "spirit")) else ["healing"]
-                    pot = generate_procedural_potion(tier=2, effect_tags=eff_tags, genre="anomalous_incursions")
-                    db.add_item(uid, ritem, pot.get("item_type", "Potion"), pot.get("effect", "Restores HP"), 1)
-                except Exception:
-                    db.add_item(uid, ritem, "Potion", "Restores 35 HP", 1)
-            else:
-                db.add_item(uid, ritem, "Quest", "Quest Reward", 1)
-
-    # Client Affinity Boost: +8 for personal commissions, +5 for standard quests
-    client_affinity_gain = 0
-    client_npc = quest.get("client_npc") or ""
-    notes = str(quest.get("quest_notes") or "")
-    if client_npc:
-        client_affinity_gain = 8 if (quest_id.startswith("COMM-") or "commission:1" in notes) else 5
         try:
-            db.update_relationship_score(session_id, client_npc, delta_score=client_affinity_gain)
+            from game_engine.quests import consume_quest_delivery_item_if_needed
+            consume_quest_delivery_item_if_needed(session_id, quest, party_user_ids)
         except Exception:
             pass
 
-    # Sponsoring Faction Rep Gain & Rival Faction Reputation Ripple (-5)
-    faction_rep_gained = 0
-    rival_rep_deltas = {}
-    if "faction:" in notes or "rival_faction:" in notes:
-        try:
-            parts = [p.strip() for p in re.split(r'[|\n]+', notes) if p.strip()]
-            faction_id = ""
-            riv_ids = []
-            for p in parts:
-                if p.startswith("faction:"):
-                    faction_id = p.split(":", 1)[1].strip()
-                elif p.startswith("rep_reward:"):
-                    faction_rep_gained = int(p.split(":", 1)[1].strip())
-                elif p.startswith("rival_faction:"):
-                    r_val = p.split(":", 1)[1].strip()
-                    if r_val and r_val not in riv_ids:
-                        riv_ids.append(r_val)
-            if faction_id:
-                if faction_rep_gained <= 0:
-                    faction_rep_gained = 10
-                db.upsert_faction(session_id, faction_id, delta_score=faction_rep_gained, notes="Faction bounty completed")
-                try:
-                    s_fac = db.get_faction(session_id, faction_id)
-                    if s_fac and s_fac.get("rival_faction_ids"):
-                        for r in s_fac["rival_faction_ids"]:
-                            if r and str(r).strip() not in riv_ids:
-                                riv_ids.append(str(r).strip())
-                except Exception:
-                    pass
+        rxp = quest.get("reward_xp", 100)
+        rgold = quest.get("reward_gold", 25)
+        ritem = quest.get("reward_item") or ""
+        notes = str(quest.get("quest_notes") or "")
+        is_story_q = bool(quest.get("is_story_quest") or quest.get("quest_type") in ("Story Quest", "Main Quest"))
 
-            for rid in riv_ids:
-                if rid and rid != faction_id:
+        # Anomalous Incursions: Faction Reward Confiscation, 5-Tier Promotion Meter & Vault Log
+        anom_promotion_result = None
+        anom_reward_note = ""
+        scen_key = "fantasy"
+        sess_row = db.get_session(session_id) or {}
+        try:
+            import scenario_data
+            scen_key = str(sess_row.get("scenario") or "fantasy")
+            if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                from mechanics.social.factions import (
+                    faction_bonus_active,
+                    get_anomalous_faction_state,
+                    update_agent_promotion_reputation,
+                )
+                from mechanics.narrative.bounty import parse_anomalous_quest_board_source
+                lead_uid = party_user_ids[0] if party_user_ids else sess_row.get("host_user_id")
+                fac_st = get_anomalous_faction_state(session_id, user_id=lead_uid)
+                player_arch = str(fac_st.get("faction_archetype_key") or "public_agency")
+                board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
+                is_mandatory = ("mandatory_daily:1" in notes) or str(quest_id or "").upper().startswith("MAND-")
+
+                # 1. Reward & Loot Confiscation / Bonus Rules
+                if player_arch == "public_agency" and (board_src == "public_agency" or is_story_q or is_mandatory):
+                    rgold = 0
+                    ritem = ""
+                    anom_reward_note = "Taxpayer Mandate: 0G / 0 Loot (salaried Public Agency duty)."
+                elif player_arch == "monastic_order" and (board_src == "monastic_order" or is_mandatory):
+                    rgold = 0
+                    anom_reward_note = "Sacred Shrine Duty: 0G bounty fee (recovered relics/spoils retained)."
+                elif player_arch == "clandestine_faction" and board_src == "clandestine_faction" and rgold > 0:
+                    if faction_bonus_active("clandestine_faction", fac_st):
+                        rgold = max(1, int(round(rgold * 1.35)))
+                        anom_reward_note = "Black-Ledger Cut: +35% Hazard Gold bonus applied (loot & relics retained)."
+                    else:
+                        anom_reward_note = "Black-Ledger Bonus Suspended (0 Rep — complete Mandatory Dispatch to restore +35% Hazard Gold)."
+
+                # 2. 5-Tier Agent Promotion Meter Progression
+                if player_arch != "freelancer":
+                    earns_promo_rep = (
+                        is_mandatory
+                        or (board_src == player_arch)
+                        or is_story_q
+                    )
+                    if earns_promo_rep:
+                        rep_delta = 15 if (is_mandatory or is_story_q) else 10
+                        anom_promotion_result = update_agent_promotion_reputation(
+                            session_id=session_id,
+                            delta_rep=rep_delta,
+                            reason=f"Completed '{quest.get('title', 'Mission')}'",
+                            is_mandatory_completion=is_mandatory,
+                            user_id=lead_uid,
+                        )
+
+                # 3. Record Non-Hostile Entity / Altered Relic Containment to Vault Log (unless failed-forward via dire_cost)
+                q_type_low = str(quest.get("quest_type") or "").lower()
+                res_app_low = str(quest.get("resolution_approach") or "").lower()
+                if res_app_low != "dire_cost" and any(k in q_type_low for k in ("non-hostile", "non_hostile", "shepherd hunted entity", "poach live specimen", "resonance core", "altered item", "cursed relic", "relic_retrieval")):
+                    from mechanics.world.anomalous_events import record_contained_anomaly_to_vault_log, extract_non_hostile_entity_name
+                    is_nh_type = "non-hostile" in q_type_low or "non_hostile" in q_type_low
+                    ent_disp = (
+                        extract_non_hostile_entity_name(quest)
+                        if is_nh_type
+                        else str(quest.get("required_item") or quest.get("title") or "Anomalous Specimen")
+                    )
+                    record_contained_anomaly_to_vault_log(
+                        session_id=session_id,
+                        entity_name=ent_disp,
+                        category_tag="cursed_relic" if ("relic" in q_type_low or "item" in q_type_low) else "spatial_warp",
+                        subtype="non_hostile_entity" if is_nh_type else "environmental_phenomenon",
+                        location=str(quest.get("client_location") or sess_row.get("current_location") or "Metropolitan Grid"),
+                        containment_note=f"Secured and logged upon completion of '{quest.get('title', 'Containment Operation')}'.",
+                        resolution_method="Bounty Containment Protocol",
+                        user_id=lead_uid,
+                        quest_id=str(quest_id or ""),
+                    )
+        except Exception:
+            pass
+
+        levels_gained_by_user = {}
+        for uid in party_user_ids:
+            lvl_ups = db.add_xp(uid, rxp)
+            if lvl_ups:
+                levels_gained_by_user[uid] = lvl_ups
+
+            db.apply_hp_mp_delta(uid, 0, 0, rgold)
+
+            if ritem:
+                import scenario_data as _sd_q
+                if _sd_q.is_anomalous_incursions_scenario(scen_key):
                     try:
-                        db.upsert_faction(session_id, rid, delta_score=-5, notes=f"Rival operation '{quest.get('title')}' completed")
-                        rival_rep_deltas[rid] = -5
+                        from mechanics.combat.items.consumables.generators import generate_procedural_potion
+                        r_lower = str(ritem).lower()
+                        eff_tags = ["mana_restore"] if any(w in r_lower for w in ("stabilizer", "incense", "ampoule", "focus", "spirit")) else ["healing"]
+                        pot = generate_procedural_potion(tier=2, effect_tags=eff_tags, genre="anomalous_incursions")
+                        db.add_item(uid, ritem, pot.get("item_type", "Potion"), pot.get("effect", "Restores HP"), 1)
+                    except Exception:
+                        db.add_item(uid, ritem, "Potion", "Restores 35 HP", 1)
+                else:
+                    db.add_item(uid, ritem, "Quest", "Quest Reward", 1)
+
+        # Client Affinity Boost: +8 for personal commissions, +5 for standard quests
+        client_affinity_gain = 0
+        client_npc = quest.get("client_npc") or ""
+        notes = str(quest.get("quest_notes") or "")
+        if client_npc:
+            client_affinity_gain = 8 if (quest_id.startswith("COMM-") or "commission:1" in notes) else 5
+            try:
+                db.update_relationship_score(session_id, client_npc, delta_score=client_affinity_gain)
+            except Exception:
+                pass
+
+        # Sponsoring Faction Rep Gain & Rival Faction Reputation Ripple (-5)
+        faction_rep_gained = 0
+        rival_rep_deltas = {}
+        if "faction:" in notes or "rival_faction:" in notes:
+            try:
+                parts = [p.strip() for p in re.split(r'[|\n]+', notes) if p.strip()]
+                faction_id = ""
+                riv_ids = []
+                for p in parts:
+                    if p.startswith("faction:"):
+                        faction_id = p.split(":", 1)[1].strip()
+                    elif p.startswith("rep_reward:"):
+                        faction_rep_gained = int(p.split(":", 1)[1].strip())
+                    elif p.startswith("rival_faction:"):
+                        r_val = p.split(":", 1)[1].strip()
+                        if r_val and r_val not in riv_ids:
+                            riv_ids.append(r_val)
+                if faction_id:
+                    if faction_rep_gained <= 0:
+                        faction_rep_gained = 10
+                    db.upsert_faction(session_id, faction_id, delta_score=faction_rep_gained, notes="Faction bounty completed")
+                    try:
+                        s_fac = db.get_faction(session_id, faction_id)
+                        if s_fac and s_fac.get("rival_faction_ids"):
+                            for r in s_fac["rival_faction_ids"]:
+                                if r and str(r).strip() not in riv_ids:
+                                    riv_ids.append(str(r).strip())
                     except Exception:
                         pass
-        except Exception:
-            pass
 
+                for rid in riv_ids:
+                    if rid and rid != faction_id:
+                        try:
+                            db.upsert_faction(session_id, rid, delta_score=-5, notes=f"Rival operation '{quest.get('title')}' completed")
+                            rival_rep_deltas[rid] = -5
+                        except Exception:
+                            pass
+            except Exception:
+                pass
 
-    with get_conn() as conn:
-        conn.execute(
-            "UPDATE quests SET reward_claimed=1, status='Completed', updated_at=? WHERE session_id=? AND quest_id=?",
-            (time.time(), session_id, quest_id)
-        )
-
-    dos_cl = get_quest_dossier(session_id, quest_id)
-    if dos_cl:
-        try:
-            eff_turn_cl = int(db.infer_session_turn(db.get_session(session_id) or {}))
-            prev_status_cl = str(quest.get("status") or "Active")
-            prev_tier_cl = str(dos_cl.get("outcome_tier") or "")
-            eff_tier_cl = prev_tier_cl or "clean_success"
-            if prev_status_cl != "Completed":
-                db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "quest_status", prev_status_cl, "Completed")
-            if not prev_tier_cl:
-                db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "outcome_tier", prev_tier_cl, eff_tier_cl)
-            db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier=eff_tier_cl)
-        except Exception:
-            pass
+        dos_cl = get_quest_dossier(session_id, quest_id)
+        if dos_cl:
+            try:
+                eff_turn_cl = int(db.infer_session_turn(sess_row))
+                prev_status_cl = str(quest.get("status") or "Active")
+                prev_tier_cl = str(dos_cl.get("outcome_tier") or "")
+                eff_tier_cl = prev_tier_cl or "clean_success"
+                if prev_status_cl != "Completed":
+                    db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "quest_status", prev_status_cl, "Completed")
+                if not prev_tier_cl:
+                    db.append_dossier_state_event(session_id, quest_id, eff_turn_cl, "outcome_tier", prev_tier_cl, eff_tier_cl)
+                db.upsert_quest_dossier(session_id, quest_id, engaged_flag=1, outcome_tier=eff_tier_cl)
+            except Exception:
+                pass
 
     return {
         "claimed": True,
@@ -1156,12 +1202,6 @@ def verify_session_clue(clue_id: int) -> bool:
         cur = conn.execute("UPDATE session_clues SET is_verified=1, updated_at=? WHERE id=?", (time.time(), clue_id))
         return cur.rowcount > 0
 
-def delete_session_clue(clue_id: int) -> bool:
-    """Deletes an evidence record by ID."""
-    with get_conn() as conn:
-        cur = conn.execute("DELETE FROM session_clues WHERE id=?", (clue_id,))
-        return cur.rowcount > 0
-
 def apply_caseboard_breakthrough_to_quests(
     session_id: int,
     clue_ids: list[int],
@@ -1176,23 +1216,36 @@ def apply_caseboard_breakthrough_to_quests(
     matched_qids = []
     advanced_qids = []
 
-    parent_clues = []
-    for pid in clue_ids:
-        cl = get_session_clue_by_id(pid)
-        if cl:
-            parent_clues.append(cl)
+    clean_pids: list[int] = []
+    for pid in (clue_ids or []):
+        try:
+            clean_pids.append(int(pid))
+        except (TypeError, ValueError):
+            pass
 
-    parent_qids = {str(c.get("quest_id")).strip() for c in parent_clues if c.get("quest_id")}
-    parent_npcs = {str(c.get("linked_npc")).strip().lower() for c in parent_clues if c.get("linked_npc")}
+    parent_qids: set[str] = set()
+    parent_npcs: set[str] = set()
 
     combined_text = f"{title} {lead_text}".lower()
     text_words = set(re.findall(r'\b[a-z]{4,}\b', combined_text)) - {
         "this", "that", "with", "from", "have", "been", "were", "what", "some", "discovered", "evidence"
     }
 
-    active_quests = get_session_quests(session_id, status="Active") or []
-    wps_by_key: dict[tuple[str, Any], list[dict]] = {}
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
+        if clean_pids:
+            placeholders = ",".join("?" for _ in clean_pids)
+            p_rows = conn.execute(
+                f"SELECT quest_id, linked_npc FROM session_clues WHERE session_id=? AND id IN ({placeholders})",
+                (session_id, *clean_pids),
+            ).fetchall()
+            for cr in p_rows:
+                if cr["quest_id"] and str(cr["quest_id"]).strip():
+                    parent_qids.add(str(cr["quest_id"]).strip())
+                if cr["linked_npc"] and str(cr["linked_npc"]).strip():
+                    parent_npcs.add(str(cr["linked_npc"]).strip().lower())
+
+        active_quests = get_session_quests(session_id, status="Active") or []
+        wps_by_key: dict[tuple[str, Any], list[dict]] = {}
         wp_all_rows = conn.execute(
             "SELECT * FROM quest_waypoints WHERE session_id=? ORDER BY stage_index ASC",
             (session_id,),
@@ -1201,50 +1254,50 @@ def apply_caseboard_breakthrough_to_quests(
             wd = dict(wr)
             wps_by_key.setdefault((str(wd.get("quest_id") or ""), wd.get("sub_obj_id")), []).append(wd)
 
-    for q in active_quests:
-        qid = q.get("quest_id", "")
-        if not qid:
-            continue
-        all_wps = wps_by_key.get((qid, None), [])
-        active_wp = next((w for w in all_wps if w.get("status") == "active"), None)
+        for q in active_quests:
+            qid = q.get("quest_id", "")
+            if not qid:
+                continue
+            all_wps = wps_by_key.get((qid, None), [])
+            active_wp = next((w for w in all_wps if w.get("status") == "active"), None)
 
-        is_match = False
-        if qid in parent_qids:
-            is_match = True
-        elif parent_npcs and any(str(w.get("target_npc", "")).strip().lower() in parent_npcs for w in all_wps):
-            is_match = True
-        elif parent_npcs and (str(q.get("client_npc", "")).strip().lower() in parent_npcs or str(q.get("target_npc", "")).strip().lower() in parent_npcs):
-            is_match = True
-        elif q.get("blueprint_id") in ("INVESTIGATION", "SOCIAL_MANIPULATION") or q.get("is_story_quest"):
-            q_text = f"{q.get('title', '')} {q.get('objective', '')}".lower()
-            q_words = set(re.findall(r'\b[a-z]{4,}\b', q_text))
-            if len(text_words & q_words) >= 1:
+            is_match = False
+            if qid in parent_qids:
                 is_match = True
+            elif parent_npcs and any(str(w.get("target_npc", "")).strip().lower() in parent_npcs for w in all_wps):
+                is_match = True
+            elif parent_npcs and (str(q.get("client_npc", "")).strip().lower() in parent_npcs or str(q.get("target_npc", "")).strip().lower() in parent_npcs):
+                is_match = True
+            elif q.get("blueprint_id") in ("INVESTIGATION", "SOCIAL_MANIPULATION") or q.get("is_story_quest"):
+                q_text = f"{q.get('title', '')} {q.get('objective', '')}".lower()
+                q_words = set(re.findall(r'\b[a-z]{4,}\b', q_text))
+                if len(text_words & q_words) >= 1:
+                    is_match = True
 
-        if is_match:
-            matched_qids.append(qid)
-            append_quest_note_flag_in_db(session_id, qid, "caseboard_breakthrough", "1")
+            if is_match:
+                matched_qids.append(qid)
+                append_quest_note_flag_in_db(session_id, qid, "caseboard_breakthrough", "1")
 
-            # Auto-advance Stage 1 scouting/investigation to Stage 2 Confrontation
-            if active_wp and int(active_wp.get("stage_index", 1)) == 1 and len(all_wps) >= 2:
-                advance_waypoint(session_id, qid, 1, None)
-                advanced_qids.append(qid)
+                # Auto-advance Stage 1 scouting/investigation to Stage 2 Confrontation
+                if active_wp and int(active_wp.get("stage_index", 1)) == 1 and len(all_wps) >= 2:
+                    advance_waypoint(session_id, qid, 1, None)
+                    advanced_qids.append(qid)
 
-            # Check sub-objectives if story quest
-            sub_objs = q.get("sub_objectives") or []
-            if isinstance(sub_objs, list) and sub_objs:
-                for so in sub_objs:
-                    if not isinstance(so, dict) or so.get("completed"):
-                        continue
-                    so_id = so.get("id")
-                    if so_id is None:
-                        continue
-                    so_all_wps = wps_by_key.get((qid, so_id), [])
-                    so_wp = next((w for w in so_all_wps if w.get("status") == "active"), None)
-                    if so_wp and int(so_wp.get("stage_index", 1)) == 1 and len(so_all_wps) >= 2:
-                        advance_waypoint(session_id, qid, 1, so_id)
-                        if qid not in advanced_qids:
-                            advanced_qids.append(qid)
+                # Check sub-objectives if story quest
+                sub_objs = q.get("sub_objectives") or []
+                if isinstance(sub_objs, list) and sub_objs:
+                    for so in sub_objs:
+                        if not isinstance(so, dict) or so.get("completed"):
+                            continue
+                        so_id = so.get("id")
+                        if so_id is None:
+                            continue
+                        so_all_wps = wps_by_key.get((qid, so_id), [])
+                        so_wp = next((w for w in so_all_wps if w.get("status") == "active"), None)
+                        if so_wp and int(so_wp.get("stage_index", 1)) == 1 and len(so_all_wps) >= 2:
+                            advance_waypoint(session_id, qid, 1, so_id)
+                            if qid not in advanced_qids:
+                                advanced_qids.append(qid)
 
     return {"matched_quest_ids": matched_qids, "advanced_quest_ids": advanced_qids}
 
@@ -1300,7 +1353,8 @@ def save_quest_waypoints(session_id: int, quest_id: str, waypoints: list, sub_ob
     if not waypoints:
         return
     now = time.time()
-    with get_conn() as conn:
+    node_id_cache: dict[str, str] = {}
+    with UnitOfWork() as conn:
         # Clear existing waypoints for this quest+sub_obj combo first
         if sub_obj_id is None:
             conn.execute(
@@ -1312,6 +1366,7 @@ def save_quest_waypoints(session_id: int, quest_id: str, waypoints: list, sub_ob
                 "DELETE FROM quest_waypoints WHERE session_id=? AND quest_id=? AND sub_obj_id=?",
                 (session_id, quest_id, sub_obj_id)
             )
+        rows_to_insert: list[tuple[Any, ...]] = []
         for i, wp in enumerate(waypoints):
             if not isinstance(wp, dict):
                 continue
@@ -1320,17 +1375,38 @@ def save_quest_waypoints(session_id: int, quest_id: str, waypoints: list, sub_ob
             target_loc = str(wp.get("target_location", ""))[:200]
             target_node = str(wp.get("target_node_id", "") or "").strip()
             if not target_node and target_loc:
-                try:
-                    target_node = db.resolve_node_id_from_location(session_id, target_loc) or ""
-                except Exception:
-                    target_node = ""
+                if target_loc in node_id_cache:
+                    target_node = node_id_cache[target_loc]
+                else:
+                    try:
+                        target_node = db.resolve_node_id_from_location(session_id, target_loc) or ""
+                    except Exception:
+                        target_node = ""
+                    node_id_cache[target_loc] = target_node
             follow_sched = int(bool(wp.get("follow_npc_schedule", 1 if wp.get("target_npc") else 0)))
             req_item = str(wp.get("required_item", "") or "")[:100]
             phases_val = wp.get("valid_time_phases") or wp.get("valid_time_phases_json") or []
             phases_str = json.dumps(phases_val) if isinstance(phases_val, list) else str(phases_val or "[]")
             appr_val = wp.get("approaches") or wp.get("approaches_json") or []
             appr_str = json.dumps(appr_val) if isinstance(appr_val, list) else str(appr_val or "[]")
-            conn.execute(
+            rows_to_insert.append((
+                session_id, quest_id, sub_obj_id, stage_idx,
+                str(wp.get("stage_label", ""))[:200],
+                target_loc,
+                target_node,
+                str(wp.get("target_npc", "") or "")[:100],
+                str(wp.get("completion_trigger", "arrival")),
+                int(wp.get("resource_target", 0)),
+                0,  # resource_collected always starts at 0
+                status,
+                follow_sched,
+                req_item,
+                phases_str,
+                appr_str,
+                now, now,
+            ))
+        if rows_to_insert:
+            conn.executemany(
                 """INSERT OR REPLACE INTO quest_waypoints
                    (session_id, quest_id, sub_obj_id, stage_index, stage_label,
                     target_location, target_node_id, target_npc, completion_trigger,
@@ -1338,22 +1414,7 @@ def save_quest_waypoints(session_id: int, quest_id: str, waypoints: list, sub_ob
                     follow_npc_schedule, required_item, valid_time_phases_json, approaches_json,
                     created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    session_id, quest_id, sub_obj_id, stage_idx,
-                    str(wp.get("stage_label", ""))[:200],
-                    target_loc,
-                    target_node,
-                    str(wp.get("target_npc", "") or "")[:100],
-                    str(wp.get("completion_trigger", "arrival")),
-                    int(wp.get("resource_target", 0)),
-                    0,  # resource_collected always starts at 0
-                    status,
-                    follow_sched,
-                    req_item,
-                    phases_str,
-                    appr_str,
-                    now, now
-                )
+                rows_to_insert,
             )
 
 def _hydrate_waypoint_row(row) -> dict | None:
@@ -1683,8 +1744,6 @@ def unlock_climax_waypoint(
         return _run(c)
 
 
-promote_locked_quest_waypoints = unlock_climax_waypoint
-
 def update_waypoint_resource_progress(session_id: int, quest_id: str, stage_index: int, delta: int, sub_obj_id: int | None = None) -> dict:
     """Increment resource_collected for a gathering waypoint.
     Returns {collected, target, complete} after update.
@@ -1733,22 +1792,12 @@ def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool 
             (session_id,)
         ).fetchall()
         row_dicts = [dict(r) for r in rows]
-        sched_sess = None
-        sched_time = None
-        sched_contacts = None
+        sched_ctx: dict[str, Any] = {}
         if resolve_schedule and any(rd.get("follow_npc_schedule") and rd.get("target_npc") for rd in row_dicts):
             try:
-                from .sessions import get_session, get_session_time
-                from .social import get_contacts
-                sched_sess = get_session(session_id)
-                sched_time = get_session_time(session_id)
-                sched_contacts = {
-                    str(c.get("name") or "").strip().lower(): c
-                    for c in (get_contacts(session_id) or [])
-                    if isinstance(c, dict) and c.get("name")
-                }
+                sched_ctx = _preload_waypoint_schedule_ctx(session_id)
             except Exception:
-                pass
+                sched_ctx = {}
         result = []
         for d in row_dicts:
             try:
@@ -1770,9 +1819,17 @@ def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool 
                     eff_loc = resolve_effective_waypoint_location(
                         session_id,
                         d,
-                        session=sched_sess,
-                        session_time=sched_time,
-                        contacts_cache=sched_contacts,
+                        session=sched_ctx.get("session"),
+                        session_time=sched_ctx.get("session_time"),
+                        contacts_cache=sched_ctx.get("contacts_cache"),
+                        roster_by_key=sched_ctx.get("roster_by_key"),
+                        nodes_by_id=sched_ctx.get("nodes_by_id"),
+                        active_events=sched_ctx.get("active_events"),
+                        primary_property=sched_ctx.get("primary_property"),
+                        primary_property_loaded=bool(sched_ctx.get("primary_property_loaded", False)),
+                        contacts=sched_ctx.get("contacts"),
+                        person_ties=sched_ctx.get("person_ties"),
+                        active_commitments=sched_ctx.get("active_commitments"),
                     )
                     if eff_loc:
                         d["live_scheduled_location"] = _normalize_loc_arrow(eff_loc)
