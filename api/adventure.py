@@ -18,7 +18,6 @@ from mechanics.combat.loadouts import ensure_combatant_loadout
 from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
 from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
 from mechanics.social.races import roll_scenario_npc_race
-from mechanics.social.relationships import is_contact_eligible
 from mechanics.world import evaluate_shop_staff_availability, resolve_scene_merchant_ui_state
 from services.examine_service import invalidate_examine_cache
 from services.turn_service import TurnService
@@ -2543,92 +2542,14 @@ async def _execute_opening_retry_locked(
                         logger.debug("Ch.1 retry eager ChapterPlan apply skipped: %s", _apply_retry_err)
             else:
                 scene = await game_engine.generate_opening_scene(session, party)
-            if getattr(scene, "model_dump", None):
-                scene = scene.model_dump(exclude_unset=False)
-            if not isinstance(scene, dict):
-                scene = {}
-            await adb(game_engine.apply_quest_update, req.session_id, scene)
-
-            raw_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                scene, session=session
-            )
-            location = scene.get("location") or session.get("current_location", "")
-            _retry_partners = (
-                [partner_arg]
-                if isinstance(partner_arg, str) and partner_arg.strip()
-                else (list(partner_arg) if isinstance(partner_arg, list) else [])
-            )
-            raw_choices = await adb(
-                game_engine.build_hybrid_turn_choices,
-                raw_choices,
-                session=session,
-                party=party,
-                result={
-                    **(scene if isinstance(scene, dict) else {}),
-                    "location": location,
-                    "npcs_present": npcs_arg,
-                    "dialogue_partners": _retry_partners,
-                },
-            )
-            init_node_id = await adb(db.resolve_node_id_from_location, req.session_id, location)
-            await adb(
-                db.save_session_scene,
+            await TurnService.commit_opening_scene(
                 req.session_id,
-                scene_title,
-                next_narrative,
-                raw_choices,
-                history=[],
-                location=location,
-                nearby_enemies=scene.get("nearby_enemies", []),
-                current_npcs=npcs_arg,
-                dialogue_partner=partner_arg,
-                current_node_id=init_node_id,
-                focal_point=scene.get("focal_point", ""),
+                session,
+                party,
+                scene,
+                char_row=actor_char if isinstance(actor_char, dict) else None,
+                scenario_key=_retry_scen,
             )
-            char_id = actor_char.get("id", 0) if isinstance(actor_char, dict) else 0
-            enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
-            for npc in (npcs_arg or []):
-                n_name = game_engine._get_npc_name(npc)
-                if n_name and n_name.lower() not in enemy_names:
-                    b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
-                    if isinstance(npc, dict):
-                        if "role" in npc and not b_info.get("role"):
-                            b_info["role"] = npc.get("role", "")
-                        if "description" in npc and not b_info.get("description"):
-                            b_info["description"] = npc.get("description", "")
-                    if not b_info.get("location"):
-                        b_info["location"] = location
-                    b_info["met_in_person"] = True
-                    if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=session.get("scenario", "fantasy"), session_id=req.session_id):
-                        await adb(db.upsert_contact,
-                            session_id=req.session_id,
-                            character_id=char_id,
-                            npc_id=n_name,
-                            name=n_name,
-                            basic_info=b_info,
-                            delta_score=0,
-                            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
-                            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
-                            race=npc.get("race", "") if isinstance(npc, dict) else "",
-                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
-                        )
-                    else:
-                        # Non-student characters are story figures only; track basic info in lorebook
-                        m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
-                        if not m_val and isinstance(b_info, dict):
-                            m_val = b_info.get("mannerisms", "")
-                        await adb(db.upsert_lorebook_entity,
-                            session_id=req.session_id,
-                            entity_type="person",
-                            name=n_name,
-                            description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
-                            traits=npc.get("traits") if isinstance(npc, dict) else [],
-                            mannerisms=m_val,
-                            race=npc.get("race", "") if isinstance(npc, dict) else "",
-                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
-                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                        )
         except Exception as e:
             logger.error(f"Error retrying opening scene: {e}", exc_info=True)
             msg = f"Failed to retry opening scene: {str(e)}"

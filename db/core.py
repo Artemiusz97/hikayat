@@ -3005,17 +3005,35 @@ def _migrate_combat_evolution_v53(conn: sqlite3.Connection) -> int:
                     snap = json.loads(snap_str) if isinstance(snap_str, str) else snap_str
                     if isinstance(snap, dict):
                         changed = False
-                        # Normalize characters in snapshot (supports list under "characters" or dict under "character_state")
+                        # Normalize characters in snapshot (supports list under "characters",
+                        # keyed dict {uid: char_dict}, or flat character dict under "character_state")
                         char_containers = []
                         if isinstance(snap.get("characters"), list):
                             char_containers.extend(snap["characters"])
-                        if isinstance(snap.get("character_state"), dict):
-                            char_containers.extend(snap["character_state"].values())
+                        cs_val = snap.get("character_state")
+                        if isinstance(cs_val, dict):
+                            if "status_effects" in cs_val:
+                                char_containers.append(cs_val)
+                            else:
+                                char_containers.extend(
+                                    v for v in cs_val.values() if isinstance(v, dict)
+                                )
                         for ch in char_containers:
                             if isinstance(ch, dict) and "status_effects" in ch:
-                                cur = ch["status_effects"]
-                                if isinstance(cur, list) and any(isinstance(x, str) for x in cur):
-                                    ch["status_effects"] = [normalize_status_effect(x) for x in cur]
+                                raw_cur = ch["status_effects"]
+                                if isinstance(raw_cur, str):
+                                    if raw_cur.strip():
+                                        try:
+                                            parsed_cur = json.loads(raw_cur)
+                                        except Exception:
+                                            parsed_cur = None
+                                        if isinstance(parsed_cur, list) and any(isinstance(x, str) for x in parsed_cur):
+                                            ch["status_effects"] = json.dumps(
+                                                [normalize_status_effect(x) for x in parsed_cur]
+                                            )
+                                            changed = True
+                                elif isinstance(raw_cur, list) and any(isinstance(x, str) for x in raw_cur):
+                                    ch["status_effects"] = [normalize_status_effect(x) for x in raw_cur]
                                     changed = True
                         # Normalize session in snapshot
                         sess = snap.get("session")
@@ -4341,6 +4359,39 @@ def is_discord_snowflake(user_id: Any) -> bool:
         return val >= DISCORD_SNOWFLAKE_MIN
     except (ValueError, TypeError):
         return False
+
+
+def _find_anomalous_agent_entry(
+    conn: sqlite3.Connection,
+    session_id: int,
+    name_low: str,
+    npc_slug: str,
+) -> dict[str, Any] | None:
+    """Looks up an anomalous special-agent entry from `sessions.extra_json['anomalous_agent_roster']`."""
+    if not session_id or (not name_low and not npc_slug):
+        return None
+    s_row = conn.execute("SELECT extra_json FROM sessions WHERE id=?", (session_id,)).fetchone()
+    if not s_row or not s_row["extra_json"]:
+        return None
+    try:
+        extra_data = json.loads(s_row["extra_json"]) if isinstance(s_row["extra_json"], str) else s_row["extra_json"]
+    except Exception:
+        return None
+    if not isinstance(extra_data, dict):
+        return None
+    raw_ar = extra_data.get("anomalous_agent_roster")
+    if not isinstance(raw_ar, list):
+        return None
+    for ar in raw_ar:
+        if not isinstance(ar, dict):
+            continue
+        ar_name = str(ar.get("name") or "").strip().lower()
+        ar_nid = str(ar.get("npc_id") or "").strip().lower()
+        if (name_low and (ar_name == name_low or ar_nid == name_low)) or (
+            npc_slug and (ar_nid == npc_slug or ar_name == npc_slug)
+        ):
+            return ar
+    return None
 
 
 def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir: str = "backups") -> str:

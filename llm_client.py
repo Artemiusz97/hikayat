@@ -38,12 +38,12 @@ log = logging.getLogger(__name__)
 
 _llm_timeout = httpx.Timeout(LLM_REQUEST_TIMEOUT, connect=60.0, read=LLM_REQUEST_TIMEOUT, write=60.0, pool=60.0)
 _http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
-_client = AsyncOpenAI(api_key=LLM_API_KEY, base_url=LLM_BASE_URL, max_retries=0, http_client=_http_client, timeout=_llm_timeout)
+_client = AsyncOpenAI(api_key=LLM_API_KEY or "hikayat-unconfigured", base_url=LLM_BASE_URL, max_retries=0, http_client=_http_client, timeout=_llm_timeout)
 
 # Optional second client used exclusively for NSFW scenarios.
 # Falls back to _client / LLM_MODEL when NSFW credentials are not configured.
 _embed_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
-_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY, base_url=EMBEDDING_BASE_URL, max_retries=0, http_client=_embed_http_client, timeout=_llm_timeout)
+_embed_client = AsyncOpenAI(api_key=EMBEDDING_API_KEY or LLM_API_KEY or "hikayat-unconfigured", base_url=EMBEDDING_BASE_URL, max_retries=0, http_client=_embed_http_client, timeout=_llm_timeout)
 
 _nsfw_http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
 _nsfw_client: AsyncOpenAI | None = (

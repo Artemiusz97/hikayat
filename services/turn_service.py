@@ -22,7 +22,6 @@ import llm_client
 import scenario_data
 from character_data import XP_REWARDS
 from mechanics.combat.merchant import apply_merchant_encounter_result
-from mechanics.social.relationships import is_contact_eligible, should_promote_roster_npc_to_contact
 from services import crash_capture
 
 log = logging.getLogger(__name__)
@@ -382,143 +381,15 @@ class TurnService:
                     scene = await game_engine.generate_opening_scene(session, party)
             else:
                 scene = await game_engine.generate_opening_scene(session, party)
-            await adb(game_engine.apply_quest_update, session_id, scene)
-            if isinstance(scene, dict) and "merchant_encounter" in scene:
-                await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
-            raw_choices, narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                scene, session=session
-            )
-            _open_partners = (
-                [partner_arg]
-                if isinstance(partner_arg, str) and partner_arg.strip()
-                else (list(partner_arg) if isinstance(partner_arg, list) else [])
-            )
-            raw_choices = await adb(
-                game_engine.build_hybrid_turn_choices,
-                raw_choices,
-                session=session,
-                party=party,
-                result={
-                    **(scene if isinstance(scene, dict) else {}),
-                    "location": scene.get("location") or session.get("current_location") or "",
-                    "npcs_present": npcs_arg,
-                    "dialogue_partners": _open_partners,
-                },
-            )
-            await adb(
-                db.save_session_scene,
+            committed = await TurnService.commit_opening_scene(
                 session_id,
-                scene_title,
-                narrative,
-                raw_choices,
-                [],
-                location=scene.get("location") or session.get("current_location"),
-                nearby_enemies=scene.get("nearby_enemies"),
-                current_npcs=npcs_arg,
-                dialogue_partner=partner_arg,
-                current_node_id=scene.get("current_node_id") or session.get("current_node_id"),
+                session,
+                party,
+                scene,
+                char_row=char_row,
+                scenario_key=scenario_key,
             )
-            char_id = char_row["id"] if char_row else 0
-            enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
-            party_npc_rows = await adb(db.get_session_party_npcs, session_id) or []
-            open_party_names = {
-                str(p.get("name") or "").strip().lower()
-                for p in party_npc_rows
-                if isinstance(p, dict) and p.get("name")
-            }
-            for sc_p in (session.get("party") or []):
-                sp_obj = sc_p[0] if isinstance(sc_p, (list, tuple)) and sc_p else sc_p
-                if isinstance(sp_obj, dict) and sp_obj.get("name") and not sp_obj.get("user_id"):
-                    open_party_names.add(str(sp_obj["name"]).strip().lower())
-            open_party_names.discard(str(char_row.get("name") or "").strip().lower() if char_row else "")
-
-            for npc in (npcs_arg or []):
-                n_name = game_engine._get_npc_name(npc)
-                if n_name and n_name.lower() not in enemy_names:
-                    b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
-                    if isinstance(npc, dict):
-                        if "role" in npc and not b_info.get("role"):
-                            b_info["role"] = npc.get("role", "")
-                        if "description" in npc and not b_info.get("description"):
-                            b_info["description"] = npc.get("description", "")
-                    if not b_info.get("location"):
-                        b_info["location"] = scene.get("location") or session.get("current_location", "")
-                    b_info["met_in_person"] = True
-
-                    existing_wr = await adb(db.get_world_roster_npc, session_id, n_name, include_legacy_rosters=False)
-                    roster_payload = {
-                        "name": n_name,
-                        "role": b_info.get("role", "") or (npc.get("role", "") if isinstance(npc, dict) else ""),
-                        "gender": npc.get("gender", "") if isinstance(npc, dict) else "",
-                        "race": npc.get("race", "") if isinstance(npc, dict) else "",
-                        "traits": (npc.get("traits") or []) if isinstance(npc, dict) else [],
-                        "appearance": (npc.get("appearance") or {}) if isinstance(npc, dict) else {},
-                        "origin": (existing_wr.get("origin") if existing_wr else None) or (npc.get("origin") if isinstance(npc, dict) and npc.get("origin") else "venue_seed"),
-                        "tier_status": (existing_wr.get("tier_status") if existing_wr else "acquaintance"),
-                        "met_in_person": True,
-                        "discovered_turn": 0,
-                        "basic_info": b_info,
-                    }
-                    await adb(db.upsert_world_roster_npc, session_id, roster_payload, turn_number=0)
-
-                    m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
-                    if not m_val and isinstance(b_info, dict):
-                        m_val = b_info.get("mannerisms", "")
-                    await adb(
-                        db.upsert_lorebook_entity,
-                        session_id=session_id,
-                        entity_type="person",
-                        name=n_name,
-                        description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
-                        traits=npc.get("traits") if isinstance(npc, dict) else [],
-                        mannerisms=m_val,
-                        race=npc.get("race", "") if isinstance(npc, dict) else "",
-                        appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
-                        gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                    )
-
-                    existing_c = await adb(db.get_contact, session_id, n_name, char_id)
-                    hh_role = str(
-                        (existing_c.get("household_role") if existing_c else "")
-                        or (npc.get("household_role") if isinstance(npc, dict) else "")
-                        or ""
-                    ).strip().lower()
-                    is_family = bool(
-                        hh_role in ("father", "mother", "parent", "brother", "sister", "sibling", "twin", "spouse", "husband", "wife")
-                        or b_info.get("is_adult_family")
-                        or b_info.get("cohabiting_family") is True
-                        or (existing_c and ((existing_c.get("basic_info") or {}).get("is_adult_family") or (existing_c.get("basic_info") or {}).get("cohabiting_family") is True))
-                        or (existing_wr and str(existing_wr.get("origin") or "").lower() == "household")
-                    )
-                    in_party = n_name.lower() in open_party_names
-                    eligible = is_family or in_party or is_contact_eligible(
-                        name=npc if isinstance(npc, dict) else n_name,
-                        role=b_info.get("role", ""),
-                        description=b_info.get("description", ""),
-                        scenario=scenario_key,
-                        session_id=session_id,
-                    )
-                    if eligible:
-                        qualifies, promo_reason = should_promote_roster_npc_to_contact(
-                            npc if isinstance(npc, dict) else {"name": n_name, "basic_info": b_info},
-                            affinity=int((existing_c or {}).get("relationship_score") or (existing_wr or {}).get("affinity_score") or 0),
-                            in_party=in_party,
-                            is_family=is_family,
-                            has_quest_link=bool(b_info.get("has_quest_link")),
-                            scenario=scenario_key,
-                            session_id=session_id,
-                        )
-                        if qualifies:
-                            await adb(
-                                db.promote_world_roster_to_contact,
-                                session_id,
-                                char_id,
-                                n_name,
-                                promo_reason or "opening_scene",
-                                has_contact_info=bool(is_family or in_party or b_info.get("exchanged_contact") or b_info.get("added_via_peerpulse")),
-                                turn_number=0,
-                                narrative_text=narrative,
-                            )
+            scene = committed["scene"]
         except Exception as e:
             log.error("Error generating opening scene: %s", e)
             try:
@@ -539,6 +410,108 @@ class TurnService:
             "character": char_row,
             "canonical_user_id": canonical_id,
             "scenario_key": scenario_key,
+        }
+
+    @staticmethod
+    async def commit_opening_scene(
+        session_id: int,
+        session: Dict[str, Any],
+        party: List[Any],
+        scene: Any,
+        *,
+        char_row: Optional[Dict[str, Any]] = None,
+        scenario_key: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Single source of truth for persisting a Turn-0 opening scene (embark and retry)."""
+        if getattr(scene, "model_dump", None):
+            scene = scene.model_dump(exclude_unset=False)
+        if not isinstance(scene, dict):
+            scene = {}
+
+        sess_dict = session if isinstance(session, dict) else {}
+        eff_scenario = str(scenario_key or sess_dict.get("scenario") or "fantasy")
+
+        await adb(game_engine.apply_quest_update, session_id, scene)
+
+        raw_choices, narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
+            scene, session=sess_dict
+        )
+        location = scene.get("location") or sess_dict.get("current_location") or ""
+        _open_partners = (
+            [partner_arg]
+            if isinstance(partner_arg, str) and partner_arg.strip()
+            else (list(partner_arg) if isinstance(partner_arg, list) else [])
+        )
+        raw_choices = await adb(
+            game_engine.build_hybrid_turn_choices,
+            raw_choices,
+            session=sess_dict,
+            party=party,
+            result={
+                **scene,
+                "location": location,
+                "npcs_present": npcs_arg,
+                "dialogue_partners": _open_partners,
+            },
+        )
+        init_node_id = scene.get("current_node_id")
+        if not init_node_id and location:
+            init_node_id = await adb(db.resolve_node_id_from_location, session_id, location)
+        if not init_node_id:
+            init_node_id = sess_dict.get("current_node_id")
+
+        await adb(
+            db.save_session_scene,
+            session_id,
+            scene_title,
+            narrative,
+            raw_choices,
+            [],
+            location=location,
+            nearby_enemies=scene.get("nearby_enemies", []),
+            current_npcs=npcs_arg,
+            dialogue_partner=partner_arg,
+            current_node_id=init_node_id,
+            focal_point=scene.get("focal_point", ""),
+        )
+
+        lead_char = char_row if isinstance(char_row, dict) else (party[0][0] if party and isinstance(party[0][0], dict) else {})
+        char_id = int(lead_char.get("id") or 0) if isinstance(lead_char, dict) else 0
+        enemy_names = {
+            game_engine._get_npc_name(e).lower()
+            for e in (scene.get("nearby_enemies") or [])
+            if e
+        }
+        open_party_names: set[str] = set()
+        for sc_p in (sess_dict.get("party") or []):
+            sp_obj = sc_p[0] if isinstance(sc_p, (list, tuple)) and sc_p else sc_p
+            if isinstance(sp_obj, dict) and sp_obj.get("name") and not sp_obj.get("user_id"):
+                open_party_names.add(str(sp_obj["name"]).strip().lower())
+        if isinstance(lead_char, dict) and lead_char.get("name"):
+            open_party_names.discard(str(lead_char["name"]).strip().lower())
+
+        await adb(
+            db.batch_commit_opening_npcs,
+            session_id,
+            char_id,
+            npcs_arg or [],
+            location=location,
+            scenario_key=eff_scenario,
+            enemy_names=enemy_names,
+            open_party_names=open_party_names,
+            narrative=narrative,
+        )
+        if "merchant_encounter" in scene:
+            await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
+        return {
+            "scene": scene,
+            "scene_title": scene_title,
+            "narrative": narrative,
+            "choices": raw_choices,
+            "npcs": npcs_arg,
+            "dialogue_partner": partner_arg,
+            "location": location,
+            "current_node_id": init_node_id,
         }
 
     @staticmethod

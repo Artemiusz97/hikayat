@@ -650,6 +650,25 @@ const ActionPanel = ({
           </div>
         )}
 
+        {/* Action Error Banner (visible in both exploration & combat, even when collapsed) */}
+        {actionError && (
+          <div className="flex items-center justify-between bg-red-950/80 border border-red-700/80 px-3 py-1.5 rounded-lg text-xs text-red-200 shadow-md">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-red-400 font-bold shrink-0">⚠️ Error:</span>
+              <span className="truncate">{actionError}</span>
+            </div>
+            {clearActionError && (
+              <button
+                type="button"
+                onClick={clearActionError}
+                className="text-gray-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10 shrink-0 ml-2"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        )}
+
         <CollapsibleSection isOpen={!isCollapsed}>
             {/* Tactical Battle Deck when in combat */}
             {inCombat ? (
@@ -937,24 +956,6 @@ const ActionPanel = ({
             ) : (
               /* Non-Combat Choices Grid: Full-width compact horizontal rows with zero scrollbars */
               <div className="space-y-1.5">
-                {actionError && (
-                  <div className="flex items-center justify-between bg-red-950/80 border border-red-700/80 px-3 py-1.5 rounded-lg text-xs text-red-200 shadow-md">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-red-400 font-bold shrink-0">⚠️ Error:</span>
-                      <span className="truncate">{actionError}</span>
-                    </div>
-                    {clearActionError && (
-                      <button
-                        type="button"
-                        onClick={clearActionError}
-                        className="text-gray-400 hover:text-white text-xs px-2 py-0.5 rounded hover:bg-white/10 shrink-0 ml-2"
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                )}
-
                 {session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-700/50 px-3 py-1 rounded text-xs text-amber-200">
                     <span>⚠️ {t('actions.fallback_warning')}</span>

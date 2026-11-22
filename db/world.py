@@ -10,7 +10,7 @@ import character_data as cd
 import heapq
 from collections import defaultdict
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _find_anomalous_agent_entry
 
 def save_merchant_state(session_id: int, merchant: dict):
     """Persists the full merchant encounter/shop blob for a session -- see
@@ -108,15 +108,12 @@ def upsert_lorebook_entity(session_id: int, entity_type: str, name: str,
                     pass
                 if not canonical_gender or not canonical_race:
                     try:
-                        ar_row = conn.execute(
-                            "SELECT gender, race FROM anomalous_agent_roster WHERE session_id=? AND (lower(name)=? OR npc_id=?) LIMIT 1",
-                            (session_id, name_low, npc_slug)
-                        ).fetchone()
+                        ar_row = _find_anomalous_agent_entry(conn, session_id, name_low, npc_slug)
                         if ar_row:
-                            if not canonical_gender and ar_row["gender"] and str(ar_row["gender"]).strip().lower() not in ("", "unknown", "none"):
-                                canonical_gender = str(ar_row["gender"]).strip().lower()
-                            if not canonical_race and ar_row["race"] and str(ar_row["race"]).strip().lower() not in ("", "unknown", "none"):
-                                canonical_race = str(ar_row["race"]).strip()
+                            if not canonical_gender and ar_row.get("gender") and str(ar_row.get("gender")).strip().lower() not in ("", "unknown", "none"):
+                                canonical_gender = str(ar_row.get("gender")).strip().lower()
+                            if not canonical_race and ar_row.get("race") and str(ar_row.get("race")).strip().lower() not in ("", "unknown", "none"):
+                                canonical_race = str(ar_row.get("race")).strip()
                     except Exception:
                         pass
             if canonical_race:

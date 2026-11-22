@@ -5,7 +5,9 @@ All secrets come from environment variables / a local .env file (never hard-code
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+_IS_TEST_MODE = os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+if not _IS_TEST_MODE:
+    load_dotenv()
 
 APP_VERSION = "3.5.0"
 
@@ -126,27 +128,29 @@ GENERATED_IMAGES_DIR = os.getenv(
     "GENERATED_IMAGES_DIR",
     os.path.abspath(os.path.join(os.path.dirname(__file__), "data", "generated_images"))
 )
-os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
 
 # Drop-in directory for user-supplied custom fonts (.woff2, .woff, .ttf, .otf)
 CUSTOM_FONTS_DIR = os.getenv(
     "CUSTOM_FONTS_DIR",
     os.path.abspath(os.path.join(os.path.dirname(__file__), "custom_fonts")),
 )
-os.makedirs(CUSTOM_FONTS_DIR, exist_ok=True)
 
-# Sanity checks at import time so the bot fails fast with a clear message
-# instead of dying deep inside a Discord event handler.
-_missing = [
-    name
-    for name, val in (
-        ("DISCORD_TOKEN", DISCORD_TOKEN),
-        ("LLM_API_KEY", LLM_API_KEY),
-    )
-    if not val
-]
-if _missing:
-    raise RuntimeError(
-        f"Missing required environment variables: {', '.join(_missing)}. "
-        f"Copy .env.example to .env and fill it in."
-    )
+if not _IS_TEST_MODE:
+    os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+    os.makedirs(CUSTOM_FONTS_DIR, exist_ok=True)
+
+
+def validate_runtime_config(*, require_discord: bool = True, require_llm: bool = True) -> None:
+    """Validate required runtime secrets and ensure runtime output directories exist."""
+    missing: list[str] = []
+    if require_discord and not DISCORD_TOKEN:
+        missing.append("DISCORD_TOKEN")
+    if require_llm and not LLM_API_KEY:
+        missing.append("LLM_API_KEY")
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}. "
+            f"Copy .env.example to .env and fill it in."
+        )
+    os.makedirs(GENERATED_IMAGES_DIR, exist_ok=True)
+    os.makedirs(CUSTOM_FONTS_DIR, exist_ok=True)

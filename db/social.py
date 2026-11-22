@@ -11,7 +11,7 @@ import sqlite3
 from config import DB_PATH
 import character_data as cd
 from .core import *
-from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list
+from .core import _delete_session_records, _to_str, _is_suspicious_entity_text, _safe_int_db, _sanitize_npcs_list, _find_anomalous_agent_entry
 
 def get_recruitment_cooldown(session_id: int, npc_name: str) -> int:
     with get_conn() as conn:
@@ -618,19 +618,13 @@ def _enrich_contact_basic_info(
     except Exception:
         pass
 
-    # 1b. Cross-reference anomalous_agent_roster
+    # 1b. Cross-reference anomalous_agent_roster (stored in sessions.extra_json)
     try:
         if preloaded_enrichment is not None:
             ar_map = preloaded_enrichment.get("anomalous_roster_by_key") or {}
             ar_row = ar_map.get(name_low) or ar_map.get(npc_slug)
         else:
-            ar_row = conn.execute(
-                """SELECT gender, race, rank_title, agent_class, faction_name
-                   FROM anomalous_agent_roster
-                   WHERE session_id=? AND (lower(name)=? OR npc_id=?)
-                   LIMIT 1""",
-                (session_id, name_low, npc_slug)
-            ).fetchone()
+            ar_row = _find_anomalous_agent_entry(conn, session_id, name_low, npc_slug)
         if ar_row:
             if isinstance(ar_row, dict):
                 ar_race = ar_row.get("race")

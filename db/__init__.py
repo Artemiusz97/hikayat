@@ -221,6 +221,7 @@ from .roster import (
     ALLOWED_STAFF_STATUSES,
     WORLD_ROSTER_V54_DDL,
     apply_world_roster_autonomy_mutations,
+    batch_commit_opening_npcs,
     bulk_upsert_world_roster,
     clear_roster_npc_merchant_archetypes,
     get_world_roster,

@@ -172,6 +172,8 @@ def _launch_tunnel_sync(port: int, provider: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    if os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() not in ("1", "true", "yes"):
+        config.validate_runtime_config(require_discord=False)
     await db.adb(db.init_db)
     try:
         snapshot_path = await db.adb(db.create_database_snapshot, tag="server_startup")
@@ -280,6 +282,7 @@ app.mount(
     "/images",
     SafeStaticFiles(
         directory=config.GENERATED_IMAGES_DIR,
+        check_dir=False,
         default_cache_control="public, max-age=86400",
     ),
     name="generated_images",
@@ -290,6 +293,7 @@ app.mount("/", SafeStaticFiles(directory="web/dist", html=True), name="web")
 
 if __name__ == "__main__":
     import uvicorn
+    config.validate_runtime_config(require_discord=False)
 
     parser = argparse.ArgumentParser(description="Hikayat Web RPG Server")
     parser.add_argument("--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host IP to bind to")

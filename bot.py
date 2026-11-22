@@ -17,7 +17,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import db
-from config import DISCORD_TOKEN, is_channel_allowed
+from config import DISCORD_TOKEN, is_channel_allowed, validate_runtime_config
 
 logging.basicConfig(level=logging.INFO)
 
@@ -268,6 +268,7 @@ def acquire_single_instance_lock():
 
 
 async def main():
+    validate_runtime_config(require_discord=True)
     db.init_db()
     try:
         snapshot_path = db.create_database_snapshot(tag="bot_startup")
