@@ -338,11 +338,18 @@ export const useGameSession = (user, character) => {
           setSession(prev => (prev ? { ...prev, non_lethal_mode: data.non_lethal_mode } : prev));
         }
       } else if (data.type === 'PICK_LOCKED') {
+        const nextWaiting = data.waiting_count;
         setPartyStatus({
           lockedCount: data.locked_picks || 0,
           total: data.total || 0,
-          waitingCount: data.waiting_count
+          waitingCount: nextWaiting
         });
+        if (nextWaiting === 0 || (data.total && (data.locked_picks || 0) >= data.total)) {
+          setWaitingForParty(false);
+        } else if (data.user_id != null && String(data.user_id) === String(userId)) {
+          setWaitingForParty(true);
+          setProcessingState(false);
+        }
       } else if (data.type === 'SCENE_IMAGE') {
         clearImagePoll();
         setSession(prev => {

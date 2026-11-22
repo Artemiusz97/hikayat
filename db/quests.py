@@ -601,7 +601,12 @@ def get_active_story_quest(session_id: int, *, resolve_schedule: bool = True) ->
         ).fetchone()
     return _enrich_quest_dict(row, resolve_schedule=resolve_schedule)
 
-def get_session_quests(session_id: int, status: str = None) -> list[dict]:
+def get_session_quests(
+    session_id: int,
+    status: str = None,
+    *,
+    preloaded_sched_ctx: dict[str, Any] | None = None,
+) -> list[dict]:
     wps_by_qid: dict[str, list[Any]] = {}
     dossiers_by_qid: dict[str, dict] = {}
     with get_conn() as conn:
@@ -645,10 +650,15 @@ def get_session_quests(session_id: int, status: str = None) -> list[dict]:
         for wp_list in wps_by_qid.values()
         for w in wp_list
     ):
-        try:
-            sched_ctx = _preload_waypoint_schedule_ctx(session_id)
-        except Exception:
-            sched_ctx = None
+        if preloaded_sched_ctx:
+            sched_ctx = preloaded_sched_ctx
+        else:
+            try:
+                sched_ctx = _preload_waypoint_schedule_ctx(session_id)
+                if preloaded_sched_ctx is not None and isinstance(sched_ctx, dict):
+                    preloaded_sched_ctx.update(sched_ctx)
+            except Exception:
+                sched_ctx = None
     out: list[dict] = []
     for r in rows:
         if not r:
@@ -1768,7 +1778,12 @@ def update_waypoint_resource_progress(session_id: int, quest_id: str, stage_inde
             return {"collected": collected, "target": target, "complete": target > 0 and collected >= target}
         return {"collected": 0, "target": 0, "complete": False}
 
-def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool = True) -> list[dict]:
+def get_all_session_active_waypoints(
+    session_id: int,
+    *,
+    resolve_schedule: bool = True,
+    preloaded_sched_ctx: dict[str, Any] | None = None,
+) -> list[dict]:
     """Returns all 'active' waypoints across all quests in a session.
     Used by the location UI to show quest markers on the travel menu.
     """
@@ -1788,10 +1803,15 @@ def get_all_session_active_waypoints(session_id: int, *, resolve_schedule: bool 
         row_dicts = [dict(r) for r in rows]
         sched_ctx: dict[str, Any] = {}
         if resolve_schedule and any(rd.get("follow_npc_schedule") and rd.get("target_npc") for rd in row_dicts):
-            try:
-                sched_ctx = _preload_waypoint_schedule_ctx(session_id)
-            except Exception:
-                sched_ctx = {}
+            if preloaded_sched_ctx:
+                sched_ctx = preloaded_sched_ctx
+            else:
+                try:
+                    sched_ctx = _preload_waypoint_schedule_ctx(session_id)
+                    if preloaded_sched_ctx is not None and isinstance(sched_ctx, dict):
+                        preloaded_sched_ctx.update(sched_ctx)
+                except Exception:
+                    sched_ctx = {}
         result = []
         for d in row_dicts:
             try:
@@ -2530,6 +2550,27 @@ def expire_quest_and_waypoints(
         resolution_approach="expired_deadline",
         progress_note=progress_note,
     )
+
+
+def get_active_quest_sub_objectives(session_id: int) -> list[list[dict[str, Any]]]:
+    """Return parsed sub-objective lists for all Active quests in `session_id`."""
+    if not session_id:
+        return []
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'",
+            (int(session_id),),
+        ).fetchall()
+    parsed: list[list[dict[str, Any]]] = []
+    for row in rows:
+        try:
+            raw = row["sub_objectives_json"] or "[]"
+            items = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(items, list):
+                parsed.append([so for so in items if isinstance(so, dict)])
+        except Exception:
+            continue
+    return parsed
 
 
 def get_quest_waypoint_labels(session_id: int, quest_id: str) -> list[dict[str, Any]]:

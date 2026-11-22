@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from typing import Any
-from ..core import (UnitOfWork, get_conn)
+from ..core import (UnitOfWork, get_conn, is_in_readonly_uow)
 from .contacts_enrichment import _enrich_contact_basic_info, _is_empty_info_val, _merge_basic_info_safely
 from .households_factions import _parse_household_row, get_household_by_id
 
@@ -818,6 +818,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
 
 def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
     """Ensure all non-hostile present scene NPCs are registered as contacts in this session."""
+    if is_in_readonly_uow():
+        return
     ensuring_set = _get_ensuring_scene_set()
     if session_id in ensuring_set:
         return
@@ -1328,7 +1330,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                 try:
                     import mechanics.social.genealogy as genealogy
                     d["relations"] = genealogy.ensure_contact_relations(d, session_id=session_id, scenario=scen_key)
-                    if session_id and d.get("id"):
+                    if session_id and d.get("id") and not is_in_readonly_uow():
                         try:
                             with get_conn() as conn:
                                 conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))
@@ -1866,7 +1868,7 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
     elif not d.get("relations") or not d["relations"].get("family"):
         import mechanics.social.genealogy as genealogy
         d["relations"] = genealogy.ensure_contact_relations(d, session_id=session_id, scenario=scen_key)
-        if session_id and d.get("id"):
+        if session_id and d.get("id") and not is_in_readonly_uow():
             try:
                 with get_conn() as conn:
                     conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))

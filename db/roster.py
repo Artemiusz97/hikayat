@@ -1181,6 +1181,16 @@ def batch_commit_opening_npcs(
         return committed
 
     if conn is not None:
+        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var
+
+        if _uow_conn_var.get() is None:
+            c_tok = _uow_conn_var.set(conn)
+            p_tok = _uow_db_path_var.set(_resolve_db_path())
+            try:
+                return _run(conn)
+            finally:
+                _uow_db_path_var.reset(p_tok)
+                _uow_conn_var.reset(c_tok)
         return _run(conn)
     with UnitOfWork() as uow_conn:
         return _run(uow_conn)

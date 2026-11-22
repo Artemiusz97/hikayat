@@ -44,7 +44,7 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
     import db as _db
 
     if use_deterministic:
-        _db.run_deterministic_tier3_compaction(session_id)
+        await _db.adb(_db.run_deterministic_tier3_compaction, session_id)
         return
 
     if session_id in _active_compactions:
@@ -52,12 +52,18 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
 
     _active_compactions.add(session_id)
     try:
-        bullets = _db.get_chapter_digest(session_id)
+        def _load_compaction_inputs(sid: int) -> tuple[list, list, dict]:
+            return (
+                _db.get_chapter_digest(sid),
+                _db.get_session_chronicles(sid),
+                _db.get_session(sid) or {},
+            )
+
+        bullets, existing, sess_row = await _db.adb(_load_compaction_inputs, session_id)
         if len(bullets) < 24:
             return
 
         bullets_to_compact = bullets[:15]
-        existing = _db.get_session_chronicles(session_id)
         chapter_number = len(existing) + 1
 
         bullet_text = "\n".join(f"- {b}" for b in bullets_to_compact)
@@ -65,16 +71,13 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
         try:
             import llm_client as _llm_client
             from game_engine.prompt_layout import build_side_channel_language_directive
+            _saga_dir = build_side_channel_language_directive(
+                sess_row,
+                text_fields=("act_title", "summary_narrative", "key_consequences"),
+                style="narrative",
+            )
             raw_result = await _llm_client.call_llm_json(
-                system_prompt=(
-                    f"{SAGA_SYSTEM_PROMPT}\n\n{_saga_dir}"  # pylint: disable=used-before-assignment
-                    if (_saga_dir := build_side_channel_language_directive(
-                        _db.get_session(session_id) or {},
-                        text_fields=("act_title", "summary_narrative", "key_consequences"),
-                        style="narrative",
-                    ))
-                    else SAGA_SYSTEM_PROMPT
-                ),
+                system_prompt=f"{SAGA_SYSTEM_PROMPT}\n\n{_saga_dir}" if _saga_dir else SAGA_SYSTEM_PROMPT,
                 user_prompt=prompt,
                 temperature=0.2,
                 max_tokens=600,
@@ -90,18 +93,20 @@ async def _run_tier3_compaction(session_id: int, use_deterministic: bool = True)
         key_consequences = result.get("key_consequences", [])
 
         if summary_narrative:
-            existing = _db.get_session_chronicles(session_id)
-            chapter_number = len(existing) + 1
+            def _commit_chronicle(sid: int) -> int:
+                ex_rows = _db.get_session_chronicles(sid)
+                ch_num = len(ex_rows) + 1
+                _db.add_session_chronicle(
+                    session_id=sid,
+                    chapter_number=ch_num,
+                    act_title=act_title,
+                    summary_narrative=summary_narrative,
+                    consequences=key_consequences,
+                )
+                _db.remove_oldest_chapter_digest_bullets(sid, len(bullets_to_compact))
+                return ch_num
 
-            _db.add_session_chronicle(
-                session_id=session_id,
-                chapter_number=chapter_number,
-                act_title=act_title,
-                summary_narrative=summary_narrative,
-                consequences=key_consequences,
-            )
-
-            _db.remove_oldest_chapter_digest_bullets(session_id, len(bullets_to_compact))
+            chapter_number = await _db.adb(_commit_chronicle, session_id)
 
             log.info(f"Successfully compacted {len(bullets_to_compact)} bullets into Saga Chronicle Chapter {chapter_number}: {act_title}")
     except Exception as exc:

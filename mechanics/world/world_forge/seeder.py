@@ -139,7 +139,7 @@ async def generate_macro_world_state(session_id: int, session: dict, party: list
     """
     import game_engine
 
-    factions = db.get_factions(session_id)
+    factions = await db.adb(db.get_factions, session_id)
     if not factions:
         return None
 

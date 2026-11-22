@@ -4,10 +4,8 @@ import asyncio
 from contextlib import nullcontext
 import json
 import re
-import sys as _sys
 import time
-import types as _types
-from typing import Any, Any as _Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -125,26 +123,9 @@ _SUBMODULE_NAMES = frozenset(
     {"in_flight", "enrichment", "routes_session", "routes_turn", "locations"}
 )
 
+from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 
-class _AdventurePackageModule(_types.ModuleType):
-    """Propagates monkeypatches on `api.adventure` to child package submodules."""
-
-    def __setattr__(self, name: str, value: _Any) -> None:
-        super().__setattr__(name, value)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    setattr(_sub, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        super().__delattr__(name)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    delattr(_sub, name)
-
-
-_sys.modules[__name__].__class__ = _AdventurePackageModule
+_install_submodule_proxy(__name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_AdventurePackageModule")
 
 __all__ = [
     "ActionRequest",

@@ -218,7 +218,15 @@ def _migrate_combat_evolution_v53(conn: sqlite3.Connection) -> int:
                             for k in ("nearby_enemies_json", "party_npcs_json", "temporary_companions_json"):
                                 if k in sess:
                                     raw_ent = sess[k]
-                                    ents = json.loads(raw_ent) if isinstance(raw_ent, str) else raw_ent
+                                    if isinstance(raw_ent, str):
+                                        if not raw_ent.strip():
+                                            continue
+                                        try:
+                                            ents = json.loads(raw_ent)
+                                        except Exception:
+                                            continue
+                                    else:
+                                        ents = raw_ent
                                     if isinstance(ents, list):
                                         sub_changed = False
                                         for ent in ents:
@@ -229,6 +237,33 @@ def _migrate_combat_evolution_v53(conn: sqlite3.Connection) -> int:
                                                     sub_changed = True
                                         if sub_changed:
                                             sess[k] = json.dumps(ents)
+                                            changed = True
+                        # Normalize child_tables.contacts[*].basic_info_json['status_effects']
+                        child_tbls = snap.get("child_tables")
+                        if isinstance(child_tbls, dict):
+                            saved_contacts = child_tbls.get("contacts")
+                            if isinstance(saved_contacts, list):
+                                for ct in saved_contacts:
+                                    if not isinstance(ct, dict):
+                                        continue
+                                    raw_cb = ct.get("basic_info_json")
+                                    if isinstance(raw_cb, str):
+                                        if not raw_cb.strip():
+                                            continue
+                                        try:
+                                            cb_info = json.loads(raw_cb)
+                                        except Exception:
+                                            continue
+                                        if isinstance(cb_info, dict) and "status_effects" in cb_info:
+                                            ceffs = cb_info["status_effects"]
+                                            if isinstance(ceffs, list) and any(isinstance(x, str) for x in ceffs):
+                                                cb_info["status_effects"] = [normalize_status_effect(x) for x in ceffs]
+                                                ct["basic_info_json"] = json.dumps(cb_info)
+                                                changed = True
+                                    elif isinstance(raw_cb, dict) and "status_effects" in raw_cb:
+                                        ceffs = raw_cb["status_effects"]
+                                        if isinstance(ceffs, list) and any(isinstance(x, str) for x in ceffs):
+                                            raw_cb["status_effects"] = [normalize_status_effect(x) for x in ceffs]
                                             changed = True
                         if changed:
                             conn.execute("UPDATE adventure_saves SET snapshot_data = ? WHERE id = ?", (json.dumps(snap), sv_id))

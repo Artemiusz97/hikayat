@@ -73,6 +73,11 @@ _uow_savepoint_seq = itertools.count(1)
 
 _MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
 
+
+def is_in_readonly_uow() -> bool:
+    """Return True when executing inside an active `ReadUnitOfWork` context."""
+    return bool(_uow_is_readonly_var.get())
+
 def _publish_verified_table_groups(groups: Optional[set[tuple[str, str]]]) -> None:
     """Publishes transaction-verified lazy-DDL table groups only after commit or clean read verification."""
     if not groups:

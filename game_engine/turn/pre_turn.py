@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import random
 import re
 import db
@@ -14,10 +13,9 @@ from game_engine.turn_context import TurnExecutionContext
 from .dialogue import _build_dialogue_prompt_block
 from .encounter_narrative import _get_enemy_base_name, _infer_incursion_action_from_label
 from .generation import log
+from .phase_state import PreTurnState
 from .prompts import _build_history_context, _build_player_actions_text, _build_quest_and_bounty_directives
 from mechanics.world.locations import extract_movement_destination, get_primary_location_name, get_zone_location_name, is_hub_location, parse_tiered_location
-
-_PRE_TURN_EXPORT_KEYS: tuple[str, ...] = ('_anom_domain_res', '_in_aftercare_for_core', '_in_intimate_for_core', '_pre_turn_dialogue_partners', '_pre_turn_incursion_notice', '_pre_turn_site_items_by_uid', '_pre_turn_sleep_info', '_pre_turn_time_info', '_staged_domain_vitals', '_staged_time_op', '_we_snap', 'actions_text', 'active_quests_str', 'active_recall_blocks', 'ambush_monsters', 'ambush_triggered', 'budget', 'calculate_action_time_cost', 'caseboard_block', 'cast_plan', 'ctx', 'dialogue_prompt_block', 'directive_note', 'effective_location', 'fow_dossier_block', 'has_exited_convo', 'hist_text', 'hs_turn_events', 'is_in_combat', 'is_sleep_action', 'mode', 'new_partners', 'phys_prompt_block', 'pre_intimate_res', 'pre_quest_res', 'pre_social_res', 'pre_turn_enemy_names', 'pre_turn_stage_npcs', 'pre_vitals_res', 'precomputed', 'raw_scene_ctx', 'scen_key', 'scene_loc', 'scene_npcs_for_prompt', 'session_id_val', 'simultaneity_note', 'stage_info', 'time_prompt_block', 'world_bundle', 'wp_block')
 
 
 async def run_pre_turn_phase(
@@ -27,8 +25,10 @@ async def run_pre_turn_phase(
     *,
     is_retry: bool = False,
     ctx: Optional[TurnExecutionContext] = None,
-) -> dict[str, Any]:
-    from mechanics.system.time_engine import format_llm_time_context, calculate_action_time_cost, is_sleep_action
+) -> PreTurnState:
+    from mechanics.combat import is_in_combat
+    from mechanics.system.time_engine import calculate_action_time_cost, format_llm_time_context, is_sleep_action
+    from mechanics.world.mobility import get_session_dialogue_partners
     session_id_val = session.get('id')
     if ctx is None:
         if session_id_val:
@@ -246,8 +246,6 @@ async def run_pre_turn_phase(
                 session["current_day"] = new_day
                 session["current_minute"] = new_min
             else:
-                from mechanics.world.mobility import get_session_dialogue_partners
-                from mechanics.combat import is_in_combat
                 is_dialogue_active = bool(get_session_dialogue_partners(session))
                 is_combat_active = bool(is_in_combat(session))
                 old_loc_val = session.get("current_location", "")
@@ -289,7 +287,6 @@ async def run_pre_turn_phase(
         _stage_clock_after_movement = None
 
     from game_engine.npcs import compute_pre_turn_stage
-    from mechanics.combat import is_in_combat
     from game_engine.npcs.cast_planner import plan_pre_turn, render_stage_plan
 
     def _run_pre_turn_stage_and_cast_bundle() -> tuple[dict, Any]:
@@ -344,7 +341,6 @@ async def run_pre_turn_phase(
     if cast_plan.has_exited_convo:
         has_exited_convo = True
 
-    from mechanics.world.mobility import get_session_dialogue_partners
     from mechanics.social.physical_state import (
         build_physical_prompt_block,
         is_erotic_intimate_contact as _core_is_erotic,
@@ -425,7 +421,7 @@ async def run_pre_turn_phase(
         if active_quests_str:
             active_quests_str += "[QUEST PRESENCE NOTE: Characters mentioned in the above quests or bounties are NOT necessarily in the current room. Do NOT include them in the scene or dialogue unless they are explicitly listed in `NPCs currently present` or actively introduced.]\n\n"
 
-    from mechanics.combat import is_in_combat, precompute_combat_turn
+    from mechanics.combat import precompute_combat_turn
     _pre_turn_incursion_notice = ""
     _pre_turn_incursion_directive = ""
     _skip_precompute_for_incursion = False
@@ -1316,16 +1312,7 @@ async def run_pre_turn_phase(
                     # 2. Check active quest sub-objectives if not found yet
                     if not target_station_sub:
                         try:
-                            def _load_active_quest_sub_objs(sid_q: int) -> list:
-                                with db.get_conn() as _c_conn:
-                                    return _c_conn.execute(
-                                        "SELECT sub_objectives_json FROM quests WHERE session_id=? AND status='Active'",
-                                        (sid_q,),
-                                    ).fetchall()
-
-                            q_rows = await adb(_load_active_quest_sub_objs, session["id"])
-                            for qr in q_rows:
-                                sub_objs = json.loads(qr["sub_objectives_json"] or "[]")
+                            for sub_objs in (await adb(db.get_active_quest_sub_objectives, session["id"])):
                                 for so in sub_objs:
                                     if not so.get("completed"):
                                         t_loc = so.get("target_location", "")
@@ -1541,5 +1528,52 @@ async def run_pre_turn_phase(
 
     time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key, session=session)
 
-    _loc = locals()
-    return {k: _loc[k] for k in _PRE_TURN_EXPORT_KEYS if k in _loc}
+    return PreTurnState(
+        _anom_domain_res=_anom_domain_res,
+        _in_aftercare_for_core=_in_aftercare_for_core,
+        _in_intimate_for_core=_in_intimate_for_core,
+        _pre_turn_dialogue_partners=_pre_turn_dialogue_partners,
+        _pre_turn_incursion_notice=_pre_turn_incursion_notice,
+        _pre_turn_site_items_by_uid=_pre_turn_site_items_by_uid,
+        _pre_turn_sleep_info=_pre_turn_sleep_info,
+        _pre_turn_time_info=_pre_turn_time_info,
+        _staged_domain_vitals=_staged_domain_vitals,
+        _staged_time_op=_staged_time_op,
+        _we_snap=_we_snap,
+        actions_text=actions_text,
+        active_quests_str=active_quests_str,
+        active_recall_blocks=active_recall_blocks,
+        ambush_monsters=ambush_monsters,
+        ambush_triggered=ambush_triggered,
+        budget=budget,
+        caseboard_block=caseboard_block,
+        cast_plan=cast_plan,
+        ctx=ctx,
+        dialogue_prompt_block=dialogue_prompt_block,
+        directive_note=directive_note,
+        effective_location=effective_location,
+        fow_dossier_block=fow_dossier_block,
+        has_exited_convo=has_exited_convo,
+        hist_text=hist_text,
+        hs_turn_events=hs_turn_events,
+        mode=mode,
+        new_partners=new_partners,
+        phys_prompt_block=phys_prompt_block,
+        pre_intimate_res=pre_intimate_res,
+        pre_quest_res=pre_quest_res,
+        pre_social_res=pre_social_res,
+        pre_turn_enemy_names=pre_turn_enemy_names,
+        pre_turn_stage_npcs=pre_turn_stage_npcs,
+        pre_vitals_res=pre_vitals_res,
+        precomputed=precomputed,
+        raw_scene_ctx=raw_scene_ctx,
+        scen_key=scen_key,
+        scene_loc=scene_loc,
+        scene_npcs_for_prompt=scene_npcs_for_prompt,
+        session_id_val=session_id_val,
+        simultaneity_note=simultaneity_note,
+        stage_info=stage_info,
+        time_prompt_block=time_prompt_block,
+        world_bundle=world_bundle,
+        wp_block=wp_block,
+    )

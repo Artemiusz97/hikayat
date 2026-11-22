@@ -67,16 +67,17 @@ async def _execute_action_locked(
                 req.session_id, 404, "Session not found", broadcast_error=broadcast_error
             )
             return None
-        session, _ = await verify_session_participant(
+        session, verified_uid = await verify_session_participant(
             request, req.session_id, req.user_id, require_turn=True, session=session_row
         )
+        eff_uid = verified_uid or req.user_id
         if session["status"] != "active":
             await fail_or_broadcast_error(
                 req.session_id, 400, "Session is not active", broadcast_error=broadcast_error
             )
             return None
 
-        char = await adb(db.get_character, req.user_id)
+        char = await adb(db.get_character, eff_uid)
         if not char:
             await fail_or_broadcast_error(
                 req.session_id, 404, "Character not found", broadcast_error=broadcast_error
@@ -137,7 +138,7 @@ async def _execute_action_locked(
         try:
             action = await TurnService.prepare_and_roll_action(
                 session_id=req.session_id,
-                user_id=req.user_id,
+                user_id=eff_uid,
                 raw_pick=raw_pick,
                 session=session,
                 char=dict(char),
@@ -166,14 +167,14 @@ async def _execute_action_locked(
             in_flight_entry["action"] = safe_action
 
         try:
-            user_settings = await adb(db.get_user_settings, req.user_id)
+            user_settings = await adb(db.get_user_settings, eff_uid)
             stream_enabled = user_settings.get("stream_narrative", 1) == 1
             stream_callback = None
 
             if stream_enabled:
                 stream_callback, flush_buffer, is_started_fn = await _make_ws_stream_controls(
                     req.session_id,
-                    req.user_id,
+                    eff_uid,
                     safe_action,
                     mode,
                     in_flight_entry=in_flight_entry,
@@ -195,7 +196,7 @@ async def _execute_action_locked(
             hb_task = asyncio.create_task(_stream_heartbeat())
 
             try:
-                turn_response = await TurnService.resolve_action(req.session_id, req.user_id, action, mode=mode, stream_callback=stream_callback)
+                turn_response = await TurnService.resolve_action(req.session_id, eff_uid, action, mode=mode, stream_callback=stream_callback)
             finally:
                 heartbeat_stop.set()
                 try:
@@ -225,7 +226,7 @@ async def _execute_action_locked(
                 locked_cnt = len(picks)
                 await manager.broadcast(req.session_id, {
                     "type": "PICK_LOCKED",
-                    "user_id": req.user_id,
+                    "user_id": eff_uid,
                     "character_name": char["name"],
                     "locked_picks": locked_cnt,
                     "total": len(party),
@@ -234,7 +235,7 @@ async def _execute_action_locked(
                 return {"status": "waiting_for_party", "locked_picks": locked_cnt, "total": len(party)}
             if broadcast_error or is_started_fn():
                 _record_last_turn_error(req.session_id, str(e), turn_id=(in_flight_entry or {}).get("turn_id"))
-                err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
                     "session_id": req.session_id,
@@ -257,7 +258,7 @@ async def _execute_action_locked(
                 status_code = 500
             if broadcast_error or is_started_fn():
                 _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
-                err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
                 await manager.broadcast(req.session_id, {
                     "type": "STREAM_ERROR",
                     "session_id": req.session_id,
@@ -272,7 +273,7 @@ async def _execute_action_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         fresh_session = await adb(db.get_session, req.session_id)
-        fresh_session = await adb(enrich_session_for_client, fresh_session, req.user_id)
+        fresh_session = await adb(enrich_session_for_client, fresh_session, eff_uid)
         if isinstance(fresh_session, dict):
             fresh_session["in_flight_turn"] = None
 
@@ -328,7 +329,7 @@ async def execute_action(req: ActionRequest, request: Request = None):
         eff_uid = verified_uid or req.user_id
         if session["status"] != "active":
             raise HTTPException(status_code=400, detail="Session is not active")
-        char = await adb(db.get_character, req.user_id)
+        char = await adb(db.get_character, eff_uid)
         if not char:
             raise HTTPException(status_code=404, detail="Character not found")
 
@@ -347,7 +348,7 @@ async def execute_action(req: ActionRequest, request: Request = None):
         if session.get("mode") == "sync":
             members = await adb(db.get_session_members, req.session_id) or []
             picks = session.get("pending_picks") or {}
-            combined_keys = {str(k) for k in picks.keys()} | {str(req.user_id)}
+            combined_keys = {str(k) for k in picks.keys()} | {str(eff_uid)}
             if len(members) > 1 and len(combined_keys) < len(members):
                 return await _execute_action_locked(
                     req, request, broadcast_error=False, pre_locked=True
@@ -386,7 +387,7 @@ async def execute_action(req: ActionRequest, request: Request = None):
 
     return launch_in_flight_ws_task(
         req.session_id,
-        req.user_id,
+        eff_uid,
         entry,
         _run_action_coro,
         http_error_fallback="Failed to execute action",
@@ -686,6 +687,7 @@ async def _execute_opening_retry_locked(
             or ("student_freelancer" if _prev_origin == "student" else "public_agency")
         )
         # Purge Turn 0 child rows + previously granted starting_prop so stale entities/props never bleed into fresh scene rolls
+        pre_retry_snap = await adb(db.snapshot_opening_retry_state, req.session_id)
         await adb(db.reset_session_for_opening_retry, req.session_id, eff_uid or 0)
         if scenario_data.is_anomalous_incursions_scenario(_retry_scen):
             from mechanics.world.anomalous_events import bootstrap_anomalous_session
@@ -750,6 +752,11 @@ async def _execute_opening_retry_locked(
             )
         except Exception as e:
             logger.error(f"Error retrying opening scene: {e}", exc_info=True)
+            if pre_retry_snap is not None:
+                try:
+                    await adb(db.restore_opening_retry_state, pre_retry_snap)
+                except Exception as restore_err:
+                    logger.warning("Failed restoring Turn-0 retry state for session %s: %s", req.session_id, restore_err)
             msg = f"Failed to retry opening scene: {str(e)}"
             if broadcast_error:
                 _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
@@ -871,6 +878,8 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
     """Cancels an in-flight asynchronous turn task, awaits rollback, and broadcasts TURN_CANCELLED."""
     _, verified_uid = await verify_session_participant(request, req.session_id, req.user_id)
     eff_uid = verified_uid or req.user_id or 0
+    pre_sess = await adb(db.get_session, req.session_id)
+    pre_turn_count = int((pre_sess or {}).get("turn_count") or 0)
     had_active = _get_active_in_flight_turn(req.session_id) is not None
     stopped = await _cancel_session_in_flight_task(req.session_id)
     if had_active and not stopped:
@@ -879,14 +888,30 @@ async def cancel_in_flight_turn(req: CancelTurnRequest, request: Request = None)
             detail="Turn cancellation is still finalizing; please retry in a moment.",
         )
 
-    fresh_session = await adb(db.get_session, req.session_id)
-    enriched_session = (
-        await adb(enrich_session_for_client, fresh_session, eff_uid)
-        if fresh_session
-        else None
-    )
-    if isinstance(enriched_session, dict):
-        enriched_session["in_flight_turn"] = None
+    async with distributed_session_lock(req.session_id):
+        fresh_session = await adb(db.get_session, req.session_id)
+        enriched_session = (
+            await adb(enrich_session_for_client, fresh_session, eff_uid)
+            if fresh_session
+            else None
+        )
+        if isinstance(enriched_session, dict):
+            enriched_session["in_flight_turn"] = None
+
+        post_turn_count = int((fresh_session or {}).get("turn_count") or 0)
+        already_committed = bool(had_active and fresh_session and post_turn_count > pre_turn_count)
+
+    if already_committed:
+        await manager.broadcast(req.session_id, {
+            "type": "NEW_SCENE",
+            "session": enriched_session,
+            "sync_timestamp": time.time(),
+        })
+        return {
+            "status": "completed",
+            "session_id": req.session_id,
+            "session": enriched_session,
+        }
 
     await manager.broadcast(req.session_id, {
         "type": "TURN_CANCELLED",

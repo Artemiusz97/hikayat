@@ -30,11 +30,11 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
     current_loc = session.get("current_location", "Local Area")
 
     # Fetch recent message history (up to 8 messages)
-    history_rows = db.get_phone_messages(session_id, npc_id, limit=8)
+    history_rows = await db.adb(db.get_phone_messages, session_id, npc_id, limit=8)
     history_text = "\n".join(f"{'Player' if r['sender'] == 'player' else contact_name}: {r['message']}" for r in history_rows)
 
     # Active quest / situation context
-    active_sq = db.get_active_story_quest(session_id)
+    active_sq = await db.adb(db.get_active_story_quest, session_id)
     sq_hint = ""
     if active_sq:
         sq_title = active_sq.get("title", "")
@@ -42,7 +42,7 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
 
     # Pending appointment hint
     clean_npc_id = npc_id.strip().lower().replace(" ", "_")
-    pending_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
+    pending_appts = [a for a in await db.adb(db.get_phone_appointments, session_id, status="pending") if a.get("npc_id") == clean_npc_id]
     appt_hint = ""
     if pending_appts:
         appt_loc = pending_appts[0].get("rendezvous_location", "")
@@ -255,8 +255,8 @@ async def generate_player_chat_message(session: dict, contact: dict, player_char
 
     # 4. Flirt
     elif intent == "flirt":
-        current_day, _, _ = db.get_session_time(session_id)
-        d_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
+        current_day, _, _ = await db.adb(db.get_session_time, session_id)
+        d_limits = await db.adb(db.get_phone_daily_limits, session_id, npc_id, current_day)
         flirt_used = d_limits.get("flirt", {}).get("used", 0)
         last_out = d_limits.get("flirt", {}).get("last_outcome", "")
         if flirt_used == 1:

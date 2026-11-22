@@ -1,25 +1,16 @@
 from __future__ import annotations
 
-import asyncio
-import copy
-import inspect
-import json
-import logging
-import os
-import random
-import re
-import sys as _sys
-import tempfile
-import types as _types
-from typing import Any, Any as _Any, Callable, Dict, List, Optional, Tuple
+import functools as _functools
+import inspect as _inspect
+from typing import Any as _Any
 
 import httpx
 from openai import APIError as OpenAIAPIError
-from pydantic import BaseModel, ConfigDict, Field
 
 import character_data as cd
 import db
 from db import adb
+from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 import game_engine
 import llm_client
 import scenario_data
@@ -43,53 +34,74 @@ from .turn.models import (
 class TurnService:
     """Facade preserving canonical `TurnService.<method>` dispatch over `services/turn/`."""
 
-    start_adventure = staticmethod(_embark_mod.start_adventure)
-    commit_opening_scene = staticmethod(_embark_mod.commit_opening_scene)
-    _await_uninterruptible = staticmethod(_models_mod._await_uninterruptible)
-    _finalize_and_save_scene = staticmethod(_resolve_mod._finalize_and_save_scene)
-    _reconcile_client_direct_choice = staticmethod(_prepare_mod._reconcile_client_direct_choice)
-    prepare_and_roll_action = staticmethod(_prepare_mod.prepare_and_roll_action)
-    resolve_action = staticmethod(_resolve_mod.resolve_action)
-    _resolve_action_with_crash_capture = staticmethod(_resolve_mod._resolve_action_with_crash_capture)
-    _resolve_action_inner = staticmethod(_resolve_mod._resolve_action_inner)
-    retry_narration = staticmethod(_resolve_mod.retry_narration)
+    @staticmethod
+    @_functools.wraps(_embark_mod.start_adventure)
+    async def start_adventure(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _embark_mod.start_adventure(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_embark_mod.commit_opening_scene)
+    async def commit_opening_scene(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _embark_mod.commit_opening_scene(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_models_mod._await_uninterruptible)
+    async def _await_uninterruptible(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _models_mod._await_uninterruptible(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_resolve_mod._finalize_and_save_scene)
+    async def _finalize_and_save_scene(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _resolve_mod._finalize_and_save_scene(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_prepare_mod._reconcile_client_direct_choice)
+    async def _reconcile_client_direct_choice(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _prepare_mod._reconcile_client_direct_choice(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_prepare_mod.prepare_and_roll_action)
+    async def prepare_and_roll_action(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _prepare_mod.prepare_and_roll_action(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_resolve_mod.resolve_action)
+    async def resolve_action(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _resolve_mod.resolve_action(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_resolve_mod._resolve_action_with_crash_capture)
+    async def _resolve_action_with_crash_capture(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _resolve_mod._resolve_action_with_crash_capture(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_resolve_mod._resolve_action_inner)
+    async def _resolve_action_inner(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _resolve_mod._resolve_action_inner(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
+
+    @staticmethod
+    @_functools.wraps(_resolve_mod.retry_narration)
+    async def retry_narration(*args: _Any, **kwargs: _Any) -> _Any:
+        res = _resolve_mod.retry_narration(*args, **kwargs)
+        return await res if _inspect.isawaitable(res) else res
 
 
 _SUBMODULES = (_models_mod, _embark_mod, _prepare_mod, _resolve_mod)
 _SUBMODULE_NAMES = frozenset({"models", "embark", "prepare", "resolve"})
 
-
-class _TurnServiceFacadeModule(_types.ModuleType):
-    """Propagates module-level monkeypatches on `services.turn_service` into `services.turn.*`."""
-
-    def __setattr__(self, name: str, value: _Any) -> None:
-        super().__setattr__(name, value)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    setattr(_sub, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        super().__delattr__(name)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    delattr(_sub, name)
-
-
-_sys.modules[__name__].__class__ = _TurnServiceFacadeModule
+_install_submodule_proxy(__name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_TurnServiceFacadeModule")
 
 __all__ = [
-    "Any",
-    "BaseModel",
-    "Callable",
-    "ConfigDict",
-    "Dict",
-    "Field",
-    "List",
     "OpenAIAPIError",
-    "Optional",
-    "Tuple",
     "TurnResponse",
     "TurnService",
     "XP_REWARDS",
@@ -98,22 +110,13 @@ __all__ = [
     "_is_llm_unavailable_exception",
     "adb",
     "apply_merchant_encounter_result",
-    "asyncio",
     "cd",
-    "copy",
     "crash_capture",
     "db",
     "game_engine",
     "httpx",
-    "inspect",
-    "json",
     "llm_client",
     "log",
     "logger",
-    "logging",
-    "os",
-    "random",
-    "re",
     "scenario_data",
-    "tempfile",
 ]

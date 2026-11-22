@@ -193,7 +193,10 @@ async def websocket_session(websocket: WebSocket, session_id: int, user_id: int 
                 })
     except WebSocketDisconnect:
         manager.disconnect(session_id, websocket)
-        await manager.broadcast_presence(session_id)
+        try:
+            await manager.broadcast_presence(session_id)
+        except Exception:
+            pass
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         manager.disconnect(session_id, websocket)

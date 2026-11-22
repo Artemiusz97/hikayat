@@ -209,25 +209,27 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         except Exception:
             pass
 
-    # Check if there is an active pending appointment with this contact
-    pending_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
-    existing_appointment = pending_appts[0] if pending_appts else None
+    def _load_dm_limits_and_ping():
+        with db.ReadUnitOfWork():
+            p_appts = [a for a in db.get_phone_appointments(session_id, status="pending") if a.get("npc_id") == clean_npc_id]
+            ex_appt = p_appts[0] if p_appts else None
+            c_day, c_min, _ = db.get_session_time(session_id)
+            d_limits = db.get_phone_daily_limits(session_id, npc_id, c_day)
 
-    # Retrieve current day & daily interaction limits
-    current_day, current_minute, _ = db.get_session_time(session_id)
-    daily_limits = db.get_phone_daily_limits(session_id, npc_id, current_day)
+            ping = basic.get("pending_hangout_ping") if isinstance(basic, dict) else None
+            if not isinstance(ping, dict) or not ping:
+                try:
+                    _roster_ping_row = db.get_world_roster_npc(session_id, clean_npc_id or npc_id)
+                    if isinstance(_roster_ping_row, dict):
+                        _roster_bi = _roster_ping_row.get("basic_info") or {}
+                        if isinstance(_roster_bi, dict) and isinstance(_roster_bi.get("pending_hangout_ping"), dict):
+                            ping = _roster_bi.get("pending_hangout_ping")
+                except Exception:
+                    ping = None
+        return p_appts, ex_appt, c_day, c_min, d_limits, ping
 
-    # D10: Detect active pending_hangout_ping reply/decline before intent classification & quota checks
-    active_ping = basic.get("pending_hangout_ping") if isinstance(basic, dict) else None
-    if not isinstance(active_ping, dict) or not active_ping:
-        try:
-            _roster_ping_row = db.get_world_roster_npc(session_id, clean_npc_id or npc_id)
-            if isinstance(_roster_ping_row, dict):
-                _roster_bi = _roster_ping_row.get("basic_info") or {}
-                if isinstance(_roster_bi, dict) and isinstance(_roster_bi.get("pending_hangout_ping"), dict):
-                    active_ping = _roster_bi.get("pending_hangout_ping")
-        except Exception:
-            active_ping = None
+    # Check if there is an active pending appointment, time/limits, and hangout ping with this contact
+    pending_appts, existing_appointment, current_day, current_minute, daily_limits, active_ping = await db.adb(_load_dm_limits_and_ping)
     if isinstance(active_ping, dict) and active_ping.get("expires_day") is not None:
         try:
             if int(current_day) > int(active_ping["expires_day"]):
@@ -392,7 +394,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         relocation_num=relocation_num,
         is_player_sending=is_player_sending
     )
-    user_settings = db.get_settings(player_char.get("user_id", 0))
+    user_settings = await db.adb(db.get_settings, player_char.get("user_id", 0))
     check_mode = user_settings.get("debug_check_mode", "off") if user_settings else "off"
     check_result = resolve_check(stat_val, req, luck=player_char.get("luk", 3), check_mode=check_mode)
     if is_autonomy_ping_reply:
@@ -418,8 +420,14 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             succeeded=False
         )
 
-    # Fetch recent message history
-    history_rows = db.get_phone_messages(session_id, npc_id, limit=6)
+    # Fetch recent message history and in-game time cleanly off the event loop
+    def _load_msg_history_and_time():
+        with db.ReadUnitOfWork():
+            rows = db.get_phone_messages(session_id, npc_id, limit=6)
+            day_v, min_v, _ = db.get_session_time(session_id)
+        return rows, day_v, min_v
+
+    history_rows, curr_day_val, curr_min_val = await db.adb(_load_msg_history_and_time)
     history_text = "\n".join(
         f"Player: {fence_player_message(r['message'], max_len=500)}"
         if r["sender"] == "player"
@@ -428,7 +436,6 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     )
 
     # In-Game Time & World Schedule Context
-    curr_day_val, curr_min_val, _ = db.get_session_time(session_id)
     from mechanics.system.time_engine import format_time_header
     from mechanics.world.world_schedule import get_world_schedule_state
     time_str = format_time_header(curr_day_val, curr_min_val)
@@ -545,7 +552,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             if check_result.succeeded and dm_eval.get("pending_request_payload"):
                 upd_basic = dict(basic)
                 upd_basic["pending_outfit_request"] = dm_eval["pending_request_payload"]
-                db.upsert_contact(
+                await db.adb(
+                    db.upsert_contact,
                     session_id=session_id,
                     character_id=player_char.get("id", 0),
                     npc_id=str(contact.get("npc_id") or clean_npc_id),
@@ -556,14 +564,14 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         pass
 
     # Contextual knowledge hints (Read-only from active quest & gossip feed)
-    active_sq = db.get_active_story_quest(session_id)
+    active_sq = await db.adb(db.get_active_story_quest, session_id)
     sq_hint = ""
     if active_sq:
         sq_title = active_sq.get("title", "")
         sq_obj = active_sq.get("objective", "")
         sq_hint = f"- Active Situation Context: '{sq_title}' — {sq_obj[:120]} (Provide thematic flavor/perspective if asked, but DO NOT invent canon story reveals that alter official quest evidence).\n"
 
-    feed_posts = db.get_gossip_feed(session_id, limit=3)
+    feed_posts = await db.adb(db.get_gossip_feed, session_id, limit=3)
     feed_hint = ""
     if feed_posts:
         snippets = "; ".join(f"'{p.get('content', '')[:60]}'" for p in feed_posts if p.get("content"))
@@ -588,7 +596,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 lines.append("- Role Dynamics: You are a Faculty teacher/staff member. Maintain a professional yet characterful educator tone.")
 
         if sibling_name:
-            all_contacts = db.get_contacts(session_id)
+            all_contacts = await db.adb(db.get_contacts, session_id)
             sibling_clean = sibling_name.lower().replace(" ", "_")
             sib_contact = next((c for c in all_contacts if c.get("npc_id") == sibling_clean or c.get("name", "").lower() == sibling_name.lower()), None)
             sib_score = sib_contact.get("relationship_score", 0) if sib_contact else 0

@@ -1,53 +1,51 @@
 from __future__ import annotations
 
 import game_engine
-from typing import Any
 from config import LLM_PASS2_TIMEOUT, LLM_STREAM_TOTAL_DEADLINE
 from game_engine.core import uses_nsfw_model
+from mechanics.combat import is_in_combat
 from .generation import log
+from .phase_state import PreTurnState, PromptAssemblyState
 from models.llm_schemas import DeterministicCombatNarration, DeterministicTurnNarration
-
-_PROMPT_EXPORT_KEYS: tuple[str, ...] = ('_next_prompt_epoch', 'departing_for_schedule', 'final_system_prompt_list', 'new_partners', 'result', 'schedule_stay_choice', 'schedule_transition_choice', 'user_prompt')
 
 
 async def assemble_and_call_turn_llm(
     session: dict,
     party: list,
     actions: list,
-    pre_state: dict[str, Any],
+    pre_state: PreTurnState,
     *,
     stream_callback=None,
-) -> dict[str, Any]:
-    _in_aftercare_for_core = pre_state.get("_in_aftercare_for_core")
-    _in_intimate_for_core = pre_state.get("_in_intimate_for_core")
-    _we_snap = pre_state.get("_we_snap")
-    actions_text = pre_state.get("actions_text")
-    active_quests_str = pre_state.get("active_quests_str")
-    active_recall_blocks = pre_state.get("active_recall_blocks")
-    ambush_monsters = pre_state.get("ambush_monsters")
-    ambush_triggered = pre_state.get("ambush_triggered")
-    budget = pre_state.get("budget")
-    caseboard_block = pre_state.get("caseboard_block")
-    cast_plan = pre_state.get("cast_plan")
-    dialogue_prompt_block = pre_state.get("dialogue_prompt_block")
-    directive_note = pre_state.get("directive_note")
-    effective_location = pre_state.get("effective_location")
-    fow_dossier_block = pre_state.get("fow_dossier_block")
-    has_exited_convo = pre_state.get("has_exited_convo")
-    hist_text = pre_state.get("hist_text")
-    is_in_combat = pre_state.get("is_in_combat")
-    mode = pre_state.get("mode")
-    new_partners = pre_state.get("new_partners")
-    phys_prompt_block = pre_state.get("phys_prompt_block")
+) -> PromptAssemblyState:
+    _in_aftercare_for_core = pre_state._in_aftercare_for_core
+    _in_intimate_for_core = pre_state._in_intimate_for_core
+    _we_snap = pre_state._we_snap
+    actions_text = pre_state.actions_text
+    active_quests_str = pre_state.active_quests_str
+    active_recall_blocks = pre_state.active_recall_blocks
+    ambush_monsters = pre_state.ambush_monsters
+    ambush_triggered = pre_state.ambush_triggered
+    budget = pre_state.budget
+    caseboard_block = pre_state.caseboard_block
+    cast_plan = pre_state.cast_plan
+    dialogue_prompt_block = pre_state.dialogue_prompt_block
+    directive_note = pre_state.directive_note
+    effective_location = pre_state.effective_location
+    fow_dossier_block = pre_state.fow_dossier_block
+    has_exited_convo = pre_state.has_exited_convo
+    hist_text = pre_state.hist_text
+    mode = pre_state.mode
+    new_partners = pre_state.new_partners
+    phys_prompt_block = pre_state.phys_prompt_block
     import game_engine.prompt_layout as prompt_layout
-    raw_scene_ctx = pre_state.get("raw_scene_ctx")
-    scene_loc = pre_state.get("scene_loc")
-    scene_npcs_for_prompt = pre_state.get("scene_npcs_for_prompt")
-    simultaneity_note = pre_state.get("simultaneity_note")
-    stage_info = pre_state.get("stage_info")
-    time_prompt_block = pre_state.get("time_prompt_block")
-    world_bundle = pre_state.get("world_bundle")
-    wp_block = pre_state.get("wp_block")
+    raw_scene_ctx = pre_state.raw_scene_ctx
+    scene_loc = pre_state.scene_loc
+    scene_npcs_for_prompt = pre_state.scene_npcs_for_prompt
+    simultaneity_note = pre_state.simultaneity_note
+    stage_info = pre_state.stage_info
+    time_prompt_block = pre_state.time_prompt_block
+    world_bundle = pre_state.world_bundle
+    wp_block = pre_state.wp_block
     # --- DYNAMIC TOKEN BUDGETING ---
     trimmed_scene_ctx = budget.trim(raw_scene_ctx, "lore")
     quest_board_text = ""
@@ -296,5 +294,13 @@ async def assemble_and_call_turn_llm(
             "choices": [],
             "next_choices": [],
         }
-    _loc = locals()
-    return {k: _loc[k] for k in _PROMPT_EXPORT_KEYS if k in _loc}
+    return PromptAssemblyState(
+        _next_prompt_epoch=_next_prompt_epoch,
+        departing_for_schedule=departing_for_schedule,
+        final_system_prompt_list=final_system_prompt_list,
+        new_partners=new_partners,
+        result=result,
+        schedule_stay_choice=schedule_stay_choice,
+        schedule_transition_choice=schedule_transition_choice,
+        user_prompt=user_prompt,
+    )

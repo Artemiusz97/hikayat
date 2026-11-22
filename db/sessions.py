@@ -960,7 +960,10 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
         return
     from .core import _delete_session_child_records_only
     with UnitOfWork() as conn:
-        sess_row = conn.execute("SELECT extra_json, host_user_id FROM sessions WHERE id=?", (session_id,)).fetchone()
+        sess_row = conn.execute(
+            "SELECT extra_json, host_user_id, character_id FROM sessions WHERE id=?",
+            (session_id,),
+        ).fetchone()
         eff_uid = int(user_id or (sess_row["host_user_id"] if sess_row and sess_row["host_user_id"] else 0))
         extra_dict: dict = {}
         if sess_row and sess_row["extra_json"]:
@@ -991,12 +994,14 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
         extra_dict.pop("leyline_unlocked_turn", None)
         extra_dict.pop("leyline_unlock_reason", None)
         extra_dict.pop("prompt_epoch", None)
-        if prop_name and eff_uid:
-            char_row = conn.execute(
-                "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
-                (eff_uid,),
-            ).fetchone()
-            char_id = char_row["id"] if char_row else None
+        if prop_name:
+            char_id = sess_row["character_id"] if sess_row and sess_row["character_id"] else None
+            if not char_id and eff_uid:
+                char_row = conn.execute(
+                    "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
+                    (eff_uid,),
+                ).fetchone()
+                char_id = char_row["id"] if char_row else None
             if char_id:
                 inv_row = conn.execute(
                     "SELECT id FROM inventory WHERE character_id=? AND LOWER(name)=LOWER(?) ORDER BY id DESC LIMIT 1",
@@ -1603,5 +1608,200 @@ def join_multiplayer_session(
         )
         db.set_character_active_session(int(char_id), int(session_id))
         return get_session(session_id), None
+
+
+def finalize_overwritten_slot_session(
+    old_session_id: int,
+    new_session_id: int,
+    host_user_id: int,
+) -> None:
+    """Finalize a superseded save-slot session without resetting the newly embarked host."""
+    if not old_session_id or int(old_session_id) == int(new_session_id or 0):
+        return
+    with UnitOfWork() as conn:
+        members = get_session_members(old_session_id)
+        sess_row = conn.execute(
+            "SELECT scenario FROM sessions WHERE id=?",
+            (int(old_session_id),),
+        ).fetchone()
+        sess_scenario = sess_row["scenario"] if sess_row else None
+        conn.execute(
+            "UPDATE sessions SET status='finished', updated_at=? WHERE id=?",
+            (time.time(), int(old_session_id)),
+        )
+        conn.execute(
+            "UPDATE characters SET active_session_id=NULL WHERE active_session_id=?",
+            (int(old_session_id),),
+        )
+        for uid in members:
+            if int(uid) != int(host_user_id):
+                reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
+
+
+def snapshot_embark_rollback_state(char_id: int) -> dict[str, Any] | None:
+    """Capture raw character and inventory rows before Turn-0 embark mutates them."""
+    if not char_id:
+        return None
+    with ReadUnitOfWork() as conn:
+        char_row = conn.execute(
+            "SELECT * FROM characters WHERE id=?",
+            (int(char_id),),
+        ).fetchone()
+        if not char_row:
+            return None
+        inv_rows = conn.execute(
+            "SELECT * FROM inventory WHERE character_id=? ORDER BY id ASC",
+            (int(char_id),),
+        ).fetchall()
+        return {
+            "character_id": int(char_id),
+            "character": dict(char_row),
+            "inventory": [dict(r) for r in inv_rows],
+        }
+
+
+def restore_embark_rollback_state(snapshot: dict[str, Any] | None) -> None:
+    """Restore raw character and inventory rows after a failed Turn-0 embark."""
+    if not isinstance(snapshot, dict) or not snapshot.get("character"):
+        return
+    char_dict = dict(snapshot["character"])
+    cid = int(snapshot.get("character_id") or char_dict.get("id") or 0)
+    if not cid:
+        return
+    with UnitOfWork() as conn:
+        valid_char_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(characters)").fetchall()
+        } - {"id"}
+        cols = [k for k in char_dict.keys() if k in valid_char_cols]
+        if cols:
+            assignments = ", ".join(f"{col}=?" for col in cols)
+            conn.execute(
+                f"UPDATE characters SET {assignments} WHERE id=?",
+                (*[char_dict[col] for col in cols], cid),
+            )
+        conn.execute("DELETE FROM inventory WHERE character_id=?", (cid,))
+        valid_inv_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(inventory)").fetchall()
+        } - {"id"}
+        for item in snapshot.get("inventory") or []:
+            if not isinstance(item, dict):
+                continue
+            item_cols = [k for k in item.keys() if k in valid_inv_cols]
+            if not item_cols:
+                continue
+            placeholders = ", ".join("?" for _ in item_cols)
+            col_list = ", ".join(item_cols)
+            vals = [cid if k == "character_id" else item[k] for k in item_cols]
+            conn.execute(
+                f"INSERT INTO inventory ({col_list}) VALUES ({placeholders})",
+                vals,
+            )
+
+
+def snapshot_opening_retry_state(session_id: int) -> dict[str, Any] | None:
+    """Capture session row, registry child rows, and starting prop before Turn-0 retry resets them."""
+    if not session_id:
+        return None
+    sid = int(session_id)
+    with ReadUnitOfWork() as conn:
+        sess_row = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
+        if not sess_row:
+            return None
+        sess_dict = dict(sess_row)
+        child_tables: dict[str, list[dict[str, Any]]] = {}
+        for spec in get_purge_specs(preserve_members=True):
+            try:
+                rows = conn.execute(
+                    f"SELECT * FROM {spec.name} WHERE session_id=?",
+                    (sid,),
+                ).fetchall()
+                if rows:
+                    child_tables[spec.name] = [dict(r) for r in rows]
+            except sqlite3.OperationalError:
+                pass
+        removed_prop: dict[str, Any] | None = None
+        try:
+            extra_dict = json.loads(sess_dict.get("extra_json") or "{}") or {}
+        except Exception:
+            extra_dict = {}
+        prop_name = str(extra_dict.get("opening_starting_prop_name") or "").strip()
+        char_id = sess_dict.get("character_id")
+        if prop_name and char_id:
+            inv_row = conn.execute(
+                "SELECT * FROM inventory WHERE character_id=? AND LOWER(name)=LOWER(?) ORDER BY id DESC LIMIT 1",
+                (int(char_id), prop_name),
+            ).fetchone()
+            if inv_row:
+                removed_prop = dict(inv_row)
+        return {
+            "session_id": sid,
+            "session": sess_dict,
+            "child_tables": child_tables,
+            "removed_prop": removed_prop,
+        }
+
+
+def restore_opening_retry_state(snapshot: dict[str, Any] | None) -> None:
+    """Restore pre-retry Turn-0 session and child rows when opening regeneration fails."""
+    if not isinstance(snapshot, dict) or not snapshot.get("session"):
+        return
+    sid = int(snapshot.get("session_id") or 0)
+    sess_dict = dict(snapshot["session"])
+    if not sid:
+        return
+    from .core import _delete_session_child_records_only
+
+    with UnitOfWork() as conn:
+        _delete_session_child_records_only(conn, sid, preserve_members=True)
+        for table_name, rows in (snapshot.get("child_tables") or {}).items():
+            if not rows:
+                continue
+            try:
+                valid_cols = {
+                    r[1] for r in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+                }
+            except sqlite3.OperationalError:
+                continue
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                cols = [k for k in row.keys() if k in valid_cols]
+                if not cols:
+                    continue
+                placeholders = ", ".join("?" for _ in cols)
+                col_list = ", ".join(cols)
+                conn.execute(
+                    f"INSERT OR IGNORE INTO {table_name} ({col_list}) VALUES ({placeholders})",
+                    [row[c] for c in cols],
+                )
+        removed_prop = snapshot.get("removed_prop")
+        if isinstance(removed_prop, dict) and removed_prop.get("character_id") and removed_prop.get("name"):
+            exists_inv = conn.execute(
+                "SELECT 1 FROM inventory WHERE character_id=? AND LOWER(name)=LOWER(?) LIMIT 1",
+                (int(removed_prop["character_id"]), str(removed_prop["name"])),
+            ).fetchone()
+            if not exists_inv:
+                valid_inv_cols = {
+                    r[1] for r in conn.execute("PRAGMA table_info(inventory)").fetchall()
+                } - {"id"}
+                icols = [k for k in removed_prop.keys() if k in valid_inv_cols]
+                if icols:
+                    placeholders = ", ".join("?" for _ in icols)
+                    col_list = ", ".join(icols)
+                    conn.execute(
+                        f"INSERT INTO inventory ({col_list}) VALUES ({placeholders})",
+                        [removed_prop[c] for c in icols],
+                    )
+        valid_sess_cols = {
+            r[1] for r in conn.execute("PRAGMA table_info(sessions)").fetchall()
+        } - {"id"}
+        scols = [k for k in sess_dict.keys() if k in valid_sess_cols]
+        if scols:
+            assignments = ", ".join(f"{c}=?" for c in scols)
+            conn.execute(
+                f"UPDATE sessions SET {assignments} WHERE id=?",
+                (*[sess_dict[c] for c in scols], sid),
+            )
+
 
 

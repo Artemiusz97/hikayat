@@ -287,7 +287,8 @@ class TurnExecutionContext:
             self._cache["contacts"] = world_bundle.get("contacts") or []
             self._cache["factions"] = world_bundle.get("factions") or []
             self._cache["party_npcs"] = world_bundle.get("party_npcs") or []
-            all_quests = db.get_session_quests(self.session_id)
+            shared_sched_ctx: dict[str, Any] = {}
+            all_quests = db.get_session_quests(self.session_id, preloaded_sched_ctx=shared_sched_ctx)
             self._cache["all_quests"] = all_quests
             self._cache["story_quest"] = _derive_story_quest(all_quests)
             active_appts = db.get_active_rendezvous_appointments(self.session_id)
@@ -299,7 +300,9 @@ class TurnExecutionContext:
                 a for a in active_appts
                 if str(a.get("status") or "").strip().lower() in ("arrived", "in_progress")
             ]
-            self._cache["active_waypoints"] = db.get_all_session_active_waypoints(self.session_id)
+            self._cache["active_waypoints"] = db.get_all_session_active_waypoints(
+                self.session_id, preloaded_sched_ctx=shared_sched_ctx
+            )
             self._cache["school_directory_map"] = db.get_school_directory_batch(self.session_id)
             self._cache["epistemic_matrix"] = db.preload_epistemic_matrix(self.session_id) or {}
 

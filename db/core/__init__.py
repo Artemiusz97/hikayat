@@ -44,6 +44,7 @@ from .connection import (
     ensure_table_group_once,
     get_conn,
     get_main_event_loop,
+    is_in_readonly_uow,
     release_distributed_lock,
     savepoint,
     set_db_path,
@@ -128,6 +129,7 @@ __all__ = [
     "get_main_event_loop",
     "init_db",
     "is_discord_snowflake",
+    "is_in_readonly_uow",
     "isolate_simulation_db",
     "maybe_run_wal_maintenance",
     "nullify_orphaned_implicated_contacts",
@@ -142,10 +144,6 @@ __all__ = [
     "vacuum_database",
 ]
 
-import sys as _sys
-import types as _types
-from typing import Any as _Any
-
 from . import (
     connection as _mod_connection,
     lifecycle as _mod_lifecycle,
@@ -153,6 +151,7 @@ from . import (
     migrations_backfills as _mod_migrations_backfills,
     schema as _mod_schema,
 )
+from .module_proxy import install_submodule_proxy as _install_submodule_proxy
 
 _SUBMODULES = (
     _mod_schema,
@@ -162,26 +161,7 @@ _SUBMODULES = (
     _mod_lifecycle,
 )
 _SUBMODULE_NAMES = frozenset(
-    {"schema", "connection", "migrations_backfills", "migrations", "lifecycle"}
+    {"schema", "connection", "migrations_backfills", "migrations", "lifecycle", "module_proxy"}
 )
 
-
-class _CorePackageModule(_types.ModuleType):
-    """Propagates attribute rebindings on `db.core` to child submodules for monolithic-module parity."""
-
-    def __setattr__(self, name: str, value: _Any) -> None:
-        super().__setattr__(name, value)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    setattr(_sub, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        super().__delattr__(name)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    delattr(_sub, name)
-
-
-_sys.modules[__name__].__class__ = _CorePackageModule
+_install_submodule_proxy(__name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_CorePackageModule")

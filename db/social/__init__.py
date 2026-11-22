@@ -148,10 +148,7 @@ __all__ = [
     "upsert_faction",
 ]
 
-import sys as _sys
-import types as _types
-from typing import Any as _Any
-
+from ..core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 from . import (
     contacts_enrichment as _mod_contacts_enrichment,
     contacts_repo as _mod_contacts_repo,
@@ -180,23 +177,4 @@ _SUBMODULE_NAMES = frozenset(
     }
 )
 
-
-class _SocialPackageModule(_types.ModuleType):
-    """Propagates attribute rebindings on `db.social` to child submodules for monolithic-module parity."""
-
-    def __setattr__(self, name: str, value: _Any) -> None:
-        super().__setattr__(name, value)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    setattr(_sub, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        super().__delattr__(name)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    delattr(_sub, name)
-
-
-_sys.modules[__name__].__class__ = _SocialPackageModule
+_install_submodule_proxy(__name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_SocialPackageModule")

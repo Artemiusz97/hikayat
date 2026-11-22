@@ -68,12 +68,13 @@ async def handle_dm_over_limit(
             f"- ATTEMPT #{over_count} (Severe Badgering / Harassment): Express strong irritation, disgust, or cold disapproval.\n"
             "- Call them out for relentlessly badgering you and crossing boundaries.\n"
         )
+    _sess_for_lang = session if isinstance(session, dict) else ((await db.adb(db.get_session, session_id)) or {})
     system_prompt += (
         "Write a short, realistic mobile text reply (1-2 sentences) in natural messaging style.\n"
         + (
             (_ref_dir + "\n")  # pylint: disable=used-before-assignment
             if (_ref_dir := build_side_channel_language_directive(
-                session if isinstance(session, dict) else (db.get_session(session_id) or {}),
+                _sess_for_lang,
                 text_fields=("reply_text",),
                 style="sms",
                 speaker_gender=speaker_gender,
@@ -146,22 +147,26 @@ async def handle_dm_over_limit(
         else:
             reply_text = "Let's take a break for today."
 
-    db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
-    db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
+    def _persist_over_limit_dm():
+        with db.UnitOfWork():
+            db.save_phone_message(session_id, npc_id, sender="player", message=user_message, intent=intent)
+            db.save_phone_message(session_id, npc_id, sender="npc", message=reply_text, intent=intent)
 
-    if affinity_delta != 0:
-        if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-            new_score = clamp_score(score + affinity_delta)
-            db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
+            if affinity_delta != 0:
+                if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
+                    new_score = clamp_score(score + affinity_delta)
+                    db.update_contact_score(session_id, npc_id, new_score, character_id=player_char.get("id", 0))
 
-    updated_limits = db.record_phone_daily_interaction(
-        session_id=session_id,
-        npc_id=npc_id,
-        current_day=current_day,
-        intent=intent_category,
-        outcome="over_limit",
-        is_over_limit=True,
-    )
+            return db.record_phone_daily_interaction(
+                session_id=session_id,
+                npc_id=npc_id,
+                current_day=current_day,
+                intent=intent_category,
+                outcome="over_limit",
+                is_over_limit=True,
+            )
+
+    updated_limits = await db.adb(_persist_over_limit_dm)
 
     return {
         "reply_text": reply_text,

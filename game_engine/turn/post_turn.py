@@ -7,60 +7,61 @@ import scenario_data
 from typing import Any, Optional
 from contextlib import nullcontext
 from db import adb
-from .generation import log
+from mechanics.combat import is_in_combat
 from mechanics.social.relationships import safe_get_contacts
+from mechanics.system.time_engine import calculate_action_time_cost, is_sleep_action
 from models.llm_schemas import TurnOutcome
 from .encounter_narrative import ensure_enemy_encounter_narrative
+from .generation import log
+from .phase_state import PreTurnState, PromptAssemblyState
+
 
 async def run_post_turn_phase(
     session: dict,
     party: list,
     actions: list,
-    pre_state: dict[str, Any],
-    llm_state: dict[str, Any],
+    pre_state: PreTurnState,
+    llm_state: PromptAssemblyState,
     *,
     stream_callback=None,
     is_retry: bool = False,
 ) -> TurnOutcome:
-    _anom_domain_res = pre_state.get("_anom_domain_res")
-    _in_intimate_for_core = pre_state.get("_in_intimate_for_core")
-    _pre_turn_dialogue_partners = pre_state.get("_pre_turn_dialogue_partners")
-    _pre_turn_incursion_notice = pre_state.get("_pre_turn_incursion_notice")
-    _pre_turn_site_items_by_uid = pre_state.get("_pre_turn_site_items_by_uid")
-    _pre_turn_sleep_info = pre_state.get("_pre_turn_sleep_info")
-    _pre_turn_time_info = pre_state.get("_pre_turn_time_info")
-    _staged_domain_vitals = pre_state.get("_staged_domain_vitals")
+    _anom_domain_res = pre_state._anom_domain_res
+    _in_intimate_for_core = pre_state._in_intimate_for_core
+    _pre_turn_dialogue_partners = pre_state._pre_turn_dialogue_partners
+    _pre_turn_incursion_notice = pre_state._pre_turn_incursion_notice
+    _pre_turn_site_items_by_uid = pre_state._pre_turn_site_items_by_uid
+    _pre_turn_sleep_info = pre_state._pre_turn_sleep_info
+    _pre_turn_time_info = pre_state._pre_turn_time_info
+    _staged_domain_vitals = pre_state._staged_domain_vitals
     from game_engine.npcs.cast_planner import apply_cast_events
     from mechanics.combat import reconcile_combat_results
     from mechanics.system.time_engine import advance_time, apply_sleep_rest
     from mechanics.world.locations import is_location_engine_enabled
-    _staged_time_op = pre_state.get("_staged_time_op")
-    calculate_action_time_cost = pre_state.get("calculate_action_time_cost")
-    cast_plan = pre_state.get("cast_plan")
-    ctx = pre_state.get("ctx")
-    effective_location = pre_state.get("effective_location")
-    has_exited_convo = pre_state.get("has_exited_convo")
-    hs_turn_events = pre_state.get("hs_turn_events")
-    is_in_combat = pre_state.get("is_in_combat")
-    is_sleep_action = pre_state.get("is_sleep_action")
-    pre_intimate_res = pre_state.get("pre_intimate_res")
-    pre_quest_res = pre_state.get("pre_quest_res")
-    pre_social_res = pre_state.get("pre_social_res")
-    pre_turn_enemy_names = pre_state.get("pre_turn_enemy_names")
-    pre_turn_stage_npcs = pre_state.get("pre_turn_stage_npcs")
-    pre_vitals_res = pre_state.get("pre_vitals_res")
-    precomputed = pre_state.get("precomputed")
-    scen_key = pre_state.get("scen_key")
-    session_id_val = pre_state.get("session_id_val")
-    stage_info = pre_state.get("stage_info")
-    _next_prompt_epoch = llm_state.get("_next_prompt_epoch")
-    departing_for_schedule = llm_state.get("departing_for_schedule")
-    final_system_prompt_list = llm_state.get("final_system_prompt_list")
-    new_partners = llm_state.get("new_partners")
-    result = llm_state.get("result")
-    schedule_stay_choice = llm_state.get("schedule_stay_choice")
-    schedule_transition_choice = llm_state.get("schedule_transition_choice")
-    user_prompt = llm_state.get("user_prompt")
+    _staged_time_op = pre_state._staged_time_op
+    cast_plan = pre_state.cast_plan
+    ctx = pre_state.ctx
+    effective_location = pre_state.effective_location
+    has_exited_convo = pre_state.has_exited_convo
+    hs_turn_events = pre_state.hs_turn_events
+    pre_intimate_res = pre_state.pre_intimate_res
+    pre_quest_res = pre_state.pre_quest_res
+    pre_social_res = pre_state.pre_social_res
+    pre_turn_enemy_names = pre_state.pre_turn_enemy_names
+    pre_turn_stage_npcs = pre_state.pre_turn_stage_npcs
+    pre_vitals_res = pre_state.pre_vitals_res
+    precomputed = pre_state.precomputed
+    scen_key = pre_state.scen_key
+    session_id_val = pre_state.session_id_val
+    stage_info = pre_state.stage_info
+    _next_prompt_epoch = llm_state._next_prompt_epoch
+    departing_for_schedule = llm_state.departing_for_schedule
+    final_system_prompt_list = llm_state.final_system_prompt_list
+    new_partners = llm_state.new_partners
+    result = llm_state.result
+    schedule_stay_choice = llm_state.schedule_stay_choice
+    schedule_transition_choice = llm_state.schedule_transition_choice
+    user_prompt = llm_state.user_prompt
 
     # Safety coercion: llm_client now returns dicts, but guard against Pydantic objects leaking through
     if getattr(result, "model_dump", None):

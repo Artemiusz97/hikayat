@@ -57,13 +57,10 @@ async def start_adventure(
     if not char:
         raise LookupError("Character not found. Create a character first!")
 
+    pre_embark_snap = await adb(db.snapshot_embark_rollback_state, char["id"])
     prev_active_sid = char.get("active_session_id")
     target_slot = slot if slot and 1 <= int(slot) <= 6 else 1
     existing_in_slot = await adb(db.get_character_session_in_slot, char["id"], target_slot)
-    if existing_in_slot:
-        if prev_active_sid == existing_in_slot["id"]:
-            prev_active_sid = None
-        await adb(db.finish_session, existing_in_slot["id"])
 
     eff_mode = (mode or "solo").lower()
     if eff_mode == "multi":
@@ -303,10 +300,19 @@ async def start_adventure(
             scenario_key=scenario_key,
         )
         scene = committed["scene"]
+        if existing_in_slot:
+            await adb(
+                db.finalize_overwritten_slot_session,
+                existing_in_slot["id"],
+                session_id,
+                canonical_id,
+            )
     except Exception as e:
         log.error("Error generating opening scene: %s", e)
         try:
             await adb(db.delete_session, session_id)
+            if pre_embark_snap is not None:
+                await adb(db.restore_embark_rollback_state, pre_embark_snap)
             if prev_active_sid:
                 prev_sess = await adb(db.get_session, prev_active_sid)
                 if prev_sess and prev_sess.get("status") in ("active", "waiting"):
@@ -414,8 +420,9 @@ async def commit_opening_scene(
         open_party_names=open_party_names,
         narrative=narrative,
     )
+    merchant = None
     if "merchant_encounter" in scene:
-        await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
+        merchant = await adb(apply_merchant_encounter_result, session_id, scene.get("merchant_encounter"))
     return {
         "scene": scene,
         "scene_title": scene_title,
@@ -425,4 +432,5 @@ async def commit_opening_scene(
         "dialogue_partner": partner_arg,
         "location": location,
         "current_node_id": init_node_id,
+        "merchant": merchant,
     }

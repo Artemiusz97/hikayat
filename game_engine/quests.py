@@ -479,7 +479,7 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
     Generates a unique story quest with 3 distinct regional destination locations and 3-stage progressive waypoints."""
     scen_block = game_engine._scenario_block(session)
     loc = session.get("current_location", "the current area")
-    goals = db.get_session_campaign_goals(session_id)
+    goals = await db.adb(db.get_session_campaign_goals, session_id)
     goals_summary = "\n".join(
         f"- [{g['id']}] {g['title']} ({g.get('progress_pct', 0)}%): {g.get('description', '')}"
         for g in goals
@@ -609,8 +609,9 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
     try:
         from mechanics.social.population_seeder import is_population_seeding_supported
         if session_id and is_population_seeding_supported(scen_key):
+            roster_rows = await db.adb(db.get_world_roster, session_id, include_legacy_rosters=False) or []
             wr_rows = [
-                r for r in (db.get_world_roster(session_id, include_legacy_rosters=False) or [])
+                r for r in roster_rows
                 if str(r.get("staff_status") or "active").lower() == "active"
                 and str(r.get("origin") or "").lower() in ("district_merchant", "civic_staff", "roaming_citizen", "roaming_merchant")
                 and r.get("name")
@@ -710,12 +711,16 @@ async def generate_story_quest(session_id: int, session: dict, chapter_num: int,
             if idx_opt in sub_waypoints and sub_waypoints[idx_opt]:
                 sub_waypoints[idx_opt][0]["stage_label"] = p_txt
 
+    has_session_for_wp = bool(
+        any((wp.get("target_location") or "").strip() for wps in sub_waypoints.values() for wp in wps)
+        and await db.adb(db.get_session, session_id)
+    )
     for wps in sub_waypoints.values():
         for wp in wps:
             if wp.get("stage_label"):
                 wp["stage_label"] = clean_narrative_location_arrows(wp["stage_label"])
             t_loc = (wp.get("target_location") or "").strip()
-            if t_loc and db.get_session(session_id):
+            if t_loc and has_session_for_wp:
                 clean_t = sanitize_location_target(t_loc, session_id=session_id, scen_key=scen_key)
                 process_llm_location_update(session_id, clean_t, scen_key)
 

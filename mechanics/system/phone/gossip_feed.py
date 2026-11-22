@@ -36,7 +36,7 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
     """Retrieves cached social feed posts or generates 4 fresh posts via fast LLM call."""
     session_id = session["id"]
     if not force_refresh:
-        existing = db.get_gossip_feed(session_id, limit=6)
+        existing = await db.adb(db.get_gossip_feed, session_id, limit=6)
         if existing and len(existing) >= 3:
             return existing
 
@@ -44,14 +44,14 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
     branding = get_phone_branding(scen_key)
     from mechanics.world.locations import get_zone_location_name, is_school_scenario
     current_loc = get_zone_location_name(session.get("current_location", "Local Area"))
-    sq = db.get_active_story_quest(session_id)
+    sq = await db.adb(db.get_active_story_quest, session_id)
     sq_title = sq.get("title", "Ongoing Mystery") if sq else "Daily Happenings"
     sq_obj = sq.get("objective", "") if sq else ""
 
     school_hints = ""
     if is_school_scenario(scen_key) or scenario_data.is_anomalous_high_school_scenario(scen_key):
         from mechanics.social.school_roster import ensure_school_directory_exists
-        roster = ensure_school_directory_exists(session)
+        roster = await db.adb(ensure_school_directory_exists, session)
         if roster:
             seniors = [c for c in roster if c.get("grade") == "Senior"]
             juniors = [c for c in roster if c.get("grade") == "Junior"]
@@ -88,9 +88,8 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
         f"Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."
     )
     try:
-        from db import adb
         from llm_client import is_nsfw_configured
-        snap_we = session.get("_world_events_snapshot") or await adb(db.get_world_events_snapshot, session_id)
+        snap_we = session.get("_world_events_snapshot") or await db.adb(db.get_world_events_snapshot, session_id)
         allow_nsfw = scenario_data.uses_nsfw_model(scen_key) and is_nsfw_configured()
 
         from mechanics.world.world_events.formatting import extract_minor_events, resolve_event_description
@@ -111,7 +110,7 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
         from mechanics.social.population_seeder import is_population_seeding_supported
         if is_population_seeding_supported(scen_key):
             wr_locals = [
-                r for r in (db.get_world_roster(session_id, include_legacy_rosters=False) or [])
+                r for r in (await db.adb(db.get_world_roster, session_id, include_legacy_rosters=False) or [])
                 if str(r.get("staff_status") or "active").lower() == "active"
                 and str(r.get("origin") or "").lower() in ("roaming_citizen", "district_merchant", "roaming_merchant", "civic_staff", "campus_seed")
                 and r.get("name")
@@ -160,7 +159,7 @@ async def generate_gossip_feed_posts(session: dict, force_refresh: bool = False)
             }
         ]
 
-    db.save_gossip_feed(session_id, posts)
+    await db.adb(db.save_gossip_feed, session_id, posts)
     return posts
 
 
@@ -243,24 +242,31 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
     Consumes 1 charge (max 3, resets every 5 turns).
     """
     session_id = session["id"]
-    char = db.get_character(user_id)
-    summary = get_social_state_summary(session_id, session)
+
+    def _load_and_consume_rumor_charge():
+        with db.UnitOfWork():
+            c_row = db.get_character(user_id)
+            sm = get_social_state_summary(session_id, session)
+            if sm["charges"] <= 0:
+                return c_row, sm, False
+            sm["charges"] -= 1
+            sm["state"]["rumor_charges"] = sm["charges"]
+            sm["state"]["rumor_last_turn"] = sm["turn_count"]
+            db.update_phone_social_state(session_id, sm["state"])
+            return c_row, sm, True
+
+    char, summary, _consumed = await db.adb(_load_and_consume_rumor_charge)
     charges = summary["charges"]
     turn_count = summary["turn_count"]
     state = summary["state"]
 
-    if charges <= 0:
+    if not _consumed:
         return {
             "success": False,
             "error": "exhausted",
             "charges_left": 0,
             "message": "📵 **No new feeds or trending whispers available right now.**\nCheck back in a few turns once new discussions trend!"
         }
-
-    charges -= 1
-    state["rumor_charges"] = charges
-    state["rumor_last_turn"] = turn_count
-    db.update_phone_social_state(session_id, state)
 
     per_val = char.get("per_", 10) if char else 10
     int_val = char.get("int_", 10) if char else 10
@@ -283,7 +289,7 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
     }
 
     scen_key = session.get("scenario", "fantasy")
-    sq = db.get_active_story_quest(session_id)
+    sq = await db.adb(db.get_active_story_quest, session_id)
     sq_title = sq.get("title", "Active Mystery") if sq else "Daily Happenings"
     sq_obj = sq.get("objective", "") if sq else ""
     loc = session.get("current_location", "the local area")
@@ -305,21 +311,17 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         discovered_rm = None
         world_pulse_payload = None
         try:
-            from db import adb
             from mechanics.world.world_events.engine import (
                 build_client_world_pulse_payload,
                 discover_hidden_rumor_from_feed,
             )
-            discovered_rm = await adb(discover_hidden_rumor_from_feed, session_id, "phone_gossip_feed")
+            discovered_rm = await db.adb(discover_hidden_rumor_from_feed, session_id, "phone_gossip_feed")
             if discovered_rm:
                 clue_text = f"[{discovered_rm['title']}] {discovered_rm['description']}"
-                world_pulse_payload = await adb(build_client_world_pulse_payload, session_id)
+                world_pulse_payload = await db.adb(build_client_world_pulse_payload, session_id)
         except Exception:
             discovered_rm = None
-        log_gossip_clue_to_quest(session_id, clue_text)
 
-        # Prepend verified lead post into feed
-        current_feed = db.get_gossip_feed(session_id, limit=20) or []
         lead_post = {
             "id": f"lead_{int(time.time())}_{random.randint(100, 999)}",
             "author_name": source,
@@ -331,8 +333,16 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             "time_ago": "Just now",
             "is_lead": True
         }
-        updated_feed = [lead_post] + [p for p in current_feed if p.get("content") != clue_text][:19]
-        db.save_gossip_feed(session_id, updated_feed)
+
+        def _persist_rumor_lead():
+            with db.UnitOfWork():
+                log_gossip_clue_to_quest(session_id, clue_text)
+                current_feed = db.get_gossip_feed(session_id, limit=20) or []
+                upd_feed = [lead_post] + [p for p in current_feed if p.get("content") != clue_text][:19]
+                db.save_gossip_feed(session_id, upd_feed)
+                return upd_feed
+
+        updated_feed = await db.adb(_persist_rumor_lead)
 
         out_res = {
             "success": True,
@@ -358,7 +368,6 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
         red_herring = random.choice(fallbacks)
 
         # Prepend noise banter post into feed
-        current_feed = db.get_gossip_feed(session_id, limit=20) or []
         noise_post = {
             "id": f"noise_{int(time.time())}_{random.randint(100, 999)}",
             "author_name": random.choice(["Campus Lurker", "Anon Student", "Corridor Whispers", "Meme Archivist"]),
@@ -370,8 +379,15 @@ async def scour_feed_for_rumor(session: dict, user_id: int) -> dict:
             "time_ago": "Just now",
             "is_lead": False
         }
-        updated_feed = [noise_post] + [p for p in current_feed if p.get("content") != red_herring][:19]
-        db.save_gossip_feed(session_id, updated_feed)
+
+        def _persist_rumor_noise():
+            with db.UnitOfWork():
+                current_feed = db.get_gossip_feed(session_id, limit=20) or []
+                upd_feed = [noise_post] + [p for p in current_feed if p.get("content") != red_herring][:19]
+                db.save_gossip_feed(session_id, upd_feed)
+                return upd_feed
+
+        updated_feed = await db.adb(_persist_rumor_noise)
 
         return {
             "success": False,

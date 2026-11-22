@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import sys as _sys
-import types as _types
-from typing import Any as _Any
-
-from contextlib import nullcontext
-from typing import Any, Optional
+from typing import Optional
 
 from .generation import log
 from .constants import *
@@ -18,14 +13,11 @@ from mechanics.narrative.intent import *
 from .dialogue import _build_dialogue_prompt_block
 from .prompts import _build_quest_and_bounty_directives, _build_player_actions_text, _build_history_context
 from game_engine.turn_context import TurnExecutionContext
-import json
-import random
 from config import LLM_PASS2_TIMEOUT, LLM_STREAM_TOTAL_DEADLINE
 import scenario_data
 from game_engine.core import is_nsfw_scenario, uses_nsfw_model
 import namegen
 import game_engine
-import re
 from models.llm_schemas import TurnOutcome, DeterministicTurnNarration, DeterministicCombatNarration
 
 from . import (
@@ -94,7 +86,7 @@ async def _resolve_turn_inner(
         is_retry=is_retry,
         ctx=ctx,
     )
-    ctx = pre_state.get("ctx", ctx)
+    ctx = pre_state.ctx
     llm_state = await assemble_and_call_turn_llm(
         session,
         party,
@@ -172,28 +164,11 @@ async def evaluate_action(
 
 
 _SUBMODULES = (_mod_encounter_narrative, _mod_pre_turn, _mod_prompt_assembly, _mod_post_turn)
-_SUBMODULE_NAMES = frozenset({"encounter_narrative", "pre_turn", "prompt_assembly", "post_turn"})
+_SUBMODULE_NAMES = frozenset({"encounter_narrative", "pre_turn", "prompt_assembly", "post_turn", "phase_state"})
 
+from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 
-class _TurnCoreFacadeModule(_types.ModuleType):
-    """Propagates monkeypatches on `game_engine.turn.core` to phase submodules."""
-
-    def __setattr__(self, name: str, value: _Any) -> None:
-        super().__setattr__(name, value)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    setattr(_sub, name, value)
-
-    def __delattr__(self, name: str) -> None:
-        super().__delattr__(name)
-        if not name.startswith("__") and name not in _SUBMODULE_NAMES:
-            for _sub in _SUBMODULES:
-                if name in _sub.__dict__:
-                    delattr(_sub, name)
-
-
-_sys.modules[__name__].__class__ = _TurnCoreFacadeModule
+_install_submodule_proxy(__name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_TurnCoreFacadeModule")
 
 __all__ = [
     "ACCOMPANIED_MOVEMENT_RE",
@@ -216,7 +191,6 @@ __all__ = [
     "ASSET_SIZE_TIERS",
     "ATMOSPHERE_ADJECTIVE_BLACKLIST",
     "ActionIntent",
-    "Any",
     "BEASTFOLK_COLOR_PATTERNS",
     "BOARD_DIRECT_INSPECT_RE",
     "BOARD_INSPECT_RE",
@@ -251,14 +225,12 @@ __all__ = [
     "DIVERSE_MALE_HAIR_STYLES",
     "DeterministicCombatNarration",
     "DeterministicTurnNarration",
-    "Dict",
     "ENCLOSED_ROOM_KEYWORDS",
     "EROTIC_OPENNESS_TEMPLATES",
     "EROTIC_OPENNESS_TIERS",
     "EXPANDED_HAIR_DYE_TEMPLATES",
     "EXTERIOR_DESTINATION_RE",
     "EYE_COLORS",
-    "Enum",
     "FEMALE_ASSET_TEXTURE_TEMPLATES",
     "FEMALE_BRA_STYLES_BOLD",
     "FEMALE_BRA_STYLES_MODERATE",
@@ -298,7 +270,6 @@ __all__ = [
     "LLM_PASS2_TIMEOUT",
     "LLM_STREAM_TOTAL_DEADLINE",
     "LOCATION_SCENARIOS",
-    "List",
     "MALE_ASSET_TEXTURE_TEMPLATES",
     "MALE_UNDERWEAR_STYLES_BOLD",
     "MALE_UNDERWEAR_STYLES_MODERATE",
@@ -329,7 +300,6 @@ __all__ = [
     "ORAL_INTIMACY_STATES",
     "ORAL_RECEIVE_MEMORY_KEYWORDS",
     "ORAL_RECEIVE_RE",
-    "Optional",
     "PARTING_REQUEST_RE",
     "PART_WAYS_RE",
     "PENIS_SIZES",
@@ -389,7 +359,6 @@ __all__ = [
     "STATURE_WEIGHTS_STANDARD",
     "STATURE_WEIGHTS_TINY_BEASTFOLK",
     "STEALTH_COVERT_RE",
-    "Set",
     "TAG_TO_LOCATION_SEED_KEY",
     "TAKE_CARE_FAREWELL_RE",
     "THIRD_PARTY_GOSSIP_RE",
@@ -443,7 +412,6 @@ __all__ = [
     "_slugify",
     "actor_card",
     "adb",
-    "annotations",
     "apply_sanctuary_treaty_violation",
     "assemble_and_call_turn_llm",
     "attune_folklore_village",
@@ -465,7 +433,6 @@ __all__ = [
     "clean_narrative_location_arrows",
     "compute_property_slot_bonus",
     "core",
-    "dataclass",
     "db",
     "dedupe_location_stutter",
     "derive_immediate_agenda",
@@ -484,7 +451,6 @@ __all__ = [
     "evaluate_spatial_route",
     "extract_asset_texture",
     "extract_movement_destination",
-    "field",
     "find_realty_by_node_id",
     "find_spatial_path",
     "format_act_preferences_prompt_directive",
@@ -611,7 +577,6 @@ __all__ = [
     "get_zone_summary_tree",
     "has_npc_authority_for_node",
     "has_player_nsfw_salon_membership_or_standing",
-    "hashlib",
     "infer_contact_gender",
     "infer_erotic_openness_from_traits",
     "infer_humanoid_skin_color",
@@ -673,13 +638,11 @@ __all__ = [
     "is_unpurchased_realty_node",
     "is_valid_persona_attribute_string",
     "iter_session_realty_catalog",
-    "json",
     "location_has_bounty_board",
     "location_has_faction_hq",
     "location_has_merchant_shop",
     "log",
     "logger",
-    "logging",
     "match_freeform_spatial_destination",
     "merge_anal_states",
     "merge_appearance_safely",
@@ -689,14 +652,11 @@ __all__ = [
     "namegen",
     "normalize_appearance",
     "normalize_stature_tier",
-    "nullcontext",
     "parse_tiered_location",
     "parse_zone_environment_data",
     "preview_sanctuary_treaty_violation",
     "process_llm_location_update",
     "provision_faction_hq_tier2_location",
-    "random",
-    "re",
     "reconcile_movement_location",
     "record_node_unlock",
     "record_turn_scene_residue",

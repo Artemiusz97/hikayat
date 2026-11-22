@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 import sys
 import httpx
@@ -11,34 +10,15 @@ from pydantic import ConfigDict
 from pydantic import Field
 from typing import Any, Dict, List, Optional
 
+from db.core.module_proxy import callable_accepts_kwarg as _callable_accepts_kwarg_impl
+
 log = logging.getLogger(__name__)
 logger = log
 
 
 def _callable_accepts_kwarg(fn: Any, kwarg: str) -> bool:
     """Returns True if callable (or wrapped mock side_effect) accepts `kwarg` or `**kwargs`."""
-    target = fn
-    for _ in range(4):
-        se = getattr(target, "side_effect", None)
-        if callable(se) and not (isinstance(se, type) and issubclass(se, BaseException)):
-            target = se
-            continue
-        wraps = getattr(target, "_mock_wraps", None)
-        if callable(wraps):
-            target = wraps
-            continue
-        break
-    try:
-        sig = inspect.signature(target)
-    except (TypeError, ValueError):
-        return False
-    for param in sig.parameters.values():
-        if param.kind == inspect.Parameter.VAR_KEYWORD or (
-            param.name == kwarg
-            and param.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
-        ):
-            return True
-    return False
+    return _callable_accepts_kwarg_impl(fn, kwarg)
 
 
 def _is_llm_unavailable_exception(exc: BaseException) -> bool:

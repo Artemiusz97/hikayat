@@ -595,10 +595,10 @@ def resolve_world_event(
                         c_rows = conn.execute("SELECT user_id FROM characters ORDER BY user_id ASC LIMIT 1").fetchall()
                         party_uids = [int(r["user_id"]) for r in c_rows if r["user_id"]] or [1]
 
-    if active_linked_qid:
-        from .quests import claim_quest_reward
+        if active_linked_qid:
+            from .quests import claim_quest_reward
 
-        claim_quest_reward(session_id, active_linked_qid, party_user_ids=party_uids)
+            claim_quest_reward(session_id, active_linked_qid, party_user_ids=party_uids)
 
     return True
 

@@ -477,6 +477,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list, *, persist
         (isinstance(session, dict) and session.get("non_lethal_mode"))
         or any(isinstance(a, dict) and a.get("is_non_lethal") for a in (actions or []))
     )
+    from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
 
     def _register_kill(m: Dict[str, Any]) -> None:
         if m.get("hp", 0) <= 0 and m["name"] not in dead_enemies and m["name"] not in yielded_enemies and m["name"] not in fled_enemies:
@@ -531,7 +532,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list, *, persist
 
         if m.get("hp", 0) <= 0:
             if is_anom_combat:
-                from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
                 if get_enemy_tether_state(m):
                     teth_res = try_resolve_zero_hp_tether(m)
                     if teth_res.get("outcome") == "reformed":
@@ -632,7 +632,6 @@ def precompute_combat_turn(session: dict, party: list, actions: list, *, persist
                     gold_gain += int(base_gold * mult)
             elif m.get("hp", 0) <= 0:
                 if is_anom_combat and m["name"] not in dead_enemies:
-                    from mechanics.world.folklore_mechanics import get_enemy_tether_state, try_resolve_zero_hp_tether
                     if get_enemy_tether_state(m):
                         teth_res = try_resolve_zero_hp_tether(m)
                         if teth_res.get("outcome") == "reformed":

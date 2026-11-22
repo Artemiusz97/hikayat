@@ -1233,10 +1233,17 @@ async def _resolve_action_inner(
             _BACKGROUND_TASKS.add(pw_task)
             pw_task.add_done_callback(_BACKGROUND_TASKS.discard)
     except asyncio.CancelledError:
+        latest_sess = None
+        try:
+            latest_sess = await _get_turn_service()._await_uninterruptible(
+                adb(db.get_session, session_id), reraise_cancel=False
+            )
+        except Exception:
+            latest_sess = None
         await _get_turn_service()._await_uninterruptible(
             _get_turn_service()._finalize_and_save_scene(
                 session_id=session_id,
-                session_obj=session,
+                session_obj=latest_sess or session,
                 outcome=outcome,
                 lead_char=(dict(party[0][0]) if party and party[0] else None),
                 history=new_hist_ref[0],
@@ -1282,6 +1289,7 @@ async def _resolve_action_inner(
             log.warning("Post-turn finalize_turn_memory failed for session %s: %s", session_id, _mem_err)
 
     lead_char_for_scene = dict(new_char) if new_char else (dict(party[0][0]) if party and party[0] else None)
+    from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
 
     if outcome.get("_is_fallback_narrative"):
         if outcome.get("fallback_reason") == "models_unavailable":
@@ -1303,7 +1311,6 @@ async def _resolve_action_inner(
                 if isinstance(refreshed_sess, dict):
                     refreshed_sess["world_pulse"] = await adb(_build_wp_payload, session_id)
                     try:
-                        from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
                         if is_anomalous_realty_scenario(str(refreshed_sess.get("scenario") or "")):
                             refreshed_sess["realty"] = await adb(build_realty_payload, session_id, user_id)
                     except Exception:
@@ -1354,7 +1361,6 @@ async def _resolve_action_inner(
     )
     def _load_final_session_with_realty() -> Optional[Dict[str, Any]]:
         try:
-            from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
             scen_hint = str((fresh_session or {}).get("scenario") or "")
             if not scen_hint:
                 _s_hint_row = db.get_session(session_id)
@@ -1370,7 +1376,6 @@ async def _resolve_action_inner(
                 return None
             s_row["world_pulse"] = fresh_session.get("world_pulse") if isinstance(fresh_session, dict) else None
             try:
-                from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
                 if is_anomalous_realty_scenario(str(s_row.get("scenario") or "")):
                     s_row["realty"] = build_realty_payload(session_id, user_id, persist_db=False)
             except Exception:

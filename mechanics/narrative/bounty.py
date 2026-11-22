@@ -1803,7 +1803,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         f"Respond with JSON matching exactly this schema:\n{FACTION_BOUNTY_SCHEMA}"
     )
 
-    from mechanics.world.locations import format_clean_location_prose, clean_narrative_location_arrows
+    from mechanics.world.locations import clean_narrative_location_arrows, format_clean_location_prose
     loc_short = format_clean_location_prose(loc, include_zone=False)
     loc_prose = format_clean_location_prose(loc, include_zone=True, preposition="in")
     bounties_raw = []
@@ -1899,7 +1899,7 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
         ]
 
     def _save_faction_bounties_sync(raw_list):
-        from mechanics.world.locations import clean_narrative_location_arrows, parse_tiered_location
+        from mechanics.world.locations import parse_tiered_location
         wiretap_fb = _should_wiretap_reveal_dossier(session_id, f_arch or "freelance_app")
         safe_cand_locs = _filter_locations_anti_self_target(candidate_locations or [], f_arch or "")
         for idx, b in enumerate(raw_list):

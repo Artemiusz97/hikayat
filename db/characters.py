@@ -470,7 +470,7 @@ def get_character(user_id: int, session_id: int | None = None, *, settings: dict
         row = conn.execute("SELECT * FROM characters WHERE user_id=? AND is_active=1 LIMIT 1", (user_id,)).fetchone()
         if not row:
             row = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id DESC LIMIT 1", (user_id,)).fetchone()
-            if row:
+            if row and not is_in_readonly_uow():
                 conn.execute("UPDATE characters SET is_active=1 WHERE id=?", (row["id"],))
         return _apply_debug_stat_override(dict(row), settings=settings, session_id=session_id) if row else None
 

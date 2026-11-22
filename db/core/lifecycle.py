@@ -9,6 +9,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from ..registry import get_purge_specs, get_snapshot_prune_specs
+from .module_proxy import unwrap_callable_target
 from .connection import (
     ReadUnitOfWork,
     _advance_maintenance_counter,
@@ -33,17 +34,7 @@ def _call_get_character_compat(
     settings: Optional[Dict[str, Any]] = None,
 ) -> Any:
     """Invokes db.get_character (or a monkeypatched test spy) passing only accepted optional kwargs."""
-    target = get_char_fn
-    for _ in range(4):
-        se = getattr(target, "side_effect", None)
-        if callable(se) and not (isinstance(se, type) and issubclass(se, BaseException)):
-            target = se
-            continue
-        wraps = getattr(target, "_mock_wraps", None)
-        if callable(wraps):
-            target = wraps
-            continue
-        break
+    target = unwrap_callable_target(get_char_fn)
     try:
         sig = inspect.signature(target)
     except (TypeError, ValueError):

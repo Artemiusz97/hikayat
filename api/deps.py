@@ -70,7 +70,10 @@ class ConnectionManager:
                 return sess_members, sess_chars
 
         members, chars_by_uid = await adb(_load_presence_bundle)
-        connected_uids = [c["user_id"] for c in self.active_connections[clean_sid]]
+        conns = list(self.active_connections.get(clean_sid) or [])
+        if not conns:
+            return
+        connected_uids = [c["user_id"] for c in conns]
 
         member_profiles = []
         for uid in members:
