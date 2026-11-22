@@ -207,6 +207,112 @@ def is_safe_sanctuary_node(session_id: int, node_id: str) -> bool:
     return False
 
 
+def _quest_loc_matches_node(loc_str: Any, node: dict | None, fac_node: dict | None = None) -> bool:
+    raw = str(loc_str or "").strip().lower()
+    if not raw or not isinstance(node, dict):
+        return False
+    leaf = raw.split("➔")[-1].split("->")[-1].strip()
+    nid = str(node.get("node_id") or "").strip().lower()
+    nname = str(node.get("name") or "").strip().lower()
+    candidates = {x for x in (nid, nname) if x}
+    if isinstance(fac_node, dict):
+        fnid = str(fac_node.get("node_id") or "").strip().lower()
+        fname = str(fac_node.get("name") or "").strip().lower()
+        if fnid:
+            candidates.add(fnid)
+        if fname and leaf == fname:
+            candidates.add(fname)
+    return raw in candidates or (bool(leaf) and leaf in candidates)
+
+
+def build_active_quest_gate_snapshot(session_id: int) -> dict[str, Any]:
+    """Preloads active quests, dossiers, and active waypoints ONCE per map/payload sweep."""
+    if not session_id:
+        return {"quests": [], "dossiers_by_qid": {}, "active_wps": []}
+    try:
+        quests = db.get_session_quests(session_id, status="Active") or []
+        dossiers_by_qid = {
+            str(d.get("quest_id") or ""): d
+            for d in (db.get_session_quest_dossiers(session_id) or [])
+            if isinstance(d, dict) and d.get("quest_id")
+        }
+        active_wps = db.get_all_session_active_waypoints(session_id) or []
+        return {
+            "quests": quests,
+            "dossiers_by_qid": dossiers_by_qid,
+            "active_wps": active_wps,
+        }
+    except Exception:
+        return {"quests": [], "dossiers_by_qid": {}, "active_wps": []}
+
+
+def _get_active_quest_gate_context(
+    session_id: int,
+    node: dict | None,
+    fac_node: dict | None = None,
+    quest_gate_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Inspects active quests & dossiers for earned handover clearance, active quest-room immunity, and rush danger tier."""
+    out: dict[str, Any] = {
+        "has_earned_clearance": False,
+        "is_active_quest_room": False,
+        "min_danger_tier": 1,
+    }
+    if not session_id or not isinstance(node, dict):
+        return out
+    min_dt: int | None = None
+    try:
+        snap = quest_gate_snapshot if isinstance(quest_gate_snapshot, dict) else build_active_quest_gate_snapshot(session_id)
+        quests = snap.get("quests") or []
+        dossiers_by_qid = snap.get("dossiers_by_qid") or {}
+        active_wps = snap.get("active_wps") or []
+        for q in quests:
+            if not isinstance(q, dict) or str(q.get("status") or "").lower() != "active":
+                continue
+            qid = str(q.get("quest_id") or "")
+            dos = dossiers_by_qid.get(qid) or {}
+            q_dt = max(1, min(5, int(dos.get("danger_tier") or q.get("danger_tier") or 1)))
+            climax = dos.get("climax_spec") or {}
+            for cl_loc in (climax.get("earned_clearance_locations") or []):
+                if _quest_loc_matches_node(cl_loc, node, fac_node):
+                    out["has_earned_clearance"] = True
+                    out["is_active_quest_room"] = True
+                    min_dt = q_dt if min_dt is None else min(min_dt, q_dt)
+
+            for ms in (climax.get("main_stages") or []):
+                if not isinstance(ms, dict):
+                    continue
+                ms_stat = str(ms.get("status") or "locked").lower()
+                if ms.get("completed") or ms_stat in ("completed", "bypassed"):
+                    continue
+                if ms.get("is_climax_stage"):
+                    if climax.get("is_unlocked") and _quest_loc_matches_node(ms.get("target_location") or climax.get("location"), node, fac_node):
+                        out["is_active_quest_room"] = True
+                        min_dt = q_dt if min_dt is None else min(min_dt, q_dt)
+                    continue
+                if ms_stat != "active":
+                    continue
+                if _quest_loc_matches_node(ms.get("target_location"), node, fac_node):
+                    out["is_active_quest_room"] = True
+                    min_dt = q_dt if min_dt is None else min(min_dt, q_dt)
+                for src in (ms.get("clue_sources") or []):
+                    if isinstance(src, dict) and str(src.get("status") or "open").lower() == "open":
+                        if _quest_loc_matches_node(src.get("location"), node, fac_node):
+                            out["is_active_quest_room"] = True
+                            min_dt = q_dt if min_dt is None else min(min_dt, q_dt)
+
+        for wp in active_wps:
+            if isinstance(wp, dict) and _quest_loc_matches_node(wp.get("target_location") or wp.get("target_node_id"), node, fac_node):
+                out["is_active_quest_room"] = True
+                wp_dt = max(1, min(5, int((dossiers_by_qid.get(str(wp.get("quest_id") or "")) or {}).get("danger_tier") or 1)))
+                min_dt = wp_dt if min_dt is None else min(min_dt, wp_dt)
+    except Exception:
+        pass
+    if min_dt is not None:
+        out["min_danger_tier"] = min_dt
+    return out
+
+
 def get_node_effective_access_info(
     session_id: int,
     node_id: str,
@@ -214,6 +320,7 @@ def get_node_effective_access_info(
     current_minute: int = 480,
     scen_key: str = "",
     session: dict | None = None,
+    quest_gate_snapshot: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Computes effective access status, curfew status, dynamic world-schedule locks,
@@ -403,6 +510,17 @@ def get_node_effective_access_info(
         except Exception:
             pass
 
+    if session_id and not is_unlocked:
+        q_gate_acc = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=quest_gate_snapshot)
+        if q_gate_acc.get("has_earned_clearance"):
+            is_unlocked = True
+            curfew_active = False
+            curfew_label = ""
+            schedule_locked = False
+            is_trespassing = False
+            sched_reason_code = "quest_handover_clearance"
+            sched_reason_label = "Quest Handover Clearance"
+
     # Status Badge
     owned_badge = ""
     for_sale_badge = ""
@@ -506,7 +624,8 @@ def record_node_unlock(
         "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
         "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
         "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
-        "fac_agency_residence", "fac_temple_residence", "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
+        "fac_agency_residence", "fac_temple_residence", "fac_cult_residence", "fac_syndicate_residence",
+        "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
     )
     if parent_id and node.get("node_type") == "ROOM" and not parent_id.startswith("bld_school_") and parent_id not in multi_wing_parents:
         db.update_world_node_state(session_id, parent_id, updates)
@@ -581,9 +700,13 @@ def has_npc_authority_for_node(npc: dict, node: dict, parent_node: dict | None =
             return True
         if f_arch == "monastic_order" and ("loc_et_" in full_target or "zone_eastern_temple" in full_target):
             return True
-        if f_arch == "cult_faction" and ("loc_cult_" in full_target or "sub_cult_" in full_target):
+        if f_arch == "cult_faction" and (
+            "loc_cult_" in full_target or ("sub_cult_" in full_target and "sub_cult_res_" not in full_target)
+        ):
             return True
-        if f_arch == "clandestine_faction" and ("loc_clandestine_" in full_target or "sub_synd_" in full_target):
+        if f_arch == "clandestine_faction" and (
+            "loc_clandestine_" in full_target or ("sub_synd_" in full_target and "sub_synd_res_" not in full_target)
+        ):
             return True
 
     return False
@@ -617,6 +740,7 @@ def evaluate_anomalous_hq_access(
 
     required_arch = ""
     is_open_lobby_or_shop = False
+    from mechanics.world.anomalous_sites import is_outlaw_hq_subnode
 
     # 1. Public Agency HQ (`loc_agency_hq` / `zone_agency_hq` / `loc_hq_*`)
     if "loc_hq_" in combined or n_id in ("zone_agency_hq", "loc_agency_hq") or p_id in ("zone_agency_hq", "loc_agency_hq"):
@@ -664,10 +788,24 @@ def evaluate_anomalous_hq_access(
             is_open_lobby_or_shop = True
 
     # 5. Cult & Clandestine HQs (`loc_cult_sanctum_hq`, `loc_clandestine_syndicate_hq`)
-    elif "loc_cult_sanctum_hq" in combined or "sub_cult_" in combined:
-        required_arch = "cult_faction"
-    elif "loc_clandestine_syndicate_hq" in combined or "sub_synd_" in combined:
-        required_arch = "clandestine_faction"
+    elif (
+        "loc_cult_sanctum_hq" in combined
+        or is_outlaw_hq_subnode(n_id) == "cult_faction"
+        or ("sub_cult_" in combined and "sub_cult_res_" not in combined)
+    ):
+        if n_id == "loc_cult_sanctum_hq" or "sub_cult_entrance" in combined or "ward-sealed threshold" in combined:
+            is_open_lobby_or_shop = True
+        else:
+            required_arch = "cult_faction"
+    elif (
+        "loc_clandestine_syndicate_hq" in combined
+        or is_outlaw_hq_subnode(n_id) == "clandestine_faction"
+        or ("sub_synd_" in combined and "sub_synd_res_" not in combined)
+    ):
+        if n_id == "loc_clandestine_syndicate_hq" or "sub_synd_entrance" in combined or "biometric vault door entrance" in combined:
+            is_open_lobby_or_shop = True
+        else:
+            required_arch = "clandestine_faction"
 
     if is_open_lobby_or_shop and not required_arch:
         return {"force_open": True}
@@ -890,7 +1028,8 @@ def evaluate_node_access_gate(
 
         # If player is already halted at loc_school_gate on Turn 2 and chooses "Return to campus grounds"
         if low_id == "loc_school_gate" and "return to campus" in current_action_label:
-            db.update_world_node_state(session_id, "loc_school_gate", {"pending_truancy_target_node_id": "", "pending_truancy_target_name": ""})
+            if persist_db:
+                db.update_world_node_state(session_id, "loc_school_gate", {"pending_truancy_target_node_id": "", "pending_truancy_target_name": ""})
             return {"gated": False, "returned_to_campus": True}
 
         # If player is halted at loc_school_gate on Turn 2 and attempts an outbound truancy breach
@@ -950,11 +1089,12 @@ def evaluate_node_access_gate(
                 )
 
                 if (is_permit_action and permit_valid) or is_rolled_stat_breach:
-                    db.update_world_node_state(
-                        session_id,
-                        "loc_school_gate",
-                        {"truancy_unlocked_day": curr_day, "pending_truancy_target_node_id": "", "pending_truancy_target_name": ""}
-                    )
+                    if persist_db:
+                        db.update_world_node_state(
+                            session_id,
+                            "loc_school_gate",
+                            {"truancy_unlocked_day": curr_day, "pending_truancy_target_node_id": "", "pending_truancy_target_name": ""}
+                        )
                     return {
                         "gated": False,
                         "unlocked_by": "agency_contract_permit" if (is_permit_action and permit_valid) else "truancy_bypass",
@@ -990,11 +1130,12 @@ def evaluate_node_access_gate(
                         ],
                     }
 
-                db.update_world_node_state(
-                    session_id,
-                    "loc_school_gate",
-                    {"pending_truancy_target_node_id": target_node_id, "pending_truancy_target_name": display_name}
-                )
+                if persist_db:
+                    db.update_world_node_state(
+                        session_id,
+                        "loc_school_gate",
+                        {"pending_truancy_target_node_id": target_node_id, "pending_truancy_target_name": display_name}
+                    )
                 return {
                     "gated": True,
                     "node_id": "loc_school_gate",
@@ -1078,11 +1219,12 @@ def evaluate_node_access_gate(
                     break
 
         if partner_waived:
-            db.update_world_node_state(
-                session_id,
-                target_node_id,
-                {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "partner_treated_suite"},
-            )
+            if persist_db:
+                db.update_world_node_state(
+                    session_id,
+                    target_node_id,
+                    {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "partner_treated_suite"},
+                )
             if isinstance(session, dict):
                 session["active_love_hotel_suite_bonus"] = suite_bonus
             return {
@@ -1110,15 +1252,16 @@ def evaluate_node_access_gate(
         )
 
         if avail_gold >= suite_fee:
-            if user_id and db_char:
+            if persist_db and user_id and db_char:
                 db.apply_hp_mp_delta(user_id, gold_delta=-suite_fee)
             if isinstance(char_obj, dict):
                 char_obj["gold"] = max(0, avail_gold - suite_fee)
-            db.update_world_node_state(
-                session_id,
-                target_node_id,
-                {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "suite_fee_paid"},
-            )
+            if persist_db:
+                db.update_world_node_state(
+                    session_id,
+                    target_node_id,
+                    {"suite_paid_day": curr_day, "unlocked_until_day": curr_day, "last_unlock_reason": "suite_fee_paid"},
+                )
             if isinstance(session, dict):
                 session["active_love_hotel_suite_bonus"] = suite_bonus
             return {
@@ -1173,13 +1316,14 @@ def evaluate_node_access_gate(
                 or int(session.get("nsfw_faction_invited_day") or 0) >= curr_day
             )
             unlock_reason = "nsfw_faction_invite" if invited_ok else "nsfw_faction_standing"
-            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason=unlock_reason)
-            if fac_node and fac_node.get("node_id") == "loc_nsfw_club_facility":
-                record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason=unlock_reason)
-            try:
-                reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
-            except Exception:
-                pass
+            if persist_db:
+                record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason=unlock_reason)
+                if fac_node and fac_node.get("node_id") == "loc_nsfw_club_facility":
+                    record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason=unlock_reason)
+                try:
+                    reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
+                except Exception:
+                    pass
             return {"gated": False, "unlocked_by": unlock_reason}
 
     # 1d. Hidden Folklore Villages Veil Gate & Sanctuary Treaty (must run BEFORE Step 2 open check & Step 3 \bkey\b regex)
@@ -1203,6 +1347,7 @@ def evaluate_node_access_gate(
         return veil_gate_res
 
     # 2. Check access info & existing unlocks
+    q_gate_snap = build_active_quest_gate_snapshot(session_id)
     access_info = get_node_effective_access_info(
         session_id,
         target_node_id,
@@ -1210,6 +1355,7 @@ def evaluate_node_access_gate(
         current_minute=curr_min,
         scen_key=scen_key,
         session=session if isinstance(session, dict) else None,
+        quest_gate_snapshot=q_gate_snap,
     )
     if access_info["is_unlocked"]:
         res = {"gated": False}
@@ -1252,13 +1398,15 @@ def evaluate_node_access_gate(
         r"\b(master key|skeleton key|staff pass|council badge|keycard|passcard|access card|clearance badge|door key|gate key|vault key|sanctum key|room key|office key|key)\b",
         inv_str,
     ):
-        record_node_unlock(session_id, target_node_id, unlock_type="permanent", current_day=curr_day, reason="key")
+        if persist_db:
+            record_node_unlock(session_id, target_node_id, unlock_type="permanent", current_day=curr_day, reason="key")
         return {"gated": False, "unlocked_by": "key"}
 
     # 4. Check Accompanying Companion Authority
     for comp in ([] if unbought_realty else active_companions):
         if isinstance(comp, dict) and has_npc_authority_for_node(comp, node, fac_node):
-            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="companion_authority")
+            if persist_db:
+                record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="companion_authority")
             return {"gated": False, "unlocked_by": "companion_authority", "authorized_npc": comp.get("name")}
 
     # 5. Check Illicit / Scheduled Rendezvous (Edge Case 2)
@@ -1274,7 +1422,8 @@ def evaluate_node_access_gate(
             is_match = check_location_matches_waypoint(display_name, appt_loc) or check_location_matches_waypoint(appt_loc, display_name)
 
         if is_match:
-            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="illicit_rendezvous")
+            if persist_db:
+                record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="illicit_rendezvous")
             return {
                 "gated": False,
                 "unlocked_by": "illicit_rendezvous",
@@ -1441,9 +1590,12 @@ def evaluate_node_access_gate(
                         return {"gated": False, "unlocked_by": "resident_welcome", "resident_name": res_name}
 
     # 7. Check Current Action Check Result (Breach / Persuasion Attempt & Escalating Complication)
+    q_gate_eval = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=q_gate_snap)
+    is_active_quest_room = bool(q_gate_eval.get("is_active_quest_room"))
+    quest_rush_dc = min(12, 6 + max(1, int(q_gate_eval.get("min_danger_tier") or 1))) if is_active_quest_room else 12
     state = db.get_world_node_state(session_id, target_node_id)
     failed_block_tag = f"{curr_day}_{time_block}"
-    is_lock_jammed = state.get("failed_block") == failed_block_tag
+    is_lock_jammed = False if is_active_quest_room else (state.get("failed_block") == failed_block_tag)
 
     _is_intercom_ring_only = (
         any(w in current_action_label for w in ("ring the intercom", "buzz", "ring the bell", "intercom"))
@@ -1458,18 +1610,19 @@ def evaluate_node_access_gate(
         is_success_tier = action_check_tier in ("critical_success", "crit_success", "success", "partial_success")
         is_crit_fail_tier = action_check_tier in ("critical_failure", "crit_fail")
         if is_success_tier:
-            record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="skill_check")
-            if is_nsfw_salon_target:
-                record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason="skill_check")
-                try:
-                    from .seeding import reveal_hidden_club_facility
-                    reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
-                except Exception:
-                    pass
+            if persist_db:
+                record_node_unlock(session_id, target_node_id, unlock_type="day", current_day=curr_day, reason="skill_check")
+                if is_nsfw_salon_target:
+                    record_node_unlock(session_id, "loc_nsfw_club_facility", unlock_type="day", current_day=curr_day, reason="skill_check")
+                    try:
+                        from .seeding import reveal_hidden_club_facility
+                        reveal_hidden_club_facility(session_id, "loc_nsfw_club_facility")
+                    except Exception:
+                        pass
             return {"gated": False, "unlocked_by": "skill_check"}
         else:
-            # Action Failed: lock out for this time block and evict to nearest open public node
-            if persist_db:
+            # Action Failed: lock out for this time block and evict to nearest open public node (active quest rooms never jam)
+            if persist_db and not is_active_quest_room:
                 db.update_world_node_state(session_id, target_node_id, {"failed_block": failed_block_tag})
             from .pathfinding import resolve_safe_open_eviction_destination
             evict_nid, evict_loc = resolve_safe_open_eviction_destination(
@@ -1663,7 +1816,7 @@ def evaluate_node_access_gate(
             barrier_choices.append(Phase2Choice(
                 f"[AGI] Sneak in or pick the lock to inspect {display_name}",
                 stat="AGI",
-                requirement=12,
+                requirement=quest_rush_dc,
                 target_node_id=target_node_id,
                 target_location=display_name,
                 intent="movement",
@@ -1700,7 +1853,7 @@ def evaluate_node_access_gate(
             barrier_choices.append(Phase2Choice(
                 f"[AGI] Slip quietly through the cellar service grate into {display_name}",
                 stat="AGI",
-                requirement=12,
+                requirement=quest_rush_dc,
                 target_node_id=target_node_id,
                 target_location=display_name,
                 intent="movement",
@@ -1710,7 +1863,7 @@ def evaluate_node_access_gate(
         barrier_choices.append(Phase2Choice(
             f"[CHA] Audition or charm the doorkeeper to gain entry to {display_name}",
             stat="CHA",
-            requirement=12,
+            requirement=quest_rush_dc,
             target_node_id=target_node_id,
             target_location=display_name,
             intent="movement",
@@ -1741,7 +1894,7 @@ def evaluate_node_access_gate(
             except Exception:
                 has_story_wp = False
 
-        if not is_lock_jammed or has_story_wp or sched_reason_code == "world_event_lockdown":
+        if not is_lock_jammed or has_story_wp or is_active_quest_room or sched_reason_code == "world_event_lockdown":
             infil_label = (
                 f"[AGI] Infiltrate past the lockdown perimeter into {display_name}"
                 if (sched_reason_code == "world_event_lockdown" or (is_lock_jammed and has_story_wp))
@@ -1750,7 +1903,7 @@ def evaluate_node_access_gate(
             barrier_choices.append(Phase2Choice(
                 infil_label,
                 stat="AGI",
-                requirement=12,
+                requirement=quest_rush_dc,
                 target_node_id=target_node_id,
                 target_location=display_name,
                 intent="movement",
@@ -1761,7 +1914,7 @@ def evaluate_node_access_gate(
             barrier_choices.append(Phase2Choice(
                 f"[CHA] Ring the intercom and ask to be let into {display_name}",
                 stat="CHA",
-                requirement=10,
+                requirement=min(10, quest_rush_dc),
                 target_node_id=target_node_id,
                 target_location=display_name,
                 intent="movement",
@@ -1770,7 +1923,7 @@ def evaluate_node_access_gate(
             barrier_choices.append(Phase2Choice(
                 f"[CHA] Talk your way past authority or seek permission for {display_name}",
                 stat="CHA",
-                requirement=11,
+                requirement=min(11, quest_rush_dc),
                 target_node_id=target_node_id,
                 target_location=display_name,
                 intent="movement",

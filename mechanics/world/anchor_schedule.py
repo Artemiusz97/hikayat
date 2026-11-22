@@ -15,7 +15,7 @@ from .locations.residence_fog import (
     can_materialize_npc_residence,
 )
 from .schedule_blocks import get_detailed_npc_time_phase, get_time_block_key
-from .world_schedule import is_weekend
+from .world_schedule import is_campus_node_or_location, is_high_school_setting, is_weekend
 
 
 SHIFT_PROFILES: Dict[str, Dict[str, Any]] = {
@@ -61,6 +61,36 @@ SHIFT_PROFILES: Dict[str, Dict[str, Any]] = {
         "supports_rest_day": False,
         "weekday_only": False,
     },
+    "pedestrian": {
+        "work_windows": [(420, 1320)],       # 07:00 - 22:00 walking 3-5 stop daily route loop
+        "hangout_windows": [(1320, 1380)],   # 22:00 - 23:00
+        "sleep_windows": [(1380, 1440), (0, 420)],
+        "supports_rest_day": False,
+        "weekday_only": False,
+    },
+    "street_vendor": {
+        "work_windows": [(480, 1200)],       # 08:00 - 20:00 (nocturnal peddlers override to 19:00 - 03:00)
+        "hangout_windows": [(1200, 1260)],
+        "sleep_windows": [(1260, 1440), (0, 480)],
+        "supports_rest_day": False,
+        "weekday_only": False,
+    },
+}
+
+_NOCTURNAL_VENDOR_WINDOWS: Dict[str, List[Tuple[int, int]]] = {
+    "work_windows": [(1140, 1440), (0, 180)],   # 19:00 - 03:00
+    "hangout_windows": [(180, 240)],
+    "sleep_windows": [(240, 1140)],
+}
+
+_PEDESTRIAN_BLOCK_STEPS: Dict[str, int] = {
+    "commute": 0,
+    "morning": 0,
+    "lunch": 1,
+    "class_afternoon": 1,
+    "afternoon": 2,
+    "extracurricular": 2,
+    "evening": 3,
 }
 
 _SHIFT_ALIASES: Dict[str, str] = {"roaming": "roaming_merchant"}
@@ -71,6 +101,10 @@ _ANCHOR_ORIGINS: FrozenSet[str] = frozenset({
     "roaming_merchant",
     "replacement_hire",
     "quest_seed",
+    "district_merchant",
+    "civic_staff",
+    "roaming_citizen",
+    "campus_seed",
 })
 
 _BLOCK_ORDER: Tuple[str, ...] = (
@@ -145,7 +179,64 @@ _STATIC_BLOCK_ROLES: Dict[str, Dict[str, str]] = {
         "evening": "work",
         "night": "home",
     },
+    "pedestrian": {
+        "commute": "work",
+        "morning": "work",
+        "lunch": "work",
+        "class_afternoon": "work",
+        "afternoon": "work",
+        "extracurricular": "work",
+        "evening": "work",
+        "night": "home",
+    },
+    "street_vendor": {
+        "commute": "work",
+        "morning": "work",
+        "lunch": "work",
+        "class_afternoon": "work",
+        "afternoon": "work",
+        "extracurricular": "work",
+        "evening": "work",
+        "night": "home",
+    },
 }
+
+_NOCTURNAL_VENDOR_ROLES: Dict[str, str] = {
+    "commute": "hangout",
+    "morning": "home",
+    "lunch": "home",
+    "class_afternoon": "home",
+    "afternoon": "home",
+    "extracurricular": "home",
+    "evening": "work",
+    "night": "work",
+}
+
+_CLOSES_AT_22_VENUES: FrozenSet[str] = frozenset({
+    "loc_theme_park",
+    "loc_occult_curio_shop",
+    "loc_downtown_shopping_arcade",
+    "loc_downtown_game_arcade",
+    "loc_downtown_ramen_alley",
+    "loc_uptown_roastery",
+    "loc_haute_couture_salon",
+    "loc_harbor_fish_market",
+    "loc_suburb_laundry",
+    "loc_es_lantern_tea_street",
+    "loc_ct_herbal_apothecary",
+    "loc_restaurant",
+    "loc_brand_clothing_store",
+    "loc_night_market",
+    "loc_arcade",
+})
+
+_CAMPUS_WEEKEND_ROAM_POOL: Tuple[str, ...] = (
+    "loc_cafe",
+    "loc_city_square",
+    "loc_arcade",
+    "loc_local_park",
+    "loc_coastal_pier",
+)
 
 
 def _in_windows(minute: int, windows: List[Tuple[int, int]]) -> bool:
@@ -229,7 +320,7 @@ def _merge_roster_context(
         eff_basic = merged_basic
 
         for field in (
-            "npc_key", "name", "origin", "shift_profile",
+            "npc_key", "name", "role", "gender", "origin", "shift_profile",
             "workplace_node_id", "hangout_node_id", "roaming_route", "is_unique_proprietor",
         ):
             cur_val = eff.get(field)
@@ -303,11 +394,274 @@ def _is_anchor_npc(eff: Mapping[str, Any], db_row: Optional[Dict[str, Any]]) -> 
     return bool(eff.get("workplace_node_id") or eff.get("hangout_node_id") or _is_24h_station(eff))
 
 
-def _resolve_active_work_node(eff: Mapping[str, Any], current_day: int, seed_key: str) -> str:
+def _effective_shift_windows(
+    shift_key: str,
+    profile: Mapping[str, Any],
+    eff: Mapping[str, Any],
+) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]], List[Tuple[int, int]]]:
     basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    if shift_key == "street_vendor" and bool(eff.get("nocturnal") or basic.get("nocturnal")):
+        return (
+            _NOCTURNAL_VENDOR_WINDOWS["work_windows"],
+            _NOCTURNAL_VENDOR_WINDOWS["hangout_windows"],
+            _NOCTURNAL_VENDOR_WINDOWS["sleep_windows"],
+        )
+    if shift_key == "evening":
+        work_nid = str(eff.get("workplace_node_id") or basic.get("workplace_node_id") or "").strip().lower()
+        if bool(eff.get("closes_at_20") or basic.get("closes_at_20")):
+            return [(840, 1200)], [(540, 840)], [(1260, 1440), (0, 480)]
+        if bool(eff.get("closes_at_22") or basic.get("closes_at_22")) or work_nid in _CLOSES_AT_22_VENUES:
+            return [(840, 1320)], [(540, 840)], [(1320, 1440), (0, 540)]
+    return (
+        profile["work_windows"],
+        profile["hangout_windows"],
+        profile["sleep_windows"],
+    )
+
+
+def _remap_campus_node(node_id: str, scen_key: str) -> str:
+    nid = str(node_id or "").strip()
+    if not nid:
+        return ""
+    if nid in ("loc_male_shower_room", "loc_female_shower_room"):
+        import scenario_data as _as_sd
+        if _as_sd.is_anomalous_high_school_scenario(scen_key):
+            return "loc_school_athletics"
+        return nid
+    from mechanics.social.population_seeder import _remap_node_for_scenario
+    return _remap_node_for_scenario(nid, scen_key)
+
+
+def _resolve_campus_seed_student_schedule(
+    eff: Mapping[str, Any],
+    *,
+    current_day: int,
+    scen_key: str,
+    current_minute: Optional[int],
+    session_id: Optional[int] = None,
+    home_node: str,
+    seed_key: str,
+    work_node: str,
+    hangout_node: str,
+) -> Dict[str, str]:
+    from mechanics.social.town_roster import is_student_on_part_time_shift, remap_town_node_for_scenario
+
+    basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    grade_low = str(eff.get("grade") or basic.get("grade") or "").strip().lower()
+    role_low = str(eff.get("role") or basic.get("role") or basic.get("occupation") or "").strip().lower()
+    club_low = str(eff.get("club") or basic.get("club") or "").strip().lower()
+    gender_low = str(eff.get("gender") or basic.get("gender") or "").strip().lower()
+    traits = eff.get("unlocked_traits") or eff.get("traits") or basic.get("traits") or []
+    trait_blob = " ".join(
+        str(t.get("name") if isinstance(t, Mapping) else t).lower()
+        for t in (traits if isinstance(traits, (list, tuple)) else [traits])
+        if t
+    )
+
+    if "freshman" in grade_low or "9" in grade_low:
+        raw_cls = "loc_freshman_class"
+    elif "sophomore" in grade_low or "10" in grade_low:
+        raw_cls = "loc_sophomore_class"
+    elif "junior" in grade_low or "11" in grade_low:
+        raw_cls = "loc_junior_class"
+    elif "senior" in grade_low or "12" in grade_low:
+        raw_cls = "loc_senior_class"
+    else:
+        raw_cls = "loc_homeroom"
+
+    cls_node = _remap_campus_node(raw_cls, scen_key)
+    club_node = work_node or hangout_node or cls_node
+    seed_int = _deterministic_seed_int(seed_key)
+
+    locked_weekend_campus = {
+        cls_node,
+        _remap_campus_node("loc_homeroom", scen_key),
+        _remap_campus_node("loc_freshman_class", scen_key),
+        _remap_campus_node("loc_sophomore_class", scen_key),
+        _remap_campus_node("loc_junior_class", scen_key),
+        _remap_campus_node("loc_senior_class", scen_key),
+        _remap_campus_node("loc_library", scen_key),
+        _remap_campus_node("loc_science_lab", scen_key),
+        _remap_campus_node("loc_cafeteria", scen_key),
+        _remap_campus_node("loc_school_rooftop", scen_key),
+    }
+
+    if not is_weekend(current_day):
+        commute_pool = (
+            _remap_campus_node("loc_school_gate", scen_key),
+            _remap_campus_node("loc_entrance_foyer", scen_key),
+            _remap_campus_node("loc_courtyard", scen_key),
+            cls_node,
+        )
+        commute_nid = commute_pool[seed_int % len(commute_pool)]
+
+        if any(k in trait_blob for k in ("introverted", "shy", "bookworm", "studious")) or seed_int % 5 == 0:
+            lunch_nid = _remap_campus_node("loc_library", scen_key)
+        elif any(k in trait_blob for k in ("athletic", "energetic", "outgoing")) or seed_int % 5 == 1:
+            lunch_nid = _remap_campus_node("loc_courtyard", scen_key)
+        else:
+            lunch_nid = _remap_campus_node("loc_cafeteria", scen_key)
+
+        schedule: Dict[str, str] = {
+            "commute": commute_nid,
+            "morning": cls_node,
+            "lunch": lunch_nid,
+            "class_afternoon": cls_node,
+            "extracurricular": club_node,
+            "afternoon": club_node,
+            "evening": club_node,
+            "night": home_node,
+        }
+
+        is_athlete = any(
+            k in f"{role_low} {club_low}"
+            for k in ("swim", "track", "martial", "athletic", "kendo", "kyudo", "sport", "sprinter", "relay")
+        )
+        if is_athlete and current_minute is not None:
+            safe_min = int(current_minute) % 1440
+            if 1110 <= safe_min < 1170:
+                shower_nid = _remap_campus_node(
+                    "loc_male_shower_room" if gender_low == "male" else "loc_female_shower_room",
+                    scen_key,
+                )
+                schedule[get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)] = shower_nid
+                schedule[get_time_block_key(safe_min)] = shower_nid
+    else:
+        is_weekend_club = ((seed_int + max(1, int(current_day or 1))) % 2 == 0) and bool(club_node) and club_node not in locked_weekend_campus
+        roam_stops = [remap_town_node_for_scenario(n, scen_key) for n in _CAMPUS_WEEKEND_ROAM_POOL]
+        if hangout_node and not is_campus_node_or_location(node_id=hangout_node, scen_key=scen_key) and hangout_node not in roam_stops:
+            roam_stops.insert(0, hangout_node)
+        roam_morn = roam_stops[seed_int % len(roam_stops)]
+        roam_aft = roam_stops[(seed_int + 1) % len(roam_stops)]
+        roam_eve = roam_stops[(seed_int + 2) % len(roam_stops)]
+
+        if is_weekend_club:
+            schedule = {
+                "commute": club_node,
+                "morning": club_node,
+                "lunch": club_node,
+                "class_afternoon": club_node,
+                "extracurricular": club_node,
+                "afternoon": club_node,
+                "evening": roam_eve,
+                "night": home_node,
+            }
+        else:
+            schedule = {
+                "commute": roam_morn,
+                "morning": roam_morn,
+                "lunch": roam_morn,
+                "class_afternoon": roam_aft,
+                "extracurricular": roam_aft,
+                "afternoon": roam_aft,
+                "evening": roam_eve,
+                "night": home_node,
+            }
+
+    if current_minute is not None and basic.get("part_time_shift"):
+        safe_min = int(current_minute) % 1440
+        pt_spec = is_student_on_part_time_shift(eff, current_day, safe_min, session_id=int(session_id or 0))
+        if pt_spec and pt_spec.get("venue_node_id"):
+            pt_venue = remap_town_node_for_scenario(str(pt_spec["venue_node_id"]), scen_key)
+            schedule[get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)] = pt_venue
+            schedule[get_time_block_key(safe_min)] = pt_venue
+
+    return schedule
+
+
+def _resolve_youth_peer_schedule(
+    eff: Mapping[str, Any],
+    *,
+    current_day: int,
+    scen_key: str,
+    current_minute: Optional[int],
+    home_node: str,
+    seed_key: str,
+) -> Dict[str, str]:
+    basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    is_truant = bool(eff.get("is_truant_peer") or basic.get("is_truant_peer"))
+    away_node = "loc_rival_academy_away"
+
+    commute_node = _resolve_active_work_node(eff, current_day, seed_key, block_key="commute", shift_key="pedestrian") or home_node
+    aft_town_node = _resolve_active_work_node(eff, current_day, seed_key, block_key="afternoon", shift_key="pedestrian") or commute_node
+    extra_town_node = _resolve_active_work_node(eff, current_day, seed_key, block_key="extracurricular", shift_key="pedestrian") or aft_town_node
+    eve_town_node = _resolve_active_work_node(eff, current_day, seed_key, block_key="evening", shift_key="pedestrian") or extra_town_node
+
+    if not is_weekend(current_day):
+        schedule: Dict[str, str] = {
+            "commute": commute_node,
+            "morning": away_node,
+            "lunch": away_node,
+            "class_afternoon": aft_town_node if is_truant else away_node,
+            "afternoon": aft_town_node if is_truant else away_node,
+            "extracurricular": extra_town_node,
+            "evening": eve_town_node,
+            "night": home_node,
+        }
+        if current_minute is not None:
+            safe_min = int(current_minute) % 1440
+            phase_key = get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)
+            canon_key = get_time_block_key(safe_min)
+            if 480 <= safe_min < 780 or (780 <= safe_min < 900 and not is_truant):
+                target_now = away_node
+            elif 900 <= safe_min < 1260 or (780 <= safe_min < 900 and is_truant):
+                step_blk = "afternoon" if safe_min < 900 else ("extracurricular" if safe_min < 1080 else "evening")
+                target_now = _resolve_active_work_node(eff, current_day, seed_key, block_key=step_blk, shift_key="pedestrian") or extra_town_node
+            elif 420 <= safe_min < 480:
+                target_now = commute_node
+            else:
+                target_now = home_node
+            schedule[phase_key] = target_now
+            schedule[canon_key] = target_now
+        return schedule
+
+    morn_we = _resolve_active_work_node(eff, current_day, seed_key, block_key="morning", shift_key="pedestrian") or commute_node
+    lunch_we = _resolve_active_work_node(eff, current_day, seed_key, block_key="lunch", shift_key="pedestrian") or morn_we
+    schedule = {
+        "commute": home_node,
+        "morning": morn_we,
+        "lunch": lunch_we,
+        "class_afternoon": aft_town_node,
+        "afternoon": aft_town_node,
+        "extracurricular": extra_town_node,
+        "evening": eve_town_node,
+        "night": home_node,
+    }
+    if current_minute is not None:
+        safe_min = int(current_minute) % 1440
+        phase_key = get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)
+        canon_key = get_time_block_key(safe_min)
+        if 480 <= safe_min < 1260:
+            step_node = _resolve_active_work_node(eff, current_day, seed_key, block_key=canon_key, shift_key="pedestrian") or morn_we
+        else:
+            step_node = home_node
+        schedule[phase_key] = step_node
+        schedule[canon_key] = step_node
+    return schedule
+
+
+def _resolve_active_work_node(
+    eff: Mapping[str, Any],
+    current_day: int,
+    seed_key: str,
+    block_key: str = "",
+    shift_key: str = "",
+) -> str:
+    basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    day_offset = max(0, int(current_day or 1) - 1)
+    if shift_key == "pedestrian":
+        we_route = _parse_roaming_route(eff.get("weekend_route") or basic.get("weekend_route"))
+        route = we_route if (is_weekend(current_day) and we_route) else _parse_roaming_route(eff.get("roaming_route") or basic.get("roaming_route"))
+        if route:
+            step = _PEDESTRIAN_BLOCK_STEPS.get(block_key, 0)
+            idx = (_deterministic_seed_int(seed_key) + day_offset + step) % len(route)
+            return route[idx]
     route = _parse_roaming_route(eff.get("roaming_route") or basic.get("roaming_route"))
     if route:
-        day_offset = max(0, int(current_day or 1) - 1)
+        if shift_key == "street_vendor":
+            half_step = 1 if block_key in ("afternoon", "extracurricular", "evening", "night") else 0
+            idx = (_deterministic_seed_int(seed_key) + day_offset + half_step) % len(route)
+            return route[idx]
         idx = (_deterministic_seed_int(seed_key) + day_offset) % len(route)
         return route[idx]
     return str(eff.get("workplace_node_id") or basic.get("workplace_node_id") or "").strip()
@@ -379,7 +733,8 @@ def resolve_anchor_schedule_nodes(
     shift_key = _normalize_shift_profile(eff.get("shift_profile") or basic.get("shift_profile"), has_route=bool(route))
     profile = SHIFT_PROFILES[shift_key]
 
-    work_node = _resolve_active_work_node(eff, current_day, seed_key)
+    work_windows, hangout_windows, sleep_windows = _effective_shift_windows(shift_key, profile, eff)
+    work_node = _resolve_active_work_node(eff, current_day, seed_key, shift_key=shift_key)
     hangout_node = str(eff.get("hangout_node_id") or basic.get("hangout_node_id") or "").strip()
     home_node = _resolve_home_node(eff, session_id, scen_key, seed_key)
 
@@ -390,39 +745,78 @@ def resolve_anchor_schedule_nodes(
     if _is_24h_station(eff) and work_node:
         return {block: work_node for block in _BLOCK_ORDER}
 
-    off_day = _is_rest_or_off_day(eff, profile, current_day, seed_key)
-    fallback_hangout = hangout_node or (work_node if shift_key == "roaming_merchant" else home_node)
+    origin_low = str(eff.get("origin") or basic.get("origin") or "").strip().lower()
+    grade_low = str(eff.get("grade") or basic.get("grade") or "").strip().lower()
+    if origin_low == "campus_seed" and grade_low != "staff" and is_high_school_setting(scen_key):
+        return _resolve_campus_seed_student_schedule(
+            eff,
+            current_day=int(current_day or 1),
+            scen_key=scen_key,
+            current_minute=current_minute,
+            session_id=session_id,
+            home_node=home_node,
+            seed_key=seed_key,
+            work_node=work_node,
+            hangout_node=hangout_node,
+        )
 
-    roles = dict(_STATIC_BLOCK_ROLES[shift_key])
+    if grade_low == "youth peer" and shift_key == "pedestrian":
+        return _resolve_youth_peer_schedule(
+            eff,
+            current_day=int(current_day or 1),
+            scen_key=scen_key,
+            current_minute=current_minute,
+            home_node=home_node,
+            seed_key=seed_key,
+        )
+
+    off_day = _is_rest_or_off_day(eff, profile, current_day, seed_key)
+    fallback_hangout = hangout_node or (work_node if shift_key in ("roaming_merchant", "street_vendor", "pedestrian") else home_node)
+
+    if shift_key == "street_vendor" and bool(eff.get("nocturnal") or basic.get("nocturnal")):
+        roles = dict(_NOCTURNAL_VENDOR_ROLES)
+    else:
+        roles = dict(_STATIC_BLOCK_ROLES[shift_key])
     if off_day:
         for blk, r in list(roles.items()):
             if r == "work":
                 roles[blk] = "hangout"
 
+    pt_venue = ""
     if current_minute is not None:
         safe_min = int(current_minute) % 1440
         phase_key = get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)
         canon_key = get_time_block_key(safe_min)
-        if not off_day and _in_windows(safe_min, profile["work_windows"]):
+        if not off_day and _in_windows(safe_min, work_windows):
             role_now = "work"
-        elif _in_windows(safe_min, profile["hangout_windows"]) or (
-            off_day and not _in_windows(safe_min, profile["sleep_windows"])
+        elif _in_windows(safe_min, hangout_windows) or (
+            off_day and not _in_windows(safe_min, sleep_windows)
         ):
             role_now = "hangout"
         else:
             role_now = "home"
         roles[phase_key] = role_now
         roles[canon_key] = role_now
+        if basic.get("part_time_shift"):
+            from mechanics.social.town_roster import is_student_on_part_time_shift, remap_town_node_for_scenario
+            pt_spec = is_student_on_part_time_shift(eff, current_day, safe_min, session_id=int(session_id or 0))
+            if pt_spec and pt_spec.get("venue_node_id"):
+                pt_venue = remap_town_node_for_scenario(str(pt_spec["venue_node_id"]), scen_key)
 
     schedule: Dict[str, str] = {}
     for block in _BLOCK_ORDER:
         role_b = roles[block]
         if role_b == "work":
-            schedule[block] = work_node or fallback_hangout or home_node
+            blk_work = _resolve_active_work_node(eff, current_day, seed_key, block_key=block, shift_key=shift_key)
+            schedule[block] = blk_work or work_node or fallback_hangout or home_node
         elif role_b == "hangout":
             schedule[block] = fallback_hangout or home_node
         else:
             schedule[block] = home_node
+    if pt_venue and current_minute is not None:
+        safe_min = int(current_minute) % 1440
+        schedule[get_detailed_npc_time_phase(safe_min, current_day=int(current_day or 1), scen_key=scen_key)] = pt_venue
+        schedule[get_time_block_key(safe_min)] = pt_venue
     return schedule
 
 
@@ -437,7 +831,6 @@ def is_npc_on_active_shift(
     Checks whether an anchor-scheduled NPC is currently working on shift at `current_minute`.
     Returns (True, active_work_node_id) or (False, "").
     """
-    _ = scen_key
     if not isinstance(npc, Mapping):
         return False, ""
 
@@ -448,21 +841,41 @@ def is_npc_on_active_shift(
         return False, ""
 
     basic = eff.get("basic_info") if isinstance(eff.get("basic_info"), Mapping) else {}
+    safe_min = int(current_minute) % 1440
+    if basic.get("part_time_shift"):
+        from mechanics.social.town_roster import is_student_on_part_time_shift, remap_town_node_for_scenario
+        pt_spec = is_student_on_part_time_shift(eff, current_day, safe_min, session_id=int(session_id or 0))
+        if pt_spec and pt_spec.get("venue_node_id"):
+            return True, remap_town_node_for_scenario(str(pt_spec["venue_node_id"]), scen_key)
+
     seed_key = _canonical_seed_key(eff)
     route = _parse_roaming_route(eff.get("roaming_route") or basic.get("roaming_route"))
     shift_key = _normalize_shift_profile(eff.get("shift_profile") or basic.get("shift_profile"), has_route=bool(route))
     profile = SHIFT_PROFILES[shift_key]
-    work_node = _resolve_active_work_node(eff, current_day, seed_key)
+    canon_block = get_time_block_key(safe_min)
+    work_windows, _, _ = _effective_shift_windows(shift_key, profile, eff)
+    work_node = _resolve_active_work_node(eff, current_day, seed_key, block_key=canon_block, shift_key=shift_key)
     if not work_node:
         return False, ""
 
     if _is_24h_station(eff):
         return True, work_node
 
+    grade_low = str(eff.get("grade") or basic.get("grade") or "").strip().lower()
+    if grade_low == "youth peer" and shift_key == "pedestrian":
+        is_truant = bool(eff.get("is_truant_peer") or basic.get("is_truant_peer"))
+        if not is_weekend(current_day):
+            if safe_min < 420 or safe_min >= 1260 or (480 <= safe_min < 780) or (780 <= safe_min < 900 and not is_truant):
+                return False, ""
+        else:
+            if safe_min < 480 or safe_min >= 1260:
+                return False, ""
+        return True, work_node
+
     if _is_rest_or_off_day(eff, profile, current_day, seed_key):
         return False, ""
 
-    if _in_windows(int(current_minute), profile["work_windows"]):
+    if _in_windows(safe_min, work_windows):
         return True, work_node
 
     return False, ""

@@ -441,11 +441,72 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     from mechanics.system.time_engine import format_time_header
     from mechanics.world.world_schedule import get_world_schedule_state
     time_str = format_time_header(curr_day_val, curr_min_val)
-    world_sched = get_world_schedule_state(scen_key, current_day=curr_day_val, current_minute=curr_min_val)
+    world_sched = get_world_schedule_state(
+        scen_key,
+        current_day=curr_day_val,
+        current_minute=curr_min_val,
+        session=session,
+        session_id=session_id,
+    )
     time_schedule_hint = (
         f"- Current In-Game Time & Schedule: {time_str} [{world_sched.get('period_label', '')}]. "
         f"Reflect the current setting and time of day in your reply when natural (e.g. discreetly texting during class, mentioning club activities, chatting on weekends, or winding down for bed).\n"
     )
+    npc_sched_nid = ""
+    npc_sched_loc = ""
+    try:
+        from mechanics.social.wardrobe.constants import is_sleepwear_window
+        from mechanics.world.anchor_schedule import is_npc_on_active_shift
+        from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
+        from mechanics.world.npc_schedule import get_npc_scheduled_location, get_npc_scheduled_node_id
+
+        npc_sched_nid = get_npc_scheduled_node_id(
+            contact,
+            current_minute=curr_min_val,
+            scen_key=scen_key,
+            session_id=session_id,
+            current_day=curr_day_val,
+        ) or ""
+        npc_sched_loc = get_npc_scheduled_location(
+            contact,
+            current_minute=curr_min_val,
+            scen_key=scen_key,
+            session_id=session_id,
+            current_day=curr_day_val,
+        ) or ""
+        on_shift_now, _ = is_npc_on_active_shift(
+            contact,
+            curr_min_val,
+            current_day=curr_day_val,
+            scen_key=scen_key,
+            session_id=session_id,
+        )
+        shift_prof_dm = str(contact.get("shift_profile") or basic.get("shift_profile") or "day").strip().lower()
+        in_sleep_dm = is_sleepwear_window(
+            curr_day_val,
+            curr_min_val,
+            shift_profile=shift_prof_dm,
+            is_nocturnal=bool(contact.get("nocturnal") or basic.get("nocturnal")),
+            closes_at_22=bool(contact.get("closes_at_22") or basic.get("closes_at_22")),
+            closes_at_20=bool(contact.get("closes_at_20") or basic.get("closes_at_20")),
+        )
+        if npc_sched_nid == SHARED_ABSTRACT_RESIDENCE_NODE or "unknown address" in npc_sched_loc.lower():
+            place_lbl = "home"
+        elif npc_sched_loc:
+            place_lbl = npc_sched_loc.split("➔")[-1].strip() or npc_sched_loc
+        else:
+            place_lbl = "nearby"
+        if in_sleep_dm and place_lbl == "home":
+            status_phrase = "winding down at home"
+        elif on_shift_now:
+            status_phrase = f"on active duty/shift at {place_lbl}"
+        else:
+            status_phrase = f"currently at {place_lbl}"
+        time_schedule_hint += (
+            f"- Your Current Situation: You are {status_phrase} right now; keep your response consistent with where you are.\n"
+        )
+    except Exception:
+        pass
     try:
         from mechanics.social.wardrobe import (
             format_wardrobe_summary,
@@ -454,11 +515,13 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             resolve_actor_wardrobe_state,
         )
 
+        offscreen_loc_str = npc_sched_loc or str(current_loc or "")
         offscreen_w = resolve_actor_wardrobe_state(
             contact,
             session=session,
             scen_key=scen_key,
-            location_str=str(current_loc or ""),
+            location_str=offscreen_loc_str,
+            node_id=npc_sched_nid,
             current_day=curr_day_val,
             current_minute=curr_min_val,
             is_colocated_with_player=False,
@@ -478,7 +541,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 dm_req,
                 scen_key=scen_key,
                 session=session,
-                location_str=str(current_loc or ""),
+                location_str=offscreen_loc_str,
+                node_id=npc_sched_nid,
                 current_day=curr_day_val,
                 current_minute=curr_min_val,
                 relationship={"track": track, "affinity": score},
@@ -832,6 +896,14 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     if dm_gate.get("directive"):
         intent_guidelines += dm_gate["directive"]
 
+    dm_lang_dir = build_side_channel_language_directive(
+        session,
+        text_fields=("reply_text",),
+        preserve_fields=("rendezvous_location", "[Attached Photo:/Video: ...] bracket prefix"),
+        style="sms",
+        speaker_gender=str(contact.get("gender") or basic.get("gender") or ""),
+        recipient_gender=str(player_char.get("gender") or session.get("lead_character_gender") or ""),
+    )
     system_prompt = (
         f"You are roleplaying as {contact_name}, an NPC contact in a {scen_key} story.\n"
         f"Your Role: {role}. Personality Traits: {traits}. Relationship Affinity: {score} ({track.capitalize()} track).\n"
@@ -854,18 +926,7 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         + family_and_grade_hint
         + epistemic_hint
         + meetup_location_hint
-        + (
-            (build_side_channel_language_directive(
-                session,
-                text_fields=("reply_text",),
-                preserve_fields=("rendezvous_location", "[Attached Photo:/Video: ...] bracket prefix"),
-                style="sms",
-                speaker_gender=str(contact.get("gender") or basic.get("gender") or ""),
-                recipient_gender=str(player_char.get("gender") or session.get("lead_character_gender") or ""),
-            ) + "\n")
-            if str(session.get("narration_language") or session.get("language") or "en").lower().strip().split("-")[0] != "en"
-            else ""
-        )
+        + (f"{dm_lang_dir}\n" if dm_lang_dir else "")
         + f"Respond with ONLY a single valid JSON object matching the schema:\n{dm_schema}"
     )
 
@@ -1313,11 +1374,8 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     # Update affinity score — guard against ineligible NPCs (teachers, parents, store clerks) slipping through
     if affinity_delta != 0 or _dm_trust_delta != 0:
         if is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
-            if affinity_delta != 0:
-                new_score = clamp_score(score + affinity_delta)
-                await db.adb(db.update_contact_score, session_id, npc_id, new_score, character_id=player_char.get("id", 0))
-        elif _dm_trust_delta != 0:
-            new_score = clamp_score(score + _dm_trust_delta)
+            delta = affinity_delta if affinity_delta != 0 else _dm_trust_delta
+            new_score = clamp_score(score + delta)
             await db.adb(db.update_contact_score, session_id, npc_id, new_score, character_id=player_char.get("id", 0))
         else:
             log.info(f"[phone] Skipping affinity update for ineligible contact '{contact_name}' (role: {role}).")

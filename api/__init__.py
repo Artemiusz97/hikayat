@@ -14,6 +14,7 @@ from .settings_ws import router as settings_ws_router
 from .world_events import router as world_events_router
 from .realty import router as realty_router
 from .contracts import router as contracts_router
+from .fonts import router as fonts_router
 
 __all__ = [
     "ConnectionManager",
@@ -30,4 +31,5 @@ __all__ = [
     "world_events_router",
     "realty_router",
     "contracts_router",
+    "fonts_router",
 ]

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiCall } from '../api/client';
 import { isValidSessionId } from '../utils/session';
 
@@ -10,42 +10,118 @@ export const usePhone = (sessionId, user) => {
   const [dailyLimits, setDailyLimits] = useState(null);
   const [loadingChat, setLoadingChat] = useState(false);
   const [sendingChat, setSendingChat] = useState(false);
+  const chatSeqRef = useRef(0);
+  const chatAbortRef = useRef(null);
+  const stateSeqRef = useRef(0);
+  const stateAbortRef = useRef(null);
 
   const fetchPhoneState = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !user) {
+      stateSeqRef.current += 1;
+      if (stateAbortRef.current) {
+        try {
+          stateAbortRef.current.abort();
+        } catch {}
+        stateAbortRef.current = null;
+      }
+      setPhoneData(null);
       setLoading(false);
       return;
     }
+    if (stateAbortRef.current) {
+      try {
+        stateAbortRef.current.abort();
+      } catch {}
+    }
+    const seq = ++stateSeqRef.current;
+    const controller = new AbortController();
+    stateAbortRef.current = controller;
     try {
       setLoading(true);
-      const data = await apiCall(`/api/phone/${sessionId}?user_id=${user.user_id}`);
+      const data = await apiCall(`/api/phone/${sessionId}?user_id=${user.user_id}`, {
+        signal: controller.signal,
+      });
+      if (seq !== stateSeqRef.current) return;
       setPhoneData(data);
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== stateSeqRef.current) return;
       console.error("Failed to load phone state:", err);
     } finally {
-      setLoading(false);
+      if (seq === stateSeqRef.current) {
+        setLoading(false);
+        if (stateAbortRef.current === controller) {
+          stateAbortRef.current = null;
+        }
+      }
     }
   }, [sessionId, user]);
 
   useEffect(() => {
     fetchPhoneState();
+    return () => {
+      stateSeqRef.current += 1;
+      if (stateAbortRef.current) {
+        try {
+          stateAbortRef.current.abort();
+        } catch {}
+        stateAbortRef.current = null;
+      }
+    };
   }, [fetchPhoneState]);
+
+  useEffect(() => {
+    chatSeqRef.current += 1;
+    if (chatAbortRef.current) {
+      try {
+        chatAbortRef.current.abort();
+      } catch {}
+      chatAbortRef.current = null;
+    }
+    setActiveChatNpc(null);
+    setChatMessages([]);
+    setDailyLimits(null);
+    setLoadingChat(false);
+    return () => {
+      if (chatAbortRef.current) {
+        try {
+          chatAbortRef.current.abort();
+        } catch {}
+      }
+    };
+  }, [sessionId]);
 
   const loadChatMessages = async (npcId) => {
     if (!isValidSessionId(sessionId) || !npcId) return;
+    if (chatAbortRef.current) {
+      try {
+        chatAbortRef.current.abort();
+      } catch {}
+    }
+    const seq = ++chatSeqRef.current;
+    const controller = new AbortController();
+    chatAbortRef.current = controller;
     setActiveChatNpc(npcId);
     setLoadingChat(true);
     try {
-      const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`);
+      const data = await apiCall(`/api/phone/${sessionId}/messages/${encodeURIComponent(npcId)}`, {
+        signal: controller.signal,
+      });
+      if (seq !== chatSeqRef.current) return;
       setChatMessages(data.messages || []);
       if (data.daily_limits) {
         setDailyLimits(data.daily_limits);
       }
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== chatSeqRef.current) return;
       console.error("Failed to fetch NPC chat messages:", err);
       setChatMessages([]);
     } finally {
-      setLoadingChat(false);
+      if (seq === chatSeqRef.current) {
+        setLoadingChat(false);
+        if (chatAbortRef.current === controller) {
+          chatAbortRef.current = null;
+        }
+      }
     }
   };
 
@@ -186,7 +262,7 @@ export const usePhone = (sessionId, user) => {
 
   return {
     phoneData,
-    isSupported: true,
+    isSupported: Boolean(phoneData?.is_supported ?? phoneData?.supported ?? true),
     branding: phoneData?.branding || {
       device_name: '📱 Smartphone',
       os_name: 'Mobile OS',

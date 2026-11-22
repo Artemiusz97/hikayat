@@ -1169,6 +1169,18 @@ def is_solo_travel_intent(actions: list = None) -> bool:
     if not actions:
         return False
     for a in actions:
+        if isinstance(a, dict) and (
+            a.get("_quest_dialogue_handoff")
+            or (
+                a.get("ends_dialogue")
+                and (
+                    a.get("target_location")
+                    or a.get("target_node_id")
+                    or str(a.get("intent") or "").lower() == "movement"
+                )
+            )
+        ):
+            return True
         lbl = (
             (str(a.get("label", "")) + " " + str(a.get("text", "")))
             if isinstance(a, dict)

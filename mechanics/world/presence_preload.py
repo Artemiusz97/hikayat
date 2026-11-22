@@ -12,6 +12,10 @@ from typing import Any, Mapping
 
 import db
 import scenario_data
+from mechanics.social.population_seeder import (
+    ensure_world_population_seeded,
+    is_population_seeding_supported,
+)
 from mechanics.social.relationships import safe_get_contacts
 from mechanics.system.commitments_engine import get_active_commitments
 from mechanics.world.anchor_schedule import (
@@ -127,6 +131,7 @@ class _PresenceContext:
     epistemic_matrix: dict[str, Any] = field(default_factory=dict)
     player_home_node_id: str = ""
     tier5_overflow_count: int = 0
+    tier5_overflow_candidates: list[dict[str, Any]] = field(default_factory=list)
     household_cache: dict[int, dict[str, Any] | None] = field(default_factory=dict)
     anchor_cache: dict[str, tuple[dict[str, str] | None, tuple[bool, str]]] = field(default_factory=dict)
     staged_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
@@ -139,6 +144,9 @@ class _PresenceContext:
     unified_records: list[tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any], set[str]]] = field(
         default_factory=list
     )
+    synthetic_npcs_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
+    quest_cast_by_key: dict[str, dict[str, Any]] = field(default_factory=dict)
+    persist_db: bool = True
 
     def find_linked(self, name_or_id: Any) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         raw_s = str(name_or_id or "").strip().lower()
@@ -408,11 +416,13 @@ def preload_presence_context(
             seed_node_id = parent_id
 
     if persist_db:
+        if sid > 0 and is_population_seeding_supported(eff_scen):
+            ensure_world_population_seeded(sid, eff_scen, session=session, turn_number=0)
         if seed_node_id:
             ensure_venue_staff_seeded(sid, seed_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
         if is_staffable_facility:
             ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
-        contacts = safe_get_contacts(sid, ensure_scene=False) if sid > 0 else []
+        contacts = safe_get_contacts(sid, ensure_scene=False, resolve_relations=False) if sid > 0 else []
         roster_rows = (db.get_world_roster(sid, include_legacy_rosters=False) or []) if sid > 0 else []
         if sid > 0 and heal_stale_civic_hq_staff(sid, scen_key=eff_scen, roster=roster_rows, nodes_by_id=nodes_by_id, contacts=contacts):
             roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
@@ -425,6 +435,12 @@ def preload_presence_context(
             sp_name = "sp_presence_preload"
             uow_conn.execute(f"SAVEPOINT {sp_name}")
             try:
+                pop_seeded_cnt = 0
+                if is_population_seeding_supported(eff_scen):
+                    pop_res = ensure_world_population_seeded(
+                        sid, eff_scen, session=session, turn_number=0, conn=uow_conn,
+                    )
+                    pop_seeded_cnt = int((pop_res or {}).get("seeded") or 0)
                 pre_keys = (
                     {
                         str(r.get("npc_id") or "").strip().lower()
@@ -434,11 +450,16 @@ def preload_presence_context(
                     if (seed_node_id or is_staffable_facility)
                     else set()
                 )
+                if pop_seeded_cnt > 0:
+                    staged_roster_ops.setdefault("population_seed", []).append({
+                        "scen_key": eff_scen,
+                        "turn_number": 0,
+                    })
                 if seed_node_id:
                     ensure_venue_staff_seeded(sid, seed_node_id, scen_key=eff_scen, current_day=safe_day, turn_number=eff_turn)
                 if is_staffable_facility:
                     ensure_roaming_merchants_seeded(sid, scen_key=eff_scen, turn_number=eff_turn)
-                contacts = safe_get_contacts(sid, ensure_scene=False)
+                contacts = safe_get_contacts(sid, ensure_scene=False, resolve_relations=False)
                 roster_rows = db.get_world_roster(sid, include_legacy_rosters=False) or []
                 if seed_node_id or is_staffable_facility:
                     new_rows = [
@@ -567,6 +588,49 @@ def preload_presence_context(
     story_quest = db.get_active_story_quest(sid, resolve_schedule=False) if sid > 0 else None
     story_wps_for_legacy = [wp for wp in active_wps if wp.get("target_node_id")] if active_wps else []
     active_events = (db.get_world_events(sid, entity_type="macro_event") or []) if sid > 0 else []
+    synthetic_npcs_by_key: dict[str, dict[str, Any]] = {}
+    quest_cast_by_key: dict[str, dict[str, Any]] = {}
+    if sid > 0:
+        try:
+            for dos_p in (db.get_session_quest_dossiers(sid, status_stage="compiled") or []):
+                if not isinstance(dos_p, Mapping):
+                    continue
+                qid_p = str(dos_p.get("quest_id") or "")
+                cast_p = dos_p.get("cast_bindings") or {}
+                if isinstance(cast_p, Mapping):
+                    for slot_k, bind_v in cast_p.items():
+                        if not isinstance(bind_v, Mapping):
+                            continue
+                        b_name = str(bind_v.get("name") or "").strip()
+                        if not b_name:
+                            continue
+                        b_rec = {
+                            "name": b_name,
+                            "gender": str(bind_v.get("gender") or "").strip(),
+                            "race": str(bind_v.get("race") or "").strip(),
+                            "role": str(bind_v.get("role") or "").strip(),
+                            "age_group": str(bind_v.get("age_group") or "").strip(),
+                            "contact_id": bind_v.get("contact_id"),
+                            "quest_id": qid_p,
+                            "slot": str(slot_k or "").strip(),
+                        }
+                        for k_cb in {b_name.lower(), slugify_key(b_name)}:
+                            if k_cb and k_cb not in quest_cast_by_key:
+                                quest_cast_by_key[k_cb] = b_rec
+                clx_p = dos_p.get("climax_spec") or {}
+                for sn in (clx_p.get("synthetic_npcs") or []):
+                    if not isinstance(sn, Mapping):
+                        continue
+                    sn_name = str(sn.get("name") or "").strip()
+                    if not sn_name:
+                        continue
+                    sn_rec = dict(sn)
+                    for k_syn in {sn_name.lower(), slugify_key(sn_name)}:
+                        if k_syn and k_syn not in synthetic_npcs_by_key:
+                            synthetic_npcs_by_key[k_syn] = sn_rec
+        except Exception:
+            synthetic_npcs_by_key = {}
+            quest_cast_by_key = {}
 
     raw_legacy_entries, legacy_enrichment_by_key = _load_raw_legacy_entries(
         sid,
@@ -625,6 +689,9 @@ def preload_presence_context(
         epistemic_matrix=epistemic_matrix,
         player_home_node_id=player_home_node_id,
         staged_roster_ops=staged_roster_ops,
+        synthetic_npcs_by_key=synthetic_npcs_by_key,
+        quest_cast_by_key=quest_cast_by_key,
+        persist_db=bool(persist_db),
     )
 
     seen_unified: set[str] = set()

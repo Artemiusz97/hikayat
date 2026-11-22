@@ -1161,7 +1161,7 @@ async def regenerate_character_gear(req: RegenerateGearRequest, request: Request
                 from mechanics.social.factions import get_anomalous_faction_state
                 f_state = await adb(get_anomalous_faction_state, int(active_sid), canonical_id)
                 cand_fac = str(f_state.get("faction_archetype_key") or "").strip()
-                if cand_fac in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "freelancer"):
+                if cand_fac in ("public_agency", "private_agency_1", "private_agency_2", "monastic_order", "cult_faction", "clandestine_faction", "freelancer"):
                     resolved_faction = cand_fac
             except Exception:
                 pass

@@ -353,6 +353,9 @@ def _compute_target_preset_and_kit(
         or basic.get("shift_profile")
         or ("student" if meta.get("is_student") else "day")
     ).strip().lower()
+    is_nocturnal = bool(npc.get("nocturnal") or basic.get("nocturnal"))
+    closes_at_22 = bool(npc.get("closes_at_22") or basic.get("closes_at_22"))
+    closes_at_20 = bool(npc.get("closes_at_20") or basic.get("closes_at_20"))
     rest_days = npc.get("rest_days") or basic.get("rest_days") or []
     part_time_days = npc.get("part_time_days") or basic.get("part_time_days") or []
     home_node_id = str(
@@ -416,6 +419,9 @@ def _compute_target_preset_and_kit(
         safe_min,
         shift_profile=shift_profile,
         on_rest_day=on_rest_day,
+        is_nocturnal=is_nocturnal,
+        closes_at_22=closes_at_22,
+        closes_at_20=closes_at_20,
     ):
         return PRESET_SLEEPWEAR, "", ""
 
@@ -454,14 +460,21 @@ def _compute_target_preset_and_kit(
 
     # 7. Student Campus vs Off-Campus Rules (Spec #3 & #9)
     if meta.get("is_student") or shift_profile == "student":
+        if basic.get("part_time_shift") or npc.get("part_time_shift"):
+            from mechanics.social.town_roster import is_student_on_part_time_shift, remap_town_node_for_scenario
+            pt_sid = int((session.get("id") if isinstance(session, Mapping) else 0) or npc.get("session_id") or basic.get("session_id") or 0)
+            pt_spec = is_student_on_part_time_shift(npc, safe_day, safe_min, session_id=pt_sid)
+            if pt_spec and pt_spec.get("venue_node_id"):
+                pt_nid = remap_town_node_for_scenario(str(pt_spec["venue_node_id"]), scen_key).lower()
+                if (pt_nid and pt_nid == nid_low) or at_workplace:
+                    return PRESET_CASUAL, "", OVERLAY_APRON
         if on_rest_day or is_weekend(safe_day):
             return PRESET_CASUAL, "", ""
         if safe_min < SCHOOL_ARRIVAL_MIN or safe_min >= AFTER_SCHOOL_UNIFORM_END_MIN:
             return PRESET_CASUAL, "", ""
         if 900 <= safe_min < AFTER_SCHOOL_UNIFORM_END_MIN:
             # 15:00 - 17:29: Uniform strictly if on campus; off-campus shops -> casual + apron; town -> casual
-            on_pt_shift = (weekday_idx in part_time_days) if isinstance(part_time_days, list) else False
-            if (at_workplace or on_pt_shift) and not is_school_campus_location(location_str, node_id):
+            if at_workplace and not is_school_campus_location(location_str, node_id):
                 return PRESET_CASUAL, "", OVERLAY_APRON
             if is_school_campus_location(location_str, node_id):
                 return PRESET_DUTY, "", ""
@@ -470,26 +483,41 @@ def _compute_target_preset_and_kit(
         return PRESET_DUTY, "", ""
 
     # 8. Adult Shift Profiles (Spec #3 & #5)
+    if shift_profile == "pedestrian":
+        return PRESET_CASUAL, "", ""
+
     work_overlay = ""
     if any(tok in role_low for tok in _SHOP_APRON_ROLE_TOKENS):
         work_overlay = OVERLAY_APRON
     elif any(tok in role_low for tok in _LAB_COAT_ROLE_TOKENS):
         work_overlay = OVERLAY_LAB_COAT
 
+    if shift_profile == "street_vendor":
+        if is_nocturnal:
+            is_working = safe_min >= 1140 or safe_min < 180
+            if is_working and not on_rest_day:
+                return PRESET_DUTY, "", ""
+            return PRESET_CASUAL, "", ""
+        is_working = 480 <= safe_min < 1200
+        if (is_working and not on_rest_day) or at_workplace:
+            return PRESET_DUTY, "", OVERLAY_APRON
+        return PRESET_CASUAL, "", ""
+
     if shift_profile == "night":
-        is_working = safe_min >= 1260 or safe_min < 300
+        is_working = safe_min >= 1200 or safe_min < 300
         if is_working and not on_rest_day:
             return PRESET_DUTY, "", (work_overlay if at_workplace else "")
         return PRESET_CASUAL, "", ""
 
     if shift_profile == "evening":
-        is_working = 840 <= safe_min < 1380
+        eve_end = 1200 if closes_at_20 else (1320 if closes_at_22 else 1380)
+        is_working = 840 <= safe_min < eve_end
         if (is_working and not on_rest_day) or at_workplace:
             return PRESET_DUTY, "", (work_overlay if at_workplace else "")
         return PRESET_CASUAL, "", ""
 
     if shift_profile == "rotating":
-        is_working = 480 <= safe_min < 1200
+        is_working = (420 <= safe_min < 660) or (960 <= safe_min < 1200)
         if (is_working and not on_rest_day) or at_workplace:
             return PRESET_DUTY, "", (work_overlay if at_workplace else "")
         return PRESET_CASUAL, "", ""
@@ -795,7 +823,7 @@ def evaluate_turn_wardrobe_transitions(
         return current_state
 
     sess = session if isinstance(session, Mapping) else {}
-    scen_key = str(sess.get("scenario_key") or "fantasy").strip()
+    scen_key = str(sess.get("scenario_key") or sess.get("scenario") or "fantasy").strip()
     loc_changed = (
         bool(location_changed)
         if location_changed is not None

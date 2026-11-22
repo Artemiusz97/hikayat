@@ -115,6 +115,20 @@ def resolve_anomalous_emergency_extraction(
         dest_location = f"{z_name} ➔ {c_name} ➔ Main Worship Hall & Incense Courtyard"
         fee = 0
         provider_label = "Shrine Crow-Talisman Rescue Ascetics (Sacred Sanctuary)"
+    elif arch == "cult_faction":
+        z_name = get_session_urban_zone_name(session_id, "zone_undercity", "Subterranean Under-City & Catacombs", scen_key)
+        c_name = f"{namegen.generate_occult_cult_name(scen_key, hash_val=int(session_id or 1))} Hidden Sanctum"
+        dest_node_id = "sub_cult_apotheca"
+        dest_location = f"{z_name} ➔ {c_name} ➔ Ichor Distillation & Blood-Letting Apotheca"
+        fee = 0
+        provider_label = "Sanctum Blood-Tending Acolytes (Occult Covenant)"
+    elif arch == "clandestine_faction":
+        z_name = get_session_urban_zone_name(session_id, "zone_industrial", "Industrial Zone", scen_key)
+        c_name = f"{namegen.generate_clandestine_syndicate_name(scen_key, hash_val=int(session_id or 1))} Shadow Exchange HQ"
+        dest_node_id = "sub_synd_lab"
+        dest_location = f"{z_name} ➔ {c_name} ➔ Weaponized Cognitohazard Lab"
+        fee = min(100, int(current_gold * 0.10))
+        provider_label = "Syndicate Black-Clinic Cleaners"
     else:
         z_name = get_session_urban_zone_name(session_id, "zone_city_center", "City Center", scen_key)
         c_name = get_session_urban_facility_name(session_id, "zone_city_center", "loc_general_hospital", "Metropolitan General Hospital", scen_key)
@@ -332,6 +346,8 @@ def resolve_anomalous_starting_location(
       - private_agency_1 -> Tower HQ -> Atrium Concierge & Biometric Turnstiles
       - private_agency_2 -> Field Office HQ -> Brick-Front Vestibule & Security Reception
       - monastic_order  -> Eastern Grand Temple -> Main Worship Hall -> Incense Courtyard
+      - cult_faction    -> Hidden Sanctum -> Ward-Sealed Threshold Entrance
+      - clandestine_faction -> Shadow Exchange HQ -> Biometric Vault Door Entrance
       - freelancer      -> Suburban Residential District -> Player's House -> Living Room
     """
     from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
@@ -382,6 +398,18 @@ def resolve_anomalous_starting_location(
         z_name = get_session_urban_zone_name(session_id, "zone_eastern_sanctuary", "Sacred Mountain Sanctuary & Onsen Quarter", scen_key)
         c_name = get_session_urban_facility_name(session_id, "zone_eastern_sanctuary", "loc_eastern_temple", "Eastern Grand Temple & Sanctuary", scen_key)
         fallback_loc = f"{z_name} ➔ {c_name} ➔ Main Worship Hall & Incense Courtyard"
+    elif fac_clean == "cult_faction":
+        candidate_ids = ["sub_cult_entrance", "loc_cult_sanctum_hq"]
+        h_val = int(session_id) if session_id else 1
+        z_name = get_session_urban_zone_name(session_id, "zone_undercity", "Subterranean Under-City & Catacombs", scen_key)
+        c_name = f"{namegen.generate_occult_cult_name(scen_key, hash_val=h_val)} Hidden Sanctum"
+        fallback_loc = f"{z_name} ➔ {c_name} ➔ Ward-Sealed Threshold Entrance"
+    elif fac_clean == "clandestine_faction":
+        candidate_ids = ["sub_synd_entrance", "loc_clandestine_syndicate_hq"]
+        h_val = int(session_id) if session_id else 1
+        z_name = get_session_urban_zone_name(session_id, "zone_industrial", "Industrial Zone", scen_key)
+        s_name = f"{namegen.generate_clandestine_syndicate_name(scen_key, hash_val=h_val)} Shadow Exchange HQ"
+        fallback_loc = f"{z_name} ➔ {s_name} ➔ Biometric Vault Door Entrance"
     elif fac_clean == "freelancer":
         candidate_ids = ["sub_walkup_studio", "sub_walkup_stairwell", "fac_downtown_walkup"]
         z_name = get_session_urban_zone_name(session_id, "zone_downtown", "Downtown", scen_key)
@@ -443,7 +471,7 @@ def bootstrap_anomalous_session(
 ) -> Dict[str, Any]:
     """
     Shared Day-1 bootstrap for Anomalous Incursions across Web API and Discord:
-    seeds 6 fixed factions, joins `starting_faction`, seeds 44 Special Agents,
+    seeds 6 fixed factions, joins `starting_faction`, seeds 48 Adult Special Agents (68 in HS),
     seeds World-Ending Anomaly blueprint, sets starting HQ/Home location,
     and dispatches Day 1 Mandatory Bounty + Daily Incursions + Morning SMS alerts.
     """

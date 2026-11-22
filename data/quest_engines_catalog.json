@@ -1685,5 +1685,63 @@
         "reinforced": "Finale durch gegnerische Vorhut verstärkt"
       }
     }
+  },
+  "masked_climax_teasers": {
+    "MYSTERY_CASE": {
+      "en": "The pattern points toward a hidden nexus—pursue open leads to unmask the reckoning.",
+      "pl": "Poszlaki prowadzą do ukrytego ośrodka — zbadaj aktywne tropy, by ujawnić finałowe starcie.",
+      "ms": "Corak petunjuk menghala ke pusat tersembunyi — jejaki bukti terbuka untuk mendedahkan konfrontasi.",
+      "zh": "线索正汇聚向隐秘的中枢——追查现阶段证物与知情者，揭开最终对决所在。",
+      "de": "Die Spur deutet auf einen verborgenen Knotenpunkt — verfolge offene Hinweise, um das Finale aufzudecken."
+    },
+    "HEIST_BREACH": {
+      "en": "The inner target remains behind sealed wards—clear perimeter obstacles to pinpoint the breach window.",
+      "pl": "Główny skarbiec kryje się za blokadami — przełam zabezpieczenia zewnętrzne, by odkryć wejście.",
+      "ms": "Sasaran dalaman masih di sebalik sekatan ketat — lepasi halangan luar untuk membuka ruang serbuan.",
+      "zh": "核心目标深锁在多重封禁之后——先突破外围防线，锁定潜入与强袭的切入口。",
+      "de": "Das innere Ziel liegt hinter versiegelten Schleusen — räume äußere Sperren aus dem Weg, um das Fenster für den Zugriff zu finden."
+    },
+    "HUNT_CONTAINMENT": {
+      "en": "Fresh spoor retreats deeper into shadowed terrain—follow the trail to corner the quarry.",
+      "pl": "Świeży trop prowadzi w głąb mrocznych zaułków — podążaj śladem, by osaczyć bestię.",
+      "ms": "Jejak segar menghala ke kawasan terlindung — ekori tanda untuk mengepung buruan.",
+      "zh": "残留的凶险气息退入了隐蔽地带——顺着当前踪迹逼近并围堵最终目标。",
+      "de": "Frische Fährten verlieren sich im düsteren Terrain — folge der Spur, um die Beute einzukreisen."
+    },
+    "ACQUISITION_EXCHANGE": {
+      "en": "The final payload sits beyond covert brokers—trace the transit chain to claim the prize.",
+      "pl": "Ładunek ukryto u pośredników — prześledź łańcuch dostaw, by przechwycić zdobycz.",
+      "ms": "Barangan akhir berada di tangan perantara sulit — kesan rantaian penghantaran untuk merampasnya.",
+      "zh": "关键标的藏在暗线交接链终端——先追查经手链路，锁定最终夺取地点。",
+      "de": "Die endgültige Fracht liegt hinter geheimen Vermittlern — verfolge die Lieferkette bis zur Übergabe."
+    },
+    "SOCIAL_BROKERAGE": {
+      "en": "Quiet leverage is shifting behind closed doors—gather backing before forcing the decisive parley.",
+      "pl": "Zakulisowe wpływy wciąż się ważą — zbierz karty przetargowe przed decydującą rozmową.",
+      "ms": "Percaturan kuasa sedang bergolak di sebalik tabir — kumpul sokongan sebelum rundingan penentu.",
+      "zh": "幕后筹码仍在暗流涌动——先握紧关键把柄与人脉，再推动最终摊牌。",
+      "de": "Hinter verschlossenen Türen verschieben sich die Machtverhältnisse — sammle Druckmittel vor der entscheidenden Verhandlung."
+    },
+    "CRISIS_DEFENSE": {
+      "en": "Pressing tremors point toward the breach epicenter—stabilize active sectors to reach the core threat.",
+      "pl": "Narastające wstrząsy wskazują epicentrum kryzysu — ustabilizuj sektory, by dotrzeć do źródła.",
+      "ms": "Gegaran mendesak menghala ke pusat ancaman — stabilkan zon aktif untuk mengekang krisis utama.",
+      "zh": "动荡中心正蓄势待发——先稳住外围关键节点，才能直击危机爆发核心。",
+      "de": "Steigende Erschütterungen weisen zum Epizentrum — stabilisiere aktive Sektoren, um den Kern der Krise zu erreichen."
+    },
+    "RIVALRY_SHOWDOWN": {
+      "en": "Your rival is staging the decisive arena—settle preliminary challenges before the final clash.",
+      "pl": "Twój rywal szykuje arenę finałowego pojedynku — rozstrzygnij wyzwania wstępne przed starciem.",
+      "ms": "Seterumu sedang menyiapkan medan penentuan — selesaikan cabaran awal sebelum pertarungan terakhir.",
+      "zh": "宿敌正在暗处布下终极擂台——先跨越眼前的试探与交锋，再赴最终一战。",
+      "de": "Dein Rivale bereitet die entscheidende Bühne vor — kläre die Vorbedingungen vor dem finalen Duell."
+    },
+    "INTIMATE_LIAISON": {
+      "en": "Unspoken tension lingers just beneath the surface—close the distance through personal moments first.",
+      "pl": "Niewypowiedziane napięcie narasta krok po kroku — pogłęb więź, zanim nadejdzie intymny finał.",
+      "ms": "Debaran tersembunyi kian terasa — rapatkan jurang kepercayaan terlebih dahulu menuju detik peribadi.",
+      "zh": "暗涌的情愫正在悄然升温——先通过眼下的私密互动拉近距离，再步入只属于彼此的时刻。",
+      "de": "Unausgesprochene Spannung knistert unter der Oberfläche — vertiefe erst die Nähe für den vertraulichen Moment."
+    }
   }
 }

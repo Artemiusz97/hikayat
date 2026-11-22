@@ -145,6 +145,9 @@ def is_sleepwear_window(
     *,
     shift_profile: str = "day",
     on_rest_day: bool = False,
+    is_nocturnal: bool = False,
+    closes_at_22: bool = False,
+    closes_at_20: bool = False,
 ) -> bool:
     """Returns True when the clock falls in the actor's circadian sleep window."""
     safe_day = max(1, int(current_day or 1))
@@ -154,7 +157,17 @@ def is_sleepwear_window(
     if prof == "night":
         # Night-shift workers sleep 05:00 - 13:59
         return 300 <= safe_min < 840
+    if prof == "street_vendor":
+        if is_nocturnal:
+            return 240 <= safe_min < 1140
+        return safe_min >= 1260 or safe_min < 480
+    if prof == "pedestrian":
+        return safe_min >= 1380 or safe_min < 420
     if prof == "evening" and not on_rest_day:
+        if closes_at_20:
+            return safe_min >= 1260 or safe_min < 480
+        if closes_at_22:
+            return safe_min >= 1320 or safe_min < 540
         # Evening-shift workers finish at 23:00 -> sleep 23:00 - 08:59
         return safe_min >= 1380 or safe_min < 540
 
@@ -229,6 +242,9 @@ def is_sleep_venue(
     if any(
         k in probe
         for k in (
+            "zone_residential_abstract",
+            "residential district",
+            "residential area (unknown)",
             "sub_npc_res_",
             "fac_npc_res_",
             "npc_res_",

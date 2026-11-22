@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 from mechanics.social.anomalous_npc_tags import (
     TAG_ANOMALY_ENTITY,
+    TAG_CIVILIAN,
     TAG_FOLKLORE_VILLAGER,
     TAG_SPECIAL_AGENT,
     classify_anomalous_npc_tag,
@@ -50,6 +51,12 @@ _ACTIVITY_LOCALES: dict[str, dict[str, str]] = {
     "telltale_earpiece": {"en": "Checking Earpiece", "pl": "Poprawia słuchawkę", "ms": "Memeriksa Alat Telinga", "de": "Prüft Ohrhörer", "zh": "轻触隐蔽耳麦"},
     "telltale_shadow": {"en": "Shadow Out of Step", "pl": "Nieswój cień", "ms": "Bayang Ganjil", "de": "Seltsamer Schatten", "zh": "影子微微错位"},
     "telltale_disheveled": {"en": "Flustered & Disheveled", "pl": "Zmieszanie i nieład", "ms": "Gugup & Kusut", "de": "Zerzaust & Verlegen", "zh": "衣衫微乱"},
+    "telltale_ward_scent": {"en": "Faint Incense & Ward Chalk", "pl": "Woń kadzidła i kredy ochronnej", "ms": "Bau Kemenyan & Kapur Pelindung", "de": "Leiser Weihrauch & Bannkreide", "zh": "隐约焚香与护符粉笔痕"},
+    "telltale_amber_sparks": {"en": "Static Amber Glint", "pl": "Bursztynowe iskry w dłoniach", "ms": "Kilauan Bara Halus", "de": "Leises Bernsteinknistern", "zh": "指尖微弱琥珀星火"},
+    "telltale_syndicate_ink": {"en": "Concealed Cipher Ink", "pl": "Ukryty atrament szyfrowy", "ms": "Dakwat Rahsia Sindiket", "de": "Verdeckte Chiffriertinte", "zh": "袖口隐蔽密文墨迹"},
+    "telltale_whispering_aura": {"en": "Humming Relic Resonance", "pl": "Cichy rezonans reliktu", "ms": "Getaran Aneh Relik", "de": "Flüsternde Reliktresonanz", "zh": "隐隐嗡鸣的遗物共鸣"},
+    "telltale_cursed_trinket": {"en": "Restless Silver Trinket", "pl": "Niespokojny srebrny talizman", "ms": "Loket Perak Bergetar", "de": "Unruhiges Silberamulett", "zh": "微微震颤的银质饰物"},
+    "telltale_micro_telltale": {"en": "Rehearsed Guarded Habit", "pl": "Wyuczony ostrożny odruch", "ms": "Tabiat Berhati-Hati", "de": "Einstudierte Wachsamkeit", "zh": "刻意收敛的小动作"},
 }
 
 _DEEP_FOCUS_KEYS = frozenset({
@@ -95,6 +102,12 @@ _ACTIVITY_SPECS: dict[str, tuple[str, int, tuple[str, ...]]] = {
     "telltale_earpiece": ("PER", 8, ("hand near ear", "scanning room calmly")),
     "telltale_shadow": ("PER", 8, ("dim lighting", "subtle uncanny stillness")),
     "telltale_disheveled": ("PER", 8, ("slightly disheveled attire", "flushed composure")),
+    "telltale_ward_scent": ("PER", 8, ("subtle smudge of ward chalk", "calm observant posture")),
+    "telltale_amber_sparks": ("PER", 8, ("warm ember shimmer", "composed stance")),
+    "telltale_syndicate_ink": ("PER", 8, ("stained cuff", "guarded glance")),
+    "telltale_whispering_aura": ("PER", 8, ("hand clutching concealed charm", "uneasy glance")),
+    "telltale_cursed_trinket": ("PER", 8, ("cold silver trinket", "distracted posture")),
+    "telltale_micro_telltale": ("PER", 8, ("subtle guarded habit", "measured gaze")),
 }
 
 _VENUE_CATALOGS: dict[str, dict[str, tuple[str, ...]]] = {
@@ -142,8 +155,14 @@ _VENUE_CATALOGS: dict[str, dict[str, tuple[str, ...]]] = {
         "containment": ("monitoring", "patrolling", "tinkering"),
         "investigation_hub": ("researching", "hacking", "chatting"),
         "infirmary": ("tending_patients", "resting", "monitoring"),
+        "market": ("tending_stall", "chatting", "browsing_phone", "coffee_break"),
+        "cafeteria": ("coffee_break", "eating", "chatting", "browsing_phone"),
+        "tavern": ("tending_bar", "coffee_break", "chatting", "resting"),
+        "shrine": ("praying", "resting", "gazing_out"),
+        "library": ("reading", "researching", "taking_notes"),
+        "rooftop": ("gazing_out", "browsing_phone", "resting"),
         "residence": ("cooking", "resting", "researching", "hanging_out"),
-        "general": ("patrolling", "researching", "monitoring"),
+        "general": ("browsing_phone", "chatting", "coffee_break", "checking_time", "resting"),
     },
     "folklore": {
         "shrine": ("praying", "tending_stall", "resting"),
@@ -289,12 +308,29 @@ def _select_role_or_venue_key(
         elif genre in ("sci_fi",) and venue == "bureau":
             venue = "bridge"
         elif genre in ("anomalous",) and venue == "library":
-            venue = "bureau"
-        choices = cat.get(venue) or cat.get("general") or ("chatting", "resting")
+            tag_chk = classify_anomalous_npc_tag(npc)
+            venue = "bureau" if tag_chk == TAG_SPECIAL_AGENT else "library"
+        choices = cat.get(venue)
+        if choices is None and genre == "campus":
+            choices = _VENUE_CATALOGS["anomalous"].get(venue)
+        if not choices:
+            choices = cat.get("general") or ("chatting", "resting")
+        if genre == "anomalous" and classify_anomalous_npc_tag(npc) == TAG_CIVILIAN and venue == "bureau":
+            choices = ("browsing_phone", "chatting", "checking_time", "coffee_break")
 
     npc_ident = str(npc.get("npc_id") or npc.get("person_key") or npc.get("name") or "npc").strip().lower()
     digest = hashlib.sha256(f"{session_id}:{day}:{time_block}:{venue}:{npc_ident}".encode("utf-8")).hexdigest()
     return choices[int(digest[:8], 16) % len(choices)]
+
+
+_SECRET_TELLTALE_MAP: dict[str, str] = {
+    "ward_scent": "telltale_ward_scent",
+    "amber_sparks": "telltale_amber_sparks",
+    "syndicate_ink": "telltale_syndicate_ink",
+    "whispering_aura": "telltale_whispering_aura",
+    "cursed_trinket": "telltale_cursed_trinket",
+    "micro_telltale": "telltale_micro_telltale",
+}
 
 
 def _detect_disguised_telltale_key(
@@ -304,8 +340,11 @@ def _detect_disguised_telltale_key(
     location: str = "",
     venue: str = "",
 ) -> str:
-    """Returns a telltale activity key for hidden disguises/anomalies or non-locker dishevelment."""
+    """Returns a telltale activity key for hidden disguises/secrets/anomalies or non-locker dishevelment."""
     basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), Mapping) else {}
+    raw_secret_tt = str(npc.get("hidden_secret_telltale") or basic.get("hidden_secret_telltale") or "").strip().lower()
+    if raw_secret_tt and (npc.get("hidden_secret") or basic.get("hidden_secret") or raw_secret_tt in _SECRET_TELLTALE_MAP):
+        return _SECRET_TELLTALE_MAP.get(raw_secret_tt, "telltale_micro_telltale")
     flags = " ".join(
         str(x or "").lower()
         for x in (

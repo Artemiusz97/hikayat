@@ -11,6 +11,12 @@ import { formatCleanLocation } from '../../utils/locationFormat';
 import KnownRoutineCard from './KnownRoutineCard';
 import KnownWardrobeCard from './KnownWardrobeCard';
 import AcquaintancesView from './AcquaintancesView';
+import {
+  formatAgeCategory,
+  formatGender,
+  formatRace,
+  formatTitle,
+} from '../../utils/npcDemographics';
 
 const isStudentNpc = (npc, basic) => {
   if (npc?.is_student !== undefined) return Boolean(npc.is_student);
@@ -31,33 +37,6 @@ const formatPersonEntity = (item) => {
   return role ? `${name} (${role})` : name;
 };
 
-const formatTitle = (str) => {
-  if (!str) return '';
-  return String(str).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-};
-
-const formatRace = (str) => {
-  if (!str) return '';
-  const clean = String(str).trim().toLowerCase().replace(/-/g, '_');
-  if (clean === 'human') return 'Human';
-  if (clean === 'dark_elf') return 'Dark Elf';
-  if (clean === 'irradiated_human') return 'Irradiated Human';
-  if (clean === 'half_beast' || clean === 'halfbeast') return 'Half-Beast';
-  if (clean === 'hybrid') return 'Hybrid';
-  if (clean.includes(':')) {
-    const [category, species] = clean.split(':');
-    const catTitle = formatTitle(category);
-    const specTitle = formatTitle(species);
-    if (category === 'half_beast' || category === 'halfbeast') return `${specTitle} Half-Beast`;
-    if (category === 'hybrid') return `${specTitle} Hybrid`;
-    if (category === 'beastfolk') return `${specTitle} Beastfolk`;
-    if (category === 'alien') return `${specTitle} Alien`;
-    if (category === 'mutant') return `${specTitle} Mutant`;
-    return `${specTitle} ${catTitle}`;
-  }
-  return formatTitle(clean);
-};
-
 const isEmptyAffil = (v) => !v || ['none', 'unaffiliated', 'unknown', 'general'].includes(String(v).trim().toLowerCase());
 
 // Club (school-only) and faction/agency are separate axes: student agents carry both.
@@ -70,16 +49,19 @@ const resolveAffiliations = (npc, basic) => {
 };
 
 // Age group badge label, e.g. "Teen · Student", "Teen", "Adult".
-const resolveAgeGroupLabel = (npc, basic, isStudent) => {
-  const ag = String(npc.age_group || basic.age_group || '').trim().toLowerCase();
-  if (!ag) return '';
-  if (ag === 'teen') return isStudent ? 'Teen · Student' : 'Teen';
-  if (ag === 'adult') return 'Adult';
-  return formatTitle(ag);
+const resolveAgeGroupLabel = (npc, basic, isStudent, t) => {
+  const agInfo = formatAgeCategory(npc.age_group || basic.age_group, t);
+  if (!agInfo) return '';
+  if (agInfo.key === 'teen' && isStudent) {
+    const studentText = typeof t === 'function' ? t('scene.student_tag', 'Student') : 'Student';
+    return `${agInfo.label} · ${studentText}`;
+  }
+  return agInfo.label;
 };
 
-const renderBulletPoints = (lines) => {
+export const renderBulletPoints = (lines, t = null) => {
   if (!lines || !lines.length) return null;
+  const unknownLabel = typeof t === 'function' ? t('common.unknown', 'Unknown') : 'Unknown';
   return (
     <div className="space-y-1">
       {lines.map((line, idx) => {
@@ -93,7 +75,7 @@ const renderBulletPoints = (lines) => {
             <div key={idx} className="leading-relaxed text-gray-300 text-xs">
               • <strong className="text-gray-100">{label}</strong>:{' '}
               {isUnknown ? (
-                <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>
+                <span className="text-gray-500 italic">{unknownLabel}</span>
               ) : (
                 <span>{val}</span>
               )}
@@ -325,9 +307,9 @@ const ContactsPanel = ({
   };
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5 min-h-full flex-1 flex flex-col">
+    <div className="space-y-3 min-h-full flex-1 flex flex-col min-w-0">
       {/* Header & Search */}
-      <div className="space-y-2 border-b border-fantasy-border pb-2">
+      <div className="space-y-2 border-b border-fantasy-border/35 pb-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
             <Smartphone size={16} className="text-fantasy-accent shrink-0" />
@@ -348,7 +330,7 @@ const ContactsPanel = ({
         <div
           role="tablist"
           aria-label={t('contacts.title', 'Contacts')}
-          className="grid grid-cols-2 gap-1 p-0.5 rounded-md bg-black/60 border border-fantasy-border/60"
+          className="grid grid-cols-2 gap-1"
         >
           <button
             type="button"
@@ -424,6 +406,7 @@ const ContactsPanel = ({
           acquaintances={filteredAcquaintances}
           loading={loading}
           searchQuery={searchQuery}
+          onMessageContact={onMessageContact}
           t={t}
         />
       ) : loading && personalContacts.length === 0 ? (
@@ -535,37 +518,37 @@ const ContactsPanel = ({
                           {npc.name}
                         </span>
                         {isBlocked && (
-                          <span className="text-[9px] px-1.5 py-0.2 bg-red-950/80 text-red-300 rounded font-bold uppercase border border-red-700/60">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-red-950/80 text-red-300 rounded font-bold uppercase border border-red-700/60">
                             🚫 {t('contacts.blocked_badge', 'Blocked')}
                           </span>
                         )}
                         {isSpecialAgent && (
-                          <span className="text-[9px] px-1.5 py-0.2 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
                             ⚡ {t('codex.special_agent', 'Special Agent')}
                           </span>
                         )}
                         {isCivilianTag && (
-                          <span className="text-[9px] px-1.5 py-0.2 bg-slate-900/80 text-slate-300 rounded font-semibold uppercase border border-slate-700/60">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-slate-900/80 text-slate-300 rounded font-semibold uppercase border border-slate-700/60">
                             {t('codex.civilian', 'Civilian')}
                           </span>
                         )}
                         {isDeceased && (
-                          <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-700/60">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-700/60">
                             💀 {t('codex.deceased', 'Deceased')}
                           </span>
                         )}
                         {isInParty && (
-                          <span className="text-[9px] px-1.5 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
+                          <span className="text-[9px] px-1.5 py-0.5 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
                             {t('codex.in_party', 'In Party')}
                           </span>
                         )}
                         {isRomantic && (
-                          <span className="text-[9px] px-1 py-0.2 bg-pink-950/60 text-pink-300 rounded font-bold uppercase border border-pink-800/40">
+                          <span className="text-[9px] px-1 py-0.5 bg-pink-950/60 text-pink-300 rounded font-bold uppercase border border-pink-800/40">
                             {t('codex.romantic', 'Romantic')}
                           </span>
                         )}
                         {npc.clothing_status && (
-                          <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
+                          <span className="text-[8.5px] font-mono px-1 py-0.5 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                             {npc.clothing_status}
                           </span>
                         )}
@@ -629,7 +612,9 @@ const ContactsPanel = ({
                     )}
                     {(() => {
                       const { isStudent, club, faction } = resolveAffiliations(npc, basic);
-                      const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent);
+                      const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent, t);
+                      const genderInfo = formatGender(basic.gender || npc.gender, t);
+                      const raceLabel = formatRace(basic.race || npc.race, t);
                       return (
                         <>
                           {ageLabel && (
@@ -647,19 +632,19 @@ const ContactsPanel = ({
                               Faction: {formatTitle(faction)}
                             </span>
                           )}
+                          {raceLabel && (
+                            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                              {raceLabel}
+                            </span>
+                          )}
+                          {genderInfo && (
+                            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                              {genderInfo.symbol ? `${genderInfo.symbol} ` : ''}{genderInfo.label}
+                            </span>
+                          )}
                         </>
                       );
                     })()}
-                    {(basic.race || npc.race) && (
-                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-                        {formatRace(basic.race || npc.race)}
-                      </span>
-                    )}
-                    {(basic.gender || npc.gender) && (
-                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-                        {formatTitle(basic.gender || npc.gender)}
-                      </span>
-                    )}
                     {(basic.age || npc.age) && (
                       <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
                         Age {basic.age || npc.age}
@@ -848,7 +833,7 @@ const ContactsPanel = ({
                                         <span>{ab.emoji || '✨'}</span>
                                         <span>{ab.name}</span>
                                         {ab.is_ultimate && (
-                                          <span className="text-[8.5px] px-1 py-0.2 rounded bg-purple-900/80 text-purple-200 border border-purple-600/50 font-mono uppercase">
+                                          <span className="text-[8.5px] px-1 py-0.5 rounded bg-purple-900/80 text-purple-200 border border-purple-600/50 font-mono uppercase">
                                             Ultimate
                                           </span>
                                         )}
@@ -979,14 +964,17 @@ const ContactsPanel = ({
                               </span>
                               {basic.race && (
                                 <span className="text-xs px-2 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/50">
-                                  {formatRace(basic.race)}
+                                  {formatRace(basic.race, t)}
                                 </span>
                               )}
-                              {basic.gender && (
-                                <span className="text-xs px-2 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/50">
-                                  {formatTitle(basic.gender)}
-                                </span>
-                              )}
+                              {basic.gender && (() => {
+                                const gInfo = formatGender(basic.gender, t);
+                                return (
+                                  <span className="text-xs px-2 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/50">
+                                    {gInfo ? `${gInfo.symbol ? `${gInfo.symbol} ` : ''}${gInfo.label}` : formatTitle(basic.gender)}
+                                  </span>
+                                );
+                              })()}
                               {basic.age && (
                                 <span className="text-xs px-2 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/50">
                                   Age {basic.age}
@@ -999,7 +987,7 @@ const ContactsPanel = ({
                               )}
                               {(() => {
                                 const { isStudent, club, faction } = resolveAffiliations(npc, basic);
-                                const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent);
+                                const ageLabel = resolveAgeGroupLabel(npc, basic, isStudent, t);
                                 return (
                                   <>
                                     {ageLabel && (
@@ -1257,7 +1245,7 @@ const ContactsPanel = ({
                                         ) : (
                                           <span>{mem.name}</span>
                                         )}{' '}
-                                        {mem.race ? `(${formatRace(mem.race)})` : ''} — {statusDot} {(!isParent && (mem.occupation || mem.grade)) ? <span className="italic text-gray-400">— {mem.occupation || mem.grade}</span> : (mem.occupation ? <span className="italic text-gray-400">— {mem.occupation}</span> : '')}
+                                        {mem.race ? `(${formatRace(mem.race, t)})` : ''} — {statusDot} {(!isParent && (mem.occupation || mem.grade)) ? <span className="italic text-gray-400">— {mem.occupation || mem.grade}</span> : (mem.occupation ? <span className="italic text-gray-400">— {mem.occupation}</span> : '')}
                                       </div>
                                     );
                                   })}
@@ -1441,7 +1429,7 @@ const ContactsPanel = ({
                                     return `• **Breast Size**: ${bTitle}`;
                                   }
                                   return line;
-                                }))
+                                }), t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{isMaleNpc ? 'Penis Size' : 'Breast Size'}</strong>: {sizeDisplay}</div>
@@ -1461,7 +1449,7 @@ const ContactsPanel = ({
                                 🎭 Demeanor & Dynamic
                               </span>
                               {hasSections && intSec.dynamic ? (
-                                renderBulletPoints(intSec.dynamic)
+                                renderBulletPoints(intSec.dynamic, t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{t('contacts.demeanor', 'Demeanor')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.intimate_demeanor ? appearance.intimate_demeanor : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
@@ -1476,7 +1464,7 @@ const ContactsPanel = ({
                                 🩲 Undergarments
                               </span>
                               {hasSections && intSec.undergarments ? (
-                                renderBulletPoints(intSec.undergarments)
+                                renderBulletPoints(intSec.undergarments, t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   {!isMaleNpc && (
@@ -1492,7 +1480,7 @@ const ContactsPanel = ({
                                 🌸 Sensitive Spots
                               </span>
                               {hasSections && (intSec.sensitive_spots || intSec.sensitivities) ? (
-                                renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities.filter(s => s.toLowerCase().includes('sensitive spot')))
+                                renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities.filter(s => s.toLowerCase().includes('sensitive spot')), t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{t('contacts.sensitive_spots', 'Sensitive Spots')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && appearance.sensitive_spots ? appearance.sensitive_spots : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
@@ -1505,7 +1493,7 @@ const ContactsPanel = ({
                                 🔥 Desires & Turn-Offs
                               </span>
                               {hasSections && (intSec.desires_and_turn_offs || intSec.sensitivities) ? (
-                                renderBulletPoints(intSec.desires_and_turn_offs || intSec.sensitivities.filter(s => !s.toLowerCase().includes('sensitive spot')))
+                                renderBulletPoints(intSec.desires_and_turn_offs || intSec.sensitivities.filter(s => !s.toLowerCase().includes('sensitive spot')), t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{t('contacts.desires_kinks', 'Desires & Kinks')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.desires_and_kinks || appearance.turn_ons) ? (Array.isArray(appearance.desires_and_kinks || appearance.turn_ons) ? (appearance.desires_and_kinks || appearance.turn_ons).join(', ') : (appearance.desires_and_kinks || appearance.turn_ons)) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>
@@ -1519,7 +1507,7 @@ const ContactsPanel = ({
                                 ❤️ Act & Position Preferences
                               </span>
                               {hasSections && intSec.act_preferences ? (
-                                renderBulletPoints(intSec.act_preferences)
+                                renderBulletPoints(intSec.act_preferences, t)
                               ) : (
                                 <div className="space-y-1 text-gray-300 leading-relaxed">
                                   <div>• <strong className="text-gray-100">{t('contacts.preferred_likes', 'Preferred / Likes')}</strong>: {(infoLevel >= 3 || isDebugRevealed) && (appearance.favorite_acts || appearance.act_likes) ? (Array.isArray(appearance.favorite_acts) ? appearance.favorite_acts.join(', ') : (appearance.act_likes || 'None')) : <span className="text-gray-500 italic">{t('common.unknown', 'Unknown')}</span>}</div>

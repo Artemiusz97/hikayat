@@ -13,6 +13,7 @@ from typing import Any, Mapping
 import db
 from mechanics.world.anchor_schedule import (
     SHIFT_PROFILES,
+    _effective_shift_windows,
     _normalize_shift_profile,
     resolve_anchor_schedule_nodes,
 )
@@ -57,10 +58,12 @@ def resolve_sleep_windows(
     has_route = bool(npc.get("roaming_route") or basic.get("roaming_route"))
     if raw_shift or has_route:
         norm_shift = _normalize_shift_profile(raw_shift, has_route=has_route)
-        if norm_shift in ("night", "evening", "rotating"):
-            windows = SHIFT_PROFILES.get(norm_shift, {}).get("sleep_windows") or []
-            if windows:
-                return [(int(s), int(e)) for s, e in windows]
+        if norm_shift in ("night", "evening", "rotating", "pedestrian", "street_vendor"):
+            profile = SHIFT_PROFILES.get(norm_shift)
+            if profile:
+                _, _, windows = _effective_shift_windows(norm_shift, profile, npc)
+                if windows:
+                    return [(int(s), int(e)) for s, e in windows]
 
     sleep_start = int(get_scenario_sleep_minute(scen_key) or 1320)
     wake_end = int(get_scenario_wake_minute(scen_key) or 420)

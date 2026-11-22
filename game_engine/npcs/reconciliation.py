@@ -26,6 +26,29 @@ from .presence import (
 )
 
 
+def _is_same_or_descendant_in_memory(
+    nodes_by_id: dict[str, dict[str, Any]],
+    child_id: str,
+    ancestor_id: str,
+) -> bool:
+    c = str(child_id or "").strip()
+    a = str(ancestor_id or "").strip()
+    if not c or not a:
+        return False
+    cur = c
+    for _ in range(10):
+        if cur == a:
+            return True
+        node = nodes_by_id.get(cur)
+        if not isinstance(node, dict):
+            break
+        parent = str(node.get("parent_id") or "").strip()
+        if not parent or parent == cur:
+            break
+        cur = parent
+    return False
+
+
 def _build_canonical_name_resolver(
     session: dict | None,
     old_npcs: list,
@@ -195,23 +218,11 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                 p_char = p_elem[0] if isinstance(p_elem, (list, tuple)) and p_elem else p_elem
                 if isinstance(p_char, dict) and p_char.get("name"):
                     _add_player_name(p_char["name"])
-        if session.get("turn_order"):
-            for uid in session["turn_order"]:
-                try:
-                    with db.get_conn() as conn:
-                        c_rows = conn.execute("SELECT name FROM characters WHERE user_id = ?", (uid,)).fetchall()
-                        for cr in c_rows:
-                            if cr["name"]:
-                                _add_player_name(cr["name"])
-                except Exception:
-                    pass
         if session.get("id"):
             try:
-                with db.get_conn() as conn:
-                    c_rows = conn.execute("SELECT name FROM characters WHERE session_id = ?", (session["id"],)).fetchall()
-                    for cr in c_rows:
-                        if cr["name"]:
-                            _add_player_name(cr["name"])
+                for sc in (db.get_session_characters(session["id"]) or []):
+                    if isinstance(sc, dict) and sc.get("name"):
+                        _add_player_name(sc["name"])
             except Exception:
                 pass
 
@@ -272,6 +283,14 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
         if closed_world_active and world_roster_list:
             try:
                 from mechanics.world import is_npc_on_active_shift, resolve_anchor_schedule_nodes
+                from mechanics.world.npc_autonomy import resolve_autonomy_node_override
+                from mechanics.world.schedule_blocks import get_detailed_npc_time_phase, get_time_block_key
+
+                nodes_by_id_rec = {
+                    str(n["node_id"]): n
+                    for n in _sess_world_nodes
+                    if isinstance(n, dict) and n.get("node_id")
+                }
                 eff_nid_rec = (
                     (result.get("current_node_id") if isinstance(result, dict) else None)
                     or (db.resolve_node_id_from_location(sess_id, new_loc) if new_loc else None)
@@ -284,29 +303,45 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                     if (session and session.get("_staged_minute") is not None)
                     else (session.get("current_minute") if (session and session.get("current_minute") is not None) else 480)
                 )
+                curr_phase_rec = get_detailed_npc_time_phase(int(eff_min_rec), current_day=eff_day_rec, scen_key=scen_key)
+                curr_blk_rec = get_time_block_key(int(eff_min_rec))
                 for wr in world_roster_list:
                     wr_nm = str(wr.get("name") or "").strip().lower()
                     if not wr_nm:
                         continue
+                    wr_pre = {**wr, "_roster_premerged": True}
                     a_map = resolve_anchor_schedule_nodes(
-                        wr,
+                        wr_pre,
                         current_day=eff_day_rec,
                         scen_key=scen_key,
-                        session_id=sess_id,
+                        session_id=None,
                         current_minute=int(eff_min_rec),
                     )
                     on_sh, work_nid = is_npc_on_active_shift(
-                        wr,
+                        wr_pre,
                         int(eff_min_rec),
                         current_day=eff_day_rec,
                         scen_key=scen_key,
-                        session_id=sess_id,
+                        session_id=None,
                     )
-                    expected_nid = (work_nid if (on_sh and work_nid) else "") or a_map.get("expected_node_id") or ""
+                    expected_nid = (
+                        (work_nid if (on_sh and work_nid) else "")
+                        or ((a_map or {}).get(curr_phase_rec) or (a_map or {}).get(curr_blk_rec) or "")
+                    )
+                    ov_rec = resolve_autonomy_node_override(
+                        wr_pre,
+                        session_id=int(sess_id),
+                        day=eff_day_rec,
+                        block=curr_blk_rec,
+                        scen_key=scen_key,
+                        scheduled_node_id=expected_nid,
+                    )
+                    if isinstance(ov_rec, dict) and ov_rec.get("node_id"):
+                        expected_nid = str(ov_rec["node_id"]).strip()
                     if eff_nid_rec and expected_nid and (
                         expected_nid == eff_nid_rec
-                        or db.is_descendant_of(sess_id, eff_nid_rec, expected_nid)
-                        or db.is_descendant_of(sess_id, expected_nid, eff_nid_rec)
+                        or _is_same_or_descendant_in_memory(nodes_by_id_rec, eff_nid_rec, expected_nid)
+                        or _is_same_or_descendant_in_memory(nodes_by_id_rec, expected_nid, eff_nid_rec)
                     ):
                         world_scheduled_here_low.add(wr_nm)
             except Exception:
@@ -1199,6 +1234,24 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
         final_by_name: dict[str, dict] = {}
 
+        is_location_move = bool(old_loc and new_loc and old_loc.lower() != new_loc.lower())
+        carried_old_names: set[str] = set()
+        roster_by_name: dict[str, dict] = {}
+        if is_location_move:
+            carried_old_names = {
+                game_engine._get_npc_name(cn).strip().lower()
+                for cn in carried_old_npcs
+                if game_engine._get_npc_name(cn)
+            }
+            roster_by_name = dict(world_roster_by_low)
+            if session.get("id"):
+                try:
+                    for r_npc in (db.get_anomalous_agent_roster(session["id"]) or []) + (db.get_school_roster(session["id"]) or []):
+                        if isinstance(r_npc, dict) and r_npc.get("name"):
+                            roster_by_name.setdefault(str(r_npc["name"]).strip().lower(), r_npc)
+                except Exception:
+                    pass
+
         for n in (carried_old_npcs + combined_new_npcs):
 
             raw_name = game_engine._get_npc_name(n)
@@ -1207,7 +1260,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
             name_clean = canon_name.lower().strip()
 
-            import namegen
             if (
                 name_clean
                 and name_clean != "none"
@@ -1220,20 +1272,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                 # Known-NPC Spatial Whitelist Gate:
                 # When moving locations, previous-room patrons or known contacts/roster NPCs cannot enter the scene
                 # unless explicitly invited, party member/temporary companion, destination staged occupant, or appointment target.
-                if old_loc and new_loc and old_loc.lower() != new_loc.lower():
-                    carried_old_names = {
-                        game_engine._get_npc_name(cn).strip().lower()
-                        for cn in carried_old_npcs
-                        if game_engine._get_npc_name(cn)
-                    }
-                    roster_by_name: dict[str, dict] = dict(world_roster_by_low)
-                    if session.get("id"):
-                        try:
-                            for r_npc in (db.get_anomalous_agent_roster(session["id"]) or []) + (db.get_school_roster(session["id"]) or []):
-                                if isinstance(r_npc, dict) and r_npc.get("name"):
-                                    roster_by_name.setdefault(str(r_npc["name"]).strip().lower(), r_npc)
-                        except Exception:
-                            pass
+                if is_location_move:
                     matched_kc = next(
                         (c for c in known_contacts if str(c.get("name") or c.get("npc_id") or "").strip().lower() == name_clean),
                         None,
@@ -1283,6 +1322,7 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                             or name_clean in staged_names
                             or (len(name_clean.split()[0]) >= 3 and name_clean.split()[0] in staged_names)
                             or name_clean in appointment_targets
+                            or name_clean in world_scheduled_here_low
                             or name_clean in newly_recruited
                             or has_mobile_dest_presence
                         )
@@ -1339,7 +1379,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
 
             name_clean = canon_name.lower().strip()
 
-            import namegen
             if (
                 name_clean
                 and name_clean != "none"
@@ -1349,78 +1388,6 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
                 and namegen.is_valid_entity_name(name_clean)
                 and not namegen.is_collective_entity_name(name_clean)
             ):
-                # Known-NPC Spatial Whitelist Gate:
-                # When moving locations, previous-room patrons or known contacts/roster NPCs cannot enter the scene
-                # unless explicitly invited, party member/temporary companion, destination staged occupant, or appointment target.
-                if old_loc and new_loc and old_loc.lower() != new_loc.lower():
-                    carried_old_names = {
-                        game_engine._get_npc_name(cn).strip().lower()
-                        for cn in retained_old
-                        if game_engine._get_npc_name(cn)
-                    }
-                    roster_by_name: dict[str, dict] = dict(world_roster_by_low)
-                    if session.get("id"):
-                        try:
-                            for r_npc in (db.get_anomalous_agent_roster(session["id"]) or []) + (db.get_school_roster(session["id"]) or []):
-                                if isinstance(r_npc, dict) and r_npc.get("name"):
-                                    roster_by_name.setdefault(str(r_npc["name"]).strip().lower(), r_npc)
-                        except Exception:
-                            pass
-                    matched_kc = next(
-                        (c for c in known_contacts if str(c.get("name") or c.get("npc_id") or "").strip().lower() == name_clean),
-                        None,
-                    )
-                    matched_roster = roster_by_name.get(name_clean)
-                    was_in_old = any(game_engine._get_npc_name(on).strip().lower() == name_clean for on in old_npcs)
-                    is_old_or_contact = (
-                        was_in_old
-                        or matched_kc is not None
-                        or matched_roster is not None
-                        or name_clean in left_behind_names
-                    )
-                    if is_old_or_contact:
-                        has_mobile_dest_presence = False
-                        if not was_in_old and name_clean not in left_behind_names and has_active_physical_presence(canon_name, result, full_narr):
-                            npc_rec = matched_kc or matched_roster
-                            kc_loc = (
-                                str((matched_kc.get("basic_info") or {}).get("location") or matched_kc.get("location") or "")
-                                if isinstance(matched_kc, dict)
-                                else (
-                                    str(matched_roster.get("primary_facility") or matched_roster.get("secondary_facility") or matched_roster.get("location") or "")
-                                    if isinstance(matched_roster, dict)
-                                    else ""
-                                )
-                            )
-                            from mechanics.world.waypoints import check_location_matches_waypoint
-                            is_stationed_here = bool(
-                                kc_loc
-                                and new_loc
-                                and (check_location_matches_waypoint(new_loc, kc_loc) or check_location_matches_waypoint(kc_loc, new_loc))
-                            )
-                            kc_zone = get_zone_location_name(kc_loc) if kc_loc else ""
-                            if is_stationed_here or (
-                                is_character_mobile(canon_name, npc_rec, scen_key)
-                                and (
-                                    (kc_zone and dest_zone and is_campus_co_located(kc_zone, dest_zone, scen_key))
-                                    or has_narrative_continuity_bridge(canon_name, session=session, actions=actions, new_loc=new_loc)
-                                )
-                            ):
-                                has_mobile_dest_presence = True
-
-                        is_permitted = (
-                            name_clean in carried_old_names
-                            or name_clean in formal_party_names
-                            or is_npc_invited_in_action(canon_name, actions)
-                            or (not closed_world_active and is_rendezvous_target(name_clean, actions=actions, session_id=sess_id, new_loc=new_loc))
-                            or name_clean in staged_names
-                            or (len(name_clean.split()[0]) >= 3 and name_clean.split()[0] in staged_names)
-                            or name_clean in appointment_targets
-                            or name_clean in newly_recruited
-                            or has_mobile_dest_presence
-                        )
-                        if not is_permitted:
-                            continue
-
                 if name_clean not in final_by_name:
 
                     n_dict = dict(n) if isinstance(n, dict) else {"name": canon_name}
@@ -1543,8 +1510,10 @@ def process_scene_npcs(result: dict, session: dict, new_loc: str, old_loc: str, 
         from game_engine.npcs.stage_manager import update_stage_blocking_and_composure_post_turn
         rel_deltas = {}
         for ru in (result.get("relationship_updates") or []):
-            if isinstance(ru, dict) and ru.get("name"):
-                rel_deltas[ru["name"].strip().lower()] = int(ru.get("delta_score") or ru.get("delta") or 0)
+            if isinstance(ru, dict):
+                ru_name = str(ru.get("npc_name") or ru.get("name") or "").strip().lower()
+                if ru_name:
+                    rel_deltas[ru_name] = int(ru.get("delta_score") or ru.get("delta") or 0)
         update_stage_blocking_and_composure_post_turn(
             session=session,
             actions=actions or [],

@@ -57,6 +57,7 @@ def resolve_clue_source_claim(
     is_bonus: bool = False,
     fail_forward: bool = False,
     conn: Optional[Any] = None,
+    persist_db: bool = True,
 ) -> Dict[str, Any]:
     """
     Claims a `"key_clue"` source (discovering stage key_clue, closing sibling open sources,
@@ -172,6 +173,15 @@ def resolve_clue_source_claim(
                     break
         if matched_src is None:
             return {}
+        if not persist_db:
+            return {
+                "status": "bonus_clue_claimed",
+                "is_bonus_clue": True,
+                "directive": (
+                    f"[CORROBORATING CLUE UNCOVERED — CASEBOARD BYPASS READY]: Secondary evidence corroborates '{kc_title}'. "
+                    f"Pairing them on the Caseboard unlocks the direct breakthrough shortcut!"
+                ),
+            }
         m_idx, m_src = matched_src
         m_src["status"] = "claimed"
         sources[m_idx] = m_src
@@ -931,41 +941,68 @@ def resolve_quest_approach_failure(
                 ),
             }
 
-        b_contract = cur_ms.get("beat_contract") or {}
-        is_dialogue_beat = bool(
-            b_contract.get("is_dialogue_beat")
-            or waypoint.get("is_dialogue_beat")
-            or waypoint.get("target_npc")
-            or cur_ms.get("target_npc")
-            or any(kw in str(waypoint.get("stage_label") or "").lower() for kw in ("interview", "interrogate", "speak", "talk", "question", "bribe", "persuade", "confront", "inquire", "ask"))
-        )
+        target_display = waypoint.get("target_npc") or cur_ms.get("target_npc") or waypoint.get("stage_label") or q_fresh.get("title")
+        if not is_climax_boss:
+            raw_apprs = cur_ms.get("approaches") or waypoint.get("approaches") or []
+            avail_apprs: List[str] = []
+            seen_ap: set[str] = set()
+            for ap_item in raw_apprs:
+                ap_code = (
+                    str(ap_item.get("stat") or ap_item.get("approach_id") or "").strip().upper()
+                    if isinstance(ap_item, dict)
+                    else str(ap_item or "").strip().upper()
+                )
+                if ap_code and ap_code not in seen_ap:
+                    seen_ap.add(ap_code)
+                    avail_apprs.append(ap_code)
+            if not avail_apprs:
+                avail_apprs = ["STR", "INT", "CHA"]
+            burned_upper = {str(x).strip().upper() for x in (new_burned.get(target_key) or [])}
+            unburned_remaining = [ap for ap in avail_apprs if ap not in burned_upper]
 
-        if is_dialogue_beat and not is_climax_boss:
-            from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
-            adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
-            nxt_wp = db.get_active_waypoint(session_id, qid, sub_obj_id)
-            target_name = waypoint.get("target_npc") or cur_ms.get("target_npc") or waypoint.get("stage_label") or q_fresh.get("title")
-            dir_msg = (
-                f"[QUEST BEAT FAIL-FORWARD — COSTLY PAYOFF]: The inquiry check with {target_name} faltered ({check_result_tier}), "
-                f"but the critical lead was extracted under pressure at a steep price! Alert increased to {new_alert}/{max_alert}. "
-                f"Narrate the compromised breakthrough and the hostile attention drawn."
-            )
-            return {
-                "status": "fail_forward",
-                "failed": False,
-                "stage_advanced": True,
-                "completed_stage": stage_idx,
-                "next_stage": adv_res.get("next_stage_idx", stage_idx + 1),
-                "all_stages_complete": bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)),
-                "next_waypoint": dict(nxt_wp) if nxt_wp else None,
-                "strikes": new_alert,
-                "max_strikes": max_alert,
-                "alert_level": new_alert,
-                "max_alert": max_alert,
-                "burned_approach": norm_appr,
-                "burned_target": target_key,
-                "directive": dir_msg,
-            }
+            if unburned_remaining and new_alert < max_alert:
+                return {
+                    "status": "strike_warning",
+                    "strikes": new_alert,
+                    "max_strikes": max_alert,
+                    "alert_level": new_alert,
+                    "max_alert": max_alert,
+                    "stage_advanced": False,
+                    "burned_approach": norm_appr,
+                    "burned_target": target_key,
+                    "unburned_remaining": unburned_remaining,
+                    "failed": False,
+                    "directive": (
+                        f"[APPROACH BURNED & ALERT ESCALATED ({new_alert}/{max_alert})]: The {norm_appr} approach on "
+                        f"'{target_display}' failed and is now burned! "
+                        f"Alternative approaches remain open ({', '.join(unburned_remaining)}), but opposition vigilance has risen."
+                    ),
+                }
+
+            if not unburned_remaining and (q_fresh.get("is_story_quest") or new_alert < max_alert):
+                from game_engine.quest_lifecycle import sync_dossier_main_stage_advance
+                adv_res = sync_dossier_main_stage_advance(session_id, qid, stage_idx)
+                nxt_wp = db.get_active_waypoint(session_id, qid, sub_obj_id)
+                return {
+                    "status": "fail_forward",
+                    "failed": False,
+                    "stage_advanced": True,
+                    "completed_stage": stage_idx,
+                    "next_stage": adv_res.get("next_stage_idx", stage_idx + 1),
+                    "all_stages_complete": bool(adv_res.get("climax_unlocked") and stage_idx >= len(ms_list)),
+                    "next_waypoint": dict(nxt_wp) if nxt_wp else None,
+                    "strikes": new_alert,
+                    "max_strikes": max_alert,
+                    "alert_level": new_alert,
+                    "max_alert": max_alert,
+                    "burned_approach": norm_appr,
+                    "burned_target": target_key,
+                    "directive": (
+                        f"[QUEST BEAT FAIL-FORWARD — COSTLY PAYOFF]: The final unburned approach against '{target_display}' faltered ({check_result_tier}), "
+                        f"forcing a costly breakthrough under pressure! Alert increased to {new_alert}/{max_alert}. "
+                        f"Narrate the compromised advance and heightened hostile attention."
+                    ),
+                }
 
         if new_alert < max_alert:
             return {
@@ -974,12 +1011,13 @@ def resolve_quest_approach_failure(
                 "max_strikes": max_alert,
                 "alert_level": new_alert,
                 "max_alert": max_alert,
+                "stage_advanced": False,
                 "burned_approach": norm_appr,
                 "burned_target": target_key,
                 "failed": False,
                 "directive": (
                     f"[APPROACH BURNED & ALERT ESCALATED ({new_alert}/{max_alert})]: The {norm_appr} approach on "
-                    f"'{waypoint.get('target_npc') or waypoint.get('stage_label') or q_fresh.get('title')}' failed and is now burned! "
+                    f"'{target_display}' failed and is now burned! "
                     f"Alternative approaches remain open, but opposition vigilance has risen."
                 ),
             }
@@ -1062,6 +1100,10 @@ def resolve_quest_approach_failure(
             "completed_stage": stage_idx,
             "next_stage": int(adv_res.get("next_stage_idx") or (stage_idx + 1)),
             "next_waypoint": dict(nxt_wp) if nxt_wp else None,
+            "alert_level": 0,
+            "max_alert": max_alert,
+            "strikes": 0,
+            "max_strikes": max_alert,
             "burned_approach": norm_appr,
             "world_scar": scar_ev,
             "directive": (
@@ -1338,6 +1380,16 @@ def resolve_quest_optional_objective(
         )
 
         climax["bypass_unlocked"] = True
+        clearance_list = [str(x) for x in (climax.get("earned_clearance_locations") or []) if x]
+        for clr_loc in (
+            climax.get("location"),
+            (main_stages[1].get("target_location") if len(main_stages) >= 2 and isinstance(main_stages[1], dict) else ""),
+            lead.get("target_location"),
+        ):
+            c_loc_s = str(clr_loc or "").strip()
+            if c_loc_s and c_loc_s not in clearance_list:
+                clearance_list.append(c_loc_s)
+        climax["earned_clearance_locations"] = clearance_list
         pushback_info = apply_optional_pushback_to_climax(
             climax,
             delta=1,
@@ -1345,11 +1397,17 @@ def resolve_quest_optional_objective(
             clock_eligible=is_threat_clock_eligible(sess, q_row, dossier),
         )
         if main_stages:
-            if str(main_stages[0].get("status") or "active") not in ("completed", "bypassed"):
-                main_stages[0]["status"] = "bypassed"
-                main_stages[0]["completed"] = True
-            if len(main_stages) >= 2 and str(main_stages[1].get("status") or "locked") == "locked":
-                main_stages[1]["status"] = "active"
+            if len(main_stages) >= 2 and not main_stages[0].get("is_climax_stage"):
+                if str(main_stages[0].get("status") or "active") not in ("completed", "bypassed"):
+                    main_stages[0]["status"] = "bypassed"
+                    main_stages[0]["completed"] = True
+                if str(main_stages[1].get("status") or "locked") == "locked":
+                    main_stages[1]["status"] = "active"
+            else:
+                climax["aid_dc_reduction"] = min(4, int(climax.get("aid_dc_reduction") or 0) + 2)
+                if str(main_stages[0].get("status") or "locked") == "locked":
+                    main_stages[0]["status"] = "active"
+                    main_stages[0]["completed"] = False
             final_approaches = list(main_stages[-1].get("approaches") or [])
             if not any(str(a.get("approach_id") or "") == "bypass_route" for a in final_approaches):
                 final_approaches.append(
@@ -1555,6 +1613,25 @@ def resolve_quest_optional_objective(
         contract_economy=econ,
     )
     db.sync_quest_projection_from_dossier(session_id, quest_id, dossier=updated)
+    if role == "aid" and not climax.get("completed"):
+        try:
+            from mechanics.narrative.chapter_plan import (
+                apply_deterministic_downstream_restitch,
+                schedule_restitch_downstream_quest_stages,
+            )
+
+            deal_ctx = {
+                "deal_summary": str(
+                    lead.get("label") or lead.get("title") or "Faction alliance reshapes the final confrontation"
+                ),
+                "ally_npc": str(lead.get("target_npc") or climax.get("aid_ally_striker") or ""),
+            }
+            restitched = apply_deterministic_downstream_restitch(session_id, quest_id, "rival_deal", deal_ctx)
+            if restitched:
+                updated = restitched
+            schedule_restitch_downstream_quest_stages(session_id, quest_id, "rival_deal", deal_ctx)
+        except Exception:
+            pass
     return {
         "success": True,
         "lead_id": lead.get("lead_id"),
@@ -2016,6 +2093,8 @@ def resolve_quest_combat_outcome(
                 location_name=venue,
                 turn_number=eff_turn,
             )
+            db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Failed")
+            db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "failure")
             db.upsert_quest_dossier(session_id, quest_id, outcome_tier="failure")
             return {
                 "handled": True,
@@ -2043,6 +2122,8 @@ def resolve_quest_combat_outcome(
         for uid in uids:
             db.apply_hp_mp_delta(int(uid), gold_delta=part_gold)
             db.add_xp(int(uid), part_xp)
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")
+        db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "partial_success")
         db.upsert_quest_dossier(session_id, quest_id, outcome_tier="partial_success")
         return {
             "handled": True,
@@ -2324,24 +2405,49 @@ def handle_npc_death_or_recruitment_fallout(
         if event_kind == "dead" and inf_name == target_low:
             cb["informant"]["status"] = "dead"
             fallback_clue = seed_or_discover_dossier_clue(session_id, qid, clue_index=0, source_location=loc)
-            new_alert = min(int(dos.get("max_alert") or 4) - 1, int(dos.get("alert_level") or 0) + 1)
-            climax = dict(dos.get("climax_spec") or {})
+            prev_alert_inf = int(dos.get("alert_level") or 0)
+            new_alert = min(int(dos.get("max_alert") or 4) - 1, prev_alert_inf + 1)
+            prev_climax_inf = copy.deepcopy(dos.get("climax_spec") or {})
+            climax = copy.deepcopy(prev_climax_inf)
             climax["is_unlocked"] = True
-            db.upsert_quest_dossier(session_id, qid, cast_bindings=cb, alert_level=new_alert, climax_spec=climax, engaged_flag=1)
+            climax["secret_lair_locked"] = False
+            if int(dos.get("engaged_flag") or 0) == 0:
+                db.append_dossier_state_event(session_id, qid, eff_turn, "engaged_flag", 0, 1)
+            if new_alert != prev_alert_inf:
+                db.append_dossier_state_event(session_id, qid, eff_turn, "alert_level", prev_alert_inf, new_alert)
+            db.append_dossier_state_event(session_id, qid, eff_turn, "climax_spec", prev_climax_inf, climax)
+            db.upsert_quest_dossier(
+                session_id,
+                qid,
+                cast_bindings=cb,
+                alert_level=new_alert,
+                climax_spec=climax,
+                engaged_flag=1,
+                sync_projection=True,
+            )
+            db.unlock_climax_waypoint(session_id, qid, climax_loc=str(climax.get("location") or ""))
             affected.append({"quest_id": qid, "role": "informant", "fallback": "lootable_cipher_spawned", "clue": fallback_clue})
 
         elif event_kind == "dead" and cli_name == target_low:
             cb["client"]["status"] = "dead"
-            twist = dict(dos.get("twist_spec") or {})
+            prev_twist_cli = copy.deepcopy(dos.get("twist_spec") or {})
+            twist = copy.deepcopy(prev_twist_cli)
+            prev_status_cli = str(q_row.get("status") or "Active")
+            prev_tier_cli = str(dos.get("outcome_tier") or "")
             if twist.get("twist_type") == "client_culprit":
                 twist["is_discovered"] = True
                 with db.get_conn() as conn:
                     conn.execute("UPDATE quests SET status='Completed', updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, qid))
+                db.append_dossier_state_event(session_id, qid, eff_turn, "quest_status", prev_status_cli, "Completed")
+                db.append_dossier_state_event(session_id, qid, eff_turn, "twist_spec", prev_twist_cli, twist)
+                db.append_dossier_state_event(session_id, qid, eff_turn, "outcome_tier", prev_tier_cli, "twist_resolution")
                 db.upsert_quest_dossier(session_id, qid, cast_bindings=cb, twist_spec=twist, outcome_tier="twist_resolution")
                 affected.append({"quest_id": qid, "role": "client", "fallback": "twist_culprit_neutralized"})
             else:
                 with db.get_conn() as conn:
                     conn.execute("UPDATE quests SET status='Failed', updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, qid))
+                db.append_dossier_state_event(session_id, qid, eff_turn, "quest_status", prev_status_cli, "Failed")
+                db.append_dossier_state_event(session_id, qid, eff_turn, "outcome_tier", prev_tier_cli, "failure")
                 db.upsert_quest_dossier(session_id, qid, cast_bindings=cb, outcome_tier="failure")
                 affected.append({"quest_id": qid, "role": "client", "fallback": "contract_voided"})
 
@@ -2443,6 +2549,36 @@ def handle_npc_death_or_recruitment_fallout(
                         "reason": event_kind,
                     }
                 )
+            elif any(
+                not s.get("completed")
+                and str(s.get("status") or "").lower() not in ("completed", "bypassed")
+                and str(s.get("target_npc") or "").strip().lower() == target_low
+                for s in ms_e4
+            ):
+                mut_reason = "npc_recruited" if event_kind == "recruited" else "npc_dead"
+                try:
+                    from mechanics.narrative.chapter_plan import apply_deterministic_downstream_restitch
+
+                    apply_deterministic_downstream_restitch(
+                        session_id,
+                        qid,
+                        mut_reason,
+                        {"npc_name": npc_name},
+                    )
+                    affected.append({"quest_id": qid, "role": "stage_target", "fallback": "downstream_restitch", "reason": event_kind})
+                except Exception:
+                    pass
+            if stage_mutated or any(a.get("quest_id") == qid for a in affected):
+                try:
+                    from mechanics.narrative.chapter_plan import schedule_restitch_downstream_quest_stages
+                    schedule_restitch_downstream_quest_stages(
+                        session_id,
+                        qid,
+                        "npc_recruited" if event_kind == "recruited" else "npc_dead",
+                        {"npc_name": npc_name},
+                    )
+                except Exception:
+                    pass
 
     return {
         "spine_mutated": spine_after is not None,

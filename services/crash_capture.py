@@ -138,7 +138,7 @@ def snapshot_sqlite_to_file(src_db_path: str | Path, dst_db_path: str | Path, *,
             src_conn = sqlite3.connect(str(src_path), timeout=30.0)
         dst_conn = sqlite3.connect(str(dst_path), timeout=30.0)
         src_conn.backup(dst_conn)
-        dst_conn.commit()
+        dst_conn.commit()  # static-check: ignore[raw-conn-commit-outside-core]  # independent crash backup SQLite handle
     finally:
         if dst_conn is not None:
             try:

@@ -879,8 +879,11 @@ def get_student_part_time_spec(npc: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return None
     basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
     grade = str(npc.get("grade") or basic.get("grade") or "").strip()
-    if grade in ("Faculty", "Citizen", "Youth Peer"):
+    if grade in ("Faculty", "Citizen", "Youth Peer", "Staff"):
         return None
+    explicit_shift = npc.get("part_time_shift") or basic.get("part_time_shift")
+    if isinstance(explicit_shift, dict) and explicit_shift.get("venue_node_id") and explicit_shift.get("job_title"):
+        return explicit_shift
     role_low = str(npc.get("role") or basic.get("role") or "").strip().lower()
     if role_low in _ROLE_TO_PART_TIME_SPEC:
         return _ROLE_TO_PART_TIME_SPEC[role_low]
@@ -1916,12 +1919,18 @@ def get_active_shop_clerk_for_location(
         return None
 
     from mechanics.social.school_roster import ensure_school_directory_exists
-    roster = ensure_school_directory_exists(sess) or []
+    roster = list(ensure_school_directory_exists(sess) or [])
+    world_roster_rows = db.get_world_roster(session_id, include_legacy_rosters=False) or []
     curr_day, curr_min, _ = db.get_session_time(session_id)
     safe_min = int(curr_min or 480) % 1440
 
-    # 1. Check if a Campus Student Part-Timer is actively working this counter right now!
-    for entry in roster:
+    # 1. Check if a Campus Student Part-Timer (school_directory + campus_seed) is actively working!
+    campus_seed_rows = [
+        r for r in world_roster_rows
+        if str(r.get("origin") or "").strip().lower() == "campus_seed"
+        and str(r.get("staff_status") or "active").strip().lower() == "active"
+    ]
+    for entry in roster + campus_seed_rows:
         pt_spec = is_student_on_part_time_shift(entry, curr_day, safe_min, session_id=session_id)
         if pt_spec and remap_town_node_for_scenario(pt_spec["venue_node_id"], scen_key) == target_venue:
             char_id = 0
@@ -1929,12 +1938,14 @@ def get_active_shop_clerk_for_location(
                 ch = db.get_character(user_id)
                 char_id = int(ch.get("id", 0)) if ch else 0
             contact = db.get_contact(session_id, entry["name"], character_id=char_id)
-            affinity = int((contact or {}).get("relationship_score") or 0)
+            affinity = int((contact or {}).get("relationship_score") or entry.get("affinity_score") or 0)
             has_discount = affinity >= 40
+            b_info = entry.get("basic_info") if isinstance(entry.get("basic_info"), dict) else {}
+            grade_lbl = str(entry.get("grade") or b_info.get("grade") or "Student").strip()
             return {
                 "name": entry["name"],
                 "role": pt_spec["job_title"],
-                "description": f"{entry['name']} ({entry['grade']} classmate working as {pt_spec['job_title']}). {pt_spec['shift_activity']}.",
+                "description": f"{entry['name']} ({grade_lbl} classmate working as {pt_spec['job_title']}). {pt_spec['shift_activity']}.",
                 "is_student_part_timer": True,
                 "affinity": affinity,
                 "price_multiplier": 0.90 if has_discount else 1.0,
@@ -1976,8 +1987,6 @@ def get_active_shop_clerk_for_location(
             )
             if is_staff:
                 candidates.insert(0, entry)
-            else:
-                candidates.append(entry)
 
     if candidates:
         chosen = candidates[0]
@@ -1996,5 +2005,29 @@ def get_active_shop_clerk_for_location(
             "price_multiplier": 0.90 if has_discount else 1.0,
             "pricing_badge": "10% Friend Hookup" if has_discount else None,
         }
+
+    # 4. Fallback to expanded `world_roster` district merchants / civic clerks on active shift
+    from mechanics.world.anchor_schedule import is_npc_on_active_shift
+    for wr in world_roster_rows:
+        if str(wr.get("origin") or "").strip().lower() not in ("district_merchant", "venue_seed"):
+            continue
+        if str(wr.get("staff_status") or "active").strip().lower() != "active":
+            continue
+        wp = remap_town_node_for_scenario(str(wr.get("workplace_node_id") or ""), scen_key)
+        if wp != target_venue:
+            continue
+        on_shift, _ = is_npc_on_active_shift(
+            wr, current_minute=safe_min, current_day=curr_day, scen_key=scen_key, session_id=None
+        )
+        if on_shift:
+            return {
+                "name": wr["name"],
+                "role": wr.get("role") or "Shop Clerk",
+                "description": f"{wr['name']} ({wr.get('role') or 'Shop Clerk'})",
+                "is_student_part_timer": False,
+                "affinity": int(wr.get("affinity_score") or 0),
+                "price_multiplier": 1.0,
+                "pricing_badge": None,
+            }
 
     return None

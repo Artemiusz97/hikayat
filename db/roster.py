@@ -147,6 +147,7 @@ def _capture_turn_snapshot(snapshots: dict[str, Any], row: dict[str, Any], turn_
     t_key = str(int(turn_number))
     if t_key not in out:
         out[t_key] = {
+            "origin": str(row.get("origin") or "venue_seed"),
             "tier_status": str(row.get("tier_status") or "seeded"),
             "affinity_score": clamp_affinity(row.get("affinity_score") or 0),
             "met_in_person": int(bool(row.get("met_in_person"))),
@@ -379,6 +380,137 @@ def upsert_world_roster_npc(
             )
             row_out = c.execute("SELECT * FROM world_roster WHERE id = ?", (cur.lastrowid,)).fetchone()
         return _hydrate_roster_row(row_out) if row_out is not None else {}
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
+
+
+def bulk_upsert_world_roster(
+    session_id: int,
+    npcs: list[dict[str, Any]],
+    turn_number: int = 0,
+    conn: sqlite3.Connection | None = None,
+) -> list[dict[str, Any]]:
+    """Inserts many `world_roster` NPCs in a single transaction, skipping already-present IDs/names."""
+    if not session_id or not npcs:
+        return []
+    sid = int(session_id)
+    now, t_num = time.time(), int(turn_number)
+
+    def _run(c: sqlite3.Connection) -> list[dict[str, Any]]:
+        _ensure_world_roster_table(c)
+        existing_rows = c.execute(
+            "SELECT npc_id, name FROM world_roster WHERE session_id = ?",
+            (sid,),
+        ).fetchall()
+        seen_ids: set[str] = {str(r["npc_id"] or "").strip().lower() for r in existing_rows}
+        seen_names: set[str] = {str(r["name"] or "").strip().lower() for r in existing_rows}
+
+        batch_rows: list[tuple[Any, ...]] = []
+        col_names: tuple[str, ...] | None = None
+        inserted_ids: list[str] = []
+
+        for npc_data in npcs:
+            if not isinstance(npc_data, dict):
+                continue
+            raw_name = str(npc_data.get("name") or "").strip()
+            raw_npc_id = str(npc_data.get("npc_id") or "").strip()
+            resolved_npc_id = slugify_npc_id(raw_npc_id or raw_name)
+            final_name = raw_name or raw_npc_id
+            if not resolved_npc_id or not final_name:
+                continue
+            if resolved_npc_id.lower() in seen_ids or final_name.lower() in seen_names:
+                continue
+            seen_ids.add(resolved_npc_id.lower())
+            seen_names.add(final_name.lower())
+
+            cols = _build_roster_upsert_columns(npc_data, {}, final_name, t_num)
+            snaps = parse_json_dict(npc_data.get("turn_snapshots") or npc_data.get("turn_snapshots_json"))
+            insert_cols = {
+                "session_id": sid,
+                "npc_id": resolved_npc_id,
+                **cols,
+                "turn_snapshots_json": json.dumps(snaps),
+                "turn_created": t_num,
+                "turn_updated": t_num,
+                "created_at": now,
+                "updated_at": now,
+            }
+            if col_names is None:
+                col_names = tuple(insert_cols.keys())
+            batch_rows.append(tuple(insert_cols[k] for k in col_names))
+            inserted_ids.append(resolved_npc_id)
+
+        if not batch_rows or col_names is None:
+            return []
+
+        placeholders = ", ".join("?" for _ in col_names)
+        c.executemany(
+            f"INSERT OR IGNORE INTO world_roster ({', '.join(col_names)}) VALUES ({placeholders})",
+            batch_rows,
+        )
+        out: list[dict[str, Any]] = []
+        for idx in range(0, len(inserted_ids), 200):
+            chunk = inserted_ids[idx : idx + 200]
+            q_marks = ", ".join("?" for _ in chunk)
+            rows = c.execute(
+                f"SELECT * FROM world_roster WHERE session_id = ? AND npc_id IN ({q_marks}) ORDER BY id ASC",
+                (sid, *chunk),
+            ).fetchall()
+            out.extend(_hydrate_roster_row(r) for r in rows)
+        return out
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
+
+
+def hydrate_world_roster_visuals(
+    session_id: int,
+    updates: list[dict[str, Any]],
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Persists Stage 1 on-scene visual/trait/basic_info hydration onto `world_roster` rows."""
+    if not session_id or not updates:
+        return 0
+    sid = int(session_id)
+    now = time.time()
+
+    def _run(c: sqlite3.Connection) -> int:
+        _ensure_world_roster_table(c)
+        updated = 0
+        for item in updates:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("npc_id") or item.get("name") or "").strip()
+            if not key:
+                continue
+            row = _find_roster_row(c, sid, key)
+            if row is None:
+                continue
+            existing = _hydrate_roster_row(row)
+            in_app = item.get("appearance") if isinstance(item.get("appearance"), dict) else {}
+            in_traits = item.get("traits") if isinstance(item.get("traits"), list) else []
+            in_basic = item.get("basic_info_updates") if isinstance(item.get("basic_info_updates"), dict) else {}
+
+            merged_app = merge_dict_safely(existing.get("appearance") or {}, in_app)
+            merged_traits = _dedupe_str_list(existing.get("traits") or [], in_traits)
+            merged_basic = merge_dict_safely(existing.get("basic_info") or {}, in_basic)
+            merged_basic["visual_hydrated"] = True
+
+            c.execute(
+                """UPDATE world_roster
+                   SET appearance_json = ?, traits_json = ?, basic_info_json = ?, updated_at = ?
+                   WHERE id = ?""",
+                (
+                    json.dumps(merged_app),
+                    json.dumps(merged_traits),
+                    json.dumps(merged_basic),
+                    now,
+                    int(row["id"]),
+                ),
+            )
+            updated += 1
+        return updated
 
     with _conn_ctx(conn) as c:
         return _run(c)
@@ -748,6 +880,7 @@ def _restore_snapshot_row(conn: sqlite3.Connection, cur: dict[str, Any], snap: d
     _update_roster_columns(
         conn, int(cur["id"]),
         {
+            "origin": _pick_allowed(snap.get("origin"), cur.get("origin"), ALLOWED_ROSTER_ORIGINS, "venue_seed"),
             "tier_status": str(snap.get("tier_status") or cur["tier_status"]),
             "affinity_score": clamp_affinity(snap.get("affinity_score", cur["affinity_score"])),
             "met_in_person": int(bool(snap.get("met_in_person", cur["met_in_person"]))),
@@ -832,6 +965,9 @@ def apply_world_roster_autonomy_mutations(
                 b_info.pop("pending_hangout_ping", None)
             if isinstance(mut.get("basic_info_updates"), dict):
                 b_info = merge_dict_safely(b_info, mut["basic_info_updates"])
+                for uk, uv in mut["basic_info_updates"].items():
+                    if uv in ("", None):
+                        b_info.pop(uk, None)
             b_info = mirror_anchors_into_basic_info(
                 b_info, new_workplace, new_home, new_hangout,
                 str(cur.get("shift_profile") or "day"), bool(cur.get("residence_unlocked")),

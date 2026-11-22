@@ -209,6 +209,7 @@ QUEST_UI_LABELS = {
     "shortcut_active": "Skrót Aktywny",
     "bypassed": "Ominięto",
     "quest_travel_to": "Udaj się do {dest}",
+    "quest_wrap_up_and_head_to": "Zakończ rozmowę z {npc} i udaj się do {dest}",
 }
 
 PACT_UI_LABELS = {
@@ -245,4 +246,13 @@ ANOMALOUS_SITE_UI_LABELS = {
     "milestone_22_reward": "Ulepszenie Rezonatora Polowego (4 Ładunki/Dzień)",
     "milestone_36_title": "Odznaczenie Strażnika Metropolii (36/36 Stref)",
     "milestone_36_reward": "+30 Rep., 5 Ładunków/Dzień i Relikwia Chronometru Eteru"
+}
+
+CROWD_DENSITY_LABELS = {
+    "quiet": "Spokojnie",
+    "moderate": "Umiarkowanie",
+    "bustling": "Tłoczno",
+    "packed": "Ścisk",
+    "crowd_label": "Tłum",
+    "nearby_bystanders": "Pobliscy przechodnie"
 }

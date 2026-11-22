@@ -81,7 +81,7 @@ def _collect_taken_names_and_ids(session_id: int) -> tuple[set[str], set[str]]:
     taken_ids: set[str] = set()
     if int(session_id or 0) <= 0:
         return taken_names, taken_ids
-    for row in safe_get_contacts(session_id, ensure_scene=False) + (db.get_world_roster(session_id, include_legacy_rosters=False) or []):
+    for row in safe_get_contacts(session_id, ensure_scene=False, resolve_relations=False) + (db.get_world_roster(session_id, include_legacy_rosters=False) or []):
         rname = str(row.get("name") or "").strip().lower()
         rid = str(row.get("npc_id") or "").strip().lower()
         if rname:
@@ -190,6 +190,7 @@ def _build_roster_payload(
     basic: dict[str, Any] = {
         "role": role,
         "occupation": occupation,
+        "age_group": "teen" if shift_profile == "student" else "adult",
         "merchant_archetypes": list(merchant_archetypes or ()),
         "is_24h_station": bool(is_24h_station),
         "is_unique_proprietor": bool(is_unique_proprietor),
@@ -249,7 +250,7 @@ def ensure_venue_staff_seeded(
     existing_all = db.get_world_roster(sid, workplace_node_id=nid, include_legacy_rosters=False) or []
     existing = [
         r for r in existing_all
-        if str(r.get("origin") or "").strip().lower() in ("venue_seed", "replacement_hire")
+        if str(r.get("origin") or "").strip().lower() in ("venue_seed", "replacement_hire", "district_merchant", "civic_staff", "campus_seed")
     ]
     if existing:
         return existing
@@ -350,13 +351,13 @@ def ensure_roaming_merchants_seeded(
 
     session = dict(session) if isinstance(session, Mapping) else (db.get_session(sid) or {})
     eff_scen = str(scen_key or session.get("scenario") or "fantasy").strip() or "fantasy"
-    if is_school_scenario(eff_scen) or not scenario_data.is_mechanic_enabled(eff_scen, "merchant_encounters"):
-        return []
-
     roster = db.get_world_roster(sid, include_legacy_rosters=False) or []
     existing_roamers = [r for r in roster if str(r.get("origin") or "").strip().lower() == "roaming_merchant"]
     if existing_roamers:
         return existing_roamers
+
+    if is_school_scenario(eff_scen) or not scenario_data.is_mechanic_enabled(eff_scen, "merchant_encounters"):
+        return []
 
     stops = _select_roamer_candidate_nodes(db.get_session_world_nodes(sid) or [])
     if not stops:
@@ -623,7 +624,7 @@ def heal_stale_civic_hq_staff(
     if not hub_candidates:
         return 0
 
-    eff_contacts = contacts if contacts is not None else (safe_get_contacts(sid, ensure_scene=False) or [])
+    eff_contacts = contacts if contacts is not None else (safe_get_contacts(sid, ensure_scene=False, resolve_relations=False) or [])
     met_keys: set[str] = set()
     for c in eff_contacts:
         if not isinstance(c, Mapping):
@@ -768,12 +769,15 @@ def _find_matching_active_roamer(
     all_roster = db.get_world_roster(session_id, include_legacy_rosters=False) or []
     fallback_hit: dict[str, Any] | None = None
     for roamer in all_roster:
-        if str(roamer.get("origin") or "").lower() != "roaming_merchant" or str(roamer.get("staff_status") or "active").lower() != "active":
+        roam_origin = str(roamer.get("origin") or "").lower()
+        roam_shift = str(roamer.get("shift_profile") or "").lower()
+        if (roam_origin != "roaming_merchant" and roam_shift != "street_vendor") or str(roamer.get("staff_status") or "active").lower() != "active":
             continue
         on_shift, active_node_id = is_npc_on_active_shift(roamer, eff_min, current_day=eff_day, scen_key=eff_scen, session_id=session_id)
         if not on_shift or not active_node_id:
             continue
-        r_archs = set((roamer.get("basic_info") or {}).get("merchant_archetypes") or ())
+        r_basic = roamer.get("basic_info") if isinstance(roamer.get("basic_info"), dict) else {}
+        r_archs = set(r_basic.get("merchant_archetypes") or ())
         if merchant_type and r_archs and merchant_type not in r_archs:
             continue
         matched = bool(resolved_node_id and active_node_id == resolved_node_id)
@@ -782,9 +786,18 @@ def _find_matching_active_roamer(
             r_name = str((r_node or {}).get("name") or "").strip().lower()
             matched = bool(r_name and r_name in eff_loc.lower())
         if matched:
+            roam_msg = (
+                f"{roamer.get('name') or 'A nocturnal peddler'} slips open a wax-sealed satchel from a shadowy alcove."
+                if r_basic.get("nocturnal")
+                else (
+                    f"{roamer.get('name') or 'A street vendor'} tends a bustling curb stall nearby."
+                    if roam_shift == "street_vendor"
+                    else f"{roamer.get('name') or 'A traveling merchant'} has set up a caravan display here for today's route."
+                )
+            )
             hit = _availability_result(
                 available=True, reason="roaming_merchant", staff_npc=roamer, facility_node_id=active_node_id or resolved_node_id,
-                reason_message=f"{roamer.get('name') or 'A traveling merchant'} has set up a caravan display here for today's route.",
+                reason_message=roam_msg,
             )
             r_disp = str(roamer.get("name") or "").strip().lower()
             if present_names and r_disp in present_names:
@@ -816,10 +829,13 @@ def _evaluate_facility_staff(
     if not (has_shop_keyword or str(node.get("category") or "").strip().lower() == "commercial" or node_meta.get("has_shop") or has_merchant_staff):
         return _availability_result(available=False, reason="no_merchant", reason_message="No shop counter or merchant stall operates at this venue.", facility_node_id=resolved_node_id), False
 
-    distinct_arch = {tuple(sorted(str(x) for x in ((r.get("basic_info") or {}).get("merchant_archetypes") or []) if x)) for r in workplace_staff}
-    relevant_staff = list(workplace_staff)
-    if m_type and len({a for a in distinct_arch if a}) > 1:
-        matched = [r for r in workplace_staff if m_type in ((r.get("basic_info") or {}).get("merchant_archetypes") or [])]
+    relevant_staff = (
+        [r for r in workplace_staff if bool((r.get("basic_info") or {}).get("merchant_archetypes"))]
+        if has_merchant_staff
+        else list(workplace_staff)
+    )
+    if m_type:
+        matched = [r for r in relevant_staff if m_type in ((r.get("basic_info") or {}).get("merchant_archetypes") or [])]
         if matched:
             relevant_staff = matched
 
@@ -860,6 +876,24 @@ def _evaluate_facility_staff(
             return _availability_result(
                 available=False, reason="off_shift", staff_npc=replacement, facility_node_id=resolved_node_id,
                 reason_message="The newly hired shopkeeper has closed for the night; the shutters are locked outside operating hours.",
+            ), True
+
+    from mechanics.social.town_roster import is_student_on_part_time_shift, remap_town_node_for_scenario
+
+    all_roster_pt = db.get_world_roster(sid, include_legacy_rosters=False) or []
+    for pt_cand in all_roster_pt:
+        if str(pt_cand.get("origin") or "").strip().lower() != "campus_seed":
+            continue
+        if str(pt_cand.get("staff_status") or "active").strip().lower() != "active":
+            continue
+        pt_spec = is_student_on_part_time_shift(pt_cand, eff_day, eff_min, session_id=sid)
+        if pt_spec and remap_town_node_for_scenario(str(pt_spec.get("venue_node_id") or ""), eff_scen) == resolved_node_id:
+            return _availability_result(
+                available=True,
+                reason="part_time_staff",
+                reason_message=f"{pt_cand.get('name') or 'A student part-timer'} waves from behind the counter.",
+                staff_npc=pt_cand,
+                facility_node_id=resolved_node_id,
             ), True
 
     return None, bool(relevant_staff)
@@ -1117,6 +1151,7 @@ _OPEN_STAFF_OR_BYPASS_REASONS: frozenset[str] = frozenset({
     "world_event_bypass",
     "kiosk_bypass",
     "active_staff",
+    "part_time_staff",
     "replacement_hired",
 })
 
@@ -1198,6 +1233,7 @@ def resolve_scene_merchant_ui_state(
             "kiosk_bypass",
             "world_event_bypass",
             "active_staff",
+            "part_time_staff",
             "replacement_hired",
             *_CLOSED_SHOP_REASONS,
         )

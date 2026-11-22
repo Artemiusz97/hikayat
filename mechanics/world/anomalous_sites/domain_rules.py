@@ -12,6 +12,7 @@ from mechanics.world.anomalous_sites.catalog import (
     PACIFIABLE_WILD_SITE_IDS,
     THEME_PARK_SITE_ID,
     get_anomalous_site_spec,
+    get_hq_membership_mode,
     get_site_state_dict,
     is_site_dormant_by_schedule,
     is_site_pacified,
@@ -220,6 +221,10 @@ def compute_domain_skill_check_modifiers(
     if not spec or is_site_dormant_by_schedule(spec, scen_key=scen_key, current_minute=current_minute, node_id=curr_nid):
         return no_op
 
+    hq_mode = get_hq_membership_mode(int(session_id or 0), node_id=curr_nid, location_str=curr_loc)
+    if hq_mode == "open_threshold":
+        return no_op
+
     site_id = str(spec["site_id"])
     site_state = get_site_state_dict(int(session_id), site_id, world_nodes=world_nodes) if session_id else {}
     pacified = bool(spec.get("site_type") not in ("theme_park_night", "hostile_hq") and site_state.get("pacified"))
@@ -231,7 +236,7 @@ def compute_domain_skill_check_modifiers(
     dc_penalty = 0
     jam_comms = False
     rule = spec.get("domain_rule") if isinstance(spec.get("domain_rule"), Mapping) else {}
-    if not pacified:
+    if not pacified and hq_mode != "allied_hub":
         equipped = db.get_equipment(int(user_id)) if (session_id and user_id) else {}
         inv = list(inventory_items) if inventory_items is not None else (db.get_inventory(int(user_id)) if (session_id and user_id) else [])
         mit = compute_domain_mitigation(int(session_id or 0), int(user_id or 0), char_data, equipped, inv, spec)
@@ -289,6 +294,12 @@ def evaluate_turn_domain_effects(
         session.pop("_active_anomalous_domain", None)
         return {"active": False}
 
+    hq_mode = get_hq_membership_mode(int(session_id or 0), node_id=curr_nid, location_str=curr_loc)
+    if hq_mode == "open_threshold":
+        session.pop("_active_anomalous_domain", None)
+        return {"active": False}
+
+    is_allied_hub = hq_mode == "allied_hub"
     site_id = str(spec["site_id"])
     site_state = get_site_state_dict(int(session_id), site_id, world_nodes=world_nodes) if session_id else {}
     pacified = bool(spec.get("site_type") not in ("theme_park_night", "hostile_hq") and site_state.get("pacified"))
@@ -309,7 +320,7 @@ def evaluate_turn_domain_effects(
     mit_ratio = float(mit.get("mitigation_ratio") or 0.0)
 
     ambient_mods = _apply_ambient_modifiers_dict(spec)
-    combat_mods = _build_combat_modifiers_dict(spec, pacified=pacified)
+    combat_mods = _build_combat_modifiers_dict(spec, pacified=(pacified or is_allied_hub))
     rule = spec.get("domain_rule") if isinstance(spec.get("domain_rule"), Mapping) else {}
 
     hp_delta = 0
@@ -324,7 +335,7 @@ def evaluate_turn_domain_effects(
         for a in actions
     )
 
-    if not pacified and not is_retry and turn_now > 1 and char_data is not None and not is_peaceful_turn:
+    if not pacified and not is_allied_hub and not is_retry and turn_now > 1 and char_data is not None and not is_peaceful_turn:
         instability = int(site_state.get("instability") or 0)
         surge_mult = 1.5 if instability == 1 else 1.0
 
@@ -388,6 +399,7 @@ def evaluate_turn_domain_effects(
         "element": spec["element"],
         "threat_grade": spec["threat_grade"],
         "pacified": pacified,
+        "hq_mode": hq_mode,
         "mitigation_ratio": mit_ratio,
         "mitigation_source": mit["source"],
         "hp_delta": hp_delta,
@@ -639,7 +651,16 @@ def get_resonator_charges_status(
             stabilized += 1
 
     max_charges = 5 if stabilized >= 36 else (4 if stabilized >= 22 else 3)
+    from mechanics.social.factions import faction_bonus_active, get_anomalous_faction_state
     ex = _read_session_extra_map(session_id, session=session)
+    fac_st = ex.get("anomalous_faction_state") if isinstance(ex.get("anomalous_faction_state"), Mapping) else {}
+    if not str(fac_st.get("faction_archetype_key") or "").strip() and session_id:
+        try:
+            fac_st = get_anomalous_faction_state(int(session_id)) or {}
+        except Exception:
+            fac_st = {}
+    if faction_bonus_active("cult_faction", fac_st):
+        max_charges += 1
     stored_day = int(ex.get("resonator_charges_day") or 0)
     used = int(ex.get("resonator_charges_used") or 0) if stored_day == int(current_day) else 0
     used = max(0, min(max_charges, used))
@@ -716,6 +737,29 @@ def build_site_map_meta(
     visited = bool(site_state.get("visited") or site_state.get("pacified"))
 
     if site_type == "hostile_hq":
+        hq_mode = get_hq_membership_mode(int(session_id or 0), node_id=site_id)
+        if hq_mode == "allied_hub":
+            icon = "🕯️ Allied Sanctum Hub" if site_id == "loc_cult_sanctum_hq" else "🕶️ Allied Exchange Hub"
+            return {
+                "site_id": site_id,
+                "site_type": site_type,
+                "threat_grade": grade_n,
+                "threat_grade_roman": grade_r,
+                "visited": True,
+                "pacified": False,
+                "status": "allied_hq",
+                "badge": f"{icon} ({elem_title} +15%)",
+                "badge_tone": "emerald",
+                "harvest_ready": False,
+                "element_masked": False,
+                "element": elem,
+                "domain_rule_name": str(rule.get("name") or ""),
+                "ambient_summary": str(rule.get("ambient_summary") or ""),
+                "tooltip": (
+                    f"Allied faction headquarters — domain hazards suppressed while "
+                    f"+{elem_title} ambient resonance remains active."
+                ),
+            }
         return {
             "site_id": site_id,
             "site_type": site_type,

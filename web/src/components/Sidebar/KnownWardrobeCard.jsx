@@ -32,7 +32,7 @@ export default function KnownWardrobeCard({ npc, showDebug = false, t }) {
   );
 
   return (
-    <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs space-y-1.5">
+    <div className="pt-2.5 border-t border-fantasy-border/30 text-xs space-y-1.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
           👔 {t('social.wardrobe_header', 'Known Wardrobe')}
@@ -57,7 +57,7 @@ export default function KnownWardrobeCard({ npc, showDebug = false, t }) {
                   <span className="text-gray-500 italic border-b border-dashed border-gray-600">???</span>
                 )}
                 {entry?.has_gift && (
-                  <span className="ml-1.5 text-[10px] px-1 py-0.2 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50">
+                  <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-700/50">
                     🎁 {t('social.wardrobe_gifted', 'Gifted')}
                   </span>
                 )}

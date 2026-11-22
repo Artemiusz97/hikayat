@@ -360,12 +360,12 @@ def resolve_agent_residence_blueprint(
     scen_key: str = "",
 ) -> dict[str, Any]:
     """
-    Deterministically computes the residence blueprint for any of the 60 Special Agents
+    Deterministically computes the residence blueprint for any of the 68 Special Agents
     WITHOUT mutating the database on Turn 1:
-    - 16 Teen Student Agents -> Parents' Family House in `zone_suburbs` (`cohabiting_family=True`).
+    - 20 Teen Student Agents -> Parents' Family House in `zone_suburbs` (`cohabiting_family=True`).
     - 12 Adult `public_agency` Agents -> Solo billet unit inside `fac_agency_residence` (`zone_city_center`).
-    - 8 Adult `monastic_order` Agents -> Solo cell/suite inside `fac_temple_residence` (`zone_woods_reserve`).
-    - 24 Adult `private_agency_1/2`, `cult_faction`, `clandestine_faction` Agents -> Solo district-themed
+    - 8 Adult `monastic_order` Agents -> Solo cell/suite inside `fac_temple_residence` (`zone_eastern_sanctuary`).
+    - 28 Adult `private_agency_1/2`, `cult_faction`, `clandestine_faction` Agents -> Solo district-themed
       apartment/condo/penthouse scaled by `agent_tier` (1..5).
     """
     b_raw = npc_dict.get("basic_info")

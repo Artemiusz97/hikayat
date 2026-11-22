@@ -1039,6 +1039,8 @@ def compute_choice_stealth_odds(
         alert_stage=st.get("alert_level", ALERT_UNAWARE),
         is_invisible=is_invisible,
         environment=env,
+        crowd_density=str((session.get("crowd_state") or {}).get("density") or "") if isinstance(session, dict) else "",
+        action_is_overt=any(w in lbl_low for w in ("attack", "assault", "strike", "break", "smash", "cast", "intim", "flash", "grope", "strip", "rob")),
         action_noise=action_noise,
     )
     return int(odds["success_chance"])
@@ -1093,6 +1095,8 @@ def resolve_stealth_action(
         alert_stage=current_stage,
         is_invisible=is_invisible,
         environment=eff_env,
+        crowd_density=str((session.get("crowd_state") or {}).get("density") or "") if isinstance(session, dict) else "",
+        action_is_overt=any(w in action_label.lower() for w in ("attack", "assault", "strike", "break", "smash", "cast", "intim", "flash", "grope", "strip", "rob")),
         action_noise=action_noise,
         luck=luck,
         check_mode=check_mode,

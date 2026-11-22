@@ -27,6 +27,7 @@ from .security import (
     verify_session_participant,
     verify_user_access,
 )
+from services.examine_service import invalidate_examine_cache
 
 
 async def _verify_missing_session_codex_auth(request: Request | None, user_id: int | str | None) -> None:
@@ -82,7 +83,9 @@ from mechanics.social.factions import (
     get_agent_dossier_summary,
     join_or_transfer_anomalous_faction,
     infer_anomalous_faction_archetype,
-    ANOMALOUS_DISTRUSTED_ARCHETYPES,
+    ANOMALOUS_OUTLAW_ARCHETYPES,
+    get_anomalous_promotion_tiers_for_archetype,
+    validate_faction_hq_action_access,
     validate_major_club_subroom_action,
     check_rival_or_hostile_turf_block,
     is_nsfw_salon_faction,
@@ -342,13 +345,13 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
             "weapon_profile": eval_res.get("weapon_profile", {}),
         }
 
-    if rec_cost > 0:
-        if char_gold < rec_cost:
-            raise HTTPException(
-                status_code=400,
-                detail=f"{npc_name} requires at least Friend standing (100 affinity) to join for free, or {rec_cost} gold to recruit (you have {char_gold} gold)."
-            )
-        await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-rec_cost)
+    if rec_cost > 0 and char_gold < rec_cost:
+        cost_fmt = scenario_data.format_scenario_currency(rec_cost, scen_key)
+        have_fmt = scenario_data.format_scenario_currency(char_gold, scen_key)
+        raise HTTPException(
+            status_code=400,
+            detail=f"{npc_name} requires at least Friend standing (100 affinity) to join for free, or {cost_fmt} to recruit (you have {have_fmt})."
+        )
 
     npc_payload = {
         "name": (matched_contact or {}).get("name") or npc_name,
@@ -365,6 +368,13 @@ async def _execute_manage_party_companion(req: CompanionPartyRequest):
     added = await adb(db.add_session_party_npc, req.session_id, npc_payload)
     if not added:
         raise HTTPException(status_code=400, detail=f"Could not add {npc_name} to party (party full or already recruited).")
+
+    if rec_cost > 0:
+        try:
+            await adb(db.apply_hp_mp_delta, req.user_id, gold_delta=-rec_cost)
+        except Exception:
+            await adb(db.remove_session_party_npc, req.session_id, npc_payload["name"])
+            raise
 
     # Recruited companions enter Party & Known Characters; only >= 100 or explicitly unlocked contacts appear in personal Contacts
     existing_in_contacts = any((c.get("name") or "").strip().lower() == npc_name.lower() for c in contacts)
@@ -451,6 +461,60 @@ def _infer_school_grade_badge(role: str, current_grade: str, scen_key: str) -> s
     return normalize_standing(role=role, grade=current_grade, scen_key=scen_key)
 
 
+def _format_world_lore_entity_for_ui(ent: dict[str, Any]) -> dict[str, Any]:
+    """Formats internal world_lore entries (such as `_macro_world_state`) for player-facing Codex UI."""
+    out = dict(ent)
+    raw_name = str(out.get("name") or "").strip()
+    raw_type = str(out.get("entity_type") or "").strip()
+    raw_desc = str(out.get("description") or "").strip()
+
+    is_macro = bool(
+        raw_name == "_macro_world_state"
+        or "| CURRENT RUMOR:" in raw_desc
+        or "| FLASHPOINT:" in raw_desc
+    )
+    if raw_type:
+        out["entity_type_label"] = "World Lore" if raw_type.lower() == "world_lore" else raw_type.replace("_", " ").title()
+
+    if is_macro:
+        out["is_macro_world_state"] = True
+        if raw_name == "_macro_world_state":
+            out["raw_name"] = raw_name
+            out["name"] = "Regional Power Dynamics"
+            out["display_name"] = "Regional Power Dynamics"
+
+        macro_conflict = raw_desc
+        current_rumor = str(out.get("current_rumor") or "").strip()
+        flashpoint = str(out.get("flashpoint") or "").strip()
+
+        segments = re.split(r"\s*\|\s*(?=(?:CURRENT\s+RUMOR|FLASHPOINT)\s*:)", raw_desc, flags=re.IGNORECASE)
+        conflict_parts: list[str] = []
+        for seg in segments:
+            s_clean = seg.strip()
+            if not s_clean:
+                continue
+            m_rumor = re.match(r"^CURRENT\s+RUMOR\s*:\s*(.+)$", s_clean, flags=re.IGNORECASE | re.DOTALL)
+            m_flash = re.match(r"^FLASHPOINT\s*:\s*(.+)$", s_clean, flags=re.IGNORECASE | re.DOTALL)
+            if m_rumor:
+                current_rumor = m_rumor.group(1).strip()
+            elif m_flash:
+                flashpoint = m_flash.group(1).strip()
+            else:
+                conflict_parts.append(s_clean)
+        if conflict_parts:
+            macro_conflict = " ".join(conflict_parts).strip()
+
+        out["description"] = macro_conflict
+        if current_rumor:
+            out["current_rumor"] = current_rumor
+        if flashpoint:
+            out["flashpoint"] = flashpoint
+            if not out.get("location"):
+                out["location"] = flashpoint
+
+    return out
+
+
 @router.get("/api/lorebook/{session_id}")
 async def get_lorebook(session_id: int, user_id: int | None = Query(None), request: Request = None):
     """Fetches lorebook entities grouped by category, restricting person entities to discovered characters."""
@@ -486,6 +550,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
     contacts = await _get_contacts_ro(session_id)
     school_roster = await adb(db.get_school_roster, session_id) or []
     dir_by_name = {str(d.get("name", "")).strip().lower(): d for d in school_roster if d.get("name")}
+    wr_rows_codex = await adb(db.get_world_roster, session_id, include_legacy_rosters=False) or []
+    wr_by_name = {str(w.get("name", "")).strip().lower(): w for w in wr_rows_codex if w.get("name")}
 
     contact_map = {
         (c.get("name") or "").lower().strip(): c
@@ -517,7 +583,8 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
     all_entities = []
 
     if isinstance(grouped, dict):
-        for cat, items in grouped.items():
+        for cat, items in list(grouped.items()):
+            formatted_non_person: list[dict[str, Any]] = []
             for it in items:
                 it_dict = dict(it)
                 is_person = (cat == "person" or it_dict.get("entity_type") == "person")
@@ -578,6 +645,14 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
                         else:
                             it_dict["gender"] = it_dict.get("gender") or ""
                         it_dict["role"] = it_dict.get("role") or dir_entry.get("role") or ""
+                    elif p_name in wr_by_name:
+                        wr_ent = wr_by_name[p_name]
+                        wb_ent = wr_ent.get("basic_info") or {}
+                        it_dict["grade"] = it_dict.get("grade") or wb_ent.get("grade") or ""
+                        it_dict["club"] = it_dict.get("club") or wb_ent.get("club") or ""
+                        it_dict["race"] = it_dict.get("race") or wr_ent.get("race") or "human"
+                        it_dict["gender"] = it_dict.get("gender") or wr_ent.get("gender") or ""
+                        it_dict["role"] = it_dict.get("role") or wr_ent.get("role") or wb_ent.get("role") or ""
 
                     # Fallback hydration from current scene NPCs or description
                     matched_curr_npc = next((n for n in curr_npcs if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == p_name), None)
@@ -658,7 +733,11 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
                     all_entities.append(it_dict)
                 else:
                     # Non-person world lore entry (place, faction, artifact, world concept)
-                    all_entities.append(it_dict)
+                    formatted_ent = _format_world_lore_entity_for_ui(it_dict)
+                    all_entities.append(formatted_ent)
+                    formatted_non_person.append(formatted_ent)
+            if cat != "person" and formatted_non_person:
+                grouped[cat] = formatted_non_person
 
         # Merge in any discovered contacts not yet in all_entities
         for c in contacts:
@@ -725,7 +804,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
         for met_name_lower in met_in_story_names:
             if met_name_lower in discovered_people_names or met_name_lower == player_char_name:
                 continue
-            r_entry = dir_by_name.get(met_name_lower)
+            r_entry = dir_by_name.get(met_name_lower) or wr_by_name.get(met_name_lower)
             matched_curr_npc = None
             for n in curr_npcs:
                 if isinstance(n, dict) and str(n.get("name", "")).strip().lower() == met_name_lower:
@@ -1555,7 +1634,8 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
         f_dict["player_rank"] = membership["faction_rank"] if f_dict["is_member"] else 0
         f_dict["player_title"] = membership["faction_title"] if f_dict["is_member"] else ""
         eff_rank = f_dict["player_rank"] or (1 if rep > 0 else 0)
-        perks = get_active_perks(f_dict, eff_rank, rep)
+        sal_susp = bool(f_dict["is_member"] and (agent_dossier or {}).get("salary_ration_suspended"))
+        perks = get_active_perks(f_dict, eff_rank, rep, salary_suspended=sal_susp)
         f_dict["active_perks"] = perks or []
         f_dict["rival_faction_ids"] = f_dict.get("rival_faction_ids") or []
         from mechanics.social.factions import is_school_club_faction, get_faction_category_tag
@@ -1563,9 +1643,21 @@ def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
         f_dict["category_tag"] = get_faction_category_tag(f_dict, scen_key)
         if is_anom:
             arch = infer_anomalous_faction_archetype(f_dict)
+            is_outlaw = arch in ANOMALOUS_OUTLAW_ARCHETYPES
             f_dict["archetype_key"] = arch
-            f_dict["joinable"] = arch not in ANOMALOUS_DISTRUSTED_ARCHETYPES
-            f_dict["diplomatic_stance"] = "distrusted" if arch in ANOMALOUS_DISTRUSTED_ARCHETYPES else "friendly"
+            f_dict["joinable"] = True
+            f_dict["is_outlaw"] = is_outlaw
+            f_dict["diplomatic_stance"] = "outlaw" if is_outlaw else "friendly"
+            f_dict["promotion_tiers"] = get_anomalous_promotion_tiers_for_archetype(arch)
+            if not f_dict["is_school_club"]:
+                player_arch = str((agent_dossier or {}).get("faction_archetype_key") or "freelancer").strip().lower()
+                player_outlaw = player_arch in ANOMALOUS_OUTLAW_ARCHETYPES
+                f_dict["quartermaster_eligible"] = (
+                    (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+                )
+                f_dict["bounty_board_eligible"] = (
+                    (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+                )
         enriched.append(f_dict)
 
     return {"factions": enriched, "membership": membership, "agent_dossier": agent_dossier}
@@ -1629,10 +1721,16 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             if is_nsfw_salon_faction(faction):
                 await adb(reveal_hidden_club_facility, session_id, "loc_nsfw_club_facility", int(session.get("turn_count") or 0))
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
+            updated_sess = await adb(db.get_session, session_id) or {}
             return {
                 "success": True,
                 "action": action,
                 "message": res.get("message", f"Joined {faction.get('name')}!"),
+                "session_sync": {
+                    "current_location": updated_sess.get("current_location"),
+                    "current_node_id": updated_sess.get("current_node_id"),
+                    "party_npcs": updated_sess.get("party_npcs") or [],
+                },
                 **payload,
             }
         if joined_fid and joined_fid != target_fid:
@@ -1657,11 +1755,19 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         if is_anom:
             fallback_target = "student_freelancer" if (scenario_data.is_anomalous_high_school_scenario(scen_key) and is_school_club_faction(faction)) else "freelancer"
             res = await adb(join_or_transfer_anomalous_faction, session_id, fallback_target, req.user_id)
+            if not res.get("success"):
+                raise HTTPException(status_code=400, detail=res.get("error", "Cannot leave this faction."))
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
+            updated_sess = await adb(db.get_session, session_id) or {}
             return {
                 "success": True,
                 "action": "leave",
                 "message": res.get("message", f"You have parted ways with {faction.get('name')}."),
+                "session_sync": {
+                    "current_location": updated_sess.get("current_location"),
+                    "current_node_id": updated_sess.get("current_node_id"),
+                    "party_npcs": updated_sess.get("party_npcs") or [],
+                },
                 **payload,
             }
         roster = faction.get("leadership_roster") or []
@@ -1678,25 +1784,11 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         }
 
     if action == "rest":
-        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, req.user_id, session)
-        if turf_block:
-            raise HTTPException(status_code=403, detail=turf_block)
-        from mechanics.social.factions import is_school_club_faction
-        is_club = is_school_club_faction(faction)
-        if is_anom and not is_club:
-            from mechanics.social.factions import get_anomalous_faction_state, infer_anomalous_faction_archetype
-            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
-            fac_arch = infer_anomalous_faction_archetype(faction)
-            if str(a_st.get("faction_archetype_key") or "") != fac_arch:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Safehouse recovery quarters at {faction.get('name', 'this faction')} are restricted to enlisted operatives."
-                )
-        elif tier["tier_level"] < 2 and not (is_anom and is_club):
-            raise HTTPException(
-                status_code=400,
-                detail="You need Liked standing or higher (+1 Rep) to use the faction safehouse rest."
-            )
+        hq_ok, hq_err, hq_code = await adb(
+            validate_faction_hq_action_access, session_id, req.user_id, faction, "rest", session
+        )
+        if not hq_ok:
+            raise HTTPException(status_code=hq_code, detail=hq_err)
         await adb(db.apply_hp_mp_delta, req.user_id, char["max_hp"], char["max_mp"], 0)
         party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
         if party_npcs_rest:
@@ -1723,40 +1815,13 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         }
 
     if action == "quartermaster":
-        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, req.user_id, session)
-        if turf_block:
-            raise HTTPException(status_code=403, detail=turf_block)
-        fac_arch = ""
-        from mechanics.social.factions import is_school_club_faction
-        is_club = is_school_club_faction(faction)
-        if is_anom and is_club:
-            from mechanics.social.factions import get_anomalous_faction_state
-            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
-            joined_club = str(a_st.get("joined_club_name") or "")
-            if joined_club.lower() != str(faction.get("name", "")).lower():
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Club quartermaster equipment is reserved for active members of {faction.get('name', 'this club')}."
-                )
-        elif is_anom and not is_club:
-            from mechanics.social.factions import (
-                ANOMALOUS_DISTRUSTED_ARCHETYPES,
-                get_anomalous_faction_state,
-                infer_anomalous_faction_archetype,
-            )
-            fac_arch = infer_anomalous_faction_archetype(faction)
-            if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"{faction.get('name', 'This group')} operates clandestinely without an official requisition quartermaster."
-                )
-            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
-            player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
-            if fac_arch in ("private_agency_1", "private_agency_2", "monastic_order") and player_arch != fac_arch:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"{faction.get('name', 'This organization')} Quartermaster access is restricted exclusively to contracted operatives of this organization."
-                )
+        from mechanics.social.factions import infer_anomalous_faction_archetype
+        fac_arch = infer_anomalous_faction_archetype(faction) if is_anom else ""
+        hq_ok, hq_err, hq_code = await adb(
+            validate_faction_hq_action_access, session_id, req.user_id, faction, "quartermaster", session
+        )
+        if not hq_ok:
+            raise HTTPException(status_code=hq_code, detail=hq_err)
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         hours_err = validate_club_quartermaster_hours(faction, current_minute)
         if hours_err:
@@ -1801,27 +1866,11 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         })
 
     if action == "bounty":
-        from mechanics.social.factions import is_school_club_faction
-        is_club = is_school_club_faction(faction)
-        if is_anom and not is_club:
-            from mechanics.social.factions import (
-                ANOMALOUS_DISTRUSTED_ARCHETYPES,
-                get_anomalous_faction_state,
-                infer_anomalous_faction_archetype,
-            )
-            fac_arch = infer_anomalous_faction_archetype(faction)
-            if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"{faction.get('name', 'This organization')} does not publish licensed containment contracts."
-                )
-            a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
-            player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
-            if fac_arch != "public_agency" and player_arch != fac_arch:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Internal dispatch contracts for {faction.get('name', 'this faction')} are restricted to its enlisted operatives."
-                )
+        hq_ok, hq_err, hq_code = await adb(
+            validate_faction_hq_action_access, session_id, req.user_id, faction, "bounty", session
+        )
+        if not hq_ok:
+            raise HTTPException(status_code=hq_code, detail=hq_err)
         bounties = await game_engine.generate_faction_bounty_board(session, faction)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
         return _serializable_action({
@@ -1906,7 +1955,6 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 detail="HQ Telemetry Calibration is exclusive to Anomalous Incursions scenarios.",
             )
         from mechanics.social.factions import (
-            ANOMALOUS_DISTRUSTED_ARCHETYPES,
             get_anomalous_faction_state,
             infer_anomalous_faction_archetype,
         )
@@ -1919,11 +1967,6 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
 
         fac_arch = infer_anomalous_faction_archetype(faction)
-        if fac_arch in ANOMALOUS_DISTRUSTED_ARCHETYPES:
-            raise HTTPException(
-                status_code=403,
-                detail="Unlicensed clandestine/cult factions lack HQ Telemetry Calibration chambers.",
-            )
         a_st = await adb(get_anomalous_faction_state, session_id, req.user_id)
         player_arch = str(a_st.get("faction_archetype_key") or "freelancer")
         eff_tier = max(int(a_st.get("promotion_tier") or 0), int(char.get("faction_rank") or 0))
@@ -1935,7 +1978,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         if eff_tier < 4:
             raise HTTPException(
                 status_code=403,
-                detail="HQ Telemetry Calibration requires Tier 4 (Special Investigator) standing or higher.",
+                detail="HQ Telemetry Calibration requires Tier 4 standing or higher.",
             )
 
         raw_attr = str(req.attribute or "").strip().lower()
@@ -1957,10 +2000,12 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             )
 
         cur_gold = int(char.get("gold", 0) or 0)
+        cost_fmt = scenario_data.format_scenario_currency(500, scen_key)
+        cur_fmt = scenario_data.format_scenario_currency(cur_gold, scen_key)
         if cur_gold < 500:
             raise HTTPException(
                 status_code=400,
-                detail=f"Telemetry Calibration requires 500G (you currently have {cur_gold}G).",
+                detail=f"Telemetry Calibration requires {cost_fmt} (you currently have {cur_fmt}).",
             )
 
         inv_items = await adb(db.get_inventory, req.user_id)
@@ -1968,6 +2013,8 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             (
                 it for it in (inv_items or [])
                 if not it.get("equipped")
+                and not it.get("is_quest_locked")
+                and not it.get("is_pact_locked")
                 and any(
                     kw in str(it.get("name") or "").strip().lower()
                     for kw in ("hume core", "resonance core", "anomalous core")
@@ -1981,10 +2028,39 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 detail="Telemetry Calibration requires 1x Hume Core in your unequipped inventory.",
             )
 
-        await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
-        await adb(db.remove_item, req.user_id, int(core_item["id"]))
-        await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
-        await adb(sync_equipped_anomalous_spells, req.user_id)
+        # Remove item first and verify success so currency is never deducted without consuming the core
+        removed = await adb(db.remove_item, req.user_id, int(core_item["id"]))
+        if not removed:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not consume Hume Core (item locked or no longer available).",
+            )
+
+        gold_deducted = False
+        try:
+            await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
+            gold_deducted = True
+            await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
+            await adb(sync_equipped_anomalous_spells, req.user_id)
+        except Exception:
+            if gold_deducted:
+                try:
+                    await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, 500)
+                except Exception:
+                    pass
+            try:
+                await adb(
+                    db.add_item,
+                    req.user_id,
+                    core_item["name"],
+                    core_item.get("item_type") or "Material",
+                    core_item.get("effect") or "",
+                    int(core_item.get("slot_cost", 1) or 1),
+                    True,
+                )
+            except Exception:
+                pass
+            raise
 
         cal_map[arc_key] = int(cal_map.get(arc_key, 0) or 0) + 1
         await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
@@ -2001,7 +2077,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             "message": (
                 f"HQ Telemetry Calibration complete! Re-attuned to "
                 f"{new_attr.replace('_', ' ').title()} / {new_arch.replace('_', ' ').title()} / "
-                f"{new_med.replace('_', ' ').title()} (-500G, -1 {core_item['name']})."
+                f"{new_med.replace('_', ' ').title()} (-{cost_fmt}, -1 {core_item['name']})."
             ),
             **payload,
         })
@@ -2023,6 +2099,24 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
     reveal_all = bool(int(settings.get("debug_reveal_all_info") or 0))
 
     quests = [dict(q) for q in db.get_session_quests(session_id) if q]
+    import scenario_data as _sd_qp
+    is_anom_qp = _sd_qp.is_anomalous_incursions_scenario(scen_key)
+    target_uid_qp = eff_uid
+    fac_st_qp = None
+    is_synd_wiretap_qp = False
+    evaluate_anomalous_bounty_eligibility = None
+    parse_anomalous_quest_board_source = None
+    if is_anom_qp:
+        from mechanics.narrative.bounty import (
+            evaluate_anomalous_bounty_eligibility,
+            parse_anomalous_quest_board_source,
+        )
+        from mechanics.social.factions import get_anomalous_faction_state
+        fac_st_qp = get_anomalous_faction_state(session_id, user_id=target_uid_qp)
+        is_synd_wiretap_qp = (
+            str((fac_st_qp or {}).get("faction_archetype_key") or "").strip().lower()
+            == "clandestine_faction"
+        )
     from mechanics.world.locations.hierarchy import (
         resolve_session_location_tokens,
         clean_narrative_location_arrows,
@@ -2137,6 +2231,25 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                 if opt_o.get("target_location"):
                     opt_o["target_location"] = dedupe_location_stutter(resolve_session_location_tokens(session_id, opt_o["target_location"], scen_key))
         q_notes_raw = str(_saved_notes or q.get("quest_notes") or "")
+        if is_anom_qp and q.get("status") == "Available":
+            try:
+                elig_probe = dict(q)
+                if _saved_notes is not None:
+                    elig_probe["quest_notes"] = _saved_notes
+                elig = evaluate_anomalous_bounty_eligibility(
+                    session_id,
+                    target_uid_qp,
+                    elig_probe,
+                    session=session,
+                    fac_state=fac_st_qp,
+                )
+                q["board_source"] = elig.get("board_source") or parse_anomalous_quest_board_source(
+                    elig_probe, session_id=session_id
+                )
+                q["anomalous_eligible"] = bool(elig.get("allowed", True))
+                q["anomalous_lock_reason"] = str(elig.get("reason") or "")
+            except Exception:
+                pass
         has_anom_bp = (
             "anomaly_bp:" in q_notes_raw
             or "anomaly_blueprint:" in q_notes_raw
@@ -2149,7 +2262,11 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                     parse_blueprint_from_notes,
                     format_anomaly_dossier_summary,
                 )
-                from mechanics.world.folklore_mechanics import get_public_anomaly_name, is_blueprint_disguised
+                from mechanics.world.folklore_mechanics import (
+                    get_public_anomaly_name,
+                    is_blueprint_disguised,
+                    unmask_blueprint_disguise,
+                )
                 parse_probe = dict(q)
                 if _saved_notes is not None:
                     parse_probe["quest_notes"] = _saved_notes
@@ -2159,7 +2276,25 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                     parse_probe["anomaly_blueprint_json"] = _saved_anom_bp_json
                 bp_q = parse_blueprint_from_notes(parse_probe)
                 if bp_q:
-                    is_rev = bool(reveal_all or "dossier_revealed:1" in q_notes_raw or bp_q.get("dossier_revealed"))
+                    b_src_q = ""
+                    if is_anom_qp:
+                        b_src_q = str(
+                            q.get("board_source")
+                            or parse_anomalous_quest_board_source(parse_probe, session_id=session_id)
+                        ).strip().lower()
+                    wiretap_live = bool(
+                        is_synd_wiretap_qp
+                        and q.get("status") == "Available"
+                        and b_src_q in ("clandestine_faction", "freelance_app")
+                    )
+                    if wiretap_live:
+                        bp_q, _ = unmask_blueprint_disguise(bp_q)
+                    is_rev = bool(
+                        reveal_all
+                        or wiretap_live
+                        or "dossier_revealed:1" in q_notes_raw
+                        or bp_q.get("dossier_revealed")
+                    )
                     q["anomaly_dossier_revealed"] = is_rev
                     q["anomaly_dossier"] = format_anomaly_dossier_summary(bp_q, revealed=is_rev)
                     if is_rev:
@@ -2248,20 +2383,6 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
             elif c.get("clue_tier") == "red_herring":
                 c["clue_tier"] = "corroborating"
     available_bounties = [q for q in quests if q.get("status") == "Available"]
-    import scenario_data as _sd_qp
-    if _sd_qp.is_anomalous_incursions_scenario(scen_key):
-        try:
-            from mechanics.narrative.bounty import evaluate_anomalous_bounty_eligibility, parse_anomalous_quest_board_source
-            from mechanics.social.factions import get_anomalous_faction_state
-            target_uid = user_id or (session.get("host_user_id") if session else None)
-            fac_st = get_anomalous_faction_state(session_id, user_id=target_uid)
-            for bq in available_bounties:
-                elig = evaluate_anomalous_bounty_eligibility(session_id, target_uid, bq, session=session, fac_state=fac_st)
-                bq["board_source"] = elig.get("board_source") or parse_anomalous_quest_board_source(bq, session_id=session_id)
-                bq["anomalous_eligible"] = bool(elig.get("allowed", True))
-                bq["anomalous_lock_reason"] = str(elig.get("reason") or "")
-        except Exception:
-            pass
     nb_label, nb_emoji = get_notice_board_label(scen_key)
     current_chapter = db.get_session_chapter(session_id) or 1
     campaign_end_goals = session.get("campaign_end_goals") or db.get_session_campaign_goals(session_id) or []
@@ -2359,6 +2480,11 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
             factions = await adb(db.get_factions, session_id)
             target_f = next((f for f in (factions or []) if f.get("faction_id") == req.faction_id), None)
             if target_f:
+                hq_ok, hq_err, hq_code = await adb(
+                    validate_faction_hq_action_access, session_id, req.user_id, target_f, "bounty", session
+                )
+                if not hq_ok:
+                    raise HTTPException(status_code=hq_code, detail=hq_err)
                 bounties = await game_engine.generate_faction_bounty_board(session, target_f, force_refresh=req.force_refresh)
             else:
                 bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
@@ -2766,6 +2892,11 @@ async def scour_phone_feed(session_id: int, req: PhoneFeedActionRequest, request
 
     async with distributed_session_lock(session_id):
         res = await scour_feed_for_rumor(dict(session), req.user_id)
+    if res.get("discovered_rumor") or res.get("success"):
+        try:
+            invalidate_examine_cache(session_id)
+        except Exception:
+            pass
     social_state = await adb(get_social_state_summary, session_id, session)
     gossip = res.get("gossip_feed")
     if not gossip:

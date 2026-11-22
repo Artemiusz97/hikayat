@@ -13,13 +13,13 @@ Use this guide whenever working on `llm_client.py`, `game_engine/prompts.py`, `g
 
 Hikayat orders prompt blocks strictly from **least volatile to most volatile** so OpenAI/Gemini/DeepSeek/Anthropic KV prefix caches hit across turns:
 
-1. **`Z0a` (`GM_SHARED_RULES`)** & **`Z0b` (`SYSTEM_PROMPT` / `COMBAT_SYSTEM_PROMPT` + `TURN_OUTPUT_RULES` + JSON Schema)**:
-   - Assembled by `@functools.cache def build_static_core(mode, kind)`.
+1. **`Z0a` (`GM_SHARED_RULES`)** & **`Z0b` (`SYSTEM_PROMPT` / `COMBAT_SYSTEM_PROMPT` + `TURN_OUTPUT_RULES` + Format Spec)**:
+   - Assembled by `@functools.cache def build_static_core(mode, kind)`. Live turns (`kind="turn"`) use Sentinel-delimited sections (`NARRATIVE_SENTINEL_FORMAT` / `COMBAT_SENTINEL_FORMAT`), while `OpeningScene` (`kind="opening"`) and structured utility calls use repaired JSON (`SCENE_SCHEMA`).
    - **Never** inject timestamps, random IDs, or session-specific text into `Z0a` or `Z0b`.
-2. **`Z1` (`build_session_zone`)**: Scenario, tone guidelines, verbosity, dialogue mode, and `build_language_directive(session)`.
-3. **`Z1b` (World Canon)**: Places, factions, and roster rules (mutates only when lorebook/directory changes).
-4. **`Z2` (Per-Turn Context)**: Character sheets, present cast (`STAGE PLAN`), physical/garment states, and clock (clock is always last in `Z2`).
-5. **`Z3` (User Message)**: Active quests/waypoints, caseboard clues, recent history, `[PRE-TURN ...]` deterministic directives, and player action(s).
+2. **`Z1` (`build_session_zone`)**: Scenario, genre/recruitment scoping (`build_scenario_genre_zone_rules`), style/dialogue mode, and `build_language_directive(session, kind=kind)`.
+3. **`Z1b` (`build_world_canon_zone`)**: Places, factions, and roster rules (mutates only when lorebook/directory changes).
+4. **`Z2` & Hybrid Rolling Epoch (`resolve_prompt_epoch`)**: Character sheets, present cast (`STAGE PLAN`), enemies, physical/garment states, and clock. `resolve_prompt_epoch` freezes `Z2` across up to 6 turns in the same scene/mode/settings (`sessions.extra_json["prompt_epoch"]`) and resets immediately on NPC departure or enemy defeat/removal, routing live vitals, live enemy updates, and turn deltas to `Z3`.
+5. **`Z3` (User Message)**: Active quests/waypoints, caseboard clues, epoch delta block, recent history, `[PRE-TURN ...]` deterministic directives, and player action(s).
 
 ---
 
@@ -29,7 +29,8 @@ Hikayat orders prompt blocks strictly from **least volatile to most volatile** s
   - Standard scenarios route through `_client` (`LLM_MODEL` + `LLM_FALLBACK_MODELS`).
   - Mature scenarios (`scenario_data.uses_nsfw_model(scen_key)`) route through `_nsfw_client` (`NSFW_LLM_*`) when configured, falling back cleanly when unset.
   - Per-model health uses `trip_model_circuit(model_name, cooldown_sec)` and `is_model_healthy(model_name)` so rate-limited or down models fail over without stalling every turn.
-  - Raw responses strip `<think>...</think>` blocks (`_THINK_TAG_RE`), unwrap markdown fences, and repair malformed JSON via `json_repair` before Pydantic validation.
+  - Live gameplay turns and retries stream unescaped prose through `call_llm_narrator_stream()` / `DualModeStreamingExtractor` (`@@TITLE:`, `@@OUTCOME`, `@@NEXT`, pipe `@@CHOICES`, `@@META`), with split TTFT/chunk-idle timers (`LLM_TTFT_TIMEOUT`, `LLM_CHUNK_IDLE_TIMEOUT`), CoT suppression (`LLM_SUPPRESS_NARRATION_COT`), and transparent JSON fallback.
+  - Raw responses strip `<think>...</think>` blocks (`_THINK_TAG_RE`), unwrap markdown fences, and repair malformed JSON via `json_repair` (with assistant `'{'` prefill and corrective error-feedback retries when `json_mode` is unsupported) before Pydantic validation.
 - **Pydantic Dual-Access Contract (`models/llm_schemas.py`)**:
   - `TurnOutcome`, `OpeningScene`, `ActionClassification`, `NarrationOutcome`, and `Choice` **must** support both attribute (`obj.field`) and dict (`obj["field"]`, `obj.get()`) access, and coerce `""` or `None` into safe defaults for local/open-weights models.
 

@@ -402,9 +402,12 @@ def get_inventory(user_id: int, char: dict | None = None) -> list[dict]:
         char = db.get_character(user_id)
     if not char:
         return []
+    char_id = char.get("id") if isinstance(char, dict) else (char["id"] if "id" in char.keys() else None)
+    if char_id is None:
+        return []
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
-                            (char["id"], user_id)).fetchall()
+                            (char_id, user_id)).fetchall()
         return [dict(r) for r in rows]
 
 
@@ -756,5 +759,65 @@ def drop_item_to_session_floor(user_id: int, item_dict: dict, session_id: int | 
     except Exception as e:
         log.warning(f"Failed to record floor drop for user {user_id}: {e}")
         return False
+
+
+def transfer_item_between_users(
+    from_user_id: int,
+    to_user_id: int,
+    item_id: int,
+    *,
+    allow_quest_locked: bool = True,
+) -> tuple[bool, str, dict | None]:
+    """Atomically transfers ownership of an unequipped item between two player characters."""
+    if int(from_user_id) == int(to_user_id):
+        return False, "Cannot transfer an item to yourself.", None
+
+    with UnitOfWork():
+        from_char = db.get_character(from_user_id)
+        to_char = db.get_character(to_user_id)
+        if not from_char or not to_char:
+            return False, "Character not found.", None
+
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                (int(item_id), from_char["id"], int(from_user_id)),
+            ).fetchone()
+            if not row:
+                return False, "Item not found in inventory.", None
+
+            item_dict = dict(row)
+            if bool(item_dict.get("equipped")):
+                return False, "Unequip the item before giving it away.", None
+            if bool(item_dict.get("is_pact_locked")):
+                return False, "Pact-bound items cannot be transferred.", None
+            if bool(item_dict.get("is_quest_locked")) and not allow_quest_locked:
+                return False, "Quest-locked items cannot be transferred.", None
+
+            slot_cost = int(item_dict["slot_cost"]) if item_dict.get("slot_cost") is not None else 1
+            if slot_cost > 0:
+                if not can_add_item(
+                    int(to_user_id),
+                    slot_cost=slot_cost,
+                    name=str(item_dict.get("name") or ""),
+                    item_type=str(item_dict.get("item_type") or ""),
+                    effect=str(item_dict.get("effect") or ""),
+                    char=to_char,
+                ):
+                    target_disp = to_char.get("name") or "Target"
+                    return False, f"{target_disp}'s backpack is full.", None
+
+            cur = conn.execute(
+                "UPDATE inventory SET user_id=?, character_id=?, equipped=0, slot=NULL WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
+                (int(to_user_id), int(to_char["id"]), int(item_id), int(from_char["id"]), int(from_user_id)),
+            )
+            if cur.rowcount <= 0:
+                return False, "Could not transfer item.", None
+
+            updated_row = conn.execute("SELECT * FROM inventory WHERE id=?", (int(item_id),)).fetchone()
+            transferred = dict(updated_row) if updated_row else item_dict
+            target_disp = to_char.get("name") or "party member"
+            return True, f"Transferred {item_dict.get('name', 'Item')} to {target_disp}.", transferred
+
 
 

@@ -297,7 +297,14 @@ def is_matching_contact_dialogue_partner(contact: dict, partner_str: str) -> boo
             return True
     return False
 
-def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vitals: bool = True) -> str:
+def _format_tracker_entity(
+    entity: dict,
+    dialogue_partners: list = None,
+    show_vitals: bool = True,
+    *,
+    show_enemy_hp: bool = True,
+    show_enemy_intent: bool = True,
+) -> str:
     """Formats a single entity line for the dashboard tracker fields.
     If the entity is an active dialogue partner, prepends a talking indicator 💬.
     In non-combat scenarios (show_vitals=False), suppresses HP, MP, and Level."""
@@ -358,7 +365,7 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
         tier_badge += " `[Civilian]`"
 
     intent = entity.get("intent")
-    intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if intent else ""
+    intent_line = f"\n   ↳ ⚡ *Intent: {intent}*" if (intent and show_enemy_intent) else ""
     act_tag = str(entity.get("activity_tag") or "").strip()
     act_mode = str(entity.get("activity_mode") or "").strip().lower()
     act_badge = f" | 🎯 *{act_tag}*{' (Joined)' if act_mode == 'joined' else ''}" if act_tag else ""
@@ -379,10 +386,15 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
     if mood and str(mood).strip() and str(mood).strip() not in status_items:
         status_items.append(str(mood).strip())
 
+    if entity.get("is_spotlight") is False and not is_conv and not (
+        entity.get("is_anomalous_entity") or str(entity.get("npc_type") or "").lower() == "anomaly"
+    ):
+        return f"• **{name}**{tier_badge}{role_str}{act_badge}{tell_line}"
+
     if hp is not None or level is not None:
         line = f"Lvl {level} " if level is not None else ""
         line += f"{conv_prefix}**{name}**{tier_badge}{role_str}"
-        if hp is not None:
+        if hp is not None and show_enemy_hp:
             line += f" — ❤️ {hp}/{max_hp}"
             if entity.get("temp_hp"):
                 line += f" (+🛡️{int(entity['temp_hp'])})"
@@ -428,7 +440,7 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
         status_text = ", ".join(status_items) if status_items else "None"
         line += f" | Status: {status_text}"
         telegraph = entity.get("telegraphed_skill")
-        if isinstance(telegraph, dict) and telegraph and hp is not None:
+        if show_enemy_intent and isinstance(telegraph, dict) and telegraph and hp is not None:
             sk_name = str(
                 telegraph.get("skill_name")
                 or telegraph.get("telegraphed_label")
@@ -453,11 +465,25 @@ def _format_tracker_entity(entity: dict, dialogue_partners: list = None, show_vi
         return f"{conv_prefix}**{name}**{tier_badge}{role_str} | Status: {status_text}{act_badge}{intent_line}{tell_line}"
 
 
-def _tracker_group_text(entities: list, max_len: int = 1000, dialogue_partners: list = None, show_vitals: bool = True) -> str:
+def _tracker_group_text(
+    entities: list,
+    max_len: int = 1000,
+    dialogue_partners: list = None,
+    show_vitals: bool = True,
+    *,
+    show_enemy_hp: bool = True,
+    show_enemy_intent: bool = True,
+) -> str:
     lines = []
     current_len = 0
     for e in entities:
-        line = _format_tracker_entity(e, dialogue_partners=dialogue_partners, show_vitals=show_vitals)
+        line = _format_tracker_entity(
+            e,
+            dialogue_partners=dialogue_partners,
+            show_vitals=show_vitals,
+            show_enemy_hp=show_enemy_hp,
+            show_enemy_intent=show_enemy_intent,
+        )
         add_len = len(line) + (1 if lines else 0)
         if current_len + add_len > max_len - 25:
             remaining = len(entities) - len(lines)
@@ -481,133 +507,11 @@ def _strip_leading_emojis(text: str) -> str:
     ).strip()
     return cleaned if cleaned else str(text).strip()
 
-def _get_choice_quest_icon(choice: dict) -> str | None:
-    """Returns the quest/bounty/interaction progression icon (⭐, 🎯, ⚡, 💌, 🎭, 💖, 🎲) if applicable, else None."""
-    if not isinstance(choice, dict):
-        return None
-    if choice.get("quest_icon"):
-        return choice["quest_icon"]
-    raw_label = str(choice.get("label") or choice.get("text") or choice.get("action") or "")
-    raw_l = raw_label.lower()
-    qid = str(choice.get("quest_id", ""))
-    ctype = str(choice.get("contract_type", "")).lower()
-
-    from mechanics.social.intimate_excitement import is_intimate_action_label as _emb_is_intimate_lbl
-    _is_intimate = _emb_is_intimate_lbl(raw_label)
-
-    if not _is_intimate:
-        # 1. Story Climax
-        if choice.get("is_climax_action") or ctype == "climax" or "⚡" in raw_label or any(
-            k in raw_l for k in ("[story climax", "[höhepunkt der geschichte", "[kemuncak cerita", "[punkt kulminacyjny", "[剧情高潮")
-        ):
-            return "⚡"
-
-        # 2. Story Quest Actions
-        if "⭐" in raw_label or any(
-            k in raw_l for k in ("[story quest", "[hauptquest", "[misi utama", "[zadanie główne", "[主线任务")
-        ) or "sq-" in qid.lower() or "story" in ctype or choice.get("is_story_quest"):
-            return "⭐"
-
-        # 3. Bounty / Sub-Quest Actions
-        if choice.get("is_quest_action") or ctype in ("sub_quest", "bounty", "side_bounty", "waypoint", "skill_check", "arrival", "resource_progress") or "🎯" in raw_label or any(
-            k in raw_l for k in ("[bounty", "[kopfgeld", "[ganjaran", "[zlecenie", "[悬赏")
-        ) or "bnt-" in qid.lower() or "qst-" in qid.lower():
-            if any(b in raw_l for b in ("contract board", "notice board", "bounty board", "bulletin board", "quest board")):
-                return None
-            return "🎯"
-
-    # 4. Meetup / Phone appointment
-    if "💌" in raw_label or any(k in raw_l for k in ("[meetup]", "[treffen]", "[pertemuan]", "[spotkanie]", "[碰头]", "[碰面]", "[会面]")):
-        return "💌"
-
-    # 5. Social & Character Interaction Archetypes
-    if "🎭" in raw_label or "[banter]" in raw_l or any(k in raw_l for k in ("playfully tease", "crack a joke", "crack a playful", "lighthearted joke", "witty banter", "playful joke")):
-        return "🎭"
-    if "💖" in raw_label or "[affection]" in raw_l or "[flirt]" in raw_l or any(k in raw_l for k in ("flirt with", "compliment ", "sincere compliment", "confess feelings", "affectionate", "hold hands with")):
-        return "💖"
-    if "🎲" in raw_label or "[challenge]" in raw_l or any(k in raw_l for k in ("challenge ", "arm-wrestle", "friendly wager", "friendly spar")):
-        return "🎲"
-    if "💬" in raw_label or "[inquiry]" in raw_l or any(k in raw_l for k in ("inquire about", "ask about", "ask if", "ask her", "ask him", "ask them")) or ("ask " in raw_l and " about " in raw_l):
-        return "💬"
-
-    return None
-
-def _get_choice_skill_emoji(choice: dict) -> str:
-    """Returns the skill check or action icon (e.g. 🧠, 💪, 🏹, 🗣️, 👁️, 🛡️, 🍀, 💬, 🔍, 🚶, 🎒, ✨)."""
-    if not isinstance(choice, dict):
-        return "✨"
-    stat = str(choice.get("stat", "")).upper()
-    req = choice.get("requirement", 0)
-    raw_label = str(choice.get("label") or choice.get("text") or choice.get("action") or "")
-    raw_l = raw_label.lower()
-
-    if stat == "ITEM":
-        return "🎒"
-
-    is_free = (stat in ("NONE", "FREE", "") or req <= 0)
-    if is_free:
-        if any(k in raw_l for k in ("contract board", "notice board", "bounty board", "bulletin board", "quest board", "bulletin")):
-            return "📜"
-        if any(k in raw_l for k in ("flirt", "compliment", "praise", "admire", "cherish", "confess", "hug", "kiss", "affection", "fond", "hold hand")):
-            return "💖"
-        if any(k in raw_l for k in ("joke", "tease", "banter", "laugh", "playful", "ribbing", "witty", "humor", "prank")):
-            return "🎭"
-        from mechanics.narrative.intent import is_conversational_exit
-        if is_conversational_exit(raw_l):
-            return "🚪"
-        if any(k in raw_l for k in (
-            "talk", "speak", "discuss", "ask", "tell", "consult", "comfort", "inquire",
-            "reassure", "address", "greet", "converse", "propose", "negotiate", "chat",
-            "whisper", "confer", "explain", "advise", "gauge", "interview", "say to", "confront"
-        )):
-            return "💬"
-        if any(k in raw_l for k in (
-            "look around", "inspect", "examine", "observe", "scan", "survey", "view the",
-            "look at the", "check out the", "read the", "study the", "take in the", "search"
-        )):
-            return "🔍"
-        if any(k in raw_l for k in ("camp", "tent")):
-            return "🏕️"
-        if any(k in raw_l for k in ("tea", "coffee", "drink", "sip", "tavern", "snack", "eat", "brew", "cup", "ale", "wine", "hearth")):
-            return "☕"
-        if any(k in raw_l for k in ("rest", "sit", "relax", "breathe", "sleep", "sofa", "bench", "couch", "chair", "nap")):
-            return "🛋️"
-        if any(k in raw_l for k in ("shelf", "bookshelf", "desk", "drawer", "tinker", "browse", "props", "decor", "cabinet", "paperwork", "documents", "records")):
-            return "🖐️"
-        if any(k in raw_l for k in ("redress", "get dressed", "don clothes", "put on clothes")):
-            return "🥋"
-        if any(k in raw_l for k in ("put down", "drop burden", "release hold")):
-            return "🤲"
-        if any(k in raw_l for k in ("break free", "struggle", "slip out", "wriggle free")):
-            return "⛓️"
-        if any(k in raw_l for k in ("equipment", "gear", "supplies", "backpack", "pack", "prepare", "sharpen")):
-            return "🎒"
-        if str(choice.get("intent") or "").lower() == "movement" or any(k in raw_l for k in (
-            "travel", "head to", "head toward", "depart", "walk to", "walk toward", "exit", "leave",
-            "slip out", "make your way", "return to", "step out", "step into", "go to", "move to",
-            "journey", "navigate to",
-            "step through", "head through", "descend into", "descend the", "cross into", "enter the",
-            "venture into", "slip into",
-        )) or any(raw_l.startswith(pfx) or f" {pfx}" in raw_l for pfx in ALL_MOVEMENT_PREFIXES) or re.search(
-            r"\b(travel|depart|exit|leave|journey|flee)\b", raw_l
-        ):
-            return "🚶"
-        if any(k in raw_l for k in ("scout", "delve", "forage", "track", "trail", "wilderness", "ruins", "woods", "forest", "patrol")):
-            return "🧭"
-        return "✨"
-
-    return STAT_EMOJI.get(stat, "❔")
-
-def _get_choice_emoji(choice: dict) -> str:
-    """Returns the combined emoji string for an action choice (e.g. '⭐ 🧠' for quest skill check, '🎭 🗣️' for banter check, '🧠' for standard check)."""
-    if not isinstance(choice, dict):
-        return "✨"
-    quest_icon = _get_choice_quest_icon(choice)
-    skill_emoji = _get_choice_skill_emoji(choice)
-
-    if quest_icon and skill_emoji and quest_icon != skill_emoji:
-        return f"{quest_icon} {skill_emoji}"
-    return quest_icon or skill_emoji or "✨"
+from game_engine.choice_icons import (
+    get_choice_quest_icon as _get_choice_quest_icon,
+    get_choice_skill_emoji as _get_choice_skill_emoji,
+    get_choice_emoji as _get_choice_emoji,
+)
 
 def _format_items_gained(item_names: list) -> str:
     """Formats a (possibly repeated) list of item names gained in a single
@@ -1112,6 +1016,23 @@ def _format_epistemic_watch_text(session: dict) -> str:
     return "\n".join(lines)[:1024]
 
 
+def _crowd_density_badge(session: dict) -> str:
+    cs = session.get("crowd_state") if isinstance(session, dict) else None
+    if not isinstance(cs, dict):
+        return ""
+    dens = str(cs.get("density") or "").strip().lower()
+    if not dens or dens in ("empty", "none"):
+        return ""
+    lang = str(session.get("language") or "en").strip().lower()
+    try:
+        from localization import LOCALES
+        mod = LOCALES.get(lang, LOCALES["en"])
+        lbl = (getattr(mod, "CROWD_DENSITY_LABELS", None) or {}).get(dens)
+    except Exception:
+        lbl = None
+    return f" • {lbl or dens.title()}"
+
+
 def _append_dialogue_mood_field(
     dash_embed: discord.Embed,
     session: dict,
@@ -1193,13 +1114,22 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
     if npcs:
         from mechanics.world.mobility import get_session_dialogue_partners
         dialogue_partners = get_session_dialogue_partners(session)
-        _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
+        _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
-        _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
-                         value=_tracker_group_text(enemies, show_vitals=combat_enabled), inline=False)
+        _safe_add_field(
+            dash_embed,
+            name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
+            value=_tracker_group_text(
+                enemies,
+                show_vitals=combat_enabled,
+                show_enemy_hp=bool(session.get("show_enemy_hp", 1)),
+                show_enemy_intent=bool(session.get("show_enemy_intent", 1)),
+            ),
+            inline=False,
+        )
 
     if combat_enabled:
         vitals_header = _tracker_header("📊", "Party", "Party", 1)
@@ -1263,13 +1193,22 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
     if npcs:
         from mechanics.world.mobility import get_session_dialogue_partners
         dialogue_partners = get_session_dialogue_partners(session)
-        _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)),
+        _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
 
     if enemies:
-        _safe_add_field(dash_embed, name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
-                         value=_tracker_group_text(enemies, show_vitals=combat_enabled), inline=False)
+        _safe_add_field(
+            dash_embed,
+            name=_tracker_header("👹", "Enemy", "Enemies", len(enemies)),
+            value=_tracker_group_text(
+                enemies,
+                show_vitals=combat_enabled,
+                show_enemy_hp=bool(session.get("show_enemy_hp", 1)),
+                show_enemy_intent=bool(session.get("show_enemy_intent", 1)),
+            ),
+            inline=False,
+        )
 
     if combat_enabled:
         vitals_header = _tracker_header("📊", "Party", "Party", 1)
@@ -1556,7 +1495,8 @@ def _format_structured_quest_embed_fields(
             s_stat = str(st.get("status") or "locked").lower()
             s_done = bool(st.get("completed")) or s_stat in ("completed", "bypassed")
             s_lbl = clean_narrative_location_arrows(str(st.get("stage_label") or st.get("text") or f"{stage_lbl} {s_idx}"))
-            s_loc = format_clean_location_badge(str(st.get("target_location") or ""))
+            raw_s_loc = str(st.get("target_location") or "").strip()
+            s_loc = "" if raw_s_loc == "Hidden Lair" else format_clean_location_badge(raw_s_loc)
             s_npc = str(st.get("target_npc") or "").strip()
 
             if st.get("bypassed") or s_stat == "bypassed":
@@ -1588,7 +1528,7 @@ def _format_structured_quest_embed_fields(
                     else:
                         stage_lines.append(f"   ↳ {c_icon} *{c_hint}*{loc_sfx}")
             else:
-                stage_lines.append(f"🔒 **Stage {s_idx}:** *{s_lbl}*")
+                stage_lines.append(f"🔒 **{stage_lbl} {s_idx}:** *{s_lbl}*")
 
         embed.add_field(
             name=f"★ {get_quest_ui_label('main_objective', lang)}",
@@ -2008,10 +1948,14 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
         if active_wp_lead:
             s_idx = active_wp_lead.get("stage_index", 1)
             s_lbl = clean_narrative_location_arrows(active_wp_lead.get("stage_label", ""))
-            s_loc = format_clean_location_badge(active_wp_lead.get("target_location", ""))
+            raw_wp_loc = str(active_wp_lead.get("target_location") or "").strip()
+            s_loc = "" if raw_wp_loc == "Hidden Lair" else format_clean_location_badge(raw_wp_loc)
+            lead_val = f"**Stage {s_idx}/{legacy_stage_total}:** *{s_lbl}*"
+            if s_loc:
+                lead_val += f"\n➔ 📍 **Target Location:** `{s_loc}`"
             embed.add_field(
                 name="📍 Current Waypoint Lead",
-                value=f"**Stage {s_idx}/{legacy_stage_total}:** *{s_lbl}*\n➔ 📍 **Target Location:** `{s_loc}`",
+                value=lead_val,
                 inline=False
             )
 
@@ -2031,7 +1975,8 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
                         if wp:
                             s_idx = wp.get("stage_index", 1)
                             s_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
-                            s_loc = format_clean_location_badge(wp.get("target_location", ""))
+                            raw_so_loc = str(wp.get("target_location") or "").strip()
+                            s_loc = "" if raw_so_loc == "Hidden Lair" else format_clean_location_badge(raw_so_loc)
                             loc_display = f" ➔ 📍 `{s_loc}`" if s_loc else ""
                             line += f"\n   ↳ *Stage {s_idx}/{legacy_stage_total}: {s_lbl}{loc_display}*"
                     except Exception:
@@ -2050,11 +1995,19 @@ def _build_main_quest_embed(session_id: int) -> discord.Embed:
                     or climax_spec_sq.get("is_unlocked")
                     or fow_meta.get("is_unlocked")
                 )
+                from mechanics.narrative.quest_engines import get_masked_climax_teaser
                 _, climax_loc = get_story_quest_climax_location(session_id)
+                sq_sess_em = db.get_session(session_id) or {}
+                sq_lang_em = str(sq_sess_em.get("narration_language") or sq_sess_em.get("language") or "en").strip().lower() or "en"
+                sq_teaser_em = get_masked_climax_teaser(
+                    str((sq_dos or {}).get("engine") or active_sq.get("engine") or "MYSTERY_CASE"),
+                    climax_spec_sq,
+                    lang=sq_lang_em,
+                )
                 climax_display = (
                     f"`{format_clean_location_badge(climax_loc)}`"
                     if (climax_loc and climax_open)
-                    else "`Hidden Lair (Uncover Clues to Reveal)`"
+                    else f"*{sq_teaser_em}*"
                 )
                 sub_val += (
                     f"\n\n⚡ **CLIMAX READY — FINAL SHOWDOWN:**\n"
@@ -2166,7 +2119,8 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
                         st_idx = wp.get("stage_index", 1)
                         st_status = wp.get("status", "locked")
                         st_lbl = clean_narrative_location_arrows(wp.get("stage_label", ""))
-                        st_loc = format_clean_location_badge(wp.get("target_location", ""))
+                        raw_st_loc = str(wp.get("target_location") or "").strip()
+                        st_loc = "" if raw_st_loc == "Hidden Lair" else format_clean_location_badge(raw_st_loc)
                         st_npc = wp.get("target_npc", "")
 
                         if st_status == "completed":
@@ -2205,8 +2159,9 @@ def _build_bounties_embed(session_id: int, selected_quest_id: str | None = None)
 
                 if active_wp:
                     action_lines = [f"**Current Task:** {clean_narrative_location_arrows(active_wp.get('stage_label', ''))}"]
-                    if active_wp.get("target_location"):
-                        action_lines.append(f"📍 **Destination:** `{format_clean_location_badge(active_wp['target_location'])}`")
+                    raw_act_loc = str(active_wp.get("target_location") or "").strip()
+                    if raw_act_loc and raw_act_loc != "Hidden Lair":
+                        action_lines.append(f"📍 **Destination:** `{format_clean_location_badge(raw_act_loc)}`")
                     if active_wp.get("target_npc"):
                         action_lines.append(f"👤 **Key Contact:** `{active_wp['target_npc']}`")
                     trig = active_wp.get("completion_trigger", "arrival")

@@ -828,7 +828,13 @@ def apply_cast_events(
     # Closed-world blocked residents from Tier 4 doorbell evaluation
     doorbell_blocked_lows = set()
     for dbell in ((stage_info or {}).get("doorbell_events") or []):
-        if isinstance(dbell, dict) and dbell.get("applicable") and not dbell.get("allowed"):
+        if (
+            isinstance(dbell, dict)
+            and dbell.get("applicable")
+            and not dbell.get("allowed")
+            and dbell.get("doorbell_status") != "npc_ringing_player_door"
+            and dbell.get("entry_mode") != "doorbell_ringing"
+        ):
             for dk in (dbell.get("name"), dbell.get("npc_id")):
                 if dk:
                     doorbell_blocked_lows.add(str(dk).strip().lower())
@@ -843,7 +849,7 @@ def apply_cast_events(
     known_npcs_by_low: Dict[str, dict] = {}
     if sess_id:
         try:
-            for c_rec in safe_get_contacts(sess_id, ensure_scene=False):
+            for c_rec in safe_get_contacts(sess_id, ensure_scene=False, resolve_relations=False):
                 cn = str(c_rec.get("name") or "").strip()
                 if cn:
                     known_npcs_by_low[cn.lower()] = c_rec

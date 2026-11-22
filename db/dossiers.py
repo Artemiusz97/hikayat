@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import logging
+import re
 import sqlite3
 import time
 from typing import Any, Optional, Sequence
@@ -368,9 +369,15 @@ def _rebase_climax_snapshot(snap: Any, new_climax: Any) -> Any:
     if not isinstance(snap, dict) or not isinstance(new_climax, dict):
         return snap
     out = copy.deepcopy(snap)
-    for top_key in ("main_objective_text", "title", "objective"):
+    for top_key in ("main_objective_text", "title", "objective", "masked_climax_teaser"):
         if new_climax.get(top_key):
             out[top_key] = new_climax[top_key]
+    if isinstance(new_climax.get("earned_clearance_locations"), list):
+        existing_cl = [str(x) for x in (out.get("earned_clearance_locations") or []) if x]
+        for loc_c in new_climax["earned_clearance_locations"]:
+            if loc_c and str(loc_c) not in existing_cl:
+                existing_cl.append(str(loc_c))
+        out["earned_clearance_locations"] = existing_cl
     new_stages = {
         int(s.get("stage_index", idx + 1)): s
         for idx, s in enumerate(new_climax.get("main_stages") or [])
@@ -792,9 +799,15 @@ def rollback_quest_dossiers_after_turn(
                 or 1
             )
             is_ch1_story = fam == "story" and chap_num <= 1
+            spawned_turn = int(pitch_cur.get("spawned_at_turn") or 0)
+            is_new_pitch = spawned_turn > t_num and not is_ch1_story
 
-            if compiled_turn > t_num and not is_ch1_story:
-                if fam in ("rumor", "minor", "dispatch", "story"):
+            if is_new_pitch or (compiled_turn > t_num and not is_ch1_story):
+                is_non_pitch_family = (
+                    fam in ("rumor", "minor", "dispatch", "story", "loyalty", "world_event")
+                    or str(qid).upper().startswith(("CLR-", "LIB-"))
+                )
+                if is_new_pitch or is_non_pitch_family:
                     c.execute("DELETE FROM quest_dossiers WHERE session_id = ? AND quest_id = ?", (session_id, qid))
                     c.execute("DELETE FROM quests WHERE session_id = ? AND quest_id = ?", (session_id, qid))
                     c.execute("DELETE FROM quest_waypoints WHERE session_id = ? AND quest_id = ?", (session_id, qid))
@@ -813,7 +826,7 @@ def rollback_quest_dossiers_after_turn(
                         (now, session_id, qid),
                     )
                     c.execute(
-                        "UPDATE quests SET status = 'Available', dossier_stage = 'pitch', sub_objectives_json = '[]', reward_claimed = 0, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                        "UPDATE quests SET status = 'Available', dossier_stage = 'pitch', sub_objectives_json = '[]', reward_claimed = 0, strikes = 0, resolution_approach = '', updated_at = ? WHERE session_id = ? AND quest_id = ?",
                         (now, session_id, qid),
                     )
                     c.execute(
@@ -834,6 +847,7 @@ def rollback_quest_dossiers_after_turn(
                     rescue_shield = d["rescue_shield_used"]
                     engaged_flag = d["engaged_flag"]
                     burned_approaches = dict(d["burned_approaches"] or {})
+                    cast_bindings = dict(d.get("cast_bindings") or {})
                     leads_graph = list(d["leads_graph"] or [])
                     twist_spec = dict(d["twist_spec"] or {})
                     climax_spec = dict(d["climax_spec"] or {})
@@ -859,6 +873,8 @@ def rollback_quest_dossiers_after_turn(
                             engaged_flag = int(prev_val or 0)
                         elif k == "burned_approaches":
                             burned_approaches = dict(prev_val or {})
+                        elif k == "cast_bindings":
+                            cast_bindings = dict(prev_val or {})
                         elif k == "leads_graph":
                             leads_graph = list(prev_val or [])
                         elif k == "clue_graph":
@@ -883,11 +899,41 @@ def rollback_quest_dossiers_after_turn(
                                     "UPDATE quests SET status = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
                                     (prev_st_str, now, session_id, qid),
                                 )
+                        elif k == "quest_strikes":
+                            restored_strikes = int(prev_val or 0)
+                            if restored_strikes <= 0:
+                                q_prog_r = c.execute(
+                                    "SELECT progress FROM quests WHERE session_id = ? AND quest_id = ?",
+                                    (session_id, qid),
+                                ).fetchone()
+                                clean_p_r = (
+                                    re.sub(
+                                        r"\s*\[⚠️ \d+/\d+ Strikes: Target Alerted\]",
+                                        "",
+                                        str(q_prog_r["progress"] or ""),
+                                    ).strip()
+                                    if q_prog_r
+                                    else ""
+                                )
+                                c.execute(
+                                    "UPDATE quests SET strikes = ?, progress = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                                    (restored_strikes, clean_p_r, now, session_id, qid),
+                                )
+                            else:
+                                c.execute(
+                                    "UPDATE quests SET strikes = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                                    (restored_strikes, now, session_id, qid),
+                                )
+                        elif k == "resolution_approach":
+                            c.execute(
+                                "UPDATE quests SET resolution_approach = ?, updated_at = ? WHERE session_id = ? AND quest_id = ?",
+                                (str(prev_val or ""), now, session_id, qid),
+                            )
 
                     c.execute(
                         """UPDATE quest_dossiers
                            SET alert_level = ?, rescue_shield_used = ?, engaged_flag = ?,
-                               burned_approaches_json = ?, leads_graph_json = ?, twist_spec_json = ?,
+                               burned_approaches_json = ?, cast_bindings_json = ?, leads_graph_json = ?, twist_spec_json = ?,
                                climax_spec_json = ?, tangible_item_json = ?, clue_graph_json = ?,
                                outcome_tier = ?, state_events_json = ?, updated_at = ?
                            WHERE session_id = ? AND quest_id = ?""",
@@ -896,6 +942,7 @@ def rollback_quest_dossiers_after_turn(
                             rescue_shield,
                             engaged_flag,
                             json.dumps(burned_approaches),
+                            json.dumps(cast_bindings),
                             json.dumps(leads_graph),
                             json.dumps(twist_spec),
                             json.dumps(climax_spec),
@@ -2089,7 +2136,10 @@ def rollback_session_anomaly_logs_after_turn(
                         afs["promotion_rep"] = int(first_h.get("old_rep", 0) or 0)
                     afs["rep_history"] = surviving
                     from mechanics.social.factions import get_anomalous_promotion_tier_info
-                    t_info = get_anomalous_promotion_tier_info(afs["promotion_rep"])
+                    t_info = get_anomalous_promotion_tier_info(
+                        afs["promotion_rep"],
+                        faction_archetype_key=str(afs.get("faction_archetype_key") or ""),
+                    )
                     if afs.get("faction_archetype_key") != "freelancer":
                         afs["promotion_tier"] = t_info["tier"]
                         afs["promotion_title"] = t_info["title"]

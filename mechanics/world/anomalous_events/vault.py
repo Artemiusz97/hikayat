@@ -56,7 +56,7 @@ def handle_secured_object_anomaly_conversion(
 ) -> Optional[Dict[str, Any]]:
     """
     Converts a secured or neutralized `object` anomaly into a usable `[Anomalous]` Weapon, Accessory, or Wearable:
-    - Private Agencies (`private_agency_1`, `private_agency_2`), Monastic Order (`monastic_order`), & Freelancers (`freelancer`):
+    - Private Agencies (`private_agency_1`, `private_agency_2`), Monastic Order (`monastic_order`), Occult Cult (`cult_faction`), Clandestine Syndicate (`clandestine_faction`), & Freelancers (`freelancer`):
       Immediately keep the converted `[Anomalous]` relic in player inventory!
     - Public Agency (`public_agency`):
       Logs the relic to the Bureau Containment Vault (`session['anomalous_vault_requisitions']`), awards `+5` Promotion Rep,
@@ -265,6 +265,10 @@ def record_contained_anomaly_to_vault_log(
         vault_facility = f"{fac_state.get('joined_faction_name', 'Conglomerate')} Cryogenic Asset Vault"
     elif arch == "private_agency_2":
         vault_facility = f"{fac_state.get('joined_faction_name', 'Agency')} Lead-Lined Evidence Vault"
+    elif arch == "cult_faction":
+        vault_facility = "Sacrificial Entity Holding Cells"
+    elif arch == "clandestine_faction":
+        vault_facility = "Contraband Entity Auction Pens"
     else:
         vault_facility = "Subterranean Containment & Quarantine Vaults"
 

@@ -33,6 +33,7 @@ import re
 
 import db
 from .anchor_schedule import (
+    _ANCHOR_ORIGINS,
     SHIFT_PROFILES,
     is_npc_on_active_shift,
     resolve_anchor_schedule_nodes,
@@ -88,6 +89,9 @@ def is_schedule_transition_imminent(
             (1020, "evening"),
             (1200, "night"),
         ]
+
+    if _is_anomalous_incursions_setting(scen_key):
+        active_boundaries = list(active_boundaries) + [(1320, "closing")]
 
     for boundary_min, next_block in active_boundaries:
         diff = (boundary_min - safe_min) % 1440
@@ -673,6 +677,7 @@ def is_npc_nocturnal_or_night_shift(
     basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
     shift_prof = str(npc.get("shift_profile") or basic.get("shift_profile") or "").strip().lower()
     is_24h = bool(npc.get("is_24h_station") or basic.get("is_24h_station"))
+    is_nocturnal_flag = bool(npc.get("nocturnal") or basic.get("nocturnal"))
     origin_val = str(npc.get("origin") or basic.get("origin") or "").strip().lower()
     staff_stat = str(npc.get("staff_status") or basic.get("staff_status") or "active").strip().lower()
     is_dead = bool(npc.get("is_deceased") or basic.get("is_deceased") or npc.get("alive") is False or basic.get("alive") is False)
@@ -700,6 +705,7 @@ def is_npc_nocturnal_or_night_shift(
                 if not shift_prof:
                     shift_prof = str(roster_row.get("shift_profile") or r_basic.get("shift_profile") or "").strip().lower()
                 is_24h = is_24h or bool(roster_row.get("is_24h_station") or r_basic.get("is_24h_station"))
+                is_nocturnal_flag = is_nocturnal_flag or bool(roster_row.get("nocturnal") or r_basic.get("nocturnal"))
                 db_stat = str(roster_row.get("staff_status") or "active").strip().lower()
                 if db_stat != "active":
                     staff_stat = db_stat
@@ -707,8 +713,11 @@ def is_npc_nocturnal_or_night_shift(
     if is_dead or (staff_stat and staff_stat != "active"):
         return False
 
-    if origin_val != "legacy_adapter" and (shift_prof == "night" or is_24h):
-        return True
+    if origin_val != "legacy_adapter":
+        if shift_prof == "night" or is_24h or is_nocturnal_flag:
+            return True
+        if origin_val in _ANCHOR_ORIGINS:
+            return False
 
     if is_high_school_setting(scen_key):
         basic = npc.get("basic_info") if isinstance(npc.get("basic_info"), dict) else {}
@@ -945,19 +954,20 @@ def get_npc_schedule_node_ids(
     name_slug = re.sub(r'[^a-z0-9]+', '_', name.lower()).strip('_')
 
     schedule_nodes: Dict[str, str] = {}
+    hydrated_for_anchor = _hydrate_npc_from_db(npc, session_id)
 
     anchor_nodes = resolve_anchor_schedule_nodes(
-        npc,
+        hydrated_for_anchor,
         current_day=current_day,
         scen_key=scen_key_low,
         session_id=session_id,
         current_minute=current_minute,
     )
     if anchor_nodes is not None:
-        return _apply_spare_key_schedule_overrides(anchor_nodes, session_id, npc, current_day, scen_key_low)
+        return _apply_spare_key_schedule_overrides(anchor_nodes, session_id, hydrated_for_anchor, current_day, scen_key_low)
 
     from mechanics.social.roster_tags import npc_is_folklore_villager
-    if npc_is_folklore_villager(npc):
+    if npc_is_folklore_villager(hydrated_for_anchor):
         from mechanics.social.folklore_roster import get_folklore_villager_spec
         from mechanics.social.races import is_myobu_fox_race
         spec = get_folklore_villager_spec(int(session_id or 0), npc.get("npc_id") or name) if session_id else None
@@ -983,7 +993,7 @@ def get_npc_schedule_node_ids(
         return _apply_spare_key_schedule_overrides(villager_nodes, session_id, npc, current_day, scen_key_low)
 
     if is_school:
-        hydrated_npc = _hydrate_npc_from_db(npc, session_id)
+        hydrated_npc = hydrated_for_anchor
         grade_val = str(hydrated_npc.get("grade") or "").strip()
         role = str(hydrated_npc.get("role") or "").strip().lower()
         club = str(hydrated_npc.get("club") or "").strip().lower()
@@ -1564,8 +1574,32 @@ def get_npc_schedule(
         hydrated_npc, scen_key=scen_key, current_day=current_day, current_minute=current_minute, session_id=session_id
     )
     schedule: Dict[str, str] = {}
+    origin_s = str(hydrated_npc.get("origin") or basic.get("origin") or "").strip().lower()
+    is_anchor_npc = bool(
+        (origin_s in _ANCHOR_ORIGINS and origin_s != "legacy_adapter")
+        or (origin_s != "legacy_adapter" and (hydrated_npc.get("use_anchor_schedule") or basic.get("use_anchor_schedule")))
+    )
 
-    if is_school:
+    if is_anchor_npc and node_sched:
+        for blk, nid in node_sched.items():
+            clean_nid = str(nid or "").strip()
+            if clean_nid == SHARED_ABSTRACT_RESIDENCE_NODE:
+                schedule[blk] = "Residential District (Unknown Address)"
+            elif clean_nid == "loc_rival_academy_away":
+                schedule[blk] = "Neighboring St. Jude's High School (In Class)"
+            elif clean_nid in _HS_NODE_FALLBACK_PATHS:
+                schedule[blk] = _HS_NODE_FALLBACK_PATHS[clean_nid]
+            elif any(clean_nid.lower().startswith(p) for p in ("sub_npc_res_", "fac_npc_res_", "npc_res_")):
+                schedule[blk] = home_loc or "Private Residence"
+            else:
+                trimmed = clean_nid
+                for p in ("sub_", "fac_", "loc_", "zone_"):
+                    if trimmed.lower().startswith(p):
+                        trimmed = trimmed[len(p):]
+                        break
+                schedule[blk] = trimmed.replace("_", " ").strip().title() or (home_loc or "Local Area")
+
+    elif is_school:
         if _is_town_citizen_or_youth_peer(hydrated_npc):
             sec_fac = str(hydrated_npc.get("secondary_facility") or basic.get("secondary_facility") or "").strip()
             for blk, nid in node_sched.items():
@@ -1871,16 +1905,43 @@ def is_npc_eligible_for_private_room(
     # 3. Rendezvous commitments check
     session_id = session.get("id") or session.get("session_id")
     if session_id:
+        nm_slug = re.sub(r"[^a-z0-9]+", "_", nm_low).strip("_")
+        nm_forms = {k for k in (nm_low, nm_slug) if k}
+        active_rv_statuses = ("active", "confirmed", "in_progress", "pending", "approaching", "arrived")
         try:
             with db.get_conn() as conn:
                 rows = conn.execute(
-                    "SELECT npc_id, status FROM commitments_ledger WHERE session_id = ? AND commitment_type = 'rendezvous'",
-                    (session_id,)
+                    "SELECT target_entity, participants_json, status FROM commitments_ledger WHERE session_id = ? AND commitment_type = 'rendezvous'",
+                    (session_id,),
                 ).fetchall()
                 for r in rows:
-                    r_npc = str(r["npc_id"] or "").strip().lower()
-                    if (r_npc == nm_low or nm_low in r_npc) and str(r["status"]).lower() in ("active", "confirmed", "in_progress", "pending"):
+                    if str(r["status"] or "").strip().lower() not in active_rv_statuses:
+                        continue
+                    t_ent = str(r["target_entity"] or "").strip().lower()
+                    t_forms = {k for k in (t_ent, t_ent.replace("_", " "), re.sub(r"[^a-z0-9]+", "_", t_ent).strip("_")) if k}
+                    if nm_forms & t_forms:
                         return True
+                    p_raw = r["participants_json"]
+                    if isinstance(p_raw, str) and p_raw.strip():
+                        try:
+                            p_list = json.loads(p_raw)
+                        except (ValueError, TypeError):
+                            p_list = []
+                    else:
+                        p_list = p_raw if isinstance(p_raw, list) else []
+                    for p in p_list:
+                        vals = (
+                            (p.get("person_key"), p.get("npc_id"), p.get("name"), p.get("npc_name"))
+                            if isinstance(p, dict)
+                            else (p,)
+                        )
+                        for v in vals:
+                            vs = str(v or "").strip().lower()
+                            if not vs or vs == "player" or vs.startswith("player:"):
+                                continue
+                            v_forms = {k for k in (vs, vs.replace("_", " "), re.sub(r"[^a-z0-9]+", "_", vs).strip("_")) if k}
+                            if nm_forms & v_forms:
+                                return True
         except Exception:
             pass
 

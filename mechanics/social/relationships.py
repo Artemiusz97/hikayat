@@ -163,6 +163,15 @@ def is_contact_eligible(
                         social_role_type = social_role_type or str(r_entry.get("social_role_type") or "")
                         probe_ent = {**r_entry, **probe_ent, "role": role, "grade": grade}
                         break
+                if not role and not grade:
+                    wr_ahs = _db_ahs2.get_world_roster_npc(int(session_id), name, include_legacy_rosters=False)
+                    if wr_ahs:
+                        wb = wr_ahs.get("basic_info") or {}
+                        role = role or str(wr_ahs.get("role") or wb.get("role") or "")
+                        grade = grade or str(wb.get("grade") or "")
+                        age_group = age_group or str(wb.get("age_group") or "")
+                        social_role_type = social_role_type or str(wb.get("social_role_type") or "")
+                        probe_ent = {**wr_ahs, **wb, **probe_ent, "role": role, "grade": grade}
             except Exception:
                 pass
 
@@ -302,6 +311,22 @@ def is_contact_eligible(
                                 grade = grade or r_entry.get("grade", "")
                                 club = club or r_entry.get("club", "")
                                 break
+                    if not grade or (not role and not social_role_type):
+                        wr_hs = db.get_world_roster_npc(int(session_id), name, include_legacy_rosters=False)
+                        if wr_hs:
+                            wb_hs = wr_hs.get("basic_info") or {}
+                            role = role or str(wr_hs.get("role") or wb_hs.get("role") or "")
+                            description = description or str(wb_hs.get("description") or role)
+                            grade = grade or str(wb_hs.get("grade") or "")
+                            club = club or str(wb_hs.get("club") or "")
+                            age_group = age_group or str(wb_hs.get("age_group") or "")
+                            srt_hs = wb_hs.get("social_role_type")
+                            if srt_hs:
+                                srt_hs_low = str(srt_hs).lower().strip()
+                                if srt_hs_low in ("faculty_staff", "adult_service", "civilian_resident"):
+                                    return False
+                                if srt_hs_low in ("student_peer", "peer", "contemporary"):
+                                    return True
                     if not role and not description:
                         lore = db.get_lorebook_entity(session_id, name)
                         if lore:

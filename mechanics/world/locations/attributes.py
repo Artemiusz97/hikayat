@@ -851,6 +851,8 @@ def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
             "agency hq", "headquarters", "operations hq", "tower hq", "spire hq",
             "command center", "briefing", "dispatch", "precinct", "bounty board",
             "notice board", "bulletin", "mission board", "contract terminal",
+            "hidden sanctum", "shadow exchange", "acolyte cloister", "chant hall",
+            "brokerage floor",
         )
         return any(k in loc_lower for k in anom_board_keywords)
 
@@ -1041,7 +1043,8 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
     ]
     multi_wing_complex_markers = (
         "tower hq", "field office hq", "office hq", "operations hq", "operations spire hq",
-        "headquarters", "agency hq", "theme park", "amusement", "grand temple",
+        "headquarters", "agency hq", "hidden sanctum", "shadow exchange",
+        "theme park", "amusement", "grand temple",
         "eastern temple", "hospital", "medical center", "botanical",
     )
     parent_join_lower = " ".join(raw_parts[:-1]).lower() if len(raw_parts) >= 2 else ""
@@ -1069,7 +1072,7 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
             found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
             found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
             found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
-        if any(k in target_lower for k in ["tactical armory", "ordnance depot", "special ordnance", "requisition vault", "vaulted armory", "gunsmithing bench"]):
+        if any(k in target_lower for k in ["tactical armory", "ordnance depot", "special ordnance", "requisition vault", "vaulted armory", "gunsmithing bench", "ossuary armory", "ritual athame", "black-bag ballistics", "suppressed ordnance"]):
             if not any(s["type"] == "weapon_merchant" for s in found):
                 found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
         elif any(k in target_lower for k in ["forge", "smithy", "blacksmith", "weaponsmith", "armory"]):
@@ -1077,12 +1080,12 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
                 found.append({"type": "weapon_merchant", **MERCHANT_ARCHETYPES["weapon_merchant"]})
             if not any(s["type"] == "armor_merchant" for s in found):
                 found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
-        if any(k in target_lower for k in ["field outfitter", "tailoring quartermaster", "bespoke ballistic outfitter", "ballistic tailoring", "exo-weave atelier", "tactical rigging", "fitted armor", "outfitter", "couture", "boutique", "apparel"]):
+        if any(k in target_lower for k in ["field outfitter", "tailoring quartermaster", "bespoke ballistic outfitter", "ballistic tailoring", "exo-weave atelier", "tactical rigging", "fitted armor", "covenant vestment", "warded silk loom", "faraday-weave", "counter-surveillance tailor", "outfitter", "couture", "boutique", "apparel"]):
             if not any(s["type"] == "armor_merchant" for s in found):
                 found.append({"type": "armor_merchant", **MERCHANT_ARCHETYPES["armor_merchant"]})
             if not any(s["type"] == "clothes_merchant" for s in found):
                 found.append({"type": "clothes_merchant", **MERCHANT_ARCHETYPES["clothes_merchant"]})
-        if any(k in target_lower for k in ["apothecary", "alchemist", "herbalist", "potion", "pharmacy", "cleansing bay", "psychic detox", "neural recovery", "field infirmary", "dispensary"]):
+        if any(k in target_lower for k in ["apothecary", "apotheca", "ichor distillation", "cognitohazard lab", "alchemist", "herbalist", "potion", "pharmacy", "cleansing bay", "psychic detox", "neural recovery", "field infirmary", "dispensary"]):
             if not any(s["type"] == "potion_merchant" for s in found):
                 found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
         if not is_anom_scen and any(k in target_lower for k in ["arcane", "magic", "mystic", "enchanter", "sorcery", "grimoire", "scribe", "antiquities", "licensed wards", "alchemical apothecary"]):
@@ -1098,9 +1101,9 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
         if any(k in target_lower for k in ["omikuji", "talisman stand", "carnival midway", "gift emporium", "duty-free", "campus bookstore", "bookstore", "curio", "campus co-op", "co-op"]):
             if not any(s["type"] == "gift_merchant" for s in found):
                 found.append({"type": "gift_merchant", **MERCHANT_ARCHETYPES["gift_merchant"]})
-        if any(k in target_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "mess hall", "food stall", "diner", "espresso", "roastery", "pour-over", "kitchenette", "skyline lounge", "ramen", "izakaya", "cafe", "café", "konbini", "convenience", "fish market", "carnival midway", "night market", "street food", "tea house", "garden terrace", "duty-free", "black bazaar"]):
+        if any(k in target_lower for k in ["bakery", "tavern", "inn", "saloon", "canteen", "refectory", "commissary", "mess hall", "food stall", "diner", "espresso", "roastery", "pour-over", "kitchenette", "skyline lounge", "ramen", "izakaya", "cafe", "café", "konbini", "convenience", "fish market", "carnival midway", "night market", "street food", "tea house", "garden terrace", "duty-free", "black bazaar"]):
             found.append({"type": "food_merchant", **MERCHANT_ARCHETYPES["food_merchant"]})
-        if any(k in target_lower for k in ["espresso", "roastery", "pour-over", "kitchenette", "skyline lounge", "cafe", "café", "canteen", "boba"]):
+        if any(k in target_lower for k in ["espresso", "roastery", "pour-over", "kitchenette", "skyline lounge", "cafe", "café", "canteen", "refectory", "commissary", "boba"]):
             found.append({"type": "cafe_merchant", **MERCHANT_ARCHETYPES["cafe_merchant"]})
         if any(k in target_lower for k in ["black market", "pawn", "crimson masquerade", "black bazaar", "drifter enclave"]):
             if not any(s["type"] == "weapon_merchant" for s in found):
@@ -1213,10 +1216,11 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
     if is_room_level:
         explicit_room_shop_terms = (
             "shop", "store", "market", "bazaar", "emporium", "armory", "ordnance",
+            "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
             "requisition", "quartermaster", "outfitter", "tailoring", "tactical rigging",
             "fitted armor", "cleansing bay", "psychic detox", "neural recovery",
-            "field infirmary", "dispensary", "apothecary", "pharmacy", "canteen",
-            "cafeteria", "espresso", "pour-over", "roastery", "kitchenette",
+            "field infirmary", "dispensary", "apothecary", "apotheca", "pharmacy", "canteen",
+            "refectory", "commissary", "cafeteria", "espresso", "pour-over", "roastery", "kitchenette",
             "cafe", "café", "taproom", "bar", "tavern", "bakery", "diner",
             "ramen", "izakaya", "tea house", "boutique", "konbini", "convenience",
             "kiosk", "vending", "co-op", "bookstore", "bookshop", "supply counter",
@@ -1262,10 +1266,11 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
         )
         explicit_shop_nouns = (
             "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
-            "armory", "ordnance", "requisition", "quartermaster", "outfitter", "tailoring",
+            "armory", "ordnance", "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
+            "requisition", "quartermaster", "outfitter", "tailoring",
             "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
-            "neural recovery", "field infirmary", "dispensary", "convenience", "konbini",
-            "boutique", "bakery", "stall", "canteen", "diner", "roastery", "pour-over",
+            "neural recovery", "field infirmary", "dispensary", "apotheca", "convenience", "konbini",
+            "boutique", "bakery", "stall", "canteen", "refectory", "commissary", "diner", "roastery", "pour-over",
             "kitchenette", "izakaya", "ramen", "espresso", "tea house", "bookstore",
             "duty-free", "midway", "omikuji", "talisman stand", "pawn", "black market",
             "auction house", "boiler-room locker", "custodian's boiler", "campus co-op", "co-op",

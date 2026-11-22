@@ -1,7 +1,11 @@
 """
-Core GM system prompt, verbosity instructions, dialogue style instructions,
-and choice description instructions for Hikayat.
+Core GM system prompt, narrative style instructions, pacing instructions,
+dialogue style instructions, and choice description instructions for Hikayat.
 """
+from __future__ import annotations
+
+from typing import Any
+
 from character_data import STAT_EFFECTS, STAT_NAMES
 
 VALID_STATS = {"STR", "PER", "END", "CHA", "INT", "AGI", "LUK"}
@@ -69,6 +73,7 @@ RULES YOU MUST ENFORCE:
   * NPC Belongings & Boundary Enforcement: Personal items, snacks, food (e.g. bento, onigiri, sandwiches), drinks, stationery, books, and props held by, eaten by, or associated with NPCs remain strictly NPC property.
   * NO UNGROUNDED TRANSFERS: An NPC's item NEVER transfers to player possession or player inventory without an explicit in-narrative action (gift, trade, purchase, theft, or handoff) recorded in `character_outcomes`.
   * GROUNDED ACTION CHOICES (`next_choices`): NEVER generate choices where the player gives, offers, shares, or consumes an item or food as their own (e.g. 'Offer [NPC] your onigiri', 'Share half your food with [NPC]', 'Hand over your potion') unless that item is EXPLICITLY present in the player's Carried Inventory or currently held in their hands.
+  * NO GENERIC EXAMINE / OBSERVE FILLER (`next_choices`): NEVER generate generic room-scanning choices like 'Observe your surroundings', 'Examine the room', or 'Look around the area' (players already have a dedicated Examine window). Only generate `investigate_clue` choices when targeting a specific object, clue, mechanism, or anomaly.
   * If an NPC has food, a drink, or a prop, player choices can ONLY comment on it, ask about it, or playfully react to it (e.g. 'Ask Yuki where she bought her onigiri', 'Playfully ask Yuki for a bite of her onigiri', 'Compliment Yuki on her snack') — NEVER offer an item the player does not possess.
 - **Caseboard Confrontations:** When the player is in the presence of a suspect linked to a VERIFIED DEDUCTION in the INVESTIGATION EVIDENCE CASEBOARD, you MUST offer a prominent [REVEAL EVIDENCE] or [CONFRONT] choice in `next_choices` to press them on the breakthrough.
 - **Narrative Balance & Forward Temporal Momentum (STRICTLY ENFORCED):**
@@ -163,45 +168,151 @@ RULES YOU MUST ENFORCE:
   * On routine turns, combat turns, or turns without a major story discovery, leave `current_clues` empty ("").
 - **Physical States & Dynamic Poses:** Track character positions, postures, held items, and clothing states in `physical_updates`. If scene involves physical struggle or intimacy, update `intimate_contact` with short state."""
 
+VALID_NARRATIVE_STYLES = ("normal", "vivid", "noir", "witty", "shakespearean", "brainrot")
+VALID_NARRATIVE_PACINGS = ("concise", "balanced", "novelistic")
+VALID_DIALOGUE_MODES = ("off", "minimal", "balanced", "adaptive", "rich", "script")
+
+_STYLE_ALIASES = {
+    "standard": "normal",
+    "satirical": "witty",
+}
+_PACING_ALIASES = {
+    "direct": "concise",
+}
+_DIALOGUE_ALIASES = {
+    "default": "balanced",
+}
+
+
+def resolve_style_and_pacing(
+    source: dict[str, Any] | None = None,
+    *,
+    verbosity: str | None = None,
+    narrative_pacing: str | None = None,
+    dialogue_mode: str | None = None,
+) -> tuple[str, str, str]:
+    """Resolve effective (style, pacing, dialogue_mode) with backward-compatible legacy mapping."""
+    src = source if isinstance(source, dict) else {}
+    raw_style = verbosity if verbosity is not None else (src.get("verbosity") or src.get("narrative_style"))
+    raw_pacing = narrative_pacing if narrative_pacing is not None else (src.get("narrative_pacing") or src.get("pacing"))
+    raw_dialogue = dialogue_mode if dialogue_mode is not None else src.get("dialogue_mode")
+
+    style_low = str(raw_style or "vivid").strip().lower()
+    pacing_low = str(raw_pacing or "balanced").strip().lower()
+    dialogue_low = str(raw_dialogue or "adaptive").strip().lower()
+
+    if style_low in ("concise", "direct"):
+        eff_style = "normal"
+        if raw_pacing is not None and str(raw_pacing).strip() != "":
+            mapped_pacing = _PACING_ALIASES.get(pacing_low, pacing_low)
+            eff_pacing = mapped_pacing if mapped_pacing in VALID_NARRATIVE_PACINGS else "concise"
+        else:
+            eff_pacing = "concise"
+    else:
+        mapped_style = _STYLE_ALIASES.get(style_low, style_low)
+        eff_style = mapped_style if mapped_style in VALID_NARRATIVE_STYLES else "vivid"
+        mapped_pacing = _PACING_ALIASES.get(pacing_low, pacing_low)
+        eff_pacing = mapped_pacing if mapped_pacing in VALID_NARRATIVE_PACINGS else "balanced"
+
+    mapped_dialogue = _DIALOGUE_ALIASES.get(dialogue_low, dialogue_low)
+    eff_dialogue = mapped_dialogue if mapped_dialogue in VALID_DIALOGUE_MODES else "adaptive"
+    return eff_style, eff_pacing, eff_dialogue
+
+
+CANON_PERSISTENCE_SHIELD = (
+    "CANON PERSISTENCE SHIELD: Style and voice directives govern ONLY player-facing story text "
+    "(`@@TITLE`, `@@OUTCOME`, `@@NEXT`, `@@CHOICES`). Keep `@@META` (`memory:`, `pose:`, `cast:`, `epistemic:`), "
+    "`new_entities.description`, `quest_updates`/`current_clues`, and 3-tier `location` paths (`Zone ➔ Primary Place ➔ Sub-Area`) "
+    "strictly in clean, grounded canon prose — NEVER inject internet slang, memes, or archaicisms into metadata, clues, or location paths."
+)
+
 VERBOSITY_INSTRUCTIONS = {
+    "normal": (
+        "NARRATIVE STYLE — STANDARD (Contemporary Prose): "
+        "Write in clear, contemporary modern English with balanced texture, accessible vocabulary, and grounded phrasing. "
+        "Example cadence: 'Rain patters against the shuttered window as you slide the rusted latch free. Inside, the study smells of damp paper and fresh ash.' "
+        "STRICTLY FORBIDDEN: Do NOT use purple prose, high-flown literary metaphors, archaic words, or internet slang."
+    ),
+    "vivid": (
+        "NARRATIVE STYLE — VIVID (Rich Literary RPG Prose): "
+        "Write in a rich, atmospheric RPG prose style with immersive sensory details, expressive scene-setting, and evocative, novel-quality writing. "
+        "Bring lighting, texture, and character presence vividly to life. "
+        "Example cadence: 'Rain needles the leaded glass while the iron latch yields with a reluctant groan, spilling cold salt air over cedar shelves and cooling embers.' "
+        "STRICTLY FORBIDDEN: Do NOT write flat, dry, mechanical, or rushed summaries."
+    ),
+    "noir": (
+        "NARRATIVE STYLE — NOIR (Hardboiled Detective Pulp): "
+        "Write narrator prose, `@@TITLE`, and `@@CHOICES` in sharp, cynical hardboiled noir: punchy staccato rhythm, rain-and-shadow imagery, dry world-weary metaphors, and razor-sharp tension. "
+        "VOICE SCOPE: Apply this hardboiled voice to the narrator, scene title, and choices; keep NPC spoken quotes grounded in each NPC's own canonical persona rather than turning every character into a 1940s detective. "
+        "Example cadence: 'The lock gives up like an alibi under hot lamps. Somebody swept the study clean—except for the fresh ash cooling on the grate.' "
+        "STRICTLY FORBIDDEN: Do NOT write breathless high-fantasy optimism or meme slang."
+    ),
+    "witty": (
+        "NARRATIVE STYLE — WITTY (Dry Deadpan Satire): "
+        "Write narrator prose, `@@TITLE`, and `@@CHOICES` with dry, wryly ironic wit in the vein of Terry Pratchett or a sardonic Baldur's Gate 3 narrator—clever understatements, affectionate commentary on questionable decisions, and sharp situational irony. "
+        "VOICE SCOPE: Apply this deadpan wit to the narrator, scene title, and choices; keep NPC spoken quotes grounded in each NPC's own canonical personality. "
+        "Example cadence: 'The rusted latch surrenders with the dignity of a wet cardboard box, revealing a study whose owner clearly believed organization was a moral failing.' "
+        "STRICTLY FORBIDDEN: Do NOT use Gen-Z/internet meme slang (no rizz/cooked/skibidi) or slapstick fourth-wall breaks referencing game mechanics."
+    ),
+    "shakespearean": (
+        "NARRATIVE STYLE — SHAKESPEAREAN (Theatrical Elizabethan): "
+        "Write in exaggerated, theatrical Elizabethan / Early Modern English: archaic vocabulary (`thee`, `thou`, `dost`, `hath`, `wherefore`, `forsooth`), elaborate metaphors, poetic rhythm, and dramatic stage-play cadence. "
+        "VOICE SCOPE: Transform narration, `@@TITLE`, `@@CHOICES`, AND spoken character/protagonist quotes (adapted to each character's status and personality). "
+        "Example cadence: 'Hark! The rusted bolt doth yield unto thy cunning hand, unveiling a chamber thick with parchment and dying embers.' "
+        "STRICTLY FORBIDDEN: Do NOT use modern slang, casual colloquialisms, or flat unadorned contemporary phrasing."
+    ),
+    "brainrot": (
+        "NARRATIVE STYLE — BRAINROT (Playable Comedic Gen-Z / Gen-Alpha Slang): "
+        "Write with chaotic, high-energy Gen-Z / Gen-Alpha internet slang and meme comedy (`cooked`, `locked in`, `aura`, `negative aura`, `rizz`, `crashout`, `glazing`, `no cap`, `fr`, `mogging`, `delulu`, `bet`, `skibidi`, `Ohio`, `sigma`, `fanum tax`, `GOAT`). "
+        "PLAYABLE COMEDIC CADENCE: Keep physical RPG actions, spatial positions, and outcomes crystal clear and followable; season each paragraph with roughly 2–4 fresh, varied slang hits with sharp comedic timing rather than repeating the same word every line. "
+        "VOICE SCOPE: Transform narration, `@@TITLE`, `@@CHOICES`, AND spoken dialogue (flavored by each NPC's canon personality—e.g. nerdy cope vs. unbothered sigma energy vs. dramatic crashout). "
+        "Example cadence: 'You lock in and pop that rusted latch cleanly—pure +aura stealth play, zero fumble. Inside, the study smells straight out of Ohio, with fresh ash giving away whoever tried to flee.' "
+        "STRICTLY FORBIDDEN: Do NOT turn sentences into unreadable word-salad gibberish, repeat one catchphrase endlessly, leak numeric HP/MP/DC stats, or alter canonical character names or 3-tier location paths."
+    ),
+    # Legacy keys retained for direct-lookup backwards compatibility
     "concise": (
         "NARRATIVE LENGTH: Output exactly 1 punchy `outcome_narrative` paragraph and 1 compact `next_narrative` paragraph. "
         "Both paragraphs must be short: 2-3 sentences each covering only the action result and the scene's next state. "
         "Use plain, functional vocabulary. Short sentences. No metaphors. "
-        "STRICTLY FORBIDDEN: Do NOT write multi-paragraph descriptions, florid adjectives, extended introspective musings, "
-        "decorative atmospheric filler, purple prose, or novelistic scene-setting. "
-        "Do NOT pad output to fill space. If the action is resolved, stop."
+        "STRICTLY FORBIDDEN: Do NOT write multi-paragraph descriptions, florid adjectives, or purple prose."
     ),
     "direct": (
         "NARRATIVE LENGTH: Output 1-2 tight `outcome_narrative` paragraphs and exactly 2 `next_narrative` paragraphs. "
-        "Focus strictly on immediate physical momentum and concrete consequences. No filler. "
-        "Use clear, everyday words. Sentences should be punchy and action-forward. "
-        "STRICTLY FORBIDDEN: Do NOT get bogged down in flowery sensory metaphors, philosophical ramblings, "
-        "extended atmospheric scene-painting, or novelistic padding between action beats. "
-        "Do NOT use archaic, literary, or overly poetic vocabulary."
+        "Focus strictly on immediate physical momentum and concrete consequences. No filler."
     ),
-    "normal": (
-        "NARRATIVE LENGTH: Output 1-2 `outcome_narrative` paragraphs and 2-3 `next_narrative` paragraphs. "
-        "Write in clear, contemporary, modern English with balanced pacing and natural world description. "
-        "Use accessible everyday vocabulary and straightforward sentence structure. "
-        "STRICTLY FORBIDDEN: Do NOT use purple prose, high-flown literary metaphors, archaic words, "
-        "melodramatic novelistic tropes, overwrought sensory catalogues, or ornate decorative language. "
-        "Keep the tone grounded and readable."
+}
+
+NARRATIVE_PACING_INSTRUCTIONS = {
+    "concise": (
+        "PACING — CONCISE (Snappy & Tight): "
+        "Output EXACTLY 1 punchy `@@OUTCOME` (`outcome_narrative`) paragraph (2–3 sentences max) and EXACTLY 1 compact `@@NEXT` (`next_narrative`) paragraph (2–3 sentences max). "
+        "Cover only the immediate action result and next scene beat. "
+        "STRICTLY FORBIDDEN: Do NOT write multiple paragraphs per section or pad scenes with extra filler."
     ),
-    "vivid": (
-        "NARRATIVE LENGTH: Output 1-2 `outcome_narrative` paragraphs and 2-3 `next_narrative` paragraphs. "
-        "Write in a rich, atmospheric RPG prose style with immersive sensory details, expressive scene-setting, "
-        "and evocative, novel-quality writing. Bring the environment and characters to life with color and texture. "
-        "STRICTLY FORBIDDEN: Do NOT write flat, dry, mechanical, or rushed summaries. "
-        "Do NOT reduce scenes to bare bullet-point narration. Maintain full sensory and atmospheric immersion."
+    "balanced": (
+        "PACING — BALANCED (Standard RPG Flow): "
+        "Output 1–2 well-paced `@@OUTCOME` (`outcome_narrative`) paragraphs and 2–3 `@@NEXT` (`next_narrative`) paragraphs. "
+        "Maintain brisk momentum with natural scene development and breathing room."
     ),
-    "shakespearean": (
-        "NARRATIVE LENGTH: Output 1-2 `outcome_narrative` paragraphs and 2-3 `next_narrative` paragraphs. "
-        "Write in an exaggerated, theatrical Elizabethan / Early Modern English prose style: "
-        "archaic vocabulary (thee, thou, dost, hath, wherefore, forsooth), elaborate metaphors, poetic rhythm, "
-        "and dramatic stage-play cadence reminiscent of Shakespeare's histories and tragedies. "
-        "STRICTLY FORBIDDEN: Do NOT use modern slang, casual colloquialisms, or contemporary phrasing. "
-        "Do NOT write flat unadorned prose — every sentence must carry dramatic theatrical weight."
+    "novelistic": (
+        "PACING — NOVELISTIC (Slow-Burn & Immersive): "
+        "Output 2–3 unhurried `@@OUTCOME` (`outcome_narrative`) paragraphs and 3–4 rich, slow-burn `@@NEXT` (`next_narrative`) paragraphs. "
+        "Linger on sensory texture, micro-expressions, spatial atmosphere, and emotional subtext before shifting to choices."
+    ),
+}
+
+PACING_CHOICE_INSTRUCTIONS = {
+    "concise": (
+        "CHOICE DESCRIPTIONS: Keep `@@CHOICES` action labels crisp and snappy (8–14 words, "
+        "e.g. 'Pick the rusted study lock before the patrol returns')."
+    ),
+    "balanced": (
+        "CHOICE DESCRIPTIONS: Write clear, descriptive narrative action choices (15–22 words, "
+        "e.g. 'Counter-rotate the eastern ring using your arcane focus while ordering your ally to hold the doorway')."
+    ),
+    "novelistic": (
+        "CHOICE DESCRIPTIONS: Write detailed, evocative narrative action choices (18–25 words, "
+        "e.g. 'Trace the scorched sigil along the eastern doorframe to test its lingering ward while signaling your companion to watch the stairs')."
     ),
 }
 
@@ -219,11 +330,10 @@ DIALOGUE_INSTRUCTIONS = {
     "balanced": (
         "Balanced storytelling: blend descriptive prose with genuine two-way spoken dialogue. "
         "When the player character interacts with or speaks to an NPC, you MUST write BOTH characters speaking aloud in quotes. "
-        "The player character's spoken action MUST appear as a direct quoted line (e.g. Character: \"...\"), "
+        "The player character's spoken action MUST appear as a direct quoted line, "
         "followed by the NPC's spoken reply, creating a true back-and-forth exchange of at least 2-3 spoken turns. "
         "STRICTLY FORBIDDEN: Do NOT write one-sided NPC monologues where only the NPC gets a spoken quote. "
-        "Do NOT summarize the player character's words purely in third-person prose while voicing only the NPC. "
-        "Both sides of the conversation must be written as direct spoken dialogue."
+        "Do NOT summarize the player character's words purely in third-person prose while voicing only the NPC."
     ),
     "adaptive": (
         "Contextually adaptive dialogue. Dynamically shift dialogue format based on the current scene: "
@@ -236,14 +346,19 @@ DIALOGUE_INSTRUCTIONS = {
         "one-sided monologue. In combat, do NOT write long theatrical dialogue speeches — keep combat barks short and urgent."
     ),
     "rich": (
-        "Dialogue-PRIMARY storytelling with cinematic stage directions. "
-        "The scene MUST be driven primarily through direct spoken two-way dialogue between the player character and NPCs, "
-        "formatted on distinct lines as **Name** *(physical action, micro-expression, or vocal tone)*: \"Quote\". "
-        "Write at least 3-5 back-and-forth character dialogue exchanges between the player character and present NPCs. "
-        "If the character is alone or acting solo, deliver their thoughts as spoken inner monologues or self-talk. "
-        "Keep narrative prose extremely concise, focusing strictly on plot-relevant physical actions and immediate atmosphere. "
-        "STRICTLY FORBIDDEN: Do NOT bury the dialogue under walls of narrative prose. "
-        "Do NOT write fewer than 3 back-and-forth spoken exchanges when NPCs are present."
+        "Dialogue-heavy NOVEL storytelling. Drive the scene primarily through expressive, natural two-way spoken banter "
+        "between the player character and present NPCs woven smoothly into prose paragraphs with vocal tone and micro-expressions. "
+        "Write at least 3-5 back-and-forth character dialogue exchanges when NPCs are present (or spoken inner monologues when alone). "
+        "STRICTLY FORBIDDEN: Do NOT use stage-play script prefixes like `**Name** *(action)*: \"Quote\"`; write flowing novel-style dialogue woven naturally into paragraphs. "
+        "Do NOT bury dialogue under walls of exposition."
+    ),
+    "script": (
+        "Dialogue-PRIMARY STAGE SCRIPT storytelling with cinematic stage directions. "
+        "Drive the scene primarily through direct spoken two-way dialogue formatted on distinct lines as "
+        "**Name** *(physical action, micro-expression, or vocal tone)*: \"Quote\". "
+        "Write at least 3-5 back-and-forth character dialogue exchanges between the player character and present NPCs "
+        "(or spoken inner monologues if acting solo), keeping connecting narrative prose ultra-brief. "
+        "STRICTLY FORBIDDEN: Do NOT bury dialogue under walls of narrative prose or omit the `**Name** *(action)*:` line formatting."
     ),
     "default": (
         "Balanced storytelling: blend descriptive prose with genuine two-way spoken dialogue. "
@@ -261,7 +376,29 @@ DIALOGUE_INSTRUCTIONS = {
 }
 
 CHOICES_STYLE_INSTRUCTIONS = {
-    "dropdown": "CHOICE DESCRIPTIONS: Write detailed, descriptive narrative action choices (15-25 words / 100-180 characters, e.g. 'Counter-rotate the eastern ring using your magical resonance while ordering Glorfindel to hold the perimeter'). Do NOT artificially restrict choices to short phrases.",
+    "dropdown": PACING_CHOICE_INSTRUCTIONS["balanced"],
+}
+
+OPENING_PACING_INSTRUCTIONS = {
+    "concise": (
+        "PACING — CONCISE (Snappy Opening): "
+        "Output 1–2 short, punchy paragraphs in `narrative` (2–3 sentences each). "
+        "Establish the immediate opening situation directly without extended padding."
+    ),
+    "balanced": (
+        "PACING — BALANCED (Standard RPG Opening): "
+        "Output 2–3 well-paced paragraphs in `narrative` setting up the scene, immediate hooks, and present NPCs."
+    ),
+    "novelistic": (
+        "PACING — NOVELISTIC (Slow-Burn Opening): "
+        "Output 3–4 rich, atmospheric paragraphs in `narrative` lingering on sensory texture, mood, and scene staging."
+    ),
+}
+
+OPENING_CHOICE_INSTRUCTIONS = {
+    "concise": "CHOICE DESCRIPTIONS: Keep `choices[].label` crisp and snappy (6–10 words max).",
+    "balanced": "CHOICE DESCRIPTIONS: Write clear opening action labels in `choices[].label` (8–14 words).",
+    "novelistic": "CHOICE DESCRIPTIONS: Write evocative opening action labels in `choices[].label` (10–18 words).",
 }
 
 

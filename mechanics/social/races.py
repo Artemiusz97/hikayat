@@ -236,46 +236,48 @@ def normalize_race(raw_race: str, scen_key: str = "fantasy", seed: str = "") -> 
     if clean in ("kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox"):
         return "kitsune:myobu_fox"
 
-    # 1. Slice of Life / High School Drama: Strictly human only (except Furry variants)
-    if has_tag(scen_key, "high_school") or has_tag(scen_key, "high_school_drama"):
-        if has_tag(scen_key, "furry"):
-            hb = resolve_half_beast(clean, seed=seed)
-            if hb:
-                return hb
-            fam_sub = resolve_animal_family_species(clean, seed=seed)
-            if fam_sub:
-                return f"beastfolk:{fam_sub}"
-            if clean in BEASTFOLK_ALIASES:
-                return BEASTFOLK_ALIASES[clean]
-            for key, norm in sorted(BEASTFOLK_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
-                if key in clean:
-                    return norm
-            if clean.startswith("beastfolk") or clean.startswith("beast") or clean in ("anthro", "furry"):
-                for fam_key in ANIMAL_FAMILY_SUBSPECIES:
-                    if fam_key in clean:
-                        sub = resolve_animal_family_species(fam_key, seed=seed)
-                        return f"beastfolk:{sub}"
-                if seed:
-                    sub = resolve_generic_beastfolk_species(seed=seed)
+    # 1. Furry scenarios (High School or Anomalous Incursions): Weighted Beastfolk / Half-Beast / Human
+    if has_tag(scen_key, "furry"):
+        hb = resolve_half_beast(clean, seed=seed)
+        if hb:
+            return hb
+        fam_sub = resolve_animal_family_species(clean, seed=seed)
+        if fam_sub:
+            return f"beastfolk:{fam_sub}"
+        if clean in BEASTFOLK_ALIASES:
+            return BEASTFOLK_ALIASES[clean]
+        for key, norm in sorted(BEASTFOLK_ALIASES.items(), key=lambda x: len(x[0]), reverse=True):
+            if key in clean:
+                return norm
+        if clean.startswith("beastfolk") or clean.startswith("beast") or clean in ("anthro", "furry"):
+            for fam_key in ANIMAL_FAMILY_SUBSPECIES:
+                if fam_key in clean:
+                    sub = resolve_animal_family_species(fam_key, seed=seed)
                     return f"beastfolk:{sub}"
-                return clean.replace(" ", "_")
-            if clean and clean not in ("human", "default"):
-                # Check general family in clean
-                for fam_key in ANIMAL_FAMILY_SUBSPECIES:
-                    if fam_key in clean:
-                        sub = resolve_animal_family_species(fam_key, seed=seed)
-                        return f"beastfolk:{sub}"
-            # Code-enforced probability roll (80% Beastfolk [Cat 25%, Fox 22.5%, Wolf 22.5%, Minor 10%], 20% Human)
-            if not clean:
-                if seed:
-                    return random.Random(str(seed)).choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
-                return random.choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
-            if clean == "human":
-                return "human"
+            if seed:
+                sub = resolve_generic_beastfolk_species(seed=seed)
+                return f"beastfolk:{sub}"
+            return clean.replace(" ", "_")
+        if clean and clean not in ("human", "default"):
+            # Check general family in clean
+            for fam_key in ANIMAL_FAMILY_SUBSPECIES:
+                if fam_key in clean:
+                    sub = resolve_animal_family_species(fam_key, seed=seed)
+                    return f"beastfolk:{sub}"
+        # Code-enforced probability roll (65% Beastfolk, 30% Half-Beast, 5% Human)
+        if not clean:
             if seed:
                 return random.Random(str(seed)).choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
             return random.choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
-        elif clean and (clean in BEASTFOLK_ALIASES or resolve_half_beast(clean, seed=seed) or clean.startswith("beastfolk") or clean.startswith("half_beast") or clean in FANTASY_RACES):
+        if clean == "human":
+            return "human"
+        if seed:
+            return random.Random(str(seed)).choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
+        return random.choices(FURRY_HIGH_SCHOOL_RACES, weights=FURRY_HIGH_SCHOOL_WEIGHTS, k=1)[0]
+
+    # 2. Slice of Life / High School Drama (non-furry): Human baseline unless explicitly nonhuman
+    if has_tag(scen_key, "high_school") or has_tag(scen_key, "high_school_drama"):
+        if clean and (clean in BEASTFOLK_ALIASES or resolve_half_beast(clean, seed=seed) or clean.startswith("beastfolk") or clean.startswith("half_beast") or clean in FANTASY_RACES):
             hb = resolve_half_beast(clean, seed=seed)
             if hb:
                 return hb
@@ -363,6 +365,35 @@ def normalize_race(raw_race: str, scen_key: str = "fantasy", seed: str = "") -> 
 
     # Allow custom fantasy race (e.g. dryad, tiefling)
     return clean[:30]
+
+
+def roll_scenario_npc_race(scen_key: str = "fantasy", seed: str = "") -> str:
+    """Rolls a canonical scenario-appropriate default NPC race (deterministic when seed is provided)."""
+    from scenario_data import has_tag
+
+    if has_tag(scen_key, "furry"):
+        return normalize_race("", scen_key, seed=seed)
+    if (
+        has_tag(scen_key, "high_school")
+        or has_tag(scen_key, "high_school_drama")
+        or has_tag(scen_key, "modern")
+        or has_tag(scen_key, "urban_fantasy")
+        or has_tag(scen_key, "steampunk")
+    ):
+        return DEFAULT_RACE
+
+    rng = random.Random(str(seed)) if seed else random
+    if has_tag(scen_key, "space") or has_tag(scen_key, "sci_fi"):
+        return rng.choices(["human", "cyborg", "android", "alien:voidborn"], weights=[0.65, 0.15, 0.10, 0.10], k=1)[0]
+    if has_tag(scen_key, "cyberpunk"):
+        return rng.choices(["human", "cyborg", "android"], weights=[0.70, 0.25, 0.05], k=1)[0]
+    if has_tag(scen_key, "post_apocalypse"):
+        return rng.choices(["human", "mutant:ghoul", "cyborg", "mutant:psionic"], weights=[0.70, 0.15, 0.10, 0.05], k=1)[0]
+    return rng.choices(
+        ["human", "elf", "dwarf", "half_elf", "beastfolk:cat", "beastfolk:wolf"],
+        weights=[0.55, 0.15, 0.10, 0.10, 0.05, 0.05],
+        k=1,
+    )[0]
 
 
 def extract_race_from_text(text: str, scen_key: str = "fantasy", name: str = "") -> str | None:

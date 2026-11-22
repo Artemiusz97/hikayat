@@ -192,6 +192,7 @@ QUEST_UI_LABELS = {
     "shortcut_active": "Shortcut Active",
     "bypassed": "Bypassed",
     "quest_travel_to": "Travel to {dest}",
+    "quest_wrap_up_and_head_to": "Wrap up with {npc} and head to {dest}",
 }
 
 PACT_UI_LABELS = {
@@ -228,4 +229,13 @@ ANOMALOUS_SITE_UI_LABELS = {
     "milestone_22_reward": "Field Resonator Upgrade (4 Daily Charges)",
     "milestone_36_title": "Metropolitan Warden Commendation (36/36 Sites)",
     "milestone_36_reward": "+30 Rep, 5 Daily Charges & Warden's Aether Chronometer Relic"
+}
+
+CROWD_DENSITY_LABELS = {
+    "quiet": "Quiet",
+    "moderate": "Moderate",
+    "bustling": "Bustling",
+    "packed": "Packed",
+    "crowd_label": "Crowd",
+    "nearby_bystanders": "Nearby Bystanders"
 }

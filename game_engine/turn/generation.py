@@ -8,7 +8,9 @@ import scenario_data
 from mechanics.world.locations import *
 from mechanics.social.persona import *
 from mechanics.narrative.intent import *
-from game_engine.core import SYSTEM_PROMPT, SCENE_SCHEMA, VALID_STATS, is_nsfw_scenario
+from game_engine.core import SYSTEM_PROMPT, VALID_STATS, is_nsfw_scenario
+from game_engine.schemas import CLASSIFY_SCHEMA
+from config import LLM_PASS1_TIMEOUT
 import namegen
 import random
 import logging
@@ -19,146 +21,132 @@ import asyncio
 from game_engine.turn_context import TurnContext
 from models.llm_schemas import TurnOutcome, ActionClassification, OpeningScene
 
-def get_narrative_requirements(verbosity: str, dialogue_mode: str) -> str:
+def get_narrative_requirements(
+    verbosity: str,
+    dialogue_mode: str,
+    narrative_pacing: Optional[str] = None,
+    *,
+    kind: str = "turn",
+) -> str:
+    """Generate dynamic NARRATIVE REQUIREMENTS text from Narrative Style, Pacing, and Dialogue Style."""
+    from game_engine.prompts import (
+        CANON_PERSISTENCE_SHIELD,
+        OPENING_CHOICE_INSTRUCTIONS,
+        PACING_CHOICE_INSTRUCTIONS,
+        resolve_style_and_pacing,
+    )
 
-    """Generate dynamic NARRATIVE REQUIREMENTS text based on the session's verbosity setting.
+    style, pacing, d = resolve_style_and_pacing(
+        verbosity=verbosity,
+        narrative_pacing=narrative_pacing,
+        dialogue_mode=dialogue_mode,
+    )
 
-    This enforces paragraph quotas and vocabulary tone matching the player's active STYLE preference.
-
-    """
-
-    _outcome_reqs = {
-
+    _outcome_pacing = {
         "concise": (
-
-            "`outcome_narrative`: Exactly 1 punchy paragraph (2-3 sentences max). "
-
-            "STRICTLY FORBIDDEN: Do NOT write multiple paragraphs, purple prose, or filler."
-
+            "`outcome_narrative`: Exactly 1 punchy paragraph (2-3 sentences max) covering only the immediate result. "
+            "STRICTLY FORBIDDEN: Do NOT write multiple paragraphs or pad with extra filler."
         ),
-
-        "direct": (
-
-            "`outcome_narrative`: 1-2 tight paragraphs. Momentum-driven, concrete action and consequences only. "
-
-            "STRICTLY FORBIDDEN: Do NOT use flowery metaphors, novelistic padding, or archaic vocabulary."
-
+        "balanced": (
+            "`outcome_narrative`: 1-2 balanced paragraphs executing the player's new action and immediate consequence."
         ),
-
-        "normal": (
-
-            "`outcome_narrative`: 1-2 clear paragraphs using contemporary modern language. "
-
-            "STRICTLY FORBIDDEN: Do NOT use purple prose, archaic words, or overwrought sensory descriptions."
-
+        "novelistic": (
+            "`outcome_narrative`: 2-3 unhurried paragraphs unfolding the action beat-by-beat with tactile detail."
         ),
-
-        "vivid": (
-
-            "`outcome_narrative`: 1-2 rich, atmospheric paragraphs with sensory detail and evocative prose. "
-
-            "STRICTLY FORBIDDEN: Do NOT write flat, dry, or rushed summaries."
-
-        ),
-
-        "shakespearean": (
-
-            "`outcome_narrative`: 1-2 paragraphs in theatrical Elizabethan English with archaic vocabulary and dramatic cadence. "
-
-            "STRICTLY FORBIDDEN: Do NOT use modern colloquialisms or casual phrasing."
-
-        ),
-
     }
 
-    _next_reqs = {
-
+    _next_pacing = {
         "concise": (
-
             "`next_narrative`: Exactly 1 compact paragraph (2-3 sentences max) covering the scene's next state. "
-
-            "STRICTLY FORBIDDEN: Do NOT pad with atmospheric filler, extended description, or purple prose."
-
+            "STRICTLY FORBIDDEN: Do NOT write multiple paragraphs or extended scene-painting."
         ),
-
-        "direct": (
-
-            "`next_narrative`: Exactly 2 direct paragraphs. Cover immediate scene aftermath and tension without filler. "
-
-            "STRICTLY FORBIDDEN: Do NOT write philosophical ramblings or extended atmospheric scene-painting."
-
+        "balanced": (
+            "`next_narrative`: 2-3 well-paced paragraphs covering scene aftermath, atmosphere, and immediate tension."
         ),
+        "novelistic": (
+            "`next_narrative`: 3-4 immersive slow-burn paragraphs lingering on mood, character subtext, and scene evolution."
+        ),
+    }
 
+    _opening_pacing = {
+        "concise": "`narrative`: 1-2 short, punchy paragraphs (2-3 sentences each) setting the immediate opening scene.",
+        "balanced": "`narrative`: 2-3 balanced paragraphs setting up the opening scene, immediate hooks, and present NPCs.",
+        "novelistic": "`narrative`: 3-4 rich, slow-burn paragraphs immersing the player in opening atmosphere and detail.",
+    }
+
+    _style_voice = {
         "normal": (
-
-            "`next_narrative`: 2-3 clear paragraphs using contemporary modern language with balanced pacing. "
-
-            "STRICTLY FORBIDDEN: Do NOT use purple prose, melodramatic tropes, or ornate decorative language."
-
+            "VOICE (Standard): Clear contemporary modern English with accessible vocabulary. "
+            "STRICTLY FORBIDDEN: Do NOT use purple prose, archaic words, or internet meme slang."
         ),
-
         "vivid": (
-
-            "`next_narrative`: 2-3 rich, immersive paragraphs with sensory atmosphere and evocative detail. "
-
-            "STRICTLY FORBIDDEN: Do NOT write flat, mechanical, or rushed summaries."
-
+            "VOICE (Vivid): Rich, atmospheric sensory RPG prose with evocative detail and novel-quality texture. "
+            "STRICTLY FORBIDDEN: Do NOT write flat, dry, or rushed summaries."
         ),
-
+        "noir": (
+            "VOICE (Noir): Hardboiled detective pulp—cynical staccato metaphors, shadow-and-rain atmosphere, and dry narrator edge "
+            "in prose, `@@TITLE`, and `@@CHOICES`. Keep NPC spoken quotes grounded in each NPC's own canonical persona. "
+            "STRICTLY FORBIDDEN: Do NOT use meme slang or breathless high-fantasy optimism."
+        ),
+        "witty": (
+            "VOICE (Witty): Dry deadpan irony in the narrator's prose, `@@TITLE`, and `@@CHOICES` (Pratchett / BG3 narrator wit). "
+            "Keep NPC spoken quotes grounded in each NPC's own canonical personality. "
+            "STRICTLY FORBIDDEN: Do NOT use Gen-Z/internet meme slang or fourth-wall mechanical terms."
+        ),
         "shakespearean": (
-
-            "`next_narrative`: 2-3 paragraphs in theatrical Elizabethan English with archaic vocabulary, elaborate metaphors, and dramatic stage-play cadence. "
-
-            "STRICTLY FORBIDDEN: Do NOT use modern slang or casual contemporary phrasing."
-
+            "VOICE (Shakespearean): Theatrical Elizabethan English (`thee`, `thou`, `dost`, `hath`, `wherefore`, dramatic cadence) "
+            "across prose, `@@TITLE`, `@@CHOICES`, AND spoken character dialogue. "
+            "STRICTLY FORBIDDEN: Do NOT use modern slang or flat casual phrasing."
         ),
-
+        "brainrot": (
+            "VOICE (Brainrot): Playable comedic Gen-Z/Gen-Alpha slang & meme energy (`cooked`, `locked in`, `aura`, `rizz`, "
+            "`crashout`, `glazing`, `no cap`, `fr`, `mogging`, `delulu`, `skibidi`, `Ohio`, `sigma`, `GOAT`) across prose, "
+            "`@@TITLE`, `@@CHOICES`, AND spoken quotes (flavored by each NPC's personality). Keep actions clear and followable; "
+            "rotate ~2-4 fresh slang beats per paragraph. STRICTLY FORBIDDEN: Unreadable word-salad spam, repeating one slang word "
+            "every sentence, numeric HP/MP/DC leaks, or altering canonical character/location names."
+        ),
     }
 
     _dialogue_reqs = {
-
         "off": "Do NOT include any spoken dialogue or quotation marks in any narrative field.",
-
         "minimal": "Include at most 1-2 short spoken quotes total across both narrative fields. STRICTLY FORBIDDEN: No extended exchanges.",
-
         "balanced": (
-
             "When the player character interacts with or speaks to an NPC, write BOTH characters speaking aloud in direct quotes — "
-
             "at least 2-3 back-and-forth spoken turns. STRICTLY FORBIDDEN: Do NOT write only the NPC's quote while summarizing the player character's words in third-person."
-
         ),
-
         "adaptive": (
-
             "In social/investigation/romance contexts: write at least 2-3 back-and-forth spoken turns between BOTH the player character and NPC. "
-
             "In combat contexts: short tactical callouts only. STRICTLY FORBIDDEN: In social scenes, do NOT reduce conversation to a single NPC quote."
-
         ),
-
         "rich": (
-
-            "Drive narrative primarily through direct two-way spoken dialogue. Write at least 3-5 back-and-forth exchanges between the player character and NPCs, "
-
-            "formatted as **Name** *(action)*: \"Quote\". STRICTLY FORBIDDEN: Do NOT bury dialogue under walls of prose."
-
+            "Drive narrative primarily through natural, expressive two-way spoken banter woven smoothly into novel prose — "
+            "at least 3-5 back-and-forth quoted exchanges between the player character and NPCs. "
+            "STRICTLY FORBIDDEN: Do NOT use stage-play `**Name** *(action)*:` prefixes and do NOT bury dialogue under walls of exposition."
         ),
-
+        "script": (
+            "Drive narrative primarily through stage-play dialogue formatted on distinct lines as **Name** *(action)*: \"Quote\" — "
+            "at least 3-5 back-and-forth exchanges between the player character and NPCs. STRICTLY FORBIDDEN: Do NOT bury dialogue under walls of prose."
+        ),
     }
 
-    v = verbosity if verbosity in _outcome_reqs else "vivid"
-
-    d = dialogue_mode if dialogue_mode in _dialogue_reqs else "balanced"
+    voice_line = _style_voice[style]
+    if kind == "opening":
+        voice_line = voice_line.replace("`@@TITLE`", "`scene_title`").replace("`@@CHOICES`", "`choices[].label`")
+        return (
+            f"- {_opening_pacing[pacing]}\n"
+            f"- {voice_line}\n"
+            f"- DIALOGUE RULE: {_dialogue_reqs[d]}\n"
+            f"- {OPENING_CHOICE_INSTRUCTIONS[pacing]}\n"
+            f"- CANON PERSISTENCE SHIELD: Keep `new_entities.description`, `campaign_end_goals`, and 3-tier `location` paths strictly in clean grounded canon prose."
+        )
 
     return (
-
-        f"- {_outcome_reqs[v]}\n"
-
-        f"- {_next_reqs[v]}\n"
-
-        f"- DIALOGUE RULE: {_dialogue_reqs[d]}"
-
+        f"- {_outcome_pacing[pacing]}\n"
+        f"- {_next_pacing[pacing]}\n"
+        f"- {voice_line}\n"
+        f"- DIALOGUE RULE: {_dialogue_reqs[d]}\n"
+        f"- {PACING_CHOICE_INSTRUCTIONS[pacing]}\n"
+        f"- {CANON_PERSISTENCE_SHIELD}"
     )
 
 async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
@@ -216,7 +204,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     # Only check if one already exists (e.g. session resumed mid-adventure)
 
     ctx = TurnContext(session.get("id"), session)
-    existing_sq = ctx.story_quest
+    existing_sq = await adb(lambda: ctx.story_quest)
 
     if existing_sq:
 
@@ -253,14 +241,9 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
 
 
     import game_engine.prompt_layout as prompt_layout
-    from mechanics.combat import is_in_combat, get_combat_prompt_and_schema
-    
+    from mechanics.combat import is_in_combat
+
     mode = "combat" if is_in_combat(session) else "narrative"
-    if mode == "combat":
-        _, combat_schema = get_combat_prompt_and_schema(session, party)
-        schema_to_use = json.dumps(combat_schema)
-    else:
-        schema_to_use = SCENE_SCHEMA
 
 
 
@@ -269,130 +252,184 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     from mechanics.system.time_engine import format_llm_time_context
     from mechanics.world.schedules import get_time_block_key
 
-    curr_day, curr_min, _ = db.get_session_time(session["id"])
+    def _prepare_opening_scene_db_bundle(
+        init_suggested_loc: str,
+    ) -> tuple[int, int, str, str]:
+        with db.UnitOfWork():
+            cur_d, cur_m, _ = db.get_session_time(session["id"])
+            sug_loc = init_suggested_loc
 
-    hook_start_min = hook_context.get("starting_minute")
-    if hook_start_min is not None and curr_day == 1 and not session.get("history"):
-        curr_min = int(hook_start_min)
-        session["current_minute"] = curr_min
-        new_slot = get_time_block_key(curr_min)
-        session["time_slot"] = new_slot
-        try:
-            db.update_session_time(session["id"], curr_day, curr_min, 0)
-        except Exception:
-            pass
+            hook_start_min = hook_context.get("starting_minute")
+            if hook_start_min is not None and cur_d == 1 and not session.get("history"):
+                cur_m = int(hook_start_min)
+                session["current_minute"] = cur_m
+                new_slot = get_time_block_key(cur_m)
+                session["time_slot"] = new_slot
+                try:
+                    db.update_session_time(session["id"], cur_d, cur_m, 0)
+                except Exception:
+                    pass
 
-    # D21: Seed spatial world_nodes and lock starting current_node_id & canonical location BEFORE spawning roles or calling Turn 0 LLM
-    locked_opening_node_id = ""
-    if session.get("id") and is_location_engine_enabled(scen_key):
-        try:
-            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
-            from mechanics.world.locations.pathfinding import format_node_hierarchy
-            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
-            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
-                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
-            pre_node_id = session.get("current_node_id") or ""
-            if not pre_node_id and suggested_loc:
-                pre_node_id = db.resolve_node_id_from_location(session["id"], suggested_loc) or ""
-            if not pre_node_id:
-                all_wn = db.get_session_world_nodes(session["id"]) or []
-                for wn in all_wn:
-                    if str(wn.get("tier") or "").upper() in ("ROOM", "FACILITY"):
-                        pre_node_id = str(wn["node_id"])
-                        break
-                if not pre_node_id and all_wn:
-                    pre_node_id = str(all_wn[0]["node_id"])
-            if pre_node_id:
-                locked_opening_node_id = pre_node_id
-                canon_loc = format_node_hierarchy(session["id"], pre_node_id) or suggested_loc
-                if canon_loc:
-                    suggested_loc = canon_loc
-                    session["current_location"] = canon_loc
-                session["current_node_id"] = pre_node_id
-                db.update_session(session["id"], current_node_id=pre_node_id, current_location=session.get("current_location") or suggested_loc)
-        except Exception as e:
-            log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
+            # D21: Seed spatial world_nodes and lock starting current_node_id & canonical location BEFORE spawning roles or calling Turn 0 LLM
+            locked_nid = ""
+            if session.get("id") and is_location_engine_enabled(scen_key):
+                try:
+                    from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+                    from mechanics.world.locations.pathfinding import format_node_hierarchy
+                    ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+                    if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                        db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
+                    pre_node_id = session.get("current_node_id") or ""
+                    if not pre_node_id and sug_loc:
+                        pre_node_id = db.resolve_node_id_from_location(session["id"], sug_loc) or ""
+                    if not pre_node_id:
+                        all_wn = db.get_session_world_nodes(session["id"]) or []
+                        for wn in all_wn:
+                            if str(wn.get("tier") or "").upper() in ("ROOM", "FACILITY"):
+                                pre_node_id = str(wn["node_id"])
+                                break
+                        if not pre_node_id and all_wn:
+                            pre_node_id = str(all_wn[0]["node_id"])
+                    if pre_node_id:
+                        locked_nid = pre_node_id
+                        canon_loc = format_node_hierarchy(session["id"], pre_node_id) or sug_loc
+                        if canon_loc:
+                            sug_loc = canon_loc
+                            session["current_location"] = canon_loc
+                        session["current_node_id"] = pre_node_id
+                        db.update_session(session["id"], current_node_id=pre_node_id, current_location=session.get("current_location") or sug_loc)
+                except Exception as e:
+                    log.warning("Pre-LLM spatial graph seed warning in generate_opening_scene: %s", e)
 
-    # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
-    hook_focal_point = hook_context.get("focal_point", "")
-    if hook_focal_point:
-        session["focal_point"] = hook_focal_point
-        try:
-            db.update_session(session["id"], focal_point=hook_focal_point)
-        except Exception as e:
-            log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
+            # Zero-LLM Stage 0 world population seed for Anomalous / High School scenarios
+            if session.get("id"):
+                try:
+                    from mechanics.social.population_seeder import ensure_world_population_seeded, is_population_seeding_supported
+                    if is_population_seeding_supported(scen_key):
+                        ensure_world_population_seeded(int(session["id"]), scen_key, session=session, turn_number=0)
+                except Exception as e:
+                    log.warning("World population seed warning in generate_opening_scene: %s", e)
 
-    scheduled_roles = hook_context.get("scheduled_roles", [])
-    if scheduled_roles:
-        try:
-            from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
-            from mechanics.social.persona.actor_card import derive_initial_micro_blocking
-            curr_npcs = list(session.get("current_npcs") or [])
-            curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
-            for role_title in scheduled_roles:
-                if role_title:
-                    spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, suggested_loc or "")
-                    if spawned and spawned.get("name"):
-                        sp_name = spawned["name"]
-                        if sp_name.lower() not in curr_npc_names:
-                            micro = derive_initial_micro_blocking(
-                                spawned,
-                                current_location=suggested_loc or "",
-                                time_slot=session.get("time_slot", "morning"),
-                                stage_role="room_bystander"
+            # Modernized starting hook integrations: focal point, scheduled roles, physical state, starting prop, visual cues
+            hf_point = hook_context.get("focal_point", "")
+            if hf_point:
+                session["focal_point"] = hf_point
+                try:
+                    db.update_session(session["id"], focal_point=hf_point)
+                except Exception as e:
+                    log.warning("Failed updating focal_point in generate_opening_scene: %s", e)
+
+            sched_roles = hook_context.get("scheduled_roles", [])
+            if sched_roles:
+                try:
+                    from game_engine.npcs.stage_manager import _spawn_canonical_role_npc_pre_turn
+                    from mechanics.social.persona.actor_card import derive_initial_micro_blocking
+                    curr_npcs = list(session.get("current_npcs") or [])
+                    curr_npc_names = {game_engine._get_npc_name(n).lower() for n in curr_npcs if n}
+                    for role_title in sched_roles:
+                        if role_title:
+                            spawned = _spawn_canonical_role_npc_pre_turn(session, role_title, sug_loc or "")
+                            if spawned and spawned.get("name"):
+                                sp_name = spawned["name"]
+                                if sp_name.lower() not in curr_npc_names:
+                                    micro = derive_initial_micro_blocking(
+                                        spawned,
+                                        current_location=sug_loc or "",
+                                        time_slot=session.get("time_slot", "morning"),
+                                        stage_role="room_bystander"
+                                    )
+                                    spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
+                                    spawned["active_prop"] = micro.get("active_prop", "")
+                                    curr_npcs.append(spawned)
+                                    curr_npc_names.add(sp_name.lower())
+                    session["current_npcs"] = curr_npcs
+                    db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
+                except Exception as e:
+                    log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+
+            # Pre-stage living district/campus bystanders + crowd_state on Turn 0 for public non-crisis hooks
+            if session.get("id") and arch_key != "in_media_res":
+                try:
+                    from mechanics.social.population_seeder import is_population_seeding_supported
+                    from mechanics.world.presence_resolver import resolve_node_presence
+                    open_nid = str(session.get("current_node_id") or locked_nid or "").strip()
+                    if open_nid and is_population_seeding_supported(scen_key):
+                        open_loc = str(session.get("current_location") or sug_loc or "")
+                        pres_open = resolve_node_presence(
+                            int(session["id"]),
+                            open_nid,
+                            open_loc,
+                            current_day=cur_d,
+                            current_minute=cur_m,
+                            scen_key=scen_key,
+                            session=session,
+                            turn_number=0,
+                            persist_db=True,
+                        )
+                        if isinstance(pres_open, dict):
+                            if isinstance(pres_open.get("crowd_state"), dict):
+                                session["crowd_state"] = dict(pres_open["crowd_state"])
+                            open_npcs = list(session.get("current_npcs") or [])
+                            seen_open = {game_engine._get_npc_name(n).strip().lower() for n in open_npcs if n}
+                            for pn in (pres_open.get("present_npcs") or []):
+                                if isinstance(pn, dict) and pn.get("name") and pn["name"].strip().lower() not in seen_open:
+                                    open_npcs.append(dict(pn))
+                                    seen_open.add(pn["name"].strip().lower())
+                            session["current_npcs"] = open_npcs
+                            db.update_session(session["id"], current_npcs_json=json.dumps(open_npcs))
+                except Exception as e:
+                    log.warning("Opening bystander presence staging warning: %s", e)
+
+            init_p = hook_context.get("initial_physical_state") or {}
+            if init_p and session.get("id"):
+                try:
+                    from mechanics.social.physical_state import upsert_actor_physical_state
+                    for p_entry in party:
+                        p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
+                        if isinstance(p_char, dict) and p_char.get("name"):
+                            upsert_actor_physical_state(session["id"], p_char["name"], init_p)
+                except Exception as e:
+                    log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
+
+            st_prop = hook_context.get("starting_prop")
+            if st_prop and party:
+                lead_uid = None
+                first_elem = party[0]
+                if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
+                    lead_uid = first_elem[0].get("user_id")
+                elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
+                    lead_uid = first_elem[1]
+                elif isinstance(first_elem, dict):
+                    lead_uid = first_elem.get("user_id")
+                if lead_uid and isinstance(st_prop, dict) and st_prop.get("name"):
+                    try:
+                        already_granted = str(session.get("opening_starting_prop_name") or "").strip().lower() == str(st_prop["name"]).strip().lower()
+                        if not already_granted:
+                            db.add_item(
+                                user_id=lead_uid,
+                                name=st_prop["name"],
+                                item_type=st_prop.get("item_type", "tool"),
+                                effect=st_prop.get("effect", ""),
+                                force=True
                             )
-                            spawned["spot_and_posture"] = micro.get("spot_and_posture", "")
-                            spawned["active_prop"] = micro.get("active_prop", "")
-                            curr_npcs.append(spawned)
-                            curr_npc_names.add(sp_name.lower())
-            session["current_npcs"] = curr_npcs
-            db.update_session(session["id"], current_npcs_json=json.dumps(curr_npcs))
-        except Exception as e:
-            log.warning("Failed spawning scheduled_roles in generate_opening_scene: %s", e)
+                            session["opening_starting_prop_name"] = st_prop["name"]
+                            if session.get("id"):
+                                db.update_session(session["id"], extra={"opening_starting_prop_name": st_prop["name"]})
+                    except Exception as e:
+                        log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
+            return cur_d, cur_m, sug_loc, locked_nid
 
+    curr_day, curr_min, suggested_loc, locked_opening_node_id = await adb(
+        _prepare_opening_scene_db_bundle, suggested_loc
+    )
+    hook_focal_point = hook_context.get("focal_point", "")
     initial_phys = hook_context.get("initial_physical_state") or {}
-    if initial_phys and session.get("id"):
-        try:
-            from mechanics.social.physical_state import upsert_actor_physical_state
-            for p_entry in party:
-                p_char = p_entry[0] if isinstance(p_entry, (tuple, list)) else p_entry
-                if isinstance(p_char, dict) and p_char.get("name"):
-                    upsert_actor_physical_state(session["id"], p_char["name"], initial_phys)
-        except Exception as e:
-            log.warning("Failed applying initial_physical_state in generate_opening_scene: %s", e)
-
-    starting_prop = hook_context.get("starting_prop")
-    if starting_prop and party:
-        lead_uid = None
-        first_elem = party[0]
-        if isinstance(first_elem, (tuple, list)) and len(first_elem) >= 1 and isinstance(first_elem[0], dict):
-            lead_uid = first_elem[0].get("user_id")
-        elif isinstance(first_elem, (tuple, list)) and len(first_elem) >= 2 and isinstance(first_elem[1], int):
-            lead_uid = first_elem[1]
-        elif isinstance(first_elem, dict):
-            lead_uid = first_elem.get("user_id")
-        if lead_uid and isinstance(starting_prop, dict) and starting_prop.get("name"):
-            try:
-                already_granted = str(session.get("opening_starting_prop_name") or "").strip().lower() == str(starting_prop["name"]).strip().lower()
-                if not already_granted:
-                    db.add_item(
-                        user_id=lead_uid,
-                        name=starting_prop["name"],
-                        item_type=starting_prop.get("item_type", "tool"),
-                        effect=starting_prop.get("effect", ""),
-                        force=True
-                    )
-                    session["opening_starting_prop_name"] = starting_prop["name"]
-                    if session.get("id"):
-                        db.update_session(session["id"], extra={"opening_starting_prop_name": starting_prop["name"]})
-            except Exception as e:
-                log.warning("Failed adding starting_prop to inventory in generate_opening_scene: %s", e)
 
     visual_cues = hook_context.get("visual_cues", "")
     if visual_cues:
         session["opening_visual_cues"] = visual_cues
 
-    time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key)
+    time_prompt_block = format_llm_time_context(curr_day, curr_min, scen_key, session=session)
 
     phys_anchor = build_physical_prompt_block(session, party, is_combat=is_in_combat(session), is_nsfw=is_nsfw_scenario(scenario))
 
@@ -495,22 +532,27 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         f"{focal_line}"
         f"{visual_line}"
         f"{loc_anchor_line}"
-        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '')}\n\n"
+        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], suggested_loc or '', current_npcs=session.get('current_npcs'), include_canon=False, session=session)}\n\n"
         f"{time_prompt_block}\n"
         f"PHYSICAL CONTINUITY ANCHOR:\n{phys_anchor}\n\n"
         f"Begin adventure for {'party' if len(party) > 1 else 'character'}.\n\n"
         f"CHARACTER SHEET(S):\n{game_engine._party_sheet_text(party)}\n"
         f"{choice_directive}\n"
-        f"Respond with JSON matching the required schema structure:\n{schema_to_use}"
+        f"Respond with one valid JSON object matching the OUTPUT SCHEMA in the system prompt."
     )
     try:
-        result = await game_engine.call_llm_json(
-            system_prompt, user_prompt,
+        import llm_client
+        with llm_client.narration_sampling_context(
+            session,
             is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
-            response_model=OpeningScene,
-            required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]],
-            system_zones=(zone_0, zone_1, zone_1b),
-        )
+        ):
+            result = await game_engine.call_llm_json(
+                system_prompt, user_prompt,
+                is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
+                response_model=OpeningScene,
+                required_any_keys=[["narrative", "next_narrative", "outcome_narrative"]],
+                system_zones=(zone_0, zone_1, zone_1b),
+            )
     except Exception as llm_err:
         log.warning("Opening scene LLM generation failed (%s); engaging deterministic fallback.", llm_err)
         result = {}
@@ -536,28 +578,32 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
     res_deep = namegen.resolve_tokens_deep(result, scenario=scen_key)
 
     if isinstance(res_deep, dict) and session.get("id") and is_location_engine_enabled(scen_key):
+        def _post_llm_spatial_opening_bundle() -> None:
+            with db.UnitOfWork():
+                from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
+                from mechanics.world.locations.pathfinding import format_node_hierarchy
+                ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
+                if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
+                    db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
+                init_loc = res_deep.get("location") or suggested_loc or ""
+                init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
+                if not init_node_id and locked_opening_node_id:
+                    init_node_id = locked_opening_node_id
+                if init_node_id:
+                    canon_hier = format_node_hierarchy(session["id"], init_node_id)
+                    if canon_hier:
+                        res_deep["location"] = canon_hier
+                        session["current_location"] = canon_hier
+                    res_deep["current_node_id"] = init_node_id
+                    session["current_node_id"] = init_node_id
+                    db.update_session(
+                        session["id"],
+                        current_node_id=init_node_id,
+                        current_location=res_deep.get("location") or suggested_loc or "",
+                    )
+
         try:
-            from mechanics.world.locations.graph_seeder import ensure_session_spatial_graph_seeded
-            from mechanics.world.locations.pathfinding import format_node_hierarchy
-            ensure_session_spatial_graph_seeded(session["id"], scen_key, char_name=first_char_name)
-            if scenario_data.is_anomalous_incursions_scenario(scen_key) and not db.get_player_properties(session["id"]):
-                db.grant_or_relocate_starter_quarters(session["id"], anom_starting_fac or "public_agency")
-            init_loc = res_deep.get("location") or suggested_loc or ""
-            init_node_id = db.resolve_node_id_from_location(session["id"], init_loc) if init_loc else None
-            if not init_node_id and locked_opening_node_id:
-                init_node_id = locked_opening_node_id
-            if init_node_id:
-                canon_hier = format_node_hierarchy(session["id"], init_node_id)
-                if canon_hier:
-                    res_deep["location"] = canon_hier
-                    session["current_location"] = canon_hier
-                res_deep["current_node_id"] = init_node_id
-                session["current_node_id"] = init_node_id
-                db.update_session(
-                    session["id"],
-                    current_node_id=init_node_id,
-                    current_location=res_deep.get("location") or suggested_loc or "",
-                )
+            await adb(_post_llm_spatial_opening_bundle)
         except Exception as e:
             log.warning("Failed to seed/resolve initial current_node_id in generate_opening_scene: %s", e)
 
@@ -595,6 +641,8 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             res_deep["npcs_present"] = game_engine.process_scene_npcs(
                 res_deep, session, eff_loc, eff_loc, actions=[]
             )
+            if isinstance(session.get("crowd_state"), dict):
+                res_deep["crowd_state"] = dict(session["crowd_state"])
         except Exception as e:
             log.warning("process_scene_npcs failed for opening scene: %s", e)
 
@@ -607,21 +655,24 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
         except Exception as e:
             log.warning("dialogue partner extraction failed for opening scene: %s", e)
 
-        # D21: Persist initial deterministic cast_state on Turn 0
-        try:
-            from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
-            init_cast_st = get_cast_state(session)
-            save_cast_state(session, init_cast_st, persist_db=bool(session.get("id")))
-        except Exception as e:
-            log.warning("initial cast_state persistence failed for opening scene: %s", e)
+        def _post_llm_cast_and_phys_bundle() -> None:
+            with db.UnitOfWork():
+                try:
+                    from game_engine.npcs.cast_planner import get_cast_state, save_cast_state
+                    init_cast_st = get_cast_state(session)
+                    save_cast_state(session, init_cast_st, persist_db=bool(session.get("id")))
+                except Exception as e:
+                    log.warning("initial cast_state persistence failed for opening scene: %s", e)
 
-        init_default_physical_state(
-            session["id"],
-            party,
-            scen_key,
-            opening_scene=res_deep,
-            initial_actor_override=initial_phys if initial_phys else None,
-        )
+                init_default_physical_state(
+                    session["id"],
+                    party,
+                    scen_key,
+                    opening_scene=res_deep,
+                    initial_actor_override=initial_phys if initial_phys else None,
+                )
+
+        await adb(_post_llm_cast_and_phys_bundle)
 
         if hook_focal_point and not res_deep.get("focal_point"):
             res_deep["focal_point"] = hook_focal_point
@@ -657,8 +708,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 })
 
         if formatted_goals:
-
-            db.update_session_campaign_goals(session["id"], formatted_goals)
+            await adb(db.update_session_campaign_goals, session["id"], formatted_goals)
 
 
 
@@ -702,113 +752,101 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
                 )
             except Exception as _sq_err:
                 log.warning("generate_story_quest for Chapter 1 failed: %s. Using contextual generator.", _sq_err)
-                sq_data = game_engine.create_contextual_story_quest_data(
-                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
-                )
+                sq_data = None
 
-            if res_deep.get("story_quest_title") and sq_data:
-                sq_data["title"] = str(res_deep["story_quest_title"]).strip()
-            if res_deep.get("story_quest_objective") and sq_data:
-                sq_data["objective"] = str(res_deep["story_quest_objective"]).strip()
-                _sub_objs_sq = sq_data.get("sub_objectives") or []
-                if _sub_objs_sq and isinstance(_sub_objs_sq[0], dict) and (
-                    _sub_objs_sq[0].get("is_main") or _sub_objs_sq[0].get("id") == 0
-                ):
-                    _sub_objs_sq[0]["text"] = sq_data["objective"]
+            def _persist_opening_story_quest_bundle(generated_sq: Optional[dict]) -> None:
+                import uuid
+                with db.UnitOfWork():
+                    eff_sq = generated_sq
+                    if eff_sq is None:
+                        eff_sq = game_engine.create_contextual_story_quest_data(
+                            session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                        )
 
-            sq_title = sq_data.get("title") or "Story Quest #1: The Discovery"
+                    if res_deep.get("story_quest_title") and eff_sq:
+                        eff_sq["title"] = str(res_deep["story_quest_title"]).strip()
+                    if res_deep.get("story_quest_objective") and eff_sq:
+                        eff_sq["objective"] = str(res_deep["story_quest_objective"]).strip()
+                        _sub_objs_sq = eff_sq.get("sub_objectives") or []
+                        if _sub_objs_sq and isinstance(_sub_objs_sq[0], dict) and (
+                            _sub_objs_sq[0].get("is_main") or _sub_objs_sq[0].get("id") == 0
+                        ):
+                            _sub_objs_sq[0]["text"] = eff_sq["objective"]
 
-            sq_archetype = sq_data.get("archetype") or "Story Quest"
+                    sq_title = eff_sq.get("title") or "Story Quest #1: The Discovery"
+                    sq_archetype = eff_sq.get("archetype") or "Story Quest"
+                    sq_objective = eff_sq.get("objective") or "Explore the area, uncover local mysteries, and establish your footing."
+                    formatted_sub_objs = eff_sq.get("sub_objectives") or []
+                    sub_waypoints = eff_sq.get("sub_waypoints") or {}
 
-            sq_objective = sq_data.get("objective") or "Explore the area, uncover local mysteries, and establish your footing."
+                    sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+                    db.upsert_quest(
+                        session_id=session["id"],
+                        quest_id=sq_id,
+                        quest_type=sq_archetype,
+                        title=sq_title,
+                        objective=sq_objective,
+                        progress="Quest #1",
+                        current_clues="",
+                        status="Active",
+                        reward_xp=250,
+                        reward_gold=60,
+                        is_story_quest=1,
+                        clues_required=1,
+                        deadline_day=None,
+                        deadline_minute=None,
+                        dossier_stage="compiled",
+                        sub_objectives=formatted_sub_objs,
+                    )
 
-            formatted_sub_objs = sq_data.get("sub_objectives") or []
+                    for so in formatted_sub_objs:
+                        so_id = so["id"]
+                        wps = sub_waypoints.get(so_id) or []
+                        if wps:
+                            db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
 
-            sub_waypoints = sq_data.get("sub_waypoints") or {}
-
-
-
-            import uuid
-
-            sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-
-            db.upsert_quest(
-
-                session_id=session["id"],
-
-                quest_id=sq_id,
-
-                quest_type=sq_archetype,
-
-                title=sq_title,
-
-                objective=sq_objective,
-
-                progress="Quest #1",
-
-                current_clues="",
-
-                status="Active",
-
-                reward_xp=250,
-
-                reward_gold=60,
-
-                is_story_quest=1,
-
-                clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
-
-                sub_objectives=formatted_sub_objs
-
-            )
-
-
-
-            # Persist waypoints for each sub-objective
-
-            for so in formatted_sub_objs:
-
-                so_id = so["id"]
-
-                wps = sub_waypoints.get(so_id) or []
-
-                if wps:
-
-                    db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+            await adb(_persist_opening_story_quest_bundle, sq_data)
 
         except Exception as e:
-            import logging
-            logging.getLogger(__name__).warning("generate_story_quest for Chapter 1 failed: %s. Applying emergency contextual generator.", e)
-            try:
-                sq_data = game_engine.create_contextual_story_quest_data(
-                    session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
-                )
-                formatted_sub_objs = sq_data.get("sub_objectives") or []
-                sub_waypoints = sq_data.get("sub_waypoints") or {}
+            log.warning("generate_story_quest for Chapter 1 failed: %s. Applying emergency contextual generator.", e)
+
+            def _persist_emergency_story_quest_bundle() -> None:
                 import uuid
-                sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
-                db.upsert_quest(
-                    session_id=session["id"],
-                    quest_id=sq_id,
-                    quest_type=sq_data.get("archetype") or "Story Quest",
-                    title=sq_data.get("title") or "Story Quest #1: The Discovery",
-                    objective=sq_data.get("objective") or "Explore the area, uncover local mysteries, and establish your footing.",
-                    progress=f"0/{len(formatted_sub_objs)} Cleared" if formatted_sub_objs else "Quest #1",
-                    current_clues="",
-                    status="Active",
-                    reward_xp=250,
-                    reward_gold=60,
-                    is_story_quest=1,
-                    clues_required=1, deadline_day=None, deadline_minute=None, dossier_stage="compiled",
-                    sub_objectives=formatted_sub_objs
-                )
-                for so in formatted_sub_objs:
-                    so_id = so["id"]
-                    wps = sub_waypoints.get(so_id) or []
-                    if wps:
-                        db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+                with db.UnitOfWork():
+                    em_sq = game_engine.create_contextual_story_quest_data(
+                        session["id"], session, chapter_num=1, starting_hook_context=starting_hook_ctx
+                    )
+                    formatted_sub_objs = em_sq.get("sub_objectives") or []
+                    sub_waypoints = em_sq.get("sub_waypoints") or {}
+                    sq_id = f"SQ-{uuid.uuid4().hex[:8].upper()}"
+                    db.upsert_quest(
+                        session_id=session["id"],
+                        quest_id=sq_id,
+                        quest_type=em_sq.get("archetype") or "Story Quest",
+                        title=em_sq.get("title") or "Story Quest #1: The Discovery",
+                        objective=em_sq.get("objective") or "Explore the area, uncover local mysteries, and establish your footing.",
+                        progress=f"0/{len(formatted_sub_objs)} Cleared" if formatted_sub_objs else "Quest #1",
+                        current_clues="",
+                        status="Active",
+                        reward_xp=250,
+                        reward_gold=60,
+                        is_story_quest=1,
+                        clues_required=1,
+                        deadline_day=None,
+                        deadline_minute=None,
+                        dossier_stage="compiled",
+                        sub_objectives=formatted_sub_objs,
+                    )
+                    for so in formatted_sub_objs:
+                        so_id = so["id"]
+                        wps = sub_waypoints.get(so_id) or []
+                        if wps:
+                            db.save_quest_waypoints(session_id=session["id"], quest_id=sq_id, waypoints=wps, sub_obj_id=so_id)
+
+            try:
+                await adb(_persist_emergency_story_quest_bundle)
             except Exception as e2:
-                logging.getLogger(__name__).error("Failed to insert emergency contextual story quest: %s", e2)
+                log.error("Failed to insert emergency contextual story quest: %s", e2)
 
     try:
         await adb(
@@ -818,8 +856,7 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             str(session.get("narration_language") or session.get("language") or "en"),
         )
     except Exception as _spine_err:
-        import logging
-        logging.getLogger(__name__).warning("compile_campaign_spine_at_turn_zero failed (non-fatal): %s", _spine_err)
+        log.warning("compile_campaign_spine_at_turn_zero failed (non-fatal): %s", _spine_err)
 
     if isinstance(res_deep, dict):
 
@@ -854,17 +891,6 @@ async def generate_opening_scene(session: dict, party: list) -> OpeningScene:
             if code_choices:
                 res_deep["choices"] = code_choices
                 res_deep["next_choices"] = code_choices
-        else:
-            op_choices = res_deep.get("choices") or []
-            if not any("observe your surroundings" in str(c.get("label", "") if isinstance(c, dict) else c).lower() for c in op_choices):
-                op_choices.append({
-                    "label": "Observe your surroundings and inspect those present",
-                    "stat": "FREE",
-                    "requirement": 0,
-                    "mp_cost": 0
-                })
-                res_deep["choices"] = op_choices
-                res_deep["next_choices"] = op_choices
 
     return res_deep
 
@@ -994,20 +1020,33 @@ def _extract_deterministic_action_primitives(action_text: str, session: dict | N
     return primitives
 
 
+_FAST_GENERAL_ACTION_VERBS = frozenset({
+    "pry", "force", "push", "pull", "lift", "smash", "break", "kick", "climb", "jump",
+    "vault", "sprint", "dodge", "duck", "inspect", "examine", "read", "decipher",
+    "analyze", "study", "comfort", "reassure", "flirt", "greet", "thank", "hug", "wave", "nod",
+})
+_FAST_FREE_SOCIAL_VERBS = frozenset({"greet", "thank", "wave", "nod"})
+_FAST_LEAD_MODIFIERS = frozenset({"i", "carefully", "quickly", "gently", "quietly"})
+
+
 def _fast_path_classify_ambient_action(action_text: str, ctx: Any = None, parsed: Any = None, session: dict | None = None) -> dict | None:
     """
-    Fast-paths short (<= 11 words), single-clause, non-negated commands
+    Fast-paths unambiguous (<= 28 words), single-clause, non-negated commands
     with confidence >= 0.95 (ambient commands, direct dialogue, affection, stealth,
-    investigation, loot searches, social invites, and direct combat attacks).
+    intimacy, merchant/phone, investigation, loot searches, social invites, direct
+    combat attacks, and clear single-verb general actions).
     Returns structured action dict if eligible, or None if routing to LLM is required.
     """
     from mechanics.narrative.intent import classify_action_intent, IntentCategory
 
     words = action_text.strip().split()
     act_low = action_text.lower()
-    is_negated = any(w in words for w in ("not", "don't", "dont", "never", "stop", "refuse", "without", "hardly", "barely"))
+    words_low = [w.lower().strip(".,!?;:\"'") for w in words]
+    is_negated = any(w in words_low for w in ("not", "don't", "dont", "never", "stop", "refuse", "without", "hardly", "barely"))
     is_multi_clause = any(conj in act_low for conj in (" but ", " while ", " although ", " then ", " before ", " after ", " because ", ";"))
-    if len(words) > 11 or is_negated or is_multi_clause:
+    has_indirect_inquiry = any(tok in f" {act_low} " for tok in (" why ", " how ", " whether ", " if ", " what happened ", " explain "))
+    has_spell_cast = any(tok in f" {act_low} " for tok in (" cast ", " channel ", " invoke ", " spell "))
+    if len(words) > 28 or is_negated or is_multi_clause or has_indirect_inquiry or has_spell_cast:
         return None
 
     if parsed is None:
@@ -1175,7 +1214,138 @@ def _fast_path_classify_ambient_action(action_text: str, ctx: Any = None, parsed
             **primitives,
         }
 
+    # 10. Intimacy, Merchant Trade, and Smartphone actions
+    if parsed.category == IntentCategory.INTIMATE_ACT:
+        return {
+            "stat": "CHA",
+            "requirement": 7,
+            "mp_cost": 0,
+            "action_category": "intimate_act",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    if parsed.category in (IntentCategory.MERCHANT_TRADE, IntentCategory.PHONE_COMM):
+        return {
+            "stat": "NONE",
+            "requirement": 0,
+            "mp_cost": 0,
+            "action_category": parsed.category.value,
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    if parsed.category == IntentCategory.PHONE_CONTACT_EXCHANGE:
+        return {
+            "stat": "CHA",
+            "requirement": 7,
+            "mp_cost": 0,
+            "action_category": "phone_contact_exchange",
+            "fast_path": True,
+            "intent": parsed.category.value,
+            "sub_intent": parsed.sub_target or "",
+            "target_npc": parsed.target_entity or "",
+            **primitives,
+        }
+
+    # 11. Unambiguous single-verb GENERAL_ACTION (excluding memory recall queries)
+    if parsed.category == IntentCategory.GENERAL_ACTION and not primitives.get("is_memory_recall") and words_low:
+        lead_verb = words_low[0]
+        if lead_verb in _FAST_LEAD_MODIFIERS and len(words_low) >= 2:
+            lead_verb = words_low[1]
+        if lead_verb in _FAST_GENERAL_ACTION_VERBS:
+            from game_engine.choices_cleaner import infer_choice_stat_and_dc
+            stat_inf, dc_inf = infer_choice_stat_and_dc(action_text)
+            if lead_verb in _FAST_FREE_SOCIAL_VERBS and not (isinstance(session, dict) and session.get("nearby_enemies")):
+                stat_inf, dc_inf = ("NONE", 0)
+            elif str(stat_inf or "").upper().strip() in ("NONE", "FREE", ""):
+                stat_inf, dc_inf = ("PER", 6)
+            return {
+                "stat": str(stat_inf).upper(),
+                "requirement": int(dc_inf),
+                "mp_cost": 0,
+                "action_category": "general_action",
+                "fast_path": True,
+                "intent": parsed.category.value,
+                "sub_intent": parsed.sub_target or "",
+                "target_npc": parsed.target_entity or "",
+                **primitives,
+            }
+
     return None
+
+
+ACTION_CLASSIFIER_SYSTEM_RULES = f"""You classify a single custom player action in "Hikayat" into deterministic RPG check & intent metadata.
+- Attributes: STR (might/force), PER (observation/ranged), END (stamina/resilience), CHA (persuasion/presence), INT (lore/magic/deduction), AGI (reflexes/stealth), LUK (fortune), ITEM (using a carried item).
+- Set `requirement` between 2 (trivial) and 12 (heroic). Set `mp_cost` > 0 only when casting a learned spell.
+- Match `target_npc` to an exact name from Present NPCs / Dialogue Partner when applicable, or `""`.
+- If the action (in any language: en, pl, ms, zh, de) attempts one of the listed Local Open Quest Beats, set `targets_quest_id` to its exact `quest_id`, `targets_sub_obj_id` to its integer `sub_obj_id` (or `null`), and `quest_approach` to the governing stat; otherwise leave them empty/`null`.
+- Return ONLY one valid JSON object matching this exact schema (no markdown fences, no commentary):
+{CLASSIFY_SCHEMA}"""
+
+
+def _collect_local_quest_beats_for_classifier(
+    session_id: int,
+    curr_loc_val: str,
+    *,
+    session: Optional[dict] = None,
+    cur_npcs: Optional[List[str]] = None,
+) -> List[str]:
+    """Synchronously gathers up to 4 open local quest beats at the current venue/cast for custom-action binding."""
+    beats: List[str] = []
+    if not session_id:
+        return beats
+    try:
+        from mechanics.world.waypoints.matching import (
+            check_location_matches_waypoint,
+            get_matching_clue_sources_for_location,
+            is_waypoint_npc_present_in_scene,
+            resolve_effective_waypoint_location,
+            resolve_waypoint_target_npc,
+        )
+
+        cur_npc_lowers = {str(n).strip().lower() for n in (cur_npcs or []) if n and str(n).strip()}
+        for wp_it in (db.get_all_session_active_waypoints(session_id) or []):
+            if len(beats) >= 4:
+                break
+            wp_qid = str(wp_it.get("quest_id") or "").strip()
+            if not wp_qid:
+                continue
+            eff_loc = resolve_effective_waypoint_location(session_id, wp_it, session=session) or wp_it.get("target_location", "")
+            t_npc = resolve_waypoint_target_npc(session_id, wp_it) or wp_it.get("target_npc", "")
+            clue_info = get_matching_clue_sources_for_location(
+                session_id, wp_qid, wp_it.get("sub_obj_id"), curr_loc_val, waypoint=wp_it, include_bonus=False
+            )
+            open_hits = clue_info.get("matching_open_sources") or []
+            loc_hit = bool(eff_loc and curr_loc_val and check_location_matches_waypoint(curr_loc_val, eff_loc, session_id=session_id))
+            npc_hit = bool(t_npc and (t_npc.strip().lower() in cur_npc_lowers or is_waypoint_npc_present_in_scene(session_id, t_npc, session=session)))
+            if not (loc_hit or npc_hit or open_hits):
+                continue
+            so_val = wp_it.get("sub_obj_id")
+            so_disp = "null" if so_val is None else str(int(so_val))
+            src_snip = ""
+            if open_hits:
+                s_parts = []
+                for hs in open_hits[:2]:
+                    s_txt = str(hs.get("approach_hint") or hs.get("label") or "").strip()
+                    s_n = str(hs.get("npc_name") or "").strip()
+                    if s_txt or s_n:
+                        s_parts.append(f"{s_n + ': ' if s_n else ''}{s_txt}"[:80])
+                if s_parts:
+                    src_snip = f" | sources: {'; '.join(s_parts)}"
+            beat_lbl = str(wp_it.get("stage_label") or "").strip()[:100]
+            beats.append(
+                f"- quest_id={wp_qid}, sub_obj_id={so_disp}, stage={int(wp_it.get('stage_index') or 1)}, npc={t_npc or 'None'}: {beat_lbl}{src_snip}"
+            )
+    except Exception:
+        pass
+    return beats
 
 
 async def classify_custom_action(session: dict, char: dict, inventory: list, action_text: str) -> dict:
@@ -1205,29 +1375,87 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
 
     parsed = classify_action_intent(action_text, ctx)
 
-    fast_action = _fast_path_classify_ambient_action(action_text, ctx, parsed=parsed, session=session)
+    local_quest_beats: list[str] = []
+    sess_id_val = int(session.get("id") or 0) if isinstance(session, dict) else 0
+    curr_loc_val = str(session.get("current_location") or "").strip() if isinstance(session, dict) else ""
+    if sess_id_val:
+        local_quest_beats = await adb(
+            _collect_local_quest_beats_for_classifier,
+            sess_id_val,
+            curr_loc_val,
+            session=session,
+            cur_npcs=cur_npcs,
+        )
+
+    _FAST_PATH_EXEMPT_INTENTS = frozenset({
+        IntentCategory.DIALOGUE_EXIT,
+        IntentCategory.REST_SLEEP,
+        IntentCategory.MEDIA_CAPTURE,
+        IntentCategory.MERCHANT_TRADE,
+        IntentCategory.PHONE_COMM,
+        IntentCategory.PHONE_CONTACT_EXCHANGE,
+    })
+    skip_fast_path = bool(local_quest_beats and parsed.category not in _FAST_PATH_EXEMPT_INTENTS)
+    fast_action = None if skip_fast_path else _fast_path_classify_ambient_action(action_text, ctx, parsed=parsed, session=session)
     if fast_action is not None:
         return fast_action
 
     primitives = _extract_deterministic_action_primitives(action_text, session=session, parsed=parsed)
 
-    # Route all nuanced, conversational, social, or multi-clause custom actions to utility LLM
+    # Compact <250-token micro-context for nuanced custom action classification
+    enemies_compact = ", ".join(
+        nm for nm in (game_engine._get_npc_name(e) for e in (session.get("nearby_enemies") or [])) if nm
+    ) or "None"
+    c_dict = char if isinstance(char, dict) else {}
+    stats_compact = (
+        f"STR {c_dict.get('str_', 5)} PER {c_dict.get('per_', c_dict.get('per', 5))} "
+        f"END {c_dict.get('end_', c_dict.get('end', 5))} CHA {c_dict.get('cha', 5)} "
+        f"INT {c_dict.get('int_', 5)} AGI {c_dict.get('agi', 5)} LUK {c_dict.get('luk', 5)} "
+        f"MP {c_dict.get('mp', 0)}/{c_dict.get('max_mp', 0)}"
+    )
+    raw_spells = c_dict.get("spells") or c_dict.get("learned_spells") or []
+    spells_compact = ", ".join(
+        f"{sp.get('name')} ({sp.get('mp_cost', 0)} MP)" if isinstance(sp, dict) and sp.get("name") else str(sp)
+        for sp in list(raw_spells)[:8]
+        if sp
+    ) or "None"
+    hist_list = session.get("history") or []
+    last_turn_snip = ""
+    if hist_list:
+        last_h = hist_list[-1]
+        if isinstance(last_h, dict):
+            raw_sn = str(last_h.get("next_narrative") or last_h.get("narrative") or last_h.get("outcome_narrative") or "").strip()
+        else:
+            raw_sn = str(last_h).strip()
+        if raw_sn:
+            last_turn_snip = re.sub(r"\s+", " ", raw_sn)[:220]
+
+    local_beats_block = (
+        "Local Open Quest Beats:\n" + "\n".join(local_quest_beats) + "\n\n"
+        if local_quest_beats
+        else ""
+    )
     user_prompt = (
-        f"KNOWN WORLD:\n{game_engine._known_world_text(session['id'], session.get('current_location', ''), current_npcs=session.get('current_npcs', []))}\n\n"
-        f"CHARACTER SHEET:\n{game_engine._character_sheet_text(char, inventory)}\n\n"
-        f"RECENT HISTORY:\n{game_engine._history_text(session.get('history', []), session_id=session.get('id'))}\n\n"
+        f"Location: {session.get('current_location', 'Unknown')}\n"
+        f"Present NPCs: {', '.join(cur_npcs[:8]) or 'None'}\n"
+        f"Dialogue Partner: {', '.join(dp_list) or 'None'}\n"
+        f"Enemies Nearby: {enemies_compact}\n"
+        f"Stats: {stats_compact}\n"
+        f"Learned Spells: {spells_compact}\n"
+        f"Last Turn: {last_turn_snip or 'Opening scene'}\n\n"
+        f"{local_beats_block}"
         f"Custom action: {fence_player_action(action_text, max_len=400)}\n\n"
         f"Decide governing Attribute, requirement (2-12), intent, sub_intent, and target_npc. If spell, set mp_cost.\n"
     )
 
     try:
         from llm_client import GM_SHARED_RULES
-        classifier_sys_prompt = f"{GM_SHARED_RULES}\n\n{SYSTEM_PROMPT}"
+        classifier_sys_prompt = f"{GM_SHARED_RULES}\n\n{ACTION_CLASSIFIER_SYSTEM_RULES}"
         result = await game_engine.call_llm_json(
-            classifier_sys_prompt, user_prompt, temperature=0.4,
-            max_tokens=800, retries=2, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
-            use_utility=True, response_model=ActionClassification,
-            system_zones=(GM_SHARED_RULES, SYSTEM_PROMPT),
+            classifier_sys_prompt, user_prompt, temperature=0.3,
+            max_tokens=220, retries=0, is_nsfw=scenario_data.uses_nsfw_model(session.get("scenario")),
+            use_utility=True, timeout=LLM_PASS1_TIMEOUT, response_model=ActionClassification,
+            system_zones=(GM_SHARED_RULES, ACTION_CLASSIFIER_SYSTEM_RULES),
         )
         if getattr(result, "model_dump", None):
             res_dict = result.model_dump(exclude_unset=True)
@@ -1266,7 +1494,11 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     if not res_dict.get("fast_path") and not (not (isinstance(session, dict) and session.get("nearby_enemies")) and llm_intent in ("dialogue_exit", "movement", "rest_sleep", "media_capture") and parsed.category.value == llm_intent):
         if str(res_dict.get("stat") or "").upper().strip() in ("FREE", "NONE", "ITEM", ""):
             res_dict["stat"] = "PER"
-        res_dict["requirement"] = max(6, int(res_dict.get("requirement", 6) or 6))
+        res_dict["requirement"] = (
+            max(3, min(12, int(res_dict.get("requirement", 5) or 5)))
+            if dp_list
+            else max(6, int(res_dict.get("requirement", 6) or 6))
+        )
 
     # Merge deterministic primitives (preserving LLM value if non-empty, else deterministic regex value)
     res_dict["gold_spent"] = max(int(res_dict.get("gold_spent") or 0), int(primitives.get("gold_spent") or 0))
@@ -1274,6 +1506,19 @@ async def classify_custom_action(session: dict, char: dict, inventory: list, act
     res_dict["spawns_npc_role"] = str(res_dict.get("spawns_npc_role") or primitives.get("spawns_npc_role") or "").strip()
     res_dict["combat_tactical_archetype"] = str(res_dict.get("combat_tactical_archetype") or primitives.get("combat_tactical_archetype") or "").strip()
     res_dict["target_location"] = str(res_dict.get("target_location") or primitives.get("target_location") or "").strip()
+
+    raw_tqid = str(res_dict.get("targets_quest_id") or "").strip()
+    res_dict["targets_quest_id"] = "" if raw_tqid.lower() in ("none", "null", "undefined", "n/a") else raw_tqid
+    raw_tso = res_dict.get("targets_sub_obj_id")
+    if isinstance(raw_tso, bool):
+        res_dict["targets_sub_obj_id"] = None
+    else:
+        try:
+            res_dict["targets_sub_obj_id"] = None if raw_tso in (None, "") else int(raw_tso)
+        except (TypeError, ValueError):
+            res_dict["targets_sub_obj_id"] = None
+    raw_qapp = str(res_dict.get("quest_approach") or "").strip().upper()
+    res_dict["quest_approach"] = "" if raw_qapp in ("NONE", "NULL", "UNDEFINED", "N/A", "") else raw_qapp
 
     if res_dict.get("stat") not in VALID_STATS:
         res_dict["stat"] = "AGI"

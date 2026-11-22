@@ -12,6 +12,7 @@ import scenario_data
 from mechanics.combat import is_in_combat
 from game_engine.npcs.presence import classify_scene_npcs
 from game_engine.core import _get_npc_name
+from game_engine.turn_context import resolve_target_turn
 from mechanics.world.locations import (
     extract_movement_destination,
     get_primary_location_name,
@@ -75,26 +76,16 @@ def _resolve_facility_node_for_stage(
 
 
 def _resolve_active_turn_1based(session: Optional[dict], default: int = 1) -> int:
-    """Resolve active 1-based turn number, preferring `_target_turn` over stale pre-commit `turn_count`."""
+    """Resolve active 1-based turn number, preferring `ctx.clock.target_turn` or `_target_turn` over stale pre-commit `turn_count`."""
     if not isinstance(session, dict):
         return max(1, int(default))
-    raw_target = session.get("_target_turn")
-    if raw_target is not None:
-        try:
-            val = int(raw_target)
-            if val > 0:
-                return val
-        except (TypeError, ValueError):
-            pass
-    raw_tc = session.get("turn_count")
-    if raw_tc is not None:
-        try:
-            return max(1, int(raw_tc) + 1)
-        except (TypeError, ValueError):
-            pass
-    hist = session.get("history")
-    if isinstance(hist, list):
-        return len(hist) + 1
+    if (
+        session.get("_ctx") is not None
+        or session.get("_target_turn") is not None
+        or session.get("turn_count") is not None
+        or isinstance(session.get("history"), list)
+    ):
+        return resolve_target_turn(None, session)
     return max(1, int(default))
 
 
@@ -152,6 +143,28 @@ def _merge_staged_roster_ops(dest: Optional[dict], src: Optional[dict]) -> dict:
             r_nm = str(item.get("name") or "").strip().lower()
             if r_nm and r_nm not in seen_ru:
                 seen_ru.add(r_nm)
+                bucket.append(dict(item))
+
+    if src.get("population_seed"):
+        bucket = out.setdefault("population_seed", [])
+        seen_ps = {str(x.get("scen_key") or "") for x in bucket if isinstance(x, dict)}
+        for item in src["population_seed"]:
+            if isinstance(item, dict) and str(item.get("scen_key") or "") not in seen_ps:
+                seen_ps.add(str(item.get("scen_key") or ""))
+                bucket.append(dict(item))
+
+    if src.get("visual_hydrations"):
+        bucket = out.setdefault("visual_hydrations", [])
+        seen_vh = {
+            str(x.get("npc_id") or x.get("name") or "").strip().lower()
+            for x in bucket if isinstance(x, dict)
+        }
+        for item in src["visual_hydrations"]:
+            if not isinstance(item, dict):
+                continue
+            vk = str(item.get("npc_id") or item.get("name") or "").strip().lower()
+            if vk and vk not in seen_vh:
+                seen_vh.add(vk)
                 bucket.append(dict(item))
 
     return out
@@ -782,6 +795,13 @@ def compute_pre_turn_stage(
     pending_roster_ops: dict = {}
     doorbell_events: list[dict] = []
     crowd_flavor: str = ""
+    _prev_cs = session.get("crowd_state") if isinstance(session.get("crowd_state"), dict) else None
+    crowd_state: dict = {
+        "density": str((_prev_cs or {}).get("density") or "empty"),
+        "flavor": str((_prev_cs or {}).get("flavor") or ""),
+        "overflow_count": int((_prev_cs or {}).get("overflow_count") or 0),
+        "overflow_candidates": list((_prev_cs or {}).get("overflow_candidates") or []),
+    }
     epistemic_matrix: dict = {}
 
     cached_stage_contacts: Optional[list] = None
@@ -1589,19 +1609,28 @@ def compute_pre_turn_stage(
         include_tier5: bool = True,
         target_nid: Optional[str] = None,
     ) -> set[str]:
-        nonlocal doorbell_events, crowd_flavor, epistemic_matrix, has_exited_convo, has_confidential_rendezvous
+        nonlocal doorbell_events, crowd_flavor, crowd_state, epistemic_matrix, has_exited_convo, has_confidential_rendezvous
         blocked_keys: set[str] = set()
         if not isinstance(pres_res, dict):
             return blocked_keys
         doorbell_events = list(pres_res.get("doorbell_events") or [])
         crowd_flavor = str(pres_res.get("crowd_flavor") or "")
+        if isinstance(pres_res.get("crowd_state"), dict):
+            crowd_state = dict(pres_res["crowd_state"])
+            crowd_state["overflow_candidates"] = list(crowd_state.get("overflow_candidates") or [])
+            crowd_state.setdefault("flavor", crowd_flavor)
         if isinstance(pres_res.get("epistemic_matrix"), dict) and pres_res.get("epistemic_matrix"):
             epistemic_matrix = dict(pres_res["epistemic_matrix"])
         for dbell in doorbell_events:
             if not isinstance(dbell, dict):
                 continue
-            if dbell.get("applicable") and not dbell.get("allowed"):
-                d_name = str(dbell.get("name") or dbell.get("npc_id") or "Resident").strip()
+            if (
+                dbell.get("applicable")
+                and not dbell.get("allowed")
+                and dbell.get("doorbell_status") != "npc_ringing_player_door"
+                and dbell.get("entry_mode") != "doorbell_ringing"
+            ):
+                d_name = str(dbell.get("name") or dbell.get("npc_name") or dbell.get("npc_id") or "Resident").strip()
                 if d_name:
                     blocked_keys.add(d_name.lower())
                 if dbell.get("npc_id"):
@@ -2478,12 +2507,47 @@ def compute_pre_turn_stage(
         else (effective_node_id or session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, effective_location) if sess_id else None))
     )
 
-    # 5. Pre-Turn Canonical Role Spawning (max 1 role slot-fill per turn; closed-world facility gated)
+    # 5. Pre-Turn Canonical Role Spawning & Crowd Overflow Promotion (max 1 per turn)
     from game_engine.turn.generation import _SPAWN_ROLE_RE
+    from mechanics.social.population_seeder import hydrate_roster_npc_on_scene
+    _CROWD_APPROACH_RE = re.compile(
+        r"\b(passerby|bystander|pedestrian|shopper|commuter|stranger|someone\s+in\s+the\s+crowd|random\s+citizen|local)\b",
+        re.IGNORECASE,
+    )
     role_slot_fills_done = 0
     for a in (actions or []):
         if role_slot_fills_done >= 1:
             break
+        lbl_str_c = str(a.get("label", "") if isinstance(a, dict) else a).strip()
+        overflow_cands = crowd_state.get("overflow_candidates") if isinstance(crowd_state, dict) else None
+        if overflow_cands and _CROWD_APPROACH_RE.search(lbl_str_c):
+            promoted_cand = dict(overflow_cands.pop(0))
+            p_nm = str(promoted_cand.get("name") or "").strip()
+            if p_nm and p_nm.lower() not in seen_stage_names:
+                patch = hydrate_roster_npc_on_scene(promoted_cand, scen_key)
+                if isinstance(patch, dict):
+                    promoted_cand["appearance"] = dict(patch["appearance"])
+                    promoted_cand["traits"] = list(patch["traits"])
+                    b_upd = dict(promoted_cand.get("basic_info") or {})
+                    b_upd.update(patch["basic_info_updates"])
+                    promoted_cand["basic_info"] = b_upd
+                    if persist_db and sess_id:
+                        db.hydrate_world_roster_visuals(int(sess_id), [patch])
+                    else:
+                        pending_roster_ops.setdefault("visual_hydrations", []).append(patch)
+                promoted_cand["presence_tier"] = 5
+                promoted_cand["presence_reason"] = "crowd_overflow_promotion"
+                promoted_cand["stage_role"] = "active_partner"
+                _add_stage_npc(promoted_cand)
+                if p_nm not in new_partners:
+                    new_partners.append(p_nm)
+                crowd_state["overflow_count"] = max(0, int(crowd_state.get("overflow_count") or 0) - 1)
+                role_slot_fills_done += 1
+                stage_directives.append(
+                    f"[STAGE DIRECTION — CROWD OVERFLOW PROMOTION]: The bystander approached by the player is "
+                    f"{p_nm} ({promoted_cand.get('role') or 'Local'}). Use their canonical name '{p_nm}' instead of inventing a new NPC."
+                )
+                break
         role_req = str(a.get("spawns_npc_role") or "").strip() if isinstance(a, dict) else ""
         if not role_req:
             lbl_str = str(a.get("label", "") if isinstance(a, dict) else a).strip()
@@ -2591,10 +2655,12 @@ def compute_pre_turn_stage(
         "pending_roster_ops": pending_roster_ops,
         "doorbell_events": doorbell_events,
         "crowd_flavor": crowd_flavor,
+        "crowd_state": crowd_state,
         "epistemic_matrix": epistemic_matrix,
     }
     if isinstance(session, dict):
         session["pre_turn_stage_npcs"] = list(stage_npcs)
+        session["crowd_state"] = dict(crowd_state)
     return ret_stage
 
 

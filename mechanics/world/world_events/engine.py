@@ -691,7 +691,7 @@ def spawn_quest_world_scar(
     if not session_id:
         return {}
     sess = db.get_session(session_id) or {}
-    eff_lang = str(sess.get("language") or "en").strip().lower()
+    eff_lang = str(sess.get("narration_language") or sess.get("language") or "en").strip().lower()
     scen_key = str(sess.get("scenario") or "fantasy")
     c_day, _c_min, t_num = resolve_session_time_and_turn(session_id, None, None, turn_number, sess)
     spec = dict(scar_spec or {})
@@ -823,6 +823,11 @@ def spawn_quest_world_scar(
                     scen_key=scen_key,
                     lang=eff_lang,
                 )
+                try:
+                    from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                    schedule_background_chapter_plan(session_id, rem_qid)
+                except Exception:
+                    pass
             except Exception:
                 db.save_quest_waypoints(
                     session_id,
@@ -877,6 +882,8 @@ def spawn_quest_world_scar(
                     deadline_day=int(c_day) + 7,
                     deadline_minute=720,
                     scen_key=scen_key,
+                    lang=eff_lang,
+                    turn_number=int(t_num),
                 )
             except Exception:
                 pass
@@ -905,7 +912,7 @@ def spawn_endless_mode_contracts(
     if not session_id:
         return []
     sess = db.get_session(session_id) or {}
-    eff_lang = str(sess.get("language") or "en").strip().lower()
+    eff_lang = str(sess.get("narration_language") or sess.get("language") or "en").strip().lower()
     scen_key = str(sess.get("scenario") or "fantasy")
     c_day = int(sess.get("current_day") or 1)
     loc = str(sess.get("current_location") or "Central Ward")
@@ -976,6 +983,11 @@ def spawn_endless_mode_contracts(
             scen_key=scen_key,
             lang=eff_lang,
         )
+        try:
+            from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+            schedule_background_chapter_plan(session_id, lib_qid)
+        except Exception:
+            pass
         if lib_q:
             spawned.append(lib_q)
 
@@ -1026,6 +1038,8 @@ def spawn_endless_mode_contracts(
             danger_tier=4,
             deadline_day=c_day + 7,
             scen_key=scen_key,
+            lang=eff_lang,
+            turn_number=int(turn_number or 0),
         )
         if q_row:
             spawned.append(q_row)
@@ -1053,7 +1067,6 @@ def spawn_endless_mode_contracts(
                 engine="SOCIAL_BROKERAGE",
                 dossier_stage="compiled",
             )
-            from mechanics.narrative.dossier_compiler import compile_quest_dossier
             compile_quest_dossier(
                 session_id=session_id,
                 quest_id=clr_qid,
@@ -1066,7 +1079,13 @@ def spawn_endless_mode_contracts(
                 client_npc=comp_name,
                 preferred_location=loc,
                 scen_key=scen_key,
+                lang=eff_lang,
             )
+            try:
+                from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
+                schedule_background_chapter_plan(session_id, clr_qid)
+            except Exception:
+                pass
             if clr_q:
                 spawned.append(clr_q)
 
@@ -1113,6 +1132,8 @@ def spawn_endless_mode_contracts(
             danger_tier=3,
             deadline_day=c_day + 7,
             scen_key=scen_key,
+            lang=eff_lang,
+            turn_number=int(turn_number or 0),
         )
         if arc_q:
             spawned.append(arc_q)

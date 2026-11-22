@@ -57,6 +57,7 @@ from mechanics.stealth.escalation import (
     build_confrontation_choices,
     inject_covert_exploration_choices,
     reduce_stealth_turn_outcome,
+    sync_stealth_choices_for_toggle,
 )
 
 __all__ = [
@@ -108,4 +109,5 @@ __all__ = [
     "build_confrontation_choices",
     "inject_covert_exploration_choices",
     "reduce_stealth_turn_outcome",
+    "sync_stealth_choices_for_toggle",
 ]

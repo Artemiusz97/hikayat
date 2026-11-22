@@ -3,12 +3,12 @@ from __future__ import annotations
 """Deterministic Band 1 (Quest/Rumor) & Band 2 (Sims-Style Social) Fallback Synthesizers & Pronoun Sanitizers."""
 
 import re
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import db
 import scenario_data
 from mechanics.social import deck
-from mechanics.social.departure import _canon_npc_key
+from mechanics.social.departure import _canon_npc_key, _locations_match
 
 _PRONOUNS_BY_GENDER: Dict[str, Dict[str, str]] = {
     "female": {
@@ -444,6 +444,278 @@ def synthesize_choice_from_seed(
     }
 
 
+_INQUIRY_OBJECT_VERBS = frozenset({
+    "investigate", "inspect", "examine", "analyze", "study", "check",
+    "verify", "confirm", "corroborate", "research", "assess", "evaluate",
+    "review", "survey",
+})
+
+_ACTION_TASK_VERBS = frozenset({
+    "search", "trace", "track", "find", "locate", "uncover", "discover",
+    "expose", "decode", "decipher", "obtain", "procure", "retrieve",
+    "recover", "acquire", "gather", "collect", "secure", "deliver",
+    "return", "rescue", "escort", "protect", "defend", "contain",
+    "neutralize", "eliminate", "stop", "halt", "disrupt", "sabotage",
+    "disable", "breach", "infiltrate", "map", "scout", "establish",
+    "resolve", "settle", "confront", "advance", "follow", "identify",
+    "read", "help", "aid", "assist", "warn", "alert", "clear", "clean",
+    "win", "defeat", "subdue", "pacify", "stabilize", "hold", "reach",
+    "enter", "question", "interrogate", "ask", "press", "convince",
+    "persuade", "negotiate",
+})
+
+
+def _partner_matches_target(
+    partner: str,
+    target_text: str,
+    *,
+    exact_name_field: bool = False,
+) -> bool:
+    p_clean = str(partner or "").strip().lower()
+    t_low = str(target_text or "").strip().lower()
+    if not p_clean or not t_low:
+        return False
+    if p_clean == t_low or re.search(rf"\b{re.escape(p_clean)}\b", t_low):
+        return True
+    parts = [tok for tok in re.findall(r"[a-z0-9]+", p_clean) if len(tok) >= 3]
+    if exact_name_field:
+        return any(re.search(rf"\b{re.escape(tok)}\b", t_low) for tok in parts)
+    return bool(parts and len(parts[0]) >= 4 and re.search(rf"\b{re.escape(parts[0])}\b", t_low))
+
+
+def _has_quest_text_leak(text: str) -> bool:
+    low = str(text or "").lower()
+    return bool(
+        not low.strip()
+        or "_json" in low
+        or "hidden lair" in low
+        or "uncover leads" in low
+        or re.search(r"\b(?:HP|MP|DC)\b", str(text or ""))
+    )
+
+
+def _clean_quest_inquiry_text(raw: str) -> str:
+    txt = str(raw or "").strip()
+    if not txt:
+        return ""
+    txt = re.sub(r"^(?:[⭐🎯⚡💌🔹🌙⏳🤝\s]+|\s*\[[^\]]+\]\s*)+", "", txt).strip()
+    txt = re.sub(
+        r"^(?:chapter\s*#?\d+\s*[:\-–—]\s*|stage\s*\d+\s*[:\-–—]\s*|on-screen\s+triage\s*[:\-–—]\s*|"
+        r"main\s+objective\s*[:\-–—]\s*|optional\s*(?:objective)?\s*[:\-–—]\s*|objective\s*[:\-–—]\s*)",
+        "",
+        txt,
+        flags=re.IGNORECASE,
+    ).strip()
+    txt = re.sub(
+        r"\s*\((?:STR|PER|END|CHA|INT|AGI|LUK|FREE|NONE|Auto-Success)\)\s*$",
+        "",
+        txt,
+        flags=re.IGNORECASE,
+    ).strip()
+    if len(txt) > 115:
+        first_clause = re.split(r"[.;]\s+", txt, maxsplit=1)[0].strip()
+        if len(first_clause) >= 16:
+            txt = first_clause
+    return txt.rstrip(" .;,")
+
+
+def _find_relevant_quest_context(
+    q: Dict[str, Any],
+    profile: Dict[str, Any],
+    session: Dict[str, Any],
+) -> Tuple[bool, Optional[Dict[str, Any]], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Resolves whether quest `q` applies to this dialogue partner/location and returns its active beat context."""
+    q_id = str(q.get("quest_id") or q.get("id") or "").strip()
+    partner = str(profile.get("name") or "").strip()
+    curr_loc = str(session.get("current_location") or "").strip()
+    sess_id = session.get("id")
+
+    relevant_wps: List[Dict[str, Any]] = []
+    for rwp in (profile.get("relevant_quests") or []):
+        if isinstance(rwp, dict) and str(rwp.get("quest_id") or "").strip() == q_id:
+            relevant_wps.append(rwp)
+
+    q_wps: List[Dict[str, Any]] = []
+    for cand in (q.get("active_waypoints") or []):
+        if isinstance(cand, dict):
+            q_wps.append(cand)
+    if not q_wps and isinstance(q.get("active_waypoint"), dict):
+        q_wps.append(q["active_waypoint"])
+    if not q_wps:
+        for cand in (q.get("waypoints") or []):
+            if isinstance(cand, dict) and str(cand.get("status") or "").lower() == "active":
+                q_wps.append(cand)
+
+    for wp in q_wps:
+        npc_hit = _partner_matches_target(partner, str(wp.get("target_npc") or ""), exact_name_field=True)
+        wp_loc = str(wp.get("effective_location") or wp.get("target_location") or "").strip()
+        loc_hit = bool(curr_loc and wp_loc and _locations_match(curr_loc, wp_loc, session_id=sess_id))
+        if (npc_hit or loc_hit) and wp not in relevant_wps:
+            relevant_wps.append(wp)
+
+    relevant_wps.sort(
+        key=lambda w: (
+            0 if _partner_matches_target(partner, str(w.get("target_npc") or ""), exact_name_field=True) else 1,
+            0 if w.get("sub_obj_id") in (None, 0) else 1,
+        )
+    )
+    matched_wp = relevant_wps[0] if relevant_wps else (q_wps[0] if q_wps else None)
+    is_relevant = bool(relevant_wps)
+
+    dos = q.get("dossier") if isinstance(q.get("dossier"), dict) else None
+    if dos is None and sess_id and q_id:
+        try:
+            dos = db.get_quest_dossier(int(sess_id), q_id)
+        except Exception:
+            dos = None
+
+    active_stage: Optional[Dict[str, Any]] = None
+    matched_clue_src: Optional[Dict[str, Any]] = None
+    if isinstance(dos, dict):
+        climax_sp = dos.get("climax_spec") or {}
+        main_stages = [s for s in (climax_sp.get("main_stages") or []) if isinstance(s, dict)]
+        is_main_wp = matched_wp is None or matched_wp.get("sub_obj_id") in (None, 0)
+        if is_main_wp and main_stages:
+            wp_sidx = matched_wp.get("stage_index") if matched_wp else None
+            if wp_sidx is not None:
+                active_stage = next((s for s in main_stages if int(s.get("stage_index") or 0) == int(wp_sidx)), None)
+            if active_stage is None:
+                active_stage = next((s for s in main_stages if str(s.get("status") or "").lower() == "active"), None)
+        if isinstance(active_stage, dict):
+            for src in (active_stage.get("clue_sources") or []):
+                if not isinstance(src, dict) or src.get("bonus") or src.get("revealed") is False or src.get("is_hidden"):
+                    continue
+                src_npc = str(src.get("npc_name") or "").strip()
+                src_loc = str(src.get("location") or "").strip()
+                if str(src.get("kind") or "").lower() == "witness" and _partner_matches_target(partner, src_npc, exact_name_field=True):
+                    matched_clue_src = src
+                    is_relevant = True
+                    break
+                if curr_loc and src_loc and _locations_match(curr_loc, src_loc, session_id=sess_id):
+                    if matched_clue_src is None:
+                        matched_clue_src = src
+                    is_relevant = True
+
+        if q.get("climax_ready") and curr_loc:
+            clx_loc = str(climax_sp.get("location") or q.get("target_location") or "").strip()
+            if clx_loc and _locations_match(curr_loc, clx_loc, session_id=sess_id):
+                is_relevant = True
+
+    if _partner_matches_target(partner, str(q.get("client_npc") or ""), exact_name_field=True):
+        is_relevant = True
+
+    main_obj = q.get("main_objective") if isinstance(q.get("main_objective"), dict) else {}
+    obj_text = str(main_obj.get("text") or q.get("objective") or "").strip()
+    if _partner_matches_target(partner, obj_text) or _partner_matches_target(partner, str(q.get("stage_label") or "")):
+        is_relevant = True
+
+    return is_relevant, matched_wp, active_stage, matched_clue_src
+
+
+def _resolve_quest_dialogue_inquiry_spec(
+    q: Dict[str, Any],
+    profile: Dict[str, Any],
+    session: Dict[str, Any],
+    pron: Dict[str, str],
+    matched_wp: Optional[Dict[str, Any]],
+    active_stage: Optional[Dict[str, Any]],
+    matched_clue_src: Optional[Dict[str, Any]],
+    is_bounty: bool,
+) -> Optional[Tuple[str, str]]:
+    """Builds specific objective/waypoint-grounded dynamic dialogue choice labels (never meta chapter titles)."""
+    partner = str(profile.get("name") or "them").strip()
+    raw_lang = str(session.get("narration_language") or session.get("language") or "en").strip().lower()
+    lang = "zh" if raw_lang.startswith("zh") else (raw_lang.split("-")[0].split("_")[0] or "en")
+    if lang not in ("en", "pl", "ms", "zh", "de"):
+        lang = "en"
+
+    main_obj = q.get("main_objective") if isinstance(q.get("main_objective"), dict) else {}
+    beat_contract = (active_stage or {}).get("beat_contract") if isinstance((active_stage or {}).get("beat_contract"), dict) else {}
+    candidates_raw = [
+        str((matched_clue_src or {}).get("approach_hint") or "").strip(),
+        str(beat_contract.get("player_verb") or "").strip(),
+        str((matched_wp or {}).get("stage_label") or (active_stage or {}).get("stage_label") or q.get("stage_label") or "").strip(),
+        str(main_obj.get("text") or q.get("objective") or "").strip(),
+        str(q.get("title") or "").strip(),
+    ]
+
+    clean_spec = ""
+    for raw_c in candidates_raw:
+        if not raw_c or _has_quest_text_leak(raw_c):
+            continue
+        cleaned = _clean_quest_inquiry_text(raw_c)
+        if cleaned:
+            clean_spec = cleaned
+            break
+
+    if not clean_spec:
+        return None
+
+    if _partner_matches_target(partner, clean_spec):
+        primary_lbl = clean_spec
+        m_top = re.search(r"\b(?:about|regarding|on|for)\s+(.+)$", clean_spec, re.IGNORECASE)
+        if lang == "en" and m_top and len(m_top.group(1).strip()) >= 4:
+            secondary_lbl = f"Cross-check details about {m_top.group(1).strip()} with {partner}"
+        elif lang == "en":
+            secondary_lbl = f"Cross-check {partner}'s account for inconsistencies"
+        else:
+            secondary_lbl = {
+                "pl": f"Zweryfikuj z {partner} szczegóły: {clean_spec}",
+                "ms": f"Semak silang butiran bersama {partner}: {clean_spec}",
+                "zh": f"与{partner}核实「{clean_spec}」的细节",
+                "de": f"Gleiche Details mit {partner} ab: {clean_spec}",
+            }[lang]
+        return primary_lbl[:180], secondary_lbl[:180]
+
+    if lang != "en":
+        primary_map = {
+            "pl": f"Zapytaj {partner} o wskazówki dotyczące: {clean_spec}",
+            "ms": f"Tanya {partner} petunjuk mengenai: {clean_spec}",
+            "zh": f"向{partner}打探关于「{clean_spec}」的具体线索",
+            "de": f"Frage {partner} nach Hinweisen zu: {clean_spec}",
+        }
+        secondary_map = {
+            "pl": f"Zweryfikuj z {partner} szczegóły dotyczące: {clean_spec}",
+            "ms": f"Semak silang butiran dengan {partner} mengenai: {clean_spec}",
+            "zh": f"与{partner}核实「{clean_spec}」的细节",
+            "de": f"Gleiche Details zu '{clean_spec}' mit {partner} ab",
+        }
+        return primary_map[lang][:180], secondary_map[lang][:180]
+
+    m_verb = re.match(r"^([A-Za-z]+(?:-[A-Za-z]+)?)\s+(.+)$", clean_spec)
+    v_low = m_verb.group(1).lower() if m_verb else ""
+    v_rest = m_verb.group(2).strip() if m_verb else ""
+
+    if v_low in _INQUIRY_OBJECT_VERBS and v_rest:
+        if v_rest.lower().startswith(("why ", "how ", "who ", "what ", "where ", "whether ", "if ")):
+            primary_lbl = f"Ask {partner} if {pron['subj']} {pron['knows_know']} {v_rest}"
+            secondary_lbl = f"Cross-check with {partner} to {v_low} {v_rest}"
+        else:
+            primary_lbl = (
+                f"Question {partner} for field leads on {v_rest}"
+                if is_bounty
+                else f"Ask {partner} what {pron['subj']} {pron['knows_know']} about {v_rest}"
+            )
+            secondary_lbl = f"Cross-check details about {v_rest} with {partner}"
+    elif v_low in _ACTION_TASK_VERBS and v_rest:
+        action_phrase = f"{v_low} {v_rest}"
+        primary_lbl = (
+            f"Question {partner} for field leads to {action_phrase}"
+            if is_bounty
+            else f"Ask {partner} what {pron['subj']} {pron['knows_know']} to help {action_phrase}"
+        )
+        secondary_lbl = f"Cross-check details with {partner} to {action_phrase}"
+    else:
+        primary_lbl = (
+            f"Question {partner} for field leads on {clean_spec}"
+            if is_bounty
+            else f"Ask {partner} what {pron['subj']} {pron['knows_know']} about {clean_spec}"
+        )
+        secondary_lbl = f"Cross-check details about {clean_spec} with {partner}"
+
+    return primary_lbl[:180], secondary_lbl[:180]
+
+
 def generate_band1_quest_and_rumor_fallbacks(
     profile: Dict[str, Any],
     session: Optional[Dict[str, Any]],
@@ -451,6 +723,7 @@ def generate_band1_quest_and_rumor_fallbacks(
     actions: Optional[List[Any]] = None,
     active_quests: Optional[List[Any]] = None,
     ledgers_getter: Optional[Callable[[Optional[Dict[str, Any]]], Dict[str, Dict[str, Any]]]] = None,
+    require_partner_relevance: bool = False,
     **kwargs: Any,
 ) -> List[Dict[str, Any]]:
     """Generates deterministic Band 1 skill-check choices prioritizing active quests/bounties and discovered rumors."""
@@ -472,41 +745,52 @@ def generate_band1_quest_and_rumor_fallbacks(
             if active_quests is None:
                 active_quests = db.get_session_quests(int(sess_id), status="Active") or []
             for q in active_quests[:3]:
-                q_title = str(q.get("title") or "").strip()
+                if not isinstance(q, dict):
+                    continue
                 q_id = str(q.get("quest_id") or q.get("id") or "")
                 is_bounty = "bounty" in str(q.get("quest_type") or "").lower() or q_id.lower().startswith("bnt-")
-                if q_title:
-                    lbl = (
-                        f"Question {partner} for field leads on '{q_title}'"
-                        if is_bounty
-                        else f"Ask {partner} what {pron['subj']} {pron['knows_know']} regarding '{q_title}'"
-                    )
-                    candidates.append({
-                        "label": lbl[:180],
-                        "stat": "CHA",
-                        "requirement": 6,
-                        "mp_cost": 0,
-                        "intent": "investigate_clue",
-                        "target_npc": partner,
-                        "quest_id": q_id,
-                        "_active_quest_inquiry": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    })
-                    candidates.append({
-                        "label": f"Cross-check details about '{q_title}' with {partner}"[:180],
-                        "stat": "INT",
-                        "requirement": 6,
-                        "mp_cost": 0,
-                        "intent": "investigate_clue",
-                        "target_npc": partner,
-                        "quest_id": q_id,
-                        "_active_quest_inquiry": True,
-                        "is_fallback": False,
-                        "_deterministic_supplement": True,
-                        "_band": 1,
-                    })
+                is_rel, matched_wp, active_stage, matched_clue_src = _find_relevant_quest_context(q, profile, sess)
+                if require_partner_relevance and not is_rel:
+                    continue
+                spec = _resolve_quest_dialogue_inquiry_spec(
+                    q,
+                    profile,
+                    sess,
+                    pron,
+                    matched_wp,
+                    active_stage,
+                    matched_clue_src,
+                    is_bounty,
+                )
+                if not spec:
+                    continue
+                primary_lbl, secondary_lbl = spec
+                candidates.append({
+                    "label": primary_lbl,
+                    "stat": "CHA",
+                    "requirement": 6,
+                    "mp_cost": 0,
+                    "intent": "investigate_clue",
+                    "target_npc": partner,
+                    "quest_id": q_id,
+                    "_active_quest_inquiry": True,
+                    "is_fallback": False,
+                    "_deterministic_supplement": True,
+                    "_band": 1,
+                })
+                candidates.append({
+                    "label": secondary_lbl,
+                    "stat": "INT",
+                    "requirement": 6,
+                    "mp_cost": 0,
+                    "intent": "investigate_clue",
+                    "target_npc": partner,
+                    "quest_id": q_id,
+                    "_active_quest_inquiry": True,
+                    "is_fallback": False,
+                    "_deterministic_supplement": True,
+                    "_band": 1,
+                })
         except Exception:
             pass
 

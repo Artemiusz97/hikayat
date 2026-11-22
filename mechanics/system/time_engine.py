@@ -993,7 +993,7 @@ def apply_sleep_rest(
             ) or ("bed" in str(surface_label or "").lower())
             if curr_nid:
                 w_node = db.get_world_node(session_id, curr_nid)
-                if w_node and str(w_node.get("privacy") or "").lower() == "private":
+                if w_node and str(w_node.get("privacy_level") or w_node.get("privacy") or "").lower() == "private":
                     is_private_room = True
 
             contacts = db.get_contacts(session_id) or []
@@ -1231,7 +1231,8 @@ def check_and_apply_fatigue(session_id: int, party_uids: List[int]) -> List[str]
 def format_llm_time_context(
     current_day: int,
     current_minute: int,
-    scen_key: str = "fantasy"
+    scen_key: str = "fantasy",
+    session: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Formats the time block and World Schedule state for injection into the game engine's user_prompt.
@@ -1248,7 +1249,7 @@ def format_llm_time_context(
         f"- Atmosphere & Lighting: {lighting}.",
     ]
     
-    if is_sleep_time(current_minute):
+    if is_sleep_time(current_minute, scen_key=scen_key):
         context_lines.append(
             f"- Late-Night Flavor: It is late evening / nighttime ({clock_str}). Most shops and facilities are closed, hallways/streets are quiet, and characters feel natural weariness if active."
         )
@@ -1259,7 +1260,13 @@ def format_llm_time_context(
 
     try:
         from mechanics.world.world_schedule import get_world_schedule_state
-        ws_state = get_world_schedule_state(scen_key=scen_key, current_day=current_day, current_minute=current_minute)
+        ws_state = get_world_schedule_state(
+            scen_key=scen_key,
+            current_day=current_day,
+            current_minute=current_minute,
+            session=session,
+            session_id=int((session or {}).get("id") or 0),
+        )
         context_lines.append(
             f"- Active World Schedule [{ws_state.get('day_type', 'weekday').capitalize()} — {ws_state.get('period_label', '')}]: {ws_state.get('narrative_directive', '')}"
         )

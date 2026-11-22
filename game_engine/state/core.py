@@ -1,6 +1,10 @@
 from __future__ import annotations
-from typing import Any
+from typing import Any, Optional
 from .constants import ENABLE_DYNAMIC_MULTIPASS, _ITEM_BLOCKLIST
+from game_engine.turn_context import (
+    TurnExecutionContext,
+    resolve_target_turn,
+)
 import db
 import re
 import json
@@ -201,6 +205,10 @@ def resolve_pre_turn_vitals_and_resources(
     consumed_items: list[dict] = []
     staged_consumable_removals: list[dict] = []
     staged_pickpocket_penalties: list[dict] = []
+    staged_item_transfers: list[dict] = []
+    staged_npc_gifts: list[dict] = []
+    staged_npc_item_uses: list[dict] = []
+    staged_hostile_item_failures: list[dict] = []
     staged_physical_state_dirty = False
     stage_directives: list[str] = []
 
@@ -324,19 +332,23 @@ def resolve_pre_turn_vitals_and_resources(
                         )
                 except Exception:
                     pass
-        elif succeeded and intent != "anomalous_site_action" and not is_social_act and any(
-            kw in lbl_low for kw in ("pick up", "take the", "grab the", "collect the", "gather ", "forage ", "harvest ")
+        elif succeeded and intent != "anomalous_site_action" and not is_social_act and (
+            sub_intent_act == "pickup_item"
+            or any(kw in lbl_low for kw in ("pick up", "take the", "grab the", "collect the", "gather ", "forage ", "harvest "))
         ):
             phys_st = (session.get("physical_state") if isinstance(session, dict) else None) or (
                 db.get_session_physical_state(session_id) if session_id else None
             ) or {}
             props_map = phys_st.get("props") if isinstance(phys_st, dict) else {}
             dropped_list = phys_st.get("dropped_items") if isinstance(phys_st, dict) else []
+            pickup_cand_raw = str(act.get("pickup_item_name") or "").strip()
+            pickup_cand_low = re.sub(r"\s*\[(?:GEAR|ITEM|CONSUMABLE|SPELLBOOK|DIGITAL)_JSON:.*$", "", pickup_cand_raw, flags=re.IGNORECASE).strip().lower()
             matched_prop = None
             matched_display = None
             if isinstance(props_map, dict):
                 for pk in list(props_map.keys()):
-                    if pk and pk.lower() in lbl_low:
+                    pk_low = str(pk or "").strip().lower()
+                    if pk and ((pickup_cand_low and pk_low == pickup_cand_low) or pk_low in lbl_low):
                         matched_prop = pk
                         matched_display = pk
                         props_map.pop(pk, None)
@@ -346,8 +358,13 @@ def resolve_pre_turn_vitals_and_resources(
                     di_str = str(di or "").strip()
                     if not di_str:
                         continue
-                    clean_di = re.sub(r"\s*\[(?:GEAR|ITEM)_JSON:.*$", "", di_str).strip()
-                    if (clean_di and clean_di.lower() in lbl_low) or di_str.lower() in lbl_low:
+                    clean_di = re.sub(r"\s*\[(?:GEAR|ITEM|CONSUMABLE|SPELLBOOK|DIGITAL)_JSON:.*$", "", di_str, flags=re.IGNORECASE).strip()
+                    if (
+                        (pickup_cand_raw and di_str.lower() == pickup_cand_raw.lower())
+                        or (pickup_cand_low and clean_di.lower() == pickup_cand_low)
+                        or (clean_di and clean_di.lower() in lbl_low)
+                        or di_str.lower() in lbl_low
+                    ):
                         matched_prop = di_str
                         matched_display = clean_di or di_str
                         dropped_list.remove(di)
@@ -395,27 +412,83 @@ def resolve_pre_turn_vitals_and_resources(
                     scenario=scen_key,
                 )
                 parsed_intent = classify_action_intent(lbl, context=ictx)
-                if (parsed_intent.category == IntentCategory.GIFT_OFFER or act.get("sub_intent") == "gift_offer") and actor_inv:
-                    gift_cand = (act.get("item_name") or parsed_intent.sub_target or parsed_intent.metadata.get("item_name", "") or "").strip()
-                    if gift_cand and gift_cand.lower() not in ("gift", "present"):
-                        for inv_it in actor_inv:
-                            it_name = str(inv_it.get("name", "")).strip()
-                            if it_name and (gift_cand.lower() in it_name.lower() or it_name.lower() in gift_cand.lower()):
-                                target_recipient = (
-                                    parsed_intent.target_entity
-                                    or act.get("target_npc")
-                                    or (session.get("dialogue_partner") if isinstance(session, dict) else None)
-                                    or "NPC"
-                                )
-                                gifted_items.append({
-                                    "user_id": actor_uid,
-                                    "npc_name": target_recipient,
-                                    "item_name": it_name,
-                                })
-                                stage_directives.append(
-                                    f"[STAGE DIRECTION — GIFT PRESENTED]: {char_name} gifted '{it_name}' from their inventory to {target_recipient}. Narrate {target_recipient} receiving and reacting to '{it_name}'."
-                                )
-                                break
+                is_explicit_gift = bool(intent == "gift_offer" or sub_intent_act == "gift_offer")
+                if (is_explicit_gift or parsed_intent.category == IntentCategory.GIFT_OFFER) and actor_inv:
+                    matched_gift_it = None
+                    req_gift_id = act.get("item_id")
+                    if req_gift_id is not None:
+                        try:
+                            g_iid = int(req_gift_id)
+                            matched_gift_it = next((inv_it for inv_it in actor_inv if isinstance(inv_it, dict) and int(inv_it.get("id") or 0) == g_iid), None)
+                        except (TypeError, ValueError):
+                            matched_gift_it = None
+                    if matched_gift_it is None:
+                        gift_cand = (act.get("item_name") or parsed_intent.sub_target or parsed_intent.metadata.get("item_name", "") or "").strip()
+                        if gift_cand and gift_cand.lower() not in ("gift", "present"):
+                            for inv_it in actor_inv:
+                                it_name_c = str(inv_it.get("name", "")).strip()
+                                if it_name_c and (gift_cand.lower() in it_name_c.lower() or it_name_c.lower() in gift_cand.lower()):
+                                    matched_gift_it = inv_it
+                                    break
+                    if matched_gift_it is not None:
+                        it_name = str(matched_gift_it.get("name", "")).strip()
+                        eff_gift_ttype = str(act.get("target_type") or "").strip().lower()
+                        eff_gift_uid = act.get("target_user_id")
+                        target_recipient = (
+                            act.get("target_name")
+                            or act.get("target_npc")
+                            or parsed_intent.target_entity
+                            or (session.get("dialogue_partner") if isinstance(session, dict) else None)
+                            or "NPC"
+                        )
+                        try:
+                            actor_inv.remove(matched_gift_it)
+                        except ValueError:
+                            pass
+                        if it_name:
+                            a_st["items_lost"].append(it_name)
+                            all_items_lost.append(it_name)
+                        if eff_gift_ttype == "player" and eff_gift_uid is not None:
+                            persisted_xfer = False
+                            if persist_db and matched_gift_it.get("id") is not None:
+                                ok_x, _msg_x, _ = db.transfer_item_between_users(actor_uid, int(eff_gift_uid), int(matched_gift_it["id"]), allow_quest_locked=True)
+                                persisted_xfer = bool(ok_x)
+                            staged_item_transfers.append({
+                                "from_user_id": actor_uid,
+                                "to_user_id": int(eff_gift_uid),
+                                "item_id": matched_gift_it.get("id"),
+                                "item_name": it_name,
+                                "target_name": target_recipient,
+                                "_persisted_in_db": persisted_xfer,
+                            })
+                            stage_directives.append(
+                                f"[STAGE DIRECTION — ITEM TRANSFERRED]: {char_name} handed '{it_name}' intact to party member {target_recipient} (item ownership transferred, NOT consumed). Narrate {target_recipient} receiving '{it_name}'."
+                            )
+                        else:
+                            persisted_gift = False
+                            gift_reaction_note = ""
+                            if persist_db:
+                                from mechanics.combat.items.consumables import evaluate_gift_reaction
+                                ok_g, g_msg, _ = evaluate_gift_reaction(actor_uid, matched_gift_it, str(target_recipient), session=session)
+                                persisted_gift = bool(ok_g)
+                                gift_reaction_note = str(g_msg or "")
+                            gifted_items.append({
+                                "user_id": actor_uid,
+                                "npc_name": str(target_recipient),
+                                "item_name": it_name,
+                                "item_id": matched_gift_it.get("id"),
+                                "_persisted_in_db": persisted_gift,
+                            })
+                            staged_npc_gifts.append({
+                                "user_id": actor_uid,
+                                "item": dict(matched_gift_it),
+                                "target_name": str(target_recipient),
+                                "_persisted_in_db": persisted_gift,
+                            })
+                            note_suffix = f" Outcome: {gift_reaction_note.replace('**', '')}" if gift_reaction_note else ""
+                            stage_directives.append(
+                                f"[STAGE DIRECTION — GIFT PRESENTED]: {char_name} gave '{it_name}' from their inventory to {target_recipient} without activating consumable effects.{note_suffix} Narrate {target_recipient} receiving and reacting to '{it_name}'."
+                            )
                 elif parsed_intent.category == IntentCategory.MEDIA_CAPTURE and scenario_has_smartphone(scen_key):
                     media_type = parsed_intent.metadata.get("media_type", "photo")
                     subject = (
@@ -456,94 +529,62 @@ def resolve_pre_turn_vitals_and_resources(
 
         # 5. Deterministic Consumable Usage (D3 Atomic Staging when persist_db=False)
         is_consumable_act = (
-            stat == "ITEM"
-            or intent in ("use_item", "consumable")
-            or sub_intent_act in ("use_item", "consumable")
-            or any(kw in lbl_low for kw in ("drink potion", "use potion", "consume potion", "take potion", "drink mana", "use healing", "drink elixir"))
+            intent not in ("gift_offer",)
+            and sub_intent_act not in ("gift_offer",)
+            and (
+                stat == "ITEM"
+                or intent in ("use_item", "consumable")
+                or sub_intent_act in ("use_item", "consumable", "covert_dose", "persuade_consume", "force_consume")
+                or any(kw in lbl_low for kw in ("drink potion", "use potion", "consume potion", "take potion", "drink mana", "use healing", "drink elixir"))
+            )
         )
         if is_consumable_act and actor_inv:
+            matched_item = None
+            req_use_iid = act.get("item_id") or ((act.get("item") or {}).get("id") if isinstance(act.get("item"), dict) else None)
+            if req_use_iid is not None:
+                try:
+                    u_iid = int(req_use_iid)
+                    matched_item = next((inv_it for inv_it in actor_inv if isinstance(inv_it, dict) and int(inv_it.get("id") or 0) == u_iid), None)
+                except (TypeError, ValueError):
+                    matched_item = None
             cand_name = (
                 (act.get("item") or {}).get("name")
                 or act.get("item_name")
                 or ""
             )
-            if not cand_name:
+            if matched_item is None and not cand_name:
                 m_use = re.search(r"^(?:Use|Drink|Consume|Eat)\s+(.+?)(?:\s+on|\s+at|$)", lbl, re.IGNORECASE)
                 if m_use:
                     cand_name = m_use.group(1).strip()
                 else:
                     cand_name = lbl.strip()
 
-            matched_item = None
-            cand_clean = cand_name.lower().strip()
-            for inv_it in actor_inv:
-                inv_n = str(inv_it.get("name", "")).strip().lower()
-                if cand_clean and (cand_clean in inv_n or inv_n in cand_clean):
-                    matched_item = inv_it
-                    break
+            if matched_item is None:
+                cand_clean = cand_name.lower().strip()
+                for inv_it in actor_inv:
+                    inv_n = str(inv_it.get("name", "")).strip().lower()
+                    if cand_clean and (cand_clean in inv_n or inv_n in cand_clean):
+                        matched_item = inv_it
+                        break
 
             if matched_item:
-                target_char = acting_char
-                recip_uid = actor_uid
-                target_uid_spec = act.get("target_user_id")
-                target_name_spec = str(act.get("target_character") or act.get("target_npc") or "").strip().lower()
-                if target_uid_spec:
-                    for pc in party_chars:
-                        if pc.get("user_id") == target_uid_spec:
-                            target_char = pc
-                            recip_uid = int(target_uid_spec)
-                            break
-                elif target_name_spec:
-                    for pc in party_chars:
-                        if str(pc.get("name", "")).strip().lower() == target_name_spec:
-                            target_char = pc
-                            recip_uid = int(pc.get("user_id") or actor_uid)
-                            break
+                from mechanics.combat.items.consumables import (
+                    apply_item_to_target,
+                    classify_consumable_usage_mode,
+                    is_hostile_or_covert_consumable,
+                    parse_item_effect,
+                )
+                use_ttype = str(act.get("target_type") or "").strip().lower()
+                use_tname = str(act.get("target_name") or act.get("target_character") or act.get("target_npc") or "").strip()
+                if not use_ttype:
+                    use_ttype = "player" if (act.get("target_user_id") or (use_tname and use_tname.lower() in char_by_name)) else "self"
 
-                _, recip_st = _ensure_actor_state(target_char)
-                recip_hp = int(target_char.get("hp", 0) or 0) + recip_st["consumable_hp_gain"]
-                recip_max_hp = max(1, int(target_char.get("max_hp", 100) or 100))
-                recip_mp = int(target_char.get("mp", 0) or 0) + recip_st["consumable_mp_gain"]
-                recip_max_mp = max(1, int(target_char.get("max_mp", 50) or 50))
-
-                from mechanics.combat.items.consumables import parse_item_effect
-                parsed_eff = parse_item_effect(matched_item) if isinstance(matched_item, dict) else {}
-                hp_rest = int(parsed_eff.get("hp_restore", 0) or 0)
-                mp_rest = int(parsed_eff.get("mp_restore", 0) or 0)
-
-                raw_eff = str(matched_item.get("effect", "") or "")
-                if hp_rest == 0:
-                    m_hp = re.search(r'(?:heal|restor(?:e|es)|\+)\s*(\d+)\s*hp', raw_eff, re.I)
-                    if m_hp:
-                        hp_rest = int(m_hp.group(1))
-                if mp_rest == 0:
-                    m_mp = re.search(r'(?:restor(?:e|es)|\+)\s*(\d+)\s*mp', raw_eff, re.I)
-                    if m_mp:
-                        mp_rest = int(m_mp.group(1))
-
-                if hp_rest == 0 and mp_rest == 0:
-                    it_low = matched_item.get("name", "").lower()
-                    if any(k in it_low for k in ("health", "healing", "heal", "salve", "potion")):
-                        hp_rest = 35
-                    elif any(k in it_low for k in ("mana", "magic", "ether")):
-                        mp_rest = 20
-
-                is_hp_full = recip_hp >= recip_max_hp
-                is_mp_full = recip_mp >= recip_max_mp
-
-                wasted = False
-                if hp_rest > 0 and mp_rest == 0 and is_hp_full:
-                    wasted = True
-                elif mp_rest > 0 and hp_rest == 0 and is_mp_full:
-                    wasted = True
-                elif hp_rest > 0 and mp_rest > 0 and is_hp_full and is_mp_full:
-                    wasted = True
-
-                if wasted:
-                    stage_directives.append(
-                        f"[STAGE DIRECTION — ITEM UNUSED]: {char_name} reached for '{matched_item['name']}', but {target_char.get('name', 'their')} vitals are already full. Item was not consumed."
+                if use_ttype in ("npc", "contact", "companion"):
+                    eff_npc_name = use_tname or str(session.get("dialogue_partner") if isinstance(session, dict) else "") or "NPC"
+                    is_hostile_use = (
+                        sub_intent_act in ("covert_dose", "persuade_consume", "force_consume")
+                        or (use_ttype != "companion" and is_hostile_or_covert_consumable(matched_item))
                     )
-                else:
                     it_id = matched_item.get("id")
                     try:
                         actor_inv.remove(matched_item)
@@ -551,35 +592,190 @@ def resolve_pre_turn_vitals_and_resources(
                         pass
                     a_st["items_lost"].append(matched_item["name"])
                     all_items_lost.append(matched_item["name"])
-                    consumed_items.append({
-                        "user_id": recip_uid,
-                        "actor_user_id": actor_uid,
-                        "item_id": it_id,
-                        "item_name": matched_item["name"],
-                        "hp_restore": hp_rest,
-                        "mp_restore": mp_rest,
-                        "_persisted_in_db": bool(persist_db),
-                    })
-                    recip_st["hp_delta"] += hp_rest
-                    recip_st["mp_delta"] += mp_rest
-                    recip_st["consumable_hp_gain"] += hp_rest
-                    recip_st["consumable_mp_gain"] += mp_rest
-                    if persist_db:
-                        if it_id:
-                            db.remove_item(actor_uid, it_id)
-                        else:
-                            db.remove_item_by_name(actor_uid, matched_item["name"])
-                        if hp_rest > 0 or mp_rest > 0:
-                            db.apply_hp_mp_delta(recip_uid, hp_delta=hp_rest, mp_delta=mp_rest)
-                    else:
-                        staged_consumable_removals.append({
+
+                    if is_hostile_use and not succeeded:
+                        persisted_fail_rem = False
+                        if persist_db:
+                            if it_id:
+                                persisted_fail_rem = bool(db.remove_item(actor_uid, int(it_id)))
+                            else:
+                                persisted_fail_rem = bool(db.remove_item_by_name(actor_uid, matched_item["name"]))
+                            if session_id and eff_npc_name:
+                                try:
+                                    db.update_relationship_score(session_id, eff_npc_name, delta_score=-15)
+                                except Exception:
+                                    pass
+                        consumed_items.append({
                             "user_id": actor_uid,
+                            "actor_user_id": actor_uid,
                             "item_id": it_id,
                             "item_name": matched_item["name"],
+                            "hp_restore": 0,
+                            "mp_restore": 0,
+                            "_persisted_in_db": persisted_fail_rem,
                         })
-                    stage_directives.append(
-                        f"[STAGE DIRECTION — ITEM CONSUMED]: {char_name} consumed '{matched_item['name']}' (+{hp_rest} HP, +{mp_rest} MP). Narrate using this item."
-                    )
+                        if not persist_db:
+                            staged_consumable_removals.append({
+                                "user_id": actor_uid,
+                                "item_id": it_id,
+                                "item_name": matched_item["name"],
+                            })
+                        staged_hostile_item_failures.append({
+                            "user_id": actor_uid,
+                            "item_name": matched_item["name"],
+                            "npc_name": eff_npc_name,
+                            "delta_score": -15,
+                            "alert_spike": 35,
+                            "_persisted_in_db": bool(persist_db),
+                        })
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — COVERT/HOSTILE ITEM FAILED]: {eff_npc_name} caught or resisted {char_name}'s attempt to use '{matched_item['name']}'! (-15 Affinity, suspicion spiked). The item was wasted. Narrate {eff_npc_name} reacting sharply."
+                        )
+                    else:
+                        persisted_npc_use = False
+                        if persist_db:
+                            ok_u, _ = apply_item_to_target(
+                                actor_uid,
+                                matched_item,
+                                use_ttype,
+                                eff_npc_name,
+                                session=session,
+                                mode="use",
+                            )
+                            persisted_npc_use = bool(ok_u)
+                        consumed_items.append({
+                            "user_id": actor_uid,
+                            "actor_user_id": actor_uid,
+                            "item_id": it_id,
+                            "item_name": matched_item["name"],
+                            "hp_restore": 0,
+                            "mp_restore": 0,
+                            "_persisted_in_db": persisted_npc_use,
+                        })
+                        if not persist_db:
+                            staged_npc_item_uses.append({
+                                "user_id": actor_uid,
+                                "item": dict(matched_item),
+                                "target_type": use_ttype,
+                                "target_name": eff_npc_name,
+                                "_persisted_in_db": False,
+                            })
+                        if is_hostile_use:
+                            stage_directives.append(
+                                f"[STAGE DIRECTION — ITEM EFFECT APPLIED]: {char_name} succeeded in administering '{matched_item['name']}' to {eff_npc_name}. Narrate the item taking effect cleanly."
+                            )
+                        else:
+                            stage_directives.append(
+                                f"[STAGE DIRECTION — ITEM ADMINISTERED]: {char_name} used '{matched_item['name']}' on {eff_npc_name}. Narrate {char_name} administering '{matched_item['name']}' and {eff_npc_name}'s response."
+                            )
+                else:
+                    target_char = acting_char
+                    recip_uid = actor_uid
+                    target_uid_spec = act.get("target_user_id")
+                    target_name_spec = use_tname.lower()
+                    if target_uid_spec:
+                        for pc in party_chars:
+                            if pc.get("user_id") == target_uid_spec:
+                                target_char = pc
+                                recip_uid = int(target_uid_spec)
+                                break
+                    elif target_name_spec:
+                        for pc in party_chars:
+                            if str(pc.get("name", "")).strip().lower() == target_name_spec:
+                                target_char = pc
+                                recip_uid = int(pc.get("user_id") or actor_uid)
+                                break
+
+                    _, recip_st = _ensure_actor_state(target_char)
+                    recip_hp = int(target_char.get("hp", 0) or 0) + recip_st["consumable_hp_gain"]
+                    recip_max_hp = max(1, int(target_char.get("max_hp", 100) or 100))
+                    recip_mp = int(target_char.get("mp", 0) or 0) + recip_st["consumable_mp_gain"]
+                    recip_max_mp = max(1, int(target_char.get("max_mp", 50) or 50))
+
+                    parsed_eff = parse_item_effect(matched_item) if isinstance(matched_item, dict) else {}
+                    hp_rest = int(parsed_eff.get("hp_restore", 0) or 0)
+                    mp_rest = int(parsed_eff.get("mp_restore", 0) or 0)
+
+                    raw_eff = str(matched_item.get("effect", "") or "")
+                    if hp_rest == 0:
+                        m_hp = re.search(r'(?:heal|restor(?:e|es)|\+)\s*(\d+)\s*hp', raw_eff, re.I)
+                        if m_hp:
+                            hp_rest = int(m_hp.group(1))
+                    if mp_rest == 0:
+                        m_mp = re.search(r'(?:restor(?:e|es)|\+)\s*(\d+)\s*mp', raw_eff, re.I)
+                        if m_mp:
+                            mp_rest = int(m_mp.group(1))
+
+                    u_mode = classify_consumable_usage_mode(matched_item)
+                    if hp_rest == 0 and mp_rest == 0 and u_mode != "narrative":
+                        it_low = matched_item.get("name", "").lower()
+                        if any(k in it_low for k in ("health", "healing", "heal", "salve")):
+                            hp_rest = 35
+                        elif any(k in it_low for k in ("mana", "magic", "ether")):
+                            mp_rest = 20
+
+                    is_hp_full = recip_hp >= recip_max_hp
+                    is_mp_full = recip_mp >= recip_max_mp
+                    has_extra_mech = bool(parsed_eff.get("cure_status") or parsed_eff.get("buffs"))
+
+                    wasted = False
+                    if u_mode == "mechanical" and not has_extra_mech:
+                        if hp_rest > 0 and mp_rest == 0 and is_hp_full:
+                            wasted = True
+                        elif mp_rest > 0 and hp_rest == 0 and is_mp_full:
+                            wasted = True
+                        elif hp_rest > 0 and mp_rest > 0 and is_hp_full and is_mp_full:
+                            wasted = True
+
+                    if wasted:
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — ITEM UNUSED]: {char_name} reached for '{matched_item['name']}', but {target_char.get('name', 'their')} vitals are already full. Item was not consumed."
+                        )
+                    else:
+                        it_id = matched_item.get("id")
+                        try:
+                            actor_inv.remove(matched_item)
+                        except ValueError:
+                            pass
+                        a_st["items_lost"].append(matched_item["name"])
+                        all_items_lost.append(matched_item["name"])
+                        consumed_items.append({
+                            "user_id": recip_uid,
+                            "actor_user_id": actor_uid,
+                            "item_id": it_id,
+                            "item_name": matched_item["name"],
+                            "hp_restore": hp_rest,
+                            "mp_restore": mp_rest,
+                            "_persisted_in_db": bool(persist_db),
+                        })
+                        recip_st["hp_delta"] += hp_rest
+                        recip_st["mp_delta"] += mp_rest
+                        recip_st["consumable_hp_gain"] += hp_rest
+                        recip_st["consumable_mp_gain"] += mp_rest
+                        if parsed_eff.get("cure_status"):
+                            for cs in parsed_eff["cure_status"]:
+                                if cs not in recip_st["status_effects"]:
+                                    recip_st["status_effects"].append(cs)
+                        if persist_db:
+                            if it_id:
+                                db.remove_item(actor_uid, it_id)
+                            else:
+                                db.remove_item_by_name(actor_uid, matched_item["name"])
+                            if hp_rest > 0 or mp_rest > 0:
+                                db.apply_hp_mp_delta(recip_uid, hp_delta=hp_rest, mp_delta=mp_rest)
+                            if parsed_eff.get("cure_status"):
+                                for cs in parsed_eff["cure_status"]:
+                                    db.remove_status_effect(recip_uid, cs)
+                        else:
+                            staged_consumable_removals.append({
+                                "user_id": actor_uid,
+                                "item_id": it_id,
+                                "item_name": matched_item["name"],
+                            })
+                        t_disp = f" on {target_char.get('name', 'teammate')}" if recip_uid != actor_uid else ""
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — ITEM CONSUMED]: {char_name} used '{matched_item['name']}'{t_disp} (+{hp_rest} HP, +{mp_rest} MP). Narrate using this item."
+                        )
 
         # 6. Deterministic Pickpocketing & Theft (D3, D17)
         if sub_intent_act == "pickpocket" or (not is_social_act and any(kw in lbl_low for kw in ("pickpocket", "pick pocket", "steal from", "lift purse", "steal coin"))):
@@ -681,6 +877,10 @@ def resolve_pre_turn_vitals_and_resources(
         "consumed_items": consumed_items,
         "staged_consumable_removals": staged_consumable_removals,
         "staged_pickpocket_penalties": staged_pickpocket_penalties,
+        "staged_item_transfers": staged_item_transfers,
+        "staged_npc_gifts": staged_npc_gifts,
+        "staged_npc_item_uses": staged_npc_item_uses,
+        "staged_hostile_item_failures": staged_hostile_item_failures,
         "staged_physical_state": (session.get("physical_state") if staged_physical_state_dirty and isinstance(session, dict) else None),
         "authorized_gold_spend_by_user": authorized_gold_spend_by_user,
         "authorized_gold_gain_by_user": authorized_gold_gain_by_user,
@@ -694,8 +894,14 @@ def resolve_pre_turn_vitals_and_resources(
     }
 
 
-def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict | None = None,
-                  actions: list | None = None) -> dict:
+def apply_outcome(
+    session_id: int,
+    party: list,
+    outcome,
+    mp_already_spent: dict | None = None,
+    actions: list | None = None,
+    ctx: Optional[TurnExecutionContext] = None,
+) -> dict:
     """Returns {user_id: [item_name, ...]} -- every item each character gained
     this turn, in the order the LLM listed them (duplicates preserved, so a
     caller can count "(xN)" for multiple copies of the same item). A user
@@ -821,7 +1027,12 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     session_id,
                     _fk_ops,
                     session=session,
-                    turn_number=int(outcome.get("_target_turn") or (session.get("_target_turn") if isinstance(session, dict) else 0) or 0),
+                    turn_number=int(
+                        (ctx.clock.target_turn if ctx is not None and ctx.clock.target_turn else None)
+                        or outcome.get("_target_turn")
+                        or (session.get("_target_turn") if isinstance(session, dict) else 0)
+                        or 0
+                    ),
                     advance_clock_on_expel=_fk_adv,
                 )
                 if _fk_committed.get("treaty_violation") and isinstance(_fk_committed["treaty_violation"], dict):
@@ -843,6 +1054,15 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                 _r_ops = outcome["_staged_roster_ops"]
                 from mechanics.world import ensure_roaming_merchants_seeded, ensure_venue_staff_seeded, slot_fill_custom_action_role
                 from mechanics.world.venue_templates import is_node_staffable
+                from mechanics.social.population_seeder import ensure_world_population_seeded
+
+                for _ps in (_r_ops.get("population_seed") or []):
+                    if isinstance(_ps, dict):
+                        ensure_world_population_seeded(
+                            session_id,
+                            scen_key=str(_ps.get("scen_key") or "fantasy"),
+                            turn_number=int(_ps.get("turn_number") or 0),
+                        )
 
                 for _vs in (_r_ops.get("venue_seeds") or []):
                     if not isinstance(_vs, dict) or not _vs.get("facility_node_id"):
@@ -919,6 +1139,9 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                             appearance=_ru.get("appearance"),
                             traits=list(_ru.get("traits") or []),
                         )
+                _vh_list = [v for v in (_r_ops.get("visual_hydrations") or []) if isinstance(v, dict)]
+                if _vh_list:
+                    db.hydrate_world_roster_visuals(session_id, _vh_list)
             except Exception as _ro_err:
                 log.warning("Failed committing staged roster ops: %s", _ro_err)
 
@@ -936,7 +1159,7 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         game_engine._sanitize_outcome_person_names(outcome, session_id, scen_key_curr)
 
         items_gained_by_user: dict = {}
-        _reduce_quests_and_waypoints(session_id, session, party_uids, outcome, actions, items_gained_by_user)
+        _reduce_quests_and_waypoints(session_id, session, party_uids, outcome, actions, items_gained_by_user, ctx=ctx)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
 
         is_combat = bool(outcome and (outcome.get("_combat_log") or outcome.get("_enemy_attack_notice") or game_engine.get_active_enemies(outcome)))
@@ -953,12 +1176,7 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             import scenario_data as _pact_sd
             if session_id and _pact_sd.is_anomalous_incursions_scenario(scen_key):
                 from mechanics.pacts import evaluate_post_turn_pact_costs_and_breaches
-                _eff_pact_turn = int(
-                    ((outcome or {}).get("_target_turn") if isinstance(outcome, dict) else 0)
-                    or ((session or {}).get("_target_turn") if isinstance(session, dict) else 0)
-                    or ((session or {}).get("turn_count") if isinstance(session, dict) else 0)
-                    or 1
-                )
+                _eff_pact_turn = resolve_target_turn(ctx, session, outcome)
                 evaluate_post_turn_pact_costs_and_breaches(
                     int(session_id),
                     session if isinstance(session, dict) else {},
@@ -1058,8 +1276,21 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
         _reduce_social_and_milestones(session_id, session, party, outcome, actions, scen_key, items_gained_by_user, first_char_id, first_char_name)
         _reduce_factions(session_id, session, outcome, party, first_char_id)
 
-        _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions)
-        _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions)
+        _reduce_deterministic_waypoints(session_id, session, outcome, party_uids, actions, ctx=ctx)
+        if isinstance(outcome, dict) and session_id:
+            _raw_adv = list(outcome.get("_quests_advanced_this_turn") or [])
+            if ctx is not None:
+                _raw_adv.extend(ctx.world_stage.just_advanced_quest_ids)
+            _just_adv_qids = list(dict.fromkeys(str(q) for q in _raw_adv if q))
+            if ctx is not None:
+                ctx.world_stage.just_advanced_quest_ids = list(_just_adv_qids)
+            if isinstance(session, dict):
+                session["_just_advanced_quest_ids"] = _just_adv_qids
+            try:
+                db.update_session(session_id, extra={"_just_advanced_quest_ids": _just_adv_qids})
+            except Exception:
+                pass
+        _reduce_physical_state_and_memories(session_id, session, outcome, party, scen_key, actions, ctx=ctx)
         if not outcome.get("_b17_neutralized"):
             _b17_killed = list(outcome.get("deceased_characters") or []) + list(outcome.get("dead_enemies") or [])
             _b17_ko = list(outcome.get("ko_characters") or [])
@@ -1134,7 +1365,12 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     outcome["_b17_neutralized"] = True
         if outcome.get("epistemic_signal"):
             from mechanics.social.epistemic_engine import resolve_fenced_epistemic_signal
-            _uid = int(session.get("user_id") or 0)
+            _lead_party_uid = (
+                party[0][0].get("user_id")
+                if party and isinstance(party[0], (tuple, list)) and party[0] and isinstance(party[0][0], dict)
+                else 0
+            )
+            _uid = int(session.get("user_id") or session.get("host_user_id") or _lead_party_uid or 0)
             _inv = db.get_inventory(_uid) if _uid else []
             _held_ids = [
                 str(it.get("id") or it.get("item_id") or "")
@@ -1147,10 +1383,16 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                 for cl in (_clues or [])
                 if isinstance(cl, dict) and cl.get("id")
             ]
+            _ep_present_npcs = (
+                outcome.get("npcs_present")
+                or session.get("current_npcs")
+                or session.get("npcs")
+                or []
+            )
             resolve_fenced_epistemic_signal(
                 session_id,
                 outcome["epistemic_signal"],
-                present_npcs=session.get("npcs") or [],
+                present_npcs=_ep_present_npcs,
                 held_item_ids=_held_ids,
                 clue_ids=_clue_ids,
                 turn=int(session.get("turn_count") or 0),
@@ -1201,15 +1443,25 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
                     sess_updates["combat_threat_ledger"] = outcome["combat_threat_ledger"]
                 if "combat_boss_telegraph" in outcome and outcome["combat_boss_telegraph"] is not None:
                     sess_updates["combat_boss_telegraph"] = outcome["combat_boss_telegraph"]
-            if outcome.get("_active_quest_encounter"):
-                sess_updates.setdefault("extra", {})["_active_quest_encounter"] = outcome["_active_quest_encounter"]
-            elif "_active_quest_encounter" in outcome:
+            _has_outcome_q_enc = isinstance(outcome, dict) and "_active_quest_encounter" in outcome
+            if _has_outcome_q_enc:
+                _act_q_enc = outcome.get("_active_quest_encounter")
+                if ctx is not None:
+                    ctx.combat.active_quest_encounter = _act_q_enc if isinstance(_act_q_enc, dict) else None
+            else:
+                _act_q_enc = ctx.combat.active_quest_encounter if ctx is not None and ctx.combat.active_quest_encounter else None
+            if _act_q_enc:
+                sess_updates.setdefault("extra", {})["_active_quest_encounter"] = _act_q_enc
+            elif _has_outcome_q_enc:
                 sess_updates.setdefault("extra", {})["_active_quest_encounter"] = None
             if sess_updates:
                 try:
                     db.update_session(session_id, **sess_updates)
                 except Exception as _ne_e:
                     log.warning("Failed committing nearby_enemies / player_resonance_pips: %s", _ne_e)
+
+    if ctx is not None and isinstance(outcome, dict):
+        ctx.notices.apply_to_outcome(outcome)
     # ── Background Digest Trigger ────────────────────────────────────────────
     # Schedule a non-blocking arc digest if an arc boundary was crossed this
     # turn (zone travel, dialogue exit, sub-quest completion, or history full).
@@ -1226,6 +1478,12 @@ def apply_outcome(session_id: int, party: list, outcome, mp_already_spent: dict 
             )
     except Exception:
         pass  # digest is best-effort - never block the turn response
+
+    try:
+        from services.examine_service import invalidate_examine_cache
+        invalidate_examine_cache(int(session_id))
+    except Exception:
+        pass
 
     return items_gained_by_user
 

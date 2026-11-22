@@ -911,6 +911,12 @@ def is_npc_invited_in_action(npc_name: str, actions: list, session: dict = None)
             is_dp = False
 
     for a in actions:
+        if isinstance(a, dict) and (
+            a.get("ends_dialogue")
+            or a.get("_quest_dialogue_handoff")
+            or str(a.get("intent") or "").lower() == "dialogue_exit"
+        ):
+            continue
         label = (a.get("label") if isinstance(a, dict) else str(a)).lower()
         t_npc = (str(a.get("target_npc") or "").strip().lower()) if isinstance(a, dict) else ""
         

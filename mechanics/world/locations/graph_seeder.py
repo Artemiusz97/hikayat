@@ -202,6 +202,7 @@ def infer_is_transit_hub(
             return 1 if meta["is_transit_hub"] else 0
         if p_low in (
             "fac_agency_residence", "fac_downtown_walkup", "fac_temple_residence",
+            "fac_cult_residence", "fac_syndicate_residence",
             "loc_player_house", "fac_suburbs_townhouse", "fac_tenement_flat",
             "fac_container_loft", "fac_vault_safehouse", "fac_shophouse_loft",
             "fac_highrise_condo", "fac_ocean_bungalow", "fac_onsen_villa",
@@ -761,11 +762,15 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
                     elif p_access in ("restricted", "private"):
                         s_access = p_access
                 s_curfew_start, s_curfew_end = infer_curfew_window("ROOM", z_id, s_id, raw_sub_name, p_category, sub.get("curfew_start_min"), sub.get("curfew_end_min"))
-                if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in ("loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2"):
+                if s_curfew_start is None and p_curfew_start is not None and not p_id.startswith("bld_school_") and p_id not in (
+                    "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+                    "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
+                ):
                     s_curfew_start, s_curfew_end = p_curfew_start, p_curfew_end
 
                 mega_complex_ids = {
                     "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+                    "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
                     "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
                 }
                 if "is_enclosed" in s_seed_meta and s_seed_meta["is_enclosed"] is not None:
@@ -827,6 +832,7 @@ def _seed_session_spatial_graph_tx(session_id: int, scenario_key: str = "high_sc
 
             is_mega_complex = p_id in {
                 "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
+                "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
                 "loc_general_hospital", "loc_theme_park", "loc_eastern_temple", "loc_botanical_zoo",
             }
             ent_to_room_mins = 3 if is_mega_complex else 1

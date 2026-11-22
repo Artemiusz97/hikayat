@@ -32,6 +32,13 @@ _VALID_SUB_INTENTS = {
 }
 
 
+def _strip_wrapping_quotes(val: Any) -> str:
+    s = str(val or "").strip()
+    while len(s) >= 2 and s[0] == s[-1] and s[0] in ("'", '"'):
+        s = s[1:-1].strip()
+    return s
+
+
 def _coerce_bool_value(v: Any) -> bool:
     if isinstance(v, bool):
         return v
@@ -56,11 +63,18 @@ def _filter_valid_cast_events_list(v: Any) -> List[Any]:
             ev_type = str(item.get("type") or "").strip().lower()
             ev_npc = str(item.get("npc") or "").strip()
             if ev_type in ("arrive", "depart", "engage") and ev_npc:
-                cleaned.append({
+                entry: Dict[str, Any] = {
                     "type": ev_type,
                     "npc": ev_npc,
                     "reason": str(item.get("reason") or "").strip(),
-                })
+                }
+                for opt_k in ("gender", "descriptor", "role"):
+                    opt_v = item.get(opt_k)
+                    if opt_v is not None and str(opt_v).strip():
+                        entry[opt_k] = str(opt_v).strip()
+                if item.get("_contract_confirmed"):
+                    entry["_contract_confirmed"] = True
+                cleaned.append(entry)
     return cleaned
 
 
@@ -140,7 +154,7 @@ class Choice(DictAccessibleModel):
     def coerce_optional_seed_str(cls, v: Any) -> str:
         if v is None:
             return ""
-        s = str(v).strip()
+        s = _strip_wrapping_quotes(v)
         if not s or s.lower() in ("null", "none", "undefined", "n/a"):
             return ""
         return s
@@ -160,6 +174,9 @@ class Choice(DictAccessibleModel):
     ends_dialogue: bool = Field(default=False)
     dismisses_npc: bool = Field(default=False)
     quest_id: Optional[str] = Field(default="")
+    targets_quest_id: Optional[str] = Field(default="")
+    targets_sub_obj_id: Optional[int] = Field(default=None)
+    quest_approach: Optional[str] = Field(default="")
     incursion_action: Optional[str] = Field(default="")
     sub_obj_id: Optional[Any] = Field(default=None)
     stage_index: Optional[int] = Field(default=0)
@@ -217,7 +234,7 @@ class Choice(DictAccessibleModel):
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
             return ""
-        s = str(v).strip()
+        s = _strip_wrapping_quotes(v)
         return "" if s.lower() in ("none", "null", "undefined") else s
 
 class PropUpdate(DictAccessibleModel):
@@ -597,6 +614,9 @@ _EPISTEMIC_SIGNAL_KINDS = frozenset({
     "alibi_stated",
     "alibi_challenged",
     "proof_shown",
+    "npc_secret_uncovered",
+    "npc_secret_learned",
+    "uncovered_npc_secret",
 })
 _EPISTEMIC_SIGNAL_CONFIDENCE = frozenset({"suspect", "rumor", "firsthand", "hard_proof"})
 
@@ -1083,7 +1103,7 @@ class ActionClassification(DictAccessibleModel):
     def coerce_optional_seed_str(cls, v: Any) -> str:
         if v is None:
             return ""
-        s = str(v).strip()
+        s = _strip_wrapping_quotes(v)
         if not s or s.lower() in ("null", "none", "undefined", "n/a"):
             return ""
         return s
@@ -1093,6 +1113,9 @@ class ActionClassification(DictAccessibleModel):
     ends_dialogue: bool = Field(default=False)
     dismisses_npc: bool = Field(default=False)
     quest_id: Optional[str] = Field(default="")
+    targets_quest_id: Optional[str] = Field(default="")
+    targets_sub_obj_id: Optional[int] = Field(default=None)
+    quest_approach: Optional[str] = Field(default="")
     incursion_action: Optional[str] = Field(default="")
     sub_obj_id: Optional[Any] = Field(default=None)
     stage_index: Optional[int] = Field(default=0)
@@ -1143,13 +1166,30 @@ class ActionClassification(DictAccessibleModel):
             return ""
         return s if s in _VALID_SUB_INTENTS else ""
 
-    @field_validator("target_npc", "target_node_id", "target_location", "spawns_npc_role", "quest_id", "incursion_action", mode="before")
+    @field_validator("target_npc", "target_node_id", "target_location", "spawns_npc_role", "quest_id", "targets_quest_id", "quest_approach", "incursion_action", mode="before")
     @classmethod
     def coerce_str_empty(cls, v: Any) -> str:
         if v is None:
             return ""
         s = str(v).strip()
-        return "" if s.lower() in ("none", "null", "undefined") else s
+        return "" if s.lower() in ("none", "null", "undefined", "n/a") else s
+
+    @field_validator("targets_sub_obj_id", mode="before")
+    @classmethod
+    def coerce_targets_sub_obj_id(cls, v: Any) -> Optional[int]:
+        if v is None:
+            return None
+        if isinstance(v, bool):
+            return None
+        if isinstance(v, int):
+            return v
+        s = str(v).strip()
+        if not s or s.lower() in ("none", "null", "undefined", "n/a"):
+            return None
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
 
     @field_validator("requirement", "mp_cost", "stage_index", mode="before")
     @classmethod
@@ -1747,11 +1787,60 @@ class ChapterPlanClueSource(DictAccessibleModel):
             return 0
 
 
+_VALID_OPTIONAL_ROLES = {"aid", "bypass", "alternative", "threatened"}
+_VALID_PLAN_APPROACHES = {"STR", "PER", "END", "CHA", "INT", "AGI", "LUK", "BRIBE", "ITEM"}
+
+
+class ChapterPlanOptionalSpec(DictAccessibleModel):
+    model_config = ConfigDict(extra="allow")
+    role: str = "aid"
+    label: str = ""
+    target_location: str = ""
+    target_npc: str = ""
+    approach_hint: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_opt_spec_aliases(cls, data: Any) -> Any:
+        if isinstance(data, cls):
+            return data
+        if isinstance(data, str):
+            return {"label": data.strip()}
+        if not isinstance(data, dict):
+            return {}
+        d = dict(data)
+        if not d.get("label"):
+            d["label"] = d.get("title") or d.get("hook") or d.get("text") or d.get("name") or ""
+        if not d.get("target_location"):
+            d["target_location"] = d.get("location") or d.get("venue") or ""
+        if not d.get("target_npc"):
+            d["target_npc"] = d.get("npc_name") or d.get("npc") or ""
+        if not d.get("approach_hint"):
+            d["approach_hint"] = d.get("hint") or d.get("stakes_hint") or d.get("description") or ""
+        return d
+
+    @field_validator("role", mode="before")
+    @classmethod
+    def coerce_opt_role(cls, v: Any) -> str:
+        s = str(v or "aid").strip().lower()
+        return s if s in _VALID_OPTIONAL_ROLES else "aid"
+
+    @field_validator("label", "target_location", "target_npc", "approach_hint", mode="before")
+    @classmethod
+    def coerce_opt_str(cls, v: Any) -> str:
+        if v is None or isinstance(v, (dict, list)):
+            return ""
+        return str(v).replace("\x00", "").strip()[:220]
+
+
 class ChapterPlanStage(DictAccessibleModel):
     model_config = ConfigDict(extra="allow")
     stage_index: int = 1
     stage_label: str = ""
     is_climax_stage: bool = False
+    target_location: str = ""
+    target_npc: str = ""
+    approaches: List[str] = Field(default_factory=list)
     beat_contract: ChapterPlanBeatContract = Field(default_factory=ChapterPlanBeatContract)
     key_clue: ChapterPlanKeyClue = Field(default_factory=ChapterPlanKeyClue)
     clue_sources: List[ChapterPlanClueSource] = Field(default_factory=list)
@@ -1770,6 +1859,10 @@ class ChapterPlanStage(DictAccessibleModel):
             d["stage_label"] = d.get("label") or d.get("description") or d.get("text") or d.get("title") or d.get("name") or ""
         if "stage_index" not in d and ("stage" in d or "index" in d):
             d["stage_index"] = d.get("stage") or d.get("index") or 1
+        if not d.get("target_location"):
+            d["target_location"] = d.get("location") or d.get("venue") or ""
+        if not d.get("target_npc"):
+            d["target_npc"] = d.get("npc_name") or d.get("npc") or ""
         if "clue_sources" not in d:
             d["clue_sources"] = d.get("sources") or d.get("clues") or d.get("investigations") or []
         return d
@@ -1782,12 +1875,30 @@ class ChapterPlanStage(DictAccessibleModel):
         except (TypeError, ValueError):
             return 1
 
-    @field_validator("stage_label", mode="before")
+    @field_validator("stage_label", "target_location", "target_npc", mode="before")
     @classmethod
     def coerce_stage_label(cls, v: Any) -> str:
         if v is None or isinstance(v, (dict, list)):
             return ""
         return str(v).replace("\x00", "").strip()[:220]
+
+    @field_validator("approaches", mode="before")
+    @classmethod
+    def coerce_stage_approaches(cls, v: Any) -> List[str]:
+        if not isinstance(v, list):
+            return []
+        out: List[str] = []
+        seen: set[str] = set()
+        for raw in v:
+            tok = ""
+            if isinstance(raw, dict):
+                tok = str(raw.get("stat") or raw.get("approach") or raw.get("id") or "").strip().upper()
+            elif raw is not None:
+                tok = str(raw).strip().upper()
+            if tok in _VALID_PLAN_APPROACHES and tok not in seen:
+                seen.add(tok)
+                out.append(tok)
+        return out[:5]
 
     @field_validator("is_climax_stage", mode="before")
     @classmethod
@@ -1821,29 +1932,40 @@ class ChapterPlan(DictAccessibleModel):
     title: str = ""
     objective: str = ""
     climax_location: str = ""
+    masked_climax_teaser: str = ""
     stages: List[ChapterPlanStage] = Field(default_factory=list)
     optional_hooks: List[str] = Field(default_factory=list)
+    optional_specs: List[ChapterPlanOptionalSpec] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
     def coerce_plan_aliases(cls, data: Any) -> Any:
         if isinstance(data, cls):
             return data
-        if not isinstance(data, dict):
-            return {}
-        d = dict(data)
-        if not d.get("title"):
-            d["title"] = d.get("quest_title") or d.get("plan_title") or d.get("name") or ""
-        if not d.get("objective"):
-            d["objective"] = d.get("goal") or d.get("main_objective") or d.get("quest_objective") or d.get("summary") or d.get("description") or ""
-        return d
+        if isinstance(data, dict):
+            d = dict(data)
+            if not d.get("title"):
+                d["title"] = d.get("quest_title") or d.get("plan_title") or d.get("name") or ""
+            if not d.get("objective"):
+                d["objective"] = d.get("goal") or d.get("main_objective") or d.get("quest_objective") or d.get("summary") or d.get("description") or ""
+            if not d.get("masked_climax_teaser"):
+                d["masked_climax_teaser"] = d.get("climax_teaser") or d.get("locked_climax_teaser") or ""
+            return d
+        return {}
 
-    @field_validator("title", "objective", "climax_location", mode="before")
+    @field_validator("title", "objective", "climax_location", "masked_climax_teaser", mode="before")
     @classmethod
     def coerce_plan_str(cls, v: Any) -> str:
         if v is None or isinstance(v, (dict, list)):
             return ""
         return str(v).replace("\x00", "").strip()[:400]
+
+    @field_validator("optional_specs", mode="before")
+    @classmethod
+    def coerce_opt_specs(cls, v: Any) -> List[Any]:
+        if not isinstance(v, list):
+            return []
+        return [item for item in v if isinstance(item, (dict, str, BaseModel))][:4]
 
     @field_validator("stages", mode="before")
     @classmethod

@@ -14,7 +14,9 @@ Hikayat delivers **100% gameplay parity** across its React 18 Web SPA (`web/`) a
 Do **not** send turn actions over WebSockets. Hikayat separates HTTP command submission from WebSocket real-time streaming:
 
 1. **Action Submission (HTTP POST)**:
-   - `submitAction()` sends `POST /api/adventure/action` (180s client timeout via `web/src/api/client.js`) with `{ session_id, user_id, choice_index, custom_action_text, direct_choice, combat_target, intent, skip_minutes, sleep_mode, is_stealth, stance, action }`.
+   - `submitAction()` sends `POST /api/adventure/action` (240s client timeout via `web/src/api/client.js`) with `{ session_id, user_id, choice_index, custom_action_text, direct_choice, combat_target, intent, skip_minutes, sleep_mode, is_stealth, stance, action, async_ws }`.
+   - When the WebSocket is open, `async_ws: true` returns `202 Accepted` immediately and resolves via WebSocket events (`STREAM_THINKING`, `STREAM_START`, `STREAM_CHUNK`, `STREAM_END`, `STREAM_ERROR`, `TURN_CANCELLED`); REST callers omitting `async_ws` retain synchronous `200`/`503`/`500` semantics.
+   - `cancelTurn()` calls `POST /api/adventure/cancel` to abort an in-flight background turn task and roll back partial turn state; `GET /api/adventure/active-session/{user_id}` attaches `in_flight_turn` metadata so page refreshes restore active processing/thinking state.
    - In multiplayer, if `data.status === "waiting_for_party"`, the UI sets `waitingForParty = true` until all party members lock picks.
    - On HTTP timeout/network error, `submitAction()` automatically recovers state via `GET /api/adventure/active-session/{user_id}`.
    - If `image_gen_enabled` is active and `scene_image_url` is not yet ready, `pollForSceneImage()` polls `GET /api/adventure/session-image/{sessionId}`.
@@ -22,7 +24,7 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 2. **Real-Time Server Push & Party Chat (`/ws/session/{sessionId}?user_id={userId}`)**:
    - **Client -> Server**: Only `{ type: "PING" }` (15s keepalive) and `{ type: "CHAT", sender, message }`. Auto-reconnects after 2s on close.
    - **Server -> Client Events**:
-     - `STREAM_START` / `STREAM_CHUNK` (`field`: `"outcome_narrative"` or `"next_narrative"`) / `STREAM_END` / `STREAM_ERROR`
+     - `STREAM_THINKING` / `STREAM_START` / `STREAM_CHUNK` (`field`: `"outcome_narrative"` or `"next_narrative"`) / `STREAM_END` / `STREAM_RESET` / `STREAM_ERROR` / `TURN_CANCELLED`
      - `NEW_SCENE` / `UPDATE_SCENE` / `PICK_LOCKED` / `SCENE_IMAGE`
      - `STEALTH_STATE_UPDATED` (`stealth_state`, `stealth_badge`)
      - `CHAT_MESSAGE` / `PRESENCE_UPDATE` / `HEARTBEAT`
@@ -50,7 +52,7 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 - **Views (`web/src/views/`)**: `AuthView.jsx`, `DashboardView.jsx`, `GameView.jsx`.
 - **Key Components (`web/src/components/`)** — representative, not exhaustive; list the directory for the current set:
   - `Sidebar/`: `TacticalActionDock.jsx`, `InventoryPanel.jsx`, `CodexPanel.jsx`, `QuestLogPanel.jsx`, `PartyWidget.jsx`, `WorldOutcomeSidebar.jsx`.
-  - `ActionPanel/TurnOutcomePanel.jsx` & `StoryFeed/` (`StoryFeed.jsx`, `HistoryCard.jsx`).
+  - `ActionPanel/ActionPanel.jsx` & `StoryFeed/` (`StoryFeed.jsx`, `HistoryCard.jsx`).
   - `Modals/` (`WorldMapModal.jsx`, `TimeSkipModal.jsx`, etc.), `Phone/PhoneModal.jsx`, `Character/CharacterCreatorModal.jsx`, `Adventure/EmbarkationModal.jsx`.
 - **Tailwind Theme (`web/tailwind.config.js`)** — values below are a snapshot; confirm in the config before relying on exact hex codes:
   - Surfaces & Borders: `bg-fantasy-dark` (`#0f0f13`), `bg-fantasy-panel` (`#1a1a24`), `border-fantasy-border` (`#2d2d3f`).

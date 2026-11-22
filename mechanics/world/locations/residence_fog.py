@@ -335,10 +335,31 @@ def unlock_npc_residence_node(
 
                 zone_id: Optional[str] = str(res_zone["node_id"]) if res_zone else None
                 zone_name = str(res_zone.get("name") or "Residential District") if res_zone else "Residential District"
-                fac_id = f"fac_npc_res_{slug}"
-                fac_name = f"{npc_name}'s Residence"
-                home_nid = f"sub_npc_res_{slug}"
-                sub_name = f"{npc_name}'s Quarters"
+
+                b_inf = (
+                    (any_row or {}).get("basic_info")
+                    if isinstance((any_row or {}).get("basic_info"), Mapping)
+                    else ((contact_row or {}).get("basic_info") if isinstance((contact_row or {}).get("basic_info"), Mapping) else {})
+                )
+                res_group = str((b_inf or {}).get("shared_residence_group") or "").strip()
+                cohab_names: list[str] = []
+                if res_group:
+                    for rr in (db.get_world_roster(sess_id, include_legacy_rosters=False, conn=conn) or []):
+                        rb = rr.get("basic_info") if isinstance(rr.get("basic_info"), Mapping) else {}
+                        if str(rb.get("shared_residence_group") or "").strip() == res_group and rr.get("name"):
+                            cohab_names.append(str(rr["name"]).strip())
+                hh_slug = _slugify_res(res_group) if res_group else ""
+                if hh_slug:
+                    fac_id = f"fac_npc_res_hh_{hh_slug}"
+                    home_nid = f"sub_npc_res_hh_{hh_slug}"
+                    display_owners = " & ".join(cohab_names[:2]) if len(cohab_names) >= 2 else npc_name
+                    fac_name = f"{display_owners}'s Residence"
+                    sub_name = "Shared Residence Quarters"
+                else:
+                    fac_id = f"fac_npc_res_{slug}"
+                    fac_name = f"{npc_name}'s Residence"
+                    home_nid = f"sub_npc_res_{slug}"
+                    sub_name = f"{npc_name}'s Quarters"
 
                 if fac_id not in existing_nodes:
                     db.save_world_node(
@@ -455,5 +476,25 @@ def unlock_npc_residence_node(
                 turn_number=t_num,
                 conn=conn,
             )
+
+        b_inf_sync = (
+            (any_row or {}).get("basic_info")
+            if isinstance((any_row or {}).get("basic_info"), Mapping)
+            else ((contact_row or {}).get("basic_info") if isinstance((contact_row or {}).get("basic_info"), Mapping) else {})
+        )
+        res_group_sync = str((b_inf_sync or {}).get("shared_residence_group") or "").strip()
+        if res_group_sync and home_nid:
+            for co_row in (db.get_world_roster(sess_id, include_legacy_rosters=False, conn=conn) or []):
+                co_id = str(co_row.get("npc_id") or "").strip()
+                if not co_id or co_id.lower() == key_str.lower():
+                    continue
+                co_b = co_row.get("basic_info") if isinstance(co_row.get("basic_info"), Mapping) else {}
+                if str(co_b.get("shared_residence_group") or "").strip() == res_group_sync:
+                    db.upsert_world_roster_npc(
+                        sess_id,
+                        {"npc_id": co_id, "name": co_row.get("name"), "home_node_id": home_nid},
+                        turn_number=0,
+                        conn=conn,
+                    )
 
     return home_nid

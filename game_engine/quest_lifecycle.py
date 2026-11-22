@@ -259,11 +259,17 @@ def sync_dossier_main_stage_advance(
         gate_type = str(climax.get("gate_type") or climax.get("gate_mode") or "open").lower()
         tot_stages = len(main_stages)
         target_ms = next((m for m in main_stages if int(m.get("stage_index") or 1) == completed_stage_idx), None)
+        clock_pending = bool(target_ms.pop("_clock_decrement_pending", False)) if isinstance(target_ms, dict) else False
         newly_completed = bool(
             target_ms
-            and not bool(target_ms.get("completed"))
-            and str(target_ms.get("status") or "").lower() not in ("completed", "bypassed")
             and not bool(target_ms.get("is_climax_stage"))
+            and (
+                clock_pending
+                or (
+                    not bool(target_ms.get("completed"))
+                    and str(target_ms.get("status") or "").lower() not in ("completed", "bypassed")
+                )
+            )
         )
 
         # D2 Dual-Path: Unlock Climax BEFORE setting next stage status
@@ -279,9 +285,11 @@ def sync_dossier_main_stage_advance(
                 conn=c,
             )
 
-        # Advance stages
-        for s in main_stages:
-            st_idx = int(s.get("stage_index") or 1)
+        # Advance stages and grant handover entry clearance for newly unlocked stage/climax rooms
+        newly_unlocked_locs: List[str] = []
+        for idx_s, s in enumerate(main_stages):
+            s.pop("_clock_decrement_pending", None)
+            st_idx = int(s.get("stage_index", idx_s + 1) or (idx_s + 1))
             if st_idx <= completed_stage_idx:
                 s["status"] = "completed"
                 s["completed"] = True
@@ -290,11 +298,21 @@ def sync_dossier_main_stage_advance(
                 if not is_climax or gate_type != "secret" or bool(climax.get("is_unlocked")):
                     s["status"] = "active"
                     s["completed"] = False
+                    nxt_loc = str(s.get("target_location") or (climax.get("location") if is_climax else "") or "").strip()
+                    if nxt_loc:
+                        newly_unlocked_locs.append(nxt_loc)
                 else:
                     s["status"] = "locked"
             else:
                 if not s.get("completed"):
                     s["status"] = "locked"
+
+        if newly_unlocked_locs or climax_unlocked:
+            existing_clr = [str(x) for x in (climax.get("earned_clearance_locations") or []) if x]
+            for cl_loc in newly_unlocked_locs + ([str(climax.get("location") or "").strip()] if climax_unlocked else []):
+                if cl_loc and cl_loc not in existing_clr:
+                    existing_clr.append(cl_loc)
+            climax["earned_clearance_locations"] = existing_clr
 
         climax["main_stages"] = main_stages
 
@@ -412,6 +430,16 @@ def heal_session_quests_on_load(session_id: int) -> bool:
                     dossiers_needing_q2.append(dos_cand)
                 break
 
+    split_brain_healed = False
+    for dos_cand in active_dossiers:
+        qid_sb = str(dos_cand.get("quest_id") or "")
+        if qid_sb:
+            try:
+                if db.reconcile_structured_quest_split_brain(session_id, qid_sb, dossier=dos_cand) is not None:
+                    split_brain_healed = True
+            except Exception:
+                pass
+
     if (
         not rename_map
         and not needs_splice
@@ -419,6 +447,7 @@ def heal_session_quests_on_load(session_id: int) -> bool:
         and not needs_opt_fix
         and not needs_clock_init
         and not dossiers_needing_q2
+        and not split_brain_healed
         and healed_spine == spine
     ):
         return False  # Fast early-return: 0 writes
@@ -670,6 +699,23 @@ def accept_bounty_contract(
 
     db.update_quest_status(session_id, quest_id, "Active")
 
+    q_notes = str(quest.get("quest_notes") or "")
+    if "dossier_revealed:0" in q_notes:
+        from mechanics.narrative.bounty import parse_anomalous_quest_board_source
+        from mechanics.social.factions import get_anomalous_faction_state
+        from mechanics.world.anomalous_events import reveal_anomaly_dossier
+
+        board_src = str(parse_anomalous_quest_board_source(quest, session_id=session_id) or "").strip().lower()
+        fac_st = get_anomalous_faction_state(session_id, user_id=eff_uid)
+        if (
+            str(fac_st.get("faction_archetype_key") or "").strip().lower() == "clandestine_faction"
+            and board_src in ("clandestine_faction", "freelance_app")
+        ):
+            reveal_anomaly_dossier(session_id, quest_id=quest_id)
+            refreshed_q = db.get_quest_by_id(session_id, quest_id)
+            if isinstance(refreshed_q, dict):
+                quest = refreshed_q
+
     fam_tier = infer_quest_family_tier(
         quest_id=quest_id,
         quest_type=str(quest.get("quest_type") or ""),
@@ -690,6 +736,7 @@ def accept_bounty_contract(
         required_item=str(quest.get("required_item") or ""),
         reward_gold=int(quest.get("reward_gold") or 50),
         scen_key=scen_key,
+        lang=str(sess.get("narration_language") or sess.get("language") or "en"),
     )
 
     sync_waypoints_from_dossier(session_id, quest_id, dossier, force_replace=False)
@@ -767,12 +814,35 @@ async def accept_bounty_contract_async(
             haggle_advance,
             None,
         )
-        if res.get("success"):
-            dos_b = res.get("dossier") or {}
-            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
-            if is_clue_based_quest(str(dos_b.get("family_tier") or ""), str(dos_b.get("engine") or "")):
-                schedule_background_chapter_plan(session_id, quest_id)
-        return res
+    if res.get("success"):
+        dos_b = res.get("dossier") or {}
+        from mechanics.narrative.chapter_plan import (
+            apply_chapter_plan_to_dossier,
+            compile_or_apply_eager_quest_plan,
+            is_full_arc_blueprint_eligible,
+        )
+
+        if is_full_arc_blueprint_eligible(
+            str(dos_b.get("family_tier") or ""),
+            str(dos_b.get("engine") or ""),
+            quest_id,
+        ):
+            plan_b = await compile_or_apply_eager_quest_plan(
+                session_id,
+                quest_id,
+                timeout_seconds=18.0,
+                dossier=dos_b,
+                defer_apply=True,
+            )
+            if plan_b:
+                async with distributed_adventure_lock(eff_uid, session_id):
+                    updated_dos = await adb(apply_chapter_plan_to_dossier, session_id, quest_id, plan_b)
+                    if updated_dos:
+                        res["dossier"] = updated_dos
+                    refreshed_q = await adb(db.get_quest_by_id, session_id, quest_id)
+                    if refreshed_q:
+                        res["quest"] = refreshed_q
+    return res
 
 
 def forfeit_side_bounty(
@@ -1223,6 +1293,9 @@ async def prewarm_chapter_ahead(
         async with acquire_background_session_lock(session_id) as locked:
             if not locked:
                 return None
+            sess_live = await adb(db.get_session, session_id)
+            if not sess_live or str(sess_live.get("status") or "active").strip().lower() != "active":
+                return None
             existing_now = await adb(db.get_prewarmed_quest_dossier, session_id, target_chapter)
             if existing_now and existing_now.get("quest_id"):
                 return str(existing_now["quest_id"])
@@ -1256,6 +1329,9 @@ async def prewarm_chapter_ahead(
             if plan:
                 async with acquire_background_session_lock(session_id) as locked_apply:
                     if locked_apply:
+                        sess_apply = await adb(db.get_session, session_id)
+                        if not sess_apply or str(sess_apply.get("status") or "active").strip().lower() != "active":
+                            return None
                         cur = await adb(db.get_quest_dossier, session_id, pre_sq_id)
                         if cur and str(cur.get("status_stage") or "") == "prewarmed":
                             await adb(apply_chapter_plan_to_dossier, session_id, pre_sq_id, plan)
@@ -1520,8 +1596,11 @@ def resolve_chapter_transition(
                 dossier_stage="compiled",
             )
             db.sync_quest_projection_from_dossier(session_id, next_sq_id, dossier=patched_dossier)
-            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
-            if is_clue_based_quest("story", next_engine) and not (patched_dossier.get("climax_spec") or {}).get("chapter_plan_applied"):
+            from mechanics.narrative.chapter_plan import (
+                is_full_arc_blueprint_eligible,
+                schedule_background_chapter_plan,
+            )
+            if is_full_arc_blueprint_eligible("story", next_engine, next_sq_id) and not (patched_dossier.get("climax_spec") or {}).get("chapter_plan_applied"):
                 schedule_background_chapter_plan(session_id, next_sq_id)
             next_dossier = patched_dossier
             refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
@@ -1580,8 +1659,11 @@ def resolve_chapter_transition(
                 scen_key=scen_key,
                 lang=lang,
             )
-            from mechanics.narrative.chapter_plan import is_clue_based_quest, schedule_background_chapter_plan
-            if is_clue_based_quest("story", next_engine):
+            from mechanics.narrative.chapter_plan import (
+                is_full_arc_blueprint_eligible,
+                schedule_background_chapter_plan,
+            )
+            if is_full_arc_blueprint_eligible("story", next_engine, next_sq_id):
                 schedule_background_chapter_plan(session_id, next_sq_id)
             refreshed_next_quest = db.get_quest_by_id(session_id, next_sq_id) or next_quest
     except Exception:

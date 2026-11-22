@@ -12,9 +12,21 @@ export const PronounTooltip = ({ charName, charRole, children }) => {
         e.stopPropagation();
         setIsOpen((prev) => !prev);
       }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen((prev) => !prev);
+        } else if (e.key === 'Escape' && isOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setIsOpen(false);
+        }
+      }}
       onMouseLeave={() => setIsOpen(false)}
       tabIndex={0}
       role="button"
+      aria-expanded={isOpen}
       aria-label={`Refers to ${charName}`}
     >
       <span className="border-b border-dotted border-fantasy-accent/60 text-fantasy-accent/95 hover:text-fantasy-accent hover:border-solid hover:bg-fantasy-accent/15 rounded px-0.5 cursor-pointer transition-all duration-150 font-medium select-none">
@@ -250,7 +262,7 @@ const HistoryCard = ({
       case 'fail':
         return t('combat.failure', theme.defaultLabel);
       case 'success':
-        return t(isSuccess ? 'combat.success' : 'combat.resolved', theme.defaultLabel);
+        return t(theme.defaultLabel === 'SUCCESS' ? 'combat.success' : 'combat.resolved', theme.defaultLabel);
       default:
         return theme.defaultLabel;
     }
@@ -267,7 +279,7 @@ const HistoryCard = ({
       <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pt-2 border-t border-white/5">
         <div className="flex items-center gap-2 min-w-0 text-xs text-gray-400/90 italic">
           <span className="text-fantasy-accent/70 not-italic font-mono text-[11px]">▸</span>
-          <span className="truncate">{actionLabel || t('history.action_resolved')}</span>
+          <span className="truncate pr-1">{actionLabel || t('history.action_resolved')}</span>
         </div>
 
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-[10px] font-mono font-bold uppercase tracking-wider shrink-0 ${theme.badgeClass}`}>

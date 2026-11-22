@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -406,6 +407,46 @@ def render_optional_objective_template(
         "label": raw_label.format(**safe_slots),
         "stakes_hint": raw_hint.format(**safe_slots),
     }
+
+
+_TEASER_LEAK_RE = re.compile(
+    r"(?:\[(?:ITEM|GEAR|SPELLBOOK)_JSON\]|\b(?:HP|MP|DC)\s*[:=]?\s*\d+)",
+    re.IGNORECASE,
+)
+
+
+def get_masked_climax_teaser(
+    engine: str,
+    climax_spec: Optional[Dict[str, Any]] = None,
+    lang: str = "en",
+) -> str:
+    """Returns a story-specific spoiler-free teaser for a locked secret climax, never leaking venue/culprit."""
+    loc = normalize_quest_locale(lang)
+    cs = climax_spec if isinstance(climax_spec, dict) else {}
+    custom = str(cs.get("masked_climax_teaser") or "").strip()
+    if custom and not _TEASER_LEAK_RE.search(custom):
+        gate_kind = str(cs.get("gate_type") or cs.get("gate_mode") or "open").strip().lower()
+        is_locked_secret = gate_kind == "secret" and not bool(cs.get("is_unlocked", False))
+        if not is_locked_secret:
+            return custom
+        raw_loc = str(cs.get("location") or cs.get("target_location") or "").strip()
+        leaf = raw_loc.split("➔")[-1].split("->")[-1].strip().lower()
+        culprit = str(cs.get("true_culprit") or "").strip().lower()
+        custom_low = custom.lower()
+        leaks_leaf = bool(leaf and len(leaf) >= 4 and leaf in custom_low)
+        leaks_culprit = bool(culprit and len(culprit) >= 3 and culprit in custom_low)
+        if not leaks_leaf and not leaks_culprit:
+            return custom
+
+    catalog = load_quest_engines_catalog()
+    teasers = catalog.get("masked_climax_teasers") or {}
+    eng_key = str(engine or "MYSTERY_CASE").strip().upper()
+    eng_map = teasers.get(eng_key) or teasers.get("MYSTERY_CASE") or {}
+    return str(
+        eng_map.get(loc)
+        or eng_map.get("en")
+        or "Pursue active leads to uncover where the final confrontation awaits."
+    )
 
 
 def render_liberation_op_spec(

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiCall } from '../api/client';
 
 export const useInventory = (user) => {
@@ -10,13 +10,43 @@ export const useInventory = (user) => {
   const [gold, setGold] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const fetchSeqRef = useRef(0);
+  const abortRef = useRef(null);
 
   const fetchInventory = useCallback(async () => {
-    if (!user) return;
+    if (!user) {
+      fetchSeqRef.current += 1;
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+        abortRef.current = null;
+      }
+      setItems([]);
+      setEquipment({});
+      setCapacity(10);
+      setPropertyBonusSlots(0);
+      setUsedSlots(0);
+      setGold(0);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    if (abortRef.current) {
+      try {
+        abortRef.current.abort();
+      } catch {}
+    }
+    const seq = ++fetchSeqRef.current;
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       setLoading(true);
       setError(null);
-      const data = await apiCall(`/api/inventory/${user.user_id}`);
+      const data = await apiCall(`/api/inventory/${user.user_id}`, {
+        signal: controller.signal,
+      });
+      if (seq !== fetchSeqRef.current) return;
       setItems(data.items || []);
       setEquipment(data.equipment || {});
       setCapacity(data.capacity || 10);
@@ -24,15 +54,30 @@ export const useInventory = (user) => {
       setUsedSlots(data.used_slots || 0);
       setGold(data.gold || 0);
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== fetchSeqRef.current) return;
       console.error("Failed to fetch inventory:", err);
       setError(err.message || "Failed to load inventory");
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+        if (abortRef.current === controller) {
+          abortRef.current = null;
+        }
+      }
     }
   }, [user]);
 
   useEffect(() => {
     fetchInventory();
+    return () => {
+      fetchSeqRef.current += 1;
+      if (abortRef.current) {
+        try {
+          abortRef.current.abort();
+        } catch {}
+        abortRef.current = null;
+      }
+    };
   }, [fetchInventory]);
 
   const equipItem = async (itemId, slot) => {
@@ -87,7 +132,13 @@ export const useInventory = (user) => {
     }
   };
 
-  const useItem = async (itemId, sessionId = null, targetType = 'self', targetName = 'self') => {
+  const useItem = async (
+    itemId,
+    sessionId = null,
+    targetType = 'self',
+    targetName = 'self',
+    targetUserId = null
+  ) => {
     if (!user) return null;
     const res = await apiCall('/api/inventory/use', {
       method: 'POST',
@@ -96,6 +147,7 @@ export const useInventory = (user) => {
         item_id: itemId,
         target_type: targetType,
         target_name: targetName,
+        target_user_id: targetUserId,
         session_id: sessionId
       })
     });

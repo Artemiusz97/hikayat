@@ -1,9 +1,23 @@
 from __future__ import annotations
 
 from .core import *
+from .registry import (
+    FTS5_VIRTUAL_TABLES,
+    GLOBAL_TABLES,
+    SESSION_TABLE_MAP,
+    SESSION_TABLE_REGISTRY,
+    SessionTableSpec,
+    get_load_specs,
+    get_purge_specs,
+    get_save_specs,
+    get_session_child_table_names,
+    get_simple_rollback_specs,
+    get_snapshot_prune_specs,
+)
 from .characters import *
 from .inventory import *
 from .settings import *
+from .settings import sync_user_settings_to_session
 from .sessions import *
 from .saves import *
 from .quests import *
@@ -41,6 +55,7 @@ from .inventory import (
     get_inventories_for_characters,
     sell_inventory_item,
     set_item_quest_lock,
+    transfer_item_between_users,
 )
 from .social import *
 from .world import *
@@ -75,19 +90,49 @@ from .world_events import (
     mark_world_event_cold,
 )
 from .core import (
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_SNAPSHOT_KEEP_LAST,
+    WAL_MAINTENANCE_TURN_INTERVAL,
+    ReadUnitOfWork,
     _backfill_session_anomaly_records_v45,
     _migrate_zone_split_and_hidden_villages_v49,
     _migrate_dynamic_social_overhaul_v50,
     _migrate_main_quest_bounty_overhaul_v51,
     _migrate_anomalous_locations_integrity_v57,
+    _migrate_outlaw_factions_v60,
     _delete_session_child_records_only,
     _delete_session_records,
     _is_suspicious_entity_text,
     _safe_int_db,
     _sanitize_npcs_list,
     _to_str,
+    ensure_table_group_once,
+    get_main_event_loop,
+    maybe_run_wal_maintenance,
     nullify_orphaned_implicated_contacts,
+    preload_prepare_action_bundle,
+    preload_turn_party_bundle,
+    prune_session_turn_snapshots,
 )
+
+# Verified zero-I/O in-memory helpers on the `db` package facade; allowed inside `async def`.
+PURE_IN_MEMORY_DB_HELPERS: frozenset[str] = frozenset({
+    "current_turn_user_id",
+    "infer_session_turn",
+    "canon_social_npc_id",
+    "get_skill_progress",
+    "compute_inventory_used_slots",
+    "is_discord_snowflake",
+    "build_contract_key",
+    "build_grudge_key",
+    "get_main_event_loop",
+    "get_session_child_table_names",
+    "get_purge_specs",
+    "get_save_specs",
+    "get_load_specs",
+    "get_snapshot_prune_specs",
+    "get_simple_rollback_specs",
+})
 from .characters import _apply_debug_stat_override, delete_character_by_id, get_character_3axis, set_character_3axis
 from .quests import (
     _enrich_quest_dict,
@@ -96,6 +141,7 @@ from .quests import (
     get_quest_waypoint_target_location,
     is_quest_main_objectives_complete,
     promote_locked_quest_waypoints,
+    reconcile_structured_quest_split_brain,
     sync_quest_projection_from_dossier,
     unlock_climax_waypoint,
     update_quest_anomaly_blueprint,
@@ -173,9 +219,11 @@ from .roster import (
     ALLOWED_STAFF_STATUSES,
     WORLD_ROSTER_V54_DDL,
     apply_world_roster_autonomy_mutations,
+    bulk_upsert_world_roster,
     clear_roster_npc_merchant_archetypes,
     get_world_roster,
     get_world_roster_npc,
+    hydrate_world_roster_visuals,
     mark_world_roster_staff_status,
     promote_world_roster_to_contact,
     record_discovered_schedule_slot,

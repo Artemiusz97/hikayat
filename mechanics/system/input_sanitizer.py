@@ -40,6 +40,11 @@ _ROLE_HEADER_SPOOF_RE = re.compile(
     re.IGNORECASE,
 )
 
+_SENTINEL_HEADER_SPOOF_RE = re.compile(
+    r"@@\s*(?:TITLE|OUTCOME(?:_NARRATIVE)?|NEXT(?:_NARRATIVE|_CHOICES)?|CHOICES|META)\b",
+    re.IGNORECASE,
+)
+
 _RESERVED_XML_FENCE_RE = re.compile(
     r"</?\s*(?:player_action|player_message|custom_lore|system|instructions?)\b[^>]*>",
     re.IGNORECASE,
@@ -56,6 +61,7 @@ def _strip_reserved_tokens(text: str) -> str:
     cleaned = _RESERVED_BRACKET_TAG_RE.sub(" ", cleaned)
     cleaned = _RESERVED_XML_FENCE_RE.sub(" ", cleaned)
     cleaned = _ROLE_HEADER_SPOOF_RE.sub(" ", cleaned)
+    cleaned = _SENTINEL_HEADER_SPOOF_RE.sub(" ", cleaned)
     return cleaned
 
 

@@ -5,8 +5,10 @@ import db
 from db import adb
 from mechanics.social.factions import (
     check_rival_or_hostile_turf_block,
+    infer_anomalous_faction_archetype,
     is_nsfw_salon_faction,
     validate_club_quartermaster_hours,
+    validate_faction_hq_action_access,
     validate_major_club_subroom_action,
 )
 from mechanics.world.locations import reveal_hidden_club_facility
@@ -111,50 +113,69 @@ class FactionMixin:
         if subroom_err:
             await interaction.response.send_message(subroom_err, ephemeral=True)
             return
-        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, user_id, session)
-        if turf_block:
-            await interaction.response.send_message(turf_block, ephemeral=True)
+        hq_ok, hq_err, _ = await adb(
+            validate_faction_hq_action_access, session_id, user_id, faction, "rest", session
+        )
+        if not hq_ok:
+            await interaction.response.send_message(hq_err, ephemeral=True)
             return
-        rep = faction.get("reputation_score", 0)
-        from mechanics.social.factions import get_faction_tier
-        tier = get_faction_tier(rep)
-        if tier["tier_level"] < 2:
-            await interaction.response.send_message("You need **Liked** standing or higher to use the safehouse rest.", ephemeral=True)
-            return
-            
+
         char = await adb(db.get_character, user_id)
         if char:
             await adb(db.apply_hp_mp_delta, user_id, char["max_hp"], char["max_mp"], 0)
+        party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
+        if party_npcs_rest:
+            rested_companions = []
+            for p_comp in party_npcs_rest:
+                if isinstance(p_comp, dict):
+                    p_comp = dict(p_comp)
+                    p_comp["hp"] = int(p_comp.get("max_hp", p_comp.get("hp", 100)) or 100)
+                    p_comp["mp"] = int(p_comp.get("max_mp", p_comp.get("mp", 0)) or 0)
+                    p_comp["status_effects"] = [
+                        s for s in (p_comp.get("status_effects") or [])
+                        if not any(k in str(s).lower() for k in ("incapacitated", "knocked out", "exhausted", "triage"))
+                    ]
+                    rested_companions.append(p_comp)
+            await adb(db.set_session_party_npcs, session_id, rested_companions)
         await interaction.response.send_message("You rest at the faction safehouse, recovering all HP and MP safely.", ephemeral=True)
 
     async def faction_quartermaster(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
+        import scenario_data
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
-        
-        session = await adb(db.get_session, session_id)
+
+        session = (await adb(db.get_session, session_id)) or {}
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         subroom_err = await adb(
             validate_major_club_subroom_action,
             session_id,
             faction,
             "quartermaster",
-            (session or {}).get("current_location", ""),
-            (session or {}).get("scenario", ""),
+            session.get("current_location", ""),
+            session.get("scenario", ""),
         )
         if subroom_err:
             await interaction.followup.send(subroom_err, ephemeral=True)
             return
-        turf_block = await adb(check_rival_or_hostile_turf_block, session_id, faction, user_id, session)
-        if turf_block:
-            await interaction.followup.send(turf_block, ephemeral=True)
+        hq_ok, hq_err, _ = await adb(
+            validate_faction_hq_action_access, session_id, user_id, faction, "quartermaster", session
+        )
+        if not hq_ok:
+            await interaction.followup.send(hq_err, ephemeral=True)
             return
         hours_err = validate_club_quartermaster_hours(faction, current_minute)
         if hours_err:
             await interaction.followup.send(hours_err, ephemeral=True)
             return
+        is_anom = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+        fac_arch = infer_anomalous_faction_archetype(faction) if is_anom else ""
         merchant = session.setdefault("merchant", {})
         faction_id = faction.get("faction_id") or faction.get("id") or faction.get("name", "default")
-        faction_key = f"faction_{faction_id}"
+        faction_key = (
+            f"faction_{faction_id}:monastic_daily"
+            if (is_anom and fac_arch == "monastic_order")
+            else f"faction_{faction_id}"
+        )
 
         from mechanics.combat.merchant import (  # pylint: disable=no-name-in-module  # resolved lazily via mechanics.combat.merchant.__getattr__ (PEP 562)
             generate_faction_quartermaster_shop,
@@ -172,14 +193,14 @@ class FactionMixin:
             shop = await generate_faction_quartermaster_shop(faction, session)
             cat_entry = update_merchant_catalogue(merchant, faction_key, shop, current_day, current_minute)
 
-        discount = cat_entry.get("discount_pct", 0)
+        discount = 0 if is_anom else cat_entry.get("discount_pct", 0)
         merchant.update({
             "active": True,
             "active_store_key": faction_key,
             "stock": cat_entry["stock"],
             "discount_pct": discount,
             "is_faction_quartermaster": True,
-            "quartermaster_faction_arch": faction.get("archetype_key") or faction.get("category") or "",
+            "quartermaster_faction_arch": fac_arch if is_anom else (faction.get("archetype_key") or faction.get("category") or ""),
             "restock_day": cat_entry.get("restock_day", current_day),
             "restock_minute": cat_entry.get("restock_minute", current_minute),
         })
@@ -218,18 +239,24 @@ class FactionMixin:
     async def faction_bounty(self, interaction: discord.Interaction, session_id: int, user_id: int, faction: dict):
         if not interaction.response.is_done():
             await interaction.response.defer(ephemeral=True)
-            
-        session = await adb(db.get_session, session_id)
+
+        session = (await adb(db.get_session, session_id)) or {}
         subroom_err = await adb(
             validate_major_club_subroom_action,
             session_id,
             faction,
             "bounty",
-            (session or {}).get("current_location", ""),
-            (session or {}).get("scenario", ""),
+            session.get("current_location", ""),
+            session.get("scenario", ""),
         )
         if subroom_err:
             await interaction.followup.send(subroom_err, ephemeral=True)
+            return
+        hq_ok, hq_err, _ = await adb(
+            validate_faction_hq_action_access, session_id, user_id, faction, "bounty", session
+        )
+        if not hq_ok:
+            await interaction.followup.send(hq_err, ephemeral=True)
             return
         from mechanics.narrative.bounty import generate_faction_bounty_board, get_faction_rep_reward_from_quest
         from cogs.adventure.views.quests import BountyBoardView

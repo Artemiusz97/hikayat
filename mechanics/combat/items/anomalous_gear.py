@@ -1054,6 +1054,10 @@ def normalize_anomalous_starting_faction(starting_faction: Optional[str]) -> str
         return "private_agency_2"
     if fac in ("monastic_order", "monastic", "shrine", "exorcist"):
         return "monastic_order"
+    if fac in ("cult_faction", "occult_cult", "cult"):
+        return "cult_faction"
+    if fac in ("clandestine_faction", "clandestine_syndicate", "clandestine"):
+        return "clandestine_faction"
     if fac in ("freelancer", "independent", "none", "leave"):
         return "freelancer"
     return "public_agency"
@@ -1208,7 +1212,7 @@ _LEGACY_ANOMALOUS_CLASS_FACTIONS: Dict[str, str] = {
 
 
 def infer_anomalous_faction_from_class(char_class: Optional[str]) -> Optional[str]:
-    """Returns the canonical faction archetype key if `char_class` belongs to one of the 5 Anomalous factions."""
+    """Returns the canonical faction archetype key if `char_class` belongs to one of the Anomalous factions."""
     if not char_class:
         return None
     target = str(char_class).strip().lower()
@@ -1242,6 +1246,12 @@ def get_anomalous_faction_starting_items(
     elif norm_fac == "monastic_order":
         medkit["name"] = "Field-Issue Trauma Medkit"
         stabilizer["name"] = "Shrine-Blessed Spirit-Calming Incense"
+    elif norm_fac == "cult_faction":
+        medkit["name"] = "Consecrated Vitae Distillate"
+        stabilizer["name"] = "Sanguine Fracture-Warding Elixir"
+    elif norm_fac == "clandestine_faction":
+        medkit["name"] = "Unmarked Trauma Auto-Shot"
+        stabilizer["name"] = "Black-Market Neural Focus Stim"
     elif norm_fac == "student_freelancer":
         medkit["name"] = "Concealed First-Aid Pouch"
         stabilizer["name"] = "Resonance Suppressant Lozenge"
@@ -1258,6 +1268,10 @@ def get_anomalous_faction_starting_items(
         salt = generate_procedural_potion(tier=3, effect_tags=["cleanse_all"], genre="anomalous_incursions")
         salt["name"] = "Sacred Purging Salt Pouch"
         items.append((salt["name"], salt["item_type"], salt["effect"], 1))
+    elif norm_fac == "cult_faction":
+        salt = generate_procedural_potion(tier=3, effect_tags=["cleanse_all"], genre="anomalous_incursions")
+        salt["name"] = "Consecrated Black-Salt Phial"
+        items.append((salt["name"], salt["item_type"], salt["effect"], 1))
     elif norm_fac == "private_agency_1":
         booster = generate_procedural_potion(tier=3, effect_tags=["attack_buff"], genre="anomalous_incursions")
         booster["name"] = "VX-II Adrenal Stim-Injector"
@@ -1265,6 +1279,10 @@ def get_anomalous_faction_starting_items(
     elif norm_fac == "private_agency_2":
         booster = generate_procedural_potion(tier=3, effect_tags=["attack_buff"], genre="anomalous_incursions")
         booster["name"] = "High-Potency Adrenal Recovery Shot"
+        items.append((booster["name"], booster["item_type"], booster["effect"], 1))
+    elif norm_fac == "clandestine_faction":
+        booster = generate_procedural_potion(tier=3, effect_tags=["attack_buff"], genre="anomalous_incursions")
+        booster["name"] = "Sanitized Adrenal Stim Injector"
         items.append((booster["name"], booster["item_type"], booster["effect"], 1))
     elif norm_fac == "public_agency":
         purge = generate_procedural_potion(tier=3, effect_tags=["cleanse_all"], genre="anomalous_incursions")

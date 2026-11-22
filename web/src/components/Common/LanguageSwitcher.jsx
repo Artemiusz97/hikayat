@@ -11,11 +11,12 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
   const btnRef = useRef(null);
 
   const currentUiLang = (i18n.language || 'en').split('-')[0].toLowerCase();
+  const canEditNarration = Boolean(settingsHook?.updateSettings);
   const currentNarrLang = (settingsHook?.settings?.narration_language || settingsHook?.settings?.language || 'en').split('-')[0].toLowerCase();
 
   const activeUiOption = AVAILABLE_LANGUAGES.find(l => l.code === currentUiLang) || AVAILABLE_LANGUAGES[0];
   const activeNarrOption = AVAILABLE_LANGUAGES.find(l => l.code === currentNarrLang) || AVAILABLE_LANGUAGES[0];
-
+  const effectiveTab = canEditNarration ? activeTab : 'ui';
 
   const handleSelectUi = (code) => {
     i18n.changeLanguage(code);
@@ -34,7 +35,7 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
     setOpen(false);
   };
 
-  const pillLabel = activeUiOption.short === activeNarrOption.short
+  const pillLabel = !canEditNarration || activeUiOption.short === activeNarrOption.short
     ? activeUiOption.short
     : `${activeUiOption.short} / ${activeNarrOption.short}`;
 
@@ -53,54 +54,56 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
         <ChevronDown size={11} className={`text-gray-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
       </button>
 
-      <AnchoredPopover anchorRef={btnRef} open={open} onClose={() => setOpen(false)} width={224} label="Language Settings">
+      <AnchoredPopover anchorRef={btnRef} open={open} onClose={() => setOpen(false)} width={224} label={t('common.language_settings', 'Language Settings')}>
         <div>
-          {/* Dual Toggle Tabs */}
-          <div className="flex border-b border-neutral-800/80 bg-black/50 p-1 gap-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab('ui')}
-              className={`flex-1 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 ${
-                activeTab === 'ui'
-                  ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 font-bold'
-                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
-              }`}
-            >
-              <Monitor size={11} />
-              <span>{t('settings.ui_tab', 'UI')}</span>
-              <span className="font-mono text-[9px] opacity-75">({activeUiOption.short})</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('narration')}
-              className={`flex-1 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 ${
-                activeTab === 'narration'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
-                  : 'text-gray-400 hover:text-gray-200 border border-transparent'
-              }`}
-            >
-              <Sparkles size={11} />
-              <span>{t('settings.narration_tab', 'Story')}</span>
-              <span className="font-mono text-[9px] opacity-75">({activeNarrOption.short})</span>
-            </button>
-          </div>
+          {/* Dual Toggle Tabs (only show Story tab when settings hook is active) */}
+          {canEditNarration && (
+            <div className="flex border-b border-neutral-800/80 bg-black/50 p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => setActiveTab('ui')}
+                className={`flex-1 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 ${
+                  effectiveTab === 'ui'
+                    ? 'bg-fantasy-accent/20 text-fantasy-accent border border-fantasy-accent/40 font-bold'
+                    : 'text-gray-400 hover:text-gray-200 border border-transparent'
+                }`}
+              >
+                <Monitor size={11} />
+                <span>{t('settings.ui_tab', 'UI')}</span>
+                <span className="font-mono text-[9px] opacity-75">({activeUiOption.short})</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('narration')}
+                className={`flex-1 py-1 rounded text-[10px] font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 ${
+                  effectiveTab === 'narration'
+                    ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
+                    : 'text-gray-400 hover:text-gray-200 border border-transparent'
+                }`}
+              >
+                <Sparkles size={11} />
+                <span>{t('settings.narration_tab', 'Story')}</span>
+                <span className="font-mono text-[9px] opacity-75">({activeNarrOption.short})</span>
+              </button>
+            </div>
+          )}
 
           {/* Section Header (dynamically translated) */}
           <div className="px-2.5 py-1 text-[10px] font-semibold text-gray-400 border-b border-neutral-800/80 uppercase tracking-wider flex items-center justify-between">
             <span>
-              {activeTab === 'ui'
+              {effectiveTab === 'ui'
                 ? t('settings.ui_language_short', 'UI Language')
                 : t('settings.narration_language_short', 'Story Language')}
             </span>
             <span className="font-mono text-[9px] text-fantasy-accent">
-              {activeTab === 'ui' ? activeUiOption.short : activeNarrOption.short}
+              {effectiveTab === 'ui' ? activeUiOption.short : activeNarrOption.short}
             </span>
           </div>
 
           {/* Options */}
           <div className="py-1">
             {AVAILABLE_LANGUAGES.map((lang) => {
-              const isSelected = activeTab === 'ui'
+              const isSelected = effectiveTab === 'ui'
                 ? lang.code === currentUiLang
                 : lang.code === currentNarrLang;
 
@@ -108,10 +111,10 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
                 <button
                   key={lang.code}
                   type="button"
-                  onClick={() => activeTab === 'ui' ? handleSelectUi(lang.code) : handleSelectNarr(lang.code)}
+                  onClick={() => effectiveTab === 'ui' ? handleSelectUi(lang.code) : handleSelectNarr(lang.code)}
                   className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs text-left transition-colors ${
                     isSelected
-                      ? activeTab === 'ui'
+                      ? effectiveTab === 'ui'
                         ? 'bg-fantasy-accent/15 text-fantasy-accent font-semibold'
                         : 'bg-amber-500/15 text-amber-300 font-semibold'
                       : 'text-gray-300 hover:bg-neutral-900 hover:text-white'
@@ -121,7 +124,7 @@ export const LanguageSwitcher = ({ settingsHook, className = '' }) => {
                     <span className="text-sm">{lang.flag}</span>
                     <span>{lang.label}</span>
                   </div>
-                  {isSelected && <Check size={12} className={activeTab === 'ui' ? "text-fantasy-accent" : "text-amber-400"} />}
+                  {isSelected && <Check size={12} className={effectiveTab === 'ui' ? "text-fantasy-accent" : "text-amber-400"} />}
                 </button>
               );
             })}

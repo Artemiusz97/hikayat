@@ -63,6 +63,7 @@ if sys.platform.startswith("win"):
 
 import logging
 from fastapi import FastAPI
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 import config
@@ -111,6 +112,7 @@ from api import (
     world_events_router,
     realty_router,
     contracts_router,
+    fonts_router,
 )
 
 import argparse
@@ -192,6 +194,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Hikayat Web API", version=config.APP_VERSION, lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 # Register domain routers
 app.include_router(auth_characters_router)
@@ -203,6 +206,7 @@ app.include_router(settings_ws_router)
 app.include_router(world_events_router)
 app.include_router(realty_router)
 app.include_router(contracts_router)
+app.include_router(fonts_router)
 
 
 @app.get("/api/server/public-url")
@@ -219,11 +223,27 @@ from starlette.websockets import WebSocketClose
 
 class SafeStaticFiles(StaticFiles):
     """StaticFiles wrapper that gracefully rejects WebSocket requests instead of raising AssertionError."""
+    def __init__(self, *args, default_cache_control: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.default_cache_control = default_cache_control
     async def __call__(self, scope, receive, send):
         if scope["type"] == "websocket":
             await WebSocketClose()(scope, receive, send)
             return
         await super().__call__(scope, receive, send)
+
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        norm = "/" + str(path or "").lstrip("/")
+        if norm in ("/", "/.", "/index.html") or norm.endswith(".html"):
+            response.headers["Cache-Control"] = "no-cache"
+        elif norm.startswith("/assets/"):
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        elif norm.startswith("/backgrounds/"):
+            response.headers["Cache-Control"] = "public, max-age=86400"
+        elif self.default_cache_control and response.status_code < 400:
+            response.headers["Cache-Control"] = self.default_cache_control
+        return response
 
 
 from fastapi.responses import FileResponse, Response
@@ -256,7 +276,14 @@ async def favicon_svg():
 
 
 # Serve locally saved generated scene images (shared across Discord & WebUI)
-app.mount("/images", StaticFiles(directory=config.GENERATED_IMAGES_DIR), name="generated_images")
+app.mount(
+    "/images",
+    SafeStaticFiles(
+        directory=config.GENERATED_IMAGES_DIR,
+        default_cache_control="public, max-age=86400",
+    ),
+    name="generated_images",
+)
 
 # Serve web frontend static bundle
 app.mount("/", SafeStaticFiles(directory="web/dist", html=True), name="web")

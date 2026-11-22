@@ -11,36 +11,37 @@ Whenever you add or alter any table, column, or query helper under `db/`, comple
 
 ## 1. Schema Definition & Idempotent Migration (`db/core.py`)
 
-1. **Fresh DB Schema**: Add new tables (`CREATE TABLE IF NOT EXISTS ...`) or columns directly to `SCHEMA` in `db/core.py`.
-2. **Existing DB Migration**: Write an idempotent migration helper (inspecting `PRAGMA table_info(<table>)` before `ALTER TABLE` or backfilling rows inside a `with get_conn() as conn:` transaction) and invoke it inside `init_db()`.
-3. **Indexes**: Add `CREATE INDEX IF NOT EXISTS idx_<table>_<cols>` for all `(session_id, ...)` and `(character_id, ...)` lookup paths to avoid full-table scans.
+1. **Fresh DB Schema**: Add new tables (`CREATE TABLE IF NOT EXISTS ...`), columns, and indexes directly to `SCHEMA` in `db/core.py`. Because fresh databases use a `PRAGMA user_version` fast-path (`CURRENT_SCHEMA_VERSION`), `SCHEMA` must stay 100% identical to the result of running `SCHEMA_MIGRATIONS` (enforced by `test_fresh_schema_matches_migrated_schema_parity` in `tests/test_codebase_contracts.py`).
+2. **Existing DB Migration**: Append a versioned tuple to `SCHEMA_MIGRATIONS` in `db/core.py` (which advances `CURRENT_SCHEMA_VERSION`) and ensure any structural/data migration helper is idempotent when invoked inside `run_schema_migrations(conn)`.
+3. **Indexes**: Add `CREATE INDEX IF NOT EXISTS idx_<table>_<cols>` to both `SCHEMA` and the migration tuple for all `(session_id, ...)` and `(character_id, ...)` lookup paths to avoid full-table scans.
 
 ---
 
-## 2. Session Child Table Purge Wiring (`db/core.py`)
+## 2. Declarative Session Registry & Purge Wiring (`db/registry.py`, `db/core.py`)
 
-If the table is scoped to an adventure session (`session_id` column):
-- Add the exact table name to the `SESSION_CHILD_TABLES` tuple in `db/core.py`.
-- Confirm `_delete_session_child_records_only(conn, session_id)` and `_delete_session_records(conn, session_id)` cleanly delete rows without foreign-key ordering errors.
-
----
-
-## 3. Save & Load Slot Cloning (`db/saves.py`)
-
-1. **Snapshot Capture (`save_adventure_slot`)**:
-   - Tables in `SESSION_CHILD_TABLES` are automatically iterated and serialized (`id` stripped).
-   - If another table references this table's autoincrement `id` (like `households.id`, `contacts.id`, `commitments_ledger.id`, `session_clues.id`), stash `rd["_orig_<entity>_id"] = rd.get("id")` before `rd.pop("id", None)`.
-2. **Slot Restoration (`load_adventure_slot`)**:
-   - Remap `row_dict["session_id"] = new_session_id` (and `character_id = char_id` where present).
-   - Remap any cross-table integer foreign keys using an `orig_id -> new_id` dictionary populated in parent-first order.
-   - **Embedded Session Key Rule**: If any string key column embeds the session ID (e.g., `hh_<sid>_...`, `rv_<sid>_...`), rewrite it with `_rewrite_session_key_id(key_str, old_session_id, new_session_id)`—never use naive `.replace(str(old_sid), str(new_sid))`, which corrupts trailing digits when `old_session_id == 1`.
+If the table is scoped to an adventure session (`session_id` column) — or if adding a non-session global table:
+- Register every `session_id` table as a `SessionTableSpec` entry in `SESSION_TABLE_REGISTRY` inside `db/registry.py` (`db/core.py` derives `SESSION_CHILD_TABLES` directly from non-optional registry entries). Global tables without `session_id` must be listed in `GLOBAL_TABLES` (`db/registry.py`).
+- Set `purge_order` appropriately (lower deletes first; e.g. `contacts` at `20` before `households` at `80`), and verify `_delete_session_child_records_only(conn, session_id)` and `prune_orphaned_and_finished_sessions()` delete cleanly without foreign-key ordering errors.
+- If the table stores turn-indexed snapshots that grow every turn, set `snapshot_table_turn_col` and `snapshot_keep_last` (and `save_row_limit_by_turn` / `save_order_col` for checkpoint exports) so `db.prune_session_turn_snapshots()` trims it automatically.
 
 ---
 
-## 4. Turn Rollback & Turn 0 Opening Retry (`db/sessions.py`)
+## 3. Save & Load Slot Cloning (`db/registry.py`, `db/saves.py`)
+
+1. **Declarative Metadata (`db/registry.py`)**:
+   - Set `include_in_save_slot`, `load_tier` (`10` parents before `20`/`30`/`40` dependents), `char_id_policy`, `session_key_cols`, `save_row_limit_by_turn`, and `orig_id_alias` (for tables whose autoincrement `id` is referenced elsewhere, e.g., `_orig_household_id`, `_orig_contact_id`, `_orig_commitment_id`, `_orig_clue_id`).
+   - Any non-trivial row rewrite or nested JSON ID remap should use a named hook (`row_transform_hook`, `post_load_hook`, or `post_inventory_hook`) registered in `db/saves.py`.
+2. **Embedded Session Key Rule**: If any string key column embeds the session ID (e.g., `hh_<sid>_...`, `rv_<sid>_...`), declare it in `session_key_cols` or rewrite it with `_rewrite_session_key_id(key_str, old_session_id, new_session_id)`—never use naive `.replace(str(old_sid), str(new_sid))`, which corrupts trailing digits when `old_session_id == 1`.
+
+---
+
+## 4. Turn Rollback & Turn 0 Opening Retry (`db/registry.py`, `db/sessions.py`)
 
 1. **Mid-Session Turn Rollback (`rollback_session_normalized_state_after_turn`)**:
-   - If the table records turn-stamped events or edges (`turn_number` / `turn_created`), delete or revert rows where `turn > turn_number` inside the single atomic `with get_conn() as conn:` block and re-materialize any cached summary JSON (such as `contacts.relations_json`).
+   - Set `rollback_mode` on the `SessionTableSpec` in `db/registry.py`:
+     - `"delete_gt_turn"` with `rollback_turn_col` and `rollback_result_key` for simple `DELETE FROM <table> WHERE session_id = ? AND <turn_col> > ?` tables.
+     - `"handler"` with `rollback_handler` (and wire the domain rollback call inside `rollback_session_normalized_state_after_turn` in `db/sessions.py`) for stateful restoration and cached summary JSON re-materialization.
+     - `"derived_rebuild"`, `"static_world"`, or `"none"` when appropriate so every table's rollback contract is explicitly accounted for.
 2. **Turn 0 Opening Retry (`reset_session_for_opening_retry`)**:
    - Ensure any new session-level state columns on `sessions` or keys in `sessions.extra_json` are reset cleanly while keeping character starter gear intact.
 
@@ -50,9 +51,10 @@ If the table is scoped to an adventure session (`session_id` column):
 
 1. **Package Root Facade (`db/__init__.py`)**:
    - Every new public function added to `db/core.py`, `db/sessions.py`, `db/saves.py`, `db/social.py`, `db/memory.py`, `db/world.py`, or `db/inventory.py` **must** be re-exported in `db/__init__.py` so `db.<fn>()` passes `tests/test_codebase_contracts.py`.
-2. **Non-Blocking Async Access**:
-   - Inside `async def` functions (`api/`, `cogs/`, `services/turn_service.py`, `game_engine/`), always execute synchronous SQLite helpers via `await adb(db.<fn>, ...)`.
-   - Batch lookups outside loops instead of issuing sequential `await adb(...)` calls per NPC or per party member.
+2. **Non-Blocking Async Access, Read Envelopes & Savepoint Safety**:
+   - Inside `async def` functions (`api/`, `cogs/`, `services/`, `game_engine/turn/`), always execute blocking `db.*` calls via `await adb(...)` using coarse `db.ReadUnitOfWork()` (multi-read snapshots) or `db.UnitOfWork()` (multi-write mutations) closures rather than per-query event-loop hops. Only pure in-memory helpers listed in `db.PURE_IN_MEMORY_DB_HELPERS` may be called directly inside `async def` (enforced by `sync-db-in-async` in `scripts/static_check.py`).
+   - Lazy schema helpers must guard repeated runs with `db.ensure_table_group_once()`.
+   - Never call raw `conn.commit()` outside `db/core.py` (would break active SQLite savepoints; enforced by `raw-conn-commit-outside-core`), and register every `session_id` table in `SCHEMA` inside `db/registry.py` (enforced by `unregistered-session-table`).
 
 ---
 

@@ -6,10 +6,13 @@ export const useSettings = (userId) => {
   const [settings, setSettings] = useState({
     stream_narrative: 1,
     verbosity: 'vivid',
-    dialogue_mode: 'balanced',
+    narrative_pacing: 'balanced',
+    dialogue_mode: 'adaptive',
     result_display: 'detailed',
     choices_style: 'dropdown',
     show_percentages: 1,
+    show_enemy_hp: 1,
+    show_enemy_intent: 1,
     image_gen_enabled: 0,
     language: 'en'
   });
@@ -36,19 +39,6 @@ export const useSettings = (userId) => {
           localStorage.setItem('hikayat_ui_language', uiLang);
         }
       }
-      try {
-        const dbg = await apiCall(`/api/debug/${userId}`);
-        if (dbg) {
-          setDebugState({
-            debug_stat_mode: dbg.debug_stat_mode || 'off',
-            debug_check_mode: dbg.debug_check_mode || 'off',
-            debug_reveal_all_info: dbg.debug_reveal_all_info ?? 0,
-            telemetry: dbg.telemetry || null
-          });
-        }
-      } catch {
-        // ignore debug fetch errors
-      }
     } catch (err) {
       console.error('Failed to fetch settings:', err);
       setError(err.message || 'Could not load settings');
@@ -66,6 +56,12 @@ export const useSettings = (userId) => {
     try {
       setSaving(true);
       const merged = { ...settings, ...newFields, user_id: userId };
+      if (
+        newFields?.narrative_pacing &&
+        ['concise', 'direct'].includes(String(merged.verbosity || '').toLowerCase())
+      ) {
+        merged.verbosity = 'normal';
+      }
       // Optimistic update
       setSettings(merged);
 

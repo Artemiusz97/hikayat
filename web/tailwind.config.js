@@ -65,8 +65,10 @@ export default {
         ...statusColors,
       },
       fontFamily: {
-        rpg: 'var(--font-display)',
-        sans: 'var(--font-sans)',
+        rpg: 'var(--ui-font-sans, var(--font-display))',
+        sans: 'var(--ui-font-sans, var(--font-sans))',
+        mono: 'var(--ui-font-sans, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace)',
+        serif: "var(--ui-font-narration, ui-serif, Georgia, Cambria, 'Times New Roman', Times, serif)",
       },
       borderRadius: {
         sm: '0.375rem',

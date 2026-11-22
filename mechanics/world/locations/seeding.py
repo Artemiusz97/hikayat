@@ -435,7 +435,6 @@ def _reconcile_faction_hq_locations(session_id: int, scenario_key: str = "high_s
                     "DELETE FROM session_locations WHERE session_id = ? AND lower(primary_name) = ? AND lower(sub_name) != ?",
                     (session_id, lname, lname),
                 )
-            conn.commit()
 
         existing_locs = db.get_session_locations(session_id) or []
         existing_primaries = (
@@ -464,7 +463,6 @@ def _reconcile_faction_hq_locations(session_id: int, scenario_key: str = "high_s
                 hq_raw = candidate_hq if (is_minor_candidate and candidate_hq) else fp
                 with db.get_conn() as conn:
                     conn.execute("UPDATE factions SET hq_location_id = ? WHERE id = ?", (hq_raw, fac["id"]))
-                    conn.commit()
 
             hq_lower = hq_raw.lower()
             is_minor_school = (
@@ -809,7 +807,6 @@ def _heal_agency_residence_and_entrances(session_id: int, scenario_key: str = "a
                 "WHERE id = ? AND extra_json LIKE '%Public Agency Residential Hall%'",
                 (res_name, session_id),
             )
-        conn.commit()
 
     sess_cur = db.get_session(session_id)
     if sess_cur and sess_cur.get("current_location"):
@@ -872,7 +869,6 @@ def _heal_agency_residence_and_entrances(session_id: int, scenario_key: str = "a
                 "UPDATE world_nodes SET is_transit_hub = ? WHERE session_id = ? AND node_id = ?",
                 hub_updates,
             )
-            conn.commit()
 
 
 def has_player_nsfw_salon_membership_or_standing(
@@ -1043,8 +1039,6 @@ def rollback_hidden_club_discoveries_after_turn(
                         "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
                         (json.dumps(cst), int(session_id), cnid),
                     )
-        if conn is None and (reverted > 0 or reverted_fac_ids):
-            c.commit()
     return reverted
 
 

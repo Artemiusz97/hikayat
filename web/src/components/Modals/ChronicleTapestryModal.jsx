@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { cleanProseLocations } from '../../utils/locationFormat';
+import { isTopEscapeLayer, registerEscapeLayer } from '../Common/MotionPrimitives';
 
 const SLIDE_ICONS = {
   world: Globe,
@@ -33,6 +34,8 @@ const ChronicleTapestryModal = ({
   const { t } = useTranslation();
   const dialogRef = useRef(null);
   const titleId = useId();
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   const [slideIdx, setSlideIdx] = useState(0);
 
   const slides = Array.isArray(tapestry?.slides) ? tapestry.slides : [];
@@ -62,6 +65,29 @@ const ChronicleTapestryModal = ({
     } else if (dialog.open) {
       dialog.close();
     }
+  }, [isOpen, totalSlides]);
+
+  useEffect(() => {
+    if (!isOpen || totalSlides === 0) return undefined;
+    const token = Symbol('chronicle-tapestry-esc');
+    const unregister = registerEscapeLayer(token);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dialog = dialogRef.current;
+        if (dialog?.open) {
+          dialog.close();
+        } else if (onCloseRef.current) {
+          onCloseRef.current();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
   }, [isOpen, totalSlides]);
 
   useEffect(() => {
@@ -123,17 +149,17 @@ const ChronicleTapestryModal = ({
       {...{ closedby: 'any' }}
       aria-labelledby={titleId}
       onClose={handleNativeClose}
-      className="hk-chronicle-dialog rounded-xl shadow-2xl overflow-y-auto overflow-x-hidden custom-scrollbar"
+      className="hk-chronicle-dialog overflow-y-auto overflow-x-hidden custom-scrollbar"
     >
       <div
-        className={`bg-fantasy-panel border rounded-xl p-4 sm:p-5 space-y-4 ${
+        className={`hk-acrylic p-4 sm:p-5 space-y-4 ${
           isFallenWorld
-            ? 'border-rose-600/80 shadow-[0_0_32px_rgba(225,29,72,0.22)]'
-            : 'border-fantasy-accent/80 shadow-[0_0_32px_rgba(201,162,94,0.2)]'
+            ? 'border-rose-500/60 shadow-[0_0_32px_rgba(225,29,72,0.22)]'
+            : 'border-fantasy-accent/60 shadow-[0_0_32px_rgba(201,162,94,0.2)]'
         }`}
       >
         {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-fantasy-border/60 pb-3">
+        <div className="flex items-start justify-between gap-3 border-b border-fantasy-border/35 pb-3">
           <div className="space-y-1 min-w-0">
             <div className="flex items-center gap-1.5 flex-wrap">
               <span
@@ -182,12 +208,12 @@ const ChronicleTapestryModal = ({
                 key={slKey}
                 type="button"
                 onClick={() => setSlideIdx(idx)}
-                className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-lg border text-[10px] font-semibold transition-all ${
+                className={`flex flex-col items-center justify-center gap-1 py-2 px-1.5 rounded-xl border text-[10px] font-semibold transition-all ${
                   isSelected
                     ? isFallenWorld
-                      ? 'bg-rose-950/60 text-rose-200 border-rose-500/70'
+                      ? 'bg-rose-500/20 text-rose-200 border-rose-500/70'
                       : 'bg-fantasy-accent/20 text-fantasy-accent border-fantasy-accent/60'
-                    : 'bg-black/45 text-gray-400 border-fantasy-border/50 hover:text-gray-200 hover:bg-white/5'
+                    : 'bg-gray-500/10 text-gray-400 border-fantasy-border/35 hover:text-gray-200 hover:bg-gray-500/15'
                 }`}
               >
                 <IconComp size={13} />
@@ -200,10 +226,10 @@ const ChronicleTapestryModal = ({
         {/* Active Slide Content */}
         {activeSlide && (
           <div
-            className={`rounded-xl border p-4 sm:p-5 space-y-3 min-h-[9.5rem] flex flex-col justify-between ${
+            className={`py-4 px-1 border-y space-y-3 min-h-[9.5rem] flex flex-col justify-between ${
               isFallenWorld
-                ? 'bg-gradient-to-br from-rose-950/35 via-black/70 to-fantasy-dark border-rose-800/50'
-                : 'bg-gradient-to-br from-fantasy-dark via-black/70 to-amber-950/20 border-fantasy-border/80'
+                ? 'border-rose-500/35'
+                : 'border-fantasy-border/35'
             }`}
           >
             <div className="space-y-2">

@@ -1,7 +1,76 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, Heart, Zap, Coins, Sparkles, Plus, AlertCircle, BookOpen, X } from 'lucide-react';
+import {
+  Activity,
+  BookOpen,
+  ChevronDown,
+  Cpu,
+  Heart,
+  Plus,
+  Shield,
+  Shirt,
+  Sparkles,
+  Swords,
+  Wrench,
+  X,
+  Zap,
+} from 'lucide-react';
 import { apiCall } from '../../api/client';
+import { AcrylicModal, CollapsibleSection, MotionButton } from '../Common/MotionPrimitives';
+import CurrencyBadge from '../Common/CurrencyBadge';
+import { formatGender, formatRace } from '../../utils/npcDemographics';
+import { FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS } from '../../utils/anatomyOptions';
+
+const getScenarioSkillsMeta = (scenarioKey) => {
+  const key = String(scenarioKey || 'fantasy').trim().toLowerCase();
+  if (key.includes('anomalous')) {
+    return {
+      labelKey: 'character.skills_abilities',
+      defaultLabel: 'Abilities',
+      icon: Zap,
+    };
+  }
+  if (key.includes('cyberpunk')) {
+    return {
+      labelKey: 'character.skills_cyberware',
+      defaultLabel: 'Cyberware & Skills',
+      icon: Cpu,
+    };
+  }
+  if (key.includes('sci_fi') || key.includes('scifi')) {
+    return {
+      labelKey: 'character.skills_tech',
+      defaultLabel: 'Tech & Skills',
+      icon: Cpu,
+    };
+  }
+  if (key.includes('steampunk')) {
+    return {
+      labelKey: 'character.skills_gadgets',
+      defaultLabel: 'Gadgets & Skills',
+      icon: Wrench,
+    };
+  }
+  if (key.includes('post_apocalypse') || key.includes('postapoc')) {
+    return {
+      labelKey: 'character.skills_perks',
+      defaultLabel: 'Survival Skills',
+      icon: Zap,
+    };
+  }
+  if (key.includes('high_school') || key.includes('highschool') || key.includes('slice_of_life')) {
+    return {
+      labelKey: 'character.skills_generic',
+      defaultLabel: 'Skills',
+      icon: Zap,
+    };
+  }
+  return {
+    labelKey: 'character.grimoire',
+    defaultLabel: 'Grimoire',
+    icon: BookOpen,
+  };
+};
 
 const StatBar = ({ label, current, max, color, icon: Icon, extraText }) => {
   const safeCurrent = Math.max(0, current || 0);
@@ -17,8 +86,8 @@ const StatBar = ({ label, current, max, color, icon: Icon, extraText }) => {
         </div>
         <div className="flex items-center gap-1.5">
           {extraText && <span className="text-[10px] text-gray-400 font-medium">{extraText}</span>}
-          <span className="font-mono text-gray-100 font-bold text-xs">{safeCurrent} / {safeMax}</span>
-          <span className="text-[10px] font-mono text-gray-400 font-medium">({pct}%)</span>
+          <span className="font-mono tabular-nums text-gray-100 font-bold text-xs">{safeCurrent} / {safeMax}</span>
+          <span className="text-[10px] font-mono tabular-nums text-gray-400 font-medium">({pct}%)</span>
         </div>
       </div>
       <div className="h-2 sm:h-2.5 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/70 p-0.5">
@@ -119,45 +188,6 @@ const formatFusedAsset = (sizeStr, texStr, isMale = false, t = null) => {
   }
 };
 
-const FEMALE_TEXTURE_OPTIONS = [
-  { value: 'Perky & High-Set', label: 'Perky & High-Set' },
-  { value: 'Pillowy Soft & Yielding', label: 'Pillowy Soft & Yielding' },
-  { value: 'Firm & Toned', label: 'Firm & Toned' },
-  { value: 'Smooth & Supple', label: 'Smooth & Supple' },
-  { value: 'Heavy & Plush', label: 'Heavy & Plush' },
-  { value: 'Bouncy & Sensitive', label: 'Bouncy & Sensitive' },
-  { value: 'Tender & Delicate', label: 'Tender & Delicate' },
-  { value: 'Shapely Teardrop', label: 'Shapely Teardrop' },
-  { value: 'Compact & Dense', label: 'Compact & Dense' },
-  { value: 'Sensitive & Responsive', label: 'Sensitive & Responsive' },
-  { value: 'Warm & Supple', label: 'Warm & Supple' },
-  { value: 'Soft & Downy Chest Fur', label: 'Soft & Downy Chest Fur (Beastfolk)' },
-  { value: 'Silky Fur-Rimmed', label: 'Silky Fur-Rimmed (Beastfolk)' },
-  { value: 'Velvety Underbelly Down', label: 'Velvety Underbelly Down (Beastfolk)' },
-  { value: 'Fluffy Plush-Accented', label: 'Fluffy Plush-Accented (Beastfolk)' },
-  { value: 'Silky Warm with Smooth Micro-Scales', label: 'Silky Warm with Smooth Micro-Scales (Scaly/Draconic)' },
-  { value: 'Supple with Shimmering Scale Borders', label: 'Supple with Shimmering Scale Borders (Scaly/Draconic)' },
-  { value: 'Sleek & Supple Drake-Contour', label: 'Sleek & Supple Drake-Contour (Scaly/Draconic)' },
-  { value: 'Downy Feather-Lined', label: 'Downy Feather-Lined (Avian/Winged)' },
-  { value: 'Light & Buoyant', label: 'Light & Buoyant (Avian/Winged)' },
-  { value: 'Velvety Plumage Accents', label: 'Velvety Plumage Accents (Avian/Winged)' },
-  { value: 'Glistening & Ultra-Smooth', label: 'Glistening & Ultra-Smooth (Aquatic)' },
-];
-
-const MALE_TEXTURE_OPTIONS = [
-  { value: 'Veined & Firm', label: 'Veined & Firm' },
-  { value: 'Smooth & Heavy', label: 'Smooth & Heavy' },
-  { value: 'Toned & Athletic', label: 'Toned & Athletic' },
-  { value: 'Warm & Pulsing', label: 'Warm & Pulsing' },
-  { value: 'Slender & Ultra-Sensitive', label: 'Slender & Ultra-Sensitive' },
-  { value: 'Dense & Formidable', label: 'Dense & Formidable' },
-  { value: 'Balanced & Firm', label: 'Balanced & Firm' },
-  { value: 'Soft Fur-Ringed Base', label: 'Soft Fur-Ringed Base (Beastfolk)' },
-  { value: 'Silky Fur-Dusted & Resilient', label: 'Silky Fur-Dusted & Resilient (Beastfolk)' },
-  { value: 'Sleek Scaled Base & Firm', label: 'Sleek Scaled Base & Firm (Scaly/Draconic)' },
-  { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
-];
-
 export const StatusEffectBadge = ({ effect }) => {
   const { t } = useTranslation();
   const { effName, displayLabel, duration, durationUnit, stacks } = parseAndTranslateStatus(effect, t);
@@ -189,7 +219,14 @@ export const StatusEffectBadge = ({ effect }) => {
   );
 };
 
-const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn }) => {
+const CharacterSheet = ({
+  character,
+  scenario = null,
+  onAllocateStat,
+  onCastSpell,
+  onRefreshCharacter = null,
+  processingTurn,
+}) => {
   const { t } = useTranslation();
   const [allocating, setAllocating] = useState(null);
   const [showAppearanceModal, setShowAppearanceModal] = useState(false);
@@ -197,6 +234,9 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
   const [editPSize, setEditPSize] = useState(character?.appearance?.penis_size || character?.penis_size || 'average');
   const [editTexture, setEditTexture] = useState(character?.appearance?.asset_texture || character?.asset_texture || '');
   const [savingApp, setSavingApp] = useState(false);
+  const [specialOpen, setSpecialOpen] = useState(true);
+  const [combatStatsOpen, setCombatStatsOpen] = useState(true);
+  const [skillsOpen, setSkillsOpen] = useState(true);
 
   useEffect(() => {
     if (character) {
@@ -226,15 +266,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         }),
       });
       if (res?.character) {
-        if (!character.appearance) character.appearance = {};
-        if (isMale) {
-          delete character.appearance.breast_size;
-          character.appearance.penis_size = editPSize;
-        } else {
-          character.appearance.breast_size = editBSize;
-          delete character.appearance.penis_size;
-        }
-        character.appearance.asset_texture = editTexture;
+        await onRefreshCharacter?.();
       }
       setShowAppearanceModal(false);
     } catch (err) {
@@ -306,12 +338,14 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
 
   const nextLevelXp = Math.max(100, (character.level || 1) * 100);
   const xpPct = Math.min(100, Math.round(((character.xp || 0) / nextLevelXp) * 100));
+  const skillsMeta = getScenarioSkillsMeta(scenario || character?.scenario);
+  const SkillsIcon = skillsMeta.icon;
 
   return (
-    <div className="bg-black/35 rounded-xl border border-fantasy-border p-3 sm:p-3.5 space-y-2.5 sm:space-y-3 select-none">
+    <div className="space-y-3 select-none">
       
       {/* Hero Header */}
-      <div className="space-y-2 border-b border-fantasy-border/50 pb-3">
+      <div className="space-y-2 border-b border-fantasy-border/35 pb-3">
         <div className="flex items-center gap-2.5">
           <div className="grid place-items-center w-10 h-10 rounded-full bg-fantasy-accent/15 text-fantasy-accent font-bold shrink-0">
             {(character.name || '?').charAt(0).toUpperCase()}
@@ -322,15 +356,22 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
               <span className="text-fantasy-accent font-semibold">Lv.{character.level || 1}</span> {character.char_class || character.class_name || 'Adventurer'}
             </p>
           </div>
-          <div className="flex items-center gap-1 h-8 px-2.5 rounded-full bg-amber-500/10 text-amber-300 font-mono text-sm font-bold shrink-0" title={t('character.gold_tooltip', 'Gold')}>
-            <Coins size={14} className="text-amber-400" />
-            <span>{character.gold !== undefined ? character.gold : 0}</span>
-          </div>
+          <CurrencyBadge
+            amount={character.gold !== undefined ? character.gold : 0}
+            scenario={scenario || character?.scenario}
+            size="lg"
+          />
         </div>
         <div className="flex items-center gap-1 flex-wrap text-xs text-gray-300">
-          {character.race && <span className="hk-chip">{character.race}</span>}
-          {character.gender && <span className="hk-chip">{character.gender}</span>}
-          <span className="hk-chip" title={t('character.days_tooltip', 'Days adventured')}>📅 {character.days_adventured ?? 1}d</span>
+          {character.race && <span className="hk-chip">{formatRace(character.race, t)}</span>}
+          {character.gender && (() => {
+            const gInfo = formatGender(character.gender, t);
+            return (
+              <span className="hk-chip">
+                {gInfo ? `${gInfo.symbol ? `${gInfo.symbol} ` : ''}${gInfo.label}` : character.gender}
+              </span>
+            );
+          })()}
               {isNsfw && !isMale && (
                 <button
                   type="button"
@@ -376,11 +417,44 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
         </div>
       )}
 
+      {/* Status Effect & Clothing Status Strip (Above Vitals) */}
+      <div className="space-y-2 pb-2.5 border-b border-fantasy-border/35 text-xs">
+        <div className="flex items-start justify-between gap-2">
+          <span className="text-gray-300 font-medium flex items-center gap-1.5 min-w-0 pt-0.5">
+            <Activity size={14} className="text-amber-400 shrink-0" />
+            <span className="truncate">{t('stats.status_effect', 'Status Effect')}:</span>
+          </span>
+          {statusList && statusList.length > 0 ? (
+            <div className="flex flex-wrap justify-end gap-1">
+              {statusList.map((eff, idx) => (
+                <StatusEffectBadge key={idx} effect={eff} />
+              ))}
+            </div>
+          ) : (
+            <span className="font-semibold text-gray-400 bg-gray-500/15 px-2.5 py-0.5 rounded-lg border border-fantasy-border/35 text-xs shrink-0">
+              {t('stats.status_none', 'None')}
+            </span>
+          )}
+        </div>
+
+        {character.clothing_status && (
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-gray-300 font-medium flex items-center gap-1.5 min-w-0">
+              <Shirt size={14} className="text-sky-400 shrink-0" />
+              <span className="truncate">{t('stats.clothing_status', 'Clothing Status')}:</span>
+            </span>
+            <span className="font-semibold text-gray-100 bg-gray-500/15 px-2.5 py-0.5 rounded-lg border border-fantasy-border/40 text-xs shrink-0">
+              {character.clothing_status}
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* Vitals (HP, Temp Shield & MP) */}
-      <div className="space-y-2 bg-black/45 p-3 rounded-lg border border-fantasy-border/60 shadow-sm">
+      <div className="space-y-2 pb-3 border-b border-fantasy-border/35">
         {tempHp > 0 && (
           <div className="flex justify-end mb-0.5">
-            <span className="text-[10px] font-mono font-bold px-2 py-0.2 rounded bg-cyan-950/90 text-cyan-300 border border-cyan-600/70 flex items-center gap-1">
+            <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-cyan-950/90 text-cyan-300 border border-cyan-600/70 flex items-center gap-1">
               <Shield size={10} /> +{tempHp} {t('inventory.shield', 'Shield')}
             </span>
           </div>
@@ -401,7 +475,7 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
               <Sparkles size={11} className="text-purple-400" />
               <span>{t('stats.xp')}</span>
             </span>
-            <span className="font-mono text-xs font-semibold text-purple-200">{character.xp || 0} / {nextLevelXp} XP ({xpPct}%)</span>
+            <span className="font-mono tabular-nums text-xs font-semibold text-purple-200">{character.xp || 0} / {nextLevelXp} XP ({xpPct}%)</span>
           </div>
           <div className="h-2 w-full bg-black/80 rounded-full overflow-hidden border border-fantasy-border/50 p-0.5">
             <div 
@@ -411,34 +485,6 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
           </div>
         </div>
       </div>
-
-      {/* Dynamic Clothing Status */}
-      {character.clothing_status && (
-        <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-black/45 border border-fantasy-border/50 text-xs">
-          <span className="text-gray-300 font-medium flex items-center gap-1.5">
-            <span className="text-sm">👔</span>
-            <span>{t('stats.clothing_status', 'Clothing Status')}:</span>
-          </span>
-          <span className="font-semibold text-gray-100 bg-neutral-900/90 px-2.5 py-0.5 rounded border border-neutral-700 text-xs">
-            {character.clothing_status}
-          </span>
-        </div>
-      )}
-
-      {/* Active Status Effects */}
-      {statusList && statusList.length > 0 && (
-        <div className="bg-black/45 p-2.5 rounded-lg border border-fantasy-border/50 shadow-sm space-y-1.5">
-          <div className="text-[11px] uppercase font-bold text-gray-300 flex items-center gap-1">
-            <AlertCircle size={13} className="text-amber-400" />
-            <span>{t('stats.active_conditions', 'Active Conditions')}</span>
-          </div>
-          <div className="flex flex-wrap gap-1">
-            {statusList.map((eff, idx) => (
-              <StatusEffectBadge key={idx} effect={eff} />
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* Pending Stat Points Alert */}
       {pendingPoints > 0 && (
@@ -459,238 +505,276 @@ const CharacterSheet = ({ character, onAllocateStat, onCastSpell, processingTurn
 
       {/* Core S.P.E.C.I.A.L. Attributes Grid */}
       <div className="space-y-1.5">
-        <div className="text-xs uppercase font-bold text-gray-200 tracking-wider flex justify-between items-center">
-          <span className="flex items-center gap-1 min-w-0">
-            <span>✨</span>
+        <button
+          type="button"
+          onClick={() => setSpecialOpen((v) => !v)}
+          aria-expanded={specialOpen}
+          className="w-full py-1 text-xs uppercase font-bold text-gray-200 hover:text-fantasy-accent tracking-wider flex justify-between items-center transition-colors"
+        >
+          <span className="flex items-center gap-1.5 min-w-0">
+            <Sparkles size={14} className="text-amber-400 shrink-0" />
             <span className="truncate">{t('stats.special_attributes', 'S.P.E.C.I.A.L. Attributes')}</span>
           </span>
-        </div>
-        <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-          {coreStats.map(st => (
-            <div 
-              key={st.key}
-              className="bg-gradient-to-b from-black/55 to-black/80 p-2 rounded-lg border border-fantasy-border/70 hover:border-fantasy-accent/60 transition-all flex flex-col justify-between min-h-[70px] sm:min-h-[74px] shadow-sm relative group"
-            >
-              <div>
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">{st.label}</span>
-                  <span className="text-[11px] opacity-75">{st.icon}</span>
+          <ChevronDown
+            size={14}
+            className={`text-gray-400 shrink-0 transition-transform duration-200 ${specialOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <CollapsibleSection isOpen={specialOpen}>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(5.6rem,1fr))] gap-2 pt-0.5">
+            {coreStats.map(st => (
+              <div 
+                key={st.key}
+                className="bg-gradient-to-b from-black/55 to-black/80 p-2.5 rounded-lg border border-fantasy-border/70 hover:border-fantasy-accent/60 transition-all flex flex-col justify-between min-h-[5.25rem] shadow-sm relative group"
+              >
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-gray-200 uppercase tracking-wider">{st.label}</span>
+                    <span className="text-[11px] opacity-75">{st.icon}</span>
+                  </div>
+                  <div className="text-[10.5px] text-gray-400 font-medium truncate max-w-full" title={st.desc}>
+                    {st.fullLabel}
+                  </div>
                 </div>
-                <div className="text-[9.5px] text-gray-400 font-medium truncate max-w-full" title={st.desc}>
-                  {st.fullLabel}
-                </div>
+                
+                <div className="font-mono tabular-nums text-xl font-bold text-amber-300 my-0.5 text-center">{st.val}</div>
+                
+                {/* Stat Allocation Plus Button */}
+                {pendingPoints > 0 && (
+                  <button
+                    onClick={() => handleAllocate(st.name)}
+                    disabled={allocating !== null}
+                    className="mt-0.5 flex items-center justify-center gap-0.5 w-full py-0.5 bg-amber-500/25 hover:bg-amber-500/40 text-amber-300 border border-amber-500/50 rounded text-[10px] font-bold transition-all disabled:opacity-50"
+                    title={`Add +1 to ${st.fullLabel}`}
+                  >
+                    <Plus size={10} />
+                    <span>{t('stats.add', 'Add')}</span>
+                  </button>
+                )}
               </div>
-              
-              <div className="font-mono text-lg sm:text-xl font-bold text-amber-300 my-0.5 text-center">{st.val}</div>
-              
-              {/* Stat Allocation Plus Button */}
-              {pendingPoints > 0 && (
-                <button
-                  onClick={() => handleAllocate(st.name)}
-                  disabled={allocating !== null}
-                  className="mt-0.5 flex items-center justify-center gap-0.5 w-full py-0.5 bg-amber-500/25 hover:bg-amber-500/40 text-amber-300 border border-amber-500/50 rounded text-[10px] font-bold transition-all disabled:opacity-50"
-                  title={`Add +1 to ${st.fullLabel}`}
-                >
-                  <Plus size={10} />
-                  <span>{t('stats.add', 'Add')}</span>
-                </button>
-              )}
-            </div>
-          ))}
+            ))}
 
-          {/* Capacity stat tile */}
-          <div className="bg-gradient-to-b from-black/55 to-black/80 p-2 rounded-lg border border-fantasy-border/70 flex flex-col justify-between min-h-[70px] sm:min-h-[74px] shadow-sm text-center">
-            <div>
-              <div className="text-xs font-bold text-gray-300 uppercase tracking-wider">{t('stats.slots_label', 'Slots')}</div>
-              <div className="text-[9.5px] text-gray-400 font-medium">{t('character.capacity', 'Capacity')}</div>
-            </div>
-            <div className="font-mono text-xs sm:text-sm font-bold text-gray-200 my-auto">
-              {character.used_inventory_slots ?? 0} / {character.inventory_capacity ?? 10}
+            {/* Capacity stat tile */}
+            <div className="bg-gradient-to-b from-black/55 to-black/80 p-2.5 rounded-lg border border-fantasy-border/70 flex flex-col justify-between min-h-[5.25rem] shadow-sm text-center">
+              <div>
+                <div className="text-xs font-bold text-gray-300 uppercase tracking-wider">{t('stats.slots_label', 'Slots')}</div>
+                <div className="text-[10.5px] text-gray-400 font-medium">{t('character.capacity', 'Capacity')}</div>
+              </div>
+              <div className="font-mono tabular-nums text-xs sm:text-[0.875rem] font-bold text-gray-200 my-auto whitespace-nowrap">
+                {character.used_inventory_slots ?? 0} / {character.inventory_capacity ?? 10}
+              </div>
             </div>
           </div>
-        </div>
+        </CollapsibleSection>
       </div>
 
       {/* Derived Combat Attributes Grid */}
       <div className="pt-1.5 border-t border-fantasy-border/40 space-y-1.5">
-        <div className="text-xs uppercase font-bold text-gray-300 tracking-wider">
-          <span>{t('stats.combat_tactical_stats', 'Combat & Tactical Stats')}</span>
-        </div>
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(3.4rem,1fr))] gap-1 text-center">
-          {combatGrid.map((cg) => (
-            <div key={cg.label} className="bg-black/45 border border-fantasy-border/60 hover:border-fantasy-border/90 rounded-lg p-1.5 shadow-sm transition-colors">
-              <div className="text-[9.5px] font-bold text-gray-400 uppercase truncate">{cg.label}</div>
-              <div className="text-xs font-mono font-bold text-gray-100 mt-0.5">{cg.val}</div>
-            </div>
-          ))}
-        </div>
+        <button
+          type="button"
+          onClick={() => setCombatStatsOpen((v) => !v)}
+          aria-expanded={combatStatsOpen}
+          className="w-full py-1 text-xs uppercase font-bold text-gray-300 hover:text-fantasy-accent tracking-wider flex justify-between items-center transition-colors"
+        >
+          <span className="flex items-center gap-1.5 min-w-0">
+            <Swords size={14} className="text-rose-400 shrink-0" />
+            <span className="truncate">{t('stats.combat_tactical_stats', 'Combat & Tactical Stats')}</span>
+          </span>
+          <ChevronDown
+            size={14}
+            className={`text-gray-400 shrink-0 transition-transform duration-200 ${combatStatsOpen ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <CollapsibleSection isOpen={combatStatsOpen}>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(4.6rem,1fr))] gap-1.5 text-center pt-0.5">
+            {combatGrid.map((cg) => (
+              <div key={cg.label} className="bg-black/45 border border-fantasy-border/60 hover:border-fantasy-border/90 rounded-lg p-2 shadow-sm transition-colors">
+                <div className="text-[10px] font-bold text-gray-400 uppercase truncate">{cg.label}</div>
+                <div className="text-[13px] font-mono tabular-nums font-bold text-gray-100 mt-0.5">{cg.val}</div>
+              </div>
+            ))}
+          </div>
+        </CollapsibleSection>
       </div>
 
-      {/* Learned Spells / Grimoire (Only shown if character has learned spells) */}
+      {/* Dynamic Scenario Skills / Abilities / Grimoire */}
       {Array.isArray(character.learned_spells) && character.learned_spells.length > 0 && (
         <div className="pt-1.5 border-t border-fantasy-border/40 space-y-1.5">
-          <div className="text-xs uppercase font-bold text-indigo-300 tracking-wider flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <BookOpen size={14} className="text-indigo-400" />
-              <span>{t('character.grimoire', 'Grimoire')} ({character.learned_spells.length})</span>
+          <button
+            type="button"
+            onClick={() => setSkillsOpen((v) => !v)}
+            aria-expanded={skillsOpen}
+            className="w-full py-1 text-xs uppercase font-bold text-indigo-300 hover:text-indigo-200 tracking-wider flex items-center justify-between transition-colors"
+          >
+            <span className="flex items-center gap-1.5 min-w-0">
+              <SkillsIcon size={14} className="text-indigo-400 shrink-0" />
+              <span className="truncate">
+                {t(skillsMeta.labelKey, skillsMeta.defaultLabel)} ({character.learned_spells.length})
+              </span>
             </span>
-            <span className="text-[11px] text-gray-400 font-mono">{t('character.learned_spells', 'Learned Spells')}</span>
-          </div>
-          <div className="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
-            {character.learned_spells.map((sp, idx) => {
-              const mpCost = Number(sp.mp_cost || 0);
-              const canAffordMp = (character.mp ?? 0) >= mpCost;
-              return (
-                <div
-                  key={sp.id || idx}
-                  className="bg-black/60 border border-indigo-900/60 rounded-lg p-2 flex flex-col gap-1 shadow-sm"
-                >
-                  <div className="flex items-center justify-between gap-1.5">
-                    <span className="text-xs font-bold text-indigo-200 truncate">{sp.name}</span>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {sp.tier_name && (
-                        <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-indigo-950/90 text-indigo-300 border border-indigo-800/60 font-semibold">
-                          {sp.tier_name}
-                        </span>
-                      )}
-                      {onCastSpell ? (
-                        <button
-                          type="button"
-                          disabled={!canAffordMp || processingTurn}
-                          onClick={() => onCastSpell(sp)}
-                          title={canAffordMp ? `Cast ${sp.name} (${mpCost} MP)` : `Requires ${mpCost} MP`}
-                          className="px-2 py-0.5 rounded bg-indigo-600/30 hover:bg-indigo-500/50 text-indigo-200 border border-indigo-500/60 text-[11px] font-mono font-bold flex items-center gap-1 disabled:opacity-40 transition-colors"
-                        >
-                          <Zap size={10} className="text-blue-300" />
-                          <span>{t('character.cast', 'Cast')} ({mpCost} MP)</span>
-                        </button>
-                      ) : (
-                        <span className="text-[11px] font-mono text-blue-400 flex items-center gap-0.5 font-semibold">
-                          <Zap size={10} /> {mpCost} MP
-                        </span>
-                      )}
+            <ChevronDown
+              size={14}
+              className={`text-gray-400 shrink-0 transition-transform duration-200 ${skillsOpen ? 'rotate-180' : ''}`}
+            />
+          </button>
+          <CollapsibleSection isOpen={skillsOpen}>
+            <div className="space-y-1.5 max-h-72 overflow-y-auto custom-scrollbar pr-1 pt-0.5">
+              {character.learned_spells.map((sp, idx) => {
+                const mpCost = Number(sp.mp_cost || 0);
+                const canAffordMp = (character.mp ?? 0) >= mpCost;
+                return (
+                  <div
+                    key={sp.id || idx}
+                    className="bg-black/60 border border-indigo-900/60 rounded-lg p-2.5 flex flex-col gap-1 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span className="text-[13px] font-bold text-indigo-200 truncate">{sp.name}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {sp.tier_name && (
+                          <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-indigo-950/90 text-indigo-300 border border-indigo-800/60 font-semibold">
+                            {sp.tier_name}
+                          </span>
+                        )}
+                        {onCastSpell ? (
+                          <button
+                            type="button"
+                            disabled={!canAffordMp || processingTurn}
+                            onClick={() => onCastSpell(sp)}
+                            title={canAffordMp ? `Cast ${sp.name} (${mpCost} MP)` : `Requires ${mpCost} MP`}
+                            className="px-2 py-0.5 rounded bg-indigo-600/30 hover:bg-indigo-500/50 text-indigo-200 border border-indigo-500/60 text-[11px] font-mono font-bold flex items-center gap-1 disabled:opacity-40 transition-colors"
+                          >
+                            <Zap size={10} className="text-blue-300" />
+                            <span>{t('character.cast', 'Cast')} ({mpCost} MP)</span>
+                          </button>
+                        ) : (
+                          <span className="text-[11px] font-mono text-blue-400 flex items-center gap-0.5 font-semibold">
+                            <Zap size={10} /> {mpCost} MP
+                          </span>
+                        )}
+                      </div>
                     </div>
+                    {sp.description && (
+                      <p className="text-xs text-gray-300 leading-relaxed">{sp.description}</p>
+                    )}
                   </div>
-                  {sp.description && (
-                    <p className="text-[11px] text-gray-300 leading-relaxed">{sp.description}</p>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          </CollapsibleSection>
         </div>
       )}
 
       {/* Intimate Physical Anatomy Live Customization Modal */}
-      {showAppearanceModal && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-md bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-fantasy-border/60 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-lg">🔞</span>
-                <div>
-                  <h3 className="font-rpg font-bold text-sm text-fantasy-accent">
-                    {t('character.customize_anatomy', 'Customize Physical Anatomy')}
-                  </h3>
-                  <p className="text-[10px] text-gray-400">
-                    {t('character.anatomy_desc', "Live update your character's assets & tactile textures")}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAppearanceModal(false)}
-                className="text-gray-400 hover:text-white p-1"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="space-y-3.5 text-xs">
-              {isMale ? (
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
-                    {t('character.penis_size_tier', 'Penis Size Tier')}
-                  </label>
-                  <select
-                    value={editPSize}
-                    onChange={(e) => setEditPSize(e.target.value)}
-                    className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
-                  >
-                    <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
-                    <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
-                    <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
-                    <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
-                  </select>
-                </div>
-              ) : (
-                <div>
-                  <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
-                    {t('character.breast_size_tier', 'Breast Size Tier')}
-                  </label>
-                  <select
-                    value={editBSize}
-                    onChange={(e) => setEditBSize(e.target.value)}
-                    className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
-                  >
-                    <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
-                    <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
-                    <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
-                    <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
-                    <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
-                  </select>
-                </div>
-              )}
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
-                    {t('character.tactile_texture', 'Tactile Texture / Feature')} ({isMale ? 'Phallus' : 'Breasts'})
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
-                      setEditTexture(pool[Math.floor(Math.random() * pool.length)].value);
-                    }}
-                    className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
-                  >
-                    <Sparkles size={11} /> {t('character.roll_feature', 'Roll Feature')}
-                  </button>
-                </div>
-                <select
-                  value={editTexture}
-                  onChange={(e) => setEditTexture(e.target.value)}
-                  className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-xs text-gray-100"
-                >
-                  <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
-                  {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-3 border-t border-fantasy-border/60">
-              <button
-                type="button"
-                onClick={() => setShowAppearanceModal(false)}
-                className="px-3 py-1.5 rounded border border-fantasy-border text-xs text-gray-300 hover:text-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSaveAppearance}
-                disabled={savingApp}
-                className="px-4 py-1.5 rounded bg-fantasy-accent hover:bg-amber-400 text-black font-bold text-xs uppercase disabled:opacity-50 transition-colors"
-              >
-                {savingApp ? t('common.saving', 'Saving...') : t('common.save_changes', 'Save Changes')}
-              </button>
+      <AcrylicModal
+        isOpen={showAppearanceModal}
+        onClose={() => setShowAppearanceModal(false)}
+        label={t('character.customize_anatomy', 'Customize Physical Anatomy')}
+        maxWidthClass="max-w-md"
+        zIndexClass="z-[100]"
+        className="p-5 space-y-4"
+      >
+        <div className="flex items-center justify-between border-b border-fantasy-border/35 pb-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-lg shrink-0">🔞</span>
+            <div className="min-w-0">
+              <h3 className="font-rpg font-bold text-sm text-fantasy-accent truncate">
+                {t('character.customize_anatomy', 'Customize Physical Anatomy')}
+              </h3>
+              <p className="text-[10px] text-gray-400 truncate">
+                {t('character.anatomy_desc', "Live update your character's assets & tactile textures")}
+              </p>
             </div>
           </div>
+          <MotionButton
+            onClick={() => setShowAppearanceModal(false)}
+            aria-label={t('common.close', 'Close')}
+            className="hk-icon-btn h-7 min-w-7 shrink-0"
+          >
+            <X size={16} />
+          </MotionButton>
         </div>
-      )}
+
+        <div className="space-y-3.5 text-xs">
+          {isMale ? (
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider font-bold text-purple-300 mb-1">
+                {t('character.penis_size_tier', 'Penis Size Tier')}
+              </label>
+              <select
+                value={editPSize}
+                onChange={(e) => setEditPSize(e.target.value)}
+                className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+              >
+                <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
+                <option value="average">{t('character.penis_average', 'Proportional (Average)')}</option>
+                <option value="large">{t('character.penis_large', 'Well-Endowed / Formidable (Large)')}</option>
+                <option value="huge">{t('character.penis_huge', 'Massive / Heavy (Huge)')}</option>
+              </select>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-[11px] uppercase tracking-wider font-bold text-pink-300 mb-1">
+                {t('character.breast_size_tier', 'Breast Size Tier')}
+              </label>
+              <select
+                value={editBSize}
+                onChange={(e) => setEditBSize(e.target.value)}
+                className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+              >
+                <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
+                <option value="small">{t('character.breast_petite', 'Petite / Modest (A-B Cup)')}</option>
+                <option value="average">{t('character.breast_proportional', 'Proportional (C-Cup)')}</option>
+                <option value="large">{t('character.breast_voluptuous', 'Voluptuous / Full (D-DD Cup)')}</option>
+                <option value="huge">{t('character.breast_bountiful', 'Bountiful / Massive (E+ Cup)')}</option>
+              </select>
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                {t('character.tactile_texture', 'Tactile Texture / Feature')} ({isMale ? 'Phallus' : 'Breasts'})
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
+                  setEditTexture(pool[Math.floor(Math.random() * pool.length)].value);
+                }}
+                className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
+              >
+                <Sparkles size={11} /> {t('character.roll_feature', 'Roll Feature')}
+              </button>
+            </div>
+            <select
+              value={editTexture}
+              onChange={(e) => setEditTexture(e.target.value)}
+              className="w-full bg-fantasy-dark/70 border border-fantasy-border/60 p-2 rounded-lg text-xs text-gray-100"
+            >
+              <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
+              {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 pt-3 border-t border-fantasy-border/35">
+          <MotionButton
+            onClick={() => setShowAppearanceModal(false)}
+            className="px-3 py-1.5 rounded-lg border border-fantasy-border/60 text-xs text-gray-300 hover:text-white hover:bg-gray-500/15"
+          >
+            {t('common.cancel', 'Cancel')}
+          </MotionButton>
+          <MotionButton
+            onClick={handleSaveAppearance}
+            disabled={savingApp}
+            className="px-4 py-1.5 rounded-lg bg-fantasy-accent hover:bg-amber-400 text-black font-bold text-xs uppercase disabled:opacity-50 transition-colors"
+          >
+            {savingApp ? t('common.saving', 'Saving...') : t('common.save_changes', 'Save Changes')}
+          </MotionButton>
+        </div>
+      </AcrylicModal>
 
     </div>
   );

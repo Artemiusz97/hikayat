@@ -16,7 +16,16 @@ from .roster_tags import (
     format_dialogue_register_directive,
 )
 from .genealogy import get_or_generate_family_tree
-from .factions import is_school_club_faction, get_faction_category_tag
+from .factions import (
+    ANOMALOUS_FACTION_SPECS,
+    ANOMALOUS_OUTLAW_ARCHETYPES,
+    faction_bonus_active,
+    get_anomalous_faction_spec,
+    get_anomalous_promotion_tiers_for_archetype,
+    get_faction_category_tag,
+    is_school_club_faction,
+    validate_faction_hq_action_access,
+)
 from .relationships import (
     can_player_dm_contact,
     is_contact_blocked,
@@ -65,8 +74,14 @@ __all__ = [
     "get_dialogue_register",
     "format_dialogue_register_directive",
     "get_or_generate_family_tree",
+    "ANOMALOUS_FACTION_SPECS",
+    "ANOMALOUS_OUTLAW_ARCHETYPES",
+    "faction_bonus_active",
+    "get_anomalous_faction_spec",
+    "get_anomalous_promotion_tiers_for_archetype",
     "is_school_club_faction",
     "get_faction_category_tag",
+    "validate_faction_hq_action_access",
     "can_player_dm_contact",
     "is_contact_blocked",
     "is_contact_eligible",

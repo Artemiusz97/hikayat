@@ -10,7 +10,16 @@ import { StatusEffectBadge } from './CharacterSheet';
 import { formatCleanLocation, cleanProseLocations } from '../../utils/locationFormat';
 import WorldPulseLoreSubTab from './WorldPulseLoreSubTab';
 import EncyclopediaSubTab from './EncyclopediaSubTab';
+import { useUiPreferences } from '../../theme/UiPreferencesProvider';
+import { formatClockTime } from '../../utils/timeFormat';
+import { formatScenarioCurrency } from '../../utils/currency';
 import { isAnomalousScenarioKey } from '../../utils/session';
+import {
+  formatAgeCategory,
+  formatGender,
+  formatRace,
+  formatTitle,
+} from '../../utils/npcDemographics';
 
 const formatPersonEntity = (item) => {
   if (!item) return '';
@@ -18,43 +27,6 @@ const formatPersonEntity = (item) => {
   const name = item.name || item.title || 'Unknown';
   const role = item.role || item.closeness || item.type || item.grade || item.relationship_type || '';
   return role ? `${name} (${role})` : name;
-};
-
-const formatTitle = (str) => {
-  if (!str) return '';
-  return String(str).replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-};
-
-const formatRace = (str) => {
-  if (!str) return '';
-  const clean = String(str).trim().toLowerCase().replace(/-/g, '_');
-  if (clean === 'human') return 'Human';
-  if (clean === 'dark_elf') return 'Dark Elf';
-  if (clean === 'irradiated_human') return 'Irradiated Human';
-  if (clean === 'half_beast' || clean === 'halfbeast') return 'Half-Beast';
-  if (clean === 'hybrid') return 'Hybrid';
-  if (clean.includes(':')) {
-    const [category, species] = clean.split(':');
-    const catTitle = formatTitle(category);
-    const specTitle = formatTitle(species);
-    if (category === 'half_beast' || category === 'halfbeast') {
-      return `${specTitle} Half-Beast`;
-    }
-    if (category === 'hybrid') {
-      return `${specTitle} Hybrid`;
-    }
-    if (category === 'beastfolk') {
-      return `${specTitle} Beastfolk`;
-    }
-    if (category === 'alien') {
-      return `${specTitle} Alien`;
-    }
-    if (category === 'mutant') {
-      return `${specTitle} Mutant`;
-    }
-    return `${specTitle} ${catTitle}`;
-  }
-  return formatTitle(clean);
 };
 
 export const getStandingBadgeClass = (standing) => {
@@ -357,8 +329,10 @@ const CodexPanel = ({
   processingTurn = false,
 }) => {
   const { t } = useTranslation();
+  const { clockFormat } = useUiPreferences();
   const { contacts = [], factions = [], agentDossier, lorebook = {}, worldPulse, commitments = [], encyclopedia, loading, factionHqAction, refreshCodex, cancelCommitment, trackRumor } = codexHook || {};
   const isAnomalousScenario = isAnomalousScenarioKey(session?.scenario);
+  const calibCost = formatScenarioCurrency(500, session?.scenario || 'anomalous_incursions');
   const [subTab, setSubTab] = useState('contacts'); // 'contacts' | 'factions' | 'lore' | 'agenda' | 'encyclopedia'
 
   useEffect(() => {
@@ -467,8 +441,14 @@ const CodexPanel = ({
           telemetry_calibrations_used: data.telemetry_calibrations_used ?? session?.telemetry_calibrations_used,
         });
       }
-      if ((action === 'rest' || action === 'calibrate') && onRefreshCharacter) {
+      if ((action === 'rest' || action === 'calibrate' || action === 'join' || action === 'transfer' || action === 'leave') && onRefreshCharacter) {
         onRefreshCharacter();
+      }
+      if ((action === 'join' || action === 'transfer' || action === 'leave') && data) {
+        if (refreshCodex) refreshCodex();
+        if (data.session_sync && onSessionUpdated) {
+          onSessionUpdated({ ...session, ...data.session_sync });
+        }
       }
       if (action === 'quartermaster') {
         if (data?.merchant && onSessionUpdated) {
@@ -678,10 +658,10 @@ const CodexPanel = ({
   };
 
   return (
-    <div className="bg-black/30 rounded-lg border border-fantasy-border p-2.5 sm:p-3 space-y-2.5 min-h-full flex-1 flex flex-col">
+    <div className="space-y-3 min-h-full flex-1 flex flex-col min-w-0">
       
       {/* Top Header & Subtabs */}
-      <div className="space-y-2 border-b border-fantasy-border pb-2">
+      <div className="space-y-2 border-b border-fantasy-border/35 pb-2.5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <BookOpen size={16} className="text-fantasy-accent" />
@@ -701,7 +681,7 @@ const CodexPanel = ({
         </div>
 
         {/* Subtabs Selector */}
-        <div className="flex flex-wrap bg-black/60 p-0.5 rounded-md border border-fantasy-border/60 gap-1">
+        <div className="flex flex-wrap gap-1">
           <button
             onClick={() => { setSubTab('contacts'); setSearchQuery(''); }}
             className={`flex-1 flex items-center justify-center gap-1.5 py-1 rounded text-[11px] font-semibold uppercase tracking-wider transition-colors ${
@@ -937,32 +917,32 @@ const CodexPanel = ({
                               </button>
                             )}
                             {isSpecialAgent && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
+                              <span className="text-[9px] px-1.5 py-0.5 bg-cyan-950/70 text-cyan-300 rounded font-bold uppercase border border-cyan-700/50">
                                 ⚡ {t('codex.special_agent', 'Special Agent')}
                               </span>
                             )}
                             {isCivilianTag && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-slate-900/80 text-slate-300 rounded font-semibold uppercase border border-slate-700/60">
+                              <span className="text-[9px] px-1.5 py-0.5 bg-slate-900/80 text-slate-300 rounded font-semibold uppercase border border-slate-700/60">
                                 {t('codex.civilian', 'Civilian')}
                               </span>
                             )}
                             {isDeceased && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-700/60">
+                              <span className="text-[9px] px-1.5 py-0.5 bg-rose-950/80 text-rose-300 rounded font-bold uppercase border border-rose-700/60">
                                 💀 {t('codex.deceased', 'Deceased')}
                               </span>
                             )}
                             {isInParty && (
-                              <span className="text-[9px] px-1.5 py-0.2 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
+                              <span className="text-[9px] px-1.5 py-0.5 bg-purple-950/60 text-purple-300 rounded font-bold uppercase border border-purple-800/40">
                                 {t('codex.in_party', 'In Party')}
                               </span>
                             )}
                             {isRomantic && (
-                              <span className="text-[9px] px-1 py-0.2 bg-pink-950/60 text-pink-300 rounded font-bold uppercase border border-pink-800/40">
+                              <span className="text-[9px] px-1 py-0.5 bg-pink-950/60 text-pink-300 rounded font-bold uppercase border border-pink-800/40">
                                 {t('codex.romantic', 'Romantic')}
                               </span>
                             )}
                             {npc.clothing_status && (
-                              <span className="text-[8.5px] font-mono px-1 py-0.2 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
+                              <span className="text-[8.5px] font-mono px-1 py-0.5 rounded bg-black/60 text-gray-300 border border-neutral-700/60 leading-tight">
                                 {npc.clothing_status}
                               </span>
                             )}
@@ -1034,27 +1014,31 @@ const CodexPanel = ({
                             Faction: {formatTitle(npc.faction_affiliation)}
                           </span>
                         )}
-                        {(npc.age_group || basic.age_group) && (
-                          <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${
-                            String(npc.age_group || basic.age_group).toLowerCase() === 'teen'
-                              ? 'bg-amber-950/40 text-amber-300 border-amber-800/40'
-                              : 'bg-indigo-950/40 text-indigo-300 border-indigo-800/40'
-                          }`}>
-                            {String(npc.age_group || basic.age_group).toLowerCase() === 'teen'
-                              ? (npc.is_student ? 'Teen · Student' : 'Teen')
-                              : 'Adult'}
-                          </span>
-                        )}
+                        {(npc.age_group || basic.age_group) && (() => {
+                          const agInfo = formatAgeCategory(npc.age_group || basic.age_group, t);
+                          if (!agInfo) return null;
+                          const label = agInfo.key === 'teen' && npc.is_student
+                            ? `${agInfo.label} · ${t('scene.student_tag', 'Student')}`
+                            : agInfo.label;
+                          return (
+                            <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${agInfo.pillClass}`}>
+                              {label}
+                            </span>
+                          );
+                        })()}
                         {(basic.race || npc.race) && (
                           <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-                            {formatRace(basic.race || npc.race)}
+                            {formatRace(basic.race || npc.race, t)}
                           </span>
                         )}
-                        {(basic.gender || npc.gender) && (
-                          <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-                            {formatTitle(basic.gender || npc.gender)}
-                          </span>
-                        )}
+                        {(basic.gender || npc.gender) && (() => {
+                          const gInfo = formatGender(basic.gender || npc.gender, t);
+                          return (
+                            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                              {gInfo ? `${gInfo.symbol ? `${gInfo.symbol} ` : ''}${gInfo.label}` : formatTitle(basic.gender || npc.gender)}
+                            </span>
+                          );
+                        })()}
                         {(basic.age || npc.age) && (
                           <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
                             Age {basic.age || npc.age}
@@ -1262,7 +1246,7 @@ const CodexPanel = ({
                                             <span>{ab.emoji || '✨'}</span>
                                             <span>{ab.name}</span>
                                             {ab.is_ultimate && (
-                                              <span className="text-[8.5px] px-1 py-0.2 rounded bg-purple-900/80 text-purple-200 border border-purple-600/50 font-mono uppercase">
+                                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-purple-900/80 text-purple-200 border border-purple-600/50 font-mono uppercase">
                                                 Ultimate
                                               </span>
                                             )}
@@ -1464,7 +1448,7 @@ const CodexPanel = ({
                                         <div className="space-y-1">
                                           {famData.members.map((mem, i) => (
                                             <div key={i} className="text-gray-300">
-                                              • <strong>{mem.relation || 'Relative'}:</strong> {renderLinkedPerson(mem)} {mem.race ? `(${formatRace(mem.race)})` : ''}
+                                              • <strong>{mem.relation || 'Relative'}:</strong> {renderLinkedPerson(mem)} {mem.race ? `(${formatRace(mem.race, t)})` : ''}
                                             </div>
                                           ))}
                                         </div>
@@ -1659,8 +1643,14 @@ const CodexPanel = ({
                 const isMember = Boolean(faction.is_member);
                 const playerRank = Number(faction.player_rank || 0);
                 const eligibleRank = Number(faction.eligible_rank || 0);
+                const isAnomScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+                const isOutlaw = Boolean(faction.is_outlaw || faction.diplomatic_stance === 'outlaw');
+                const isAnomMainFaction = isAnomScenario && !faction.is_school_club;
+                const promoTiers = Array.isArray(faction.promotion_tiers) ? faction.promotion_tiers : [];
                 const canPromote = isMember && eligibleRank > playerRank && playerRank < 4;
-                const canRest = rep >= 1;
+                const canRest = isAnomMainFaction ? isMember : rep >= 1;
+                const qmBlocked = faction.quartermaster_eligible === false;
+                const bountyBlocked = faction.bounty_board_eligible === false;
                 const roster = Array.isArray(faction.leadership_roster) ? faction.leadership_roster : [];
                 const hierarchy = Array.isArray(faction.hierarchy) ? faction.hierarchy : [];
                 const activePerks = Array.isArray(faction.active_perks) ? faction.active_perks : [];
@@ -1680,9 +1670,14 @@ const CodexPanel = ({
                           <Flag size={13} className="text-fantasy-accent shrink-0" />
                           <span>{faction.name || faction.faction_id}</span>
                           {factionCategoryTag && (
-                            <span className={`text-[9.5px] px-1.5 py-0.2 rounded font-medium border flex items-center gap-1 shrink-0 ${factionCategoryTag.style}`}>
+                            <span className={`text-[9.5px] px-1.5 py-0.5 rounded font-medium border flex items-center gap-1 shrink-0 ${factionCategoryTag.style}`}>
                               <span>{factionCategoryTag.icon}</span>
                               <span>{factionCategoryTag.label}</span>
+                            </span>
+                          )}
+                          {isOutlaw && (
+                            <span className="text-[9.5px] px-1.5 py-0.5 rounded font-bold border bg-rose-950/70 text-rose-300 border-rose-700/60 shrink-0 uppercase">
+                              {t('codex.outlaw_badge', 'Outlaw')}
                             </span>
                           )}
                           {isMember && (
@@ -1752,6 +1747,38 @@ const CodexPanel = ({
                                 <span className="text-[11px] text-gray-300">{rivalFactions.join(', ')}</span>
                               </div>
                             )}
+                          </div>
+                        )}
+
+                        {/* 5-Tier Anomalous Operative Promotion Ladder */}
+                        {isAnomMainFaction && promoTiers.length > 0 && (
+                          <div className="space-y-1.5 bg-black/40 p-2 rounded border border-fantasy-border/40">
+                            <div className="flex items-center justify-between text-[10px] font-bold text-cyan-300 uppercase tracking-wider">
+                              <span>🎖️ {t('codex.promotion_ladder', '5-Tier Operative Ladder')}</span>
+                              {isMember && (
+                                <span className="font-mono text-amber-300">
+                                  {Number(agentDossier?.promotion_rep || 0)}/100 Rep • T{Number(agentDossier?.promotion_tier || playerRank || 1)}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-1">
+                              {promoTiers.map((pt) => {
+                                const isCurTier = isMember && Number(agentDossier?.promotion_tier || playerRank || 0) === Number(pt.tier);
+                                return (
+                                  <div
+                                    key={pt.tier}
+                                    className={`flex items-center justify-between px-1.5 py-1 rounded border text-[10.5px] ${
+                                      isCurTier
+                                        ? 'bg-amber-950/35 border-amber-500/50 text-amber-200 font-semibold'
+                                        : 'bg-black/50 border-fantasy-border/30 text-gray-300'
+                                    }`}
+                                  >
+                                    <span>T{pt.tier} • {pt.title}</span>
+                                    <span className="font-mono text-[10px] text-gray-500">{pt.min_rep ?? pt.rep_required ?? 0} Rep</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
                         )}
 
@@ -1830,7 +1857,13 @@ const CodexPanel = ({
                             <button
                               disabled={Boolean(factionBusy) || !canRest}
                               onClick={() => handleFactionOp(faction.faction_id, 'rest')}
-                              title={canRest ? 'Recover full HP & MP at Faction Safehouse' : 'Requires Liked standing (+1 Rep)'}
+                              title={
+                                canRest
+                                  ? 'Recover full HP & MP at Faction Safehouse'
+                                  : isAnomMainFaction
+                                    ? t('codex.rest_members_only', 'Restricted to enlisted operatives of this HQ')
+                                    : 'Requires Liked standing (+1 Rep)'
+                              }
                               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
                                 canRest
                                   ? 'bg-cyan-950/40 hover:bg-cyan-900/50 border-cyan-700/60 text-cyan-300'
@@ -1843,42 +1876,58 @@ const CodexPanel = ({
 
                             {/* Quartermaster Shop */}
                             <button
-                              disabled={Boolean(factionBusy)}
+                              disabled={Boolean(factionBusy) || qmBlocked}
                               onClick={() => handleFactionOp(faction.faction_id, 'quartermaster')}
-                              className="flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300 transition-all"
+                              title={qmBlocked ? t('codex.qm_locked_tip', 'Locked: Outlaws are blacklisted at Bureau HQ; specialized faction armories are members-only.') : undefined}
+                              className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                                qmBlocked
+                                  ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                                  : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300'
+                              }`}
                             >
                               <ShoppingBag size={12} />
-                              <span>{t('codex.quartermaster', 'Quartermaster')}</span>
+                              <span>{qmBlocked ? `🔒 ${t('codex.quartermaster', 'Quartermaster')}` : t('codex.quartermaster', 'Quartermaster')}</span>
                             </button>
 
                             {/* Promotion Trial */}
                             <button
-                              disabled={Boolean(factionBusy) || !canPromote}
+                              disabled={Boolean(factionBusy) || isAnomMainFaction || !canPromote}
                               onClick={() => handleFactionOp(faction.faction_id, 'promote')}
                               title={
-                                !isMember
-                                  ? 'Join faction first'
-                                  : canPromote
-                                    ? `Challenge for Rank ${playerRank + 1}!`
-                                    : 'Earn more Faction Reputation to unlock the next rank'
+                                isAnomMainFaction
+                                  ? t('codex.auto_promote_tip', 'Advances automatically at 20 / 45 / 70 / 90 Rep via Bounties and Dispatches')
+                                  : !isMember
+                                    ? 'Join faction first'
+                                    : canPromote
+                                      ? `Challenge for Rank ${playerRank + 1}!`
+                                      : 'Earn more Faction Reputation to unlock the next rank'
                               }
                               className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
-                                canPromote
+                                !isAnomMainFaction && canPromote
                                   ? 'bg-purple-950/50 hover:bg-purple-900/60 border-purple-600/60 text-purple-200 animate-pulse'
                                   : 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
                               }`}
                             >
                               <Swords size={12} />
-                              <span>{canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}</span>
+                              <span>
+                                {isAnomMainFaction
+                                  ? t('codex.auto_promote_btn', 'Auto-Promotes (Rep)')
+                                  : canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}
+                              </span>
                             </button>
 
                             {/* Faction Bounties */}
                             <button
-                              disabled={Boolean(factionBusy)}
+                              disabled={Boolean(factionBusy) || bountyBlocked}
                               onClick={() => handleFactionOp(faction.faction_id, 'bounty')}
-                              className="col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-700/60 text-indigo-300 transition-all"
+                              title={bountyBlocked ? t('codex.bounty_locked_tip', 'Locked: Outlaws are blacklisted at Bureau contracts; internal dispatches are members-only.') : undefined}
+                              className={`col-span-2 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                                bountyBlocked
+                                  ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                                  : 'bg-indigo-950/40 hover:bg-indigo-900/50 border-indigo-700/60 text-indigo-300'
+                              }`}
                             >
-                              <span>{t('codex.faction_bounties', '📋 Faction Bounties')}</span>
+                              <span>{bountyBlocked ? `🔒 ${t('codex.faction_bounties', '📋 Faction Bounties')}` : t('codex.faction_bounties', '📋 Faction Bounties')}</span>
                             </button>
                           </div>
 
@@ -1890,7 +1939,10 @@ const CodexPanel = ({
                                   🧬 {t('awakened.calibration_title', 'HQ Telemetry Calibration')}
                                 </span>
                                 <p id={`${calibId}-${faction.faction_id}-desc`} className="text-[10px] text-gray-400 leading-snug mt-0.5">
-                                  {t('awakened.calibration_desc', 'Tier 4+ Senior Operative privilege: Re-attune your 3-axis Resonance (500G + 1x Hume Core, max 1/arc).')}
+                                  {t('awakened.calibration_desc', {
+                                    cost: calibCost,
+                                    defaultValue: `Tier 4+ Senior Operative privilege: Re-attune your 3-axis Resonance (${calibCost} + 1x Hume Core, max 1/arc).`,
+                                  })}
                                 </p>
                               </div>
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
@@ -1953,7 +2005,10 @@ const CodexPanel = ({
                                 })}
                                 className="w-full py-1.5 px-2 rounded text-[11px] font-bold border bg-cyan-950/60 hover:bg-cyan-900/70 border-cyan-500/60 text-cyan-200 transition-all disabled:opacity-50"
                               >
-                                🧬 {t('awakened.calibration_btn', 'Calibrate Resonance (500G + 1x Hume Core)')}
+                                🧬 {t('awakened.calibration_btn', {
+                                  cost: calibCost,
+                                  defaultValue: `Calibrate Resonance (${calibCost} + 1x Hume Core)`,
+                                })}
                               </button>
                             </div>
                           )}
@@ -2010,15 +2065,17 @@ const CodexPanel = ({
                   const cardTitle = c.title || (isRendezvous ? `Meetup with ${targetName}` : `Promise to ${targetName}`);
                   const matchedTarget = findDiscoveredContact({ name: targetName, npc_id: c.npc_id || c.target_entity });
 
-                  const fmtMin = (m) => {
-                    const clean = Math.max(0, Number(m || 0)) % 1440;
-                    return `${String(Math.floor(clean / 60)).padStart(2, '0')}:${String(clean % 60).padStart(2, '0')}`;
-                  };
-                  const timeWindowLabel = c.time_window_label || (
-                    isRendezvous && c.scheduled_day
-                      ? `Day ${c.scheduled_day} • ${fmtMin(c.start_minute)}–${fmtMin(c.end_minute)}`
-                      : (c.scheduled_day ? `Day ${c.scheduled_day}` : 'Open Obligation')
-                  );
+                  const hasStartMin = c.start_minute !== undefined && c.start_minute !== null;
+                  const hasEndMin = c.end_minute !== undefined && c.end_minute !== null;
+                  const formattedSpan = hasStartMin
+                    ? hasEndMin
+                      ? `${formatClockTime(c.start_minute, clockFormat)}–${formatClockTime(c.end_minute, clockFormat)}`
+                      : formatClockTime(c.start_minute, clockFormat)
+                    : '';
+                  const timeWindowLabel =
+                    isRendezvous && c.scheduled_day && formattedSpan
+                      ? `Day ${c.scheduled_day} • ${formattedSpan}`
+                      : c.time_window_label || (c.scheduled_day ? `Day ${c.scheduled_day}` : 'Open Obligation');
 
                   const hasOverlapConflict = isRendezvous && filteredCommitments.some(other => {
                     if (!other || (other.commitment_id || other.id) === cId || (other.commitment_key && other.commitment_key === c.commitment_key) || other.commitment_type !== 'rendezvous') return false;
@@ -2054,17 +2111,17 @@ const CodexPanel = ({
                           <h5 className="font-semibold text-xs text-gray-100">
                             {cardTitle}
                           </h5>
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-fantasy-dark text-gray-300 border border-fantasy-border/60 uppercase font-mono">
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-fantasy-dark text-gray-300 border border-fantasy-border/60 uppercase font-mono">
                             {subtypeLabel}
                           </span>
                           {hasOverlapConflict && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/40">
                               ⚠️ Overlap
                             </span>
                           )}
                         </div>
 
-                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-mono uppercase font-bold border shrink-0 ${
+                        <span className={`text-[9px] px-1.5 py-0.5 rounded font-mono uppercase font-bold border shrink-0 ${
                           isArrived
                             ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
                             : isFulfilled
@@ -2102,7 +2159,7 @@ const CodexPanel = ({
                             <span>{timeWindowLabel}</span>
                           </span>
                           {isConfidential && (
-                            <span className="text-[9px] px-1 py-0.2 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
+                            <span className="text-[9px] px-1 py-0.5 rounded bg-purple-950/60 text-purple-300 border border-purple-800/40">
                               Confidential
                             </span>
                           )}

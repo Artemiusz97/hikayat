@@ -1043,3 +1043,51 @@ def is_school_scenario(scenario_key: str | dict | None) -> bool:
         s = str(scenario_key or "").lower()
         return any(x in s for x in ("school", "academy", "high_school"))
 
+
+def get_scenario_currency(scenario_or_key: dict | str | None) -> dict[str, str]:
+    """Return currency metadata (key, name, symbol, placement) matching web/src/utils/currency.js."""
+    if isinstance(scenario_or_key, dict):
+        raw = str(scenario_or_key.get("id") or scenario_or_key.get("name") or "fantasy")
+    else:
+        raw = str(scenario_or_key or "fantasy")
+    key = raw.strip().lower()
+
+    if "anomalous" in key or "sci_fi" in key or "scifi" in key or "sci-fi" in key or "space" in key:
+        return {"key": "credits", "name": "Credits", "symbol": "₵", "placement": "prefix"}
+    if "high_school" in key or "highschool" in key or "academy" in key or "school" in key:
+        return {"key": "yen", "name": "Yen", "symbol": "¥", "placement": "prefix"}
+    if "slice_of_life" in key or "modern" in key:
+        return {"key": "dollars", "name": "Cash", "symbol": "$", "placement": "prefix"}
+    if "cyberpunk" in key:
+        return {"key": "eddies", "name": "Eurodollars", "symbol": "€$", "placement": "suffix"}
+    if "steampunk" in key:
+        return {"key": "sovereigns", "name": "Sovereigns", "symbol": "£", "placement": "prefix"}
+    if "post_apocalypse" in key or "postapoc" in key or "post_apoc" in key or "wasteland" in key:
+        return {"key": "caps", "name": "Caps", "symbol": "Caps", "placement": "suffix"}
+    if "dark_fantasy" in key:
+        return {"key": "crowns", "name": "Crowns", "symbol": "Crowns", "placement": "suffix"}
+    return {"key": "gold", "name": "Gold", "symbol": "G", "placement": "suffix"}
+
+
+def format_scenario_currency(
+    amount: int | float | None,
+    scenario_or_key: dict | str | None,
+    *,
+    include_name: bool = False,
+) -> str:
+    """Format an integer currency amount with the scenario's symbol/placement."""
+    cur = get_scenario_currency(scenario_or_key)
+    try:
+        num = int(round(float(amount))) if amount is not None else 0
+    except (TypeError, ValueError):
+        num = 0
+    formatted_abs = f"{abs(num):,}"
+    sign = "-" if num < 0 else ""
+    if cur["placement"] == "prefix":
+        base = f"{sign}{cur['symbol']}{formatted_abs}"
+    else:
+        base = f"{sign}{formatted_abs} {cur['symbol']}"
+    if include_name and cur["symbol"] != cur["name"]:
+        return f"{base} ({cur['name']})"
+    return base
+

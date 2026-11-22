@@ -7,8 +7,22 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import db
+from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
 
 log = logging.getLogger(__name__)
+
+
+def _format_departure_dest_label(dest_loc: str, dest_nid: str = "") -> str:
+    clean_nid = str(dest_nid or "").strip()
+    raw_loc = str(dest_loc or "").strip()
+    low_loc = raw_loc.lower()
+    if (
+        clean_nid == SHARED_ABSTRACT_RESIDENCE_NODE
+        or "unknown address" in low_loc
+        or "residential district" in low_loc
+    ):
+        return "home"
+    return raw_loc.split("➔")[-1].strip() if raw_loc else ""
 
 _CONVINCE_STAY_RE = re.compile(
     r"\b(?:convince|persuade|beg|urge|coax|plead\s+with|ask)\b.*?\b(?:to\s+)?stay\b"
@@ -173,11 +187,14 @@ def run_departure_turn_evaluation(
         )
         t_blk = next_b if (is_imm and next_b) else curr_blk
         t_min = (curr_min + mins_r) if (is_imm and mins_r) else curr_min
+        if t_blk == "closing":
+            t_blk = "night"
+            t_min = 1320
         s_loc = get_npc_scheduled_location(
             npc_ref, current_minute=t_min, current_day=curr_day, scen_key=scen_key, time_slot=t_blk, session_id=sess_id
         )
         s_nid = get_npc_scheduled_node_id(
-            npc_ref, current_minute=t_min, current_day=curr_day, scen_key=scen_key, time_slot=t_blk
+            npc_ref, current_minute=t_min, current_day=curr_day, scen_key=scen_key, time_slot=t_blk, session_id=sess_id
         ) or ""
         return str(s_loc or ""), str(s_nid or "")
 
@@ -214,7 +231,7 @@ def run_departure_turn_evaluation(
                     dest_loc, dest_nid = _resolve_npc_dest(p_nm, prof)
                     if not dest_loc or _locations_match(scene_loc, dest_loc, session_id=sess_id, node_a=scene_nid, node_b=dest_nid):
                         dest_loc = "their next obligation"
-                    dest_clean = dest_loc.split("➔")[-1].strip()
+                    dest_clean = _format_departure_dest_label(dest_loc, dest_nid) or "their next obligation"
                     _queue_departure(p_nm, dest_loc, dest_nid, "private_meetup_exit")
                     directives.append(
                         f"\n[PRIVATE MEETUP CONCLUSION & DEPARTURE]: The player has ended the conversation to wrap up the meetup. "
@@ -224,7 +241,7 @@ def run_departure_turn_evaluation(
             elif st and st.get("stage") in ("stage_1_warning", "stage_2_ultimatum", "extended_stay"):
                 dest_loc = str(st.get("target_location") or "")
                 dest_nid = str(st.get("target_node_id") or "")
-                dest_clean = dest_loc.split("➔")[-1].strip() if dest_loc else "their scheduled obligation"
+                dest_clean = _format_departure_dest_label(dest_loc, dest_nid) or "their scheduled obligation"
                 _queue_departure(p_nm, dest_loc, dest_nid, "schedule_departure_on_exit")
                 directives.append(
                     f"\n[SCHEDULE DEPARTURE]: As the conversation ends, {p_nm} bids farewell and physically leaves the scene for {dest_clean}.\n"
@@ -266,7 +283,7 @@ def run_departure_turn_evaluation(
             stage_val = str(st.get("stage") or "none")
             dest_loc = str(st.get("target_location") or "")
             dest_nid = str(st.get("target_node_id") or "")
-            dest_clean = dest_loc.split("➔")[-1].strip() if dest_loc else "their next obligation"
+            dest_clean = _format_departure_dest_label(dest_loc, dest_nid) or "their next obligation"
 
             if is_let_depart_act and act_targets_this_npc:
                 states.pop(p_key, None)
@@ -378,13 +395,13 @@ def run_departure_turn_evaluation(
         has_prolonged_linger = bool(linger_turns >= 4)
 
         if has_real_clock_shift or has_commitment_elsewhere or has_prolonged_linger:
-            dest_clean = dest_loc.split("➔")[-1].strip()
+            dest_clean = _format_departure_dest_label(dest_loc, dest_nid) or "their next obligation"
             t_blk = next_blk_now if (is_imm_now and next_blk_now) else curr_blk
             states[p_key] = {
                 "stage": "stage_1_warning",
                 "target_location": dest_loc,
                 "target_node_id": dest_nid,
-                "triggered_block": t_blk,
+                "triggered_block": "night" if t_blk == "closing" else t_blk,
                 "turns_remaining": 0,
                 "extended_block": "",
             }

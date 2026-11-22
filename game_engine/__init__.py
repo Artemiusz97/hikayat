@@ -58,11 +58,32 @@ from .quest_agency import (
 )
 from .state import *
 from .turn import *
-from .turn_context import TurnContext
-from .choices_cleaner import clean_choices_impl, sanitize_and_diversify_choices, build_hybrid_turn_choices, is_malformed_choice_label
-from .prompt_layout import build_language_directive, build_side_channel_language_directive
+from .turn_context import (
+    TurnExecutionContext,
+    TurnContext,
+    TurnClockStage,
+    CombatStageState,
+    EpistemicAndWorldStage,
+    TurnNotices,
+    resolve_target_turn,
+    resolve_pre_turn_quest_res,
+)
+from .choices_cleaner import (
+    clean_choices_impl,
+    sanitize_and_diversify_choices,
+    build_hybrid_turn_choices,
+    is_malformed_choice_label,
+    order_choices_canonically,
+)
+from .choice_icons import (
+    get_choice_quest_icon,
+    get_choice_skill_emoji,
+    get_choice_emoji,
+    split_outcome_and_next_paragraphs,
+)
+from .prompt_layout import build_language_directive, build_side_channel_language_directive, build_closing_reminder
 from .pronoun_resolver import tag_narrative_pronouns, strip_pronoun_tags, annotate_turn_pronouns
-from llm_client import call_llm_json, call_llm_json_stream
+from llm_client import call_llm_json, call_llm_json_stream, call_llm_narrator, call_llm_narrator_stream
 from mechanics.social.roster_tags import (
     AgeGroup,
     derive_age_group,

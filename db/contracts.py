@@ -111,17 +111,21 @@ ENTITY_CONTRACTS_V52_DDL: Tuple[str, ...] = (
 
 def _ensure_contracts_v52_tables(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
-    row = conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_entity_contracts' LIMIT 1"
-    ).fetchone()
-    if row is not None:
-        return
-    for sql in ENTITY_CONTRACTS_V52_DDL:
-        try:
-            conn.execute(sql)
-        except sqlite3.OperationalError as exc:
-            if "duplicate column name" not in str(exc).lower():
-                raise
+    def _check(c: sqlite3.Connection) -> None:
+        row = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='session_entity_contracts' LIMIT 1"
+        ).fetchone()
+        if row is not None:
+            return
+        for sql in ENTITY_CONTRACTS_V52_DDL:
+            try:
+                c.execute(sql)
+            except sqlite3.OperationalError as exc:
+                if "duplicate column name" not in str(exc).lower():
+                    raise
+
+    from .core import ensure_table_group_once
+    ensure_table_group_once(conn, "contracts_v52", _check)
 
 
 def build_contract_key(session_id: int, holder_id: str | int, patron_id: str) -> str:

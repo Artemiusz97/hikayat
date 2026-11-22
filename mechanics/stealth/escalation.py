@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from mechanics.stealth.alert_tracker import ALERT_UNAWARE
 from mechanics.stealth.core import (
     any_actor_hidden,
+    is_actor_hidden,
     break_stealth,
     classify_detection_escalation,
     consume_stealth_turn_transients,
@@ -182,49 +183,118 @@ def build_confrontation_choices(authority_name: str, scen_key: str) -> List[Dict
     return choices
 
 
+def _has_present_non_anomalous_npcs(session: Optional[Dict[str, Any]]) -> bool:
+    """Returns True if at least one non-anomalous NPC is present in the scene."""
+    if not isinstance(session, dict):
+        return False
+    for n in (session.get("current_npcs") or []):
+        if isinstance(n, dict):
+            if (
+                n.get("is_anomalous_entity")
+                or n.get("npc_type") == "anomaly"
+                or n.get("anomalous_npc_tag") == "anomaly_entity"
+            ):
+                continue
+            if str(n.get("name") or "").strip():
+                return True
+        elif isinstance(n, str) and n.strip():
+            return True
+    return False
+
+
+def _build_genre_distract_choice(session: Dict[str, Any], *, contested: bool) -> Dict[str, Any]:
+    """Constructs a genre-adapted stealth distraction choice."""
+    scen_low = str(session.get("scenario") or "fantasy").strip().lower()
+    if any(k in scen_low for k in ("cyber", "sci_fi", "scifi", "space", "future")):
+        free_lbl = "Distract — Ping a nearby terminal or toss a stray casing to divert attention"
+        cont_lbl = "Distract — Trigger a contested kinetic decoy to misdirect wary onlookers"
+    elif any(k in scen_low for k in ("school", "drama", "modern", "slice", "academy", "urban", "anomalous")):
+        free_lbl = "Distract — Create a subtle noise nearby to draw onlookers' attention away"
+        cont_lbl = "Distract — Stage a swift contested diversion to misdirect watchful eyes"
+    elif any(k in scen_low for k in ("steam", "clockwork", "victorian")):
+        free_lbl = "Distract — Tap a nearby brass pipe or clink a cog to draw attention away"
+        cont_lbl = "Distract — Improvise a contested mechanical diversion to misdirect sentries"
+    else:
+        free_lbl = "Distract — Toss a small pebble into nearby brush to create a noise diversion"
+        cont_lbl = "Distract — Improvise a contested diversion to misdirect wary guards"
+
+    return {
+        "label": cont_lbl if contested else free_lbl,
+        "stat": "AGI" if contested else "NONE",
+        "requirement": 7 if contested else 0,
+        "mp_cost": 0,
+        "intent": "stealth_covert",
+        "sub_intent": "stealth_distract",
+        "action_category": "stealth",
+        "is_stealth": True,
+        "stance": "stealth",
+        "_server_stamped": True,
+        "_stealth_injected": True,
+    }
+
+
 def inject_covert_exploration_choices(
     choices: List[Dict[str, Any]],
     session: Optional[Dict[str, Any]],
     max_total: int = 6,
+    *,
+    user_id: Optional[int] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Injects dedicated covert tactical choices when Stealth stance is active outside combat
-    (Blueprint Section 6), without clobbering quest-tagged, barrier, or trailing FREE utility choices.
+    Injects dedicated covert tactical choices when Stealth stance is active outside combat,
+    including dynamic Distract choices whenever non-anomalous NPCs are present (even at 0% detection).
     """
-    if not isinstance(session, dict) or not any_actor_hidden(session):
+    if not isinstance(session, dict):
+        return choices
+    actor_is_hidden = any_actor_hidden(session) or (user_id is not None and is_actor_hidden(session, int(user_id)))
+    if not actor_is_hidden:
         return choices
 
     from mechanics.combat import is_in_combat
     if is_in_combat(session):
         return choices
 
-    if not is_stealth_context_warranted(session):
-        return choices
-
     st = get_session_stealth_state(session)
     if st.get("detection_meter", 0) >= 100 or st.get("alert_level") == "detected":
         return choices
 
+    warranted = is_stealth_context_warranted(session)
+    has_npcs = _has_present_non_anomalous_npcs(session)
+    if not warranted and not has_npcs:
+        return choices
+
     base = [dict(c) for c in (choices or []) if isinstance(c, dict)]
     existing_low = " ".join(str(c.get("label") or "").lower() for c in base)
+    has_distract_already = any(
+        c.get("sub_intent") == "stealth_distract"
+        or any(k in str(c.get("label") or "").lower() for k in ("distract", "diversion", "pebble", "stone"))
+        for c in base
+    )
 
     covert_additions: List[Dict[str, Any]] = []
-    shadow_lbl = "Shadow Step — Slip quietly through cover past nearby sightlines"
-    if not any(k in existing_low for k in ("shadow step", "sneak", "slip past", "creep")) and not is_stealth_choice_locked_out(session, label=shadow_lbl):
-        covert_additions.append({
-            "label": shadow_lbl,
-            "stat": "AGI",
-            "requirement": 6,
-            "mp_cost": 0,
-            "intent": "stealth_covert",
-            "action_category": "stealth",
-            "is_stealth": True,
-            "stance": "stealth",
-            "_server_stamped": True,
-        })
+    if warranted:
+        shadow_lbl = "Shadow Step — Slip quietly through cover past nearby sightlines"
+        if not any(k in existing_low for k in ("shadow step", "sneak", "slip past", "creep")) and not is_stealth_choice_locked_out(session, label=shadow_lbl):
+            covert_additions.append({
+                "label": shadow_lbl,
+                "stat": "AGI",
+                "requirement": 6,
+                "mp_cost": 0,
+                "intent": "stealth_covert",
+                "action_category": "stealth",
+                "is_stealth": True,
+                "stance": "stealth",
+                "_server_stamped": True,
+                "_stealth_injected": True,
+            })
+
+    if has_npcs and not has_distract_already:
+        covert_additions.append(
+            _build_genre_distract_choice(session, contested=bool(st.get("free_distraction_used", False)))
+        )
 
     meter = int(st.get("detection_meter", 0) or 0)
-    if meter > 0:
+    if warranted and meter > 0:
         if "freeze & blend" not in existing_low and "hold still" not in existing_low:
             covert_additions.append({
                 "label": "Freeze & Blend — Hold motionless in shadow to let suspicion cool",
@@ -236,46 +306,46 @@ def inject_covert_exploration_choices(
                 "is_stealth": True,
                 "stance": "stealth",
                 "_server_stamped": True,
+                "_stealth_injected": True,
             })
-        if not any(k in existing_low for k in ("distract", "diversion", "pebble", "stone")):
-            if not st.get("free_distraction_used", False):
-                covert_additions.append({
-                    "label": "Toss a small noise distraction to lure sentries away",
-                    "stat": "NONE",
-                    "requirement": 0,
-                    "mp_cost": 0,
-                    "intent": "stealth_covert",
-                    "action_category": "stealth",
-                    "is_stealth": True,
-                    "stance": "stealth",
-                    "_server_stamped": True,
-                })
-            else:
-                covert_additions.append({
-                    "label": "Improvise a contested diversion to misdirect wary guards",
-                    "stat": "AGI",
-                    "requirement": 7,
-                    "mp_cost": 0,
-                    "intent": "stealth_covert",
-                    "action_category": "stealth",
-                    "is_stealth": True,
-                    "stance": "stealth",
-                    "_server_stamped": True,
-                })
 
     if not covert_additions:
         return base
 
-    # Keep FREE utility actions (Observe, Redress, Put down) anchored at the tail
+    # Keep FREE utility actions (Pickup, Redress, Put down) anchored at the tail
     utility_free = [c for c in base if str(c.get("stat") or "").upper() == "FREE"]
     core_base = [c for c in base if c not in utility_free]
     pinned = [c for c in core_base if c.get("is_quest_action") or c.get("is_climax_action") or c.get("_priority_slot")]
     regular = [c for c in core_base if c not in pinned]
 
-    selected_covert = covert_additions[:2]
+    selected_covert = covert_additions[:3]
     budget_for_regular = max(1, max_total - len(pinned) - len(selected_covert))
     merged_core = (pinned + regular[:budget_for_regular] + selected_covert)[:max_total]
     return merged_core + utility_free
+
+
+def sync_stealth_choices_for_toggle(
+    session: Optional[Dict[str, Any]],
+    user_id: int,
+    is_hidden: bool,
+) -> List[Dict[str, Any]]:
+    """Updates session choices immediately when the player toggles Stealth stance ON or OFF."""
+    if not isinstance(session, dict):
+        return []
+    raw_choices = [dict(c) for c in (session.get("choices") or []) if isinstance(c, dict)]
+    stripped: List[Dict[str, Any]] = []
+    for c in raw_choices:
+        lbl_low = str(c.get("label") or "").strip().lower()
+        if (
+            c.get("_stealth_injected")
+            or c.get("sub_intent") == "stealth_distract"
+            or lbl_low.startswith(("shadow step —", "freeze & blend —", "distract —"))
+        ):
+            continue
+        stripped.append(c)
+    if not is_hidden:
+        return stripped
+    return inject_covert_exploration_choices(stripped, session, user_id=int(user_id))
 
 
 def reduce_stealth_turn_outcome(

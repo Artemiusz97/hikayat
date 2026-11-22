@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import Any
 from .game_loop_mixin import GameLoopMixin
 from .merchant_mixin import MerchantMixin
 from .faction_mixin import FactionMixin
@@ -113,6 +114,11 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             else:
                 await interaction.response.send_message(msg, ephemeral=True)
             return
+
+        try:
+            await adb(game_engine.heal_session_quests_on_load, session_id)
+        except Exception:
+            pass
 
         await self._resend_current_scene(interaction, session, use_followup=True)
 
@@ -304,24 +310,30 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
     @app_commands.describe(mode="Solo or multiplayer",
                            scenario="Pick a preset scenario or select Custom Scenario",
                            tags="Comma-separated tags (Required only if scenario is set to Custom)",
-                           verbosity="Override your default narration style for this adventure",
-                           dialogue="Override your default dialogue setting for this adventure",
+                           verbosity="Override your default narrative style for this adventure",
+                           pacing="Override your default narrative pacing for this adventure",
+                           dialogue="Override your default dialogue style for this adventure",
                            image_generation="Override your default image-generation setting for this adventure")
     @app_commands.choices(
         mode=[app_commands.Choice(name="Solo", value="solo"),
               app_commands.Choice(name="Multiplayer (Turn-based, 2 players)", value="turn"),
               app_commands.Choice(name="Multiplayer (Synchronized, 2 players)", value="sync")],
         scenario=_scenario_command_choices(),
-        verbosity=[app_commands.Choice(name="Shakespearean", value="shakespearean"),
-                   app_commands.Choice(name="Vivid", value="vivid"),
-                   app_commands.Choice(name="Normal", value="normal"),
-                   app_commands.Choice(name="Direct", value="direct"),
-                   app_commands.Choice(name="Concise", value="concise")],
+        verbosity=[app_commands.Choice(name="Vivid", value="vivid"),
+                   app_commands.Choice(name="Standard", value="normal"),
+                   app_commands.Choice(name="Noir", value="noir"),
+                   app_commands.Choice(name="Witty", value="witty"),
+                   app_commands.Choice(name="Shakespearean", value="shakespearean"),
+                   app_commands.Choice(name="Brainrot", value="brainrot")],
+        pacing=[app_commands.Choice(name="Concise", value="concise"),
+                app_commands.Choice(name="Balanced", value="balanced"),
+                app_commands.Choice(name="Novelistic", value="novelistic")],
         dialogue=[app_commands.Choice(name="Off", value="off"),
                   app_commands.Choice(name="Minimal", value="minimal"),
                   app_commands.Choice(name="Balanced", value="balanced"),
                   app_commands.Choice(name="Adaptive", value="adaptive"),
-                  app_commands.Choice(name="Rich", value="rich")],
+                  app_commands.Choice(name="Rich", value="rich"),
+                  app_commands.Choice(name="Script", value="script")],
         image_generation=[app_commands.Choice(name="On", value="on"),
                           app_commands.Choice(name="Off", value="off")],
     )
@@ -329,6 +341,7 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                      scenario: app_commands.Choice[str] = None,
                      tags: str = None,
                      verbosity: app_commands.Choice[str] = None,
+                     pacing: app_commands.Choice[str] = None,
                      dialogue: app_commands.Choice[str] = None,
                      image_generation: app_commands.Choice[str] = None):
         char = await adb(db.get_character, interaction.user.id)
@@ -342,6 +355,10 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             session = await adb(db.get_session, existing_id)
             if session and session["status"] == "active":
                 await interaction.response.defer()
+                try:
+                    await adb(game_engine.heal_session_quests_on_load, int(session["id"]))
+                except Exception:
+                    pass
                 await self._resend_current_scene(interaction, session, use_followup=True)
                 return
             elif session and session["status"] == "waiting":
@@ -350,8 +367,9 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                 return
 
         settings = await adb(db.get_settings, interaction.user.id)
-        effective_verbosity = verbosity.value if verbosity else settings["verbosity"]
-        effective_dialogue = dialogue.value if dialogue else settings.get("dialogue_mode", "balanced")
+        effective_verbosity = verbosity.value if verbosity else settings.get("verbosity", "vivid")
+        effective_pacing = pacing.value if pacing else settings.get("narrative_pacing", "balanced")
+        effective_dialogue = dialogue.value if dialogue else settings.get("dialogue_mode", "adaptive")
         effective_image_gen = (image_generation.value == "on") if image_generation else bool(
             settings["image_gen_enabled"])
         effective_result_display = settings.get("result_display", "detailed")
@@ -373,10 +391,18 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             "mode": mode.value,
             "scenario": effective_scenario,
             "verbosity": effective_verbosity,
+            "pacing": effective_pacing,
             "dialogue": effective_dialogue,
             "image_gen": effective_image_gen,
             "choices_style": "dropdown",
+            "combat_ui_style": settings.get("combat_ui_style", "battle_deck") or "battle_deck",
             "result_display": effective_result_display,
+            "show_percentages": int(settings.get("show_percentages", 1)),
+            "show_enemy_hp": int(settings.get("show_enemy_hp", 1)),
+            "show_enemy_intent": int(settings.get("show_enemy_intent", 1)),
+            "language": settings.get("language", "en") or "en",
+            "narration_language": settings.get("narration_language") or settings.get("language") or "en",
+            "character_id": char.get("id") if isinstance(char, dict) else None,
         }
 
         # Slash choices list only scenario families; offer the variants as a second step.
@@ -416,12 +442,27 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             return
 
         capacity = 2
-        session_id = await adb(db.create_session, interaction.user.id, mode_value, capacity,
-                                        session_config["verbosity"], session_config["dialogue"],
-                                        session_config["image_gen"],
-                                        "dropdown", interaction.channel_id,
-                                        scenario=effective_scenario,
-                                        result_display=session_config["result_display"])
+        session_id = await adb(
+            db.create_session,
+            interaction.user.id,
+            mode_value,
+            capacity,
+            session_config["verbosity"],
+            session_config["dialogue"],
+            session_config["image_gen"],
+            "dropdown",
+            interaction.channel_id,
+            scenario=effective_scenario,
+            result_display=session_config["result_display"],
+            combat_ui_style=session_config.get("combat_ui_style", "battle_deck"),
+            show_percentages=session_config.get("show_percentages", 1),
+            language=session_config.get("language", "en"),
+            narration_language=session_config.get("narration_language"),
+            character_id=session_config.get("character_id"),
+            narrative_pacing=session_config.get("pacing", "balanced"),
+            show_enemy_hp=session_config.get("show_enemy_hp", 1),
+            show_enemy_intent=session_config.get("show_enemy_intent", 1),
+        )
         lobby_content = (f"**{char['name']}** is looking for a second adventurer for "
                          f"**{MODE_LABELS[mode_value]}** play in **{scenario_label}**! "
                          f"Click below to join.")
@@ -547,12 +588,36 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
         from mechanics.world.world_forge.seeder import forge_world_state
         await forge_world_state(session, party)
         try:
-            scene = await game_engine.generate_opening_scene(session, party)
+            async def _run_eager_disc_plan(sq_qid: str) -> Any:
+                try:
+                    from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
+                    return await compile_or_apply_eager_quest_plan(
+                        session["id"], sq_qid, timeout_seconds=10.0, defer_apply=True
+                    )
+                except Exception:
+                    return None
+
+            sq_disc = await adb(game_engine.ensure_story_quest_exists, session)
+            sq_disc_id = str((sq_disc or {}).get("quest_id") or "")
+            if sq_disc_id:
+                scene, eager_disc_plan = await asyncio.gather(
+                    game_engine.generate_opening_scene(session, party),
+                    _run_eager_disc_plan(sq_disc_id),
+                )
+                if eager_disc_plan:
+                    try:
+                        from mechanics.narrative.chapter_plan import apply_chapter_plan_to_dossier
+                        await adb(apply_chapter_plan_to_dossier, session["id"], sq_disc_id, eager_disc_plan)
+                    except Exception:
+                        pass
+            else:
+                scene = await game_engine.generate_opening_scene(session, party)
             # Safety coercion: generate_opening_scene returns dict; guard against any Pydantic leaks
             if getattr(scene, "model_dump", None):
                 scene = scene.model_dump(exclude_unset=False)
             if not isinstance(scene, dict):
                 scene = {}
+            await adb(game_engine.apply_quest_update, session["id"], scene)
         except Exception as e:
             logger.error("Failed to generate opening scene for session %s: %s", session.get("id"), e, exc_info=True)
             try:
@@ -641,13 +706,6 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
                 )
 
         fresh_session = await adb(db.get_session, session["id"])
-        try:
-            sq_disc = await adb(db.get_active_story_quest, session["id"])
-            if sq_disc and sq_disc.get("quest_id"):
-                from mechanics.narrative.chapter_plan import schedule_background_chapter_plan
-                schedule_background_chapter_plan(session["id"], str(sq_disc["quest_id"]))
-        except Exception:
-            pass
         image_url = await self._maybe_generate_image(fresh_session, scene.get("image_prompt"), outcome=scene)
 
         if session["mode"] == "sync":
@@ -981,6 +1039,11 @@ class AdventureCog(commands.Cog, GameLoopMixin, MerchantMixin, FactionMixin, Wor
             return
 
         await interaction.followup.send(f"✅ Successfully loaded checkpoint **{clean_name}** for **{char['name']}**!")
+        try:
+            await adb(game_engine.heal_session_quests_on_load, int(session["id"]))
+        except Exception:
+            pass
+
         await self._resend_current_scene(interaction, session, use_followup=True)
 
     @load_slot_cmd.autocomplete("name")

@@ -1,23 +1,13 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Clock, AlertTriangle, FastForward, X, Users } from 'lucide-react';
-
-const formatClockTime = (totalMinutes) => {
-  const normalized = ((totalMinutes % 1440) + 1440) % 1440;
-  const hours = Math.floor(normalized / 60);
-  const minutes = normalized % 60;
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-};
-
-const getTimePhase = (minute, t = null) => {
-  const norm = ((minute % 1440) + 1440) % 1440;
-  const tr = (k, def) => (t ? t(k, def) : def);
-  if (norm >= 300 && norm < 420) return { label: tr('timeskip.phase_dawn', 'Dawn'), icon: '🌅', color: 'text-amber-300' };
-  if (norm >= 420 && norm < 720) return { label: tr('timeskip.phase_morning', 'Morning'), icon: '☀️', color: 'text-yellow-300' };
-  if (norm >= 720 && norm < 1080) return { label: tr('timeskip.phase_afternoon', 'Afternoon'), icon: '🌤️', color: 'text-amber-200' };
-  if (norm >= 1080 && norm < 1200) return { label: tr('timeskip.phase_dusk', 'Dusk'), icon: '🌇', color: 'text-orange-400' };
-  return { label: tr('timeskip.phase_night', 'Night'), icon: '🌙', color: 'text-indigo-300' };
-};
+import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
+import { useUiPreferences } from '../../theme/UiPreferencesProvider';
+import {
+  formatClockTime,
+  getDayOfWeekLabel,
+  getTimeOfDayPhaseInfo,
+} from '../../utils/timeFormat';
 
 const TimeSkipModal = ({
   isOpen,
@@ -29,6 +19,7 @@ const TimeSkipModal = ({
 }) => {
   // Current time parsed from session
   const { t } = useTranslation();
+  const { clockFormat } = useUiPreferences();
   const currentDay = Number(session?.current_day || 1);
   const currentMinute = Number(session?.current_minute !== undefined ? session.current_minute : 480); // default 08:00 AM
 
@@ -74,32 +65,61 @@ const TimeSkipModal = ({
     return { hpPercent: pct, label: `+${pct}% HP/MP Nap Rest` };
   }, [canSleep, mode, skipMinutes, recoveryRatio]);
 
-  if (!isOpen) return null;
-
   const targetMinute = currentMinute + skipMinutes;
   const targetDayOffset = Math.floor(targetMinute / 1440);
   const targetDay = currentDay + targetDayOffset;
-  const targetTimeStr = formatClockTime(targetMinute);
-  const currentTimeStr = formatClockTime(currentMinute);
-  const targetPhase = getTimePhase(targetMinute, t);
-  const currentPhase = getTimePhase(currentMinute, t);
+  const targetTimeStr = formatClockTime(targetMinute, clockFormat);
+  const targetTimePromptStr = formatClockTime(targetMinute, '24h');
+  const currentTimeStr = formatClockTime(currentMinute, clockFormat);
+  const currentDayLabel = getDayOfWeekLabel(currentDay, t);
+  const targetDayLabel = getDayOfWeekLabel(targetDay, t);
+  const targetPhase = getTimeOfDayPhaseInfo(targetMinute, t);
+  const currentPhase = getTimeOfDayPhaseInfo(currentMinute, t);
+  const CurrentPhaseIcon = currentPhase.Icon;
+  const TargetPhaseIcon = targetPhase.Icon;
 
   const isMultiplayer = Boolean(session?.party_members && session.party_members.length > 1);
 
-  // Check for upcoming appointments from phoneHook
-  const appointments = phoneHook?.appointments || [];
-  const upcomingAppointment = appointments.find((apt) => {
-    if (!apt.target_minute) return false;
-    return apt.target_minute > currentMinute && apt.target_minute <= targetMinute;
-  });
+  // Check for upcoming commitments & appointments from phoneHook
+  const rawCommitments =
+    Array.isArray(phoneHook?.commitments) && phoneHook.commitments.length > 0
+      ? phoneHook.commitments
+      : (phoneHook?.appointments || []);
+  const currentAbsMinute = ((currentDay - 1) * 1440) + (currentMinute % 1440);
+  const targetAbsMinute = currentAbsMinute + skipMinutes;
 
-  const nextAppointment = appointments
-    .filter((a) => a.target_minute && a.target_minute > currentMinute)
-    .sort((a, b) => a.target_minute - b.target_minute)[0];
+  const upcomingCommitments = rawCommitments
+    .map((apt) => {
+      if (!apt || typeof apt !== 'object') return null;
+      const statusLow = String(apt.status || 'pending').trim().toLowerCase();
+      if (['cancelled', 'canceled', 'completed', 'expired', 'missed'].includes(statusLow)) {
+        return null;
+      }
+      let absMin = null;
+      if (apt.start_minute !== undefined && apt.start_minute !== null && Number.isFinite(Number(apt.start_minute))) {
+        const schedDay = Math.max(1, Number(apt.scheduled_day || currentDay) || currentDay);
+        absMin = ((schedDay - 1) * 1440) + (((Number(apt.start_minute) % 1440) + 1440) % 1440);
+      } else if (apt.target_minute !== undefined && apt.target_minute !== null && Number.isFinite(Number(apt.target_minute))) {
+        const rawTargetMin = Number(apt.target_minute);
+        const schedDay = Math.max(1, Number(apt.scheduled_day || currentDay) || currentDay);
+        absMin = rawTargetMin >= 1440 ? rawTargetMin : ((schedDay - 1) * 1440) + rawTargetMin;
+      }
+      if (absMin === null || absMin <= currentAbsMinute) return null;
+      return {
+        ...apt,
+        _absMin: absMin,
+        _displayName: apt.target_display_name || apt.npc_name || apt.partner_name || apt.target_entity || 'contact',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a._absMin - b._absMin);
+
+  const upcomingAppointment = upcomingCommitments.find((apt) => apt._absMin <= targetAbsMinute) || null;
+  const nextAppointment = upcomingCommitments[0] || null;
 
   const handleFastForwardToNextEvent = () => {
-    if (nextAppointment?.target_minute) {
-      const diff = Math.max(15, nextAppointment.target_minute - currentMinute);
+    if (nextAppointment?._absMin) {
+      const diff = Math.max(15, nextAppointment._absMin - currentAbsMinute);
       setSkipMinutes(diff);
       setMode('wait');
     }
@@ -119,28 +139,30 @@ const TimeSkipModal = ({
 
     if (isFullSleep) {
       const surf = sleepContext.surface_label ? sleepContext.surface_label.toLowerCase() : "bed";
-      customText = `I turn in for the night on the ${surf} and sleep until morning at ${targetTimeStr}.`;
+      customText = `I turn in for the night on the ${surf} and sleep until morning at ${targetTimePromptStr}.`;
       intent = "rest_sleep";
       sleepMode = "sleep";
     } else if (isNap) {
       const surf = sleepContext.surface_label ? sleepContext.surface_label.toLowerCase() : "bed";
-      customText = `I lie down on the ${surf} and take a ${readableDuration} nap until ${targetTimeStr}.`;
+      customText = `I lie down on the ${surf} and take a ${readableDuration} nap until ${targetTimePromptStr}.`;
       intent = "rest_sleep";
       sleepMode = "nap";
     } else {
-      customText = `I wait and pass the time for ${readableDuration} until Day ${targetDay} at ${targetTimeStr}.`;
+      customText = `I wait and pass the time for ${readableDuration} until Day ${targetDay} at ${targetTimePromptStr}.`;
       intent = "wait_time";
       sleepMode = "wait";
     }
 
-    await onAction({
-      custom_action_text: customText,
-      intent,
-      sleep_mode: sleepMode,
-      skip_minutes: skipMinutes,
-      target_day: targetDay,
-      target_minute: targetMinute % 1440
-    });
+    void Promise.resolve(
+      onAction?.({
+        custom_action_text: customText,
+        intent,
+        sleep_mode: sleepMode,
+        skip_minutes: skipMinutes,
+        target_day: targetDay,
+        target_minute: targetMinute % 1440,
+      })
+    ).catch(() => {});
     onClose();
   };
 
@@ -148,40 +170,39 @@ const TimeSkipModal = ({
   const targetHourFrac = ((targetMinute % 1440) / 1440) * 360;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/75 backdrop-blur-md animate-in fade-in duration-200 select-none">
-      <div className="fixed inset-0" onClick={onClose} />
-      <div className="relative w-full max-w-lg max-h-[calc(var(--app-height,100dvh)-1.5rem)] overflow-y-auto overflow-x-hidden overscroll-contain custom-scrollbar bg-fantasy-panel border border-amber-500/40 rounded-2xl shadow-2xl p-4 sm:p-5 space-y-4 z-10">
-        
-        {/* Glow backdrop effect */}
-        <div className="absolute -top-16 -left-16 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-16 -right-16 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-
-        {/* Modal Header */}
-        <div className="flex items-center justify-between border-b border-fantasy-border/60 pb-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300">
-              <Clock size={16} />
-            </div>
-            <div>
-              <h3 className="font-rpg font-bold text-fantasy-accent text-base leading-tight">
-                {t('timeskip.title', 'Chronos Dial • Time Skip')}
-              </h3>
-              <p className="text-[11px] text-gray-400">
-                {t('timeskip.subtitle', 'Turn the hands of time to advance the world and regain energy')}
-              </p>
-            </div>
+    <AcrylicModal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={t('timeskip.title', 'Chronos Dial • Time Skip')}
+      maxWidthClass="max-w-lg"
+      className="p-4 sm:p-5 space-y-4 overflow-y-auto overflow-x-hidden custom-scrollbar select-none"
+    >
+      {/* Modal Header */}
+      <div className="flex items-center justify-between border-b border-fantasy-border/35 pb-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-8 h-8 rounded-full bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 shrink-0">
+            <Clock size={16} />
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 text-gray-400 hover:text-gray-200 rounded-lg hover:bg-white/10 transition-colors"
-          >
-            <X size={18} />
-          </button>
+          <div className="min-w-0">
+            <h3 className="font-rpg font-bold text-fantasy-accent text-base leading-tight truncate">
+              {t('timeskip.title', 'Chronos Dial • Time Skip')}
+            </h3>
+            <p className="text-[11px] text-gray-400 truncate">
+              {t('timeskip.subtitle', 'Turn the hands of time to advance the world and regain energy')}
+            </p>
+          </div>
         </div>
+        <MotionButton
+          onClick={onClose}
+          aria-label={t('common.close', 'Close')}
+          className="hk-icon-btn h-8 min-w-8 shrink-0"
+        >
+          <X size={18} />
+        </MotionButton>
+      </div>
 
-        {/* Genshin-Style Clock Face & Progression Display */}
-        <div className="flex flex-col sm:flex-row items-center justify-around gap-4 bg-black/50 border border-fantasy-border/80 rounded-xl p-4 shadow-inner">
+      {/* Genshin-Style Clock Face & Progression Display */}
+      <div className="flex flex-col sm:flex-row items-center justify-around gap-4 py-2">
           {/* Animated Clock Dial */}
           <div className="relative w-36 h-36 rounded-full border-2 border-amber-500/30 flex items-center justify-center bg-gradient-to-b from-neutral-900 to-black shadow-lg shrink-0">
             {/* Clock Face Markers */}
@@ -204,12 +225,12 @@ const TimeSkipModal = ({
 
             {/* Sun / Moon Orbit Badge */}
             <div
-              className="absolute w-6 h-6 rounded-full bg-black/80 border border-amber-400 flex items-center justify-center text-xs shadow-md transition-all duration-300"
+              className="absolute w-6 h-6 rounded-full bg-black/80 border border-amber-400 flex items-center justify-center shadow-md transition-all duration-300"
               style={{
                 transform: `rotate(${targetHourFrac}deg) translateY(-58px) rotate(-${targetHourFrac}deg)`
               }}
             >
-              {targetPhase.icon}
+              <TargetPhaseIcon size={12} className={targetPhase.colorClass} />
             </div>
           </div>
 
@@ -220,9 +241,9 @@ const TimeSkipModal = ({
                 {t('timeskip.current_time', 'Current Time')}
               </span>
               <div className="font-mono text-sm text-gray-300 font-semibold flex items-center justify-center sm:justify-start gap-1.5">
-                <span>{currentPhase.icon}</span>
-                <span>Day {currentDay} • {currentTimeStr}</span>
-                <span className={`text-[10px] font-mono uppercase ${currentPhase.color}`}>({currentPhase.label})</span>
+                <CurrentPhaseIcon size={14} className={`${currentPhase.colorClass} shrink-0`} />
+                <span>{currentDayLabel} • {currentTimeStr}</span>
+                <span className={`text-[10px] font-mono uppercase ${currentPhase.colorClass}`}>({currentPhase.label})</span>
               </div>
             </div>
 
@@ -236,9 +257,9 @@ const TimeSkipModal = ({
                 {t('timeskip.projected_arrival', 'Projected Arrival')}
               </span>
               <div className="font-mono text-base font-extrabold text-amber-200 flex items-center justify-center sm:justify-start gap-1.5">
-                <span>{targetPhase.icon}</span>
-                <span>Day {targetDay} • {targetTimeStr}</span>
-                <span className={`text-xs ${targetPhase.color}`}>[{targetPhase.label}]</span>
+                <TargetPhaseIcon size={15} className={`${targetPhase.colorClass} shrink-0`} />
+                <span>{targetDayLabel} • {targetTimeStr}</span>
+                <span className={`text-xs ${targetPhase.colorClass}`}>[{targetPhase.label}]</span>
               </div>
             </div>
           </div>
@@ -381,7 +402,7 @@ const TimeSkipModal = ({
             <div className="flex items-center gap-2">
               <AlertTriangle size={16} className="text-rose-400 shrink-0" />
               <span>
-                <strong>{t('timeskip.warning', 'Warning:')}</strong> You have an upcoming date with {upcomingAppointment.partner_name || 'contact'} at {formatClockTime(upcomingAppointment.target_minute)}!
+                <strong>{t('timeskip.warning', 'Warning:')}</strong> You have an upcoming date with {upcomingAppointment._displayName} at {formatClockTime(upcomingAppointment._absMin % 1440, clockFormat)}!
               </span>
             </div>
             {nextAppointment && (
@@ -405,27 +426,23 @@ const TimeSkipModal = ({
         )}
 
         {/* Footer Confirm & Cancel */}
-        <div className="flex items-center justify-between pt-2 border-t border-fantasy-border/60">
-          <button
-            type="button"
+        <div className="flex items-center justify-between pt-3 border-t border-fantasy-border/35">
+          <MotionButton
             onClick={onClose}
-            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white hover:bg-white/5 transition-colors"
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-gray-400 hover:text-white hover:bg-gray-500/15 transition-colors"
           >
             {t('timeskip.cancel', 'Cancel')}
-          </button>
-          <button
-            type="button"
+          </MotionButton>
+          <MotionButton
             disabled={processing || skipMinutes <= 0}
             onClick={handleConfirmSkip}
             className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-extrabold text-xs shadow-lg hover:shadow-amber-500/30 transition-all flex items-center gap-1.5 disabled:opacity-50"
           >
             <Clock size={14} />
             <span>{t('timeskip.confirm', 'Confirm Time Skip')}</span>
-          </button>
+          </MotionButton>
         </div>
-
-      </div>
-    </div>
+    </AcrylicModal>
   );
 };
 

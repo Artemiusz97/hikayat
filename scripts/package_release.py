@@ -29,7 +29,7 @@ EXCLUDE_DIRS = {
     'venv', 'env', 'ENV', '.venv',
     '__pycache__', '.pytest_cache',
     'node_modules', '.git', '.idea', '.vscode',
-    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', '_norton_', 'reports',
+    'bin', 'scratch', 'releases', 'icon', 'backups', 'tests', 'generated_images', 'custom_fonts', '_norton_', 'reports',
     'crash_reports', 'htmlcov'
 }
 
@@ -81,7 +81,7 @@ def package_release(dry_run: bool = False) -> str:
             arcname = os.path.relpath(filepath, BASE_DIR).replace(os.sep, '/')
 
             # Check for personal path leaks in text files
-            if not file.endswith(('.png', '.jpg', '.jpeg', '.ico', '.exe')):
+            if not file.lower().endswith(('.png', '.jpg', '.jpeg', '.webp', '.ico', '.exe', '.woff', '.woff2', '.ttf', '.otf')):
                 try:
                     with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
                         for line_idx, line in enumerate(f, 1):

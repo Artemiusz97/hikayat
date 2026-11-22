@@ -232,6 +232,8 @@ def calculate_opposed_stealth_odds(
     environment: str = "",
     action_noise: int = 0,
     dc_modifier: int = 0,
+    crowd_density: str = "",
+    action_is_overt: bool = False,
 ) -> Dict[str, Any]:
     """
     Computes deterministic success chance for an opposed stealth contest.
@@ -265,6 +267,12 @@ def calculate_opposed_stealth_odds(
         alert_vigilance = 50
 
     dc_mod_penalty = int(dc_modifier or 0) * 5
+    norm_density = str(crowd_density or "").strip().lower()
+    crowd_mod = 0
+    if norm_density == "bustling":
+        crowd_mod = -4 if action_is_overt else 4
+    elif norm_density == "packed":
+        crowd_mod = -6 if action_is_overt else 6
 
     # Net ratings
     stealth_rating = (
@@ -273,6 +281,7 @@ def calculate_opposed_stealth_odds(
         + gear_stealth_bonus
         - armor_noise
         + optical_concealment
+        + crowd_mod
         - companion_penalty
         - action_noise
         - dc_mod_penalty
@@ -297,6 +306,8 @@ def calculate_opposed_stealth_odds(
         "companion_penalty": companion_penalty,
         "companion_noise_penalty": companion_penalty,
         "lighting_mod": lighting_mod,
+        "crowd_density": norm_density,
+        "crowd_modifier": crowd_mod,
         "is_invisible": is_invisible,
         "optical_concealment": optical_concealment,
         "alert_vigilance": alert_vigilance,
@@ -318,6 +329,8 @@ def resolve_opposed_stealth_check(
     luck: int = 3,
     check_mode: str = "off",
     dc_modifier: int = 0,
+    crowd_density: str = "",
+    action_is_overt: bool = False,
 ) -> Tuple[CheckResult, Dict[str, Any]]:
     """
     Executes an opposed stealth roll and returns the canonical (CheckResult, odds_meta).
@@ -333,6 +346,8 @@ def resolve_opposed_stealth_check(
         environment=environment,
         action_noise=action_noise,
         dc_modifier=dc_modifier,
+        crowd_density=crowd_density,
+        action_is_overt=action_is_overt,
     )
 
     chance = odds["success_chance"]

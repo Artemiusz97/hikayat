@@ -145,6 +145,12 @@ def classify_anomalous_npc_tag(
     if any(k in role_check_low for k in ("non-hostile entity", "non-hostile object", "non-hostile phenomenon")):
         return TAG_ANOMALY_ENTITY
 
+    # 0b. Fog-of-War mask for unrevealed Hidden-in-Plain-Sight Awakened NPCs
+    if bool(ent_dict.get("hidden_awakened") or basic.get("hidden_awakened")) and not bool(
+        ent_dict.get("hidden_secret_revealed") or basic.get("hidden_secret_revealed")
+    ):
+        return TAG_CIVILIAN
+
     # 1. Check direct persisted tag on entity or basic_info (Strictly Permanent)
     for raw_tag in (
         ent_dict.get("anomalous_npc_tag"),
@@ -1213,6 +1219,13 @@ def apply_civilian_permadeath(
         except Exception:
             pass
 
+        try:
+            cur_day_pd = int((session or {}).get("current_day") or (db.get_session_time(session_id)[0] if session_id else 1) or 1)
+            cur_turn_pd = max(1, int((session or {}).get("turn_count") or 1))
+            db.mark_world_roster_staff_status(session_id, clean_name, "dead", day_changed=cur_day_pd, turn_number=cur_turn_pd)
+        except Exception:
+            pass
+
     if isinstance(session, dict):
         curr = session.get("current_npcs") or []
         filtered = [
@@ -1236,6 +1249,92 @@ def apply_civilian_permadeath(
         "npc_name": clean_name,
         "killer_name": killer_name,
     }
+
+
+def apply_breach_civilian_round_rules(
+    session: Optional[Dict[str, Any]],
+    scen_key: str,
+    stage_info: Optional[Dict[str, Any]] = None,
+) -> Tuple[int, List[str]]:
+    """
+    Round-1 Civilian Breach Stakes & Round-2+ Scatter rule for Anomalous combat:
+    - Round 1: Retains present un-pinned TAG_CIVILIAN bystanders with `civilian_in_danger=True`.
+    - Round 2+: Scatters un-pinned/un-rescued bystanders off-stage to perimeter safety.
+    """
+    if not isinstance(session, dict) or not scenario_data.is_anomalous_incursions_scenario(scen_key or ""):
+        return 0, []
+    hostiles = [e for e in (session.get("nearby_enemies") or []) if isinstance(e, dict) and int(e.get("hp", 1) or 0) > 0]
+    if not hostiles and not session.get("in_combat"):
+        session["_anomalous_breach_combat_round"] = 0
+        return 0, []
+
+    breach_round = int(session.get("_anomalous_breach_combat_round") or 0) + 1
+    session["_anomalous_breach_combat_round"] = breach_round
+
+    sess_id = int(session.get("id") or 0) or None
+    party_lows = {
+        str(p.get("name") or "").strip().lower()
+        for p in (session.get("party_npcs") or [])
+        if isinstance(p, dict) and p.get("name")
+    }
+    stage_list = (
+        list(stage_info["stage_npcs"])
+        if isinstance(stage_info, dict) and isinstance(stage_info.get("stage_npcs"), list)
+        else list(session.get("current_npcs") or [])
+    )
+
+    unpinned_civs: list[dict[str, Any]] = []
+    scatter_names_low: set[str] = set()
+    for npc in stage_list:
+        if not isinstance(npc, dict) or not npc.get("name"):
+            continue
+        nm = str(npc["name"]).strip()
+        if nm.lower() in party_lows or int(npc.get("presence_tier") or 5) in (1, 3):
+            continue
+        if npc.get("pinned_in_combat") or npc.get("is_quest_target"):
+            continue
+        if classify_anomalous_npc_tag(npc, session_id=sess_id, preloaded_session=session, read_only=True) != TAG_CIVILIAN:
+            continue
+        if is_civilian_forced_to_fight_as_ally(npc, session):
+            continue
+        unpinned_civs.append(npc)
+        scatter_names_low.add(nm.lower())
+
+    if not unpinned_civs:
+        return breach_round, []
+
+    civ_names = ", ".join(str(c["name"]) for c in unpinned_civs[:4])
+    if breach_round == 1:
+        for civ in unpinned_civs:
+            civ["civilian_in_danger"] = True
+            se = list(civ.get("status_effects") or [])
+            if "In Danger" not in se:
+                se.append("In Danger")
+            civ["status_effects"] = se
+        if isinstance(stage_info, dict) and isinstance(stage_info.get("stage_npcs"), list):
+            stage_info["stage_npcs"] = stage_list
+        session["current_npcs"] = stage_list
+        return breach_round, [
+            f"[CIVILIAN BREACH STAKES — ROUND 1]: Unprotected civilian(s) ({civ_names}) are caught near the breach! "
+            f"Shield, cover, or evacuate them immediately before hostiles strike or they panic and bolt."
+        ]
+
+    kept = [
+        n for n in stage_list
+        if not (isinstance(n, dict) and str(n.get("name") or "").strip().lower() in scatter_names_low)
+    ]
+    if isinstance(stage_info, dict) and isinstance(stage_info.get("stage_npcs"), list):
+        stage_info["stage_npcs"] = kept
+    if isinstance(session.get("pre_turn_stage_npcs"), list):
+        session["pre_turn_stage_npcs"] = [
+            n for n in session["pre_turn_stage_npcs"]
+            if not (isinstance(n, dict) and str(n.get("name") or "").strip().lower() in scatter_names_low)
+        ]
+    session["current_npcs"] = kept
+    return breach_round, [
+        f"[CIVILIAN BREACH SCATTER — ROUND {breach_round}]: Panicked bystander(s) ({civ_names}) scramble "
+        f"behind perimeter cover, clearing the active combat floor."
+    ]
 
 
 def resolve_anomalous_ally_combat_action(

@@ -96,11 +96,35 @@ class ConnectionManager:
 
         await asyncio.gather(*[_safe_send(c) for c in list(conns)], return_exceptions=True)
 
+    async def send_personal(self, session_id: int, websocket: WebSocket, message: dict) -> None:
+        """Send a serialized JSON message to a single socket under its connection lock."""
+        try:
+            clean_sid = int(session_id)
+        except (ValueError, TypeError):
+            clean_sid = session_id
+        conns = self.active_connections.get(clean_sid, [])
+        if not conns and isinstance(clean_sid, int):
+            conns = self.active_connections.get(str(clean_sid), [])
+        elif not conns and isinstance(clean_sid, str) and clean_sid.isdigit():
+            conns = self.active_connections.get(int(clean_sid), [])
+        target = next((c for c in list(conns) if c.get("ws") is websocket), None)
+        safe_message = _to_json_safe(message)
+        if target is None:
+            await websocket.send_json(safe_message)
+            return
+        lock = target.setdefault("lock", asyncio.Lock())
+        async with lock:
+            try:
+                await websocket.send_json(safe_message)
+            except Exception as e:
+                logger.error(f"Error sending personal WS frame to user {target.get('user_id')}: {e}")
+                self.disconnect(clean_sid, target["ws"])
+
 
 manager = ConnectionManager()
 
 
-_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot", "_dealt_social_seeds"})
+_JSON_SAFE_TRANSIENT_KEYS = frozenset({"_ctx", "_target_turn", "_world_events_snapshot", "_dealt_social_seeds", "_prompt_epoch", "prompt_epoch"})
 
 
 def _to_json_safe(val, _seen: set[int] | None = None):
@@ -147,10 +171,10 @@ def enrich_choices_with_odds(
     inv: list | None = None,
 ) -> list:
     """Enriches scene choices with calculated success_pct, chance, and Discord-matching action icons."""
-    from cogs.adventure.embeds import (
-        _get_choice_quest_icon,
-        _get_choice_skill_emoji,
-        _get_choice_emoji,
+    from game_engine import (
+        get_choice_quest_icon as _get_choice_quest_icon,
+        get_choice_skill_emoji as _get_choice_skill_emoji,
+        get_choice_emoji as _get_choice_emoji,
     )
     from mechanics.stealth import compute_choice_stealth_odds
 
@@ -258,8 +282,16 @@ def _batch_load_party_characters(missing_uids: List[int]) -> Dict[int, Dict[str,
         return {}
 
 
-def _format_party_member_entry(uid: Any, char_data: Dict[str, Any]) -> Dict[str, Any]:
+def _format_party_member_entry(
+    uid: Any,
+    char_data: Dict[str, Any],
+    *,
+    used_slots: Optional[int] = None,
+    capacity: Optional[int] = None,
+) -> Dict[str, Any]:
     raw_eff_val = _parse_status_effects_list(char_data.get("status_effects"))
+    eff_cap = int(capacity) if capacity is not None else int(cd.inventory_capacity(int(char_data.get("str_", 5) or 5)))
+    eff_used = int(used_slots) if used_slots is not None else 0
     return {
         "user_id": uid,
         "character_id": char_data.get("id"),
@@ -271,6 +303,8 @@ def _format_party_member_entry(uid: Any, char_data: Dict[str, Any]) -> Dict[str,
         "mp": char_data.get("mp", 0),
         "max_mp": char_data.get("max_mp", 0),
         "gold": char_data.get("gold", 0),
+        "used_slots": eff_used,
+        "capacity": eff_cap,
         "stats": {
             "str": char_data.get("str_", 1),
             "per": char_data.get("per_", 1),
@@ -291,7 +325,7 @@ def enrich_session_party_members(
     *,
     preloaded_chars: Optional[Dict[int, Dict[str, Any]]] = None,
 ) -> List[Dict[str, Any]]:
-    """Fetches real-time vitals and status effects for all human characters in the party."""
+    """Fetches real-time vitals, capacity, and status effects for all human characters in the party."""
     session_id = session_dict.get("id")
     if not session_id:
         return []
@@ -305,12 +339,31 @@ def enrich_session_party_members(
     if len(missing_uids) > 1:
         chars_by_uid.update(_batch_load_party_characters(missing_uids))
 
-    members: List[Dict[str, Any]] = []
+    resolved_chars: List[Tuple[Any, Dict[str, Any]]] = []
     for uid in uids:
         u_int = int(uid)
         c = chars_by_uid[u_int] if u_int in chars_by_uid else db.get_character(uid)
         if c:
-            members.append(_format_party_member_entry(uid, c))
+            resolved_chars.append((uid, c))
+
+    inv_by_cid: Dict[int, List[Dict[str, Any]]] = {}
+    if resolved_chars:
+        try:
+            inv_by_cid = db.get_inventories_for_characters([c for _, c in resolved_chars]) or {}
+        except Exception:
+            inv_by_cid = {}
+
+    members: List[Dict[str, Any]] = []
+    for uid, c in resolved_chars:
+        cid = c.get("id")
+        c_inv = inv_by_cid.get(int(cid), []) if cid is not None else []
+        try:
+            u_slots = db.compute_inventory_used_slots(c_inv)
+            cap = db.get_character_inventory_capacity(int(uid), c, int(session_id))
+        except Exception:
+            u_slots = len(c_inv)
+            cap = cd.inventory_capacity(int(c.get("str_", 5) or 5))
+        members.append(_format_party_member_entry(uid, c, used_slots=u_slots, capacity=cap))
     return members
 
 
@@ -424,6 +477,7 @@ class ItemUseRequest(BaseModel):
     item_id: int
     target_type: Optional[str] = "self"
     target_name: Optional[str] = "self"
+    target_user_id: Optional[int] = None
     session_id: Optional[int] = None
 
 
@@ -495,6 +549,12 @@ class ActionRequest(BaseModel):
     sleep_mode: Optional[str] = None
     is_stealth: Optional[bool] = False
     stance: Optional[str] = None
+    item_id: Optional[int] = None
+    target_type: Optional[str] = None
+    target_name: Optional[str] = None
+    target_user_id: Optional[int] = None
+    use_mode: Optional[str] = None
+    async_ws: Optional[bool] = False
 
 
 class ToggleStealthRequest(BaseModel):
@@ -515,6 +575,12 @@ class EndAdventureRequest(BaseModel):
 
 
 class RetryAdventureRequest(BaseModel):
+    session_id: int
+    user_id: Optional[int] = None
+    async_ws: Optional[bool] = False
+
+
+class CancelTurnRequest(BaseModel):
     session_id: int
     user_id: Optional[int] = None
 
@@ -580,17 +646,21 @@ class LoadSlotRequest(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     user_id: int
-    language: Optional[str] = "en"
+    language: Optional[str] = None
     ui_language: Optional[str] = None
     narration_language: Optional[str] = None
-    verbosity: Optional[str] = "normal"
-    dialogue_mode: Optional[str] = "balanced"
-    image_gen_enabled: Optional[int] = 0
-    choices_style: Optional[str] = "dropdown"
-    result_display: Optional[str] = "detailed"
-    stream_narrative: Optional[int] = 1
-    show_percentages: Optional[int] = 1
-    combat_ui_style: Optional[str] = "battle_deck"
+    verbosity: Optional[str] = None
+    narrative_style: Optional[str] = None
+    narrative_pacing: Optional[str] = None
+    dialogue_mode: Optional[str] = None
+    image_gen_enabled: Optional[int] = None
+    choices_style: Optional[str] = None
+    result_display: Optional[str] = None
+    stream_narrative: Optional[int] = None
+    show_percentages: Optional[int] = None
+    show_enemy_hp: Optional[int] = None
+    show_enemy_intent: Optional[int] = None
+    combat_ui_style: Optional[str] = None
     image_model: Optional[str] = None
 
 

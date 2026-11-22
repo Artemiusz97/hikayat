@@ -3,6 +3,7 @@ import discord
 import db
 from db import adb
 import game_engine
+import scenario_data
 from character_data import inventory_capacity
 from skill_check import resolve_check
 from mechanics.world import evaluate_shop_staff_availability
@@ -42,9 +43,35 @@ class MerchantMixin:
               for uid in session["turn_order"]]
         ))
 
+        from mechanics.combat.merchant import (
+            get_anomalous_shop_faction_context,
+            get_store_key,
+            get_or_create_merchant_catalogue,
+            update_merchant_catalogue,
+            validate_or_clear_faction_quartermaster,
+        )
+
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
         loc = session.get("current_location", "")
-        if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+        is_qm_enter = False
+        if not is_phone_shop:
+            is_qm_enter, updated_m = await adb(validate_or_clear_faction_quartermaster, session_id, loc, merchant)
+            merchant.clear()
+            merchant.update(updated_m)
+        shop_ctx = await adb(
+            get_anomalous_shop_faction_context,
+            session,
+            loc,
+            is_phone_shop,
+            interaction.user.id,
+        )
+        if not shop_ctx.get("allowed", True):
+            await interaction.followup.send(
+                shop_ctx.get("access_denied_reason") or "Access denied to this faction store.",
+                ephemeral=True,
+            )
+            return
+        if not is_phone_shop and not is_qm_enter:
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 session_id,
@@ -64,12 +91,6 @@ class MerchantMixin:
                 return
             if shop_avail.get("staff_npc"):
                 merchant["flavor_name"] = str(shop_avail["staff_npc"].get("name") or merchant.get("flavor_name") or "")
-
-        from mechanics.combat.merchant import (
-            get_store_key,
-            get_or_create_merchant_catalogue,
-            update_merchant_catalogue,
-        )
 
         store_key = get_store_key(merchant, is_phone_shop=is_phone_shop, merchant_type=merchant_type, location=loc)
         cat_entry, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, current_day, current_minute)
@@ -233,12 +254,12 @@ class MerchantMixin:
         (first come, first served), which is a separate concern from
         personal gold/inventory and not something Task 3.2 asks to be
         per-player."""
-        import json as _json
         from mechanics.combat.merchant import (
             compute_effective_shop_item_price,
             get_anomalous_shop_faction_context,
             mark_vault_requisition_claimed,
             stamp_discounted_purchase_metadata,
+            validate_or_clear_faction_quartermaster,
         )
         from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
 
@@ -255,9 +276,19 @@ class MerchantMixin:
                 if int(user_id) not in sess_members:
                     await interaction.response.send_message("You're not in this session.", ephemeral=True)
                     return
-                merchant = session["merchant"]
+                merchant = dict(session.get("merchant") or {})
                 is_phone_shop = bool(merchant.get("is_phone_shop", False))
-                if not is_phone_shop and not bool(merchant.get("is_faction_quartermaster")):
+                is_qm_buy = False
+                if not is_phone_shop:
+                    is_qm_buy, updated_m = await adb(
+                        validate_or_clear_faction_quartermaster,
+                        session_id,
+                        session.get("current_location", ""),
+                        merchant,
+                    )
+                    merchant.clear()
+                    merchant.update(updated_m)
+                if not is_phone_shop and not is_qm_buy:
                     shop_avail = await adb(
                         evaluate_shop_staff_availability,
                         session_id,
@@ -316,27 +347,20 @@ class MerchantMixin:
                     return
 
                 effect_val = str(entry.get("effect") or entry.get("description", ""))
-                if shop_ctx.get("is_monastic_free_shop") or shop_ctx.get("is_public_discounted_shop"):
-                    for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
-                        if effect_val.startswith(prefix):
-                            try:
-                                meta_obj = _json.loads(effect_val[len(prefix):])
-                                if shop_ctx.get("is_monastic_free_shop"):
-                                    meta_obj["shrine_sacred_grant"] = True
-                                if shop_ctx.get("is_public_discounted_shop"):
-                                    meta_obj["purchase_price_paid"] = price
-                                    meta_obj["public_requisition_item"] = True
-                                effect_val = f"{prefix}{_json.dumps(meta_obj)}"
-                            except Exception:
-                                pass
-                            break
-                    else:
-                        if shop_ctx.get("is_monastic_free_shop"):
-                            effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'shrine_sacred_grant': True})}"
-                        elif shop_ctx.get("is_public_discounted_shop"):
-                            effect_val = f"[CONSUMABLE_JSON]{_json.dumps({'description': effect_val, 'purchase_price_paid': price, 'public_requisition_item': True})}"
-                elif shop_ctx.get("is_event_discounted_shop"):
-                    effect_val = stamp_discounted_purchase_metadata(effect_val, price)
+                is_anom_purchase = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+                if (
+                    is_anom_purchase
+                    or shop_ctx.get("is_monastic_free_shop")
+                    or shop_ctx.get("is_public_discounted_shop")
+                    or shop_ctx.get("is_event_discounted_shop")
+                    or shop_ctx.get("is_cult_discounted_shop")
+                ):
+                    effect_val = stamp_discounted_purchase_metadata(
+                        effect_val,
+                        price,
+                        shrine_sacred_grant=bool(shop_ctx.get("is_monastic_free_shop")),
+                        public_requisition_item=bool(shop_ctx.get("is_public_discounted_shop")),
+                    )
 
                 slot_cost_val = int(entry.get("slot_cost", 1) or 1)
                 can_fit = await adb(
@@ -444,8 +468,19 @@ class MerchantMixin:
         if not session:
             await interaction.response.send_message("Session not found.", ephemeral=True)
             return
-        merchant = session.get("merchant") or {}
-        if not bool(merchant.get("is_phone_shop")) and not bool(merchant.get("is_faction_quartermaster")):
+        from mechanics.combat.merchant import validate_or_clear_faction_quartermaster
+        merchant = dict(session.get("merchant") or {})
+        is_qm_sell = False
+        if not bool(merchant.get("is_phone_shop")):
+            is_qm_sell, updated_m = await adb(
+                validate_or_clear_faction_quartermaster,
+                session_id,
+                session.get("current_location", ""),
+                merchant,
+            )
+            merchant.clear()
+            merchant.update(updated_m)
+        if not bool(merchant.get("is_phone_shop")) and not is_qm_sell:
             shop_avail = await adb(
                 evaluate_shop_staff_availability,
                 session_id,

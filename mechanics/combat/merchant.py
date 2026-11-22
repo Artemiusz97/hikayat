@@ -495,8 +495,14 @@ def _apply_world_event_shop_multiplier(ctx: dict, session: dict | None, is_phone
 
 
 
-def stamp_discounted_purchase_metadata(item_eff: str, price_paid: int) -> str:
-    """Embeds purchase_price_paid into item metadata/effect so resale cannot arbitrage festival discounts."""
+def stamp_discounted_purchase_metadata(
+    item_eff: str,
+    price_paid: int,
+    *,
+    shrine_sacred_grant: bool = False,
+    public_requisition_item: bool = False,
+) -> str:
+    """Embeds purchase_price_paid and faction grant markers into item metadata/effect to block resale arbitrage."""
     eff_str = str(item_eff or "")
     paid_int = max(0, int(price_paid))
     for prefix in ("[ITEM_JSON]", "[GEAR_JSON]", "[CONSUMABLE_JSON]"):
@@ -504,12 +510,51 @@ def stamp_discounted_purchase_metadata(item_eff: str, price_paid: int) -> str:
             try:
                 meta_obj = json.loads(eff_str[len(prefix):])
                 if isinstance(meta_obj, dict):
-                    meta_obj["purchase_price_paid"] = paid_int
+                    if shrine_sacred_grant:
+                        meta_obj["shrine_sacred_grant"] = True
+                    else:
+                        meta_obj["purchase_price_paid"] = paid_int
+                    if public_requisition_item:
+                        meta_obj["public_requisition_item"] = True
                     return f"{prefix}{json.dumps(meta_obj)}"
             except Exception:
                 pass
             return eff_str
-    return f"[CONSUMABLE_JSON]{json.dumps({'description': eff_str, 'purchase_price_paid': paid_int})}"
+    payload: Dict[str, Any] = {"description": eff_str}
+    if shrine_sacred_grant:
+        payload["shrine_sacred_grant"] = True
+    else:
+        payload["purchase_price_paid"] = paid_int
+    if public_requisition_item:
+        payload["public_requisition_item"] = True
+    return f"[CONSUMABLE_JSON]{json.dumps(payload)}"
+
+
+def validate_or_clear_faction_quartermaster(
+    session_id: int,
+    loc: str,
+    merchant: Optional[Dict[str, Any]],
+) -> tuple[bool, Dict[str, Any]]:
+    """Verify `is_faction_quartermaster` is anchored to a Faction HQ; clear stale flags if not."""
+    if not isinstance(merchant, dict) or not merchant.get("is_faction_quartermaster"):
+        return False, dict(merchant) if isinstance(merchant, dict) else {}
+    sid = int(session_id or 0)
+    from mechanics.world.locations import location_has_faction_hq
+    at_hq = bool(
+        sid
+        and (
+            location_has_faction_hq(loc or "", session_id=sid)
+            or db.get_faction_by_hq(sid, loc or "")
+        )
+    )
+    if at_hq:
+        return True, merchant
+    updated = dict(merchant)
+    updated["is_faction_quartermaster"] = False
+    updated.pop("quartermaster_faction_arch", None)
+    if sid:
+        db.save_merchant_state(sid, updated)
+    return False, updated
 
 
 def get_anomalous_shop_faction_context(
@@ -534,6 +579,9 @@ def get_anomalous_shop_faction_context(
         "is_monastic_free_ration": False,
         "shrine_free_remaining": 0,
         "is_public_discounted_shop": False,
+        "is_cult_discounted_shop": False,
+        "faction_element_bias": (),
+        "faction_trait_bias": (),
         "pricing_badge": None,
     }
     if not session or is_phone_shop:
@@ -576,6 +624,8 @@ def get_anomalous_shop_faction_context(
 
     priv1_hq_name = ""
     priv2_hq_name = ""
+    cult_hq_name = ""
+    synd_hq_name = ""
     if session_id:
         try:
             for fac in (db.get_factions(session_id) or []):
@@ -584,11 +634,46 @@ def get_anomalous_shop_faction_context(
                     priv1_hq_name = str(fac.get("name") or "").lower()
                 elif f_arch == "private_agency_2":
                     priv2_hq_name = str(fac.get("name") or "").lower()
+                elif f_arch == "cult_faction":
+                    cult_hq_name = str(fac.get("name") or "").lower()
+                elif f_arch == "clandestine_faction":
+                    synd_hq_name = str(fac.get("name") or "").lower()
         except Exception:
             pass
 
+    from mechanics.world.anomalous_sites import is_outlaw_hq_subnode
+
     if shop_arch:
         pass
+    elif (
+        is_outlaw_hq_subnode(loc_id) == "cult_faction"
+        or loc_id == "loc_cult_sanctum_hq"
+        or "hidden sanctum" in loc_str
+        or "cult sanctum" in loc_str
+        or any(k in loc_str for k in (
+            "ward-sealed threshold", "acolyte cloister", "resonant fracture altar",
+            "sacrificial entity holding", "forbidden apocrypha", "ritual athame",
+            "ossuary armory", "covenant vestment", "warded silk loom",
+            "ichor distillation", "blood-letting apotheca", "initiate refectory",
+            "abyssal conduit inner sanctum", "sanctum reliquary", "sanctum apotheca",
+        ))
+        or (cult_hq_name and cult_hq_name in loc_str)
+    ):
+        shop_arch = "cult_faction"
+    elif (
+        is_outlaw_hq_subnode(loc_id) == "clandestine_faction"
+        or loc_id == "loc_clandestine_syndicate_hq"
+        or "shadow exchange" in loc_str
+        or any(k in loc_str for k in (
+            "biometric vault door", "mercenary security guardroom", "black-budget brokerage",
+            "contraband entity auction", "weaponized cognitohazard", "black-bag ballistics",
+            "suppressed ordnance", "faraday-weave", "counter-surveillance tailor",
+            "dead-drop espresso", "broker commissary", "soundproof standby safehouse",
+            "directorate black-ledger",
+        ))
+        or (synd_hq_name and synd_hq_name in loc_str)
+    ):
+        shop_arch = "clandestine_faction"
     elif (
         loc_id.startswith("sub_priv1_")
         or loc_id in ("loc_private_hq_1_armory", "loc_private_hq_1", "loc_private_hq_1_lobby")
@@ -655,13 +740,52 @@ def get_anomalous_shop_faction_context(
     ctx["shop_faction_archetype"] = shop_arch
 
     if shop_arch == "public_agency":
+        from mechanics.social.factions import ANOMALOUS_OUTLAW_ARCHETYPES
         if player_arch == "public_agency":
             ctx["price_multiplier"] = 0.50
             ctx["is_public_discounted_shop"] = True
             ctx["pricing_badge"] = "🏛️ Public Agency Requisition (-50% Official Discount)"
+        elif player_arch in ANOMALOUS_OUTLAW_ARCHETYPES:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "Public Agency Bureau requisitions are blacklisted for Occult Cult and Clandestine Syndicate operatives."
+            )
+            ctx["price_multiplier"] = 1.0
+            ctx["pricing_badge"] = "🚫 Public Agency Bureau Blacklist (Outlaw Operatives Barred)"
         else:
             ctx["price_multiplier"] = 1.0
             ctx["pricing_badge"] = "🏛️ Public Agency Storefront (1.0x Standard Price for External Operatives)"
+    elif shop_arch == "cult_faction":
+        ctx["faction_element_bias"] = ("aether", "bio")
+        if player_arch == "cult_faction":
+            if not suspended:
+                ctx["price_multiplier"] = 0.85
+                ctx["is_cult_discounted_shop"] = True
+                ctx["pricing_badge"] = "👁️ Sanctum Tithe Discount (0.85x • 24/7 • +25% Aether/Bio Gear)"
+            else:
+                ctx["price_multiplier"] = 1.0
+                ctx["pricing_badge"] = "⚠️ Sanctum Tithe Discount Suspended (0 Rep — Complete Mandatory Rite to Restore 0.85x)"
+        else:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "Sanctum armory, reliquary vests, and ichor apotheca trade strictly with initiated Occult Cult members."
+            )
+            ctx["price_multiplier"] = 1.0
+            ctx["pricing_badge"] = "🔒 Sanctum Vault Store (Occult Cult Initiates Only)"
+    elif shop_arch == "clandestine_faction":
+        ctx["private_agency_bonus"] = True
+        ctx["faction_element_bias"] = ("electric", "physical")
+        ctx["faction_trait_bias"] = ("stealth", "faraday")
+        if player_arch == "clandestine_faction":
+            ctx["price_multiplier"] = 1.15
+            ctx["pricing_badge"] = "🕶️ Black-Bag Syndicate Armory (1.15x • 24/7 • +25% Electric/Physical & Stealth/Faraday Stock)"
+        else:
+            ctx["allowed"] = False
+            ctx["access_denied_reason"] = (
+                "Syndicate ordnance cages and Faraday tailors trade strictly with cleared Syndicate operatives."
+            )
+            ctx["price_multiplier"] = 1.15
+            ctx["pricing_badge"] = "🔒 Syndicate Black-Bag Armory (Syndicate Operatives Only)"
     elif shop_arch == "private_agency_1":
         ctx["private_agency_bonus"] = True
         if player_arch == shop_arch:
@@ -738,14 +862,10 @@ def get_anomalous_shop_faction_context(
 
 
 
-def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> int:
-    """
-    Enforces Anti-Exploit Resale Rules in Anomalous Incursions:
-    - Monastic Shrine free items (`shrine_sacred_grant: True`) -> 0G resale value.
-    - Public Agency 50%-discounted items (`purchase_price_paid`) -> capped at <= 50% of price paid.
-    """
+def _extract_purchase_price_and_grant(item_dict: dict) -> Tuple[Optional[int], bool]:
+    """Extracts `(purchase_price_paid, is_shrine_sacred_grant)` across item dict, parsed metadata, and effect JSON."""
     if not item_dict or not isinstance(item_dict, dict):
-        return default_sell_price
+        return None, False
 
     from mechanics.combat.equipment import parse_equipment_metadata
     from mechanics.combat.items import parse_consumable_metadata
@@ -754,15 +874,13 @@ def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> 
     cons_meta = parse_consumable_metadata(item_dict) or {}
     raw_eff = str(item_dict.get("effect") or "")
 
-    if (
+    is_grant = bool(
         item_dict.get("shrine_sacred_grant")
         or eq_meta.get("shrine_sacred_grant")
         or cons_meta.get("shrine_sacred_grant")
         or '"shrine_sacred_grant": true' in raw_eff.lower()
         or '"shrine_sacred_grant":true' in raw_eff.lower()
-    ):
-        return 0
-
+    )
     paid = (
         item_dict.get("purchase_price_paid")
         if item_dict.get("purchase_price_paid") is not None
@@ -772,12 +890,26 @@ def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> 
             else cons_meta.get("purchase_price_paid")
         )
     )
+    paid_int: Optional[int] = None
     if paid is not None:
         try:
-            paid_int = int(paid)
-            return min(default_sell_price, max(0, int(paid_int * 0.50)))
+            paid_int = max(0, int(paid))
         except (TypeError, ValueError):
-            pass
+            paid_int = None
+    return paid_int, is_grant
+
+
+def compute_anomalous_resale_price(item_dict: dict, default_sell_price: int) -> int:
+    """
+    Enforces Anti-Exploit Resale Rules in Anomalous Incursions:
+    - Monastic Shrine free items (`shrine_sacred_grant: True`) -> 0G resale value.
+    - Discounted faction items (`purchase_price_paid`) -> capped at <= 50% of price paid.
+    """
+    paid_int, is_grant = _extract_purchase_price_and_grant(item_dict)
+    if is_grant:
+        return 0
+    if paid_int is not None:
+        return min(default_sell_price, max(0, int(paid_int * 0.50)))
     return default_sell_price
 
 
@@ -840,6 +972,12 @@ def compute_item_resale_payout(
         )
 
     sell_price = sell_bonus_price(base_val, discount_pct // 2)
+    paid_int, is_grant = _extract_purchase_price_and_grant(item)
+    if not is_grant and paid_int is None and sess.get("id"):
+        from mechanics.social.factions import faction_bonus_active, get_anomalous_faction_state
+        f_state = get_anomalous_faction_state(int(sess["id"]))
+        if faction_bonus_active("clandestine_faction", f_state):
+            sell_price = max(1, int(round(sell_price * 1.40)))
     sell_price = compute_anomalous_resale_price(item, sell_price)
     return sell_price, ""
 
@@ -924,6 +1062,233 @@ def calculate_balanced_price(
     return max(1, final_price)
 
 
+def _generate_biased_equipment(
+    scen_key: str,
+    slot: str,
+    tier: int,
+    priv_bonus: bool,
+    shop_ctx: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Generates equipment with optional faction element (+25% bias) and Faraday/stealth wearable bias."""
+    from mechanics.combat.items import generate_random_equipment
+    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
+    from mechanics.combat.items.envelope import serialize_item
+
+    eq = generate_random_equipment(
+        scenario=scen_key,
+        slot=slot,
+        tier=tier,
+        private_agency_bonus=priv_bonus,
+    )
+    if not isinstance(eq, dict):
+        return None
+    ctx = shop_ctx or {}
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        el_bias = tuple(ctx.get("faction_element_bias") or ())
+        if el_bias and random.random() < 0.25:
+            apply_anomalous_incursions_gear_rules(
+                eq,
+                scenario=scen_key,
+                slot=slot,
+                tier=tier,
+                private_agency_bonus=priv_bonus,
+                force_anomalous=True,
+                element=random.choice(el_bias),
+            )
+        trait_bias = tuple(ctx.get("faction_trait_bias") or ())
+        if ("faraday" in trait_bias or "stealth" in trait_bias) and slot in ("Armor", "Top", "Shield", "Accessory 1") and random.random() < 0.25:
+            meta = eq.get("metadata")
+            if isinstance(meta, dict):
+                s_mods = meta.setdefault("stat_modifiers", {})
+                if isinstance(s_mods, dict):
+                    s_mods["electric_res"] = max(int(s_mods.get("electric_res") or 0), 15)
+                    s_mods["stealth"] = max(int(s_mods.get("stealth") or 0), 1)
+                passives = meta.setdefault("anomalous_passives", [])
+                if isinstance(passives, list):
+                    passives.append({
+                        "category": "combat_buff",
+                        "buff_name": "Faraday Counter-Surveillance Weave",
+                        "stat_target": "EVA",
+                        "bonus_val": 8,
+                        "tier": int(meta.get("tier") or tier or 2),
+                        "label": "Faraday Counter-Surveillance Weave (+8% EVA / +15% Electric Res)",
+                    })
+                eq["effect"] = serialize_item(meta)
+    eq["price"] = calculate_balanced_price(
+        eq.get("item_type", "Item"),
+        eq.get("name", ""),
+        tier=eq.get("tier", tier),
+        scen_key=scen_key,
+        metadata=eq.get("metadata"),
+    )
+    eq["quantity"] = 1
+    return eq
+
+
+def _apply_anomalous_shop_overlays(
+    stock: List[Dict[str, Any]],
+    shop_ctx: Dict[str, Any],
+    scen_key: str,
+    *,
+    session: Optional[Dict[str, Any]] = None,
+    merchant_type: str = "",
+    merchant_name: str = "",
+    is_phone_shop: bool = False,
+    party: Optional[list] = None,
+    is_quartermaster: bool = False,
+) -> List[Dict[str, Any]]:
+    """
+    Shared Layer 2 overlay pipeline for Anomalous Incursions shops & faction quartermasters:
+    enriches un-enriched equipment (with Cult aether/bio & Syndicate electric/physical bias),
+    injects folklore ward pools, handles Monastic daily caps, and surfaces Public Agency Vault requisitions.
+    """
+    from mechanics.combat.equipment import enrich_equipment_item
+    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
+
+    shop_arch = str(shop_ctx.get("shop_faction_archetype") or "")
+    player_arch = str(shop_ctx.get("player_faction_archetype") or session.get("joined_faction", "freelancer") if isinstance(session, dict) else (shop_ctx.get("player_faction_archetype") or "freelancer"))
+    priv_bonus = bool(shop_ctx.get("private_agency_bonus", False))
+    el_bias = tuple(shop_ctx.get("faction_element_bias") or ())
+
+    equip_types = {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "headwear", "lingerie", "outerwear"}
+    for item in stock:
+        itype = str(item.get("item_type", "")).lower()
+        if not item.get("effect"):
+            if itype in equip_types or any(
+                k in item.get("name", "").lower()
+                for k in ("sword", "axe", "bow", "dagger", "shield", "armor", "helm", "glove", "boot", "ring", "amulet", "robe", "tunic", "pistol", "rifle", "shotgun", "katana", "baton")
+            ):
+                enrich_equipment_item(item, scenario=scen_key)
+                if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                    chosen_el = random.choice(el_bias) if (el_bias and random.random() < 0.25) else None
+                    apply_anomalous_incursions_gear_rules(
+                        item,
+                        scenario=scen_key,
+                        slot=item.get("slot", "Weapon"),
+                        tier=item.get("tier", 2 if is_quartermaster else 3),
+                        private_agency_bonus=priv_bonus,
+                        element=chosen_el,
+                    )
+
+    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+        from mechanics.world.folklore_mechanics import build_folklore_shop_stock_items
+
+        loc_low = str((session or {}).get("current_location") or "").lower()
+        node_low = str((session or {}).get("current_node_id") or "").lower()
+        m_name_low = str(merchant_name or "").lower()
+        loc_probe = f"{loc_low} {node_low}".strip()
+        if shop_arch in ("monastic_order", "cult_faction") or (
+            not is_quartermaster and (
+                merchant_type == "magic_merchant"
+                or any(k in loc_probe or k in m_name_low for k in ("shrine", "torii", "temple", "talisman", "cinnabar"))
+            )
+        ):
+            folklore_pool = "shrine"
+        elif shop_arch in ("public_agency", "private_agency_1", "private_agency_2", "clandestine_faction") or (
+            not is_quartermaster and merchant_type in ("quartermaster", "armory_merchant", "weapon_merchant")
+        ):
+            folklore_pool = "quartermaster"
+        elif (
+            not is_quartermaster
+            and (
+                merchant_type in (
+                    "convenience_merchant",
+                    "food_merchant",
+                    "night_market_merchant",
+                    "general_merchant",
+                    "potion_merchant",
+                    "gift_merchant",
+                    "alchemist",
+                )
+                or any(k in loc_probe or k in m_name_low for k in ("black_market", "black market", "drifter_bazaar", "forgotten_metro", "peddler", "tinker"))
+                or is_phone_shop
+            )
+        ):
+            folklore_pool = "urban_market"
+        else:
+            folklore_pool = None
+
+        if folklore_pool:
+            f_items = build_folklore_shop_stock_items(folklore_pool)
+            existing_stock_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+            formatted_f_items = []
+            for f_spec in f_items:
+                if f_spec["name"].lower() in existing_stock_names:
+                    continue
+                formatted_f_items.append({
+                    "name": f_spec["name"],
+                    "type": "Consumable",
+                    "item_type": "Consumable",
+                    "description": f_spec["desc"],
+                    "desc": f_spec["desc"],
+                    "price": int(f_spec["price"]),
+                    "quantity": 1 if (is_quartermaster and shop_arch == "monastic_order") else 3,
+                    "tier": 3,
+                    "effect": f_spec["effect"],
+                    "appeasement_tags": list(f_spec.get("appeasement_tags") or []),
+                })
+            if shop_arch == "monastic_order" and (is_quartermaster or player_arch == "monastic_order") and formatted_f_items:
+                day_idx = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1) % len(formatted_f_items)
+                stock = stock[:2] + [formatted_f_items[day_idx]]
+            else:
+                stock.extend(formatted_f_items)
+
+    if not is_quartermaster:
+        _inject_folklore_permission_tokens_into_shop_stock(
+            stock,
+            session=session if isinstance(session, dict) else None,
+            merchant_type=merchant_type,
+            is_phone_shop=is_phone_shop,
+            party=party,
+        )
+
+    if shop_arch == "monastic_order" and (is_quartermaster or player_arch == "monastic_order"):
+        perm_tokens = [
+            s_it for s_it in stock
+            if isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token")
+        ]
+        non_perm = [
+            s_it for s_it in stock
+            if not (isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token"))
+        ]
+        if perm_tokens and not is_quartermaster:
+            stock = non_perm[:2] + [perm_tokens[0]]
+        else:
+            stock = stock[:3]
+        for s_it in stock:
+            s_it["quantity"] = 1
+
+    if shop_arch == "public_agency" and player_arch == "public_agency" and isinstance(session, dict):
+        req_items = list(session.get("anomalous_vault_requisitions") or [])
+        if not req_items and session.get("id"):
+            try:
+                sess_db = db.get_session(int(session["id"])) or {}
+                req_items = list(sess_db.get("anomalous_vault_requisitions") or [])
+            except Exception:
+                req_items = []
+        existing_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
+        for req_it in req_items:
+            if not isinstance(req_it, dict) or req_it.get("requisitioned"):
+                continue
+            if req_it.get("name") and str(req_it["name"]).lower() not in existing_names:
+                req_copy = dict(req_it)
+                base_p = int(req_copy.get("price") or calculate_balanced_price(
+                    req_copy.get("item_type", "Weapon"),
+                    req_copy["name"],
+                    tier=int(req_copy.get("tier", 2) or 2),
+                    scen_key=scen_key,
+                    metadata=req_copy.get("metadata"),
+                ))
+                req_copy["price"] = base_p
+                req_copy["requisition_price"] = max(1, int(round(base_p * 0.50)))
+                req_copy["quantity"] = 1
+                req_copy["is_vault_requisition"] = True
+                stock.insert(0, req_copy)
+                existing_names.add(str(req_copy["name"]).lower())
+
+    return stock
+
+
 async def generate_merchant_shop(party: list, merchant_name: str, merchant_description: str,
                                   session: dict, is_phone_shop: bool = False, merchant_type: str = "general_merchant") -> dict:
     """Generate shop stock and rumors via LLM for a specific merchant archetype."""
@@ -939,7 +1304,7 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
     active_hs_clerk = None
     if not is_phone_shop and merchant_type != "online_merchant":
         from mechanics.world.locations import is_school_scenario
-        if is_school_scenario(scen_key) and isinstance(session, dict) and session.get("id"):
+        if (is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key)) and isinstance(session, dict) and session.get("id"):
             try:
                 from mechanics.social.town_roster import get_active_shop_clerk_for_location
                 lead_uid = None
@@ -1053,10 +1418,8 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
             slots = ["Weapon", "Weapon", "Armor", "Shield", "Top", "Accessory 1", "Gloves", "Shoes"]
             random.shuffle(slots)
             for s in slots[:4]:
-                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
+                eq = _generate_biased_equipment(scen_key, s, random.choice(tier_choices), priv_bonus, shop_ctx)
                 if eq:
-                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key, metadata=eq.get("metadata"))
-                    eq["quantity"] = 1
                     procedural_stock.append(eq)
         elif merchant_type == "potion_merchant":
             p1 = generate_procedural_potion(tier=2 if priv_bonus else 3, genre=scen_key)
@@ -1259,10 +1622,8 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         else:
             slots = ["Weapon", "Accessory 1", "Top", "Shoes"]
             for s in slots[:3]:
-                eq = _gen_eq(scenario=scen_key, slot=s, tier=random.choice(tier_choices), private_agency_bonus=priv_bonus)
+                eq = _generate_biased_equipment(scen_key, s, random.choice(tier_choices), priv_bonus, shop_ctx)
                 if eq:
-                    eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 3), scen_key=scen_key, metadata=eq.get("metadata"))
-                    eq["quantity"] = 1
                     procedural_stock.append(eq)
         result = {
             "intro_narrative": f"{merchant_name or arch_title} welcomes you into the shop.",
@@ -1399,139 +1760,17 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
                 "effect": f"[SPELLBOOK_JSON]{json.dumps(spell_meta)}"
             })
 
-    from mechanics.combat.equipment import enrich_equipment_item
-    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
-    EQUIP_TYPES = {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory", "clothing", "headwear", "lingerie", "outerwear"}
-    for item in stock:
-        itype = str(item.get("item_type", "")).lower()
-        if not item.get("effect"):
-            if itype in EQUIP_TYPES or any(k in item.get("name", "").lower() for k in ["sword", "axe", "bow", "dagger", "shield", "armor", "helm", "glove", "boot", "ring", "amulet", "robe", "tunic", "pistol", "rifle", "shotgun", "katana", "baton"]):
-                enrich_equipment_item(item, scenario=scen_key)
-                if scenario_data.is_anomalous_incursions_scenario(scen_key):
-                    apply_anomalous_incursions_gear_rules(
-                        item,
-                        scenario=scen_key,
-                        slot=item.get("slot", "Weapon"),
-                        tier=item.get("tier", 3),
-                        private_agency_bonus=priv_bonus,
-                    )
-
-    # Folklore Wards & Offerings stock for Anomalous Incursions shops (Shrines, Quartermasters, Urban Markets)
-    if scenario_data.is_anomalous_incursions_scenario(scen_key):
-        from mechanics.world.folklore_mechanics import build_folklore_shop_stock_items
-
-        shop_arch = str(shop_ctx.get("shop_faction_archetype") or "")
-        loc_low = str((session or {}).get("current_location") or "").lower()
-        m_name_low = str(merchant_name or "").lower()
-        if shop_arch == "monastic_order" or any(k in loc_low or k in m_name_low for k in ("shrine", "torii", "temple", "talisman")):
-            folklore_pool = "shrine"
-        elif shop_arch in ("public_agency", "private_agency_1", "private_agency_2") or merchant_type in ("quartermaster", "armory_merchant", "weapon_merchant"):
-            folklore_pool = "quartermaster"
-        elif merchant_type in (
-            "convenience_merchant",
-            "food_merchant",
-            "night_market_merchant",
-            "general_merchant",
-            "potion_merchant",
-            "gift_merchant",
-            "alchemist",
-        ) or is_phone_shop:
-            folklore_pool = "urban_market"
-        else:
-            folklore_pool = None
-
-        if folklore_pool:
-            f_items = build_folklore_shop_stock_items(folklore_pool)
-            existing_stock_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
-            formatted_f_items = []
-            for f_spec in f_items:
-                if f_spec["name"].lower() in existing_stock_names:
-                    continue
-                formatted_f_items.append({
-                    "name": f_spec["name"],
-                    "type": "Consumable",
-                    "item_type": "Consumable",
-                    "description": f_spec["desc"],
-                    "desc": f_spec["desc"],
-                    "price": int(f_spec["price"]),
-                    "quantity": 3,
-                    "tier": 3,
-                    "effect": f_spec["effect"],
-                    "appeasement_tags": list(f_spec.get("appeasement_tags") or []),
-                })
-            if (
-                shop_ctx.get("shop_faction_archetype") == "monastic_order"
-                and shop_ctx.get("player_faction_archetype") == "monastic_order"
-                and formatted_f_items
-            ):
-                # Rotate 1 consecrated folklore ward into the 3-item daily monastic ration
-                day_idx = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1) % len(formatted_f_items)
-                stock = stock[:2] + [formatted_f_items[day_idx]]
-            else:
-                stock.extend(formatted_f_items)
-
-    # Inject quest-locked Folklore Permission Tokens & Enclave Trust-Tiered Wares (in-person only)
-    _inject_folklore_permission_tokens_into_shop_stock(
+    stock = _apply_anomalous_shop_overlays(
         stock,
+        shop_ctx,
+        scen_key,
         session=session if isinstance(session, dict) else None,
         merchant_type=merchant_type,
-        is_phone_shop=is_phone_shop,
+        merchant_name=merchant_name,
+        is_phone_shop=bool(is_phone_shop),
         party=party,
+        is_quartermaster=False,
     )
-
-    # Monastic Shrine Order member daily stock cap (2-3 items/day, quantity 1 each)
-    if (
-        shop_ctx.get("shop_faction_archetype") == "monastic_order"
-        and shop_ctx.get("player_faction_archetype") == "monastic_order"
-    ):
-        perm_tokens = [
-            s_it for s_it in stock
-            if isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token")
-        ]
-        non_perm = [
-            s_it for s_it in stock
-            if not (isinstance(s_it, dict) and (s_it.get("metadata") or {}).get("is_permission_token"))
-        ]
-        if perm_tokens:
-            stock = non_perm[:2] + [perm_tokens[0]]
-        else:
-            stock = stock[:3]
-        for s_it in stock:
-            s_it["quantity"] = 1
-
-    # Public Agency Bureau Vault Requisition: unlock secured Object Anomalies at the HQ Tactical Armory
-    # Gated strictly to formal enlisted operatives of public_agency (freelancers & student operatives do not have vault clearance)
-    if (
-        shop_ctx.get("shop_faction_archetype") == "public_agency"
-        and shop_ctx.get("player_faction_archetype") == "public_agency"
-        and isinstance(session, dict)
-    ):
-        req_items = list(session.get("anomalous_vault_requisitions") or [])
-        if not req_items and session.get("id"):
-            try:
-                sess_db = db.get_session(int(session["id"])) or {}
-                req_items = list(sess_db.get("anomalous_vault_requisitions") or [])
-            except Exception:
-                req_items = []
-        existing_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
-        for req_it in req_items:
-            if not isinstance(req_it, dict) or req_it.get("requisitioned"):
-                continue
-            if req_it.get("name") and str(req_it["name"]).lower() not in existing_names:
-                req_copy = dict(req_it)
-                base_p = int(req_copy.get("price") or calculate_balanced_price(
-                    req_copy.get("item_type", "Weapon"),
-                    req_copy["name"],
-                    tier=int(req_copy.get("tier", 2) or 2),
-                    scen_key=scen_key,
-                    metadata=req_copy.get("metadata"),
-                ))
-                req_copy["price"] = base_p
-                req_copy["requisition_price"] = max(1, int(round(base_p * 0.50)))
-                req_copy["quantity"] = 1
-                req_copy["is_vault_requisition"] = True
-                stock.insert(0, req_copy)
-                existing_names.add(str(req_copy["name"]).lower())
 
     llm_rumors = [str(r)[:300] for r in (result.get("rumors") or []) if str(r).strip()]
     if is_phone_shop or merchant_type == "online_merchant":
@@ -1566,7 +1805,11 @@ async def generate_merchant_shop(party: list, merchant_name: str, merchant_descr
         "rumors": rumor_entries,
         "merchant_type": merchant_type,
         "in_person_only": bool((MERCHANT_ARCHETYPES.get(merchant_type) or {}).get("in_person_only")),
+        "shop_faction_archetype": shop_ctx.get("shop_faction_archetype"),
+        "is_cult_discounted_shop": bool(shop_ctx.get("is_cult_discounted_shop")),
     }
+    if shop_ctx.get("pricing_badge"):
+        out_shop["pricing_badge"] = shop_ctx["pricing_badge"]
     if active_hs_clerk:
         out_shop["merchant_name"] = merchant_name
         out_shop["is_student_part_timer"] = bool(active_hs_clerk.get("is_student_part_timer"))
@@ -1711,6 +1954,30 @@ def generate_grounded_merchant_rumors(
             except Exception:
                 pass
 
+        if len(rumor_entries) < 3:
+            try:
+                world_locals = db.get_world_roster(session_id, include_legacy_rosters=False) or []
+                active_locals = [
+                    r for r in world_locals
+                    if str(r.get("staff_status") or "active").lower() == "active"
+                    and str(r.get("origin") or "") in ("roaming_citizen", "district_merchant", "civic_staff", "roaming_merchant", "campus_seed")
+                    and str(r.get("name") or "").strip()
+                ]
+                if active_locals:
+                    curr_day_r, _, _ = db.get_session_time(session_id)
+                    picked_r = active_locals[(int(curr_day_r or 1) * 7 + len(rumor_entries)) % len(active_locals)]
+                    p_name = str(picked_r.get("name") or "").strip()
+                    p_role = str(picked_r.get("role") or "local").strip()
+                    p_node_id = str(picked_r.get("workplace_node_id") or "").strip()
+                    p_node_obj = db.get_world_node(session_id, p_node_id) if p_node_id else None
+                    p_loc_lbl = str((p_node_obj or {}).get("name") or p_node_id.replace("loc_", "").replace("_", " ").title() or "downtown").strip()
+                    r_txt = f"Word from regulars: {p_name} ({p_role}) mentioned heavy foot traffic around {p_loc_lbl} earlier today."
+                    if r_txt.lower() not in seen_texts:
+                        seen_texts.add(r_txt.lower())
+                        rumor_entries.append({"text": r_txt[:300], "revealed": False})
+            except Exception:
+                pass
+
     for raw_r in (fallback_rumors or []):
         if len(rumor_entries) >= 3:
             break
@@ -1739,10 +2006,25 @@ Price items based on name/description flavor. Keep buy prices modest (merchants 
 Respond with ONLY a single valid JSON object matching the schema exactly, no prose or code fences."""
 
 
-async def evaluate_items_for_sale(items: list) -> dict:
+async def evaluate_items_for_sale(items: list, session: Optional[Dict[str, Any]] = None) -> dict:
     """Price items for player selling."""
     if not items:
         return {}
+    fence_active = False
+    sess = session if isinstance(session, dict) else {}
+    if sess.get("id"):
+        from mechanics.social.factions import faction_bonus_active, get_anomalous_faction_state
+        f_state = get_anomalous_faction_state(int(sess["id"]))
+        fence_active = faction_bonus_active("clandestine_faction", f_state)
+
+    def _apply_syndicate_fence_and_clamp(item_obj: Any, base_sell: int) -> int:
+        amt = base_sell
+        if fence_active and isinstance(item_obj, dict):
+            paid_int, is_grant = _extract_purchase_price_and_grant(item_obj)
+            if not is_grant and paid_int is None:
+                amt = max(1, int(round(amt * 1.40)))
+        return compute_anomalous_resale_price(item_obj, amt) if isinstance(item_obj, dict) else amt
+
     _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
     if not _is_llm_mocked:
         from mechanics.combat.items import parse_item_tier
@@ -1750,7 +2032,7 @@ async def evaluate_items_for_sale(items: list) -> dict:
         for i in items:
             t = parse_item_tier(i)
             p = calculate_balanced_price(i.get("item_type", "Item"), i.get("name", ""), tier=t, metadata=i.get("metadata"))
-            sell_p = compute_anomalous_resale_price(i, max(1, p // 3))
+            sell_p = _apply_syndicate_fence_and_clamp(i, max(1, p // 3))
             prices[str(i["name"])] = sell_p
         return prices
 
@@ -1771,7 +2053,7 @@ async def evaluate_items_for_sale(items: list) -> dict:
             price = 3
         orig_it = by_name.get(str(entry["name"]))
         if orig_it:
-            price = compute_anomalous_resale_price(orig_it, price)
+            price = _apply_syndicate_fence_and_clamp(orig_it, price)
         prices[str(entry["name"])] = price
     return prices
 
@@ -1876,6 +2158,8 @@ def compute_effective_shop_item_price(
         return max(1, int(round(base_price * 0.50)))
     if ctx.get("is_public_discounted_shop"):
         return max(1, int(round(base_price * 0.50)))
+    if ctx.get("is_cult_discounted_shop"):
+        return max(1, int(round(base_price * 0.85)))
     mult = float(ctx.get("price_multiplier", 1.0) or 1.0)
     if mult != 1.0:
         marked_up = int(round(base_price * mult))
@@ -2007,11 +2291,27 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
     from mechanics.social.factions import get_faction_discount, infer_anomalous_faction_archetype
     auto_discount = get_faction_discount(rep_score)
     fac_arch = infer_anomalous_faction_archetype(faction) if scenario_data.is_anomalous_incursions_scenario(scen_key) else ""
+    sess_qm = dict(session or {})
+    sess_qm["merchant"] = dict(
+        sess_qm.get("merchant") or {},
+        is_faction_quartermaster=True,
+        quartermaster_faction_arch=fac_arch,
+        active_store_key=f"faction_{fac_arch}",
+    )
+    qm_ctx = get_anomalous_shop_faction_context(
+        sess_qm,
+        is_phone_shop=False,
+        user_id=int((session or {}).get("user_id") or 0) or None,
+    )
     theme_hint = ""
     if fac_arch == "private_agency_1":
         theme_hint = "Theme: Defense and containment conglomerate — sleek smart-linked weapons, defense-catalog model codes, and cleanroom ballisticweave gear.\n"
     elif fac_arch == "private_agency_2":
         theme_hint = "Theme: Boutique partner-owned private agency — custom-tuned firearms, fitted ballistic armor, and calibrated ward instruments.\n"
+    elif fac_arch == "cult_faction":
+        theme_hint = "Theme: Occult Sanctum armory & apotheca — obsidian ritual blades, warded silk vestments, sanguine ichor distillates, and aether/bio relics.\n"
+    elif fac_arch == "clandestine_faction":
+        theme_hint = "Theme: Clandestine Syndicate black-bag cage — serial-scrubbed carbines, Faraday-weave coats, stealth optics, and electric/physical ordnance.\n"
 
     user_prompt = (
         f"{scenario_data.scenario_prompt_block(scen_info, session_id=int((session or {}).get('id') or 0))}\n"
@@ -2022,40 +2322,35 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         f"Respond with JSON matching exactly this schema:\n{FACTION_QUARTERMASTER_SCHEMA}"
     )
     _is_llm_mocked = hasattr(call_llm_json, "_mock_name")
+    from mechanics.social.factions import is_school_club_faction as _is_hs_club_qm
+    priv_bonus_qm = fac_arch in ("private_agency_1", "private_agency_2", "clandestine_faction") or (
+        scenario_data.is_anomalous_high_school_scenario(scen_key) and _is_hs_club_qm(faction)
+    )
     if _is_llm_mocked:
         result = await call_llm_json(FACTION_QUARTERMASTER_SYSTEM_PROMPT, user_prompt,
                                       temperature=0.7, is_nsfw=scenario_data.uses_nsfw_model(scen_key),
                                       use_utility=True)
         result = namegen.resolve_tokens_deep(result, scenario=scen_key)
     else:
-        from mechanics.combat.items import generate_random_equipment as _gen_eq
         q_stock = []
-        from mechanics.social.factions import is_school_club_faction as _is_hs_club_qm_gen
-        _priv_gen_qm = fac_arch in ("private_agency_1", "private_agency_2") or (
-            scenario_data.is_anomalous_high_school_scenario(scen_key) and _is_hs_club_qm_gen(faction)
-        )
         for slot in ["Weapon", "Armor", "Accessory 1"]:
-            eq = _gen_eq(scenario=scen_key, slot=slot, tier=2, private_agency_bonus=_priv_gen_qm)
+            eq = _generate_biased_equipment(scen_key, slot, 2, priv_bonus_qm, qm_ctx)
             if eq:
-                eq["price"] = calculate_balanced_price(eq.get("item_type", "Item"), eq.get("name", ""), tier=eq.get("tier", 2), scen_key=scen_key, metadata=eq.get("metadata"))
-                eq["quantity"] = 1
                 q_stock.append(eq)
         if fac_arch == "private_agency_1":
             intro_str = f"The {faction_name} ordnance officer verifies your biometric clearance and unlocks a backlit vault case of smart-linked equipment."
         elif fac_arch == "private_agency_2":
             intro_str = f"The {faction_name} master gunsmith unbolts the vaulted armory door and lays out custom-tuned firearms and ward-fitted gear."
+        elif fac_arch == "cult_faction":
+            intro_str = f"The {faction_name} apotheca steward unseals the ossuary lockers, offering consecrated athames and distilled reagents."
+        elif fac_arch == "clandestine_faction":
+            intro_str = f"The {faction_name} arms broker slides open a reinforced blast shutter of scrubbed ordnance and Faraday weaves."
         else:
             intro_str = f"The {faction_name} quartermaster nods at you."
         result = {
             "intro_narrative": intro_str,
             "stock": q_stock,
         }
-    from mechanics.combat.equipment import enrich_equipment_item
-    from mechanics.combat.items.anomalous_gear import apply_anomalous_incursions_gear_rules
-    from mechanics.social.factions import is_school_club_faction as _is_hs_club_qm
-    priv_bonus_qm = fac_arch in ("private_agency_1", "private_agency_2") or (
-        scenario_data.is_anomalous_high_school_scenario(scen_key) and _is_hs_club_qm(faction)
-    )
 
     stock = []
     for entry in result.get("stock", []) or []:
@@ -2086,82 +2381,27 @@ async def generate_faction_quartermaster_shop(faction: dict, session: dict) -> d
         for keep_k in ("effect", "metadata", "slot", "slot_cost", "tier"):
             if entry.get(keep_k) is not None:
                 qm_item[keep_k] = entry[keep_k]
-        if not qm_item.get("effect") and it_type.lower() in {"weapon", "armor", "shield", "head", "top", "bottom", "gloves", "shoes", "accessory"}:
-            enrich_equipment_item(qm_item, scenario=scen_key)
-            if scenario_data.is_anomalous_incursions_scenario(scen_key):
-                apply_anomalous_incursions_gear_rules(
-                    qm_item,
-                    scenario=scen_key,
-                    slot=qm_item.get("slot", "Weapon"),
-                    tier=qm_item.get("tier", 2),
-                    private_agency_bonus=priv_bonus_qm,
-                )
         stock.append(qm_item)
-    if scenario_data.is_anomalous_incursions_scenario(scen_key):
-        from mechanics.world.folklore_mechanics import build_folklore_shop_stock_items
-        qm_pool = "shrine" if fac_arch == "monastic_order" else "quartermaster"
-        f_qm_items = build_folklore_shop_stock_items(qm_pool)
-        existing_qm_f = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
-        formatted_qm_f = []
-        for f_spec in f_qm_items:
-            if f_spec["name"].lower() in existing_qm_f:
-                continue
-            formatted_qm_f.append({
-                "name": f_spec["name"],
-                "type": "Consumable",
-                "item_type": "Consumable",
-                "description": f_spec["desc"],
-                "desc": f_spec["desc"],
-                "price": int(f_spec["price"]),
-                "quantity": 1 if fac_arch == "monastic_order" else 3,
-                "tier": 3,
-                "effect": f_spec["effect"],
-                "appeasement_tags": list(f_spec.get("appeasement_tags") or []),
-            })
-        if fac_arch == "monastic_order" and formatted_qm_f:
-            day_idx_qm = int((session or {}).get("current_day") or (session or {}).get("in_game_day") or 1) % len(formatted_qm_f)
-            stock = stock[:2] + [formatted_qm_f[day_idx_qm]]
-        else:
-            stock.extend(formatted_qm_f)
-    if fac_arch == "monastic_order" and len(stock) > 3:
-        stock = stock[:3]
-    from mechanics.social.factions import get_anomalous_faction_state
-    a_st = get_anomalous_faction_state(int(session.get("id", 0)), int(session.get("user_id", 0))) if session.get("id") else {}
-    player_arch = str(a_st.get("faction_archetype_key") or session.get("joined_faction") or "freelancer")
-    if fac_arch == "public_agency" and player_arch == "public_agency" and isinstance(session, dict):
-        req_items = list(session.get("anomalous_vault_requisitions") or [])
-        if not req_items and session.get("id"):
-            try:
-                sess_db = db.get_session(int(session["id"])) or {}
-                req_items = list(sess_db.get("anomalous_vault_requisitions") or [])
-            except Exception:
-                req_items = []
-        existing_qm_names = {str(s.get("name", "")).lower() for s in stock if isinstance(s, dict)}
-        for req_it in req_items:
-            if not isinstance(req_it, dict) or req_it.get("requisitioned"):
-                continue
-            if req_it.get("name") and str(req_it["name"]).lower() not in existing_qm_names:
-                req_copy = dict(req_it)
-                base_p = int(req_copy.get("price") or calculate_balanced_price(
-                    req_copy.get("item_type", "Weapon"),
-                    req_copy["name"],
-                    tier=int(req_copy.get("tier", 2) or 2),
-                    scen_key=scen_key,
-                    metadata=req_copy.get("metadata"),
-                ))
-                req_copy["price"] = base_p
-                req_copy["requisition_price"] = max(1, int(round(base_p * 0.50)))
-                req_copy["quantity"] = 1
-                req_copy["is_vault_requisition"] = True
-                stock.insert(0, req_copy)
-                existing_qm_names.add(str(req_copy["name"]).lower())
-    return {
+
+    stock = _apply_anomalous_shop_overlays(
+        stock,
+        qm_ctx,
+        scen_key,
+        session=session if isinstance(session, dict) else None,
+        is_quartermaster=True,
+    )
+    out_qm = {
         "intro_narrative": str(result.get("intro_narrative", f"The {faction_name} quartermaster nods at you."))[:300],
         "stock": stock,
         "faction_id": faction.get("faction_id", ""),
         "faction_discount_pct": auto_discount,
         "is_faction_quartermaster": True,
+        "quartermaster_faction_arch": fac_arch,
+        "is_cult_discounted_shop": bool(qm_ctx.get("is_cult_discounted_shop")),
     }
+    if qm_ctx.get("pricing_badge"):
+        out_qm["pricing_badge"] = qm_ctx["pricing_badge"]
+    return out_qm
 
 
 # -----------------------------------------------------------------------------

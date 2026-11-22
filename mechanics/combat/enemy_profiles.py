@@ -219,12 +219,20 @@ ANOMALOUS_TIER2_FACILITY_IDS = {
     "sub_cult_altar",
     "sub_cult_cells",
     "sub_cult_reliquary",
+    "sub_cult_armory",
+    "sub_cult_vestments",
+    "sub_cult_apotheca",
+    "sub_cult_quarters",
     "sub_cult_sanctum",
     "sub_synd_entrance",
     "sub_synd_guardroom",
     "sub_synd_floor",
     "sub_synd_pens",
     "sub_synd_lab",
+    "sub_synd_armory",
+    "sub_synd_outfitter",
+    "sub_synd_canteen",
+    "sub_synd_quarters",
     "sub_synd_vault",
 }
 
@@ -311,6 +319,10 @@ def is_anomalous_danger_zone(
     ):
         return False
     if any(ex in loc_name_low for ex in _SAFE_EXCLUSION_KEYWORDS):
+        return False
+
+    from mechanics.world.anomalous_sites.catalog import get_hq_membership_mode
+    if get_hq_membership_mode(session_id, node_id=location_id, location_str=location_name) in ("open_threshold", "allied_hub"):
         return False
 
     # Theme Park complex: ALWAYS safe during daytime 08:00–21:59 (even inner rides with "Anomaly" in name).

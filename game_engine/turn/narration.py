@@ -1,10 +1,11 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
-import asyncio
 
 import db
 from models.llm_schemas import DeterministicTurnNarration, DeterministicCombatNarration
+import llm_client
 from llm_client import GM_SHARED_RULES, call_llm_json, call_llm_json_stream
 from scenario_data import is_nsfw_scenario, uses_nsfw_model
 import game_engine
@@ -15,13 +16,14 @@ log = logging.getLogger(__name__)
 NARRATION_SYSTEM_PROMPT = """You are a highly skilled interactive fiction engine (the "Narrator").
 Your ONLY job right now is to regenerate the prose (the narrative description of what just happened and what is happening next) and the next available choices.
 
-You MUST NOT change the mechanical outcome of the turn. The facts provided in the user prompt's FROZEN STATE block are absolute and frozen. You are just describing them in vivid, second-person prose according to the player's preferences.
+You MUST NOT change the mechanical outcome of the turn. The facts provided in the user prompt's FROZEN STATE block are absolute and frozen. You are just describing them in second-person prose strictly obeying the active Narrative Style, Pacing, and Dialogue Style directives.
 
-## YOUR TASK
-1. 'outcome_narrative': Describe the immediate result of the NEW player's action(s). Write exactly what happens based on the frozen mechanics. NEVER repeat, re-state, or re-quote dialogue or events that already happened in previous turns.
-2. 'next_narrative': Describe the current state of the scene right after the action is resolved. Detail the environment, who is still here, and the immediate atmosphere.
-3. 'scene_title': A short 2-5 word title for the current situation.
-4. 'next_choices': Propose 2-5 logical, contextual actions the player can take next, given the new situation.
+## YOUR TASK (OUTPUT USING SENTINEL SECTIONS — NO JSON OR CODE FENCES)
+1. `@@TITLE: <2-5 word title>`: A short evocative title for the current situation.
+2. `@@OUTCOME`: Describe the immediate result of the NEW player action(s) based strictly on the frozen mechanics. NEVER repeat, re-state, or re-quote dialogue or events from previous turns.
+3. `@@NEXT`: Describe the current state of the scene right after the action resolves (environment, who is still here, immediate atmosphere).
+4. `@@CHOICES`: Propose 2-5 logical, contextual actions as `- <STR|PER|END|CHA|INT|AGI|LUK|ITEM|NONE> | <0-12> | [optional: topic_id=<id> | category=<cat> | ends_dialogue=true | target=<Exact NPC Name>] | <label>` lines (when in active conversation with an NPC, keep choices in-conversation and include 1 `NONE | 0 | ends_dialogue=true | ...` exit option).
+5. `@@META` (optional): Emit `pose: <Actor Name> | <posture> | <holding>` or `memory: <1-sentence NPC memory fact>` lines only when warranted.
 
 ## GUIDELINES
 - PROTAGONIST GENDER & PRONOUN FIDELITY: Never misgender the protagonist. If the protagonist is male, always use he/him/his (never she/her). If female, always use she/her/hers. When NPCs flirt or banter with the protagonist, ensure their romantic dialogue targets the protagonist's canon gender (e.g. female NPCs flirting with a male protagonist ask what he looks for in a woman/girl/partner, NEVER invert attraction to ask what he looks for in a guy).
@@ -34,10 +36,23 @@ You MUST NOT change the mechanical outcome of the turn. The facts provided in th
 - CANON UNDERGARMENT & COMMANDO FIDELITY: Strictly adhere to each character's canonical undergarment state. If a character is wearing NO underwear / panties (Commando) or NO bra (Bra-less), when their skirt, dress, pants, or shirt is lifted, parted, or removed, they are completely bare underneath! Third-person narration and dialogue MUST NEVER narrate peeling back, sliding aside, snapping, or removing phantom panties, bras, or underwear when the character is commando or bra-less.
 - NARRATOR RESTRAINT ON UNREVEALED INTIMATE TRAITS: Never describe an NPC's hidden intimate traits (such as underwear styles, secret erogenous spots, or intimate anatomy) before they have been revealed through player action, clothing removal, or intimacy progression.
 - FORWARD TEMPORAL MOMENTUM: Start immediately from the player's new action and move the clock forward. NEVER write a summary or recap paragraph of earlier conversation turns.
-- Respect the verbosity and dialogue preferences.
+- Strictly obey the active Narrative Style, Pacing, and Dialogue Style directives.
 - If characters died, describe their fall.
 - If an item was gained, mention it naturally in the prose.
-- Do NOT generate markdown formatting unless it's bold/italics for emphasis. No code blocks.
+- Output raw prose under `@@OUTCOME` and `@@NEXT` with NO JSON braces or markdown code blocks.
+"""
+
+COMBAT_NARRATION_SYSTEM_PROMPT = """You are a highly skilled interactive fiction engine (the "Narrator") in active COMBAT ENCOUNTER mode.
+Your ONLY job right now is to regenerate the battle prose (the immediate combat exchange and aftermath) strictly matching the FROZEN STATE block.
+
+You MUST NOT change mechanical damage, defeats, or positions. Do NOT emit `@@CHOICES` (tactical combat decks are supplied deterministically).
+
+## YOUR TASK (OUTPUT USING SENTINEL SECTIONS — NO JSON OR CODE FENCES)
+1. `@@TITLE: <2-5 word combat heading>`: A short evocative battle title.
+2. `@@OUTCOME`: Depict the player action and any enemy counter-attack strictly from frozen facts. NEVER mention numeric HP, damage digits, or roll percentages in prose.
+3. `@@NEXT`: Describe the immediate battlefield stance, enemy conditions, and tactical tension.
+4. `@@META` (optional): Emit `pose: <Actor Name> | <posture> | <holding>` or `memory: <1-sentence combat turning point>` lines if warranted.
+- Strictly obey the active Narrative Style, Pacing, and Dialogue Style directives.
 """
 
 def _build_frozen_state_text(snapshot: dict) -> str:
@@ -147,21 +162,10 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
     """
     session_id = session.get("id", 0)
     
-    # 1. Provide context (recent history, known world, scenario, style)
     raw_hist = list(session.get("history") or [])
     # CRITICAL: On a retry narration pass, the turn being retried is at history[-1],
     # so effective history leading up to the action must exclude it!
     effective_history = raw_hist[:-1] if raw_hist else []
-    history_str = game_engine._history_text(effective_history, session_id=session_id)
-    known_world_str = game_engine._known_world_text(
-        session_id,
-        session.get("current_location", ""),
-        current_npcs=session.get("current_npcs", [])
-    )
-    style_str = game_engine._style_block(session)
-    scenario_str = game_engine._scenario_block(session)
-    
-    # 2. Build actions text
     actions = snapshot.get("actions", [])
     action_lines = []
     for a in actions:
@@ -169,70 +173,100 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         action_lines.append(f"[{tier_label}] {a.get('label')}")
     actions_text = "\n".join(action_lines)
 
-    # 1B. Build contact & topic-aware grounding for present NPCs
-    contact_lines = []
     from mechanics.social.genealogy import build_topic_aware_npc_context
+    from mechanics.social.physical_state import build_physical_prompt_block
+
+    style_str = game_engine._style_block(session, kind="turn")
+    scenario_str = game_engine._scenario_block(session)
     present_npcs = snapshot.get("applied", {}).get("npcs_present", []) or session.get("current_npcs", [])
-    for n in present_npcs:
-        n_name = n.get("name") if isinstance(n, dict) else str(n)
-        if n_name:
-            contact = db.get_contact(session_id, n_name)
-            if contact:
-                c_details = []
-                c_track = contact.get("track", "platonic")
-                c_details.append(f"Track: {c_track}")
-                c_score = contact.get("relationship_score", 0)
-                c_details.append(f"Affinity: {c_score}")
-                topic_ctx = build_topic_aware_npc_context(
-                    contact,
-                    actions=actions,
-                    session_history=effective_history,
-                    scenario=session.get("scenario", "fantasy")
-                )
-                line = f"  * {n_name}: " + " | ".join(c_details)
-                if topic_ctx:
-                    line += "\n" + topic_ctx
-                contact_lines.append(line)
+    is_combat_retry = bool(snapshot.get("applied", {}).get("nearby_enemies"))
 
-    contact_block = ""
-    if contact_lines:
-        contact_block = "\n\nKNOWN CHARACTER CONTEXT & RELATIONSHIPS:\n" + "\n".join(contact_lines)
+    def _build_retry_db_context() -> tuple[str, str, str, str, str, str]:
+        with db.UnitOfWork():
+            h_str = game_engine._history_text(effective_history, session_id=session_id)
+            kw_str = game_engine._known_world_text(
+                session_id,
+                session.get("current_location", ""),
+                current_npcs=session.get("current_npcs", []),
+            )
+            all_contacts_map = {
+                str(c.get("name") or "").strip().lower(): c
+                for c in (db.get_contacts(session_id, ensure_scene=False) or [])
+                if isinstance(c, dict) and c.get("name")
+            }
+            c_lines = []
+            for n in present_npcs:
+                n_name = n.get("name") if isinstance(n, dict) else str(n)
+                if not n_name:
+                    continue
+                contact = all_contacts_map.get(n_name.strip().lower()) or db.get_contact(session_id, n_name)
+                if contact:
+                    c_details = [
+                        f"Track: {contact.get('track', 'platonic')}",
+                        f"Affinity: {contact.get('relationship_score', 0)}",
+                    ]
+                    topic_ctx = build_topic_aware_npc_context(
+                        contact,
+                        actions=actions,
+                        session_history=effective_history,
+                        scenario=session.get("scenario", "fantasy"),
+                    )
+                    line = f"  * {n_name}: " + " | ".join(c_details)
+                    if topic_ctx:
+                        line += "\n" + topic_ctx
+                    c_lines.append(line)
+            c_block = "\n\nKNOWN CHARACTER CONTEXT & RELATIONSHIPS:\n" + "\n".join(c_lines) if c_lines else ""
 
-    # 1C. Build physical & intimate state continuity block
-    phys_block_str = ""
-    try:
-        from mechanics.social.physical_state import build_physical_prompt_block
-        lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
-        party_for_phys = [(lead_char_obj, [])] if isinstance(lead_char_obj, dict) else []
-        phys_block = build_physical_prompt_block(
-            session,
-            party_for_phys,
-            is_combat=bool(snapshot.get("applied", {}).get("nearby_enemies")),
-            is_nsfw=is_nsfw_scenario(session.get("scenario")),
-            actions=actions,
-        )
-        if phys_block:
-            phys_block_str = f"\n\n[ACTIVE PHYSICAL & INTIMATE STATE CONTINUITY]:\n{phys_block}"
-    except Exception:
-        pass
-    # Include Protagonist Character Sheet in context if available
-    char_sheet_str = ""
-    lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
-    if not isinstance(lead_char_obj, dict) and session.get("user_id"):
-        try:
-            lead_char_obj = db.get_character(session["user_id"])
-        except Exception:
-            pass
-    if isinstance(lead_char_obj, dict):
-        inv = []
-        if session.get("user_id"):
+            p_block_str = ""
             try:
-                inv = db.get_inventory(session["user_id"])
+                lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
+                party_for_phys = [(lead_char_obj, [])] if isinstance(lead_char_obj, dict) else []
+                phys_block = build_physical_prompt_block(
+                    session,
+                    party_for_phys,
+                    is_combat=is_combat_retry,
+                    is_nsfw=is_nsfw_scenario(session.get("scenario")),
+                    actions=actions,
+                )
+                if phys_block:
+                    p_block_str = f"\n\n[ACTIVE PHYSICAL & INTIMATE STATE CONTINUITY]:\n{phys_block}"
             except Exception:
-                inv = []
-        char_sheet_str = f"\n\nPROTAGONIST CHARACTER SHEET:\n{game_engine._character_sheet_text(lead_char_obj, inv)}"
+                pass
 
-    context_str = f"{scenario_str}\n\n{style_str}\n\n{known_world_str}{char_sheet_str}{contact_block}{phys_block_str}\n\nRECENT HISTORY:\n{history_str}"
+            ch_sheet_str = ""
+            lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
+            eff_uid = (
+                (lead_char_obj.get("user_id") if isinstance(lead_char_obj, dict) else None)
+                or session.get("user_id")
+                or session.get("host_user_id")
+            )
+            if not isinstance(lead_char_obj, dict) and session.get("character_id"):
+                try:
+                    lead_char_obj = db.get_character_by_id(int(session["character_id"]))
+                except Exception:
+                    lead_char_obj = None
+            if not isinstance(lead_char_obj, dict) and eff_uid:
+                try:
+                    lead_char_obj = db.get_character(int(eff_uid), session_id=session_id)
+                except Exception:
+                    lead_char_obj = None
+            resolved_gender = ""
+            if isinstance(lead_char_obj, dict):
+                resolved_gender = str(lead_char_obj.get("gender") or "")
+                inv = []
+                inv_uid = eff_uid or lead_char_obj.get("user_id")
+                if inv_uid:
+                    try:
+                        inv = db.get_inventory(int(inv_uid))
+                    except Exception:
+                        inv = []
+                ch_sheet_str = f"\n\nPROTAGONIST CHARACTER SHEET:\n{game_engine._character_sheet_text(lead_char_obj, inv)}"
+
+            return h_str, kw_str, c_block, p_block_str, ch_sheet_str, resolved_gender
+
+    history_str, known_world_str, contact_block, phys_block_str, char_sheet_str, resolved_lead_gender = await db.adb(_build_retry_db_context)
+
+    context_str = f"{known_world_str}{char_sheet_str}{contact_block}{phys_block_str}\n\nRECENT HISTORY:\n{history_str}"
     
     # 3. Build frozen state text + D13 frozen deterministic stage plan
     frozen_state_text = _build_frozen_state_text(snapshot)
@@ -270,18 +304,22 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
     stage_plan_block = render_stage_plan(frozen_cast_plan)
     frozen_state_text = f"{frozen_state_text}\n\n{stage_plan_block}"
 
-    narration_core_zone = f"{GM_SHARED_RULES}\n\n{NARRATION_SYSTEM_PROMPT}"
-    sys_prompt = narration_core_zone
+    active_narration_prompt = COMBAT_NARRATION_SYSTEM_PROMPT if is_combat_retry else NARRATION_SYSTEM_PROMPT
+    narration_core_zone = f"{GM_SHARED_RULES}\n\n{active_narration_prompt}"
+    style_zone = style_str
 
     # Ensure lead character gender is populated if available
     lead_char_obj = actions[0].get("char") if actions and isinstance(actions[0], dict) else None
-    if not session.get("lead_character_gender") and isinstance(lead_char_obj, dict):
-        session["lead_character_gender"] = lead_char_obj.get("gender", "male")
+    if not session.get("lead_character_gender"):
+        if isinstance(lead_char_obj, dict) and lead_char_obj.get("gender"):
+            session["lead_character_gender"] = lead_char_obj.get("gender", "male")
+        elif resolved_lead_gender:
+            session["lead_character_gender"] = resolved_lead_gender
 
     from game_engine.prompt_layout import build_language_directive
     lang_dir = build_language_directive(session)
-    if lang_dir:
-        sys_prompt += f"\n\n{lang_dir}"
+    sys_zones = tuple(z for z in (narration_core_zone, scenario_str, style_zone, lang_dir) if z)
+    sys_prompt = "\n\n".join(sys_zones)
 
     # Check for conversational exit intent in retry pass
     from mechanics.narrative.intent import is_dialogue_exit_action
@@ -291,10 +329,10 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         departure_directive = (
             "\n\n[CONVERSATIONAL DEPARTURE & SCENE TRANSITION DIRECTIVE]:\n"
             "The player has explicitly concluded the conversation, stepped away, or departed.\n"
-            "- In `outcome_narrative`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
+            "- In `@@OUTCOME`, narrate only the immediate parting gesture or departure (e.g. nodding, thanking them, stepping away). "
             "EVERY character present in the scene MUST STOP talking with the player! DO NOT have any NPCs continue or initiate conversation with the player this turn! DO NOT reopen the conversation!\n"
-            "- In `next_narrative`, transition the scene forward into open exploration, room atmosphere, or next destination. NO NPC should be talking to the player.\n"
-            "- In `choices`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices."
+            "- In `@@NEXT`, transition the scene forward into open exploration, room atmosphere, or next destination. NO NPC should be talking to the player.\n"
+            "- In `@@CHOICES`, generate OPEN EXPLORATION, room inspection, or travel choices. DO NOT generate active dialogue choices."
         )
 
     frozen_block = (
@@ -302,42 +340,53 @@ async def run_narration_pass(session: dict, snapshot: dict, attempt: int = 1, st
         f"The player took the following action(s):\n{actions_text}\n\n"
         f"The engine already resolved the outcome and these are the unchangeable facts:\n{frozen_state_text}\n\n"
     )
-    user_prompt = f"Context & Lore:\n{context_str}\n\n{frozen_block}Please generate the narration and next choices now based strictly on the frozen mechanics.{departure_directive}"
-
-    # Temperature bump for manual retries (attempt 1 is auto-recovery, attempt 2+ is manual)
-    base_temp = 0.7
-    if attempt > 1:
-        base_temp = min(1.2, base_temp + (attempt - 1) * 0.15)
+    closing_tail = game_engine.build_closing_reminder(session)
+    user_prompt = (
+        f"Context & Lore:\n{context_str}\n\n{frozen_block}"
+        f"Please generate the narration and next choices now based strictly on the frozen mechanics.{departure_directive}\n\n"
+        f"{closing_tail}"
+    )
 
     is_nsfw = uses_nsfw_model(session.get("scenario"))
+    profile_params = llm_client.resolve_narration_sampling_params(session, is_nsfw=is_nsfw)
+    # Temperature bump for manual retries (attempt 1 uses style profile temperature, attempt 2+ bumps above profile)
+    retry_temp = None if attempt <= 1 else min(1.2, round(profile_params["temperature"] + (attempt - 1) * 0.15, 2))
 
     retry_schema = DeterministicCombatNarration if bool(snapshot.get("applied", {}).get("nearby_enemies")) else DeterministicTurnNarration
 
-    if stream_callback:
-        result = await call_llm_json_stream(
-            system_prompt=sys_prompt,
-            user_prompt=user_prompt,
-            on_narrative_token=stream_callback,
-            temperature=base_temp,
-            is_nsfw=is_nsfw,
-            response_model=retry_schema,
-            system_zones=(narration_core_zone, lang_dir),
-        )
-    else:
-        result = await call_llm_json(
-            system_prompt=sys_prompt,
-            user_prompt=user_prompt,
-            temperature=base_temp,
-            is_nsfw=is_nsfw,
-            response_model=retry_schema,
-            system_zones=(narration_core_zone, lang_dir),
-        )
+    with llm_client.narration_sampling_context(session, is_nsfw=is_nsfw):
+        if stream_callback:
+            result = await call_llm_json_stream(
+                system_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                on_narrative_token=stream_callback,
+                temperature=retry_temp,
+                is_nsfw=is_nsfw,
+                response_model=retry_schema,
+                system_zones=sys_zones,
+            )
+        else:
+            result = await call_llm_json(
+                system_prompt=sys_prompt,
+                user_prompt=user_prompt,
+                temperature=retry_temp,
+                is_nsfw=is_nsfw,
+                response_model=retry_schema,
+                system_zones=sys_zones,
+            )
     
     # Convert NarrationOutcome to dict
     raw_dict = dict(result) if hasattr(result, "keys") else (result.model_dump() if hasattr(result, "model_dump") else {})
     # Strict contract: narration pass only provides prose and choices, never alters mechanics or location
     allowed_keys = {"outcome_narrative", "next_narrative", "scene_title", "next_choices", "choices", "_is_fallback_narrative"}
     out = {k: v for k, v in raw_dict.items() if k in allowed_keys}
+    split_out, split_nxt = game_engine.split_outcome_and_next_paragraphs(
+        out.get("outcome_narrative") or "",
+        out.get("next_narrative") or "",
+    )
+    if split_out != (out.get("outcome_narrative") or "").strip() or split_nxt != (out.get("next_narrative") or "").strip():
+        out["outcome_narrative"] = split_out
+        out["next_narrative"] = split_nxt
 
     lead_char_dict = actions[0].get("char", {}) if actions and isinstance(actions[0], dict) else {}
     session_for_echo = dict(session)

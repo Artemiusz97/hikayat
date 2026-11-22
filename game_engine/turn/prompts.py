@@ -309,9 +309,8 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
             if _is_social_or_non_combat_action(a, session):
                 tier_directive = (
                     f"Critical Failure (FAIL FORWARD: Severe social blunder, major embarrassment, dramatic confrontation, or critical clue blunder; flips scene stakes). "
-                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! Do NOT inflict MP loss or Gold deductions (mp_change MUST be 0, gold_change MUST be 0)! "
-                    f"Express failure through relationship affinity loss in relationship_updates (delta_score: -3 to -6), "
-                    f"reputation loss in faction_updates, NPC suspicion/walking away, narrative complications, or intense emotional mood tags in status_effects (e.g. 'Humiliated', 'Mortified', 'Flustered')."
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"Express failure through sharp conversational awkwardness, NPC suspicion or walking away, clue complications, or social friction in `@@OUTCOME` (affinity/reputation changes are resolved server-side; never output JSON fields)."
                 )
             else:
                 from skill_check import calculate_hazard_damage
@@ -324,7 +323,8 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
 
                     f"Critical Failure (FAIL FORWARD: Catastrophic disaster, major trap trigger, or sudden ambush that flips scene stakes). "
 
-                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
+                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage! "
+                    f"(Server applies this HP loss automatically; depict the physical impact qualitatively in `@@OUTCOME` without writing numeric digits in prose.)"
 
                 )
 
@@ -333,9 +333,8 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
             if _is_social_or_non_combat_action(a, session):
                 tier_directive = (
                     f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
-                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! Do NOT inflict MP loss or Gold deductions (mp_change MUST be 0, gold_change MUST be 0)! "
-                    f"Express failure through relationship affinity penalties in relationship_updates (delta_score: -1 to -3), "
-                    f"conversational awkwardness, defensive NPC reactions, clue ambiguity, or emotional mood tags in status_effects (e.g. 'Flustered', 'Awkward', 'Embarrassed')."
+                    f"[NON-COMBAT / SOCIAL RULE]: Do NOT inflict physical HP damage (hp_change MUST be 0)! "
+                    f"Express failure through conversational awkwardness, defensive NPC reactions, clue ambiguity, or social friction in `@@OUTCOME` (affinity deltas are resolved server-side; never output JSON fields)."
                 )
             else:
                 from skill_check import calculate_hazard_damage
@@ -348,7 +347,8 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
 
                     f"Failure (FAIL FORWARD: Suffer a complication, escalation, or success-at-a-cost; keep momentum moving!). "
 
-                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage!"
+                    f"[MANDATORY HAZARD MATH]: If a physical trap or hazard hits {a['char']['name']}, it MUST deal exactly {hazard_dmg} damage! "
+                    f"(Server applies this HP loss automatically; depict the physical impact qualitatively in `@@OUTCOME` without writing numeric digits in prose.)"
 
                 )
 
@@ -380,9 +380,9 @@ def _build_player_actions_text(actions: list, session: dict | None = None) -> st
 
                 f"    - Perception ({per_val}): Directly controls the quantity and thoroughness of discoveries (e.g. concealed daggers, hidden coin pouches, keys, letters, enemy equipment).\n"
 
-                f"    - Luck ({luk_val}): Directly controls item quality and rare bonus finds (e.g. pristine condition gear, rare materials, bonus currency in `gold_change`, magical/tech accessories).\n"
+                f"    - Luck ({luk_val}): Directly controls item quality and rare bonus finds (e.g. pristine condition gear, rare materials, bonus coin pouches, magical/tech accessories).\n"
 
-                f"    - Populate all scavenged items and gear in `items_gained` and currency in `gold_change`."
+                f"    - Depict the scavenged discoveries vividly in `@@OUTCOME` (loot items and currency are granted server-side; never output JSON fields or internal tags)."
 
             )
 

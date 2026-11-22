@@ -473,12 +473,20 @@ def resolve_site_harvest_action(
         world_nodes=nodes,
     )
 
+    from mechanics.social.factions import faction_bonus_active, get_anomalous_faction_state
+
+    f_state = get_anomalous_faction_state(int(session_id)) if session_id else {}
+    p_arch = str((f_state or {}).get("faction_archetype_key") or "").strip().lower()
+    synd_harvest_active = faction_bonus_active("clandestine_faction", f_state)
+
     mult = 2 if is_overdraw else 1
     gold_gain = (25 + 12 * grade) * mult
     xp_gain = (20 + 10 * grade) * mult
     if not succeeded and not is_overdraw:
         gold_gain = max(10, gold_gain // 2)
         xp_gain = max(10, xp_gain // 2)
+    if synd_harvest_active:
+        gold_gain = int(round(gold_gain * 1.25))
 
     ward_name, ward_desc = _ELEMENT_WARD_REWARDS.get(site_elem, ("Stabilization Flare", "Containment ward flare."))
     if user_id:
@@ -540,7 +548,8 @@ def resolve_site_harvest_action(
     remnant_spawned = None
     if is_overdraw:
         rem_roll = float(force_remnant_roll) if force_remnant_roll is not None else random.random()
-        if rem_roll < 0.40:
+        rem_thresh = 0.20 if faction_bonus_active("cult_faction", f_state) else 0.40
+        if rem_roll < rem_thresh:
             bp = generate_anomaly_blueprint(
                 session_id=int(session_id),
                 seed_key=f"remnant:{canon_id}:{curr_day}:{turn_number}",

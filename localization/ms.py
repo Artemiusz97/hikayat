@@ -209,6 +209,7 @@ QUEST_UI_LABELS = {
     "shortcut_active": "Pintasan Aktif",
     "bypassed": "Dipintas",
     "quest_travel_to": "Pergi ke {dest}",
+    "quest_wrap_up_and_head_to": "Tamatkan perbualan dengan {npc} dan menuju ke {dest}",
 }
 
 PACT_UI_LABELS = {
@@ -245,4 +246,13 @@ ANOMALOUS_SITE_UI_LABELS = {
     "milestone_22_reward": "Naik Taraf Resonator Medan (4 Caj Harian)",
     "milestone_36_title": "Pujian Penjaga Metropolitan (36/36 Tapak)",
     "milestone_36_reward": "+30 Rep., 5 Caj Harian & Relik Kronometer Aether Warden"
+}
+
+CROWD_DENSITY_LABELS = {
+    "quiet": "Tenang",
+    "moderate": "Sederhana",
+    "bustling": "Sibuk",
+    "packed": "Sesak",
+    "crowd_label": "Orang Ramai",
+    "nearby_bystanders": "Orang Awam Berdekatan"
 }

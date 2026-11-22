@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useId, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Flame, ShieldAlert, Sparkles, BookOpen, RefreshCw, X, Lock,
-  Zap, Heart, Coins, ArrowUpCircle, CheckCircle2, Skull, Radio
+  Zap, Heart, Coins, ArrowUpCircle, CheckCircle2, Skull, Radio, Maximize2
 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { isValidSessionId } from '../../utils/session';
+import { isTopEscapeLayer, registerEscapeLayer } from '../Common/MotionPrimitives';
 
 const TIER_ROMAN = { 1: 'I', 2: 'II', 3: 'III' };
 
@@ -50,10 +51,13 @@ const EntityContractsModal = ({
   user,
   onContractMutated,
   onSessionUpdated,
+  mode = 'modal',
+  onExpandModal = null,
 }) => {
   const { t, i18n } = useTranslation();
   const dialogRef = useRef(null);
   const titleId = useId();
+  const isDrawer = mode === 'drawer';
 
   const [activeTab, setActiveTab] = useState('active'); // 'active' | 'discover' | 'compendium'
   const [overview, setOverview] = useState(null);
@@ -61,33 +65,91 @@ const EntityContractsModal = ({
   const [busyKey, setBusyKey] = useState(null);
   const [feedback, setFeedback] = useState(null);
   const [selectedTiers, setSelectedTiers] = useState({});
+  const hasAutoSelectedTabRef = useRef(false);
+  const fetchAbortRef = useRef(null);
+  const fetchSeqRef = useRef(0);
+  const wasOpenRef = useRef(false);
 
   const sessionId = session?.id;
   const userId = user?.user_id;
   const currentLang = String(i18n?.language || 'en').slice(0, 2);
 
+  useEffect(() => {
+    if (!isOpen) {
+      hasAutoSelectedTabRef.current = false;
+      wasOpenRef.current = false;
+      if (fetchAbortRef.current) {
+        try {
+          fetchAbortRef.current.abort();
+        } catch {}
+        fetchAbortRef.current = null;
+      }
+    }
+  }, [isOpen, sessionId]);
+
   const fetchOverview = useCallback(async () => {
     if (!isValidSessionId(sessionId) || !userId) return;
+    if (fetchAbortRef.current) {
+      try {
+        fetchAbortRef.current.abort();
+      } catch {}
+    }
+    const seq = ++fetchSeqRef.current;
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     setLoading(true);
     try {
       const data = await apiCall(
-        `/api/contracts/${sessionId}?user_id=${encodeURIComponent(userId)}&lang=${encodeURIComponent(currentLang)}`
+        `/api/contracts/${sessionId}?user_id=${encodeURIComponent(userId)}&lang=${encodeURIComponent(currentLang)}`,
+        { signal: controller.signal }
       );
+      if (seq !== fetchSeqRef.current) return;
       setOverview(data);
-      if (data && Array.isArray(data.active_pacts) && data.active_pacts.length === 0 && Array.isArray(data.available_patrons) && data.available_patrons.length > 0) {
+      if (
+        !hasAutoSelectedTabRef.current &&
+        data &&
+        Array.isArray(data.active_pacts) &&
+        data.active_pacts.length === 0 &&
+        Array.isArray(data.available_patrons) &&
+        data.available_patrons.length > 0
+      ) {
+        hasAutoSelectedTabRef.current = true;
         setActiveTab((prev) => (prev === 'active' ? 'discover' : prev));
+      } else if (data) {
+        hasAutoSelectedTabRef.current = true;
       }
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || seq !== fetchSeqRef.current) return;
       setFeedback({ type: 'error', text: err.message || 'Failed to load Entity Contracts.' });
     } finally {
-      setLoading(false);
+      if (seq === fetchSeqRef.current) {
+        setLoading(false);
+        if (fetchAbortRef.current === controller) {
+          fetchAbortRef.current = null;
+        }
+      }
     }
   }, [sessionId, userId, currentLang]);
 
-  // Open/close native <dialog> strictly via .showModal() / .close() (modern-web-guidance: dialog)
+  // Open/close native <dialog> strictly via .showModal() / .close() (modal mode) or direct fetch (drawer mode)
   useEffect(() => {
+    const justOpened = isOpen && !wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (isDrawer) {
+      if (isOpen) {
+        if (justOpened) setFeedback(null);
+        fetchOverview();
+      }
+      return () => {
+        if (fetchAbortRef.current) {
+          try {
+            fetchAbortRef.current.abort();
+          } catch {}
+        }
+      };
+    }
     const dialog = dialogRef.current;
-    if (!dialog) return;
+    if (!dialog) return undefined;
 
     if (isOpen) {
       if (!dialog.open) {
@@ -98,10 +160,44 @@ const EntityContractsModal = ({
     } else if (dialog.open) {
       dialog.close();
     }
-  }, [isOpen, fetchOverview]);
+    return () => {
+      if (fetchAbortRef.current) {
+        try {
+          fetchAbortRef.current.abort();
+        } catch {}
+      }
+    };
+  }, [isDrawer, isOpen, fetchOverview, session?.turn_count, session?.contracts_sync_ts]);
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (isDrawer || !isOpen) return undefined;
+    const token = Symbol('entity-contracts-esc');
+    const unregister = registerEscapeLayer(token);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dialog = dialogRef.current;
+        if (dialog?.open) {
+          dialog.close();
+        } else if (onCloseRef.current) {
+          onCloseRef.current();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [isDrawer, isOpen]);
 
   // Fallback for browsers without native <dialog closedby="any"> support (modern-web-guidance: light-dismiss-a-dialog)
   useEffect(() => {
+    if (isDrawer) return undefined;
     const dialog = dialogRef.current;
     if (!dialog || typeof HTMLDialogElement === 'undefined') return undefined;
     if ('closedBy' in HTMLDialogElement.prototype) return undefined;
@@ -120,7 +216,7 @@ const EntityContractsModal = ({
 
     dialog.addEventListener('click', handleBackdropClick);
     return () => dialog.removeEventListener('click', handleBackdropClick);
-  }, []);
+  }, [isDrawer]);
 
   const handleDialogClose = () => {
     if (dialogRef.current) {
@@ -158,7 +254,9 @@ const EntityContractsModal = ({
       }
       if (res?.spawned_exorcism_boss) {
         setFeedback({ type: 'warn', text: res.message || 'Manifestation Exorcism Duel initiated!' });
-        if (dialogRef.current?.open) {
+        if (isDrawer) {
+          onClose?.();
+        } else if (dialogRef.current?.open) {
           dialogRef.current.close();
         }
         return;
@@ -183,19 +281,51 @@ const EntityContractsModal = ({
   const slotCapacity = Number(overview?.slot_capacity || 2);
   const remoteReady = Boolean(overview?.remote_communion_available);
 
-  return (
-    <dialog
-      ref={dialogRef}
-      closedby="any"
-      aria-labelledby={titleId}
-      onClose={handleDialogClose}
-      className="hk-contracts-dialog"
+  const contractsContent = (
+    <div
+      className={
+        isDrawer
+          ? 'flex-1 min-h-0 flex flex-col overflow-hidden text-gray-100'
+          : 'hk-acrylic border-rose-500/35 flex flex-col max-h-[calc(var(--app-height,100dvh)-1.5rem)] overflow-hidden text-gray-100'
+      }
     >
-      <div className="hk-surface bg-fantasy-panel border border-rose-900/60 rounded-2xl shadow-2xl flex flex-col max-h-[calc(var(--app-height,100dvh)-1.5rem)] overflow-hidden text-gray-100">
-        {/* Header */}
-        <div className="px-4 py-3 border-b border-rose-900/50 bg-gradient-to-r from-rose-950/50 via-fantasy-panel to-black/60 flex items-center justify-between gap-3 shrink-0">
+      {/* Header / Compact Drawer Toolbar */}
+      {isDrawer ? (
+        <div className="px-3.5 py-2 border-b border-rose-500/20 flex items-center justify-between gap-2 shrink-0">
+          <span
+            className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/35 font-mono text-[11px] text-rose-200 font-bold truncate"
+            title={t('contracts.slots_hint', 'Base 2 slots (3 when unmodified END ≥ 7)')}
+          >
+            🩸 {t('contracts.slots', 'Pact Slots')}: {slotUsed}/{slotCapacity}
+          </span>
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              type="button"
+              onClick={fetchOverview}
+              disabled={loading}
+              className="hk-icon-btn h-7 min-w-7"
+              title={t('contracts.refresh', 'Refresh')}
+              aria-label={t('contracts.refresh', 'Refresh')}
+            >
+              <RefreshCw size={14} className={loading ? 'animate-spin text-rose-300' : ''} />
+            </button>
+            {onExpandModal && (
+              <button
+                type="button"
+                onClick={onExpandModal}
+                className="hk-icon-btn h-7 min-w-7"
+                title={t('contracts.expand_modal', 'Expand Contracts Window')}
+                aria-label={t('contracts.expand_modal', 'Expand Contracts Window')}
+              >
+                <Maximize2 size={14} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="px-4 py-3 border-b border-rose-500/25 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-rose-950/80 border border-rose-600/50 grid place-items-center text-rose-300 shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-rose-500/15 border border-rose-500/40 grid place-items-center text-rose-300 shrink-0">
               <Flame size={18} />
             </div>
             <div className="min-w-0">
@@ -210,7 +340,7 @@ const EntityContractsModal = ({
 
           <div className="flex items-center gap-1.5 shrink-0">
             <span
-              className="px-2 py-1 rounded-lg bg-black/60 border border-rose-800/50 font-mono text-[11px] text-rose-200 font-bold"
+              className="px-2 py-1 rounded-lg bg-rose-500/10 border border-rose-500/35 font-mono text-[11px] text-rose-200 font-bold"
               title={t('contracts.slots_hint', 'Base 2 slots (3 when unmodified END ≥ 7)')}
             >
               🩸 {t('contracts.slots', 'Pact Slots')}: {slotUsed}/{slotCapacity}
@@ -229,7 +359,7 @@ const EntityContractsModal = ({
               <button
                 type="submit"
                 value="close"
-                autofocus="true"
+                autoFocus
                 className="hk-icon-btn"
                 aria-label={t('common.close', 'Close')}
                 title={t('common.close', 'Close')}
@@ -239,88 +369,96 @@ const EntityContractsModal = ({
             </form>
           </div>
         </div>
+      )}
 
-        {/* Status Strip & Tabs */}
-        <div className="px-4 pt-2.5 pb-2 border-b border-fantasy-border/50 bg-black/35 space-y-2 shrink-0">
-          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-            <span
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border font-medium ${
-                remoteReady
-                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
-                  : 'bg-amber-950/60 text-amber-300 border-amber-700/50'
-              }`}
-            >
-              <Radio size={11} />
-              <span>
-                {remoteReady
-                  ? t('contracts.remote_ready', 'Remote Communion Active')
-                  : t('contracts.remote_blocked', 'Sanctuary / Quarters Required for Upgrades')}
-              </span>
-            </span>
-
-            {activeGrudges.length > 0 && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-950/80 text-red-200 border border-red-600/60 font-semibold">
-                <Skull size={11} />
-                <span>{t('contracts.grudge_warning', { count: activeGrudges.length, defaultValue: `Active Grudge Nemeses: ${activeGrudges.length}` })}</span>
-              </span>
-            )}
-          </div>
-
-          <div className="hk-segmented" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'active'}
-              onClick={() => setActiveTab('active')}
-            >
-              <Flame size={13} />
-              <span className="truncate">{t('contracts.tabs.active', 'Active Covenants')} ({activePacts.length})</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'discover'}
-              onClick={() => setActiveTab('discover')}
-            >
-              <Sparkles size={13} />
-              <span className="truncate">{t('contracts.tabs.discover', 'Discover & Appraise')} ({availablePatrons.length})</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeTab === 'compendium'}
-              onClick={() => setActiveTab('compendium')}
-            >
-              <BookOpen size={13} />
-              <span className="truncate">{t('contracts.tabs.compendium', 'Patron Compendium')} ({compendium.length})</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Feedback Banner */}
-        {feedback && (
-          <div
-            className={`mx-4 mt-2.5 px-3 py-2 rounded-lg border text-xs flex items-center justify-between gap-2 shrink-0 ${
-              feedback.type === 'error'
-                ? 'bg-red-950/75 border-red-700/70 text-red-200'
-                : feedback.type === 'warn'
-                  ? 'bg-amber-950/75 border-amber-600/70 text-amber-200'
-                  : 'bg-emerald-950/75 border-emerald-700/70 text-emerald-200'
+      {/* Status Strip & Tabs */}
+      <div className={`${isDrawer ? 'px-3.5 pt-2 pb-2' : 'px-4 pt-2.5 pb-2'} border-b border-fantasy-border/35 space-y-2 shrink-0`}>
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <span
+            className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border font-medium ${
+              remoteReady
+                ? 'bg-emerald-950/60 text-emerald-300 border-emerald-700/50'
+                : 'bg-amber-950/60 text-amber-300 border-amber-700/50'
             }`}
           >
-            <span>{feedback.text}</span>
-            <button type="button" onClick={() => setFeedback(null)} className="text-gray-400 hover:text-white">
-              <X size={13} />
-            </button>
-          </div>
-        )}
+            <Radio size={11} />
+            <span>
+              {remoteReady
+                ? t('contracts.remote_ready', 'Remote Communion Active')
+                : t('contracts.remote_blocked', 'Sanctuary / Quarters Required for Upgrades')}
+            </span>
+          </span>
 
-        {/* Scrollable Content Body */}
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-3">
+          {activeGrudges.length > 0 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-950/80 text-red-200 border border-red-600/60 font-semibold">
+              <Skull size={11} />
+              <span>{t('contracts.grudge_warning', { count: activeGrudges.length, defaultValue: `Active Grudge Nemeses: ${activeGrudges.length}` })}</span>
+            </span>
+          )}
+        </div>
+
+        <div className="hk-segmented" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'active'}
+            onClick={() => setActiveTab('active')}
+            className={isDrawer ? 'text-[11px] px-1.5 min-w-0' : ''}
+          >
+            <Flame size={isDrawer ? 12 : 13} className="shrink-0" />
+            <span className="truncate">{t('contracts.tabs.active', 'Active Covenants')} ({activePacts.length})</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'discover'}
+            onClick={() => setActiveTab('discover')}
+            className={isDrawer ? 'text-[11px] px-1.5 min-w-0' : ''}
+          >
+            <Sparkles size={isDrawer ? 12 : 13} className="shrink-0" />
+            <span className="truncate">{t('contracts.tabs.discover', 'Discover & Appraise')} ({availablePatrons.length})</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'compendium'}
+            onClick={() => setActiveTab('compendium')}
+            className={isDrawer ? 'text-[11px] px-1.5 min-w-0' : ''}
+          >
+            <BookOpen size={isDrawer ? 12 : 13} className="shrink-0" />
+            <span className="truncate">{t('contracts.tabs.compendium', 'Patron Compendium')} ({compendium.length})</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Feedback Banner */}
+      {feedback && (
+        <div
+          className={`${isDrawer ? 'mx-3.5' : 'mx-4'} mt-2.5 px-3 py-2 rounded-lg border text-xs flex items-center justify-between gap-2 shrink-0 ${
+            feedback.type === 'error'
+              ? 'bg-red-950/75 border-red-700/70 text-red-200'
+              : feedback.type === 'warn'
+                ? 'bg-amber-950/75 border-amber-600/70 text-amber-200'
+                : 'bg-emerald-950/75 border-emerald-700/70 text-emerald-200'
+          }`}
+        >
+          <span>{feedback.text}</span>
+          <button type="button" onClick={() => setFeedback(null)} className="text-gray-400 hover:text-white">
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Scrollable Content Body */}
+      <div
+        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar ${
+          isDrawer ? '[scrollbar-gutter:stable] p-3.5 space-y-3' : 'p-4 space-y-3'
+        }`}
+      >
           {/* TAB 1: ACTIVE COVENANTS */}
           {activeTab === 'active' && (
             activePacts.length === 0 ? (
-              <div className="p-6 rounded-xl bg-black/40 border border-dashed border-rose-900/50 text-center space-y-2">
+              <div className="p-6 text-center space-y-2">
                 <Flame size={26} className="mx-auto text-rose-400/50" />
                 <p className="text-xs text-gray-300 max-w-lg mx-auto leading-relaxed">
                   {t('contracts.no_active', 'No active Entity Contracts bound right now.')}
@@ -357,8 +495,8 @@ const EntityContractsModal = ({
                     key={pact.contract_key}
                     className={`rounded-xl border p-3.5 space-y-2.5 transition-colors ${
                       hasBreach
-                        ? 'bg-red-950/25 border-red-600/70'
-                        : 'bg-black/50 border-rose-900/50 hover:border-rose-700/70'
+                        ? 'bg-red-500/10 border-red-500/50'
+                        : 'bg-gray-500/5 border-rose-500/25 hover:border-rose-500/45'
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -414,8 +552,8 @@ const EntityContractsModal = ({
                     )}
 
                     {/* Zero-MP Combat Skill + Field Utility */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                      <div className="p-2.5 rounded-lg bg-black/60 border border-fantasy-border/50 space-y-1">
+                    <div className={`grid gap-2.5 text-xs ${isDrawer ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
+                      <div className="p-2.5 rounded-xl bg-gray-500/10 border border-fantasy-border/35 space-y-1">
                         <div className="flex items-center justify-between gap-1.5">
                           <span className="font-bold text-rose-200 truncate">
                             {pact.combat_skill?.emoji || '🩸'} {pact.combat_skill?.name || 'Covenant Invocation'}
@@ -443,7 +581,7 @@ const EntityContractsModal = ({
                         </p>
                       </div>
 
-                      <div className="p-2.5 rounded-lg bg-black/60 border border-fantasy-border/50 space-y-1">
+                      <div className="p-2.5 rounded-xl bg-gray-500/10 border border-fantasy-border/35 space-y-1">
                         <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-300 font-bold block">
                           ✨ {t('contracts.passive_label', 'Field Utility')}: {pact.field_utility?.name || 'Pact Passive'}
                         </span>
@@ -539,7 +677,7 @@ const EntityContractsModal = ({
               )}
 
               {availablePatrons.length === 0 ? (
-                <div className="p-6 rounded-xl bg-black/40 border border-dashed border-fantasy-border/60 text-center space-y-2">
+                <div className="p-6 text-center space-y-2">
                   <Sparkles size={26} className="mx-auto text-gray-500" />
                   <p className="text-xs text-gray-400 max-w-lg mx-auto leading-relaxed">
                     {t('contracts.no_available', 'No Patron channels reachable at your current coordinates.')}
@@ -559,7 +697,7 @@ const EntityContractsModal = ({
                   return (
                     <div
                       key={pid}
-                      className="rounded-xl bg-black/50 border border-fantasy-border/70 hover:border-rose-700/60 p-3.5 space-y-2.5 transition-colors"
+                      className="rounded-xl bg-gray-500/5 border border-fantasy-border/35 hover:border-rose-500/45 p-3.5 space-y-2.5 transition-colors"
                     >
                       <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="space-y-0.5 min-w-0">
@@ -603,14 +741,14 @@ const EntityContractsModal = ({
                         <p className="text-xs text-gray-300 leading-relaxed">{offer.summary}</p>
                       )}
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
-                        <div className="p-2 rounded-lg bg-black/60 border border-fantasy-border/50">
+                      <div className={`grid gap-2.5 text-xs ${isDrawer ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
+                        <div className="p-2.5 rounded-xl bg-gray-500/10 border border-fantasy-border/35">
                           <span className="font-bold text-rose-200 block">
                             {offer.combat_skill?.emoji || '🩸'} {offer.combat_skill?.name} ({t('contracts.zero_mp', '0 MP')})
                           </span>
                           <span className="text-[11px] text-gray-400">{offer.combat_skill?.description}</span>
                         </div>
-                        <div className="p-2 rounded-lg bg-black/60 border border-fantasy-border/50">
+                        <div className="p-2.5 rounded-xl bg-gray-500/10 border border-fantasy-border/35">
                           <span className="font-bold text-cyan-200 block">
                             ✨ {offer.field_utility?.name || t('contracts.passive_label', 'Field Utility')}
                           </span>
@@ -688,21 +826,21 @@ const EntityContractsModal = ({
           {/* TAB 3: ACCOUNT-WIDE PATRON COMPENDIUM */}
           {activeTab === 'compendium' && (
             compendium.length === 0 ? (
-              <div className="p-6 rounded-xl bg-black/40 border border-dashed border-fantasy-border/60 text-center space-y-2">
+              <div className="p-6 text-center space-y-2">
                 <BookOpen size={26} className="mx-auto text-gray-500" />
                 <p className="text-xs text-gray-400">
                   {t('contracts.no_compendium', 'No Entity Patrons recorded in your account archive yet.')}
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className={`grid gap-2.5 ${isDrawer ? 'grid-cols-1' : 'grid-cols-1 sm:grid-cols-2'}`}>
                 {compendium.map((entry) => {
                   const elemCls = ELEMENT_BADGE[String(entry.element || 'aether').toLowerCase()] || ELEMENT_BADGE.aether;
                   const maxTier = Number(entry.max_tier_reached || 1);
                   return (
                     <div
                       key={entry.patron_id}
-                      className="p-3 rounded-xl bg-black/50 border border-fantasy-border/60 space-y-1.5"
+                      className="p-3 rounded-xl bg-gray-500/5 border border-fantasy-border/35 space-y-1.5"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-rpg font-bold text-sm text-gray-100 truncate">
@@ -742,7 +880,22 @@ const EntityContractsModal = ({
             )
           )}
         </div>
-      </div>
+    </div>
+  );
+
+  if (isDrawer) {
+    return isOpen ? contractsContent : null;
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      {...{ closedby: 'any' }}
+      aria-labelledby={titleId}
+      onClose={handleDialogClose}
+      className="hk-contracts-dialog"
+    >
+      {contractsContent}
     </dialog>
   );
 };

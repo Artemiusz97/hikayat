@@ -40,22 +40,32 @@ const transitionTheme = (id, origin) => {
   }
   // Automatic (scenario-driven) changes: gentle default crossfade, no reveal.
   if (!origin) {
-    document.startViewTransition(() => paintTheme(id));
+    try {
+      document.startViewTransition(() => paintTheme(id));
+    } catch {
+      paintTheme(id);
+      root.classList.remove('theme-transitioning');
+    }
     return;
   }
   const { x, y } = origin;
   const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
   root.classList.add('theme-transitioning');
-  const vt = document.startViewTransition(() => paintTheme(id));
-  vt.ready
-    .then(() => {
-      root.animate(
-        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
-        { duration: 650, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
-      );
-    })
-    .catch(() => {});
-  vt.finished.finally(() => root.classList.remove('theme-transitioning'));
+  try {
+    const vt = document.startViewTransition(() => paintTheme(id));
+    vt.ready
+      .then(() => {
+        root.animate(
+          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+          { duration: 650, easing: 'cubic-bezier(0.22, 1, 0.36, 1)', pseudoElement: '::view-transition-new(root)' }
+        );
+      })
+      .catch(() => {});
+    vt.finished.finally(() => root.classList.remove('theme-transitioning'));
+  } catch {
+    paintTheme(id);
+    root.classList.remove('theme-transitioning');
+  }
 };
 
 export const ThemeProvider = ({ children }) => {

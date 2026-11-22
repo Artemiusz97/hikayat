@@ -1,7 +1,10 @@
-import { useState, useEffect, useMemo, useId } from 'react';
-import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone } from 'lucide-react';
+import { useState, useEffect, useMemo, useId, useRef } from 'react';
+import { copyToClipboard } from '../../utils/clipboard';
+import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, Briefcase, Landmark, Smartphone, Eye, KeyRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../../api/client';
+import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
+import { FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS } from '../../utils/anatomyOptions';
 
 const STAT_KEYS = [
   { key: 'str', code: 'STR', label: 'Strength' },
@@ -21,45 +24,6 @@ function computeClassPreset(className = '', classDesc = '') {
   if (/bard|diplomat|idol|president|noble|social|merchant|cleric|healer|priest|ritualist|broker|exorcist|escort|containment agent|containment specialist/.test(text)) return { str: 1, per: 1, end: 2, cha: 4, int: 2, agi: 1, luk: 1 };
   return { str: 3, per: 1, end: 3, cha: 1, int: 1, agi: 2, luk: 1 };
 }
-
-const FEMALE_TEXTURE_OPTIONS = [
-  { value: 'Perky & High-Set', label: 'Perky & High-Set' },
-  { value: 'Pillowy Soft & Yielding', label: 'Pillowy Soft & Yielding' },
-  { value: 'Firm & Toned', label: 'Firm & Toned' },
-  { value: 'Smooth & Supple', label: 'Smooth & Supple' },
-  { value: 'Heavy & Plush', label: 'Heavy & Plush' },
-  { value: 'Bouncy & Sensitive', label: 'Bouncy & Sensitive' },
-  { value: 'Tender & Delicate', label: 'Tender & Delicate' },
-  { value: 'Shapely Teardrop', label: 'Shapely Teardrop' },
-  { value: 'Compact & Dense', label: 'Compact & Dense' },
-  { value: 'Sensitive & Responsive', label: 'Sensitive & Responsive' },
-  { value: 'Warm & Supple', label: 'Warm & Supple' },
-  { value: 'Soft & Downy Chest Fur', label: 'Soft & Downy Chest Fur (Beastfolk)' },
-  { value: 'Silky Fur-Rimmed', label: 'Silky Fur-Rimmed (Beastfolk)' },
-  { value: 'Velvety Underbelly Down', label: 'Velvety Underbelly Down (Beastfolk)' },
-  { value: 'Fluffy Plush-Accented', label: 'Fluffy Plush-Accented (Beastfolk)' },
-  { value: 'Silky Warm with Smooth Micro-Scales', label: 'Silky Warm with Smooth Micro-Scales (Scaly/Draconic)' },
-  { value: 'Supple with Shimmering Scale Borders', label: 'Supple with Shimmering Scale Borders (Scaly/Draconic)' },
-  { value: 'Sleek & Supple Drake-Contour', label: 'Sleek & Supple Drake-Contour (Scaly/Draconic)' },
-  { value: 'Downy Feather-Lined', label: 'Downy Feather-Lined (Avian/Winged)' },
-  { value: 'Light & Buoyant', label: 'Light & Buoyant (Avian/Winged)' },
-  { value: 'Velvety Plumage Accents', label: 'Velvety Plumage Accents (Avian/Winged)' },
-  { value: 'Glistening & Ultra-Smooth', label: 'Glistening & Ultra-Smooth (Aquatic)' },
-];
-
-const MALE_TEXTURE_OPTIONS = [
-  { value: 'Veined & Firm', label: 'Veined & Firm' },
-  { value: 'Smooth & Heavy', label: 'Smooth & Heavy' },
-  { value: 'Toned & Athletic', label: 'Toned & Athletic' },
-  { value: 'Warm & Pulsing', label: 'Warm & Pulsing' },
-  { value: 'Slender & Ultra-Sensitive', label: 'Slender & Ultra-Sensitive' },
-  { value: 'Dense & Formidable', label: 'Dense & Formidable' },
-  { value: 'Balanced & Firm', label: 'Balanced & Firm' },
-  { value: 'Soft Fur-Ringed Base', label: 'Soft Fur-Ringed Base (Beastfolk)' },
-  { value: 'Silky Fur-Dusted & Resilient', label: 'Silky Fur-Dusted & Resilient (Beastfolk)' },
-  { value: 'Sleek Scaled Base & Firm', label: 'Sleek Scaled Base & Firm (Scaly/Draconic)' },
-  { value: 'Sturdy Draconic Build', label: 'Sturdy Draconic Build (Scaly/Draconic)' },
-];
 
 const BREAST_SIZE_LABELS = {
   flat: ['character.breast_flat', 'Flat (AA-Cup / Barely There)'],
@@ -114,6 +78,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [mode, setMode] = useState('solo'); // solo, turn, sync
   const [shareLink, setShareLink] = useState('');
   const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef(null);
+  useEffect(() => () => {
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+  }, []);
 
   const isNsfw = useMemo(() => {
     if (scenario === 'nsfw_high_school_drama' || String(scenario).toLowerCase().includes('nsfw')) return true;
@@ -173,7 +141,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       
       // Fetch share link in background
       apiCall('/api/server/public-url').then(res => {
-        if (res.url) setShareLink(res.url);
+        const publicUrl = res?.public_url || res?.url || '';
+        if (publicUrl) setShareLink(publicUrl);
       }).catch(() => {});
     }
   }, [isOpen, character]);
@@ -182,20 +151,37 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
 
   useEffect(() => {
     if (!isOpen) return;
+    let cancelled = false;
+    const controller = new AbortController();
     setLoading(true);
     const query = scenario === 'custom' 
       ? `/api/class-templates?scenario=custom&tags=${encodeURIComponent(tagsParam || 'fantasy')}&lang=${encodeURIComponent(activeUiLang)}`
       : `/api/class-templates?scenario=${encodeURIComponent(scenario || 'fantasy')}&lang=${encodeURIComponent(activeUiLang)}`;
 
-    apiCall(query).then(data => {
-      setTemplates(data);
-      const activeClassesObj = data?.classes || {};
-      const classNames = Object.keys(activeClassesObj);
-      if (classNames.length > 0 && !classNames.includes(charClass)) {
-        setCharClass(classNames[0]);
-      }
-      setRegeneratedLoadout(null);
-    }).finally(() => setLoading(false));
+    apiCall(query, { signal: controller.signal })
+      .then((data) => {
+        if (cancelled) return;
+        setTemplates(data);
+        const activeClassesObj = data?.classes || {};
+        const classNames = Object.keys(activeClassesObj);
+        if (classNames.length > 0 && !classNames.includes(charClass)) {
+          setCharClass(classNames[0]);
+        }
+        setRegeneratedLoadout(null);
+      })
+      .catch((err) => {
+        if (err?.name === 'AbortError' || err?.isUserAbort || cancelled) return;
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [isOpen, scenario, tagsParam, activeUiLang]);
 
   const isAnomalousHighSchool = useMemo(() => {
@@ -249,28 +235,42 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       Icon: Landmark,
       isDefault: true,
       name: t('embark.faction_public_name', 'Public Containment Agency'),
-      desc: t('embark.faction_public_desc', 'Daily Salary (50G–300G) • 50% HQ Shop Discount • Mandatory Daily Bounty • 0G/0 Loot on Agency Bounties • Starts at Bureau HQ'),
+      desc: t('embark.faction_public_desc', 'Daily Salary (₵50–₵300) • 50% HQ Shop Discount • Mandatory Daily Bounty • ₵0/0 Loot on Agency Bounties • Starts at Bureau HQ'),
     },
     {
       id: 'private_agency_1',
       Icon: Building2,
       isDefault: false,
       name: t('embark.faction_private_name', 'Corporate Containment Conglomerate'),
-      desc: t('embark.faction_private_desc', 'Keep 100% Bounty Gold & Loot • Special Ordnance Vault (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Tower HQ'),
+      desc: t('embark.faction_private_desc', 'Keep 100% Bounty Credits & Loot • Special Ordnance Vault (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Tower HQ'),
     },
     {
       id: 'private_agency_2',
       Icon: Briefcase,
       isDefault: false,
       name: t('embark.faction_private_2_name', 'Independent Private Agency'),
-      desc: t('embark.faction_private_2_desc', 'Keep 100% Bounty Gold & Loot • Custom Gunsmith & Broker Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Field Office HQ'),
+      desc: t('embark.faction_private_2_desc', 'Keep 100% Bounty Credits & Loot • Custom Gunsmith & Broker Armory (+35% Price) • Public Contracts Allowed • Mandatory Daily Bounty • Starts at Field Office HQ'),
     },
     {
       id: 'monastic_order',
       Icon: Sparkles,
       isDefault: false,
       name: t('embark.faction_monastic_name', 'Monastic Shrine Order'),
-      desc: t('embark.faction_monastic_desc', '2–3 Free Sacred Items Daily • Keep Combat Loot (0G Order Fee) • Free Temple Healing • Mandatory Daily Bounty • Starts at Grand Temple'),
+      desc: t('embark.faction_monastic_desc', '2–3 Free Sacred Items Daily • Keep Combat Loot (₵0 Order Fee) • Free Temple Healing • Mandatory Daily Bounty • Starts at Grand Temple'),
+    },
+    {
+      id: 'cult_faction',
+      Icon: Eye,
+      isDefault: false,
+      name: t('embark.faction_cult_name', 'Occult Cult Sanctum'),
+      desc: t('embark.faction_cult_desc', '0.85x Reliquary Tithe • -50% Pact Offering Costs • +1 Daily Resonator Charge • Free Apotheca Extraction • Blacklisted from Licensed Agencies • Starts at Sanctum Threshold'),
+    },
+    {
+      id: 'clandestine_faction',
+      Icon: KeyRound,
+      isDefault: false,
+      name: t('embark.faction_clandestine_name', 'Clandestine Relic Syndicate'),
+      desc: t('embark.faction_clandestine_desc', '+35% Syndicate Bounty Cash • +40% Fence Loot Resale • Auto-Revealed Anomaly Dossiers • +25% Harvest Credits • Blacklisted from Licensed Agencies • Starts at Vault Threshold'),
     },
     {
       id: 'freelancer',
@@ -440,12 +440,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     setCustomTags(prev => prev.includes(tagKey) ? prev.filter(t => t !== tagKey) : [...prev, tagKey]);
   };
 
-  const copyLink = () => {
+  const copyLink = async () => {
     if (!shareLink) return;
-    navigator.clipboard.writeText(shareLink).then(() => {
+    if (await copyToClipboard(shareLink)) {
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    });
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   const submitEmbark = async () => {
@@ -517,35 +518,38 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     }
   };
 
-  if (!isOpen) return null;
-
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4">
-      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm" onClick={onClose} />
-
-      <div className="relative w-full max-w-4xl bg-fantasy-panel border border-fantasy-border rounded-xl shadow-2xl overflow-hidden z-10 flex flex-col max-h-[calc(var(--app-height,100dvh)-2rem)]">
-        <div className="p-4 border-b border-fantasy-border bg-black/50 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-fantasy-accent/15 border border-fantasy-accent/40 text-fantasy-accent">
+    <AcrylicModal
+      isOpen={isOpen}
+      onClose={onClose}
+      label={t('embark.wizard_title', 'Embarkation Wizard')}
+      maxWidthClass="max-w-4xl"
+      zIndexClass="z-[60]"
+    >
+        <div className="px-4 py-3.5 border-b border-fantasy-border/35 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="p-2 rounded-xl bg-fantasy-accent/15 border border-fantasy-accent/40 text-fantasy-accent shrink-0">
               <Compass size={18} />
             </div>
-            <div>
-              <h2 className="font-rpg font-bold text-lg text-fantasy-accent">{t('embark.wizard_title', 'Embarkation Wizard')}</h2>
+            <div className="min-w-0">
+              <h2 className="font-rpg font-bold text-lg text-fantasy-accent truncate">{t('embark.wizard_title', 'Embarkation Wizard')}</h2>
               <p className="text-xs text-gray-400">Step {step} of 2 • Configure Your Journey</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-white rounded"><X size={18} /></button>
+          <MotionButton onClick={onClose} aria-label={t('common.close', 'Close')} className="hk-icon-btn h-8 min-w-8 shrink-0">
+            <X size={18} />
+          </MotionButton>
         </div>
 
         {error && (
-          <div className="mx-4 mt-3 p-2 bg-red-900/50 text-red-200 border border-red-700 text-xs rounded">{error}</div>
+          <div className="mx-4 mt-3 p-2.5 bg-red-500/15 text-red-200 border border-red-500/40 text-xs rounded-xl shrink-0">{error}</div>
         )}
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain custom-scrollbar px-5 py-2">
           {step === 1 && (
-            <>
+            <div>
               {/* Realm Selection */}
-              <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4 space-y-3">
+              <section className="hk-flat-section space-y-3">
                 <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">{t('embark.origin_realm', '1. Origin Realm')}</h3>
                 <select
                   value={activeFamily}
@@ -873,8 +877,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
               </section>
 
               {/* Class & Stats Reallocation */}
-              <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4 space-y-3">
+              <section className="hk-flat-section grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-3 min-w-0">
                    <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100 mb-2">{t('embark.class_and_loadout', '2. Class & Loadout')}</h3>
                    <select value={charClass} onChange={(e) => setCharClass(e.target.value)} className="w-full bg-fantasy-dark border border-fantasy-border p-2 rounded text-sm text-gray-100">
                      {Object.keys(activeClassesMap).map(cls => <option key={cls} value={cls}>{activeClassesMap[cls]?.display_name || cls}</option>)}
@@ -948,10 +952,10 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                 </div>
 
                 {/* Stats Reallocation */}
-                <div className="bg-black/30 border border-fantasy-border/80 rounded-lg p-4">
+                <div className="min-w-0 md:border-l md:border-fantasy-border/35 md:pl-5">
                   <div className="flex items-center justify-between mb-3">
                     <h3 className="text-xs uppercase tracking-wider font-bold text-gray-100">{t('embark.free_stats', '3. Free Stats Allocation')}</h3>
-                    <span className="px-2 py-1 bg-black text-fantasy-accent border border-fantasy-border text-[10px] font-mono rounded">{pointsRemaining} pts left</span>
+                    <span className="px-2 py-0.5 bg-gray-500/15 text-fantasy-accent border border-fantasy-border/40 text-[10px] font-mono rounded-lg">{pointsRemaining} pts left</span>
                   </div>
                   
                   <button onClick={handleApplyPreset} className="w-full mb-3 py-1.5 rounded border border-fantasy-accent/50 text-fantasy-accent text-[11px] bg-fantasy-accent/10 hover:bg-fantasy-accent/20 transition-colors">
@@ -972,7 +976,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                         <div className="flex items-center gap-1.5">
                           <span className="text-xs font-bold text-gray-300 w-10">{s.code}</span>
                           {isSynergyStat && (
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono uppercase">
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-mono uppercase">
                               ⚡ {t('awakened.synergy_badge', 'Medium Synergy')}
                             </span>
                           )}
@@ -991,7 +995,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
 
               {/* Optional / NSFW Intimate Physical Anatomy Customizer */}
               {isNsfw && (
-                <section className="bg-pink-950/20 border border-pink-800/60 rounded-lg p-4 space-y-3">
+                <section className="hk-flat-section space-y-3">
                   <div className="flex items-center justify-between border-b border-pink-900/50 pb-2">
                     <div className="flex items-center gap-2">
                       <span className="text-base">🔞</span>
@@ -1100,38 +1104,38 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                   )}
                 </section>
               )}
-            </>
+            </div>
           )}
 
           {step === 2 && (
-            <div className="space-y-6">
-              <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-5">
+            <div>
+              <section className="hk-flat-section">
                  <h3 className="text-sm uppercase tracking-wider font-bold text-fantasy-accent mb-4 text-center">{t('embark.select_adventure_mode', 'Select Adventure Mode')}</h3>
-                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                    {[
                      { id: 'solo', name: 'Solo Adventure', desc: 'Play alone, offline or online.' },
                      { id: 'turn', name: 'Multiplayer (Turn-Based)', desc: 'Take turns with friends.' },
                      { id: 'sync', name: 'Multiplayer (Sync)', desc: 'Real-time chaotic actions.' }
                    ].map(m => (
-                     <div key={m.id} onClick={() => setMode(m.id)} className={`p-4 rounded-lg border cursor-pointer transition-all ${mode === m.id ? 'bg-fantasy-accent/20 border-fantasy-accent' : 'bg-black/50 border-fantasy-border hover:border-gray-500'}`}>
+                     <MotionButton key={m.id} onClick={() => setMode(m.id)} className={`p-4 rounded-xl border text-left transition-all ${mode === m.id ? 'bg-fantasy-accent/20 border-fantasy-accent' : 'bg-gray-500/10 border-fantasy-border/40 hover:border-fantasy-border'}`}>
                        <div className="font-bold text-gray-100">{m.name}</div>
                        <div className="text-[11px] text-gray-400 mt-1">{m.desc}</div>
-                     </div>
+                     </MotionButton>
                    ))}
                  </div>
               </section>
 
               {mode !== 'solo' && shareLink && (
-                <section className="bg-black/30 border border-fantasy-border/80 rounded-lg p-5 text-center">
+                <section className="hk-flat-section text-center">
                   <h4 className="text-xs font-bold text-gray-300 mb-2">{t('embark.invite_friends', 'Invite Friends (Cross-Device Link)')}</h4>
                   <p className="text-[11px] text-gray-400 mb-3">{t('embark.invite_friends_desc', 'Share this public link so anyone can join your adventure!')}</p>
                   <div className="flex items-center justify-center gap-2">
-                    <code className="px-3 py-1.5 bg-black border border-fantasy-border text-fantasy-accent rounded text-sm select-all">
+                    <code className="px-3 py-1.5 bg-gray-500/15 border border-fantasy-border/50 text-fantasy-accent rounded-lg text-sm select-all break-all">
                       {shareLink}
                     </code>
-                    <button onClick={copyLink} className="p-1.5 rounded bg-fantasy-dark border border-fantasy-border hover:text-white transition-colors">
+                    <MotionButton onClick={copyLink} className="p-1.5 rounded-lg bg-gray-500/15 border border-fantasy-border/50 hover:text-white transition-colors">
                       {copied ? <Check size={16} className="text-green-400" /> : <Link size={16} />}
-                    </button>
+                    </MotionButton>
                   </div>
                 </section>
               )}
@@ -1139,24 +1143,23 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
           )}
         </div>
 
-        <div className="p-4 border-t border-fantasy-border bg-black/40 flex justify-between shrink-0">
+        <div className="px-4 py-3 border-t border-fantasy-border/35 flex justify-between shrink-0">
           {step === 2 ? (
-            <button onClick={() => setStep(1)} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">{t('common.back', 'Back')}</button>
+            <MotionButton onClick={() => setStep(1)} className="px-4 py-2 border border-fantasy-border/60 text-xs rounded-lg text-gray-300 hover:bg-gray-500/10">{t('common.back', 'Back')}</MotionButton>
           ) : (
-            <button onClick={onClose} className="px-4 py-2 border border-fantasy-border text-xs rounded text-gray-300">{t('common.cancel', 'Cancel')}</button>
+            <MotionButton onClick={onClose} className="px-4 py-2 border border-fantasy-border/60 text-xs rounded-lg text-gray-300 hover:bg-gray-500/10">{t('common.cancel', 'Cancel')}</MotionButton>
           )}
 
           {step === 1 ? (
-             <button onClick={() => setStep(2)} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded hover:bg-amber-400 transition-colors">{t('embark.next_step', 'Next Step')}</button>
+             <MotionButton onClick={() => setStep(2)} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded-lg hover:bg-amber-400 transition-colors">{t('embark.next_step', 'Next Step')}</MotionButton>
           ) : (
-             <button onClick={submitEmbark} disabled={submitting} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded flex items-center gap-2 hover:bg-amber-400 transition-colors">
+             <MotionButton onClick={submitEmbark} disabled={submitting} className="px-5 py-2 bg-fantasy-accent text-black font-bold text-xs uppercase rounded-lg flex items-center gap-2 hover:bg-amber-400 transition-colors">
                <Play size={14} />
                {submitting ? 'Embarking...' : 'Start Adventure'}
-             </button>
+             </MotionButton>
           )}
         </div>
-      </div>
-    </div>
+    </AcrylicModal>
   );
 };
 
