@@ -9,18 +9,18 @@ Whenever you add or alter any table, column, or query helper under `db/`, comple
 
 ---
 
-## 1. Schema Definition & Idempotent Migration (`db/core.py`)
+## 1. Schema Definition & Idempotent Migration (`db/core/`)
 
-1. **Fresh DB Schema**: Add new tables (`CREATE TABLE IF NOT EXISTS ...`), columns, and indexes directly to `SCHEMA` in `db/core.py`. Because fresh databases use a `PRAGMA user_version` fast-path (`CURRENT_SCHEMA_VERSION`), `SCHEMA` must stay 100% identical to the result of running `SCHEMA_MIGRATIONS` (enforced by `test_fresh_schema_matches_migrated_schema_parity` in `tests/test_codebase_contracts.py`).
-2. **Existing DB Migration**: Append a versioned tuple to `SCHEMA_MIGRATIONS` in `db/core.py` (which advances `CURRENT_SCHEMA_VERSION`) and ensure any structural/data migration helper is idempotent when invoked inside `run_schema_migrations(conn)`.
+1. **Fresh DB Schema**: Add new tables (`CREATE TABLE IF NOT EXISTS ...`), columns, and indexes directly to `SCHEMA` in `db/core/schema.py`. Because fresh databases use a `PRAGMA user_version` fast-path (`CURRENT_SCHEMA_VERSION`), `SCHEMA` must stay 100% identical to the result of running `SCHEMA_MIGRATIONS` (enforced by `test_fresh_schema_matches_migrated_schema_parity` in `tests/test_codebase_contracts.py`).
+2. **Existing DB Migration**: Append a versioned tuple to `SCHEMA_MIGRATIONS` in `db/core/migrations.py` (which advances `CURRENT_SCHEMA_VERSION`) and ensure any structural/data migration helper in `db/core/migrations_backfills.py` is idempotent when invoked inside `run_schema_migrations(conn)`.
 3. **Indexes**: Add `CREATE INDEX IF NOT EXISTS idx_<table>_<cols>` to both `SCHEMA` and the migration tuple for all `(session_id, ...)` and `(character_id, ...)` lookup paths to avoid full-table scans.
 
 ---
 
-## 2. Declarative Session Registry & Purge Wiring (`db/registry.py`, `db/core.py`)
+## 2. Declarative Session Registry & Purge Wiring (`db/registry.py`, `db/core/`)
 
 If the table is scoped to an adventure session (`session_id` column) — or if adding a non-session global table:
-- Register every `session_id` table as a `SessionTableSpec` entry in `SESSION_TABLE_REGISTRY` inside `db/registry.py` (`db/core.py` derives `SESSION_CHILD_TABLES` directly from non-optional registry entries). Global tables without `session_id` must be listed in `GLOBAL_TABLES` (`db/registry.py`).
+- Register every `session_id` table as a `SessionTableSpec` entry in `SESSION_TABLE_REGISTRY` inside `db/registry.py` (`db/core/schema.py` derives `SESSION_CHILD_TABLES` directly from non-optional registry entries). Global tables without `session_id` must be listed in `GLOBAL_TABLES` (`db/registry.py`).
 - Set `purge_order` appropriately (lower deletes first; e.g. `contacts` at `20` before `households` at `80`), and verify `_delete_session_child_records_only(conn, session_id)` and `prune_orphaned_and_finished_sessions()` delete cleanly without foreign-key ordering errors.
 - If the table stores turn-indexed snapshots that grow every turn, set `snapshot_table_turn_col` and `snapshot_keep_last` (and `save_row_limit_by_turn` / `save_order_col` for checkpoint exports) so `db.prune_session_turn_snapshots()` trims it automatically.
 
@@ -50,11 +50,11 @@ If the table is scoped to an adventure session (`session_id` column) — or if a
 ## 5. Facade Re-Exports & Async Concurrency Hygiene
 
 1. **Package Root Facade (`db/__init__.py`)**:
-   - Every new public function added to `db/core.py`, `db/sessions.py`, `db/saves.py`, `db/social.py`, `db/memory.py`, `db/world.py`, or `db/inventory.py` **must** be re-exported in `db/__init__.py` so `db.<fn>()` passes `tests/test_codebase_contracts.py`.
+   - Every new public function added to `db/core/`, `db/sessions.py`, `db/saves.py`, `db/social/`, `db/memory.py`, `db/world.py`, or `db/inventory.py` **must** be re-exported in `db/__init__.py` so `db.<fn>()` passes `tests/test_codebase_contracts.py`.
 2. **Non-Blocking Async Access, Read Envelopes & Savepoint Safety**:
    - Inside `async def` functions (`api/`, `cogs/`, `services/`, `game_engine/turn/`), always execute blocking `db.*` calls via `await adb(...)` using coarse `db.ReadUnitOfWork()` (multi-read snapshots) or `db.UnitOfWork()` (multi-write mutations) closures rather than per-query event-loop hops. Only pure in-memory helpers listed in `db.PURE_IN_MEMORY_DB_HELPERS` may be called directly inside `async def` (enforced by `sync-db-in-async` in `scripts/static_check.py`).
    - Lazy schema helpers must guard repeated runs with `db.ensure_table_group_once()`.
-   - Never call raw `conn.commit()` outside `db/core.py` (would break active SQLite savepoints; enforced by `raw-conn-commit-outside-core`), and register every `session_id` table in `SCHEMA` inside `db/registry.py` (enforced by `unregistered-session-table`).
+   - Never call raw `conn.commit()` outside `db/core/` (would break active SQLite savepoints; enforced by `raw-conn-commit-outside-core`), and register every `session_id` table in `SCHEMA` inside `db/registry.py` (enforced by `unregistered-session-table`).
 
 ---
 

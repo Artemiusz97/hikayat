@@ -882,9 +882,9 @@ def _is_sqlite_conn_producer(expr: Optional[ast.AST]) -> bool:
 
 
 def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
-    """Flag raw SQLite `conn.commit()` outside `db/core.py` (would release active savepoints)."""
+    """Flag raw SQLite `conn.commit()` outside `db/core` (would release active savepoints)."""
     norm_rel = rel.replace("\\", "/")
-    if norm_rel == "db/core.py":
+    if norm_rel == "db/core.py" or norm_rel.startswith("db/core/"):
         return []
     try:
         source = path.read_text(encoding="utf-8")
@@ -1032,8 +1032,15 @@ def analyze_unregistered_session_tables(
     registry_path: Optional[Path] = None,
     rel: str = "db/core.py",
 ) -> List[Finding]:
-    """Flag any SCHEMA table in db/core.py with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
-    core_p = db_core_path or (ROOT / "db" / "core.py")
+    """Flag any SCHEMA table in db/core/schema.py (or db/core.py) with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
+    schema_pkg_p = ROOT / "db" / "core" / "schema.py"
+    if db_core_path is not None:
+        core_p = db_core_path
+    elif schema_pkg_p.exists():
+        core_p = schema_pkg_p
+        rel = "db/core/schema.py"
+    else:
+        core_p = ROOT / "db" / "core.py"
     reg_p = registry_path or (ROOT / "db" / "registry.py")
     if not core_p.exists() or not reg_p.exists():
         return []
@@ -1505,7 +1512,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         findings.extend(analyze_raw_conn_commit(p, rel))
         findings.extend(analyze_unused_imports(p, rel))
         findings.extend(analyze_shadowing_local_imports(p, rel))
-    if any(r.replace("\\", "/") in ("db/core.py", "db/registry.py") for r in rels):
+    if any(r.replace("\\", "/") in ("db/core.py", "db/core/schema.py", "db/registry.py") for r in rels):
         findings.extend(analyze_unregistered_session_tables())
     if not args.no_pylint:
         findings.extend(run_pylint(rels))

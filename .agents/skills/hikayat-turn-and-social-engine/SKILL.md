@@ -46,7 +46,7 @@ Use this runbook when working on `services/turn_service.py`, `game_engine/`, `mo
 
 Hikayat persists complex social/world state in normalized SQLite tables rather than fragile JSON blobs (verified by `tests/test_five_normalized_models_cutover.py`):
 
-1. **Normalized Household & Genealogy Model** (`mechanics/social/genealogy.py`, `db/social.py`)
+1. **Normalized Household & Genealogy Model** (`mechanics/social/genealogy.py`, `db/social/households_factions.py`)
    - Tracks canonical family trees (parents, siblings, spouses), shared residences, and household concurrency.
 2. **Normalized Intimacy Ledger & Excitement Model** (`mechanics/social/persona/intimacy/ledger.py`, `mechanics/social/intimate_excitement.py`)
    - Records structured intimate events (`record_intimate_event`, `get_intimate_events`), experience transitions, and immutable appearance profiles (`appearance.py`).
