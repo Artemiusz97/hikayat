@@ -15,7 +15,7 @@ import time
 from typing import Any, Callable
 
 import db
-from .core import UnitOfWork, get_conn
+from .core import UnitOfWork, ensure_table_group_once, get_conn
 from .roster_adapters import (
     ALLOWED_ROSTER_ORIGINS,
     ALLOWED_ROSTER_TIERS,
@@ -80,10 +80,13 @@ def _conn_ctx(conn: sqlite3.Connection | None):
 
 def _ensure_world_roster_table(conn: sqlite3.Connection) -> None:
     """Self-healing DDL guard for isolated unit tests that bypass full migrations."""
-    if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_roster' LIMIT 1").fetchone():
-        return
-    for sql in WORLD_ROSTER_V54_DDL:
-        conn.execute(sql)
+    def _create_if_missing(c: sqlite3.Connection) -> None:
+        if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='world_roster' LIMIT 1").fetchone():
+            return
+        for sql in WORLD_ROSTER_V54_DDL:
+            c.execute(sql)
+
+    ensure_table_group_once(conn, "world_roster_v54", _create_if_missing)
 
 
 def _opt_int(val: Any) -> int | None:

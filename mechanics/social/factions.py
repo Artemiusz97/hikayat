@@ -2837,7 +2837,12 @@ def ensure_starter_factions(session_id: int, scenario_key: str = "fantasy") -> l
     return sync_faction_rosters_with_contacts(session_id)
 
 
-def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> Dict[str, Any]:
+def get_anomalous_faction_state(
+    session_id: int,
+    user_id: int | None = None,
+    *,
+    persist_db: bool = True,
+) -> Dict[str, Any]:
     """
     Retrieves or initializes the player's Anomalous Incursions Faction & 5-Tier Promotion Meter state.
     """
@@ -2850,7 +2855,11 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
     if not scenario_data.is_anomalous_incursions_scenario(scen_key):
         return {}
 
-    factions = ensure_starter_factions(session_id, scen_key)
+    factions = (
+        ensure_starter_factions(session_id, scen_key)
+        if persist_db
+        else (db.get_factions(session_id) or [])
+    )
     lookup_uid = user_id or session.get("host_user_id")
     char = db.get_character(lookup_uid) if lookup_uid else None
     is_student = is_student_operative(session)
@@ -2906,7 +2915,8 @@ def get_anomalous_faction_state(session_id: int, user_id: int | None = None) -> 
             "mandatory_bounty_id": str(state.get("mandatory_bounty_id") or ""),
             "last_rollover_day": int(state.get("last_rollover_day", 1) or 1),
         }
-        save_anomalous_faction_state(session_id, state, user_id=lookup_uid)
+        if persist_db:
+            save_anomalous_faction_state(session_id, state, user_id=lookup_uid)
     else:
         arch = state.get("faction_archetype_key", "public_agency")
         rep = max(0, min(100, int(state.get("promotion_rep", 0) or 0)))

@@ -1067,6 +1067,15 @@ def _append_dialogue_mood_field(
         _safe_add_field(dash_embed, name="💬 Dialogue Mood", value=f"{_m_emoji} {_m_who}`{mood_info['mood_label']}`", inline=False)
 
 
+def _append_conversation_pause_field(dash_embed: discord.Embed, choices: list, enemies: list) -> None:
+    """Explains a trimmed dialogue menu when the partner's daily small-talk budget is exhausted."""
+    if enemies or not isinstance(choices, list):
+        return
+    paused = next((c for c in choices if isinstance(c, dict) and c.get("_conversation_paused")), None)
+    if paused and paused.get("pause_notice"):
+        _safe_add_field(dash_embed, name="⏸️ Conversation Paused", value=str(paused["pause_notice"]), inline=False)
+
+
 def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: str,
                  choices: list, image_url: str | None = None) -> list[discord.Embed]:
     story_embed = discord.Embed(title=_truncate_field_name(scene_title or "Hikayat", 256), description=_truncate_embed_text(narrative),
@@ -1117,6 +1126,7 @@ def scene_embed(session: dict, actor_char: dict, scene_title: str, narrative: st
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
+        _append_conversation_pause_field(dash_embed, choices, enemies)
 
     if enemies:
         _safe_add_field(
@@ -1196,6 +1206,7 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
         _safe_add_field(dash_embed, name=_tracker_header("🧑‍🤝‍🧑", "Character", "Characters", len(npcs)) + _crowd_density_badge(session),
                          value=_tracker_group_text(npcs, dialogue_partners=dialogue_partners, show_vitals=combat_enabled), inline=False)
         _append_dialogue_mood_field(dash_embed, session, dialogue_partners, enemies, c_day, c_min)
+        _append_conversation_pause_field(dash_embed, choices, enemies)
 
     if enemies:
         _safe_add_field(

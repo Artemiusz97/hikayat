@@ -113,6 +113,7 @@ from .core import (
     preload_prepare_action_bundle,
     preload_turn_party_bundle,
     prune_session_turn_snapshots,
+    savepoint,
 )
 
 # Verified zero-I/O in-memory helpers on the `db` package facade; allowed inside `async def`.
@@ -181,6 +182,7 @@ from .properties import (
     get_character_inventory_capacity,
     get_player_properties,
     get_primary_property,
+    get_session_property_slot_bonus,
     grant_or_relocate_starter_quarters,
     grant_property_spare_key,
     revoke_property_spare_key,

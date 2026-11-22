@@ -153,6 +153,7 @@ def get_npc_social_composure(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, Any] | None:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             "SELECT * FROM npc_social_composure WHERE session_id = ? AND npc_id = ?",
             (int(session_id), nid),
@@ -175,6 +176,7 @@ def get_npc_social_composure_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -338,6 +340,7 @@ def get_character_social_daily(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, Any] | None:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             """SELECT * FROM character_social_daily
                WHERE session_id = ? AND character_id = ? AND npc_id = ? AND current_day = ?""",
@@ -363,6 +366,7 @@ def get_character_social_daily_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -445,6 +449,7 @@ def get_social_topic_states(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         rows = c.execute(
             """SELECT * FROM social_topic_states
                WHERE session_id = ? AND character_id = ? AND npc_id = ?""",
@@ -469,6 +474,7 @@ def get_social_topic_states_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, dict[str, dict[str, Any]]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -516,6 +522,7 @@ def upsert_social_topic_state(
     now = time.time()
 
     def _run(c: sqlite3.Connection) -> dict[str, Any]:
+        _ensure_social_v50_tables(c)
         row = c.execute(
             """SELECT * FROM social_topic_states
                WHERE session_id = ? AND character_id = ? AND npc_id = ? AND topic_id = ?""",
@@ -583,6 +590,7 @@ def record_contact_dossier_discoveries(
     now = time.time()
 
     def _run(c: sqlite3.Connection) -> int:
+        _ensure_social_v50_tables(c)
         cids: list[int] = []
         for raw_cid in (character_ids or []):
             try:
@@ -641,6 +649,7 @@ def get_contact_dossier_discoveries(
     nid = canon_social_npc_id(npc_id)
 
     def _run(c: sqlite3.Connection) -> list[dict[str, Any]]:
+        _ensure_social_v50_tables(c)
         rows = c.execute(
             """SELECT * FROM contact_dossier_discoveries
                WHERE session_id = ? AND character_id IN (?, 0) AND npc_id = ?
@@ -666,6 +675,7 @@ def get_contact_dossier_discoveries_batch(
     norm_ids = [canon_social_npc_id(x) for x in (npc_ids or []) if str(x or "").strip()]
 
     def _run(c: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+        _ensure_social_v50_tables(c)
         if norm_ids:
             qmarks = ",".join("?" * len(norm_ids))
             rows = c.execute(
@@ -1078,6 +1088,7 @@ def upsert_wardrobe_preset_discoveries_batch(
         return 0
 
     def _run(c: sqlite3.Connection) -> int:
+        _ensure_social_v50_tables(c)
         c.executemany(
             """INSERT OR IGNORE INTO contact_dossier_discoveries (
                 session_id, character_id, npc_id, fact_category, fact_key,

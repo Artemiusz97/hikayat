@@ -225,6 +225,8 @@ def reconcile_combat_results(session: dict, llm_outcome: dict, precomputed: dict
             precomputed["surviving_enemies"] = []
         elif "surviving_enemies" in precomputed:
             session["nearby_enemies"] = precomputed["surviving_enemies"]
+        if "party_npcs" in precomputed:
+            session["party_npcs"] = precomputed["party_npcs"]
         if "player_resonance_pips" in precomputed:
             session["player_resonance_pips"] = precomputed["player_resonance_pips"]
     enemies = session.get("nearby_enemies", [])

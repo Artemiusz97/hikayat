@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import threading
 import time
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,10 +17,14 @@ from mechanics.narrative.examine import build_examine_snapshot, scrub_examine_pr
 log = logging.getLogger(__name__)
 
 _MAX_CACHE_ENTRIES = 256
+_MAX_EPOCH_ENTRIES = 4096
 _CACHE_TTL_SEC = 1800.0
 
+_CACHE_LOCK = threading.Lock()
 _EXAMINE_CACHE: "OrderedDict[Tuple[Any, ...], Tuple[float, str]]" = OrderedDict()
 _INFLIGHT_LOCKS: Dict[Tuple[Any, ...], asyncio.Lock] = {}
+_INFLIGHT_WAITERS: Dict[Tuple[Any, ...], int] = {}
+_SESSION_EPOCHS: "OrderedDict[int, int]" = OrderedDict()
 
 
 def invalidate_examine_cache(session_id: int) -> None:
@@ -28,19 +33,31 @@ def invalidate_examine_cache(session_id: int) -> None:
         sid = int(session_id)
     except (TypeError, ValueError):
         return
-    stale_keys = [k for k in _EXAMINE_CACHE.keys() if k and k[0] == sid]
-    for k in stale_keys:
-        _EXAMINE_CACHE.pop(k, None)
-    stale_locks = [k for k in _INFLIGHT_LOCKS.keys() if k and k[0] == sid]
-    for k in stale_locks:
-        if not _INFLIGHT_LOCKS[k].locked():
-            _INFLIGHT_LOCKS.pop(k, None)
+    with _CACHE_LOCK:
+        _SESSION_EPOCHS[sid] = _SESSION_EPOCHS.get(sid, 0) + 1
+        _SESSION_EPOCHS.move_to_end(sid)
+        while len(_SESSION_EPOCHS) > _MAX_EPOCH_ENTRIES:
+            _SESSION_EPOCHS.popitem(last=False)
+        stale_keys = [k for k in list(_EXAMINE_CACHE.keys()) if k and k[0] == sid]
+        for k in stale_keys:
+            _EXAMINE_CACHE.pop(k, None)
+        stale_locks = [
+            k for k in list(_INFLIGHT_LOCKS.keys())
+            if isinstance(k, tuple) and len(k) == 2 and isinstance(k[1], tuple) and k[1] and k[1][0] == sid
+        ]
+        for k in stale_locks:
+            if _INFLIGHT_WAITERS.get(k, 0) <= 0 and not _INFLIGHT_LOCKS[k].locked():
+                _INFLIGHT_LOCKS.pop(k, None)
+                _INFLIGHT_WAITERS.pop(k, None)
 
 
 def _clear_examine_cache_all() -> None:
     """Test helper to clear all cached Examine prose."""
-    _EXAMINE_CACHE.clear()
-    _INFLIGHT_LOCKS.clear()
+    with _CACHE_LOCK:
+        _EXAMINE_CACHE.clear()
+        _INFLIGHT_LOCKS.clear()
+        _INFLIGHT_WAITERS.clear()
+        _SESSION_EPOCHS.clear()
 
 
 def _make_examine_cache_key(
@@ -126,24 +143,32 @@ def _make_examine_cache_key(
 
 
 def _get_cached_prose(cache_key: Tuple[Any, ...]) -> Optional[str]:
-    entry = _EXAMINE_CACHE.get(cache_key)
-    if not entry:
-        return None
-    ts, prose = entry
-    if (time.monotonic() - ts) > _CACHE_TTL_SEC:
-        _EXAMINE_CACHE.pop(cache_key, None)
-        return None
-    _EXAMINE_CACHE.move_to_end(cache_key)
-    return prose
+    with _CACHE_LOCK:
+        entry = _EXAMINE_CACHE.get(cache_key)
+        if not entry:
+            return None
+        ts, prose = entry
+        if (time.monotonic() - ts) > _CACHE_TTL_SEC:
+            _EXAMINE_CACHE.pop(cache_key, None)
+            return None
+        _EXAMINE_CACHE.move_to_end(cache_key)
+        return prose
 
 
-def _store_cached_prose(cache_key: Tuple[Any, ...], prose: str) -> None:
+def _store_cached_prose_unlocked(cache_key: Tuple[Any, ...], prose: str) -> None:
     if not prose:
         return
     _EXAMINE_CACHE[cache_key] = (time.monotonic(), prose)
     _EXAMINE_CACHE.move_to_end(cache_key)
     while len(_EXAMINE_CACHE) > _MAX_CACHE_ENTRIES:
         _EXAMINE_CACHE.popitem(last=False)
+
+
+def _store_cached_prose(cache_key: Tuple[Any, ...], prose: str) -> None:
+    if not prose:
+        return
+    with _CACHE_LOCK:
+        _store_cached_prose_unlocked(cache_key, prose)
 
 
 def _build_examine_prompts(
@@ -227,25 +252,29 @@ async def get_examine_payload(
     When include_prose=False, returns instant live structured state + cached prose if already warm.
     When include_prose=True, generates and caches concise sensory prose scoped to current turn/state.
     """
-    session_row = await adb(db.get_session, int(session_id))
-    if not session_row:
-        raise LookupError("Session not found")
-    session = dict(session_row)
+    def _hydrate_examine_bundle() -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        with db.ReadUnitOfWork():
+            session_row = db.get_session(int(session_id))
+            if not session_row:
+                raise LookupError("Session not found")
+            sess = dict(session_row)
+            u_settings = db.get_settings(int(user_id)) or {}
+            char_row = db.get_character(int(user_id), int(session_id), settings=u_settings)
+            if not char_row:
+                char_row = db.get_character(int(user_id), settings=u_settings)
+            ch = dict(char_row) if char_row else {"user_id": int(user_id), "per_": 5}
+            snap = build_examine_snapshot(
+                sess,
+                ch,
+                user_settings=u_settings,
+                user_id=int(user_id),
+            )
+            return sess, ch, u_settings, snap
 
-    char_row = await adb(db.get_character, int(user_id), int(session_id))
-    if not char_row:
-        char_row = await adb(db.get_character, int(user_id))
-    char = dict(char_row) if char_row else {"user_id": int(user_id), "per_": 5}
-
-    user_settings = await adb(db.get_settings, int(user_id)) or {}
-
-    snapshot = await adb(
-        build_examine_snapshot,
-        session,
-        char,
-        user_settings=user_settings,
-        user_id=int(user_id),
-    )
+    sid_int = int(session_id)
+    with _CACHE_LOCK:
+        start_epoch = _SESSION_EPOCHS.get(sid_int, 0)
+    session, char, user_settings, snapshot = await adb(_hydrate_examine_bundle)
 
     cache_key = _make_examine_cache_key(session, snapshot, int(user_id), user_settings)
     cached_prose = _get_cached_prose(cache_key)
@@ -261,42 +290,68 @@ async def get_examine_payload(
         snapshot["prose_cached"] = False
         return snapshot
 
-    lock = _INFLIGHT_LOCKS.setdefault(cache_key, asyncio.Lock())
-    async with lock:
-        cached_after = _get_cached_prose(cache_key)
-        if cached_after:
-            snapshot["narrative_prose"] = cached_after
-            snapshot["prose_ready"] = True
-            snapshot["prose_cached"] = True
-            return snapshot
+    lock_key = (id(asyncio.get_running_loop()), cache_key)
+    with _CACHE_LOCK:
+        lock = _INFLIGHT_LOCKS.get(lock_key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _INFLIGHT_LOCKS[lock_key] = lock
+        _INFLIGHT_WAITERS[lock_key] = _INFLIGHT_WAITERS.get(lock_key, 0) + 1
+    try:
+        async with lock:
+            cached_after = _get_cached_prose(cache_key)
+            if cached_after:
+                snapshot["narrative_prose"] = cached_after
+                snapshot["prose_ready"] = True
+                snapshot["prose_cached"] = True
+                return snapshot
 
-        scen_key = str(session.get("scenario") or char.get("scenario") or "fantasy")
-        is_nsfw = bool(scenario_data.uses_nsfw_model(scen_key))
-        sys_prompt, usr_prompt = _build_examine_prompts(session, snapshot, char, user_settings)
+            with _CACHE_LOCK:
+                is_stale_epoch = _SESSION_EPOCHS.get(sid_int, 0) != start_epoch
+            if is_stale_epoch:
+                snapshot["narrative_prose"] = snapshot.get("fallback_prose") or ""
+                snapshot["prose_ready"] = True
+                snapshot["prose_cached"] = False
+                return snapshot
 
-        prose_text = ""
-        try:
-            raw_resp = await llm_client.call_llm_text(
-                sys_prompt,
-                usr_prompt,
-                max_tokens=300,
-                retries=1,
-                is_nsfw=is_nsfw,
-                use_utility=False,
-                timeout=18.0,
-            )
-            prose_text = scrub_examine_prose(raw_resp)
-        except Exception as exc:
-            log.warning("Examine async prose generation failed (falling back): %s", exc)
+            scen_key = str(session.get("scenario") or char.get("scenario") or "fantasy")
+            is_nsfw = bool(scenario_data.uses_nsfw_model(scen_key))
+            sys_prompt, usr_prompt = _build_examine_prompts(session, snapshot, char, user_settings)
+
             prose_text = ""
+            try:
+                raw_resp = await llm_client.call_llm_text(
+                    sys_prompt,
+                    usr_prompt,
+                    max_tokens=300,
+                    retries=1,
+                    is_nsfw=is_nsfw,
+                    use_utility=False,
+                    timeout=18.0,
+                )
+                prose_text = scrub_examine_prose(raw_resp)
+            except Exception as exc:
+                log.warning("Examine async prose generation failed (falling back): %s", exc)
+                prose_text = ""
 
-        if prose_text:
-            _store_cached_prose(cache_key, prose_text)
-            snapshot["narrative_prose"] = prose_text
-            snapshot["prose_ready"] = True
-            snapshot["prose_cached"] = False
-        else:
-            snapshot["narrative_prose"] = snapshot.get("fallback_prose") or ""
-            snapshot["prose_ready"] = True
-            snapshot["prose_cached"] = False
-        return snapshot
+            if prose_text:
+                with _CACHE_LOCK:
+                    if _SESSION_EPOCHS.get(sid_int, 0) == start_epoch:
+                        _store_cached_prose_unlocked(cache_key, prose_text)
+                snapshot["narrative_prose"] = prose_text
+                snapshot["prose_ready"] = True
+                snapshot["prose_cached"] = False
+            else:
+                snapshot["narrative_prose"] = snapshot.get("fallback_prose") or ""
+                snapshot["prose_ready"] = True
+                snapshot["prose_cached"] = False
+            return snapshot
+    finally:
+        with _CACHE_LOCK:
+            remaining = _INFLIGHT_WAITERS.get(lock_key, 0) - 1
+            if remaining > 0:
+                _INFLIGHT_WAITERS[lock_key] = remaining
+            else:
+                _INFLIGHT_WAITERS.pop(lock_key, None)
+                if _INFLIGHT_LOCKS.get(lock_key) is lock and not lock.locked():
+                    _INFLIGHT_LOCKS.pop(lock_key, None)

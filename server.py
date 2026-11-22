@@ -172,9 +172,9 @@ def _launch_tunnel_sync(port: int, provider: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db.init_db()
+    await db.adb(db.init_db)
     try:
-        snapshot_path = db.create_database_snapshot(tag="server_startup")
+        snapshot_path = await db.adb(db.create_database_snapshot, tag="server_startup")
         print(f"[Database Snapshot] Automatic backup created at: {snapshot_path}")
     except Exception as e:
         print(f"[Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")

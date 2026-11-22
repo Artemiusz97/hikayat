@@ -2329,12 +2329,8 @@ def resolve_pre_turn_quests_and_clues(
         pre_ch = session.get("chapter", 1) if isinstance(session, dict) else 1
         eff_loc = session.get("current_location") or ""
         with db.UnitOfWork() as uow_conn:
-            uow_conn.execute("SAVEPOINT sp_pre_turn_quests")
-            try:
+            with db.savepoint(uow_conn, "sp_pre_turn_quests", rollback_always=True):
                 res = _resolve_pre_turn_quests_impl(session, party=party, actions=actions, persist_db=False)
-            finally:
-                uow_conn.execute("ROLLBACK TO SAVEPOINT sp_pre_turn_quests")
-                uow_conn.execute("RELEASE SAVEPOINT sp_pre_turn_quests")
         res["_needs_db_commit"] = True
         res["_pre_chapter"] = pre_ch
         res["_effective_location"] = eff_loc

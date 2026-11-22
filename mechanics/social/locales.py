@@ -169,6 +169,22 @@ def get_wardrobe_labels(lang: str = "en") -> dict[str, str]:
     return dict(WARDROBE_LABELS.get(norm_lang, WARDROBE_LABELS["en"]))
 
 
+CONVERSATION_PAUSE_NOTICES: dict[str, str] = {
+    "en": "{name} has run out of small talk for now. Come back later in the day, or try something else.",
+    "pl": "{name} na razie nie ma ochoty na dalszą pogawędkę. Wróć później w ciągu dnia albo spróbuj czegoś innego.",
+    "ms": "{name} sudah kehabisan bual kosong buat masa ini. Datang semula nanti, atau cuba sesuatu yang lain.",
+    "de": "{name} ist für den Moment mit dem Smalltalk durch. Komm später am Tag wieder oder versuch etwas anderes.",
+    "zh": "{name}暂时没有闲聊的兴致了。稍后再来，或者换个方式试试。",
+}
+
+
+def get_conversation_pause_notice(name: str, lang: str = "en") -> str:
+    """Player-facing notice shown when a partner's daily small-talk budget is exhausted."""
+    norm_lang = normalize_social_lang(lang)
+    tpl = CONVERSATION_PAUSE_NOTICES.get(norm_lang, CONVERSATION_PAUSE_NOTICES["en"])
+    return tpl.format(name=str(name or "").strip() or "They")
+
+
 def normalize_social_lang(lang: str | None) -> str:
     code = str(lang or "en").strip().lower().split("-")[0].split("_")[0]
     return code if code in SUPPORTED_SOCIAL_LOCALES else "en"

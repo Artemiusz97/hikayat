@@ -30,7 +30,7 @@ class CombatStageState:
     last_combat_turn: Optional[int] = None
     last_combat_location: str = ""
     active_quest_encounter: Optional[dict[str, Any]] = None
-    preloaded_equipment_by_uid: dict[int, list[dict[str, Any]]] = field(default_factory=dict)
+    preloaded_equipment_by_uid: dict[int, dict[str, Any]] = field(default_factory=dict)
     combat_resolved: bool = False
 
 
@@ -94,7 +94,11 @@ class TurnNotices:
         for attr, key in _NOTICE_LIST_FIELDS:
             val = outcome.get(key)
             if isinstance(val, list) and val:
-                setattr(self, attr, list(val))
+                merged = list(getattr(self, attr) or [])
+                for item in val:
+                    if item not in merged:
+                        merged.append(item)
+                setattr(self, attr, merged)
         for attr, key in _NOTICE_SCALAR_FIELDS:
             val = outcome.get(key)
             if val is not None and val != "":
@@ -244,9 +248,18 @@ class TurnExecutionContext:
             return self
 
         import game_engine
+        import scenario_data
+
+        scen_key_pre = str((self.session or {}).get("scenario") or "")
+        if not scen_key_pre:
+            s_pre = db.get_session(self.session_id)
+            scen_key_pre = str((s_pre or {}).get("scenario") or "fantasy")
+        if scenario_data.is_mechanic_enabled(scen_key_pre, "faction_reputation") and not db.get_factions(self.session_id):
+            from mechanics.social.factions import ensure_session_factions_seeded
+            ensure_session_factions_seeded(self.session_id, scen_key_pre)
 
         with db.ReadUnitOfWork():
-            world_bundle = game_engine._load_known_world(self.session_id)
+            world_bundle = game_engine._load_known_world(self.session_id, seed_factions=False)
             self._cache["world_bundle"] = world_bundle
             self._cache["contacts"] = world_bundle.get("contacts") or []
             self._cache["factions"] = world_bundle.get("factions") or []

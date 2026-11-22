@@ -603,7 +603,7 @@ def get_active_enemies(data: dict) -> list[dict]:
             res.append({"name": e.strip()})
     return res
 
-def _load_known_world(session_id: int) -> dict:
+def _load_known_world(session_id: int, *, seed_factions: bool = True) -> dict:
     """Single fetch of everything the KNOWN WORLD builders need.
 
     Returned bundle is shared by `_world_canon_text`, `_scene_context_text` and
@@ -614,7 +614,7 @@ def _load_known_world(session_id: int) -> dict:
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
     factions = world_data.get("factions") or []
-    if not factions and scenario_data.is_mechanic_enabled(scen_key, "faction_reputation"):
+    if seed_factions and not factions and scenario_data.is_mechanic_enabled(scen_key, "faction_reputation"):
         from mechanics.social.factions import ensure_session_factions_seeded
         factions = ensure_session_factions_seeded(session_id, scen_key) or []
     return {
@@ -713,7 +713,8 @@ def _world_canon_text(session_id: int, world: dict | None = None,
 
 def _scene_context_text(session_id: int, current_location: str,
                         current_npcs: list = None, max_items: int = 4, history_text: str = "",
-                        world: dict | None = None, session: dict | None = None) -> str:
+                        world: dict | None = None, session: dict | None = None,
+                        *, ensure_locations_seeded: bool = True) -> str:
     """Per-turn, scene-relevant slice of KNOWN WORLD (volatile Z2 prompt zone).
 
     Everything that depends on where the party is, who is present, recent
@@ -728,7 +729,13 @@ def _scene_context_text(session_id: int, current_location: str,
     history_lower = (history_text or "").lower()
 
     if is_location_engine_enabled(scen_key):
-        loc_header = format_llm_location_context(session_id, current_location, scen_key, present_npcs=current_npcs)
+        loc_header = format_llm_location_context(
+            session_id,
+            current_location,
+            scen_key,
+            present_npcs=current_npcs,
+            ensure_seeded=ensure_locations_seeded,
+        )
         lines = [loc_header]
     else:
         lines = [f"Current location: {current_location or '(not yet established)'}"]

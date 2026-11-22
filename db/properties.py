@@ -344,8 +344,8 @@ def atomic_purchase_property(
             """INSERT INTO player_properties (
                    session_id, property_id, facility_node_id, zone_id, tier,
                    price_paid, is_primary, is_starter, spare_keys_json,
-                   purchased_turn, purchased_day, created_at, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '{}', ?, ?, ?, ?)""",
+                   purchased_turn, purchased_day, buyer_character_id, created_at, updated_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, '{}', ?, ?, ?, ?, ?)""",
             (
                 int(session_id),
                 entry["property_id"],
@@ -356,6 +356,7 @@ def atomic_purchase_property(
                 1 if promote_primary else 0,
                 t_num,
                 c_day,
+                int(char_row["id"]),
                 now,
                 now,
             ),
@@ -578,7 +579,7 @@ def rollback_player_properties_after_turn(
 
     with _uow_ctx(conn) as c:
         to_revert = c.execute(
-            "SELECT id, facility_node_id, price_paid FROM player_properties WHERE session_id = ? AND is_starter = 0 AND purchased_turn > ?",
+            "SELECT id, facility_node_id, price_paid, buyer_character_id FROM player_properties WHERE session_id = ? AND is_starter = 0 AND purchased_turn > ?",
             (int(session_id), t_num),
         ).fetchall()
         for r in to_revert:
@@ -586,10 +587,17 @@ def rollback_player_properties_after_turn(
             _set_facility_unlock_state(c, int(session_id), r["facility_node_id"], unlocked=False, marker_key="deed_owned")
             price = int(r["price_paid"] or 0)
             if price > 0:
-                c.execute(
-                    "UPDATE characters SET gold = gold + ? WHERE id = (COALESCE((SELECT character_id FROM sessions WHERE id = ?), (SELECT id FROM characters WHERE active_session_id = ? LIMIT 1)))",
-                    (price, int(session_id), int(session_id)),
-                )
+                buyer_cid = r["buyer_character_id"]
+                if buyer_cid is not None:
+                    c.execute(
+                        "UPDATE characters SET gold = gold + ? WHERE id = ?",
+                        (price, int(buyer_cid)),
+                    )
+                else:
+                    c.execute(
+                        "UPDATE characters SET gold = gold + ? WHERE id = (COALESCE((SELECT character_id FROM sessions WHERE id = ?), (SELECT id FROM characters WHERE active_session_id = ? LIMIT 1)))",
+                        (price, int(session_id), int(session_id)),
+                    )
             deleted_cnt += 1
 
         remaining = c.execute(
@@ -617,6 +625,25 @@ def rollback_player_properties_after_turn(
             )
 
     return {"properties_deleted": deleted_cnt, "spare_keys_pruned": pruned_keys}
+
+
+def get_session_property_slot_bonus(
+    session_id: int | None,
+    conn: sqlite3.Connection | None = None,
+) -> int:
+    """Computes total inventory slot bonus granted by owned deeds in `session_id`."""
+    if not session_id:
+        return 0
+    with _conn_ctx(conn) as c:
+        try:
+            t_rows = c.execute(
+                "SELECT tier FROM player_properties WHERE session_id = ? AND is_starter = 0",
+                (int(session_id),),
+            ).fetchall()
+            tiers = [int(r["tier"] or 0) for r in t_rows if int(r["tier"] or 0) > 0]
+            return compute_property_slot_bonus(tiers)
+        except sqlite3.OperationalError:
+            return 0
 
 
 def get_character_inventory_capacity(
@@ -663,18 +690,7 @@ def get_character_inventory_capacity(
             if sess_row:
                 sid = int(sess_row["id"])
 
-        bonus = 0
-        if sid:
-            try:
-                t_rows = c.execute(
-                    "SELECT tier FROM player_properties WHERE session_id = ? AND is_starter = 0",
-                    (int(sid),),
-                ).fetchall()
-                tiers = [int(r["tier"] or 0) for r in t_rows if int(r["tier"] or 0) > 0]
-                bonus = compute_property_slot_bonus(tiers)
-            except sqlite3.OperationalError:
-                bonus = 0
-
+        bonus = get_session_property_slot_bonus(sid, conn=c) if sid else 0
         return cd.inventory_capacity(strength, bonus_slots=bonus)
 
 
@@ -683,6 +699,7 @@ __all__ = [
     "get_character_inventory_capacity",
     "get_player_properties",
     "get_primary_property",
+    "get_session_property_slot_bonus",
     "grant_or_relocate_starter_quarters",
     "grant_property_spare_key",
     "revoke_property_spare_key",

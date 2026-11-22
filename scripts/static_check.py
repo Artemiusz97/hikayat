@@ -538,7 +538,7 @@ def analyze_possibly_unbound(path: Path, rel: str) -> List[Finding]:
 # Analyzers 3–5: Bundle B DB/Async/Registry Architecture Contracts
 # ---------------------------------------------------------------------------
 
-_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/turn/")
+_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/turn/", "server.py")
 _ASYNC_SAFE_DB_ATTRS = frozenset({
     "adb",
     "distributed_session_lock",
@@ -589,20 +589,132 @@ def _extract_pure_db_helpers(db_init_path: Optional[Path] = None) -> Set[str]:
     return set()
 
 
-def _collect_db_imports(nodes: Iterable[ast.AST]) -> Tuple[Set[str], Dict[str, str]]:
-    """Collect aliases of `import db` and `from db import fn` bindings in a block."""
+def _discover_db_submodules(db_dir: Optional[Path] = None) -> Set[str]:
+    target = db_dir or (ROOT / "db")
+    if not target.is_dir():
+        return set()
+    subs: Set[str] = set()
+    for p in target.iterdir():
+        if p.name == "__init__.py" or p.name.startswith("__"):
+            continue
+        if p.is_file() and p.suffix == ".py":
+            subs.add(p.stem)
+        elif p.is_dir() and (p / "__init__.py").is_file():
+            subs.add(p.name)
+    return subs
+
+
+_DB_SUBMODULES = _discover_db_submodules()
+
+
+def _collect_db_imports(
+    nodes: Iterable[ast.AST],
+    *,
+    db_submodules: Optional[Set[str]] = None,
+) -> Tuple[Set[str], Dict[str, str]]:
+    """Collect aliases of `import db[.submod]` and `from db[.submod] import fn` bindings in a block."""
+    subs = _DB_SUBMODULES if db_submodules is None else db_submodules
     aliases: Set[str] = set()
     symbols: Dict[str, str] = {}
     for node in nodes:
         if isinstance(node, ast.Import):
             for al in node.names:
-                if al.name == "db":
-                    aliases.add(al.asname or "db")
-        elif isinstance(node, ast.ImportFrom) and node.module == "db" and node.level == 0:
+                if al.name == "db" or al.name.startswith("db."):
+                    if al.asname:
+                        aliases.add(al.asname)
+                    else:
+                        aliases.add(al.name)
+                        aliases.add("db")
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module
+            and (node.module == "db" or node.module.startswith("db."))
+        ):
             for al in node.names:
-                if al.name != "*":
-                    symbols[al.asname or al.name] = al.name
+                if al.name == "*":
+                    continue
+                bound = al.asname or al.name
+                if node.module == "db" and al.name in subs:
+                    aliases.add(bound)
+                else:
+                    symbols[bound] = al.name
     return aliases, symbols
+
+
+def _collect_local_bindings(fn: ast.AST) -> Set[str]:
+    """Collect parameter and direct-scope non-db bindings that shadow outer names in `fn`."""
+    bound: Set[str] = set()
+    args = getattr(fn, "args", None)
+    if isinstance(args, ast.arguments):
+        for a in list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs):
+            bound.add(a.arg)
+        if args.vararg is not None:
+            bound.add(args.vararg.arg)
+        if args.kwarg is not None:
+            bound.add(args.kwarg.arg)
+
+    _SCOPE_WALLS = (
+        ast.FunctionDef,
+        ast.AsyncFunctionDef,
+        ast.ClassDef,
+        ast.Lambda,
+        ast.ListComp,
+        ast.SetComp,
+        ast.DictComp,
+        ast.GeneratorExp,
+    )
+
+    def _walk(node: ast.AST) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+            return
+        if isinstance(node, _SCOPE_WALLS):
+            return
+        if isinstance(node, ast.Import):
+            for al in node.names:
+                if not (al.name == "db" or al.name.startswith("db.")):
+                    bound.add(al.asname or al.name.split(".")[0])
+            return
+        if isinstance(node, ast.ImportFrom):
+            is_db_imp = (
+                node.level == 0
+                and node.module is not None
+                and (node.module == "db" or node.module.startswith("db."))
+            )
+            if not is_db_imp:
+                for al in node.names:
+                    if al.name != "*":
+                        bound.add(al.asname or al.name)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchAs) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchStar) and isinstance(node.name, str):
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and isinstance(node.rest, str):
+            bound.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            _walk(child)
+
+    for stmt in getattr(fn, "body", ()):
+        _walk(stmt)
+    return bound
+
+
+def _dotted_attr_chain(expr: ast.AST) -> Optional[str]:
+    parts: List[str] = []
+    cur = expr
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return None
 
 
 def analyze_sync_db_in_async(
@@ -624,8 +736,6 @@ def analyze_sync_db_in_async(
     allowed = helpers | _ASYNC_SAFE_DB_ATTRS
     findings: List[Finding] = []
 
-    mod_aliases, mod_symbols = _collect_db_imports(tree.body)
-
     def _iter_direct_imports(body: List[ast.stmt]) -> List[ast.stmt]:
         stmts: List[ast.stmt] = []
         stack: List[ast.AST] = list(body)
@@ -639,6 +749,8 @@ def analyze_sync_db_in_async(
             stack.extend(ast.iter_child_nodes(node))
         return stmts
 
+    mod_aliases, mod_symbols = _collect_db_imports(_iter_direct_imports(tree.body))
+
     def _scan_async_fn(
         fn: ast.AsyncFunctionDef,
         qualname: str,
@@ -647,8 +759,10 @@ def analyze_sync_db_in_async(
     ) -> None:
         local_stmts = _iter_direct_imports(fn.body)
         loc_aliases, loc_symbols = _collect_db_imports(local_stmts)
-        aliases = parent_aliases | loc_aliases
-        symbols = {**parent_symbols, **loc_symbols}
+        shadowed = _collect_local_bindings(fn)
+        aliases = (parent_aliases - shadowed) | loc_aliases
+        symbols = {k: v for k, v in parent_symbols.items() if k not in shadowed}
+        symbols.update(loc_symbols)
 
         def _visit(node: ast.AST) -> None:
             if node is not fn:
@@ -660,9 +774,14 @@ def analyze_sync_db_in_async(
                         _visit(d)
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
                         _visit(d)
-                    # Recurse only into nested async defs inside this sync helper.
+                    # Recurse only into nested async defs inside this sync helper, scoping any local imports to its body.
+                    fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+                    fn_shadowed = _collect_local_bindings(node)
+                    sub_aliases = (aliases - fn_shadowed) | fn_aliases
+                    sub_symbols = {k: v for k, v in symbols.items() if k not in fn_shadowed}
+                    sub_symbols.update(fn_symbols)
                     for sub in node.body:
-                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", aliases, symbols)
+                        _scan_for_nested_async(sub, f"{qualname}.{node.name}", sub_aliases, sub_symbols)
                     return
                 if isinstance(node, ast.Lambda):
                     for d in node.args.defaults + [x for x in node.args.kw_defaults if x is not None]:
@@ -675,13 +794,11 @@ def analyze_sync_db_in_async(
                 if isinstance(node, ast.Call):
                     fn_name: Optional[str] = None
                     via_alias = False
-                    if (
-                        isinstance(node.func, ast.Attribute)
-                        and isinstance(node.func.value, ast.Name)
-                        and node.func.value.id in aliases
-                    ):
-                        fn_name = node.func.attr
-                        via_alias = True
+                    if isinstance(node.func, ast.Attribute):
+                        root_chain = _dotted_attr_chain(node.func.value)
+                        if root_chain and root_chain in aliases:
+                            fn_name = node.func.attr
+                            via_alias = True
                     elif isinstance(node.func, ast.Name) and node.func.id in symbols:
                         fn_name = symbols[node.func.id]
 
@@ -714,7 +831,17 @@ def analyze_sync_db_in_async(
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
             _scan_async_fn(node, q, parent_aliases, parent_symbols)
             return
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+        if isinstance(node, ast.FunctionDef):
+            q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
+            fn_aliases, fn_symbols = _collect_db_imports(_iter_direct_imports(node.body))
+            fn_shadowed = _collect_local_bindings(node)
+            sub_aliases = (parent_aliases - fn_shadowed) | fn_aliases
+            sub_symbols = {k: v for k, v in parent_symbols.items() if k not in fn_shadowed}
+            sub_symbols.update(fn_symbols)
+            for sub in node.body:
+                _scan_for_nested_async(sub, q, sub_aliases, sub_symbols)
+            return
+        if isinstance(node, ast.ClassDef):
             q = f"{scope_prefix}.{node.name}" if scope_prefix else node.name
             for sub in node.body:
                 _scan_for_nested_async(sub, q, parent_aliases, parent_symbols)
@@ -729,7 +856,11 @@ def analyze_sync_db_in_async(
 
 def _is_sqlite_conn_producer(expr: Optional[ast.AST]) -> bool:
     """Return True when `expr` constructs or opens a sqlite3 connection / UoW handle."""
-    if expr is None or not isinstance(expr, ast.Call):
+    if expr is None:
+        return False
+    if isinstance(expr, ast.IfExp):
+        return _is_sqlite_conn_producer(expr.body) or _is_sqlite_conn_producer(expr.orelse)
+    if not isinstance(expr, ast.Call):
         return False
     f = expr.func
     name = f.attr if isinstance(f, ast.Attribute) else (f.id if isinstance(f, ast.Name) else "")
@@ -753,27 +884,46 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
     lines = source.splitlines()
     findings: List[Finding] = []
 
-    def _collect_conn_vars(scope_node: ast.AST) -> Set[str]:
-        conn_vars = set(_DEFAULT_SQLITE_CONN_NAMES)
+    def _is_conn_expr(expr: Optional[ast.AST], conn_vars: Set[str]) -> bool:
+        if expr is None:
+            return False
+        if _is_sqlite_conn_producer(expr):
+            return True
+        if isinstance(expr, ast.Name) and expr.id in conn_vars:
+            return True
+        if isinstance(expr, ast.Attribute) and expr.attr in _DEFAULT_SQLITE_CONN_NAMES:
+            return True
+        return False
+
+    def _collect_conn_vars(scope_node: ast.AST, seeded_conns: Set[str]) -> Set[str]:
+        conn_vars = set(seeded_conns)
+        scope_nodes: List[ast.AST] = []
         stack: List[ast.AST] = list(getattr(scope_node, "body", []))
         while stack:
             node = stack.pop()
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
-            if isinstance(node, ast.With):
-                for item in node.items:
-                    if item.optional_vars is not None and _is_sqlite_conn_producer(item.context_expr):
-                        conn_vars.update(_target_names(item.optional_vars))
-            elif isinstance(node, ast.Assign) and _is_sqlite_conn_producer(node.value):
-                for tgt in node.targets:
-                    conn_vars.update(_target_names(tgt))
-            elif isinstance(node, ast.AnnAssign) and _is_sqlite_conn_producer(node.value):
-                conn_vars.update(_target_names(node.target))
+            scope_nodes.append(node)
             stack.extend(ast.iter_child_nodes(node))
+        changed = True
+        while changed:
+            changed = False
+            before = len(conn_vars)
+            for node in scope_nodes:
+                if isinstance(node, ast.With):
+                    for item in node.items:
+                        if item.optional_vars is not None and _is_conn_expr(item.context_expr, conn_vars):
+                            conn_vars.update(_target_names(item.optional_vars))
+                elif isinstance(node, ast.Assign) and _is_conn_expr(node.value, conn_vars):
+                    for tgt in node.targets:
+                        conn_vars.update(_target_names(tgt))
+                elif isinstance(node, ast.AnnAssign) and _is_conn_expr(node.value, conn_vars):
+                    conn_vars.update(_target_names(node.target))
+            changed = len(conn_vars) > before
         return conn_vars
 
     def _scan_scope(node: ast.AST, qualname: str, inherited_conns: Set[str]) -> None:
-        conn_vars = inherited_conns | _collect_conn_vars(node)
+        conn_vars = inherited_conns | _collect_conn_vars(node, inherited_conns)
 
         def _visit(cur: ast.AST) -> None:
             if cur is not node and isinstance(cur, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -789,10 +939,16 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
                 val = cur.func.value
                 is_conn = (
                     (isinstance(val, ast.Name) and val.id in conn_vars)
+                    or (isinstance(val, ast.Attribute) and val.attr in _DEFAULT_SQLITE_CONN_NAMES)
                     or _is_sqlite_conn_producer(val)
                 )
                 if is_conn and not _is_suppressed_line(lines, cur.lineno, "raw-conn-commit-outside-core"):
-                    target_desc = val.id if isinstance(val, ast.Name) else "get_conn()"
+                    if isinstance(val, ast.Name):
+                        target_desc = val.id
+                    elif isinstance(val, ast.Attribute):
+                        target_desc = ast.unparse(val) if hasattr(ast, "unparse") else f"obj.{val.attr}"
+                    else:
+                        target_desc = "get_conn()"
                     findings.append(Finding(
                         norm_rel,
                         cur.lineno,
@@ -817,8 +973,8 @@ def analyze_raw_conn_commit(path: Path, rel: str) -> List[Finding]:
     return findings
 
 
-def _extract_registered_table_names(registry_path: Path) -> Set[str]:
-    """Extract all table names registered in SESSION_TABLE_REGISTRY, GLOBAL_TABLES, FTS5_VIRTUAL_TABLES."""
+def _extract_registered_table_names(registry_path: Path, *, include_global: bool = True) -> Set[str]:
+    """Extract registered table names from SESSION_TABLE_REGISTRY, FTS5_VIRTUAL_TABLES (and optionally GLOBAL_TABLES)."""
     tree = ast.parse(registry_path.read_text(encoding="utf-8"), filename=str(registry_path))
     names: Set[str] = set()
 
@@ -844,6 +1000,7 @@ def _extract_registered_table_names(registry_path: Path) -> Set[str]:
                 if elt.args and isinstance(elt.args[0], ast.Constant) and isinstance(elt.args[0].value, str):
                     names.add(elt.args[0].value.strip().lower())
 
+    allowed_sets = ("GLOBAL_TABLES", "FTS5_VIRTUAL_TABLES") if include_global else ("FTS5_VIRTUAL_TABLES",)
     for stmt in tree.body:
         val_node: Optional[ast.AST] = None
         target_name = ""
@@ -853,7 +1010,7 @@ def _extract_registered_table_names(registry_path: Path) -> Set[str]:
         elif isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target_name = stmt.targets[0].id
             val_node = stmt.value
-        if target_name in ("GLOBAL_TABLES", "FTS5_VIRTUAL_TABLES"):
+        if target_name in allowed_sets:
             _collect_from_set_var(val_node)
         elif target_name == "SESSION_TABLE_REGISTRY":
             _collect_from_registry(val_node)
@@ -865,7 +1022,7 @@ def analyze_unregistered_session_tables(
     registry_path: Optional[Path] = None,
     rel: str = "db/core.py",
 ) -> List[Finding]:
-    """Flag any SCHEMA table in db/core.py with a `session_id` column missing from db/registry.py."""
+    """Flag any SCHEMA table in db/core.py with a `session_id` column missing from SESSION_TABLE_REGISTRY / FTS5_VIRTUAL_TABLES."""
     core_p = db_core_path or (ROOT / "db" / "core.py")
     reg_p = registry_path or (ROOT / "db" / "registry.py")
     if not core_p.exists() or not reg_p.exists():
@@ -873,7 +1030,7 @@ def analyze_unregistered_session_tables(
     try:
         core_source = core_p.read_text(encoding="utf-8")
         core_tree = ast.parse(core_source, filename=str(core_p))
-        registered = _extract_registered_table_names(reg_p)
+        registered = _extract_registered_table_names(reg_p, include_global=False)
     except (SyntaxError, UnicodeDecodeError, OSError):
         return []
 
@@ -895,7 +1052,7 @@ def analyze_unregistered_session_tables(
     core_lines = core_source.splitlines()
     findings: List[Finding] = []
     create_re = re.compile(
-        r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+        r"CREATE\s+(?:VIRTUAL\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:USING\s+[A-Za-z0-9_]+\s*)?\(",
         re.IGNORECASE,
     )
     for m in create_re.finditer(schema_str):
@@ -925,7 +1082,7 @@ def analyze_unregistered_session_tables(
             lineno,
             "unregistered-session-table",
             "SCHEMA",
-            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY / GLOBAL_TABLES)",
+            f"table '{tname}' has a `session_id` column in SCHEMA but is missing from db/registry.py (SESSION_TABLE_REGISTRY)",
         ))
     return findings
 

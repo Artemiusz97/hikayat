@@ -964,6 +964,8 @@ def resolve_spare_key_evening_visit_node(
 def build_realty_payload(
     session_id: int,
     user_id: int | None = None,
+    *,
+    persist_db: bool = True,
 ) -> dict[str, Any]:
     """
     Omnichannel domain payload builder for Smartphone Realty (FastAPI + Discord).
@@ -1018,7 +1020,7 @@ def build_realty_payload(
 
     # Ensure starter quarters row is seeded if missing on an active anomalous session
     raw_props = db.get_player_properties(int(session_id))
-    if not any(p.get("is_starter") for p in raw_props):
+    if persist_db and not any(p.get("is_starter") for p in raw_props):
         try:
             db.grant_or_relocate_starter_quarters(int(session_id))
             raw_props = db.get_player_properties(int(session_id))

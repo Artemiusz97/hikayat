@@ -384,7 +384,7 @@ def _hydrate_friendly_allies(
     return friendly_npcs, active_party_npcs, current_npcs, living_allies, active_constructs
 
 
-def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
+def precompute_combat_turn(session: dict, party: list, actions: list, *, persist_db: bool = True) -> dict:
     """Executes the Unified 3-Phase Tactical Combat Round before LLM narration."""
     has_hostiles = session.get("nearby_enemies", [])
     if not has_hostiles:
@@ -737,7 +737,7 @@ def precompute_combat_turn(session: dict, party: list, actions: list) -> dict:
                 p_obj = p_raw[0] if isinstance(p_raw, (tuple, list)) else p_raw
                 if isinstance(p_obj, dict) and p_obj not in player_chars:
                     reset_combatant_cooldowns(p_obj)
-        if sess_id_cbt:
+        if sess_id_cbt and persist_db:
             try:
                 db.set_session_party_npcs(sess_id_cbt, persisted_party_npcs)
             except Exception:

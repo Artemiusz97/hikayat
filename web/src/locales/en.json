@@ -1632,6 +1632,7 @@
   },
   "social": {
     "mood_prefix": "Mood",
+    "conversation_paused": "{{name}} has run out of small talk for now. Come back later in the day, or try something else.",
     "schedule_header": "Schedule & Routine",
     "masked_slot": "???",
     "bond_settling_dm": "Bond Settling Today — further chats unlock facts without forcing affinity.",

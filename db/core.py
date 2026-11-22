@@ -15,6 +15,8 @@ Tables:
                    narrator stops renaming things
 """
 import asyncio
+import inspect
+import itertools
 import json
 import logging
 import time
@@ -876,6 +878,7 @@ CREATE TABLE IF NOT EXISTS player_properties (
     purchased_day       INTEGER NOT NULL DEFAULT 1,
     created_at          REAL NOT NULL,
     updated_at          REAL NOT NULL,
+    buyer_character_id  INTEGER,
     UNIQUE(session_id, property_id)
 );
 CREATE INDEX IF NOT EXISTS idx_player_properties_sess ON player_properties(session_id);
@@ -1159,9 +1162,19 @@ _VERIFIED_TABLE_GROUPS_LOCK = threading.Lock()
 _uow_conn_var = contextvars.ContextVar("_uow_conn_var", default=None)
 _uow_db_path_var = contextvars.ContextVar("_uow_db_path_var", default=None)
 _uow_is_readonly_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uow_is_readonly_var", default=False)
+_uow_strict_readonly_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uow_strict_readonly_var", default=False)
 _uow_added_table_groups_var: contextvars.ContextVar[Optional[set[tuple[str, str]]]] = contextvars.ContextVar(
     "_uow_added_table_groups_var", default=None
 )
+_uow_savepoint_seq = itertools.count(1)
+
+
+def _publish_verified_table_groups(groups: Optional[set[tuple[str, str]]]) -> None:
+    """Publishes transaction-verified lazy-DDL table groups only after commit or clean read verification."""
+    if not groups:
+        return
+    with _VERIFIED_TABLE_GROUPS_LOCK:
+        _VERIFIED_TABLE_GROUPS.update(groups)
 
 
 def _discard_verified_table_groups(groups: Optional[set[tuple[str, str]]]) -> None:
@@ -1180,29 +1193,65 @@ def _read_schema_version(conn: sqlite3.Connection) -> int:
         return 0
 
 
+@contextmanager
+def savepoint(conn: sqlite3.Connection, name: str = "sp_nested", *, rollback_always: bool = False):
+    """Wraps a SQLite sub-operation in a named SAVEPOINT and rolls back pending lazy-DDL cache keys on revert."""
+    clean_name = re.sub(r"[^A-Za-z0-9_]", "_", str(name or "sp_nested")).strip("_") or "sp_nested"
+    if clean_name[0].isdigit():
+        clean_name = f"sp_{clean_name}"
+    pending = _uow_added_table_groups_var.get() if conn is _uow_conn_var.get() else None
+    pending_before = set(pending) if pending is not None else None
+    conn.execute(f"SAVEPOINT {clean_name}")
+    try:
+        yield conn
+        if rollback_always:
+            try:
+                conn.execute(f"ROLLBACK TO SAVEPOINT {clean_name}")
+                conn.execute(f"RELEASE SAVEPOINT {clean_name}")
+            except sqlite3.Error:
+                pass
+            if pending is not None and pending_before is not None:
+                pending.intersection_update(pending_before)
+        else:
+            conn.execute(f"RELEASE SAVEPOINT {clean_name}")
+    except BaseException:
+        try:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {clean_name}")
+        except sqlite3.Error:
+            pass
+        try:
+            conn.execute(f"RELEASE SAVEPOINT {clean_name}")
+        except sqlite3.Error:
+            pass
+        if pending is not None and pending_before is not None:
+            pending.intersection_update(pending_before)
+        raise
+
+
 def ensure_table_group_once(
     conn: sqlite3.Connection,
     group_name: str,
     check_and_create_fn: Callable[[sqlite3.Connection], None],
 ) -> None:
-    """Runs lazy DDL guard at most once per active db_path (or directly on ad-hoc connections)."""
-    active_db_path = _uow_db_path_var.get()
-    if active_db_path:
-        key = (str(active_db_path), str(group_name))
-        with _VERIFIED_TABLE_GROUPS_LOCK:
-            if key in _VERIFIED_TABLE_GROUPS:
+    """Runs lazy DDL guard at most once per active db_path (publishing to shared cache only after commit)."""
+    uow_conn = _uow_conn_var.get()
+    if uow_conn is not None and conn is uow_conn:
+        active_db_path = _uow_db_path_var.get()
+        if active_db_path:
+            key = (str(active_db_path), str(group_name))
+            with _VERIFIED_TABLE_GROUPS_LOCK:
+                if key in _VERIFIED_TABLE_GROUPS:
+                    return
+            pending = _uow_added_table_groups_var.get()
+            if pending is not None and key in pending:
                 return
-        check_and_create_fn(conn)
-        newly_added = False
-        with _VERIFIED_TABLE_GROUPS_LOCK:
-            if key not in _VERIFIED_TABLE_GROUPS:
-                _VERIFIED_TABLE_GROUPS.add(key)
-                newly_added = True
-        if newly_added:
-            added = _uow_added_table_groups_var.get()
-            if added is not None:
-                added.add(key)
-        return
+            check_and_create_fn(conn)
+            if pending is not None:
+                pending.add(key)
+            elif not conn.in_transaction:
+                with _VERIFIED_TABLE_GROUPS_LOCK:
+                    _VERIFIED_TABLE_GROUPS.add(key)
+            return
     check_and_create_fn(conn)
 
 
@@ -1228,26 +1277,37 @@ def _release_pooled_conn(pool: queue.Queue, conn: sqlite3.Connection) -> None:
 def close_all_connections():
     """Drains all connection pools. Vital for test teardown on Windows."""
     global _TURNS_SINCE_MAINTENANCE
+    drained: list[list[sqlite3.Connection]] = []
     with _POOL_LOCK:
         for _path, q in _POOL.items():
-            optimized_path = False
+            conns: list[sqlite3.Connection] = []
             while not q.empty():
                 try:
-                    conn = q.get_nowait()
-                    if not optimized_path and not conn.in_transaction:
-                        optimized_path = True
-                        try:
-                            conn.execute("PRAGMA optimize")
-                        except sqlite3.Error:
-                            pass
-                    conn.close()
+                    conns.append(q.get_nowait())
                 except queue.Empty:
                     break
+            if conns:
+                drained.append(conns)
         _POOL.clear()
     with _MAINTENANCE_LOCK:
         _TURNS_SINCE_MAINTENANCE = 0
     with _VERIFIED_TABLE_GROUPS_LOCK:
         _VERIFIED_TABLE_GROUPS.clear()
+
+    for conns in drained:
+        optimized_path = False
+        for conn in conns:
+            if not optimized_path:
+                try:
+                    if not conn.in_transaction:
+                        optimized_path = True
+                        conn.execute("PRAGMA optimize")
+                except sqlite3.Error:
+                    pass
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass
 
 def _create_new_connection(db_path: str):
     conn = sqlite3.connect(db_path, timeout=30.0, check_same_thread=False)
@@ -1269,13 +1329,29 @@ def _get_independent_conn(db_path: str = None):
     if db_path is None:
         db_path = __import__('db').DB_PATH
     pool, conn = _acquire_pooled_conn(db_path)
+    ind_added_groups: set[tuple[str, str]] = set()
+    token = _uow_conn_var.set(conn)
+    path_token = _uow_db_path_var.set(db_path)
+    ro_token = _uow_is_readonly_var.set(False)
+    strict_token = _uow_strict_readonly_var.set(False)
+    added_token = _uow_added_table_groups_var.set(ind_added_groups)
+    committed = False
     try:
         yield conn
         conn.commit()
+        committed = True
     except BaseException:
-        conn.rollback()
+        if conn.in_transaction:
+            conn.rollback()
         raise
     finally:
+        if committed:
+            _publish_verified_table_groups(ind_added_groups)
+        _uow_added_table_groups_var.reset(added_token)
+        _uow_strict_readonly_var.reset(strict_token)
+        _uow_is_readonly_var.reset(ro_token)
+        _uow_db_path_var.reset(path_token)
+        _uow_conn_var.reset(token)
         _release_pooled_conn(pool, conn)
 
 @contextmanager
@@ -1284,41 +1360,47 @@ def UnitOfWork(db_path: str = None):
     if db_path is None:
         db_path = __import__('db').DB_PATH
 
-    # If we are already in a transaction on the same DB, just yield the existing connection
     existing_conn = _uow_conn_var.get()
     if existing_conn is not None and _uow_db_path_var.get() == db_path:
-        if _uow_is_readonly_var.get():
-            _log.warning(
-                "UnitOfWork nested inside active ReadUnitOfWork on %s; "
-                "reusing BEGIN DEFERRED connection without write-lock upgrade.",
-                db_path,
+        if _uow_strict_readonly_var.get():
+            raise RuntimeError(
+                f"Cannot nest UnitOfWork inside ReadUnitOfWork(strict_readonly=True) on {db_path}"
             )
-        yield existing_conn
+        if _uow_is_readonly_var.get():
+            raise RuntimeError(
+                f"Cannot nest UnitOfWork inside active ReadUnitOfWork on {db_path}"
+            )
+        if not existing_conn.in_transaction:
+            existing_conn.execute("BEGIN IMMEDIATE")
+        with savepoint(existing_conn, f"_uow_sp_{next(_uow_savepoint_seq)}"):
+            yield existing_conn
         return
 
     pool, conn = _acquire_pooled_conn(db_path)
-
-    # Begin the transaction explicitly
-    if not conn.in_transaction:
-        conn.execute("BEGIN IMMEDIATE")
 
     added_groups: set[tuple[str, str]] = set()
     token = _uow_conn_var.set(conn)
     path_token = _uow_db_path_var.set(db_path)
     ro_token = _uow_is_readonly_var.set(False)
+    strict_token = _uow_strict_readonly_var.set(False)
     added_token = _uow_added_table_groups_var.set(added_groups)
     committed = False
     try:
+        # Execute BEGIN IMMEDIATE inside try so lock/busy failures always release the pooled conn.
+        if not conn.in_transaction:
+            conn.execute("BEGIN IMMEDIATE")
         yield conn
         conn.commit()
         committed = True
     except BaseException:
-        conn.rollback()
+        if conn.in_transaction:
+            conn.rollback()
         raise
     finally:
-        if not committed:
-            _discard_verified_table_groups(added_groups)
+        if committed:
+            _publish_verified_table_groups(added_groups)
         _uow_added_table_groups_var.reset(added_token)
+        _uow_strict_readonly_var.reset(strict_token)
         _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)
         _uow_conn_var.reset(token)
@@ -1332,20 +1414,28 @@ def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False)
         db_path = __import__("db").DB_PATH
 
     existing_conn = _uow_conn_var.get()
-    if not strict_readonly and existing_conn is not None and _uow_db_path_var.get() == db_path:
-        yield existing_conn
-        return
+    if existing_conn is not None and _uow_db_path_var.get() == db_path:
+        if not strict_readonly or _uow_strict_readonly_var.get():
+            yield existing_conn
+            return
+        parent_kind = "ReadUnitOfWork" if _uow_is_readonly_var.get() else "UnitOfWork"
+        raise RuntimeError(
+            f"Cannot nest ReadUnitOfWork(strict_readonly=True) inside active {parent_kind} on {db_path}"
+        )
 
     pool, conn = _acquire_pooled_conn(db_path)
     before_changes = conn.total_changes
-    before_schema_version = _read_schema_version(conn)
+    # Read PRAGMA schema_version before BEGIN DEFERRED when writable so no WAL read snapshot
+    # is pinned prematurely before a caller's lazy write.
+    before_schema_version: Optional[int] = None if strict_readonly else _read_schema_version(conn)
     added_groups: set[tuple[str, str]] = set()
     query_only_enabled = False
     token = _uow_conn_var.set(conn)
     path_token = _uow_db_path_var.set(db_path)
     ro_token = _uow_is_readonly_var.set(True)
+    strict_token = _uow_strict_readonly_var.set(bool(strict_readonly))
     added_token = _uow_added_table_groups_var.set(added_groups)
-    rolled_back = False
+    succeeded = False
     try:
         if strict_readonly:
             conn.execute("PRAGMA query_only = ON")
@@ -1354,25 +1444,23 @@ def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False)
             conn.execute("BEGIN DEFERRED")
         yield conn
         # SQLite total_changes counts DML only; PRAGMA schema_version catches lazy DDL (CREATE TABLE/INDEX).
-        has_mutations = (
+        if not strict_readonly and (
             conn.total_changes > before_changes
-            or _read_schema_version(conn) != before_schema_version
-        )
-        if not strict_readonly and has_mutations:
+            or (before_schema_version is not None and _read_schema_version(conn) != before_schema_version)
+        ):
             conn.commit()
         elif conn.in_transaction:
             conn.rollback()
-            if has_mutations:
-                rolled_back = True
+        succeeded = True
     except BaseException:
-        rolled_back = True
         if conn.in_transaction:
             conn.rollback()
         raise
     finally:
-        if rolled_back:
-            _discard_verified_table_groups(added_groups)
+        if succeeded:
+            _publish_verified_table_groups(added_groups)
         _uow_added_table_groups_var.reset(added_token)
+        _uow_strict_readonly_var.reset(strict_token)
         _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)
         _uow_conn_var.reset(token)
@@ -1404,6 +1492,7 @@ def get_conn():
         token = _uow_conn_var.set(conn)
         path_token = _uow_db_path_var.set(db_path)
         ro_token = _uow_is_readonly_var.set(False)
+        strict_token = _uow_strict_readonly_var.set(False)
         added_token = _uow_added_table_groups_var.set(added_groups)
         committed = False
         try:
@@ -1411,12 +1500,14 @@ def get_conn():
             conn.commit()
             committed = True
         except BaseException:
-            conn.rollback()
+            if conn.in_transaction:
+                conn.rollback()
             raise
         finally:
-            if not committed:
-                _discard_verified_table_groups(added_groups)
+            if committed:
+                _publish_verified_table_groups(added_groups)
             _uow_added_table_groups_var.reset(added_token)
+            _uow_strict_readonly_var.reset(strict_token)
             _uow_is_readonly_var.reset(ro_token)
             _uow_db_path_var.reset(path_token)
             _uow_conn_var.reset(token)
@@ -1452,6 +1543,42 @@ async def adb(fn, /, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
 
 
+def _call_get_character_compat(
+    get_char_fn: Callable[..., Any],
+    user_id: int,
+    *,
+    session_id: Any = None,
+    settings: Optional[Dict[str, Any]] = None,
+) -> Any:
+    """Invokes db.get_character (or a monkeypatched test spy) passing only accepted optional kwargs."""
+    target = get_char_fn
+    for _ in range(4):
+        se = getattr(target, "side_effect", None)
+        if callable(se) and not (isinstance(se, type) and issubclass(se, BaseException)):
+            target = se
+            continue
+        wraps = getattr(target, "_mock_wraps", None)
+        if callable(wraps):
+            target = wraps
+            continue
+        break
+    try:
+        sig = inspect.signature(target)
+    except (TypeError, ValueError):
+        return get_char_fn(user_id)
+    params = sig.parameters
+    has_varkw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+    kwargs: Dict[str, Any] = {}
+    if session_id is not None and (
+        ("session_id" in params and params["session_id"].kind != inspect.Parameter.POSITIONAL_ONLY)
+        or has_varkw
+    ):
+        kwargs["session_id"] = session_id
+    if ("settings" in params and params["settings"].kind != inspect.Parameter.POSITIONAL_ONLY) or has_varkw:
+        kwargs["settings"] = settings
+    return get_char_fn(user_id, **kwargs)
+
+
 def preload_prepare_action_bundle(
     session_id: int,
     user_id: int,
@@ -1468,13 +1595,19 @@ def preload_prepare_action_bundle(
         if eff_sess is None:
             sess_row = db_mod.get_session(session_id)
             eff_sess = dict(sess_row) if sess_row else None
+        settings = db_mod.get_settings(user_id) or {}
         eff_char = char
         if eff_char is None:
-            char_row = db_mod.get_character(user_id)
+            eff_sid = session_id or (eff_sess.get("id") if isinstance(eff_sess, dict) else None)
+            char_row = _call_get_character_compat(
+                db_mod.get_character,
+                user_id,
+                session_id=eff_sid,
+                settings=settings,
+            )
             eff_char = dict(char_row) if char_row else None
         else:
             eff_char = dict(eff_char)
-        settings = db_mod.get_settings(user_id) or {}
         we_snap: Any = None
         if include_world_events and isinstance(eff_sess, dict) and eff_sess.get("id") and "_world_events_snapshot" not in eff_sess:
             try:
@@ -2538,6 +2671,16 @@ SCHEMA_MIGRATIONS.append(
         60,
         "outlaw_factions_10wing_and_safehouses_v60",
         [],
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        61,
+        "player_properties_buyer_character_id_v61",
+        [
+            "ALTER TABLE player_properties ADD COLUMN buyer_character_id INTEGER",
+        ],
     )
 )
 
@@ -3740,9 +3883,14 @@ def _set_user_version(conn: sqlite3.Connection, version: int) -> None:
 
 def _all_migrations_recorded(conn: sqlite3.Connection) -> bool:
     try:
-        row = conn.execute("SELECT COUNT(*) FROM schema_migrations").fetchone()
-        return bool(row and int(row[0]) == len(SCHEMA_MIGRATIONS))
-    except sqlite3.OperationalError:
+        expected = {int(v) for v, _, _ in SCHEMA_MIGRATIONS}
+        recorded = {
+            int(row[0])
+            for row in conn.execute("SELECT version FROM schema_migrations").fetchall()
+            if row and row[0] is not None
+        }
+        return expected.issubset(recorded)
+    except (sqlite3.OperationalError, TypeError, ValueError):
         return False
 
 
@@ -3756,19 +3904,14 @@ def _exec_schema_with_legacy_fallback(conn: sqlite3.Connection) -> None:
             raise
         buf: list[str] = []
         post_stmts: list[str] = []
-        in_trigger = False
         for line in SCHEMA.splitlines():
             stripped = line.strip()
-            if not stripped or stripped.startswith("--"):
+            if not buf and (not stripped or stripped.startswith("--")):
                 continue
             buf.append(line)
-            up = stripped.upper()
-            if up.startswith("CREATE TRIGGER"):
-                in_trigger = True
-            stmt_done = (in_trigger and up == "END;") or (not in_trigger and stripped.endswith(";"))
-            if stmt_done:
-                in_trigger = False
-                stmt_sql = "\n".join(buf).strip()
+            candidate = "\n".join(buf) + "\n"
+            if sqlite3.complete_statement(candidate):
+                stmt_sql = candidate.strip()
                 buf = []
                 if stmt_sql.upper().startswith(("CREATE TABLE", "CREATE VIRTUAL TABLE")):
                     conn.execute(stmt_sql)
@@ -3817,14 +3960,15 @@ def init_db(force: bool = False):
             has_migrations = conn.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'"
             ).fetchone() is not None
-            if has_migrations:
+            if has_migrations and _get_user_version(conn) == CURRENT_SCHEMA_VERSION:
                 try:
                     run_schema_migrations(conn)
                     if _all_migrations_recorded(conn):
                         _set_user_version(conn, CURRENT_SCHEMA_VERSION)
                     return
                 except Exception:
-                    pass
+                    if conn.in_transaction:
+                        conn.rollback()
             _exec_schema_with_legacy_fallback(conn)
 
             if _all_migrations_recorded(conn):
@@ -3898,7 +4042,7 @@ def maybe_run_wal_maintenance(
     if conn is not None:
         _run_maint(conn)
     else:
-        with get_conn() as c:
+        with _get_independent_conn() as c:
             _run_maint(c)
     return True
 

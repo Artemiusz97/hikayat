@@ -664,6 +664,11 @@ class TurnService:
                 )
 
         await adb(_commit_scene_tx)
+        try:
+            from services.examine_service import invalidate_examine_cache
+            invalidate_examine_cache(int(session_id))
+        except Exception:
+            pass
         return scene_title, next_narrative, cleaned_choices
 
     @staticmethod
@@ -1129,25 +1134,29 @@ class TurnService:
                 _cur_loc_s = str((session or {}).get("current_location") or "")
                 _cur_nid_s = str((session or {}).get("current_node_id") or "")
                 _cur_scen_s = str((session or {}).get("scenario") or "anomalous_incursions")
-                _cand_cards_s = (
-                    build_site_puzzle_choices(
-                        int(session_id),
-                        location_str=_cur_loc_s,
-                        node_id=_cur_nid_s,
-                        scen_key=_cur_scen_s,
-                        current_day=_cur_day_s,
-                        current_minute=_cur_min_s,
-                        inventory=inventory,
-                        session=session,
+
+                def _build_site_reconcile_cards() -> list:
+                    return (
+                        build_site_puzzle_choices(
+                            int(session_id),
+                            location_str=_cur_loc_s,
+                            node_id=_cur_nid_s,
+                            scen_key=_cur_scen_s,
+                            current_day=_cur_day_s,
+                            current_minute=_cur_min_s,
+                            inventory=inventory,
+                            session=session,
+                        )
+                        + build_site_harvest_choices(
+                            int(session_id),
+                            location_str=_cur_loc_s,
+                            node_id=_cur_nid_s,
+                            scen_key=_cur_scen_s,
+                            current_day=_cur_day_s,
+                        )
                     )
-                    + build_site_harvest_choices(
-                        int(session_id),
-                        location_str=_cur_loc_s,
-                        node_id=_cur_nid_s,
-                        scen_key=_cur_scen_s,
-                        current_day=_cur_day_s,
-                    )
-                )
+
+                _cand_cards_s = await adb(_build_site_reconcile_cards)
                 _req_sa = str(cleaned.get("site_action") or "").strip().lower()
                 _req_sid = str(cleaned.get("site_id") or "").strip().lower()
                 _req_ward = bool(cleaned.get("use_ward"))
@@ -2532,12 +2541,16 @@ class TurnService:
         })
         if not action.get("active_recall") and isinstance(session, dict) and session.get("id") and label_text:
             from game_engine.turn.generation import extract_deterministic_recall_query
-            recall_q = extract_deterministic_recall_query(label_text, session_id=session["id"])
-            if recall_q:
-                from db.memory import active_recall_search
-                recall_hits = await adb(active_recall_search, session["id"], recall_q)
-                if recall_hits:
-                    action["active_recall"] = recall_hits
+            from db.memory import active_recall_search
+            _rc_sid = session["id"]
+
+            def _run_direct_choice_recall():
+                rq = extract_deterministic_recall_query(label_text, session_id=_rc_sid)
+                return active_recall_search(_rc_sid, rq) if rq else None
+
+            recall_hits = await adb(_run_direct_choice_recall)
+            if recall_hits:
+                action["active_recall"] = recall_hits
         return action
 
     @staticmethod
@@ -2870,37 +2883,6 @@ class TurnService:
         pre_turn_count_val = int(session.get("turn_count") or 0)
         pre_turn_history_snapshot = copy.deepcopy(list(session.get("history") or []))
         target_turn = max(pre_turn_count_val, _hist_actions_cnt) + 1
-        _property_gold_refunds: List[Tuple[int, int, Optional[int]]] = []
-        for _pa in actions:
-            if isinstance(_pa, dict) and str(_pa.get("intent") or "").strip().lower() == "property_purchase":
-                _p_uid = int(_pa.get("user_id") or (_pa.get("char") or {}).get("user_id") or user_id)
-                _p_id = str(_pa.get("property_id") or "").strip()
-                if not _p_id and _pa.get("target_node_id"):
-                    from mechanics.world.locations.realty_catalog import find_realty_by_node_id
-                    _c_fb = find_realty_by_node_id(str(_pa["target_node_id"]), session_or_id=session or session_id)
-                    if _c_fb:
-                        _p_id = _c_fb["property_id"]
-                if _p_id:
-                    _buy_res = await adb(db.atomic_purchase_property, session_id, _p_uid, _p_id, turn_number=target_turn)
-                    if _buy_res.get("ok"):
-                        _paid = int(_buy_res.get("price_paid") or 0)
-                        _p_cid = int(_buy_res.get("character_id") or (_pa.get("char") or {}).get("id") or 0) or None
-                        _pa["gold_spent"] = 0
-                        _pa["_gold_already_deducted"] = True
-                        if _paid > 0:
-                            _property_gold_refunds.append((_p_uid, _paid, _p_cid))
-                        _updated_gold = _buy_res.get("new_gold")
-                        if _updated_gold is None:
-                            _updated_gold = _buy_res.get("gold")
-                        for _idx_m, (_pc, _pinv) in enumerate(party):
-                            if int(_pc.get("user_id") or 0) == _p_uid:
-                                if _updated_gold is not None:
-                                    _pc["gold"] = int(_updated_gold)
-                                party[_idx_m] = (_pc, _pinv)
-                    else:
-                        _pa["target_node_id"] = ""
-                        _pa["target_location"] = ""
-                        _pa["label"] = f"Inspect the realty listing outside ({_buy_res.get('message') or _buy_res.get('reason') or 'purchase declined'})"
         pre_turn_daily_incursions_snapshot = copy.deepcopy(
             session.get("daily_incursions") if "daily_incursions" in session else session.get("daily_breaches")
         )
@@ -3089,6 +3071,33 @@ class TurnService:
 
         # Resolve the turn with the LLM — resolve_turn now always returns a dict
         try:
+            for _pa in actions:
+                if isinstance(_pa, dict) and str(_pa.get("intent") or "").strip().lower() == "property_purchase":
+                    _p_uid = int(_pa.get("user_id") or (_pa.get("char") or {}).get("user_id") or user_id)
+                    _p_id = str(_pa.get("property_id") or "").strip()
+                    if not _p_id and _pa.get("target_node_id"):
+                        from mechanics.world.locations.realty_catalog import find_realty_by_node_id
+                        _c_fb = await adb(find_realty_by_node_id, str(_pa["target_node_id"]), session_or_id=session or session_id)
+                        if _c_fb:
+                            _p_id = _c_fb["property_id"]
+                    if _p_id:
+                        _buy_res = await adb(db.atomic_purchase_property, session_id, _p_uid, _p_id, turn_number=target_turn)
+                        if _buy_res.get("ok"):
+                            _pa["gold_spent"] = 0
+                            _pa["_gold_already_deducted"] = True
+                            _updated_gold = _buy_res.get("new_gold")
+                            if _updated_gold is None:
+                                _updated_gold = _buy_res.get("gold")
+                            for _idx_m, (_pc, _pinv) in enumerate(party):
+                                if int(_pc.get("user_id") or 0) == _p_uid:
+                                    if _updated_gold is not None:
+                                        _pc["gold"] = int(_updated_gold)
+                                    party[_idx_m] = (_pc, _pinv)
+                        else:
+                            _pa["target_node_id"] = ""
+                            _pa["target_location"] = ""
+                            _pa["label"] = f"Inspect the realty listing outside ({_buy_res.get('message') or _buy_res.get('reason') or 'purchase declined'})"
+
             resolve_kwargs: Dict[str, Any] = {"stream_callback": stream_callback}
             if _callable_accepts_kwarg(game_engine.resolve_turn, "ctx"):
                 resolve_kwargs["ctx"] = turn_ctx
@@ -3451,8 +3460,14 @@ class TurnService:
                 lvls_l_gained: List[int] = []
                 xp_by_u: Dict[Any, int] = {}
                 levels_by_u: Dict[Any, List[int]] = {}
-                char_row_main = db.get_character(user_id)
-                uid_char_cache: Dict[Any, Any] = {user_id: char_row_main}
+                uid_char_cache: Dict[Any, Any] = {
+                    int(c["user_id"]): c
+                    for c in (db.get_session_characters(session_id) or [])
+                    if isinstance(c, dict) and c.get("user_id") is not None
+                }
+                if user_id not in uid_char_cache:
+                    uid_char_cache[user_id] = db.get_character(user_id)
+                char_row_main = uid_char_cache.get(user_id)
 
                 deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
                 for a in actions:
@@ -3761,6 +3776,17 @@ class TurnService:
             _run_finalize_memory_after_prose(new_hist, outcome), reraise_cancel=False
         )
         def _load_final_session_with_realty() -> Optional[Dict[str, Any]]:
+            try:
+                from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
+                scen_hint = str((fresh_session or {}).get("scenario") or "")
+                if not scen_hint:
+                    _s_hint_row = db.get_session(session_id)
+                    scen_hint = str((_s_hint_row or {}).get("scenario") or "")
+                if is_anomalous_realty_scenario(scen_hint):
+                    if not any(p.get("is_starter") for p in db.get_player_properties(session_id)):
+                        db.grant_or_relocate_starter_quarters(session_id)
+            except Exception:
+                pass
             with db.ReadUnitOfWork():
                 s_row = db.get_session(session_id)
                 if not isinstance(s_row, dict):
@@ -3769,7 +3795,7 @@ class TurnService:
                 try:
                     from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
                     if is_anomalous_realty_scenario(str(s_row.get("scenario") or "")):
-                        s_row["realty"] = build_realty_payload(session_id, user_id)
+                        s_row["realty"] = build_realty_payload(session_id, user_id, persist_db=False)
                 except Exception:
                     pass
                 return s_row
@@ -3872,23 +3898,28 @@ class TurnService:
             raw_hist[-1] = last_entry
 
         async def _commit_retry_result():
-            if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
-                await adb(db.update_session, session_id, history_json=json.dumps(raw_hist, default=str))
-                try:
-                    await adb(db.resync_latest_digest_turn, session_id, raw_hist)
-                except Exception as _resync_err:
-                    log.warning("resync_latest_digest_turn during retry_narration failed (non-fatal): %s", _resync_err)
+            def _commit_retry_tx():
+                with db.UnitOfWork() as uow_conn:
+                    if raw_hist and isinstance(raw_hist[-1], dict) and raw_hist[-1].get("type") == "action":
+                        db.update_session(session_id, history_json=json.dumps(raw_hist, default=str))
+                        try:
+                            with db.savepoint(uow_conn, "sp_retry_resync_digest"):
+                                db.resync_latest_digest_turn(session_id, raw_hist)
+                        except Exception as _resync_err:
+                            log.warning("resync_latest_digest_turn during retry_narration failed (non-fatal): %s", _resync_err)
 
-            snapshot["retry_attempts"] = attempt
-            snapshot["fallback_reason"] = None
-            await adb(db.set_turn_snapshot, session_id, snapshot)
+                    snapshot["retry_attempts"] = attempt
+                    snapshot["fallback_reason"] = None
+                    db.set_turn_snapshot(session_id, snapshot)
 
-            fresh_s = await adb(db.get_session, session_id)
-            n_char = await adb(db.get_character, user_id)
+                    s_row = db.get_session(session_id)
+                    ch_row = db.get_character(user_id, session_id=session_id)
+                    if isinstance(s_row, dict):
+                        from mechanics.world.world_events.engine import build_client_world_pulse_payload as _build_wp_retry
+                        s_row["world_pulse"] = _build_wp_retry(session_id)
+                    return s_row, ch_row
 
-            if isinstance(fresh_s, dict):
-                from mechanics.world.world_events.engine import build_client_world_pulse_payload as _build_wp_retry
-                fresh_s["world_pulse"] = await adb(_build_wp_retry, session_id)
+            fresh_s, n_char = await adb(_commit_retry_tx)
 
             applied_state = dict(snapshot.get("applied", {}))
             merged = dict(applied_state)

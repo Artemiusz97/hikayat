@@ -381,6 +381,7 @@ def format_llm_location_context(
     char_name: str = "",
     *,
     present_npcs: list | None = None,
+    ensure_seeded: bool = True,
 ) -> str:
     """Formats the location context string and real-time movement rules for the LLM prompt."""
 
@@ -390,7 +391,8 @@ def format_llm_location_context(
 
 
 
-    ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
+    if ensure_seeded:
+        ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
 
     zone, primary, sub = parse_tiered_location(current_location_raw, scenario_key, session_id=session_id, char_name=char_name)
 

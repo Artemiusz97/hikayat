@@ -1632,6 +1632,7 @@
   },
   "social": {
     "mood_prefix": "Nastrój",
+    "conversation_paused": "{{name}} na razie nie ma ochoty na dalszą pogawędkę. Wróć później w ciągu dnia albo spróbuj czegoś innego.",
     "schedule_header": "Plan dnia i rutyna",
     "masked_slot": "???",
     "bond_settling_dm": "Więź utrwala się na dziś — dalsze rozmowy odkrywają fakty bez wymuszania punktów więzi.",

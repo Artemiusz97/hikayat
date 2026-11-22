@@ -1,4 +1,5 @@
 import asyncio
+from contextlib import nullcontext
 import json
 import re
 import time
@@ -99,6 +100,23 @@ async def _cancel_session_in_flight_task(session_id: int | None) -> bool:
     return not still_running
 
 
+def _cancel_unstarted_in_flight_entry_locked(session_id: int | None) -> None:
+    """Marks and removes any newly queued `_IN_FLIGHT_TURN_TASKS` entry while holding `distributed_adventure_lock`."""
+    if not session_id:
+        return
+    sid = int(session_id)
+    _LAST_TURN_ERRORS.pop(sid, None)
+    entry = _IN_FLIGHT_TURN_TASKS.get(sid)
+    if not entry:
+        return
+    entry["cancelled_by_endpoint"] = True
+    task = entry.get("task")
+    if isinstance(task, asyncio.Task) and not task.done():
+        task.cancel()
+    if _IN_FLIGHT_TURN_TASKS.get(sid) is entry:
+        _IN_FLIGHT_TURN_TASKS.pop(sid, None)
+
+
 async def _load_error_session_snapshot(session_id: int, user_id: int | None) -> dict | None:
     """Safely reload and enrich the rolled-back session state for STREAM_ERROR clients."""
     try:
@@ -166,7 +184,72 @@ def _sanitize_enemy_telegraph_view(e_view: dict) -> None:
         e_view["telegraphed_skill"] = sanitized_tel
 
 
-def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None = None) -> dict:
+def _enrich_session_for_client(
+    session: dict,
+    user_id: int,
+    ui_lang: str | None = None,
+    *,
+    read_only: bool = False,
+) -> dict:
+    """Enriches session payload under a single ReadUnitOfWork (deferring any writes until exit)."""
+    if not session or not isinstance(session, dict):
+        return session
+
+    sid_val = int(session.get("id") or 0)
+    pre_agent_roster = None
+    if (
+        not read_only
+        and sid_val > 0
+        and scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
+    ):
+        raw_r = session.get("anomalous_agent_roster")
+        if not isinstance(raw_r, list) or not raw_r:
+            try:
+                from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+                pre_agent_roster = ensure_anomalous_agent_roster(sid_val, str(session.get("scenario") or ""))
+            except Exception:
+                pre_agent_roster = []
+    if not read_only and sid_val > 0:
+        try:
+            from mechanics.world.locations import is_anomalous_realty_scenario
+            if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
+                if not any(p.get("is_starter") for p in db.get_player_properties(sid_val)):
+                    db.grant_or_relocate_starter_quarters(sid_val)
+        except Exception:
+            pass
+
+    pending_writes: dict[str, Any] = {}
+    with db.ReadUnitOfWork():
+        enriched = _enrich_session_for_client_body(
+            session,
+            user_id,
+            ui_lang=ui_lang,
+            read_only=read_only,
+            pre_agent_roster=pre_agent_roster,
+            pending_writes=pending_writes,
+        )
+
+    if not read_only and sid_val > 0 and pending_writes:
+        try:
+            with db.UnitOfWork():
+                if "choices" in pending_writes:
+                    db.update_session(sid_val, choices=pending_writes["choices"])
+                if "merchant" in pending_writes:
+                    db.save_merchant_state(sid_val, pending_writes["merchant"])
+        except Exception:
+            pass
+    return enriched
+
+
+def _enrich_session_for_client_body(
+    session: dict,
+    user_id: int,
+    ui_lang: str | None = None,
+    *,
+    read_only: bool = False,
+    pre_agent_roster: list | None = None,
+    pending_writes: dict[str, Any] | None = None,
+) -> dict:
     """Enriches session payload with odds, party vitals, combat state, formatted time, fallback flags, and categorized combat decks."""
     if not session or not isinstance(session, dict):
         return session
@@ -207,11 +290,8 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
     if not had_exit:
         healed_choices = ensure_active_dialogue_exit_choice(raw_choices, session=session)
         if has_dialogue_exit_choice(healed_choices):
-            if session.get("id"):
-                try:
-                    db.update_session(int(session["id"]), choices=healed_choices)
-                except Exception:
-                    pass
+            if not read_only and session.get("id") and isinstance(pending_writes, dict):
+                pending_writes["choices"] = healed_choices
             raw_choices = healed_choices
 
     session["choices"] = enrich_choices_with_odds(
@@ -262,10 +342,8 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
             cleaned_merch["is_faction_quartermaster"] = False
             cleaned_merch["active"] = False
             session["merchant"] = cleaned_merch
-            try:
-                db.save_merchant_state(sid_int, cleaned_merch)
-            except Exception:
-                pass
+            if not read_only and isinstance(pending_writes, dict):
+                pending_writes["merchant"] = cleaned_merch
 
     merch_ui = resolve_scene_merchant_ui_state(
         session,
@@ -381,7 +459,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
             try:
                 from mechanics.pacts import get_pact_slot_capacity, get_available_patrons_for_context
                 _act_pacts = db.get_player_active_pacts(int(session["id"]), int(uid))
-                _avail_p = get_available_patrons_for_context(session, char or {}, int(uid))
+                _avail_p = get_available_patrons_for_context(session, char or {}, int(uid), persist_db=False)
                 session["contracts_hud"] = {
                     "enabled": True,
                     "slot_used": len(_act_pacts),
@@ -691,7 +769,9 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
         if is_anom_sess:
             raw_roster = session.get("anomalous_agent_roster")
             if not isinstance(raw_roster, list) or not raw_roster:
-                if sess_id:
+                if pre_agent_roster is not None:
+                    raw_roster = pre_agent_roster
+                elif not read_only and sess_id:
                     try:
                         from mechanics.social.agent_roster import ensure_anomalous_agent_roster
                         raw_roster = ensure_anomalous_agent_roster(sess_id, str(session.get("scenario") or ""))
@@ -1161,6 +1241,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
                         _dp_nm,
                         current_day=day,
                         current_minute=minute,
+                        persist_db=(not read_only),
                     )
                     _m_key, _ = _soc_pacing.derive_mood_and_dc_mod(
                         int(_comp.get("current_composure", 100)),
@@ -1195,7 +1276,7 @@ def _enrich_session_for_client(session: dict, user_id: int, ui_lang: str | None 
         try:
             from mechanics.world.locations import is_anomalous_realty_scenario, build_realty_payload
             if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
-                session["realty"] = build_realty_payload(int(session["id"]), user_id)
+                session["realty"] = build_realty_payload(int(session["id"]), user_id, persist_db=False)
         except Exception as e_rl:
             logger.debug(f"Could not enrich realty for session: {e_rl}")
 
@@ -1356,12 +1437,14 @@ async def get_character_sessions_endpoint(character_id: int, request: Request = 
     if not char:
         return {"sessions": []}
     await verify_user_access(request, char["user_id"])
-    sessions = await adb(db.get_character_sessions, character_id)
     user_id = char["user_id"]
-    enriched = []
-    for s in sessions:
-        es = await adb(_enrich_session_for_client, s, user_id)
-        enriched.append(es)
+
+    def _load_and_enrich_char_sessions() -> list[dict]:
+        with db.ReadUnitOfWork():
+            sessions = db.get_character_sessions(character_id)
+            return [_enrich_session_for_client(s, user_id, read_only=True) for s in sessions]
+
+    enriched = await adb(_load_and_enrich_char_sessions)
     return {"sessions": enriched}
 
 
@@ -1410,7 +1493,7 @@ async def get_active_session(user_id: int, request: Request = None):
     if not session:
         return {"has_active_session": False, "session": None}
 
-    session = await adb(_enrich_session_for_client, session, user_id)
+    session = await adb(_enrich_session_for_client, session, user_id, read_only=True)
 
     return {
         "has_active_session": True,
@@ -1450,6 +1533,8 @@ async def start_adventure(req: StartAdventureRequest, request: Request = None):
         await _cancel_session_in_flight_task(int(pre_slot_sess["id"]))
         _LAST_TURN_ERRORS.pop(int(pre_slot_sess["id"]), None)
     async with distributed_adventure_lock(canonical_id, lock_sids):
+        for _l_sid in lock_sids:
+            _cancel_unstarted_in_flight_entry_locked(_l_sid)
         from api.auth_characters import rebuild_verified_client_starter_loadout
         try:
             start_result = await TurnService.start_adventure(
@@ -1664,8 +1749,18 @@ async def _execute_action_locked(
     *,
     in_flight_entry: dict[str, Any] | None = None,
     broadcast_error: bool = False,
+    pre_locked: bool = False,
 ) -> dict | None:
-    async with distributed_session_lock(req.session_id):
+    lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    async with lock_ctx:
+        if in_flight_entry is not None:
+            if (
+                in_flight_entry.get("cancelled_by_endpoint")
+                or _IN_FLIGHT_TURN_TASKS.get(req.session_id) is not in_flight_entry
+            ):
+                return None
+        elif not pre_locked and _get_active_in_flight_turn(req.session_id) is not None:
+            raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
         session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             if broadcast_error:
@@ -1932,138 +2027,140 @@ async def _execute_action_locked(
 @router.post("/api/adventure/action")
 async def execute_action(req: ActionRequest, request: Request = None):
     """Executes a player choice or custom action in an adventure session."""
-    session_row, verified_uid = await verify_session_participant(request, req.session_id, req.user_id, require_turn=True)
-    if bool(getattr(req, "async_ws", False)):
+    if not bool(getattr(req, "async_ws", False)):
+        return await _execute_action_locked(req, request, broadcast_error=False)
+
+    async with distributed_session_lock(req.session_id):
         if _get_active_in_flight_turn(req.session_id) is not None:
             raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
 
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session, verified_uid = await verify_session_participant(
+            request, req.session_id, req.user_id, require_turn=True, session=session_row
+        )
         eff_uid = verified_uid or req.user_id
+        if session["status"] != "active":
+            raise HTTPException(status_code=400, detail="Session is not active")
+        char = await adb(db.get_character, req.user_id)
+        if not char:
+            raise HTTPException(status_code=404, detail="Character not found")
+
+        raw_choices = session.get("choices") or []
+        has_action_payload = (
+            req.choice_index is not None
+            or bool((req.custom_action_text or "").strip())
+            or bool(req.direct_choice)
+            or bool(isinstance(req.action, dict) and req.action)
+        )
+        if not has_action_payload:
+            raise HTTPException(status_code=400, detail="No action specified")
+        if req.choice_index is not None and raw_choices and not (0 <= int(req.choice_index) < len(raw_choices)):
+            raise HTTPException(status_code=400, detail="Invalid choice index")
+
+        if session.get("mode") == "sync":
+            members = await adb(db.get_session_members, req.session_id) or []
+            picks = session.get("pending_picks") or {}
+            combined_keys = {str(k) for k in picks.keys()} | {str(req.user_id)}
+            if len(members) > 1 and len(combined_keys) < len(members):
+                return await _execute_action_locked(
+                    req, request, broadcast_error=False, pre_locked=True
+                )
+
         turn_id = f"turn_{req.session_id}_{int(time.time() * 1000)}"
+        preview_label = (req.custom_action_text or "").strip()
+        if not preview_label and req.choice_index is not None and raw_choices:
+            chosen_preview = raw_choices[int(req.choice_index)]
+            if isinstance(chosen_preview, dict):
+                preview_label = str(chosen_preview.get("label") or chosen_preview.get("text") or "").strip()
+            elif isinstance(chosen_preview, str):
+                preview_label = chosen_preview.strip()
+        if not preview_label and isinstance(req.action, dict):
+            preview_label = str(req.action.get("label") or req.action.get("text") or req.action.get("custom_action_text") or "").strip()
+
         entry: dict[str, Any] = {
             "turn_id": turn_id,
             "user_id": eff_uid,
             "status": "resolving",
-            "action": {"user_id": eff_uid, "label": "Resolving Action..."},
+            "action": {"user_id": eff_uid, "label": preview_label or "Action"},
             "started_at": time.time(),
             "cancelled_by_endpoint": False,
             "task": None,
         }
-        # Reserve slot synchronously before any subsequent `await` to close the TOCTOU window
         _IN_FLIGHT_TURN_TASKS[req.session_id] = entry
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
 
-        release_reservation = True
-        try:
-            session = session_row
-            if session["status"] != "active":
-                raise HTTPException(status_code=400, detail="Session is not active")
-            char = await adb(db.get_character, req.user_id)
-            if not char:
-                raise HTTPException(status_code=404, detail="Character not found")
-
-            raw_choices = session.get("choices") or []
-            has_action_payload = (
-                req.choice_index is not None
-                or bool((req.custom_action_text or "").strip())
-                or bool(req.direct_choice)
-                or bool(isinstance(req.action, dict) and req.action)
-            )
-            if not has_action_payload:
-                raise HTTPException(status_code=400, detail="No action specified")
-            if req.choice_index is not None and raw_choices and not (0 <= int(req.choice_index) < len(raw_choices)):
-                raise HTTPException(status_code=400, detail="Invalid choice index")
-
-            if session.get("mode") == "sync":
-                members = await adb(db.get_session_members, req.session_id) or []
-                picks = session.get("pending_picks") or {}
-                combined_keys = {str(k) for k in picks.keys()} | {str(req.user_id)}
-                if len(members) > 1 and len(combined_keys) < len(members):
-                    if _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
-                        _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
-                    release_reservation = False
-                    return await _execute_action_locked(req, request, broadcast_error=False)
-
-            preview_label = (req.custom_action_text or "").strip()
-            if not preview_label and req.choice_index is not None and raw_choices:
-                chosen_preview = raw_choices[int(req.choice_index)]
-                if isinstance(chosen_preview, dict):
-                    preview_label = str(chosen_preview.get("label") or chosen_preview.get("text") or "").strip()
-                elif isinstance(chosen_preview, str):
-                    preview_label = chosen_preview.strip()
-            if not preview_label and isinstance(req.action, dict):
-                preview_label = str(req.action.get("label") or req.action.get("text") or req.action.get("custom_action_text") or "").strip()
-            entry["action"] = {"user_id": eff_uid, "label": preview_label or "Action"}
-
-            if entry.get("cancelled_by_endpoint"):
-                return JSONResponse(
-                    status_code=200,
-                    content={"status": "cancelled", "session_id": req.session_id, "turn_id": turn_id},
-                )
-
-            async def _run_bg_action():
-                try:
-                    await _execute_action_locked(
-                        req,
-                        request,
-                        in_flight_entry=entry,
-                        broadcast_error=True,
-                    )
-                except asyncio.CancelledError:
-                    if not entry.get("cancelled_by_endpoint"):
-                        try:
-                            fresh = await adb(db.get_session, req.session_id)
-                            if fresh:
-                                fresh = await adb(_enrich_session_for_client, fresh, req.user_id)
-                                if isinstance(fresh, dict):
-                                    fresh["in_flight_turn"] = None
-                            await manager.broadcast(req.session_id, {
-                                "type": "TURN_CANCELLED",
-                                "session_id": req.session_id,
-                                "session": fresh,
-                                "sync_timestamp": time.time(),
-                            })
-                        except Exception:
-                            pass
-                    raise
-                except HTTPException as http_err:
-                    err_detail = str(http_err.detail or "Failed to execute action")
-                    _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
-                    err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
-                    await manager.broadcast(req.session_id, {
-                        "type": "STREAM_ERROR",
-                        "session_id": req.session_id,
-                        "error": err_detail,
-                        "status_code": http_err.status_code,
-                        "session": err_sess,
-                    })
-                except Exception as bg_err:
-                    logger.error("Unhandled async turn error for session %s: %s", req.session_id, bg_err, exc_info=True)
-                    err_detail = f"Engine failed to resolve the turn: {bg_err}"
-                    _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
-                    err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
-                    await manager.broadcast(req.session_id, {
-                        "type": "STREAM_ERROR",
-                        "session_id": req.session_id,
-                        "error": err_detail,
-                        "status_code": 500,
-                        "session": err_sess,
-                    })
-                finally:
-                    if _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
-                        _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
-
-            bg_task = _spawn_background_task(_run_bg_action())
-            entry["task"] = bg_task
-            release_reservation = False
+    release_reservation = True
+    try:
+        if entry.get("cancelled_by_endpoint"):
             return JSONResponse(
-                status_code=202,
-                content={"status": "accepted", "session_id": req.session_id, "turn_id": turn_id},
+                status_code=200,
+                content={"status": "cancelled", "session_id": req.session_id, "turn_id": turn_id},
             )
-        finally:
-            if release_reservation and _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
-                _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
 
-    return await _execute_action_locked(req, request, broadcast_error=False)
+        async def _run_bg_action():
+            try:
+                await _execute_action_locked(
+                    req,
+                    request,
+                    in_flight_entry=entry,
+                    broadcast_error=True,
+                )
+            except asyncio.CancelledError:
+                if not entry.get("cancelled_by_endpoint"):
+                    try:
+                        fresh = await adb(db.get_session, req.session_id)
+                        if fresh:
+                            fresh = await adb(_enrich_session_for_client, fresh, req.user_id)
+                            if isinstance(fresh, dict):
+                                fresh["in_flight_turn"] = None
+                        await manager.broadcast(req.session_id, {
+                            "type": "TURN_CANCELLED",
+                            "session_id": req.session_id,
+                            "session": fresh,
+                            "sync_timestamp": time.time(),
+                        })
+                    except Exception:
+                        pass
+                raise
+            except HTTPException as http_err:
+                err_detail = str(http_err.detail or "Failed to execute action")
+                _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": err_detail,
+                    "status_code": http_err.status_code,
+                    "session": err_sess,
+                })
+            except Exception as bg_err:
+                logger.error("Unhandled async turn error for session %s: %s", req.session_id, bg_err, exc_info=True)
+                err_detail = f"Engine failed to resolve the turn: {bg_err}"
+                _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, req.user_id)
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": err_detail,
+                    "status_code": 500,
+                    "session": err_sess,
+                })
+            finally:
+                if _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
+                    _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
+
+        bg_task = _spawn_background_task(_run_bg_action())
+        entry["task"] = bg_task
+        release_reservation = False
+        return JSONResponse(
+            status_code=202,
+            content={"status": "accepted", "session_id": req.session_id, "turn_id": turn_id},
+        )
+    finally:
+        if release_reservation and _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
+            _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
 
 
 @router.get("/api/adventure/examine")
@@ -2177,6 +2274,7 @@ async def end_adventure(req: EndAdventureRequest, request: Request = None):
     _, verified_uid = await verify_session_participant(request, req.session_id, req.user_id)
     await _cancel_session_in_flight_task(req.session_id)
     async with distributed_adventure_lock(verified_uid, req.session_id):
+        _cancel_unstarted_in_flight_entry_locked(req.session_id)
         await adb(db.finish_session, req.session_id)
     return {"success": True, "session_id": req.session_id}
 
@@ -2187,9 +2285,22 @@ async def _execute_retry_narration_locked(
     *,
     in_flight_entry: dict[str, Any] | None = None,
     broadcast_error: bool = False,
+    pre_locked: bool = False,
+    session_row: dict[str, Any] | None = None,
 ) -> dict | None:
-    async with distributed_session_lock(req.session_id):
-        session_row = await adb(db.get_session, req.session_id)
+    lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    async with lock_ctx:
+        if not pre_locked:
+            if in_flight_entry is not None:
+                if (
+                    in_flight_entry.get("cancelled_by_endpoint")
+                    or _IN_FLIGHT_TURN_TASKS.get(req.session_id) is not in_flight_entry
+                ):
+                    return None
+            elif _get_active_in_flight_turn(req.session_id) is not None:
+                raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
+        if session_row is None:
+            session_row = await adb(db.get_session, req.session_id)
         if not session_row:
             if broadcast_error:
                 await manager.broadcast(req.session_id, {
@@ -2203,16 +2314,12 @@ async def _execute_retry_narration_locked(
 
         session = dict(session_row)
         eff_uid = uid or session.get("host_user_id")
-        members = await adb(db.get_session_members, req.session_id)
-        if not members and eff_uid:
-            members = [eff_uid]
-
-        party = []
-        for m_uid in members:
-            c = await adb(db.get_character, m_uid)
+        _, party = await adb(db.preload_turn_party_bundle, req.session_id)
+        if not party and eff_uid:
+            c = await adb(db.get_character, eff_uid, session_id=req.session_id)
             if c:
-                inv = await adb(db.get_inventory, m_uid)
-                party.append((dict(c), inv))
+                inv = await adb(db.get_inventory, eff_uid, char=c)
+                party = [(dict(c), list(inv or []))]
 
         actor_char = party[0][0] if party else {"user_id": eff_uid or 0, "name": "Adventurer", "max_hp": 100, "per_": 5, "luk": 5}
         is_started_fn = lambda: False
@@ -2325,274 +2432,383 @@ async def _execute_retry_narration_locked(
         return {"success": True, "session": enriched_session}
 
 
-@router.post("/api/adventure/retry")
-async def retry_adventure_scene(req: RetryAdventureRequest, request: Request = None):
-    """Re-generates the current scene when fallback generation occurred or retry is requested."""
-    session_peek, verified_uid = await verify_session_participant(request, req.session_id, req.user_id)
-    uid = verified_uid or req.user_id
+async def _execute_opening_retry_locked(
+    req: RetryAdventureRequest,
+    uid: int | None,
+    *,
+    session_row: dict[str, Any] | None = None,
+    in_flight_entry: dict[str, Any] | None = None,
+    broadcast_error: bool = False,
+    pre_locked: bool = False,
+) -> dict | None:
+    lock_ctx = nullcontext() if pre_locked else distributed_session_lock(req.session_id)
+    async with lock_ctx:
+        if not pre_locked:
+            if in_flight_entry is not None:
+                if (
+                    in_flight_entry.get("cancelled_by_endpoint")
+                    or _IN_FLIGHT_TURN_TASKS.get(req.session_id) is not in_flight_entry
+                ):
+                    return None
+            elif _get_active_in_flight_turn(req.session_id) is not None:
+                raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
 
-    if bool(getattr(req, "async_ws", False)):
-        if _get_active_in_flight_turn(req.session_id) is not None:
-            raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
-        if list(session_peek.get("history") or []):
-            eff_uid = uid or session_peek.get("host_user_id")
-            turn_id = f"retry_{req.session_id}_{int(time.time() * 1000)}"
-            entry: dict[str, Any] = {
-                "turn_id": turn_id,
-                "user_id": eff_uid,
-                "status": "resolving",
-                "action": {"user_id": eff_uid, "label": "Regenerating scene..."},
-                "started_at": time.time(),
-                "cancelled_by_endpoint": False,
-                "task": None,
-            }
-            _IN_FLIGHT_TURN_TASKS[req.session_id] = entry
-            _LAST_TURN_ERRORS.pop(int(req.session_id), None)
-
-            async def _run_bg_retry():
-                try:
-                    await _execute_retry_narration_locked(
-                        req,
-                        eff_uid,
-                        in_flight_entry=entry,
-                        broadcast_error=True,
-                    )
-                except asyncio.CancelledError:
-                    if not entry.get("cancelled_by_endpoint"):
-                        try:
-                            fresh = await adb(db.get_session, req.session_id)
-                            if fresh:
-                                fresh = await adb(_enrich_session_for_client, fresh, eff_uid)
-                                if isinstance(fresh, dict):
-                                    fresh["in_flight_turn"] = None
-                            await manager.broadcast(req.session_id, {
-                                "type": "TURN_CANCELLED",
-                                "session_id": req.session_id,
-                                "session": fresh,
-                                "sync_timestamp": time.time(),
-                            })
-                        except Exception:
-                            pass
-                    raise
-                except HTTPException as http_err:
-                    err_detail = str(http_err.detail or "Failed to retry scene")
-                    _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
-                    err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
-                    await manager.broadcast(req.session_id, {
-                        "type": "STREAM_ERROR",
-                        "session_id": req.session_id,
-                        "error": err_detail,
-                        "status_code": http_err.status_code,
-                        "session": err_sess,
-                    })
-                except Exception as bg_err:
-                    logger.error("Unhandled async retry error for session %s: %s", req.session_id, bg_err, exc_info=True)
-                    err_detail = f"Failed to retry scene: {bg_err}"
-                    _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
-                    err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
-                    await manager.broadcast(req.session_id, {
-                        "type": "STREAM_ERROR",
-                        "session_id": req.session_id,
-                        "error": err_detail,
-                        "status_code": 500,
-                        "session": err_sess,
-                    })
-                finally:
-                    if _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
-                        _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
-
-            bg_task = _spawn_background_task(_run_bg_retry())
-            entry["task"] = bg_task
-            return JSONResponse(
-                status_code=202,
-                content={"status": "accepted", "session_id": req.session_id, "turn_id": turn_id},
-            )
-
-    async with distributed_session_lock(req.session_id):
-        session_row = await adb(db.get_session, req.session_id)
+        if session_row is None:
+            session_row = await adb(db.get_session, req.session_id)
         if not session_row:
+            if broadcast_error:
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": "Session not found",
+                    "status_code": 404,
+                })
+                return None
             raise HTTPException(status_code=404, detail="Session not found")
 
         session = dict(session_row)
-        uid = uid or session.get("host_user_id")
-        members = await adb(db.get_session_members, req.session_id)
-        if not members and uid:
-            members = [uid]
-
-        party = []
-        for m_uid in members:
-            c = await adb(db.get_character, m_uid)
+        eff_uid = uid or session.get("host_user_id")
+        _, party = await adb(db.preload_turn_party_bundle, req.session_id)
+        if not party and eff_uid:
+            c = await adb(db.get_character, eff_uid, session_id=req.session_id)
             if c:
-                inv = await adb(db.get_inventory, m_uid)
-                party.append((dict(c), inv))
+                inv = await adb(db.get_inventory, eff_uid, char=c)
+                party = [(dict(c), list(inv or []))]
 
-        actor_char = party[0][0] if party else {"user_id": uid or 0, "name": "Adventurer", "max_hp": 100, "per_": 5, "luk": 5}
+        actor_char = party[0][0] if party else {"user_id": eff_uid or 0, "name": "Adventurer", "max_hp": 100, "per_": 5, "luk": 5}
 
-        history = list(session.get("history") or [])
-        if not history:
-            # Turn 0: Opening scene retry
-            # Capture Anomalous scenario starting faction & origin metadata BEFORE reset_session_for_opening_retry wipes child tables
-            _retry_scen = str(session.get("scenario") or "fantasy")
-            _prev_fac_state = session.get("anomalous_faction_state") if isinstance(session.get("anomalous_faction_state"), dict) else {}
-            _prev_origin = str(session.get("origin_mode") or "")
-            _prev_grade = str(session.get("student_grade") or "Sophomore")
-            _prev_faction = str(
-                session.get("anomalous_starting_faction")
-                or _prev_fac_state.get("faction_archetype_key")
-                or ("student_freelancer" if _prev_origin == "student" else "public_agency")
+        # Turn 0: Opening scene retry
+        # Capture Anomalous scenario starting faction & origin metadata BEFORE reset_session_for_opening_retry wipes child tables
+        _retry_scen = str(session.get("scenario") or "fantasy")
+        _prev_fac_state = session.get("anomalous_faction_state") if isinstance(session.get("anomalous_faction_state"), dict) else {}
+        _prev_origin = str(session.get("origin_mode") or "")
+        _prev_grade = str(session.get("student_grade") or "Sophomore")
+        _prev_faction = str(
+            session.get("anomalous_starting_faction")
+            or _prev_fac_state.get("faction_archetype_key")
+            or ("student_freelancer" if _prev_origin == "student" else "public_agency")
+        )
+        # Purge Turn 0 child rows + previously granted starting_prop so stale entities/props never bleed into fresh scene rolls
+        await adb(db.reset_session_for_opening_retry, req.session_id, eff_uid or 0)
+        if scenario_data.is_anomalous_incursions_scenario(_retry_scen):
+            from mechanics.world.anomalous_events import bootstrap_anomalous_session
+            await adb(
+                bootstrap_anomalous_session,
+                req.session_id,
+                _retry_scen,
+                eff_uid or 0,
+                _prev_faction,
+                actor_char.get("name", "") if isinstance(actor_char, dict) else "",
+                _prev_origin,
+                _prev_grade,
             )
-            # Purge Turn 0 child rows + previously granted starting_prop so stale entities/props never bleed into fresh scene rolls
-            await adb(db.reset_session_for_opening_retry, req.session_id, uid or 0)
-            if scenario_data.is_anomalous_incursions_scenario(_retry_scen):
-                from mechanics.world.anomalous_events import bootstrap_anomalous_session
-                await adb(
-                    bootstrap_anomalous_session,
-                    req.session_id,
-                    _retry_scen,
-                    uid or 0,
-                    _prev_faction,
-                    actor_char.get("name", "") if isinstance(actor_char, dict) else "",
-                    _prev_origin,
-                    _prev_grade,
-                )
-            session = await adb(db.get_session, req.session_id) or session
+        session = await adb(db.get_session, req.session_id) or session
+        _, reloaded_party = await adb(db.preload_turn_party_bundle, req.session_id)
+        if not reloaded_party and eff_uid:
+            c = await adb(db.get_character, eff_uid, session_id=req.session_id)
+            if c:
+                inv = await adb(db.get_inventory, eff_uid, char=c)
+                reloaded_party = [(dict(c), list(inv or []))]
+        if reloaded_party:
+            party = reloaded_party
+        elif not party:
             party = []
-            for m_uid in members:
-                c = await adb(db.get_character, m_uid)
-                if c:
-                    inv = await adb(db.get_inventory, m_uid)
-                    party.append((dict(c), inv))
-            actor_char = party[0][0] if party else actor_char
-            session["current_npcs"] = []
-            session["dialogue_partner"] = None
-            session["nearby_enemies"] = []
-            try:
-                async def _run_eager_retry_plan(sq_qid: str) -> Any:
-                    try:
-                        from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
-                        return await compile_or_apply_eager_quest_plan(
-                            req.session_id, sq_qid, timeout_seconds=25.0, defer_apply=True
-                        )
-                    except Exception as _bg_retry_err:
-                        logger.debug("Ch.1 retry eager ChapterPlan skipped: %s", _bg_retry_err)
-                        return None
-
-                sq_retry = await adb(game_engine.ensure_story_quest_exists, session)
-                sq_retry_id = str((sq_retry or {}).get("quest_id") or "")
-                if sq_retry_id:
-                    scene, eager_retry_plan = await asyncio.gather(
-                        game_engine.generate_opening_scene(session, party),
-                        _run_eager_retry_plan(sq_retry_id),
+        actor_char = party[0][0] if party else actor_char
+        session["current_npcs"] = []
+        session["dialogue_partner"] = None
+        session["nearby_enemies"] = []
+        try:
+            async def _run_eager_retry_plan(sq_qid: str) -> Any:
+                try:
+                    from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
+                    return await compile_or_apply_eager_quest_plan(
+                        req.session_id, sq_qid, timeout_seconds=25.0, defer_apply=True
                     )
-                    if eager_retry_plan:
-                        try:
-                            from mechanics.narrative.chapter_plan import apply_chapter_plan_to_dossier
-                            await adb(apply_chapter_plan_to_dossier, req.session_id, sq_retry_id, eager_retry_plan)
-                        except Exception as _apply_retry_err:
-                            logger.debug("Ch.1 retry eager ChapterPlan apply skipped: %s", _apply_retry_err)
-                else:
-                    scene = await game_engine.generate_opening_scene(session, party)
-                if getattr(scene, "model_dump", None):
-                    scene = scene.model_dump(exclude_unset=False)
-                if not isinstance(scene, dict):
-                    scene = {}
-                await adb(game_engine.apply_quest_update, req.session_id, scene)
+                except Exception as _bg_retry_err:
+                    logger.debug("Ch.1 retry eager ChapterPlan skipped: %s", _bg_retry_err)
+                    return None
 
-                raw_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
-                    scene, session=session
+            sq_retry = await adb(game_engine.ensure_story_quest_exists, session)
+            sq_retry_id = str((sq_retry or {}).get("quest_id") or "")
+            if sq_retry_id:
+                scene, eager_retry_plan = await asyncio.gather(
+                    game_engine.generate_opening_scene(session, party),
+                    _run_eager_retry_plan(sq_retry_id),
                 )
-                location = scene.get("location") or session.get("current_location", "")
-                _retry_partners = (
-                    [partner_arg]
-                    if isinstance(partner_arg, str) and partner_arg.strip()
-                    else (list(partner_arg) if isinstance(partner_arg, list) else [])
-                )
-                raw_choices = await adb(
-                    game_engine.build_hybrid_turn_choices,
-                    raw_choices,
-                    session=session,
-                    party=party,
-                    result={
-                        **(scene if isinstance(scene, dict) else {}),
-                        "location": location,
-                        "npcs_present": npcs_arg,
-                        "dialogue_partners": _retry_partners,
-                    },
-                )
-                init_node_id = await adb(db.resolve_node_id_from_location, req.session_id, location)
-                await adb(
-                    db.save_session_scene,
-                    req.session_id,
-                    scene_title,
-                    next_narrative,
-                    raw_choices,
-                    history=[],
-                    location=location,
-                    nearby_enemies=scene.get("nearby_enemies", []),
-                    current_npcs=npcs_arg,
-                    dialogue_partner=partner_arg,
-                    current_node_id=init_node_id,
-                    focal_point=scene.get("focal_point", ""),
-                )
-                char_id = actor_char.get("id", 0) if isinstance(actor_char, dict) else 0
-                enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
-                for npc in (npcs_arg or []):
-                    n_name = game_engine._get_npc_name(npc)
-                    if n_name and n_name.lower() not in enemy_names:
-                        b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
-                        if isinstance(npc, dict):
-                            if "role" in npc and not b_info.get("role"):
-                                b_info["role"] = npc.get("role", "")
-                            if "description" in npc and not b_info.get("description"):
-                                b_info["description"] = npc.get("description", "")
-                        if not b_info.get("location"):
-                            b_info["location"] = location
-                        b_info["met_in_person"] = True
-                        if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=session.get("scenario", "fantasy"), session_id=req.session_id):
-                            await adb(db.upsert_contact,
-                                session_id=req.session_id,
-                                character_id=char_id,
-                                npc_id=n_name,
-                                name=n_name,
-                                basic_info=b_info,
-                                delta_score=0,
-                                new_traits=npc.get("traits") if isinstance(npc, dict) else None,
-                                new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
-                                race=npc.get("race", "") if isinstance(npc, dict) else "",
-                                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
-                            )
-                        else:
-                            # Non-student characters are story figures only; track basic info in lorebook
-                            m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
-                            if not m_val and isinstance(b_info, dict):
-                                m_val = b_info.get("mannerisms", "")
-                            await adb(db.upsert_lorebook_entity,
-                                session_id=req.session_id,
-                                entity_type="person",
-                                name=n_name,
-                                description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
-                                traits=npc.get("traits") if isinstance(npc, dict) else [],
-                                mannerisms=m_val,
-                                race=npc.get("race", "") if isinstance(npc, dict) else "",
-                                appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
-                                gender=npc.get("gender", "") if isinstance(npc, dict) else "",
-                            )
-            except Exception as e:
-                logger.error(f"Error retrying opening scene: {e}", exc_info=True)
-                raise HTTPException(status_code=500, detail=f"Failed to retry opening scene: {str(e)}")
+                if eager_retry_plan:
+                    try:
+                        from mechanics.narrative.chapter_plan import apply_chapter_plan_to_dossier
+                        await adb(apply_chapter_plan_to_dossier, req.session_id, sq_retry_id, eager_retry_plan)
+                    except Exception as _apply_retry_err:
+                        logger.debug("Ch.1 retry eager ChapterPlan apply skipped: %s", _apply_retry_err)
+            else:
+                scene = await game_engine.generate_opening_scene(session, party)
+            if getattr(scene, "model_dump", None):
+                scene = scene.model_dump(exclude_unset=False)
+            if not isinstance(scene, dict):
+                scene = {}
+            await adb(game_engine.apply_quest_update, req.session_id, scene)
 
-            updated_session = await adb(db.get_session, req.session_id)
-            enriched_session = await adb(_enrich_session_for_client, updated_session, uid)
+            raw_choices, next_narrative, scene_title, partner_arg, npcs_arg = game_engine.extract_scene_fields(
+                scene, session=session
+            )
+            location = scene.get("location") or session.get("current_location", "")
+            _retry_partners = (
+                [partner_arg]
+                if isinstance(partner_arg, str) and partner_arg.strip()
+                else (list(partner_arg) if isinstance(partner_arg, list) else [])
+            )
+            raw_choices = await adb(
+                game_engine.build_hybrid_turn_choices,
+                raw_choices,
+                session=session,
+                party=party,
+                result={
+                    **(scene if isinstance(scene, dict) else {}),
+                    "location": location,
+                    "npcs_present": npcs_arg,
+                    "dialogue_partners": _retry_partners,
+                },
+            )
+            init_node_id = await adb(db.resolve_node_id_from_location, req.session_id, location)
+            await adb(
+                db.save_session_scene,
+                req.session_id,
+                scene_title,
+                next_narrative,
+                raw_choices,
+                history=[],
+                location=location,
+                nearby_enemies=scene.get("nearby_enemies", []),
+                current_npcs=npcs_arg,
+                dialogue_partner=partner_arg,
+                current_node_id=init_node_id,
+                focal_point=scene.get("focal_point", ""),
+            )
+            char_id = actor_char.get("id", 0) if isinstance(actor_char, dict) else 0
+            enemy_names = {game_engine._get_npc_name(e).lower() for e in scene.get("nearby_enemies", []) if e}
+            for npc in (npcs_arg or []):
+                n_name = game_engine._get_npc_name(npc)
+                if n_name and n_name.lower() not in enemy_names:
+                    b_info = dict(npc.get("basic_info") or {}) if isinstance(npc, dict) else {}
+                    if isinstance(npc, dict):
+                        if "role" in npc and not b_info.get("role"):
+                            b_info["role"] = npc.get("role", "")
+                        if "description" in npc and not b_info.get("description"):
+                            b_info["description"] = npc.get("description", "")
+                    if not b_info.get("location"):
+                        b_info["location"] = location
+                    b_info["met_in_person"] = True
+                    if is_contact_eligible(name=n_name, role=b_info.get("role", ""), description=b_info.get("description", ""), scenario=session.get("scenario", "fantasy"), session_id=req.session_id):
+                        await adb(db.upsert_contact,
+                            session_id=req.session_id,
+                            character_id=char_id,
+                            npc_id=n_name,
+                            name=n_name,
+                            basic_info=b_info,
+                            delta_score=0,
+                            new_traits=npc.get("traits") if isinstance(npc, dict) else None,
+                            new_preferences=npc.get("preferences") if isinstance(npc, dict) else None,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else None,
+                        )
+                    else:
+                        # Non-student characters are story figures only; track basic info in lorebook
+                        m_val = npc.get("mannerisms", "") if isinstance(npc, dict) else ""
+                        if not m_val and isinstance(b_info, dict):
+                            m_val = b_info.get("mannerisms", "")
+                        await adb(db.upsert_lorebook_entity,
+                            session_id=req.session_id,
+                            entity_type="person",
+                            name=n_name,
+                            description=b_info.get("description", "") or (npc.get("description", "") if isinstance(npc, dict) else ""),
+                            traits=npc.get("traits") if isinstance(npc, dict) else [],
+                            mannerisms=m_val,
+                            race=npc.get("race", "") if isinstance(npc, dict) else "",
+                            appearance=npc.get("appearance", {}) if isinstance(npc, dict) else {},
+                            gender=npc.get("gender", "") if isinstance(npc, dict) else "",
+                        )
+        except Exception as e:
+            logger.error(f"Error retrying opening scene: {e}", exc_info=True)
+            msg = f"Failed to retry opening scene: {str(e)}"
+            if broadcast_error:
+                _record_last_turn_error(req.session_id, msg, turn_id=(in_flight_entry or {}).get("turn_id"))
+                err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": msg,
+                    "status_code": 500,
+                    "session": err_sess,
+                })
+                return None
+            raise HTTPException(status_code=500, detail=msg)
 
-            await manager.broadcast(req.session_id, {
-                "type": "NEW_SCENE",
-                "session": enriched_session,
-                "sync_timestamp": time.time(),
-            })
-            return {"success": True, "session": enriched_session}
+        _LAST_TURN_ERRORS.pop(int(req.session_id), None)
+        updated_session = await adb(db.get_session, req.session_id)
+        enriched_session = await adb(_enrich_session_for_client, updated_session, eff_uid)
+        if isinstance(enriched_session, dict):
+            enriched_session["in_flight_turn"] = None
 
-    return await _execute_retry_narration_locked(req, uid, broadcast_error=False)
+        await manager.broadcast(req.session_id, {
+            "type": "NEW_SCENE",
+            "session": enriched_session,
+            "sync_timestamp": time.time(),
+        })
+        return {"success": True, "session": enriched_session}
+
+
+async def _execute_retry_dispatch_locked(
+    req: RetryAdventureRequest,
+    uid: int | None,
+    *,
+    in_flight_entry: dict[str, Any] | None = None,
+    broadcast_error: bool = False,
+) -> dict | None:
+    async with distributed_session_lock(req.session_id):
+        if in_flight_entry is not None:
+            if (
+                in_flight_entry.get("cancelled_by_endpoint")
+                or _IN_FLIGHT_TURN_TASKS.get(req.session_id) is not in_flight_entry
+            ):
+                return None
+        elif _get_active_in_flight_turn(req.session_id) is not None:
+            raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
+
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            if broadcast_error:
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": "Session not found",
+                    "status_code": 404,
+                })
+                return None
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        history = list((session_row or {}).get("history") or [])
+        if not history:
+            return await _execute_opening_retry_locked(
+                req,
+                uid,
+                session_row=session_row,
+                in_flight_entry=in_flight_entry,
+                broadcast_error=broadcast_error,
+                pre_locked=True,
+            )
+        return await _execute_retry_narration_locked(
+            req,
+            uid,
+            in_flight_entry=in_flight_entry,
+            broadcast_error=broadcast_error,
+            pre_locked=True,
+            session_row=session_row,
+        )
+
+
+@router.post("/api/adventure/retry")
+async def retry_adventure_scene(req: RetryAdventureRequest, request: Request = None):
+    """Re-generates the current scene when fallback generation occurred or retry is requested."""
+    if not bool(getattr(req, "async_ws", False)):
+        _, verified_uid = await verify_session_participant(request, req.session_id, req.user_id)
+        eff_uid = verified_uid or req.user_id
+        return await _execute_retry_dispatch_locked(req, eff_uid, broadcast_error=False)
+
+    async with distributed_session_lock(req.session_id):
+        if _get_active_in_flight_turn(req.session_id) is not None:
+            raise HTTPException(status_code=409, detail="A turn is already in progress for this session.")
+        session_row = await adb(db.get_session, req.session_id)
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+        session_peek, verified_uid = await verify_session_participant(
+            request, req.session_id, req.user_id, session=session_row
+        )
+        eff_uid = (verified_uid or req.user_id) or session_peek.get("host_user_id")
+        turn_id = f"retry_{req.session_id}_{int(time.time() * 1000)}"
+        entry: dict[str, Any] = {
+            "turn_id": turn_id,
+            "user_id": eff_uid,
+            "status": "resolving",
+            "action": {"user_id": eff_uid, "label": "Regenerating scene..."},
+            "started_at": time.time(),
+            "cancelled_by_endpoint": False,
+            "task": None,
+        }
+        _IN_FLIGHT_TURN_TASKS[req.session_id] = entry
+        _LAST_TURN_ERRORS.pop(int(req.session_id), None)
+
+    release_reservation = True
+    try:
+        if entry.get("cancelled_by_endpoint"):
+            return JSONResponse(
+                status_code=200,
+                content={"status": "cancelled", "session_id": req.session_id, "turn_id": turn_id},
+            )
+
+        async def _run_bg_retry():
+            try:
+                await _execute_retry_dispatch_locked(
+                    req,
+                    eff_uid,
+                    in_flight_entry=entry,
+                    broadcast_error=True,
+                )
+            except asyncio.CancelledError:
+                if not entry.get("cancelled_by_endpoint"):
+                    try:
+                        fresh = await adb(db.get_session, req.session_id)
+                        if fresh:
+                            fresh = await adb(_enrich_session_for_client, fresh, eff_uid)
+                            if isinstance(fresh, dict):
+                                fresh["in_flight_turn"] = None
+                        await manager.broadcast(req.session_id, {
+                            "type": "TURN_CANCELLED",
+                            "session_id": req.session_id,
+                            "session": fresh,
+                            "sync_timestamp": time.time(),
+                        })
+                    except Exception:
+                        pass
+                raise
+            except HTTPException as http_err:
+                err_detail = str(http_err.detail or "Failed to retry scene")
+                _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": err_detail,
+                    "status_code": http_err.status_code,
+                    "session": err_sess,
+                })
+            except Exception as bg_err:
+                logger.error("Unhandled async retry error for session %s: %s", req.session_id, bg_err, exc_info=True)
+                err_detail = f"Failed to retry scene: {bg_err}"
+                _record_last_turn_error(req.session_id, err_detail, turn_id=turn_id)
+                err_sess = await _load_error_session_snapshot(req.session_id, eff_uid)
+                await manager.broadcast(req.session_id, {
+                    "type": "STREAM_ERROR",
+                    "session_id": req.session_id,
+                    "error": err_detail,
+                    "status_code": 500,
+                    "session": err_sess,
+                })
+            finally:
+                if _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
+                    _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
+
+        bg_task = _spawn_background_task(_run_bg_retry())
+        entry["task"] = bg_task
+        release_reservation = False
+        return JSONResponse(
+            status_code=202,
+            content={"status": "accepted", "session_id": req.session_id, "turn_id": turn_id},
+        )
+    finally:
+        if release_reservation and _IN_FLIGHT_TURN_TASKS.get(req.session_id) is entry:
+            _IN_FLIGHT_TURN_TASKS.pop(req.session_id, None)
 
 
 @router.post("/api/adventure/cancel")
@@ -2692,6 +2908,7 @@ async def load_slot(req: LoadSlotRequest, request: Request = None):
     if active_sid:
         await _cancel_session_in_flight_task(active_sid)
     async with distributed_adventure_lock(req.user_id, active_sid):
+        _cancel_unstarted_in_flight_entry_locked(active_sid)
         try:
             res = await adb(db.load_adventure_slot, req.user_id, req.slot_name)
         except ValueError as e:

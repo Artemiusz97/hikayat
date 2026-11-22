@@ -534,6 +534,29 @@ const ActionPanel = ({
     );
   };
 
+  const renderConversationPauseNotice = () => {
+    if (inCombat || !Array.isArray(choices)) return null;
+    const pausedExit = choices.find((c) => c && typeof c === 'object' && c._conversation_paused);
+    if (!pausedExit) return null;
+    const pauseName = String(pausedExit.pause_partner || '').trim();
+    return (
+      <div
+        role="status"
+        className="flex items-start gap-1.5 px-2.5 py-1 rounded-lg bg-slate-900/70 border border-slate-600/40 text-[11px] text-slate-300"
+      >
+        <span aria-hidden="true">⏸️</span>
+        <span>
+          {pauseName
+            ? t('social.conversation_paused', {
+                name: pauseName,
+                defaultValue: pausedExit.pause_notice || `${pauseName} has run out of small talk for now.`,
+              })
+            : pausedExit.pause_notice}
+        </span>
+      </div>
+    );
+  };
+
   const totalChoiceCount = (choices?.length || 0) + (!inCombat && merchantAvailable && onOpenMerchant ? 1 : 0);
 
   const isGameOver = Boolean(session?.status === 'finished' || session?.is_game_over);
@@ -948,6 +971,7 @@ const ActionPanel = ({
                 )}
 
                 {renderActivePartnerMoodBar()}
+                {renderConversationPauseNotice()}
 
                 {session?.is_truncated_generation && !session?.is_fallback_generation && onRetry && (
                   <div className="flex items-center justify-between bg-amber-950/40 border border-amber-600/50 px-3 py-1 rounded text-xs text-amber-200">

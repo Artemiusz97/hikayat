@@ -633,52 +633,57 @@ async def _resolve_turn_inner(
         _stage_clock_after_movement = None
 
     from game_engine.npcs import compute_pre_turn_stage
-    stage_info = compute_pre_turn_stage(
-        session,
-        actions,
-        party=party,
-        ctx=ctx,
-        persist_db=False,
-        stage_clock_cb=_stage_clock_after_movement,
-    )
-    if (stage_info.get("pending_folklore_ops") or {}).get("treaty_violation_village") and not is_retry:
-        exp_new_day = prev_day + ((prev_min + 30) // 1440)
-        exp_new_min = (prev_min + 30) % 1440
-        session["current_day"] = exp_new_day
-        session["current_minute"] = exp_new_min
-        if session_id_val:
-            _pre_turn_sleep_info = None
-            _staged_time_op = {"op": "advance", "delta_minutes": 30, "party_uids": party_uids}
-            _pre_turn_time_info = {
-                "session_id": session_id_val,
-                "old_day": prev_day,
-                "new_day": exp_new_day,
-                "old_minute": prev_min,
-                "new_minute": exp_new_min,
-                "days_elapsed": exp_new_day - prev_day,
-                "minutes_elapsed": 30,
-                "day_rolled_over": exp_new_day > prev_day,
-                "fatigue_applied": [],
-            }
-            session["_staged_time_op"] = _staged_time_op
-            ctx.clock.staged_time_op = _staged_time_op
+    from mechanics.combat import is_in_combat
+    from game_engine.npcs.cast_planner import plan_pre_turn, render_stage_plan, apply_cast_events
+
+    def _run_pre_turn_stage_and_cast_bundle() -> tuple[dict, Any]:
+        nonlocal _pre_turn_sleep_info, _staged_time_op, _pre_turn_time_info
+        _st = compute_pre_turn_stage(
+            session,
+            actions,
+            party=party,
+            ctx=ctx,
+            persist_db=False,
+            stage_clock_cb=_stage_clock_after_movement,
+        )
+        if (_st.get("pending_folklore_ops") or {}).get("treaty_violation_village") and not is_retry:
+            exp_new_day = prev_day + ((prev_min + 30) // 1440)
+            exp_new_min = (prev_min + 30) % 1440
+            session["current_day"] = exp_new_day
+            session["current_minute"] = exp_new_min
+            if session_id_val:
+                _pre_turn_sleep_info = None
+                _staged_time_op = {"op": "advance", "delta_minutes": 30, "party_uids": party_uids}
+                _pre_turn_time_info = {
+                    "session_id": session_id_val,
+                    "old_day": prev_day,
+                    "new_day": exp_new_day,
+                    "old_minute": prev_min,
+                    "new_minute": exp_new_min,
+                    "days_elapsed": exp_new_day - prev_day,
+                    "minutes_elapsed": 30,
+                    "day_rolled_over": exp_new_day > prev_day,
+                    "fatigue_applied": [],
+                }
+                session["_staged_time_op"] = _staged_time_op
+                ctx.clock.staged_time_op = _staged_time_op
+        _cp = plan_pre_turn(
+            session,
+            party,
+            actions,
+            stage_info=_st,
+            is_combat=bool(is_in_combat(session)),
+            new_loc=_st["effective_location"],
+            persist_db=False,
+        )
+        return _st, _cp
+
+    stage_info, cast_plan = await adb(_run_pre_turn_stage_and_cast_bundle)
     new_partners = stage_info["new_partners"]
     has_exited_convo = stage_info["has_exited_convo"]
     effective_location = stage_info["effective_location"]
     pre_turn_stage_npcs = stage_info["stage_npcs"]
     movement_dest_str = stage_info["movement_dest_str"]
-
-    from mechanics.combat import is_in_combat
-    from game_engine.npcs.cast_planner import plan_pre_turn, render_stage_plan, apply_cast_events
-    cast_plan = plan_pre_turn(
-        session,
-        party,
-        actions,
-        stage_info=stage_info,
-        is_combat=bool(is_in_combat(session)),
-        new_loc=effective_location,
-        persist_db=False,
-    )
     new_partners = cast_plan.dialogue_partners
     if cast_plan.has_exited_convo:
         has_exited_convo = True
@@ -1012,18 +1017,32 @@ async def _resolve_turn_inner(
     precomputed = None
     if mode == "combat":
         def _load_combat_precomputed_bundle() -> tuple[dict[int, dict], dict | None]:
+            import character_data as _cd_eq
             eq_by_uid: dict[int, dict] = {}
             with db.UnitOfWork():
                 for _p_entry in (party or []):
                     _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+                    _p_inv = (
+                        _p_entry[1]
+                        if isinstance(_p_entry, (tuple, list)) and len(_p_entry) > 1 and isinstance(_p_entry[1], list)
+                        else None
+                    )
                     if isinstance(_p_char, dict) and _p_char.get("user_id"):
                         _p_uid = int(_p_char["user_id"])
                         if _p_uid not in eq_by_uid:
-                            eq_by_uid[_p_uid] = db.get_equipment(_p_uid) or {}
+                            if _p_inv is not None:
+                                _by_slot = {
+                                    str(it["slot"]): dict(it)
+                                    for it in _p_inv
+                                    if isinstance(it, dict) and it.get("equipped") and it.get("slot")
+                                }
+                                eq_by_uid[_p_uid] = {slot: _by_slot.get(slot) for slot in _cd_eq.EQUIPMENT_SLOTS}
+                            else:
+                                eq_by_uid[_p_uid] = db.get_equipment(_p_uid) or {}
                 ctx.combat.preloaded_equipment_by_uid = eq_by_uid
                 if isinstance(session, dict):
                     session["_preloaded_equipment_by_uid"] = eq_by_uid
-                return eq_by_uid, precompute_combat_turn(session, party, actions)
+                return eq_by_uid, precompute_combat_turn(session, party, actions, persist_db=False)
 
         try:
             _, precomputed = await adb(_load_combat_precomputed_bundle)
@@ -1085,49 +1104,54 @@ async def _resolve_turn_inner(
 
     # --- DETERMINISTIC PRE-TURN ENGINES (Python-First, 0 Arbiter LLM calls) ---
     from game_engine.state.core import resolve_pre_turn_vitals_and_resources
-    pre_vitals_res = resolve_pre_turn_vitals_and_resources(
-        session, party, actions, persist_db=False
-    )
+    from game_engine.state.social import resolve_pre_turn_social_and_disclosures
+
+    def _run_pre_turn_deterministic_engines() -> tuple[dict, dict, dict]:
+        _vitals = resolve_pre_turn_vitals_and_resources(
+            session, party, actions, persist_db=False
+        )
+        _social = resolve_pre_turn_social_and_disclosures(
+            session, party, actions, new_dialogue_partners=new_partners, persist_db=False
+        )
+        _hs_events: dict = {}
+        try:
+            from mechanics.world.locations.seeds import is_school_scenario as _is_hs_scen
+            if _is_hs_scen(session.get("scenario", "")):
+                from mechanics.social.discreet_encounters import evaluate_high_school_turn_events
+                _hs_events = evaluate_high_school_turn_events(
+                    session,
+                    party,
+                    actions,
+                    effective_location=str(effective_location or session.get("current_location") or ""),
+                    effective_node_id=str(stage_info.get("effective_node_id") or session.get("current_node_id") or ""),
+                )
+        except Exception as _hs_ev_err:
+            log.warning("Failed evaluating High School turn events: %s", _hs_ev_err)
+        return _vitals, _social, _hs_events
+
+    pre_vitals_res, pre_social_res, hs_turn_events = await adb(_run_pre_turn_deterministic_engines)
     for p_dir in (pre_vitals_res.get("stage_directives") or pre_vitals_res.get("directives") or []):
         if p_dir and p_dir not in directive_note:
             directive_note += f"\n{p_dir}\n"
-
-    from game_engine.state.social import resolve_pre_turn_social_and_disclosures
-    pre_social_res = resolve_pre_turn_social_and_disclosures(
-        session, party, actions, new_dialogue_partners=new_partners, persist_db=False
-    )
     for s_dir in (pre_social_res.get("directives") or []):
         if s_dir and s_dir not in directive_note:
             directive_note += f"\n{s_dir}\n"
-
-    hs_turn_events: dict = {}
-    try:
-        from mechanics.world.locations.seeds import is_school_scenario as _is_hs_scen
-        if _is_hs_scen(session.get("scenario", "")):
-            from mechanics.social.discreet_encounters import evaluate_high_school_turn_events
-            hs_turn_events = evaluate_high_school_turn_events(
-                session,
-                party,
-                actions,
-                effective_location=str(effective_location or session.get("current_location") or ""),
-                effective_node_id=str(stage_info.get("effective_node_id") or session.get("current_node_id") or ""),
-            )
-            if hs_turn_events.get("override_location"):
-                effective_location = hs_turn_events["override_location"]
-                session["current_location"] = effective_location
-            if hs_turn_events.get("override_node_id"):
-                stage_info["effective_node_id"] = hs_turn_events["override_node_id"]
-                session["current_node_id"] = hs_turn_events["override_node_id"]
-            if hs_turn_events.get("dialogue_partners"):
-                session["dialogue_partners"] = list(hs_turn_events["dialogue_partners"])
-                session["dialogue_partner"] = hs_turn_events["dialogue_partners"][0]
-            for hs_dir in (hs_turn_events.get("directives") or []):
-                if hs_dir and hs_dir not in directive_note:
-                    directive_note += f"\n{hs_dir}\n"
-    except Exception as _hs_ev_err:
-        log.warning("Failed evaluating High School turn events: %s", _hs_ev_err)
+    if isinstance(hs_turn_events, dict) and hs_turn_events:
+        if hs_turn_events.get("override_location"):
+            effective_location = hs_turn_events["override_location"]
+            session["current_location"] = effective_location
+        if hs_turn_events.get("override_node_id"):
+            stage_info["effective_node_id"] = hs_turn_events["override_node_id"]
+            session["current_node_id"] = hs_turn_events["override_node_id"]
+        if hs_turn_events.get("dialogue_partners"):
+            session["dialogue_partners"] = list(hs_turn_events["dialogue_partners"])
+            session["dialogue_partner"] = hs_turn_events["dialogue_partners"][0]
+        for hs_dir in (hs_turn_events.get("directives") or []):
+            if hs_dir and hs_dir not in directive_note:
+                directive_note += f"\n{hs_dir}\n"
 
     _anom_domain_res: dict = {}
+    _staged_domain_vitals: dict | None = None
     try:
         from mechanics.world.anomalous_sites.domain_rules import evaluate_turn_domain_effects
 
@@ -1145,7 +1169,7 @@ async def _resolve_turn_inner(
                         party,
                         curr_node=_dom_node,
                         actions=actions,
-                        persist_db=True,
+                        persist_db=False,
                         is_retry=is_retry,
                     )
                     if _res_dom.get("composure_shift") or _res_dom.get("wet_flag"):
@@ -1167,11 +1191,30 @@ async def _resolve_turn_inner(
                 party,
                 curr_node=None,
                 actions=actions,
-                persist_db=True,
+                persist_db=False,
                 is_retry=is_retry,
             )
 
         _anom_domain_res = await adb(_eval_domain_effects_bundle)
+        _dom_hp_d = int(_anom_domain_res.get("hp_delta") or 0)
+        _dom_mp_d = int(_anom_domain_res.get("mp_delta") or 0)
+        if _dom_hp_d != 0 or _dom_mp_d != 0:
+            _dom_lead_c = (
+                party[0][0]
+                if party and isinstance(party[0], (tuple, list)) and party[0]
+                else (party[0] if party else None)
+            )
+            _dom_uid = (
+                int(_dom_lead_c["user_id"])
+                if isinstance(_dom_lead_c, dict) and _dom_lead_c.get("user_id")
+                else session.get("host_user_id")
+            )
+            if _dom_uid:
+                _staged_domain_vitals = {
+                    "user_id": int(_dom_uid),
+                    "hp_delta": _dom_hp_d,
+                    "mp_delta": _dom_mp_d,
+                }
         for _dd in (_anom_domain_res.get("stage_directives") or []):
             if _dd and _dd not in directive_note:
                 directive_note += f"\n{_dd}\n"
@@ -1194,7 +1237,9 @@ async def _resolve_turn_inner(
     _old_loc_for_quests = session.get("current_location")
     if effective_location:
         session["current_location"] = effective_location
-    pre_quest_res = resolve_pre_turn_quests_and_clues(session, party, actions, persist_db=False)
+    pre_quest_res = await adb(
+        resolve_pre_turn_quests_and_clues, session, party, actions, persist_db=False
+    )
     if isinstance(pre_quest_res, dict):
         ctx.world_stage.pre_turn_quest_res = pre_quest_res
     if _old_loc_for_quests:
@@ -1743,10 +1788,21 @@ async def _resolve_turn_inner(
     scene_loc = effective_location if effective_location else session.get('current_location', '')
     scene_npcs_for_prompt = pre_turn_stage_npcs if (stage_info.get("is_movement") or pre_turn_stage_npcs) else session.get('current_npcs', [])
     from game_engine.turn.generation import extract_deterministic_recall_query
-    from contextlib import nullcontext
 
     def _pre_prompt_read_bundle() -> tuple:
         sid_val = session.get("id")
+        _seeded_locs_pre_read = False
+        if sid_val:
+            from mechanics.world.locations import is_location_engine_enabled, ensure_session_locations_seeded
+            if is_location_engine_enabled(scen_key):
+                _lead_nm_seed = (
+                    party[0][0].get("name", "")
+                    if (party and isinstance(party[0], (tuple, list)) and isinstance(party[0][0], dict))
+                    else ""
+                )
+                ensure_session_locations_seeded(sid_val, scen_key, char_name=_lead_nm_seed)
+                _seeded_locs_pre_read = True
+
         uow_cm = db.ReadUnitOfWork() if sid_val else nullcontext()
         with uow_cm:
             dlg_blk = _build_dialogue_prompt_block(session, ctx, new_partners, party, actions)
@@ -1758,7 +1814,7 @@ async def _resolve_turn_inner(
             else:
                 c_day, c_min = int(session.get("current_day", 1) or 1), int(session.get("current_minute", 480) or 480)
 
-            w_bundle = dict(ctx.world_bundle) if sid_val else game_engine._load_known_world(sid_val)
+            w_bundle = dict(ctx.world_bundle) if sid_val else game_engine._load_known_world(sid_val, seed_factions=False)
             w_bundle["session"] = session
             w_bundle["_ctx"] = ctx
             r_scene_ctx = game_engine._scene_context_text(
@@ -1768,6 +1824,7 @@ async def _resolve_turn_inner(
                 4,
                 hist_text,
                 w_bundle,
+                ensure_locations_seeded=(not _seeded_locs_pre_read),
             )
             wp_blk = ""
             cb_blk = ""
@@ -2230,40 +2287,47 @@ async def _resolve_turn_inner(
                 d for d in dot_dead_dicts if isinstance(d, dict) and d.get("requires_non_lethal_subdue")
             ]
             dot_nh_notices: list[str] = []
-            if dot_killed_non_hostile and session.get("id"):
-                try:
-                    from mechanics.world.anomalous_events import handle_killed_non_hostile_entity
-                    party_uids_dot = [
-                        p[0].get("user_id")
-                        for p in (party or [])
-                        if p and isinstance(p[0], dict) and p[0].get("user_id")
-                    ]
-                    lead_dot_nh = party_uids_dot[0] if party_uids_dot else session.get("host_user_id")
-                    for nh_dead in dot_killed_non_hostile:
-                        nh_res = handle_killed_non_hostile_entity(
-                            session_id=int(session["id"]),
-                            dead_enemy=nh_dead,
-                            user_id=lead_dot_nh,
-                            party_user_ids=party_uids_dot,
-                            session=session,
-                        )
-                        if nh_res.get("message"):
-                            dot_nh_notices.append(nh_res["message"])
-                except Exception:
-                    pass
+            def _run_dot_pre_checks() -> tuple[list[str], bool]:
+                local_notices: list[str] = []
+                local_confiscated = False
+                if dot_killed_non_hostile and session.get("id"):
+                    try:
+                        from mechanics.world.anomalous_events import handle_killed_non_hostile_entity
+                        party_uids_dot = [
+                            p[0].get("user_id")
+                            for p in (party or [])
+                            if p and isinstance(p[0], dict) and p[0].get("user_id")
+                        ]
+                        lead_dot_nh = party_uids_dot[0] if party_uids_dot else session.get("host_user_id")
+                        with db.UnitOfWork():
+                            for nh_dead in dot_killed_non_hostile:
+                                nh_res = handle_killed_non_hostile_entity(
+                                    session_id=int(session["id"]),
+                                    dead_enemy=nh_dead,
+                                    user_id=lead_dot_nh,
+                                    party_user_ids=party_uids_dot,
+                                    session=session,
+                                )
+                                if nh_res.get("message"):
+                                    local_notices.append(nh_res["message"])
+                    except Exception:
+                        pass
 
-            if scenario_data.is_anomalous_incursions_scenario(scen_key):
-                try:
-                    from mechanics.narrative.bounty import should_confiscate_anomalous_combat_loot
-                    lead_dot_uid = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                    dot_confiscated = should_confiscate_anomalous_combat_loot(
-                        int(session.get("id") or 0),
-                        session=session,
-                        user_id=lead_dot_uid,
-                        defeated_enemies=dot_dead_dicts,
-                    )
-                except Exception:
-                    dot_confiscated = False
+                if scenario_data.is_anomalous_incursions_scenario(scen_key):
+                    try:
+                        from mechanics.narrative.bounty import should_confiscate_anomalous_combat_loot
+                        lead_dot_uid = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                        local_confiscated = should_confiscate_anomalous_combat_loot(
+                            int(session.get("id") or 0),
+                            session=session,
+                            user_id=lead_dot_uid,
+                            defeated_enemies=dot_dead_dicts,
+                        )
+                    except Exception:
+                        local_confiscated = False
+                return local_notices, local_confiscated
+
+            dot_nh_notices, dot_confiscated = await adb(_run_dot_pre_checks)
             if dot_confiscated or len(dot_killed_non_hostile) == len(dot_dead_dicts):
                 dot_gold_gain = 0
             elif dot_gold_gain > 0:
@@ -2310,7 +2374,9 @@ async def _resolve_turn_inner(
                     )
                     if dot_nh_notices:
                         msg += "\n" + "\n".join(dot_nh_notices)
-                try:
+
+                def _run_dot_victory_db_updates() -> list[str]:
+                    extra_msgs: list[str] = []
                     dot_inc_flags: dict = {}
                     for d in dot_dead_dicts:
                         if not isinstance(d, dict) or d.get("requires_non_lethal_subdue"):
@@ -2318,61 +2384,70 @@ async def _resolve_turn_inner(
                         _d_inc = str(d.get("incursion_id") or d.get("breach_id") or "")
                         if _d_inc:
                             dot_inc_flags[_d_inc] = bool(dot_inc_flags.get(_d_inc) or d.get("prevent_vault_capture"))
-                    if dot_inc_flags and session.get("id"):
-                        from mechanics.world.anomalous_events import mark_hostile_incursion_resolved_on_victory
-                        lead_dot_uid = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                        for d_inc_id, d_prevent in dot_inc_flags.items():
-                            inc_done_res = mark_hostile_incursion_resolved_on_victory(
-                                int(session["id"]), d_inc_id, user_id=lead_dot_uid, prevent_vault_capture=d_prevent
-                            )
-                            if inc_done_res and inc_done_res.get("message"):
-                                msg += f"\n{inc_done_res['message']}"
                     dot_locus_bosses = [
                         d for d in dot_dead_dicts
                         if isinstance(d, dict) and d.get("is_site_locus_boss") and not d.get("requires_non_lethal_subdue")
                     ]
-                    if dot_locus_bosses and session.get("id"):
-                        from mechanics.world.anomalous_sites import complete_site_pacification
-                        lead_dot_uid_sb = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
-                        seen_dot_sites: set[str] = set()
-                        for d_sb in dot_locus_bosses:
-                            sid_dot = str(d_sb.get("anomalous_site_id") or session.get("current_node_id") or "").strip()
-                            if not sid_dot or sid_dot in seen_dot_sites:
-                                continue
-                            seen_dot_sites.add(sid_dot)
-                            pac_dot = complete_site_pacification(
-                                int(session["id"]),
-                                sid_dot,
-                                user_id=int(lead_dot_uid_sb or 1),
-                                method="locus_boss_slain",
-                                scen_key=str(session.get("scenario") or "anomalous_incursions"),
-                                current_day=int(session.get("current_day", 1) or 1),
-                                turn_number=len(session.get("history") or []) + 1,
-                            )
-                            if isinstance(pac_dot, dict) and pac_dot.get("message"):
-                                msg += f"\n{pac_dot['message']}"
-                except Exception:
-                    pass
+                    if not ((dot_inc_flags and session.get("id")) or (dot_locus_bosses and session.get("id")) or dot_dead_dicts):
+                        return extra_msgs
+                    with db.UnitOfWork() as dot_uow_conn:
+                        try:
+                            if dot_inc_flags and session.get("id"):
+                                from mechanics.world.anomalous_events import mark_hostile_incursion_resolved_on_victory
+                                lead_dot_uid = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                                for d_inc_id, d_prevent in dot_inc_flags.items():
+                                    inc_done_res = mark_hostile_incursion_resolved_on_victory(
+                                        int(session["id"]), d_inc_id, user_id=lead_dot_uid, prevent_vault_capture=d_prevent
+                                    )
+                                    if inc_done_res and inc_done_res.get("message"):
+                                        extra_msgs.append(inc_done_res["message"])
+                            if dot_locus_bosses and session.get("id"):
+                                from mechanics.world.anomalous_sites import complete_site_pacification
+                                lead_dot_uid_sb = party[0][0].get("user_id") if (party and party[0] and isinstance(party[0][0], dict)) else session.get("host_user_id")
+                                seen_dot_sites: set[str] = set()
+                                for d_sb in dot_locus_bosses:
+                                    sid_dot = str(d_sb.get("anomalous_site_id") or session.get("current_node_id") or "").strip()
+                                    if not sid_dot or sid_dot in seen_dot_sites:
+                                        continue
+                                    seen_dot_sites.add(sid_dot)
+                                    pac_dot = complete_site_pacification(
+                                        int(session["id"]),
+                                        sid_dot,
+                                        user_id=int(lead_dot_uid_sb or 1),
+                                        method="locus_boss_slain",
+                                        scen_key=str(session.get("scenario") or "anomalous_incursions"),
+                                        current_day=int(session.get("current_day", 1) or 1),
+                                        turn_number=len(session.get("history") or []) + 1,
+                                    )
+                                    if isinstance(pac_dot, dict) and pac_dot.get("message"):
+                                        extra_msgs.append(pac_dot["message"])
+                        except Exception:
+                            pass
 
-                if dot_dead_dicts:
-                    from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
-                    _b17_dot_ko = [
-                        d for d in dot_dead_dicts
-                        if isinstance(d, dict) and d.get("requires_non_lethal_subdue")
-                    ]
-                    _b17_dot_killed = [
-                        d for d in dot_dead_dicts
-                        if not (isinstance(d, dict) and d.get("requires_non_lethal_subdue"))
-                    ]
-                    neutralize_witnesses_from_combat_or_skill(
-                        int(session_id_val or session.get("id") or 0),
-                        defeated_npcs=_b17_dot_ko,
-                        killed_npcs=_b17_dot_killed,
-                        present_witnesses=result.get("npcs") or session.get("npcs") or [],
-                        turn=int(session.get("turn_count") or 0),
-                        location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
-                        mode="combat",
-                    )
+                        if dot_dead_dicts:
+                            from mechanics.social.epistemic_engine import neutralize_witnesses_from_combat_or_skill
+                            _b17_dot_ko = [
+                                d for d in dot_dead_dicts
+                                if isinstance(d, dict) and d.get("requires_non_lethal_subdue")
+                            ]
+                            _b17_dot_killed = [
+                                d for d in dot_dead_dicts
+                                if not (isinstance(d, dict) and d.get("requires_non_lethal_subdue"))
+                            ]
+                            neutralize_witnesses_from_combat_or_skill(
+                                int(session_id_val or session.get("id") or 0),
+                                defeated_npcs=_b17_dot_ko,
+                                killed_npcs=_b17_dot_killed,
+                                present_witnesses=result.get("npcs") or session.get("npcs") or [],
+                                turn=int(session.get("turn_count") or 0),
+                                location_node_id=str(session.get("current_node_id") or session.get("location") or ""),
+                                mode="combat",
+                                conn=dot_uow_conn,
+                            )
+                    return extra_msgs
+
+                for _extra_dot_m in await adb(_run_dot_victory_db_updates):
+                    msg += f"\n{_extra_dot_m}"
                 if result.get("_combat_resolved_notice"):
 
                     if ", ".join(dot_dead) not in result["_combat_resolved_notice"]:
@@ -2682,7 +2757,12 @@ async def _resolve_turn_inner(
                         or ""
                     )
                     if _eff_aff_nid:
-                        _owned_aff = get_player_owned_or_starter_property_for_node(int(session_id_val), _eff_aff_nid, session=session)
+                        _owned_aff = await adb(
+                            get_player_owned_or_starter_property_for_node,
+                            int(session_id_val),
+                            _eff_aff_nid,
+                            session=session,
+                        )
                         if _owned_aff and _owned_aff.get("catalog_entry"):
                             _home_aff_bonus = int(_owned_aff["catalog_entry"].get("hangout_affinity_bonus") or 0)
                 except Exception:
@@ -3019,7 +3099,8 @@ async def _resolve_turn_inner(
             try:
                 from mechanics.world.anomalous_events import sync_non_hostile_anomaly_scene_presence as _sync_nh_pre_cast
                 _tmp_anom_sess = dict(session, current_npcs=list(result.get("npcs_present") or []))
-                result["npcs_present"] = _sync_nh_pre_cast(
+                result["npcs_present"] = await adb(
+                    _sync_nh_pre_cast,
                     int(session["id"]),
                     session=_tmp_anom_sess,
                     location_str=str(new_loc or ""),
@@ -3198,6 +3279,8 @@ async def _resolve_turn_inner(
 
 
     # --- ATTACH ADVANCED IN-GAME TIME & DAY/NIGHT PROGRESSION ---
+    if isinstance(res, dict) and _staged_domain_vitals is not None:
+        res["_staged_domain_vitals"] = _staged_domain_vitals
     if not is_retry:
         if isinstance(res, dict) and _staged_time_op is not None:
             res["_staged_time_op"] = _staged_time_op
@@ -3221,7 +3304,7 @@ async def _resolve_turn_inner(
                 for char in party if char
             ]
             if actions and any(is_sleep_action(a.get("label", "")) for a in actions if isinstance(a, dict)):
-                sleep_info = apply_sleep_rest(session["id"], party_uids, scen_key=scen_key)
+                sleep_info = await adb(apply_sleep_rest, session["id"], party_uids, scen_key=scen_key)
                 if isinstance(res, dict):
                     res["_sleep_info"] = sleep_info
                     # Ensure outcome narrative reflects a refreshing sleep
@@ -3235,17 +3318,18 @@ async def _resolve_turn_inner(
                 is_combat_active = bool(game_engine.get_active_enemies(session) or (isinstance(res, dict) and game_engine.get_active_enemies(res)))
                 old_loc_val = session.get("current_location", "")
                 new_loc_val = (res.get("location") if isinstance(res, dict) else None) or old_loc_val
-                time_delta = calculate_action_time_cost(
+                time_delta = await adb(
+                    calculate_action_time_cost,
                     first_act,
                     scen_key=scen_key,
                     old_loc=old_loc_val,
                     new_loc=new_loc_val,
                     is_dialogue=is_dialogue_active,
                     is_combat=is_combat_active,
-                    session_id=session["id"]
+                    session_id=session["id"],
                 )
                 time_delta += int(_anom_domain_res.get("time_slip_min") or 0)
-                time_report = advance_time(session["id"], time_delta, party_uids=party_uids)
+                time_report = await adb(advance_time, session["id"], time_delta, party_uids=party_uids)
                 if isinstance(res, dict):
                     res["_time_info"] = time_report
 
@@ -3317,7 +3401,8 @@ async def _resolve_turn_inner(
                 from mechanics.social.conversation_choices import record_partner_conversation_turn
                 lead_p_rec = str(new_partners[0]).strip()
                 was_partner_before = lead_p_rec.lower() in _pre_turn_dialogue_partners
-                record_partner_conversation_turn(
+                await adb(
+                    record_partner_conversation_turn,
                     session,
                     lead_p_rec,
                     actions,
@@ -3330,7 +3415,8 @@ async def _resolve_turn_inner(
                 log.warning("Failed recording partner conversation turn ledger: %s", _led_err)
 
         raw_turn_choices = result.get("next_choices") if result.get("next_choices") is not None else result.get("choices")
-        hybrid_choices = game_engine.build_hybrid_turn_choices(
+        hybrid_choices = await adb(
+            game_engine.build_hybrid_turn_choices,
             raw_turn_choices or [],
             session=session,
             party=party,
@@ -3373,7 +3459,7 @@ async def _resolve_turn_inner(
                 session["endless_mode_unlocked"] = True
                 if session.get("id"):
                     try:
-                        resolve_epilogue_choice(int(session["id"]), "epilogue_endless_mode", db.infer_session_turn(session))
+                        await adb(resolve_epilogue_choice, int(session["id"]), "epilogue_endless_mode", db.infer_session_turn(session))
                     except Exception:
                         pass
                 endless_note = (
@@ -3387,7 +3473,7 @@ async def _resolve_turn_inner(
                 session["chronicle_archived"] = True
                 if session.get("id"):
                     try:
-                        resolve_epilogue_choice(int(session["id"]), "epilogue_conclude_campaign", db.infer_session_turn(session))
+                        await adb(resolve_epilogue_choice, int(session["id"]), "epilogue_conclude_campaign", db.infer_session_turn(session))
                     except Exception:
                         pass
                 archive_note = (
@@ -3418,7 +3504,8 @@ async def _resolve_turn_inner(
                 if session.get("id"):
                     eff_loc_sync = str(res.get("location") or session.get("current_location") or "")
                     eff_nid_sync = str(res.get("current_node_id") or session.get("current_node_id") or "")
-                    synced_npcs = sync_non_hostile_anomaly_scene_presence(
+                    synced_npcs = await adb(
+                        sync_non_hostile_anomaly_scene_presence,
                         int(session["id"]),
                         session=session,
                         location_str=eff_loc_sync,
