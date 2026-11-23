@@ -35,6 +35,7 @@ from .in_flight import (
 from .enrichment import (
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 
 router = APIRouter()
@@ -84,7 +85,43 @@ async def get_character_sessions_endpoint(character_id: int, request: Request = 
     def _load_and_enrich_char_sessions() -> list[dict]:
         with db.ReadUnitOfWork():
             sessions = db.get_character_sessions(character_id)
-            return [enrich_session_for_client(s, user_id, read_only=True) for s in sessions]
+            if not sessions:
+                return []
+            shared_settings = db.get_settings(user_id) or {}
+            shared_inv = db.get_inventory(user_id, char=char) or []
+            from db.characters import _apply_debug_stat_override
+            sids = [int(s["id"]) for s in sessions if s and s.get("id")]
+            pacts_by_sid: dict[int, list[dict]] = {}
+            grudges_by_sid: dict[int, list[dict]] = {}
+            if sids and shared_settings.get("debug_stat_mode", "off") not in ("max", "min"):
+                for sid_item in sids:
+                    pacts_by_sid[sid_item] = db.get_player_active_pacts(
+                        sid_item, int(user_id), character_id=character_id
+                    )
+                    grudges_by_sid[sid_item] = db.get_session_active_grudges(
+                        sid_item, holder_id=int(user_id)
+                    )
+            out: list[dict] = []
+            for s in sessions:
+                s_id = int(s["id"]) if s and s.get("id") else None
+                slot_char = _apply_debug_stat_override(
+                    dict(char),
+                    settings=shared_settings,
+                    session_id=s_id,
+                    active_pacts=pacts_by_sid.get(s_id, []) if s_id is not None else [],
+                    active_grudges=grudges_by_sid.get(s_id, []) if s_id is not None else [],
+                )
+                out.append(
+                    enrich_session_for_client(
+                        s,
+                        user_id,
+                        read_only=True,
+                        preloaded_settings=shared_settings,
+                        preloaded_char=slot_char,
+                        preloaded_inv=shared_inv,
+                    )
+                )
+            return out
 
     enriched = await adb(_load_and_enrich_char_sessions)
     return {"sessions": enriched}
@@ -119,7 +156,15 @@ async def resume_session_endpoint(req: ResumeSessionRequest, request: Request = 
     except Exception:
         pass
 
-    enriched = await adb(enrich_session_for_client, dict(session_row), canonical_id)
+    sess_dict = dict(session_row)
+    pre_roster = await adb(heal_session_before_projection, sess_dict, req.session_id)
+    enriched = await adb(
+        enrich_session_for_client,
+        sess_dict,
+        canonical_id,
+        pre_agent_roster=pre_roster,
+        pre_healed=True,
+    )
     return {"success": True, "session": enriched}
 
 

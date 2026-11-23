@@ -70,60 +70,90 @@ def _sanitize_enemy_telegraph_view(e_view: dict) -> None:
         e_view["telegraphed_skill"] = sanitized_tel
 
 
+def heal_session_before_projection(
+    session: dict | None,
+    session_id: int | None = None,
+) -> list | None:
+    """Explicitly runs idempotent session self-healing writes (agent roster & starter quarters) outside ReadUnitOfWork."""
+    if not session or not isinstance(session, dict):
+        return None
+    sid_val = int(session_id if session_id is not None else (session.get("id") or 0))
+    if sid_val <= 0:
+        return None
+
+    pre_agent_roster = None
+    if scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")):
+        raw_r = session.get("anomalous_agent_roster")
+        if not isinstance(raw_r, list) or not raw_r:
+            try:
+                from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+                pre_agent_roster = ensure_anomalous_agent_roster(sid_val, str(session.get("scenario") or ""))
+                if isinstance(pre_agent_roster, list):
+                    session["anomalous_agent_roster"] = pre_agent_roster
+            except Exception:
+                pre_agent_roster = []
+    try:
+        from mechanics.world.locations import is_anomalous_realty_scenario
+        if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
+            if not any(p.get("is_starter") for p in db.get_player_properties(sid_val)):
+                db.grant_or_relocate_starter_quarters(sid_val)
+    except Exception:
+        pass
+    return pre_agent_roster
+
+
+def _flush_projection_pending_writes(session_id: int, pending_writes: dict[str, Any]) -> None:
+    if session_id <= 0 or not pending_writes:
+        return
+    try:
+        with db.UnitOfWork():
+            if "choices" in pending_writes:
+                db.update_session(session_id, choices=pending_writes["choices"])
+            if "merchant" in pending_writes:
+                db.save_merchant_state(session_id, pending_writes["merchant"])
+    except Exception:
+        pass
+
+
 def enrich_session_for_client(
     session: dict,
     user_id: int,
     ui_lang: str | None = None,
     *,
     read_only: bool = False,
+    preloaded_settings: dict | None = None,
+    preloaded_char: dict | None = None,
+    preloaded_inv: list | None = None,
+    pre_agent_roster: list | None = None,
+    pre_healed: bool = False,
 ) -> dict:
-    """Enriches session payload under a single ReadUnitOfWork (deferring any writes until exit)."""
+    """Enriches session payload under a single ReadUnitOfWork (pure when read_only=True)."""
     if not session or not isinstance(session, dict):
         return session
 
     sid_val = int(session.get("id") or 0)
-    pre_agent_roster = None
-    if (
-        not read_only
-        and sid_val > 0
-        and scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
-    ):
-        raw_r = session.get("anomalous_agent_roster")
-        if not isinstance(raw_r, list) or not raw_r:
-            try:
-                from mechanics.social.agent_roster import ensure_anomalous_agent_roster
-                pre_agent_roster = ensure_anomalous_agent_roster(sid_val, str(session.get("scenario") or ""))
-            except Exception:
-                pre_agent_roster = []
-    if not read_only and sid_val > 0:
-        try:
-            from mechanics.world.locations import is_anomalous_realty_scenario
-            if is_anomalous_realty_scenario(str(session.get("scenario") or "")):
-                if not any(p.get("is_starter") for p in db.get_player_properties(sid_val)):
-                    db.grant_or_relocate_starter_quarters(sid_val)
-        except Exception:
-            pass
+    eff_agent_roster = pre_agent_roster
+    if not read_only and sid_val > 0 and not pre_healed:
+        healed_roster = heal_session_before_projection(session, sid_val)
+        if eff_agent_roster is None:
+            eff_agent_roster = healed_roster
 
-    pending_writes: dict[str, Any] = {}
+    pending_writes: dict[str, Any] | None = None if read_only else {}
     with db.ReadUnitOfWork():
         enriched = _enrich_session_for_client_body(
             session,
             user_id,
             ui_lang=ui_lang,
             read_only=read_only,
-            pre_agent_roster=pre_agent_roster,
+            pre_agent_roster=eff_agent_roster,
             pending_writes=pending_writes,
+            preloaded_settings=preloaded_settings,
+            preloaded_char=preloaded_char,
+            preloaded_inv=preloaded_inv,
         )
 
     if not read_only and sid_val > 0 and pending_writes:
-        try:
-            with db.UnitOfWork():
-                if "choices" in pending_writes:
-                    db.update_session(sid_val, choices=pending_writes["choices"])
-                if "merchant" in pending_writes:
-                    db.save_merchant_state(sid_val, pending_writes["merchant"])
-        except Exception:
-            pass
+        _flush_projection_pending_writes(sid_val, pending_writes)
     return enriched
 
 
@@ -138,6 +168,9 @@ def _enrich_session_for_client_body(
     read_only: bool = False,
     pre_agent_roster: list | None = None,
     pending_writes: dict[str, Any] | None = None,
+    preloaded_settings: dict | None = None,
+    preloaded_char: dict | None = None,
+    preloaded_inv: list | None = None,
 ) -> dict:
     """Enriches session payload with odds, party vitals, combat state, formatted time, fallback flags, and categorized combat decks."""
     if not session or not isinstance(session, dict):
@@ -153,17 +186,29 @@ def _enrich_session_for_client_body(
     session["is_in_combat"] = in_combat
 
     raw_choices = session.get("choices") or []
-    user_settings = db.get_settings(uid) if uid else {}
-    char = db.get_character(uid, session_id=session.get("id"), settings=user_settings) if uid else None
-    if char and char.get("user_id") and int(char["user_id"]) != int(uid):
+    user_settings = (
+        dict(preloaded_settings)
+        if preloaded_settings is not None
+        else (db.get_settings(uid) if uid else {})
+    )
+    char = (
+        dict(preloaded_char)
+        if preloaded_char is not None
+        else (db.get_character(uid, session_id=session.get("id"), settings=user_settings) if uid else None)
+    )
+    if preloaded_settings is None and char and char.get("user_id") and int(char["user_id"]) != int(uid):
         user_settings = db.get_settings(char["user_id"])
-    char_inv = (db.get_inventory(uid, char=char) or []) if (uid and char) else []
+    char_inv = (
+        [dict(it) if isinstance(it, dict) else it for it in preloaded_inv]
+        if preloaded_inv is not None
+        else ((db.get_inventory(uid, char=char) or []) if (uid and char) else [])
+    )
     if not raw_choices or any(not isinstance(c, dict) for c in raw_choices):
         raw_choices = game_engine.sanitize_and_diversify_choices(
             raw_choices,
             scenario=scenario_data.resolve_scenario_key(session.get("scenario")),
             location=session.get("current_location", ""),
-            char=dict(char) if char else None,
+            char={**char, "_preloaded_inventory": char_inv} if char else None,
             dialogue_partner=session.get("dialogue_partner"),
             current_npcs=session.get("current_npcs", []),
             session_id=session.get("id")

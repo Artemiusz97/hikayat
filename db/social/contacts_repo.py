@@ -15,7 +15,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                    new_traits: list = None, new_preferences: list = None, race: str = "", gender: str = "", appearance: dict = None,
                    new_memory: str = None, new_general_memory: str = None, narrative_text: str = "",
                    open_thread: str = "", emotional_tone: str = "", intimate_profile: dict = None,
-                   household_role: str | None = None) -> dict:
+                   household_role: str | None = None, scenario: str | None = None) -> dict:
     import mechanics.social.persona as persona
     import namegen
 
@@ -71,9 +71,14 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     if not npc_id or not name:
         return {}
 
-    sess = db.get_session(session_id)
-    scen = sess.get("scenario", "fantasy") if sess else "fantasy"
+    sess = None
+    if scenario and str(scenario).strip():
+        scen = str(scenario).strip()
+    else:
+        sess = db.get_session(session_id)
+        scen = sess.get("scenario", "fantasy") if sess else "fantasy"
     import mechanics.social.relationships as relationships
+    import scenario_data
     n_role = (basic_info.get("role") if isinstance(basic_info, dict) else "") or ""
     n_desc = (basic_info.get("description") if isinstance(basic_info, dict) else "") or ""
     n_grade = (basic_info.get("grade") if isinstance(basic_info, dict) else "") or ""
@@ -82,6 +87,12 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
     is_promoted_adult_family = (
         str(household_role or "").strip().lower() in ("father", "mother")
         or bool(isinstance(basic_info, dict) and basic_info.get("is_adult_family"))
+    )
+    skip_sess_lookup = bool(
+        scenario
+        and str(scenario).strip()
+        and not scenario_data.is_anomalous_incursions_scenario(scen)
+        and not scenario_data.is_anomalous_high_school_scenario(scen)
     )
     if not is_promoted_adult_family and not relationships.is_contact_eligible(
         name=name,
@@ -93,6 +104,8 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
         social_role_type=n_srt,
         age_group=n_age_group,
         is_adult_family=is_promoted_adult_family,
+        preloaded_session=sess,
+        skip_session_lookup=skip_sess_lookup,
     ):
         return {}
 
@@ -478,7 +491,6 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for dfk in ("intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed"):
                 if cur_prof.get(dfk):
                     ret_app[dfk] = cur_prof[dfk]
-            cur_info = _enrich_contact_basic_info(conn, session_id, final_name, cur_info, scenario=scen, narrative_text=narrative_text)
             if cur_prof.get("had_first_time_with_player"):
                 ret_app["had_first_time_with_player"] = cur_prof["had_first_time_with_player"]
 
@@ -630,7 +642,6 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and app_dict.get(k):
                     prof_dict[k] = app_dict[k]
                 app_dict.pop(k, None)
-            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
 
             if "tracks" not in prof_dict or not isinstance(prof_dict["tracks"], dict):
                 prof_dict["tracks"] = {}
@@ -671,7 +682,6 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
             for k in ("intercourse_experience", "oral_experience", "manual_experience", "anal_experience",
                       "past_intimate_history", "past_intimate_entries"):
                 app_dict.pop(k, None)
-            info = _enrich_contact_basic_info(conn, session_id, name, info, scenario=scen, narrative_text=narrative_text)
 
             cursor = conn.execute(
                 """INSERT INTO contacts (session_id, character_id, npc_id, name, basic_info_json,

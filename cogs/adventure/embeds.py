@@ -122,8 +122,17 @@ def _party_vitals_text(session: dict) -> str:
     """Renders the tracker: Lvl, Name, HP/MaxHP, MP/MaxMP, and
     active status effects for every human player and recruited party companion."""
     lines = []
-    for uid in session.get("turn_order", []):
-        char = db.get_character(uid)
+    turn_order = session.get("turn_order") or []
+    order_uids = [int(u) for u in turn_order if u is not None]
+    chars_by_uid = (
+        db.batch_load_party_characters(order_uids, session_id=session.get("id"))
+        if order_uids
+        else {}
+    )
+    for uid in turn_order:
+        char = chars_by_uid.get(int(uid)) if uid is not None else None
+        if not char:
+            char = db.get_character(uid)
         if not char:
             continue
         marker = ""
@@ -2327,8 +2336,6 @@ def _build_history_embed(session_id: int, selected_quest_id: str | None = None) 
 
 def _build_caseboard_embed(session_id: int, selected_suspect: str | None = None) -> discord.Embed:
     all_clues = db.get_session_clues(session_id)
-    if not all_clues:
-        all_clues = db.get_session_clues(session_id)
 
     cur_ch = db.get_session_chapter(session_id) or 1
     suspect_filter = None if selected_suspect in (None, "__all__", "") else selected_suspect

@@ -757,6 +757,8 @@ def promote_world_roster_to_contact(
     has_contact_info: bool = False,
     turn_number: int = 1,
     narrative_text: str = "",
+    *,
+    scenario: str | None = None,
 ) -> dict[str, Any] | None:
     """Promotes a `world_roster` (or legacy adapter) NPC into `contacts` while snapshotting pre-promotion state."""
     if not session_id or not str(npc_key_or_name or "").strip():
@@ -812,6 +814,7 @@ def promote_world_roster_to_contact(
             basic_info=b_info, delta_score=delta_score, new_traits=list(cur.get("traits") or []),
             race=str(cur.get("race") or ""), gender=str(cur.get("gender") or ""),
             appearance=dict(cur.get("appearance") or {}) or None, narrative_text=narrative_text or "",
+            scenario=scenario,
         )
         if not contact_res:
             return None
@@ -1080,6 +1083,7 @@ def batch_commit_opening_npcs(
     party_set = {str(p).strip().lower() for p in (open_party_names or set()) if p}
 
     def _run(c: sqlite3.Connection) -> int:
+        preloaded_sess = db.get_session(sid)
         party_npc_rows = get_session_party_npcs(sid) or []
         for p in party_npc_rows:
             if isinstance(p, dict) and p.get("name"):
@@ -1155,6 +1159,8 @@ def batch_commit_opening_npcs(
                 description=b_info.get("description", ""),
                 scenario=scenario_key,
                 session_id=sid,
+                preloaded_session=preloaded_sess,
+                skip_session_lookup=preloaded_sess is None,
             )
             if eligible:
                 qualifies, promo_reason = should_promote_roster_npc_to_contact(
@@ -1175,6 +1181,7 @@ def batch_commit_opening_npcs(
                         has_contact_info=bool(is_family or in_party or b_info.get("exchanged_contact") or b_info.get("added_via_peerpulse")),
                         turn_number=0,
                         narrative_text=narrative,
+                        scenario=scenario_key,
                     )
             committed += 1
         return committed

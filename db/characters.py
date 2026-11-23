@@ -339,6 +339,7 @@ def _apply_debug_stat_override(
     settings: dict | None = None,
     session_id: int | None = None,
     active_pacts: list[dict] | None = None,
+    active_grudges: list[dict] | None = None,
 ) -> dict | None:
     if not char:
         return char
@@ -407,8 +408,9 @@ def _apply_debug_stat_override(
                     else db.get_player_active_pacts(int(eff_sid), int(user_id), character_id=char.get("id"))
                 )
                 grudges = (
-                    db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id))
-                    if eff_sid else []
+                    active_grudges
+                    if active_grudges is not None
+                    else (db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id)) if eff_sid else [])
                 )
                 if pacts or grudges:
                     from mechanics.pacts.appraisal import apply_active_pact_modifiers
@@ -595,7 +597,64 @@ def get_user_characters(user_id: int) -> list[dict]:
     user_id = resolve_canonical_user_id(user_id)
     with get_conn() as conn:
         rows = conn.execute("SELECT * FROM characters WHERE user_id=? ORDER BY id ASC", (user_id,)).fetchall()
-        return [_apply_debug_stat_override(dict(r)) for r in rows]
+        if not rows:
+            return []
+        s_row = conn.execute("SELECT * FROM user_settings WHERE user_id=?", (user_id,)).fetchone()
+        settings = dict(s_row) if s_row else {}
+        sids = sorted({int(r["active_session_id"]) for r in rows if r["active_session_id"]})
+        pacts_by_sid: dict[int, list[dict]] = {}
+        grudges_by_sid: dict[int, list[dict]] = {}
+        if sids and settings.get("debug_stat_mode", "off") not in ("max", "min"):
+            from .contracts import _ensure_contracts_v52_tables, _hydrate_contract_row
+            _ensure_contracts_v52_tables(conn)
+            sids_json = json.dumps(sids)
+            uid_str = str(int(user_id))
+            p_rows = conn.execute(
+                """SELECT * FROM session_entity_contracts
+                   WHERE session_id IN (SELECT value FROM json_each(?))
+                     AND holder_type = 'player'
+                     AND holder_id = ?
+                     AND status = 'active'
+                   ORDER BY id ASC""",
+                (sids_json, uid_str),
+            ).fetchall()
+            for pr in p_rows:
+                hd = _hydrate_contract_row(pr)
+                pacts_by_sid.setdefault(int(hd["session_id"]), []).append(hd)
+            g_rows = conn.execute(
+                """SELECT * FROM session_contract_grudges
+                   WHERE session_id IN (SELECT value FROM json_each(?))
+                     AND holder_id = ?
+                     AND status = 'active'""",
+                (sids_json, uid_str),
+            ).fetchall()
+            for gr in g_rows:
+                gd = dict(gr)
+                grudges_by_sid.setdefault(int(gd["session_id"]), []).append(gd)
+    out: list[dict] = []
+    for r in rows:
+        rd = dict(r)
+        r_sid = int(rd["active_session_id"]) if rd.get("active_session_id") else None
+        cid = rd.get("id")
+        char_pacts = (
+            [
+                p
+                for p in pacts_by_sid.get(r_sid, [])
+                if p.get("character_id") in (None, 0, cid)
+            ]
+            if r_sid is not None
+            else []
+        )
+        out.append(
+            _apply_debug_stat_override(
+                rd,
+                settings=settings,
+                session_id=r_sid,
+                active_pacts=char_pacts,
+                active_grudges=grudges_by_sid.get(r_sid, []) if r_sid is not None else [],
+            )
+        )
+    return out
 
 def switch_character(user_id: int, character_id_or_name) -> dict | None:
     chars = get_user_characters(user_id)
@@ -1291,9 +1350,12 @@ def batch_load_party_characters(
                 (uids_json,),
             ).fetchall()
             pacts_by_uid: dict[str, list[dict]] = {}
+            grudges_by_uid: dict[str, list[dict]] = {}
             if session_id is not None:
-                from .contracts import get_session_pacts_batch
+                from .contracts import get_session_active_grudges, get_session_pacts_batch
                 pacts_by_uid = get_session_pacts_batch(int(session_id), holder_type="player", conn=conn)
+                for gr in get_session_active_grudges(int(session_id), conn=conn):
+                    grudges_by_uid.setdefault(str(gr.get("holder_id") or ""), []).append(gr)
         settings_by_uid = {
             int(sr["user_id"]): dict(sr)
             for sr in s_rows
@@ -1313,6 +1375,7 @@ def batch_load_party_characters(
                     settings=settings_by_uid.get(canon_uid, {}),
                     session_id=session_id,
                     active_pacts=pacts_by_uid.get(str(canon_uid), []) if session_id is not None else None,
+                    active_grudges=grudges_by_uid.get(str(canon_uid), []) if session_id is not None else None,
                 )
                 if hydrated is not None:
                     hydrated["status_effects"] = _coerce_status_effects_list(raw_eff)

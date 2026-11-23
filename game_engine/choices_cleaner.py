@@ -517,7 +517,15 @@ def _is_item_in_inventory(item: str, player_inv: set[str]) -> bool:
 def _get_player_inventory_items(char: dict = None, session_id: int = None) -> set[str]:
     """Collects normalized names of items carried or equipped by the active player character."""
     items = set()
+    has_preloaded_inv = False
     if isinstance(char, dict):
+        if isinstance(char.get("_preloaded_inventory"), list):
+            has_preloaded_inv = True
+            for itm in char["_preloaded_inventory"]:
+                if isinstance(itm, dict) and itm.get("name"):
+                    items.add(str(itm["name"]).strip().lower())
+                elif isinstance(itm, str) and itm.strip():
+                    items.add(itm.strip().lower())
         raw_inv = char.get("inventory") or char.get("items") or []
         if isinstance(raw_inv, list):
             for itm in raw_inv:
@@ -532,6 +540,9 @@ def _get_player_inventory_items(char: dict = None, session_id: int = None) -> se
                     items.add(v.strip().lower())
                 elif isinstance(v, dict) and v.get("name"):
                     items.add(str(v["name"]).strip().lower())
+
+    if has_preloaded_inv:
+        return items
 
     uid = None
     if isinstance(char, dict):

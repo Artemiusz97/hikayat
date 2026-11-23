@@ -97,7 +97,17 @@ async def perform_entity_contract_ritual(
         if res.get("spawned_exorcism_boss") or act_norm in ("sign", "sever"):
             fresh_sess = await adb(db.get_session, session_id)
             if fresh_sess:
-                enriched_session = await adb(enrich_session_for_client, dict(fresh_sess), eff_uid, eff_lang)
+                from .adventure import heal_session_before_projection
+                sess_copy = dict(fresh_sess)
+                pre_roster = await adb(heal_session_before_projection, sess_copy, session_id)
+                enriched_session = await adb(
+                    enrich_session_for_client,
+                    sess_copy,
+                    eff_uid,
+                    eff_lang,
+                    pre_agent_roster=pre_roster,
+                    pre_healed=True,
+                )
 
     safe_res = _serializable_action({
         "success": True,

@@ -1523,8 +1523,11 @@ def get_session_characters(session_id: int | dict) -> list[dict]:
                 (json.dumps(r_uids),),
             ).fetchall()
             settings_by_uid = {int(sr["user_id"]): dict(sr) for sr in s_rows if sr and sr["user_id"] is not None}
-        from .contracts import get_session_pacts_batch
+        from .contracts import get_session_active_grudges, get_session_pacts_batch
         pacts_by_uid = get_session_pacts_batch(int(session_id), holder_type="player", conn=conn)
+        grudges_by_uid: dict[str, list[dict]] = {}
+        for gr in get_session_active_grudges(int(session_id), conn=conn):
+            grudges_by_uid.setdefault(str(gr.get("holder_id") or ""), []).append(gr)
     seen_ids: set[int] = set()
     out: list[dict] = []
     for r in rows:
@@ -1534,6 +1537,7 @@ def get_session_characters(session_id: int | dict) -> list[dict]:
             settings=settings_by_uid.get(u_int, {}) if u_int is not None else None,
             session_id=int(session_id),
             active_pacts=pacts_by_uid.get(str(u_int), []) if u_int is not None else [],
+            active_grudges=grudges_by_uid.get(str(u_int), []) if u_int is not None else [],
         )
         if d and d.get("id") not in seen_ids:
             seen_ids.add(int(d["id"]))

@@ -44,6 +44,7 @@ from .in_flight import (
 from .enrichment import (
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 
 router = APIRouter()
@@ -277,7 +278,18 @@ async def _execute_action_locked(
 
         _LAST_TURN_ERRORS.pop(int(req.session_id), None)
         fresh_session = await adb(db.get_session, req.session_id)
-        fresh_session = await adb(enrich_session_for_client, fresh_session, eff_uid)
+        if isinstance(fresh_session, dict):
+            fresh_session = dict(fresh_session)
+            pre_roster = await adb(heal_session_before_projection, fresh_session, req.session_id)
+            fresh_session = await adb(
+                enrich_session_for_client,
+                fresh_session,
+                eff_uid,
+                pre_agent_roster=pre_roster,
+                pre_healed=True,
+            )
+        else:
+            fresh_session = await adb(enrich_session_for_client, fresh_session, eff_uid)
         if isinstance(fresh_session, dict):
             fresh_session["in_flight_turn"] = None
 

@@ -74,6 +74,7 @@ from .enrichment import (
     _sanitize_enemy_telegraph_view,
     _trigger_scene_image_broadcast,
     enrich_session_for_client,
+    heal_session_before_projection,
 )
 from .routes_session import (
     delete_save,
@@ -181,6 +182,7 @@ __all__ = [
     "get_character_sessions_endpoint",
     "get_session_image",
     "get_world_map_locations",
+    "heal_session_before_projection",
     "invalidate_examine_cache",
     "join_adventure",
     "launch_in_flight_ws_task",
