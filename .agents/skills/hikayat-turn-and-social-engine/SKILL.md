@@ -37,7 +37,7 @@ Use this runbook when working on `services/turn_service.py`, `game_engine/`, `mo
      - Dijkstra/BFS graph routing and gate validation in `mechanics/world/locations/` (`movement.py`, `pathfinding.py`, `access_gate.py`, `hierarchy.py`).
      - Stealth state updates (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`) in `mechanics/stealth/`.
    - **Phase 5 — Bounded Narration & Post-Sanitizers**:
-     - Dual-model routing in `llm_client.py` (`LLM_MODEL` for prose, `LLM_UTILITY_MODEL` for background tasks, `NSFW_LLM_*` isolation for mature scenarios, 3,500-token reasoning headroom).
+     - Dual-model routing in `llm_client/` (`LLM_MODEL` for prose, `LLM_UTILITY_MODEL` for background tasks, `NSFW_LLM_*` isolation for mature scenarios, 3,500-token reasoning headroom).
      - Post-generation passes: `ensure_enemy_encounter_narrative` (`game_engine/turn/core.py`), `pronoun_resolver.py`, `sanitize_comparative_cliches`, and `choices_cleaner.py`.
 
 ---

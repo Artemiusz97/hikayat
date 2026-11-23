@@ -48,13 +48,12 @@ def _discover_script_files() -> List[str]:
     return [f"scripts/{p.name}" for p in sorted(scripts_dir.glob("*.py"))]
 
 
-SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "mechanics", "services", "models", "localization", "bin"]
+SCAN_TARGETS = ["api", "cogs", "db", "game_engine", "llm_client", "mechanics", "services", "models", "localization", "bin"]
 SCAN_ROOT_FILES = [
     "bot.py",
     "character_data.py",
     "config.py",
     "image_client.py",
-    "llm_client.py",
     "namegen.py",
     "scenario_data.py",
     "scenario_variants.py",

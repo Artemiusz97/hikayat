@@ -5,7 +5,7 @@ description: "Use this skill whenever modifying LLM prompts, KV-cache prompt ord
 
 # Hikayat LLM Orchestration, Prose Guardrails & Image Prompt Runbook
 
-Use this guide whenever working on `llm_client.py`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner.py`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
+Use this guide whenever working on `llm_client/`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner.py`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
 
 ---
 
@@ -25,7 +25,7 @@ Hikayat orders prompt blocks strictly from **least volatile to most volatile** s
 
 ## 2. Client Routing, Circuit Breakers & Schema Coercion
 
-- **Client Isolation (`llm_client.py`)**:
+- **Client Isolation (`llm_client/`)**:
   - Standard scenarios route through `_client` (`LLM_MODEL` + `LLM_FALLBACK_MODELS`).
   - Mature scenarios (`scenario_data.uses_nsfw_model(scen_key)`) route through `_nsfw_client` (`NSFW_LLM_*`) when configured, falling back cleanly when unset.
   - Per-model health uses `trip_model_circuit(model_name, cooldown_sec)` and `is_model_healthy(model_name)` so rate-limited or down models fail over without stalling every turn.
