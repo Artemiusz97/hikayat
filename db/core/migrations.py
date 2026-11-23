@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 import time
+
+log = logging.getLogger(__name__)
 
 from .connection import _VERIFIED_TABLE_GROUPS, _VERIFIED_TABLE_GROUPS_LOCK, get_conn
 from .migrations_backfills import (
@@ -996,32 +999,32 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
         try:
             _migrate_contacts_intimacy_profiles(conn)
         except Exception as e:
-            print(f"[migration 25] Warning: intimacy profile data migration encountered: {e}")
+            log.warning("[migration 25] Warning: intimacy profile data migration encountered: %s", e)
 
     if 26 in newly_applied:
         try:
             from mechanics.social.relationship_graph import migrate_legacy_relations
             migrate_legacy_relations(conn)
         except Exception as e:
-            print(f"[migration 26] Warning: social graph migration encountered: {e}")
+            log.warning("[migration 26] Warning: social graph migration encountered: %s", e)
 
     if 27 in newly_applied:
         try:
             _migrate_phone_appointments_to_commitments(conn)
         except Exception as e:
-            print(f"[migration 27] Warning: commitments backfill encountered: {e}")
+            log.warning("[migration 27] Warning: commitments backfill encountered: %s", e)
 
     if 30 in newly_applied:
         try:
             _migrate_clean_cutover_v30(conn)
         except Exception as e:
-            print(f"[migration 30] Warning: clean cutover v30 migration encountered: {e}")
+            log.warning("[migration 30] Warning: clean cutover v30 migration encountered: %s", e)
 
     if 32 in newly_applied:
         try:
             _migrate_self_heal_main_area_and_roster_drift_v32(conn)
         except Exception as e:
-            print(f"[migration 32] Warning: self-heal migration encountered: {e}")
+            log.warning("[migration 32] Warning: self-heal migration encountered: %s", e)
 
     if 37 in newly_applied:
         try:
@@ -1042,66 +1045,68 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
                 from ..memory import rebuild_session_digests_fts
                 rebuild_session_digests_fts(conn)
         except Exception as e:
-            print(f"[migration 37] Warning: multilingual FTS5 migration encountered: {e}")
+            log.warning("[migration 37] Warning: multilingual FTS5 migration encountered: %s", e)
 
     if 39 in newly_applied:
         try:
             _backfill_campaign_spines_from_legacy_sessions(conn)
         except Exception as e:
-            print(f"[migration 39] Warning: campaign spine legacy backfill encountered: {e}")
+            log.warning("[migration 39] Warning: campaign spine legacy backfill encountered: %s", e)
 
     if 45 in newly_applied:
         try:
             _backfill_session_anomaly_records_v45(conn)
         except Exception as e:
-            print(f"[migration 45] Warning: session anomaly records backfill encountered: {e}")
+            log.warning("[migration 45] Warning: session anomaly records backfill encountered: %s", e)
     if 49 in newly_applied:
         try:
             _migrate_zone_split_and_hidden_villages_v49(conn)
         except Exception as e:
-            print(f"[migration 49] Warning: zone split & hidden folklore villages backfill encountered: {e}")
+            log.warning("[migration 49] Warning: zone split & hidden folklore villages backfill encountered: %s", e)
     if 50 in newly_applied:
         try:
             _migrate_dynamic_social_overhaul_v50(conn)
         except Exception as e:
-            print(f"[migration 50] Warning: dynamic social overhaul backfill encountered: {e}")
+            log.warning("[migration 50] Warning: dynamic social overhaul backfill encountered: %s", e)
     if 51 in newly_applied:
         try:
             _migrate_main_quest_bounty_overhaul_v51(conn)
         except Exception as e:
-            print(f"[migration 51] Warning: main quest & bounty overhaul backfill encountered: {e}")
+            log.warning("[migration 51] Warning: main quest & bounty overhaul backfill encountered: %s", e)
     if 53 in newly_applied:
         try:
             _migrate_combat_evolution_v53(conn)
         except Exception as e:
-            print(f"[migration 53] Warning: combat evolution phase 3 backfill encountered: {e}")
+            log.warning("[migration 53] Warning: combat evolution phase 3 backfill encountered: %s", e)
     if 55 in newly_applied:
         try:
             _ensure_living_world_indexes_v55(conn)
         except Exception as e:
-            print(f"[migration 55] Warning: living world index creation encountered: {e}")
+            log.warning("[migration 55] Warning: living world index creation encountered: %s", e)
     if 57 in newly_applied:
         try:
             _migrate_anomalous_locations_integrity_v57(conn)
         except Exception as e:
-            print(f"[migration 57] Warning: anomalous locations integrity backfill encountered: {e}")
+            log.warning("[migration 57] Warning: anomalous locations integrity backfill encountered: %s", e)
 
     if 58 in newly_applied or 59 in newly_applied:
         try:
             _migrate_narrative_pacing_values_v58(conn)
         except Exception as e:
-            print(f"[migration 58] Warning: narrative pacing backfill encountered: {e}")
+            log.warning("[migration 58] Warning: narrative pacing backfill encountered: %s", e)
 
     if 60 in newly_applied:
         try:
             _migrate_outlaw_factions_v60(conn)
         except Exception as e:
-            print(f"[migration 60] Warning: outlaw factions 10-wing HQ & safehouses backfill encountered: {e}")
+            log.warning("[migration 60] Warning: outlaw factions 10-wing HQ & safehouses backfill encountered: %s", e)
 
     try:
         _strip_legacy_session_fk_constraints(conn)
+    except RuntimeError:
+        raise
     except Exception as e:
-        print(f"[schema] Warning: session FK cleanup encountered: {e}")
+        log.warning("[schema] Warning: session FK cleanup encountered: %s", e)
 
     return newly_applied
 

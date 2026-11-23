@@ -65,6 +65,8 @@ _uow_is_readonly_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uo
 
 _uow_strict_readonly_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uow_strict_readonly_var", default=False)
 
+_uow_explicit_var: contextvars.ContextVar[bool] = contextvars.ContextVar("_uow_explicit_var", default=False)
+
 _uow_added_table_groups_var: contextvars.ContextVar[Optional[set[tuple[str, str]]]] = contextvars.ContextVar(
     "_uow_added_table_groups_var", default=None
 )
@@ -72,6 +74,11 @@ _uow_added_table_groups_var: contextvars.ContextVar[Optional[set[tuple[str, str]
 _uow_savepoint_seq = itertools.count(1)
 
 _MAIN_EVENT_LOOP: Optional[asyncio.AbstractEventLoop] = None
+
+
+def is_in_uow() -> bool:
+    """Return True when executing inside an active explicit `UnitOfWork` or `ReadUnitOfWork` context."""
+    return bool(_uow_explicit_var.get())
 
 
 def is_in_readonly_uow() -> bool:
@@ -236,6 +243,7 @@ def _get_independent_conn(db_path: str = None):
     path_token = _uow_db_path_var.set(db_path)
     ro_token = _uow_is_readonly_var.set(False)
     strict_token = _uow_strict_readonly_var.set(False)
+    exp_token = _uow_explicit_var.set(False)
     added_token = _uow_added_table_groups_var.set(ind_added_groups)
     committed = False
     try:
@@ -250,6 +258,7 @@ def _get_independent_conn(db_path: str = None):
         if committed:
             _publish_verified_table_groups(ind_added_groups)
         _uow_added_table_groups_var.reset(added_token)
+        _uow_explicit_var.reset(exp_token)
         _uow_strict_readonly_var.reset(strict_token)
         _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)
@@ -274,8 +283,12 @@ def UnitOfWork(db_path: str = None):
             )
         if not existing_conn.in_transaction:
             existing_conn.execute("BEGIN IMMEDIATE")
-        with savepoint(existing_conn, f"_uow_sp_{next(_uow_savepoint_seq)}"):
-            yield existing_conn
+        nested_exp_token = _uow_explicit_var.set(True)
+        try:
+            with savepoint(existing_conn, f"_uow_sp_{next(_uow_savepoint_seq)}"):
+                yield existing_conn
+        finally:
+            _uow_explicit_var.reset(nested_exp_token)
         return
 
     pool, conn = _acquire_pooled_conn(db_path)
@@ -285,6 +298,7 @@ def UnitOfWork(db_path: str = None):
     path_token = _uow_db_path_var.set(db_path)
     ro_token = _uow_is_readonly_var.set(False)
     strict_token = _uow_strict_readonly_var.set(False)
+    exp_token = _uow_explicit_var.set(True)
     added_token = _uow_added_table_groups_var.set(added_groups)
     committed = False
     try:
@@ -302,6 +316,7 @@ def UnitOfWork(db_path: str = None):
         if committed:
             _publish_verified_table_groups(added_groups)
         _uow_added_table_groups_var.reset(added_token)
+        _uow_explicit_var.reset(exp_token)
         _uow_strict_readonly_var.reset(strict_token)
         _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)
@@ -317,7 +332,11 @@ def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False)
     existing_conn = _uow_conn_var.get()
     if existing_conn is not None and _uow_db_path_var.get() == db_path:
         if not strict_readonly or _uow_strict_readonly_var.get():
-            yield existing_conn
+            nested_exp_token = _uow_explicit_var.set(True)
+            try:
+                yield existing_conn
+            finally:
+                _uow_explicit_var.reset(nested_exp_token)
             return
         parent_kind = "ReadUnitOfWork" if _uow_is_readonly_var.get() else "UnitOfWork"
         raise RuntimeError(
@@ -335,6 +354,7 @@ def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False)
     path_token = _uow_db_path_var.set(db_path)
     ro_token = _uow_is_readonly_var.set(True)
     strict_token = _uow_strict_readonly_var.set(bool(strict_readonly))
+    exp_token = _uow_explicit_var.set(True)
     added_token = _uow_added_table_groups_var.set(added_groups)
     succeeded = False
     try:
@@ -361,6 +381,7 @@ def ReadUnitOfWork(db_path: str | None = None, *, strict_readonly: bool = False)
         if succeeded:
             _publish_verified_table_groups(added_groups)
         _uow_added_table_groups_var.reset(added_token)
+        _uow_explicit_var.reset(exp_token)
         _uow_strict_readonly_var.reset(strict_token)
         _uow_is_readonly_var.reset(ro_token)
         _uow_db_path_var.reset(path_token)

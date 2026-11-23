@@ -358,6 +358,12 @@ def _backfill_campaign_spines_from_legacy_sessions(conn: sqlite3.Connection) -> 
 def _strip_legacy_session_fk_constraints(conn: sqlite3.Connection) -> None:
     """Removes legacy FOREIGN KEY(session_id) REFERENCES sessions(id) from normalized child tables
     so synthetic session_ids in unit tests and simulations match all other SESSION_CHILD_TABLES."""
+    from .connection import is_in_uow
+
+    if is_in_uow():
+        raise RuntimeError(
+            "Cannot run _strip_legacy_session_fk_constraints inside an active UnitOfWork or ReadUnitOfWork."
+        )
     target_ddls = {
         "households": (
             """CREATE TABLE households__new (

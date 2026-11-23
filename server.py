@@ -2,6 +2,8 @@
 Hikayat Web API & WebSocket Server Entrypoint.
 Routes are modularized into FastAPI APIRouter modules under `api/`.
 """
+from __future__ import annotations
+
 import sys
 if hasattr(sys.stdout, "reconfigure"):
     try:

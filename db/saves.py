@@ -60,7 +60,7 @@ def _remap_epistemic_proof_refs(
         raw_meta = r["metadata_json"] or "{}"
         try:
             meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             meta = {}
         if isinstance(meta, dict):
             snaps = meta.get("_turn_snapshots")
@@ -169,8 +169,8 @@ def _rewrite_snapshot_json_list_fields(
                 elif old_host is not None and item.get("character_id") in (old_host,):
                     item["character_id"] = char_id
             row_dict[col_name] = json.dumps(parsed)
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            _log.warning("Snapshot JSON column %s rewrite skipped for session %s: %s", col_name, new_sid, exc)
 
 
 def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]) -> dict[str, Any]:
@@ -196,7 +196,7 @@ def _hook_restore_contact_row(row_dict: dict[str, Any], load_ctx: dict[str, Any]
             if isinstance(rel_obj, dict):
                 rel_obj["household_id"] = row_dict["household_id"]
                 row_dict["relations_json"] = json.dumps(rel_obj)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
     row_dict.setdefault("household_role", "child")
     return row_dict
@@ -269,8 +269,8 @@ def _hook_rewrite_campaign_spine_session_keys(row_dict: dict[str, Any], load_ctx
             try:
                 parsed_sp = json.loads(raw_sp) if isinstance(raw_sp, str) else raw_sp
                 row_dict[sp_col] = json.dumps(_rewrite_spine_embedded_ids(parsed_sp, old_sid, new_sid))
-            except Exception:
-                pass
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                _log.warning("Campaign spine column %s rewrite skipped for session %s: %s", sp_col, new_sid, exc)
     return row_dict
 
 
@@ -403,8 +403,8 @@ def _post_sync_loaded_player_properties(load_ctx: dict[str, Any]) -> None:
                 ).fetchall():
                     m_key = "starter_unlocked" if int(pr["is_starter"] or 0) == 1 else "deed_owned"
                     _set_facility_unlock_state(conn, new_sid, str(pr["facility_node_id"]), unlocked=True, marker_key=m_key)
-    except Exception:
-        pass
+    except (sqlite3.Error, TypeError, ValueError, KeyError) as exc:
+        _log.warning("Post-load player property sync failed for session %s: %s", new_sid, exc)
 
 
 def _post_rebuild_session_digests_fts(load_ctx: dict[str, Any]) -> None:
@@ -435,8 +435,8 @@ def _post_remap_clue_deduction_parents(load_ctx: dict[str, Any]) -> None:
                     "UPDATE session_clues SET deduction_parents_json = ? WHERE id = ?",
                     (json.dumps(remapped_parents), cl_r["id"]),
                 )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load clue deduction remap failed for clue %s: %s", cl_r["id"], exc)
 
 
 def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
@@ -460,8 +460,8 @@ def _post_remap_commitments_conflicting_ids(load_ctx: dict[str, Any]) -> None:
                         pass
                 cm_meta["conflicting_ids"] = remapped_conflicts
                 conn.execute("UPDATE commitments_ledger SET metadata_json = ? WHERE id = ?", (json.dumps(cm_meta), cm_r["id"]))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load commitment conflict remap failed for commitment %s: %s", cm_r["id"], exc)
 
 
 def _post_remap_campaign_spines_nested_ids(load_ctx: dict[str, Any]) -> None:
@@ -488,8 +488,8 @@ def _post_remap_campaign_spines_nested_ids(load_ctx: dict[str, Any]) -> None:
                 "UPDATE campaign_spines SET lieutenants_roster_json = ?, nemeses_json = ?, state_events_json = ? WHERE id = ?",
                 (json.dumps(lts), json.dumps(nems), json.dumps(sp_events), sp_r["id"]),
             )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load campaign spine remap failed for spine %s: %s", sp_r["id"], exc)
 
 
 def _post_remap_quest_dossiers_nested_ids(load_ctx: dict[str, Any]) -> None:
@@ -529,8 +529,8 @@ def _post_remap_quest_dossiers_nested_ids(load_ctx: dict[str, Any]) -> None:
                     qd_r["id"],
                 ),
             )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load quest dossier remap failed for dossier %s: %s", qd_r["id"], exc)
 
 
 def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
@@ -561,7 +561,7 @@ def _post_rematerialize_contacts_relations(load_ctx: dict[str, Any]) -> None:
             ):
                 try:
                     cd_item[out_col] = json.loads(cd_item.get(j_col) or "{}")
-                except Exception:
+                except (json.JSONDecodeError, TypeError, ValueError):
                     cd_item[out_col] = {}
             mat_rel = rg.materialize_relations(new_sid, cd_item, conn=conn)
             if cd_item.get("household_id"):
@@ -641,8 +641,8 @@ def _post_inv_remap_quest_dossiers_inventory_ids(load_ctx: dict[str, Any]) -> No
                     "UPDATE quest_dossiers SET tangible_item_json = ?, state_events_json = ? WHERE id = ?",
                     (json.dumps(t_item), json.dumps(ev_list), qd_row["id"]),
                 )
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Post-load dossier inventory remap failed for dossier %s: %s", qd_row["id"], exc)
 
 
 def _post_inv_remap_epistemic_proof_refs(load_ctx: dict[str, Any]) -> None:
@@ -845,8 +845,8 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                     extra_dict["world_ending_anomaly"] = namegen.generate_world_ending_anomaly_profile(hash_val=int(session_id or 1))
                     sess_dict["extra_json"] = json.dumps(extra_dict)
                     conn.execute("UPDATE sessions SET extra_json = ? WHERE id = ?", (sess_dict["extra_json"], session_id))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError, ValueError, sqlite3.Error) as exc:
+            _log.warning("Save world_ending_anomaly capture skipped for session %s: %s", session_id, exc)
 
         # Sanitize mid-combat ephemeral constructs and summons before saving snapshot
         try:
@@ -857,7 +857,7 @@ def save_adventure_slot(user_id: int, slot_name: str, overwrite: bool = False) -
                 if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
             ]
             sess_dict["current_npcs_json"] = json.dumps(cleaned_npcs)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
         snapshot = {
@@ -938,7 +938,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         if isinstance(to, str):
             try:
                 to = json.loads(to)
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 to = [user_id]
         if not to or user_id not in to:
             to = [user_id]
@@ -958,7 +958,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     sess_data["turn_count"] = len(action_turns)
                 else:
                     sess_data["turn_count"] = 0
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 sess_data["turn_count"] = 0
         sess_data.setdefault("last_digested_turn", 0)
         sess_data["status"] = "active"
@@ -975,7 +975,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 if not (isinstance(n, dict) and (n.get("is_summon") or n.get("is_autonomous_construct")))
             ]
             sess_data["current_npcs_json"] = json.dumps(cleaned_npcs)
-        except Exception:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
 
         # Preserve origin session provenance for folklore codex turn-gating and strip legacy anomaly JSON keys
@@ -987,7 +987,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
         if isinstance(raw_extra, str):
             try:
                 ex_obj = json.loads(raw_extra) if raw_extra.strip() else {}
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 ex_obj = {}
         elif isinstance(raw_extra, dict):
             ex_obj = dict(raw_extra)
@@ -1031,7 +1031,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                     legacy_phys_patch = dict(p_obj)
                     clean_room_meta = {k: v for k, v in p_obj.items() if k != "actors"}
                     sess_data["physical_state_json"] = json.dumps(clean_room_meta) if clean_room_meta else "{}"
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 legacy_phys_patch = None
 
         # Filter strictly to columns present in live sessions table
@@ -1166,8 +1166,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 if not _has_sanc:
                     from mechanics.world.locations.folklore_veil_lifecycle import backfill_zone_split_and_hidden_villages_v49
                     backfill_zone_split_and_hidden_villages_v49(conn, session_id=new_session_id)
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError) as exc:
+            _log.warning("Post-load v49 folklore zone backfill skipped for session %s: %s", new_session_id, exc)
 
         # Backfill Migration 50 contact dossier discoveries on pre-v50 save slots & sync kin/companion/romance exemptions
         try:
@@ -1178,8 +1178,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                 session_id=new_session_id,
                 is_legacy_migration=_is_pre_v50_save,
             )
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+            _log.warning("Post-load v50 contact discovery backfill skipped for session %s: %s", new_session_id, exc)
 
         # Backfill Migration 57 anomalous locations integrity on save load
         try:
@@ -1189,8 +1189,8 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
             )
             backfill_anomalous_locations_integrity_v57(conn, session_id=new_session_id)
             backfill_outlaw_faction_hqs_and_residences_v60(conn, session_id=new_session_id)
-        except Exception:
-            pass
+        except (sqlite3.Error, TypeError, ValueError, json.JSONDecodeError) as exc:
+            _log.warning("Post-load v57/v60 anomalous location backfill skipped for session %s: %s", new_session_id, exc)
 
         # Run registered post-load hooks (FTS5 rebuild, ID remaps, relations materialization, properties)
         ran_post_hooks: set[str] = set()
@@ -1222,7 +1222,7 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         if isinstance(eff_meta, dict) and eff_meta.get("linked_contract_key"):
                             eff_meta["linked_contract_key"] = linked_ckey
                             item_dict["effect"] = "[GEAR_JSON]" + json.dumps(eff_meta, separators=(",", ":"))
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError, ValueError):
                         pass
             item_dict = {
                 k: (json.dumps(v) if isinstance(v, (dict, list)) else v)
@@ -1245,8 +1245,13 @@ def load_adventure_slot(user_id: int, slot_name: str) -> dict:
                         "UPDATE session_entity_contracts SET bound_gear_item_id = ? WHERE session_id = ? AND contract_key = ?",
                         (int(cur_inv.lastrowid), new_session_id, linked_ckey),
                     )
-                except Exception:
-                    pass
+                except sqlite3.Error as exc:
+                    _log.warning(
+                        "Post-load bound_gear_item_id link failed for session %s contract %s: %s",
+                        new_session_id,
+                        linked_ckey,
+                        exc,
+                    )
 
         # Run registered post-inventory hooks (MacGuffin inventory_id & epistemic proof_artifact_ref remaps)
         ran_post_inv_hooks: set[str] = set()
