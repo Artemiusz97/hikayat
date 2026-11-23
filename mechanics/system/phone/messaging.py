@@ -33,7 +33,10 @@ from .dm_grounding import (
     build_meetup_candidates_and_hint,
 )
 from .player_dm import generate_player_chat_message  # static-check: ignore[unused-import]
-from .dm_outcomes import handle_dm_over_limit, persist_dm_media_item_and_milestone
+from .dm_outcomes import (
+    handle_dm_over_limit,
+    persist_dm_media_items_and_milestone,
+)
 
 from .media_captions import (
     generate_npc_photo_caption,
@@ -1380,12 +1383,13 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             log.info(f"[phone] Skipping affinity update for ineligible contact '{contact_name}' (role: {role}).")
 
 
-    # Automatically create Digital Media Item in player inventory if a photo/video was received
+    # Automatically create Digital Media Item(s) in player inventory if photo/video received
     digital_item_id = None
+    digital_item_ids: list[int] = []
     media_type_created = None
     if check_result.succeeded:
-        digital_item_id, media_type_created = await db.adb(
-            persist_dm_media_item_and_milestone,
+        media_persist_res = await db.adb(
+            persist_dm_media_items_and_milestone,
             session=session,
             session_id=session_id,
             npc_id=npc_id,
@@ -1397,6 +1401,9 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             intent=intent,
             current_day=current_day,
         )
+        digital_item_id = media_persist_res.get("digital_item_id")
+        digital_item_ids = list(media_persist_res.get("digital_item_ids") or [])
+        media_type_created = media_persist_res.get("media_type_created")
 
     if intent_category and not (is_autonomy_ping_reply and intent_category == "meetup"):
         meta = {}
@@ -1427,6 +1434,15 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
 
     updated_limits = await db.adb(db.get_phone_daily_limits, session_id, npc_id, current_day)
 
+    media_dropped = None
+    if digital_item_id:
+        media_dropped = {
+            "id": digital_item_id,
+            "media_type": media_type_created or "photo",
+            "contact_name": contact_name,
+            "contact_npc_id": npc_id,
+        }
+
     return {
         "reply_text": reply_text,
         "affinity_delta": affinity_delta,
@@ -1435,7 +1451,9 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         "intent": intent,
         "new_score": clamp_score(score + affinity_delta),
         "digital_item_id": digital_item_id,
+        "digital_item_ids": digital_item_ids,
         "media_type_created": media_type_created,
+        "media_dropped": media_dropped,
         "daily_limits": updated_limits,
         "daily_digestion_capped": dm_digestion_capped,
         "discovered_facts": dm_discovered_facts,

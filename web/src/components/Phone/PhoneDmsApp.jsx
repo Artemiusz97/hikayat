@@ -1,17 +1,27 @@
 import { useRef } from 'react';
 import {
   Calendar,
+  Camera,
   ChevronLeft,
   Heart,
+  Loader2,
   MapPin,
   MessageSquare,
+  Play,
   Send,
   ShieldAlert,
+  Sparkles,
   User,
   Users,
+  Video,
 } from 'lucide-react';
 import { formatCleanLocation } from '../../utils/locationFormat';
-import { formatTimestamp } from './phoneHelpers';
+import {
+  formatTimestamp,
+  matchDmAttachmentToGallery,
+  parseDmMediaAttachment,
+} from './phoneHelpers';
+import { isImageGenModeActive } from './phoneWallpapers';
 
 const PhoneDmsApp = ({
   branding,
@@ -39,10 +49,15 @@ const PhoneDmsApp = ({
   dmDirectory = [],
   dispatchDirectory = [],
   onLoadChatMessages,
+  mediaGallery = [],
+  imageGenEnabled = 0,
+  onSelectPhoto,
+  onGenerateMediaPhoto,
   clockFormat = '12h',
   t,
 }) => {
   const msgTabRefs = useRef({});
+  const isImgGenActive = isImageGenModeActive(imageGenEnabled);
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
@@ -86,7 +101,11 @@ const PhoneDmsApp = ({
 
           {/* DM Reply Outcome Banner */}
           {dmOutcomeBanner && (
-            <div className="bg-neutral-950/90 border border-cyan-700/50 rounded-xl p-2 text-[10px] space-y-1 shrink-0">
+            <div
+              className={`bg-neutral-950/90 border rounded-xl p-2 text-[10px] space-y-1 shrink-0 ${
+                dmOutcomeBanner.error ? 'border-red-700/60' : 'border-cyan-700/50'
+              }`}
+            >
               <div className="flex items-center justify-between">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {dmOutcomeBanner.check && (
@@ -117,6 +136,9 @@ const PhoneDmsApp = ({
                   ✕
                 </button>
               </div>
+              {dmOutcomeBanner.error && (
+                <div className="text-red-300 font-medium">⚠️ {dmOutcomeBanner.error}</div>
+              )}
               {dmOutcomeBanner.daily_digestion_capped && (
                 <div className="text-indigo-300">
                   💬{' '}
@@ -168,10 +190,13 @@ const PhoneDmsApp = ({
             ) : (
               chatMessages.map((msg, idx) => {
                 const isPlayer = msg.sender === 'player' || msg.sender === 'Player' || msg.sender === 'You';
+                const { cleanText, attachments = [] } = parseDmMediaAttachment(msg.message);
+                const resolvedNpcId = activeContactEntry?.npc_id || '';
+
                 return (
                   <div key={msg.id || idx} className={`flex flex-col ${isPlayer ? 'items-end' : 'items-start'}`}>
                     <div
-                      className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs ${
+                      className={`max-w-[85%] rounded-2xl px-3 py-1.5 text-xs space-y-1.5 ${
                         isPlayer
                           ? 'bg-cyan-600 text-white rounded-tr-none'
                           : isDispatchThread
@@ -179,7 +204,135 @@ const PhoneDmsApp = ({
                             : 'bg-neutral-800 text-gray-200 rounded-tl-none border border-neutral-700/50'
                       }`}
                     >
-                      <p className="leading-snug whitespace-pre-line">{msg.message}</p>
+                      {cleanText && <p className="leading-snug whitespace-pre-line">{cleanText}</p>}
+
+                      {attachments.map((attachment, aIdx) => {
+                        const matchedMedia = !isPlayer
+                          ? matchDmAttachmentToGallery(
+                              attachment,
+                              msg.timestamp,
+                              activeDisplayTitle,
+                              mediaGallery,
+                              resolvedNpcId
+                            )
+                          : null;
+                        const mediaImageUrl = matchedMedia?.image_url || '';
+                        const mediaStatus = matchedMedia?.image_status || (mediaImageUrl ? 'ready' : 'idle');
+                        const inspectPayload = matchedMedia || {
+                          id: null,
+                          name: `${attachment.isVideo ? 'Video' : 'Photo'}: ${isPlayer ? 'You' : activeDisplayTitle}`,
+                          contact_name: isPlayer ? 'You' : activeDisplayTitle,
+                          media_type: attachment.mediaType,
+                          caption: attachment.caption,
+                          timestamp: msg.timestamp,
+                          tags: ['misc', 'digital'],
+                          image_url: '',
+                          image_status: 'idle',
+                        };
+
+                        return (
+                          <div
+                            key={`${msg.id || idx}-att-${aIdx}`}
+                            data-phone-style="classic"
+                            className="rounded-xl overflow-hidden border border-white/15 hk-phone-media-frame"
+                          >
+                            {mediaImageUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => onSelectPhoto?.(inspectPayload)}
+                                className="block w-full text-left cursor-pointer group relative"
+                              >
+                                <div className="relative h-48 w-full overflow-hidden hk-phone-media-frame">
+                                  <img
+                                    src={mediaImageUrl}
+                                    alt={attachment.caption || activeDisplayTitle}
+                                    loading="lazy"
+                                    className="w-full h-full object-cover object-top group-hover:scale-[1.02] transition-transform"
+                                  />
+                                  {attachment.isVideo && (
+                                    <span className="absolute inset-0 m-auto w-9 h-9 rounded-full hk-phone-play-badge flex items-center justify-center hk-phone-icon-glyph">
+                                      <Play size={15} className="ml-0.5" />
+                                    </span>
+                                  )}
+                                  {attachment.isBonus && (
+                                    <span className="absolute top-1.5 left-1.5 text-[8.5px] px-1.5 py-0.5 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70 font-bold">
+                                      +Bonus
+                                    </span>
+                                  )}
+                                  {attachment.isIntimate && (
+                                    <span className="absolute top-1.5 right-1.5 text-[8.5px] px-1.5 py-0.5 bg-red-950/85 text-red-200 rounded border border-red-700/70 font-bold">
+                                      18+
+                                    </span>
+                                  )}
+                                </div>
+                                {attachment.caption && (
+                                  <p className="px-2.5 py-1.5 text-[10px] text-gray-200 italic leading-snug line-clamp-2">
+                                    &ldquo;{attachment.caption}&rdquo;
+                                  </p>
+                                )}
+                              </button>
+                            ) : mediaStatus === 'generating' ? (
+                              <div className="p-3 flex items-center gap-2 text-[11px] text-pink-300 animate-pulse">
+                                <Loader2 size={14} className="animate-spin shrink-0" />
+                                <span>{t('phone.dms.generating_photo', 'Developing photo...')}</span>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 space-y-1.5">
+                                <div className="flex items-start gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectPhoto?.(inspectPayload)}
+                                    className="w-7 h-7 rounded-lg bg-pink-950/60 border border-pink-700/40 text-pink-300 flex items-center justify-center shrink-0 cursor-pointer"
+                                    title={t('phone.dms.open_photo_vault', 'Open Preview')}
+                                  >
+                                    {attachment.isVideo ? <Video size={13} /> : <Camera size={13} />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => onSelectPhoto?.(inspectPayload)}
+                                    className="text-left min-w-0 flex-1 cursor-pointer"
+                                  >
+                                    <span className="text-[10px] font-bold text-pink-300 flex items-center gap-1 flex-wrap">
+                                      <span>
+                                        {attachment.isIntimate
+                                          ? t('phone.dms.attached_intimate', 'Intimate Attachment')
+                                          : attachment.isVideo
+                                            ? t('phone.dms.attached_video', 'Video Attachment')
+                                            : t('phone.dms.attached_photo', 'Photo Attachment')}
+                                      </span>
+                                      {attachment.isBonus && (
+                                        <span className="text-[8px] px-1 py-0.2 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70">
+                                          +Bonus
+                                        </span>
+                                      )}
+                                    </span>
+                                    {attachment.caption && (
+                                      <span className="text-[10px] text-gray-200 italic line-clamp-2 block">
+                                        &ldquo;{attachment.caption}&rdquo;
+                                      </span>
+                                    )}
+                                  </button>
+                                </div>
+                                {mediaStatus === 'error' && (
+                                  <p className="text-[10px] text-red-300 bg-red-950/50 border border-red-800/50 rounded-md px-2 py-1">
+                                    {t('phone.vault.generate_failed', 'Could not generate photo.')}
+                                  </p>
+                                )}
+                                {!isPlayer && isImgGenActive && matchedMedia?.id && onGenerateMediaPhoto && (
+                                  <button
+                                    type="button"
+                                    onClick={() => onGenerateMediaPhoto(matchedMedia.id)}
+                                    className="w-full py-1 px-2 rounded-lg bg-pink-600/25 hover:bg-pink-600/40 text-pink-200 border border-pink-500/40 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                                  >
+                                    <Sparkles size={11} />
+                                    <span>{t('phone.vault.generate_photo', 'Generate Photo')}</span>
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                     <span className="text-[9px] font-mono tabular-nums text-gray-500 mt-0.5 px-1">
                       {formatTimestamp(msg.timestamp, clockFormat)}
@@ -537,7 +690,10 @@ const PhoneDmsApp = ({
                     <button
                       key={ch.npc_id}
                       type="button"
-                      onClick={() => onLoadChatMessages(ch.npc_id)}
+                      onClick={() => {
+                        onClearOutcomeBanner?.();
+                        onLoadChatMessages(ch.npc_id);
+                      }}
                       className="w-full text-left bg-indigo-950/25 border border-indigo-800/50 hover:border-indigo-500/60 rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors"
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -577,7 +733,10 @@ const PhoneDmsApp = ({
                     <button
                       key={c.npc_id}
                       type="button"
-                      onClick={() => onLoadChatMessages(c.npc_id)}
+                      onClick={() => {
+                        onClearOutcomeBanner?.();
+                        onLoadChatMessages(c.npc_id);
+                      }}
                       className={`w-full text-left bg-neutral-900/60 border rounded-xl p-2.5 flex items-center justify-between cursor-pointer transition-colors ${
                         c.is_blocked_contact
                           ? 'border-red-900/60 hover:border-red-700/70'

@@ -10,7 +10,7 @@ import json
 import logging
 import random
 import re
-from typing import Any
+from typing import Any, Mapping
 
 import db
 import scenario_data
@@ -108,17 +108,31 @@ _SANCTUARY_EXCLUDED_KEYWORDS = (
 )
 
 
-def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
+def _parse_node_state_json(node: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Parse `world_nodes.state_json` safely into a dict without DB round-trips."""
+    from mechanics.world.anomalous_sites.catalog import parse_node_state
+    return parse_node_state(node)
+
+
+def get_designated_hub_sanctuary_node_id(
+    session_id: int,
+    *,
+    all_nodes: list[dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> str:
     """
     Designates and persists 1 core Hub Sanctuary facility per session (`safe_sanctuary_exempt = True`)
     that can NEVER be locked down by WorldScars or Chapter 8–9 martial law.
     """
     if not session_id:
         return ""
-    try:
-        nodes = db.get_session_world_nodes(session_id) or []
-    except Exception:
-        nodes = []
+    if all_nodes is not None:
+        nodes = list(all_nodes)
+    else:
+        try:
+            nodes = db.get_session_world_nodes(session_id) or []
+        except Exception:
+            nodes = []
     if not nodes:
         return "loc_hub_sanctuary"
 
@@ -131,7 +145,12 @@ def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
         if not nid:
             continue
         try:
-            st = db.get_world_node_state(session_id, nid) or {}
+            if state_by_id is not None and nid in state_by_id:
+                st = state_by_id.get(nid) or {}
+            elif all_nodes is not None:
+                st = _parse_node_state_json(fac)
+            else:
+                st = db.get_world_node_state(session_id, nid) or {}
             if st.get("safe_sanctuary_exempt"):
                 return nid
         except Exception:
@@ -174,32 +193,57 @@ def get_designated_hub_sanctuary_node_id(session_id: int) -> str:
                 break
 
     if chosen_nid:
-        try:
-            db.update_world_node_state(session_id, chosen_nid, {"safe_sanctuary_exempt": True})
-        except Exception:
-            pass
+        if not db.is_in_readonly_uow():
+            try:
+                db.update_world_node_state(session_id, chosen_nid, {"safe_sanctuary_exempt": True})
+            except Exception:
+                pass
+        if isinstance(state_by_id, dict):
+            state_by_id.setdefault(chosen_nid, {})["safe_sanctuary_exempt"] = True
     return chosen_nid
 
 
-def is_safe_sanctuary_node(session_id: int, node_id: str) -> bool:
+def is_safe_sanctuary_node(
+    session_id: int,
+    node_id: str,
+    *,
+    node_by_id: Mapping[str, dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+    sanctuary_id: str | None = None,
+) -> bool:
     """Returns True if `node_id` (or its parent facility) is the session's Safe Hub Sanctuary."""
     if not session_id or not node_id:
         return False
-    sanctuary_id = get_designated_hub_sanctuary_node_id(session_id)
+    if sanctuary_id is None:
+        sanctuary_id = get_designated_hub_sanctuary_node_id(
+            session_id,
+            all_nodes=list(node_by_id.values()) if node_by_id is not None else None,
+            state_by_id=state_by_id,
+        )
     target = str(node_id).strip()
     if sanctuary_id and target.lower() == sanctuary_id.lower():
         return True
     try:
-        node = db.get_world_node(session_id, target)
+        node = node_by_id.get(target) if node_by_id is not None else db.get_world_node(session_id, target)
         if node:
-            st = db.get_world_node_state(session_id, target) or {}
+            if state_by_id is not None and target in state_by_id:
+                st = state_by_id.get(target) or {}
+            elif node_by_id is not None:
+                st = _parse_node_state_json(node)
+            else:
+                st = db.get_world_node_state(session_id, target) or {}
             if st.get("safe_sanctuary_exempt"):
                 return True
             parent_id = str(node.get("parent_id") or "")
             if parent_id:
                 if sanctuary_id and parent_id.lower() == sanctuary_id.lower():
                     return True
-                pst = db.get_world_node_state(session_id, parent_id) or {}
+                if state_by_id is not None and parent_id in state_by_id:
+                    pst = state_by_id.get(parent_id) or {}
+                elif node_by_id is not None:
+                    pst = _parse_node_state_json(node_by_id.get(parent_id))
+                else:
+                    pst = db.get_world_node_state(session_id, parent_id) or {}
                 if pst.get("safe_sanctuary_exempt"):
                     return True
     except Exception:
@@ -313,6 +357,102 @@ def _get_active_quest_gate_context(
     return out
 
 
+def build_access_eval_context(
+    session_id: int,
+    *,
+    scen_key: str = "",
+    session: dict[str, Any] | None = None,
+    all_nodes: list[dict[str, Any]] | None = None,
+    quest_gate_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Preload session-level spatial, quest, event, faction, and property state once per sweep."""
+    sess_row: dict[str, Any] = dict(session) if isinstance(session, dict) else {}
+    if not sess_row and session_id:
+        try:
+            sess_row = db.get_session(session_id) or {}
+        except Exception:
+            sess_row = {}
+
+    resolved_scen = str(scen_key or sess_row.get("scenario") or "high_school_drama")
+
+    if all_nodes is not None:
+        nodes = list(all_nodes)
+    elif session_id:
+        try:
+            nodes = db.get_session_world_nodes(session_id) or []
+        except Exception:
+            nodes = []
+    else:
+        nodes = []
+
+    node_by_id: dict[str, dict[str, Any]] = {}
+    state_by_id: dict[str, dict[str, Any]] = {}
+    for n in nodes:
+        if not isinstance(n, dict):
+            continue
+        nid = str(n.get("node_id") or "")
+        if nid:
+            node_by_id[nid] = n
+            state_by_id[nid] = _parse_node_state_json(n)
+
+    sanctuary_id = (
+        get_designated_hub_sanctuary_node_id(
+            session_id,
+            all_nodes=nodes,
+            state_by_id=state_by_id,
+        )
+        if session_id
+        else ""
+    )
+
+    macro_events: list[dict[str, Any]] = []
+    if session_id:
+        try:
+            macro_events = db.get_world_events(session_id, entity_type="macro_event") or []
+        except Exception:
+            macro_events = []
+
+    q_snap = (
+        quest_gate_snapshot
+        if quest_gate_snapshot is not None
+        else build_active_quest_gate_snapshot(session_id)
+    )
+
+    faction_state: dict[str, Any] = {}
+    session_quests: list[dict[str, Any]] = []
+    try:
+        from scenario_data import is_anomalous_incursions_scenario
+        if session_id and is_anomalous_incursions_scenario(resolved_scen):
+            from mechanics.social.factions import get_anomalous_faction_state
+            faction_state = get_anomalous_faction_state(session_id) or {}
+            session_quests = db.get_session_quests(session_id) or []
+    except Exception:
+        faction_state = {}
+        session_quests = []
+
+    player_properties: list[dict[str, Any]] = []
+    if session_id:
+        try:
+            player_properties = db.get_player_properties(int(session_id)) or []
+        except Exception:
+            player_properties = []
+
+    return {
+        "session_id": session_id,
+        "session": sess_row,
+        "scen_key": resolved_scen,
+        "all_nodes": nodes,
+        "node_by_id": node_by_id,
+        "state_by_id": state_by_id,
+        "sanctuary_id": sanctuary_id,
+        "macro_events": macro_events,
+        "quest_gate_snapshot": q_snap,
+        "faction_state": faction_state,
+        "session_quests": session_quests,
+        "player_properties": player_properties,
+    }
+
+
 def get_node_effective_access_info(
     session_id: int,
     node_id: str,
@@ -321,6 +461,7 @@ def get_node_effective_access_info(
     scen_key: str = "",
     session: dict | None = None,
     quest_gate_snapshot: dict[str, Any] | None = None,
+    eval_ctx: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Computes effective access status, curfew status, dynamic world-schedule locks,
@@ -339,7 +480,12 @@ def get_node_effective_access_info(
             "is_trespassing": False,
         }
 
-    node = db.get_world_node(session_id, node_id)
+    ctx_nodes_by_id = eval_ctx.get("node_by_id") if isinstance(eval_ctx, Mapping) else None
+    ctx_state_by_id = eval_ctx.get("state_by_id") if isinstance(eval_ctx, Mapping) else None
+    if session is None and isinstance(eval_ctx, Mapping) and isinstance(eval_ctx.get("session"), dict):
+        session = eval_ctx["session"]
+
+    node = ctx_nodes_by_id.get(node_id) if isinstance(ctx_nodes_by_id, Mapping) else db.get_world_node(session_id, node_id)
     if not node:
         return {
             "access_tier": "open",
@@ -354,15 +500,24 @@ def get_node_effective_access_info(
         }
 
     if not scen_key:
-        try:
-            sess_row = db.get_session(session_id)
-            scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
-        except Exception:
-            scen_key = "high_school_drama"
+        if isinstance(eval_ctx, Mapping) and eval_ctx.get("scen_key"):
+            scen_key = str(eval_ctx["scen_key"])
+        elif isinstance(session, dict) and session.get("scenario"):
+            scen_key = str(session["scenario"])
+        else:
+            try:
+                sess_row = db.get_session(session_id)
+                scen_key = (sess_row or {}).get("scenario") or "high_school_drama"
+            except Exception:
+                scen_key = "high_school_drama"
 
     fac_node = None
     if node.get("parent_id") and node.get("node_type") == "ROOM":
-        fac_node = db.get_world_node(session_id, node["parent_id"])
+        fac_node = (
+            ctx_nodes_by_id.get(node["parent_id"])
+            if isinstance(ctx_nodes_by_id, Mapping)
+            else db.get_world_node(session_id, node["parent_id"])
+        )
 
     # Effective access tier
     tier = str(node.get("access_tier") or "open").lower()
@@ -372,8 +527,12 @@ def get_node_effective_access_info(
             tier = fac_tier
 
     # State JSON check for unlocks and residue
-    state = db.get_world_node_state(session_id, node_id)
-    fac_state = db.get_world_node_state(session_id, fac_node["node_id"]) if fac_node else {}
+    if isinstance(ctx_state_by_id, Mapping):
+        state = ctx_state_by_id.get(node_id) or {}
+        fac_state = (ctx_state_by_id.get(fac_node["node_id"]) or {}) if fac_node else {}
+    else:
+        state = db.get_world_node_state(session_id, node_id)
+        fac_state = db.get_world_node_state(session_id, fac_node["node_id"]) if fac_node else {}
 
     is_unlocked = bool(
         state.get("unlocked_permanent")
@@ -436,7 +595,16 @@ def get_node_effective_access_info(
                 curfew_label = sched_access["curfew_label"]
 
     # Anomalous Incursions Tiered HQ Access Gate evaluation
-    anom_hq = evaluate_anomalous_hq_access(session_id, node, fac_node, scen_key=scen_key)
+    ctx_faction_state = eval_ctx.get("faction_state") if isinstance(eval_ctx, Mapping) else None
+    ctx_session_quests = eval_ctx.get("session_quests") if isinstance(eval_ctx, Mapping) else None
+    anom_hq = evaluate_anomalous_hq_access(
+        session_id,
+        node,
+        fac_node,
+        scen_key=scen_key,
+        faction_state=ctx_faction_state,
+        quests=ctx_session_quests,
+    )
     if anom_hq.get("force_open"):
         tier = "open"
         is_unlocked = True
@@ -447,7 +615,10 @@ def get_node_effective_access_info(
             sched_reason_code = "faction_hq_restricted"
 
     # Anomalous High School After-Hours Campus Anomaly Breach Unlock (20:00–06:00)
-    if session_id and not is_unlocked and (schedule_locked or curfew_active) and scenario_data.is_anomalous_high_school_scenario(scen_key):
+    _may_have_incursions = True
+    if isinstance(eval_ctx, Mapping) and isinstance(session, dict) and "daily_incursions" in session and not session.get("daily_incursions"):
+        _may_have_incursions = False
+    if session_id and _may_have_incursions and not is_unlocked and (schedule_locked or curfew_active) and scenario_data.is_anomalous_high_school_scenario(scen_key):
         try:
             from mechanics.world.anomalous_events import get_active_incursion_at_location
             from mechanics.world.world_schedule import is_campus_node_or_location
@@ -468,10 +639,22 @@ def get_node_effective_access_info(
             pass
 
     # Procedural World Event Facility Lockdown / Quarantine evaluation (Safe Hub Sanctuary is NEVER locked)
-    sanctuary_exempt = is_safe_sanctuary_node(session_id, node_id) if session_id else False
+    ctx_sanctuary_id = eval_ctx.get("sanctuary_id") if isinstance(eval_ctx, Mapping) else None
+    sanctuary_exempt = (
+        is_safe_sanctuary_node(
+            session_id,
+            node_id,
+            node_by_id=ctx_nodes_by_id,
+            state_by_id=ctx_state_by_id,
+            sanctuary_id=ctx_sanctuary_id,
+        )
+        if session_id
+        else False
+    )
+    has_ctx_events = isinstance(eval_ctx, Mapping) and "macro_events" in eval_ctx
     if session_id and sanctuary_exempt:
         try:
-            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            ev_list = eval_ctx["macro_events"] if has_ctx_events else db.get_world_events(session_id, entity_type="macro_event")
             has_crisis_lock = any(
                 ev.get("status") == "active"
                 and (
@@ -497,8 +680,12 @@ def get_node_effective_access_info(
     elif session_id and not is_unlocked:
         try:
             from mechanics.world.world_events.modifiers import is_node_locked_by_event
-            sanctuary_nid = get_designated_hub_sanctuary_node_id(session_id)
-            ev_list = db.get_world_events(session_id, entity_type="macro_event")
+            sanctuary_nid = (
+                ctx_sanctuary_id
+                if ctx_sanctuary_id is not None
+                else get_designated_hub_sanctuary_node_id(session_id)
+            )
+            ev_list = eval_ctx["macro_events"] if has_ctx_events else db.get_world_events(session_id, entity_type="macro_event")
             ev_lock = is_node_locked_by_event(ev_list, node_id, safe_sanctuary_node_id=sanctuary_nid) or (
                 is_node_locked_by_event(ev_list, str(fac_node.get("node_id") or ""), safe_sanctuary_node_id=sanctuary_nid) if fac_node else None
             )
@@ -511,7 +698,10 @@ def get_node_effective_access_info(
             pass
 
     if session_id and not is_unlocked:
-        q_gate_acc = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=quest_gate_snapshot)
+        eff_q_snap = quest_gate_snapshot if quest_gate_snapshot is not None else (
+            eval_ctx.get("quest_gate_snapshot") if isinstance(eval_ctx, Mapping) else None
+        )
+        q_gate_acc = _get_active_quest_gate_context(session_id, node, fac_node, quest_gate_snapshot=eff_q_snap)
         if q_gate_acc.get("has_earned_clearance"):
             is_unlocked = True
             curfew_active = False
@@ -527,7 +717,15 @@ def get_node_effective_access_info(
     if session_id:
         try:
             from .residences import get_player_owned_or_starter_property_for_node, is_unpurchased_realty_node
-            owned_prop = get_player_owned_or_starter_property_for_node(session_id, node_id)
+            p_props = eval_ctx.get("player_properties") if isinstance(eval_ctx, Mapping) else None
+            owned_prop = get_player_owned_or_starter_property_for_node(
+                session_id,
+                node_id,
+                session=session,
+                world_node=node,
+                world_node_loaded=True,
+                player_properties=p_props,
+            )
             if owned_prop is not None:
                 tier = "open"
                 is_unlocked = True
@@ -539,7 +737,12 @@ def get_node_effective_access_info(
                 sched_reason_label = ""
                 owned_badge = "Owned Residence" if not owned_prop.get("is_starter") else "Starter Quarters"
             else:
-                unbought_realty = is_unpurchased_realty_node(session_id, node_id)
+                unbought_realty = is_unpurchased_realty_node(
+                    session_id,
+                    node_id,
+                    session=session,
+                    player_properties=p_props,
+                )
                 if unbought_realty is not None and not is_unlocked:
                     tier = "private"
                     curfew_active = False
@@ -717,6 +920,9 @@ def evaluate_anomalous_hq_access(
     node: dict,
     fac_node: dict | None = None,
     scen_key: str = "",
+    *,
+    faction_state: dict[str, Any] | None = None,
+    quests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Evaluates Tiered HQ Access Gates for Anomalous Incursions:
@@ -812,16 +1018,19 @@ def evaluate_anomalous_hq_access(
     if not required_arch:
         return {}
 
-    from mechanics.social.factions import get_anomalous_faction_state
-    f_state = get_anomalous_faction_state(session_id)
+    if faction_state is None:
+        from mechanics.social.factions import get_anomalous_faction_state
+        f_state = get_anomalous_faction_state(session_id)
+    else:
+        f_state = faction_state
     player_arch = str(f_state.get("faction_archetype_key") or "").lower()
     if player_arch == required_arch:
         return {"force_open": True, "unlocked_by_faction": required_arch}
 
     # Check if an active Story Quest or Accepted Bounty targets this location
     try:
-        quests = db.get_session_quests(session_id) or []
-        for q in quests:
+        quests_list = db.get_session_quests(session_id) or [] if quests is None else quests
+        for q in quests_list:
             if str(q.get("status") or "").lower() in ("active", "accepted", "in_progress"):
                 cand_locs = [
                     str(q.get("target_location") or "").lower(),

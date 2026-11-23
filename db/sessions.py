@@ -13,7 +13,7 @@ from .core import _delete_session_records, _to_str, _sanitize_npcs_list, _json_d
 from .registry import get_purge_specs, get_simple_rollback_specs
 
 def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
-                    dialogue_mode: str, image_gen_enabled: bool, choices_style: str = "dropdown",
+                    dialogue_mode: str, image_gen_enabled: int | bool = 0, choices_style: str = "dropdown",
                     channel_id: int = 0, scenario: str = "fantasy",
                     result_display: str = "detailed", combat_ui_style: str = "battle_deck",
                     show_percentages: int = 1, language: str = "en",
@@ -28,6 +28,22 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
     eff_pacing = narrative_pacing if narrative_pacing is not None else (
         "concise" if str(verbosity or "").strip().lower() in ("concise", "direct") else "balanced"
     )
+    if isinstance(image_gen_enabled, bool):
+        eff_img_gen = 1 if image_gen_enabled else 0
+    elif isinstance(image_gen_enabled, str):
+        s_mode = image_gen_enabled.strip().lower()
+        if s_mode in ("2", "on_demand", "ondemand"):
+            eff_img_gen = 2
+        elif s_mode in ("1", "auto", "true", "yes", "on"):
+            eff_img_gen = 1
+        else:
+            eff_img_gen = 0
+    else:
+        try:
+            parsed_img = int(image_gen_enabled)
+        except (TypeError, ValueError):
+            parsed_img = 0
+        eff_img_gen = parsed_img if parsed_img in (0, 1, 2) else (1 if parsed_img else 0)
     with get_conn() as conn:
         cur = conn.execute(
             """INSERT INTO sessions (mode, capacity, status, turn_order, current_turn_index,
@@ -39,7 +55,7 @@ def create_session(host_user_id: int, mode: str, capacity: int, verbosity: str,
                                       language, narration_language, character_id, slot, schema_epoch)
                VALUES (?,?,?,?,0,'[]','[]','{}','','[]','[]',?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (mode, capacity, status, json.dumps([host_user_id]), verbosity, eff_pacing,
-             dialogue_mode, 1 if image_gen_enabled else 0, choices_style, combat_ui_style,
+             dialogue_mode, eff_img_gen, choices_style, combat_ui_style,
              result_display, scenario, channel_id, host_user_id, time.time(), time.time(),
              1 if show_percentages else 0, 1 if show_enemy_hp else 0, 1 if show_enemy_intent else 0,
              language or eff_narr_lang, eff_narr_lang, character_id, slot, schema_epoch),
@@ -1619,12 +1635,18 @@ def finalize_overwritten_slot_session(
     if not old_session_id or int(old_session_id) == int(new_session_id or 0):
         return
     with UnitOfWork() as conn:
-        members = get_session_members(old_session_id)
         sess_row = conn.execute(
             "SELECT scenario FROM sessions WHERE id=?",
             (int(old_session_id),),
         ).fetchone()
         sess_scenario = sess_row["scenario"] if sess_row else None
+        stale_guest_uids = [
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT user_id FROM characters WHERE active_session_id=? AND user_id!=?",
+                (int(old_session_id), int(host_user_id)),
+            ).fetchall()
+        ]
         conn.execute(
             "UPDATE sessions SET status='finished', updated_at=? WHERE id=?",
             (time.time(), int(old_session_id)),
@@ -1633,9 +1655,8 @@ def finalize_overwritten_slot_session(
             "UPDATE characters SET active_session_id=NULL WHERE active_session_id=?",
             (int(old_session_id),),
         )
-        for uid in members:
-            if int(uid) != int(host_user_id):
-                reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
+        for uid in stale_guest_uids:
+            reset_character_for_new_adventure(uid, new_scenario=sess_scenario)
 
 
 def snapshot_embark_rollback_state(char_id: int) -> dict[str, Any] | None:
@@ -1649,9 +1670,10 @@ def snapshot_embark_rollback_state(char_id: int) -> dict[str, Any] | None:
         ).fetchone()
         if not char_row:
             return None
+        user_id = char_row["user_id"]
         inv_rows = conn.execute(
-            "SELECT * FROM inventory WHERE character_id=? ORDER BY id ASC",
-            (int(char_id),),
+            "SELECT * FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?) ORDER BY id ASC",
+            (int(char_id), user_id),
         ).fetchall()
         return {
             "character_id": int(char_id),
@@ -1679,7 +1701,14 @@ def restore_embark_rollback_state(snapshot: dict[str, Any] | None) -> None:
                 f"UPDATE characters SET {assignments} WHERE id=?",
                 (*[char_dict[col] for col in cols], cid),
             )
-        conn.execute("DELETE FROM inventory WHERE character_id=?", (cid,))
+        user_id = char_dict.get("user_id")
+        if user_id is not None:
+            conn.execute(
+                "DELETE FROM inventory WHERE character_id=? OR (character_id IS NULL AND user_id=?)",
+                (cid, user_id),
+            )
+        else:
+            conn.execute("DELETE FROM inventory WHERE character_id=?", (cid,))
         valid_inv_cols = {
             r[1] for r in conn.execute("PRAGMA table_info(inventory)").fetchall()
         } - {"id"}
@@ -1691,7 +1720,12 @@ def restore_embark_rollback_state(snapshot: dict[str, Any] | None) -> None:
                 continue
             placeholders = ", ".join("?" for _ in item_cols)
             col_list = ", ".join(item_cols)
-            vals = [cid if k == "character_id" else item[k] for k in item_cols]
+            vals = [
+                None
+                if (k == "character_id" and item.get("character_id") is None)
+                else (cid if k == "character_id" else item[k])
+                for k in item_cols
+            ]
             conn.execute(
                 f"INSERT INTO inventory ({col_list}) VALUES ({placeholders})",
                 vals,
@@ -1726,6 +1760,14 @@ def snapshot_opening_retry_state(session_id: int) -> dict[str, Any] | None:
             extra_dict = {}
         prop_name = str(extra_dict.get("opening_starting_prop_name") or "").strip()
         char_id = sess_dict.get("character_id")
+        if prop_name and not char_id:
+            eff_uid = sess_dict.get("host_user_id")
+            if eff_uid:
+                char_row = conn.execute(
+                    "SELECT id FROM characters WHERE user_id=? AND is_active=1 ORDER BY id DESC LIMIT 1",
+                    (eff_uid,),
+                ).fetchone()
+                char_id = char_row["id"] if char_row else None
         if prop_name and char_id:
             inv_row = conn.execute(
                 "SELECT * FROM inventory WHERE character_id=? AND LOWER(name)=LOWER(?) ORDER BY id DESC LIMIT 1",
@@ -1753,7 +1795,15 @@ def restore_opening_retry_state(snapshot: dict[str, Any] | None) -> None:
 
     with UnitOfWork() as conn:
         _delete_session_child_records_only(conn, sid, preserve_members=True)
-        for table_name, rows in (snapshot.get("child_tables") or {}).items():
+        child_tables = snapshot.get("child_tables") or {}
+        ordered_names = [
+            s.name
+            for s in reversed(get_purge_specs(preserve_members=True))
+            if s.name in child_tables
+        ]
+        ordered_names.extend(k for k in child_tables if k not in ordered_names)
+        for table_name in ordered_names:
+            rows = child_tables[table_name]
             if not rows:
                 continue
             try:

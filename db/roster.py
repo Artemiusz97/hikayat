@@ -1116,7 +1116,6 @@ def batch_commit_opening_npcs(
                 "origin": (existing_wr.get("origin") if existing_wr else None) or (npc.get("origin") if isinstance(npc, dict) and npc.get("origin") else "venue_seed"),
                 "tier_status": (existing_wr.get("tier_status") if existing_wr else "acquaintance"),
                 "met_in_person": True,
-                "discovered_turn": 0,
                 "basic_info": b_info,
             }
             upsert_world_roster_npc(sid, roster_payload, turn_number=0, conn=c)
@@ -1181,9 +1180,11 @@ def batch_commit_opening_npcs(
         return committed
 
     if conn is not None:
-        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var
+        from .core.connection import _resolve_db_path, _uow_conn_var, _uow_db_path_var, is_in_readonly_uow
 
-        if _uow_conn_var.get() is None:
+        if is_in_readonly_uow():
+            raise RuntimeError("Cannot call batch_commit_opening_npcs inside ReadUnitOfWork")
+        if _uow_conn_var.get() is not conn:
             c_tok = _uow_conn_var.set(conn)
             p_tok = _uow_db_path_var.set(_resolve_db_path())
             try:

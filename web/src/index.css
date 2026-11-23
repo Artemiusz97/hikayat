@@ -1313,3 +1313,180 @@ dialog::backdrop {
   font-size: 1.0625rem;
   line-height: 1.5;
 }
+
+/* ==========================================================================
+   Smartphone OS: iPhone-inspired Default Wallpaper & Frosted Glass Mode
+   ========================================================================== */
+.hk-phone-wp-iphone {
+  position: relative;
+  overflow: hidden;
+  background-color: #070b1a;
+  background-image:
+    radial-gradient(92% 62% at 18% 12%, rgba(56, 189, 248, 0.42) 0%, rgba(56, 189, 248, 0) 62%),
+    radial-gradient(85% 68% at 86% 24%, rgba(168, 85, 247, 0.46) 0%, rgba(168, 85, 247, 0) 64%),
+    radial-gradient(96% 68% at 24% 88%, rgba(244, 63, 94, 0.42) 0%, rgba(244, 63, 94, 0) 60%),
+    radial-gradient(85% 62% at 82% 82%, rgba(37, 99, 235, 0.55) 0%, rgba(37, 99, 235, 0) 64%),
+    linear-gradient(155deg, #070a18 0%, #14173c 44%, #1a1036 74%, #090d1f 100%);
+}
+
+.hk-phone-wp-iphone::before {
+  content: '';
+  position: absolute;
+  inset: -25%;
+  background:
+    conic-gradient(
+      from 215deg at 52% 48%,
+      rgba(56, 189, 248, 0.24) 0deg,
+      rgba(167, 139, 250, 0.16) 95deg,
+      rgba(244, 114, 182, 0.24) 185deg,
+      rgba(34, 211, 238, 0.14) 270deg,
+      rgba(56, 189, 248, 0.24) 360deg
+    );
+  filter: blur(36px);
+  opacity: 0.72;
+  animation: hk-phone-aurora 28s var(--ease-in-out) infinite alternate;
+  pointer-events: none;
+}
+
+.hk-phone-wp-iphone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.08) 0.5px, transparent 0.5px);
+  background-size: 14px 14px;
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+@keyframes hk-phone-aurora {
+  from { transform: translate3d(-4%, -3%, 0) rotate(-4deg) scale(1.02); }
+  to { transform: translate3d(4%, 3%, 0) rotate(5deg) scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hk-phone-wp-iphone::before {
+    animation: none;
+  }
+}
+
+/* Keep Home Screen clock, labels, and bright app-icon glyphs crisp white over wallpapers even in Light themes */
+.hk-phone-home-text {
+  color: #f9fafb !important;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.65), 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.hk-phone-home-subtext {
+  color: rgba(243, 244, 246, 0.86) !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.75);
+}
+
+.hk-phone-home-accent {
+  color: #fcd34d !important;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.8);
+}
+
+.hk-phone-icon-glyph {
+  color: #ffffff !important;
+}
+
+/* True-dark photographic overlays that stay dark even under Light themes */
+.hk-phone-backdrop {
+  background-color: #090a0f;
+}
+@media (min-width: 768px) {
+  .hk-phone-backdrop {
+    background-color: rgba(5, 7, 12, 0.8);
+  }
+}
+
+.hk-phone-thumb-scrim {
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.86) 0%, rgba(0, 0, 0, 0.26) 52%, rgba(0, 0, 0, 0) 100%);
+}
+
+.hk-phone-play-badge {
+  background-color: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  color: #ffffff;
+}
+
+.hk-phone-notif-classic {
+  background-color: rgba(8, 10, 16, 0.6);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.hk-phone-lightbox {
+  background-color: rgba(6, 8, 14, 0.94);
+}
+
+.hk-phone-media-frame {
+  background-color: rgba(5, 7, 12, 0.75);
+}
+
+/* Classic dock behind Home screen */
+.hk-phone-dock-classic {
+  background: rgba(14, 16, 24, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 10px 30px -10px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+  backdrop-filter: blur(18px) saturate(1.4);
+}
+
+/* Frosted Glass UI Style: inherits Hikayat's active main-UI theme (--panel, --border, --accent, acrylic tokens) */
+[data-phone-style='glass'].hk-phone-shell {
+  border-color: oklch(var(--border) / var(--acrylic-border-a));
+  background: oklch(var(--bg-deep) / 0.78);
+}
+
+[data-phone-style='glass'] .hk-phone-chrome {
+  background: oklch(var(--panel) / var(--acrylic-bg-a)) !important;
+  border-color: oklch(var(--border) / var(--acrylic-border-a)) !important;
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight), 0 8px 24px -12px oklch(var(--shadow) / 0.45);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+}
+
+[data-phone-style='glass'] .hk-phone-dock {
+  background: oklch(var(--panel) / clamp(0.55, var(--acrylic-bg-a), 0.96)) !important;
+  border: 1px solid oklch(var(--border) / var(--acrylic-border-a)) !important;
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight), 0 12px 28px -10px oklch(var(--shadow) / 0.55);
+  -webkit-backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+  backdrop-filter: blur(var(--acrylic-blur)) saturate(var(--acrylic-sat));
+}
+
+[data-phone-style='glass'] .hk-phone-canvas[data-phone-app='home'] {
+  background: transparent !important;
+  background-image: none !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas:not([data-phone-app='home']) {
+  background-color: oklch(var(--panel) / clamp(0.56, var(--acrylic-bg-a), 0.92)) !important;
+  background-image: none !important;
+}
+
+/* Translucent theme-harmonized surfaces inside all Phone sub-apps without stacking heavy per-card blur */
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-950, .bg-neutral-950\/95, .bg-neutral-950\/90, .bg-neutral-950\/80, .bg-neutral-950\/70, .bg-neutral-950\/60, .bg-black) {
+  background-color: oklch(var(--bg-deep) / clamp(0.32, calc(var(--acrylic-bg-a) + 0.08), 0.84)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-900, .bg-neutral-900\/95, .bg-neutral-900\/90, .bg-neutral-900\/85, .bg-neutral-900\/80, .bg-neutral-900\/70, .bg-neutral-900\/60, .bg-neutral-900\/50, .bg-neutral-900\/40) {
+  background-color: oklch(var(--panel) / clamp(0.26, var(--acrylic-bg-a), 0.78)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.bg-neutral-800, .bg-neutral-800\/80, .bg-neutral-800\/70, .bg-neutral-700, .bg-neutral-700\/80) {
+  background-color: oklch(var(--panel) / clamp(0.34, calc(var(--acrylic-bg-a) + 0.14), 0.88)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas :is(.border-neutral-950, .border-neutral-900, .border-neutral-800, .border-neutral-800\/90, .border-neutral-800\/80, .border-neutral-800\/70, .border-neutral-800\/60, .border-neutral-800\/40, .border-neutral-700, .border-neutral-700\/80, .border-neutral-700\/60, .border-neutral-700\/50) {
+  border-color: oklch(var(--border) / var(--acrylic-border-a)) !important;
+}
+
+[data-phone-style='glass'] .hk-phone-canvas .hk-phone-card {
+  background-color: oklch(var(--panel) / clamp(0.3, var(--acrylic-bg-a), 0.82));
+  border-color: oklch(var(--border) / var(--acrylic-border-a));
+  box-shadow: inset 0 1px 0 var(--acrylic-highlight);
+}
+
+[data-phone-style='glass'] .hk-phone-header-accent {
+  color: oklch(var(--accent)) !important;
+}
+

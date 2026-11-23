@@ -698,13 +698,16 @@ async def _resolve_action_inner(
         apply_kwargs: Dict[str, Any] = {"actions": actions}
         if _callable_accepts_kwarg(game_engine.apply_outcome, "ctx"):
             apply_kwargs["ctx"] = turn_ctx
-        items_gained = await adb(
-            game_engine.apply_outcome,
-            session_id,
-            party,
-            outcome,
-            mp_already_spent,
-            **apply_kwargs,
+        items_gained = await _get_turn_service()._await_uninterruptible(
+            adb(
+                game_engine.apply_outcome,
+                session_id,
+                party,
+                outcome,
+                mp_already_spent,
+                **apply_kwargs,
+            ),
+            reraise_cancel=True,
         )
     except BaseException as e:
         await _get_turn_service()._await_uninterruptible(_rollback_turn_failure(e), reraise_cancel=False)

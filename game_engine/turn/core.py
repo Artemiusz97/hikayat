@@ -22,6 +22,7 @@ from models.llm_schemas import TurnOutcome, DeterministicTurnNarration, Determin
 
 from . import (
     encounter_narrative as _mod_encounter_narrative,
+    phase_state as _mod_phase_state,
     post_turn as _mod_post_turn,
     pre_turn as _mod_pre_turn,
     prompt_assembly as _mod_prompt_assembly,
@@ -163,7 +164,7 @@ async def evaluate_action(
 
 
 
-_SUBMODULES = (_mod_encounter_narrative, _mod_pre_turn, _mod_prompt_assembly, _mod_post_turn)
+_SUBMODULES = (_mod_encounter_narrative, _mod_pre_turn, _mod_prompt_assembly, _mod_post_turn, _mod_phase_state)
 _SUBMODULE_NAMES = frozenset({"encounter_narrative", "pre_turn", "prompt_assembly", "post_turn", "phase_state"})
 
 from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy

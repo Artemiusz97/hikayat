@@ -718,4 +718,9 @@ class EpilogueChoiceRequest(BaseModel):
     choice_id: str = "endless"  # "archive" | "endless"
 
 
+class PhoneMediaGenerateRequest(BaseModel):
+    user_id: int
+    force_regenerate: bool = False
+
+
 

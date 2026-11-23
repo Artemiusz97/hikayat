@@ -9,6 +9,7 @@ import asyncio
 import copy
 import json
 import logging
+import os
 import random
 import re
 from contextlib import contextmanager
@@ -35,6 +36,29 @@ import httpx
 import json_repair
 
 log = logging.getLogger(__name__)
+
+
+class LiveLLMBlockedError(RuntimeError):
+    """Raised when a live outbound LLM HTTP call is blocked in test mode."""
+
+
+def _is_live_llm_blocked() -> bool:
+    return (
+        os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+        and os.getenv("HIKAYAT_ALLOW_LIVE_LLM", "").strip().lower() not in ("1", "true", "yes")
+    )
+
+
+def _unwrap_live_llm_blocked(err: BaseException | None) -> LiveLLMBlockedError | None:
+    seen: set[int] = set()
+    cur = err
+    while cur is not None and id(cur) not in seen:
+        if isinstance(cur, LiveLLMBlockedError):
+            return cur
+        seen.add(id(cur))
+        cur = cur.__cause__ if cur.__cause__ is not None else cur.__context__
+    return None
+
 
 _llm_timeout = httpx.Timeout(LLM_REQUEST_TIMEOUT, connect=60.0, read=LLM_REQUEST_TIMEOUT, write=60.0, pool=60.0)
 _http_client = httpx.AsyncClient(verify=LLM_VERIFY_SSL, timeout=_llm_timeout)
@@ -371,7 +395,10 @@ async def get_embedding(text: str) -> list[float]:
         return vec
     except Exception as e:
         _append_llm_tape_entry("embedding", ok=False, exc=e)
-        log.warning(f"Embedding failed for model {EMBEDDING_MODEL}: {e}")
+        if _unwrap_live_llm_blocked(e) is not None:
+            log.debug("Blocked live embedding call in test mode: %s", e)
+        else:
+            log.warning(f"Embedding failed for model {EMBEDDING_MODEL}: {e}")
         return []
 
 def get_candidate_models(is_nsfw: bool = False, use_utility: bool = False) -> list[tuple[AsyncOpenAI, str]]:
@@ -1159,7 +1186,7 @@ def _is_response_complete(
     return True
 def _is_non_retriable_error(e: Exception) -> bool:
     """Return True if the error indicates a fatal configuration/auth issue that cannot succeed on retry."""
-    if isinstance(e, (AuthenticationError, NotFoundError)):
+    if _unwrap_live_llm_blocked(e) is not None or isinstance(e, (AuthenticationError, NotFoundError)):
         return True
     if isinstance(e, BadRequestError):
         err_msg = str(e).lower()
@@ -1256,6 +1283,8 @@ def _strip_unsupported_bad_request_params(
     requested_max_tokens: int,
 ) -> bool:
     """Strip unsupported reasoning/max_tokens/extra_body overrides after a provider 400 error; return True if kwargs changed."""
+    if _unwrap_live_llm_blocked(err) is not None:
+        return False
     err_str = str(err).lower()
     changed = False
     if "extra_body" in kwargs and any(
@@ -1384,6 +1413,8 @@ async def probe_model_capabilities(client: AsyncOpenAI, model_name: str) -> dict
 
 async def probe_all_configured_models(quiet: bool = False) -> dict[str, dict]:
     """Pre-probe all configured standard and NSFW candidate models to warm capability caches."""
+    if _is_live_llm_blocked():
+        return {}
     groups = get_probe_candidate_groups()
     probed_results = {}
 
@@ -2269,7 +2300,11 @@ async def _call_llm_json_stream_live(system_prompt: str | list, user_prompt: str
                         break
                     if attempt >= retries:
                         trip_model_circuit(model_name, cooldown_sec=45.0)
+                except LiveLLMBlockedError:
+                    raise
                 except Exception as e:
+                    if (blocked := _unwrap_live_llm_blocked(e)) is not None:
+                        raise blocked
                     last_stream_err = e
                     if _is_non_retriable_error(e):
                         raise
@@ -2714,7 +2749,11 @@ async def _call_llm_json_live(system_prompt: str | list, user_prompt: str,
 
                     record_llm_telemetry(model_name, elapsed_ms, usage=usage_obj, success=True)
                     return result
+                except LiveLLMBlockedError:
+                    raise
                 except Exception as e:
+                    if (blocked := _unwrap_live_llm_blocked(e)) is not None:
+                        raise blocked
                     last_err = e
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     record_llm_telemetry(model_name, elapsed_ms, usage=None, success=False, error=str(e))
@@ -2812,7 +2851,13 @@ async def _call_llm_text_live(system_prompt: str, user_prompt: str,
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     record_llm_telemetry(model_name, elapsed_ms, usage=getattr(response, "usage", None), success=True)
                     return content
+                except LiveLLMBlockedError as e:
+                    log.debug("Blocked live LLM text call in test mode: %s", e)
+                    return ""
                 except Exception as e:
+                    if (blocked := _unwrap_live_llm_blocked(e)) is not None:
+                        log.debug("Blocked live LLM text call in test mode: %s", blocked)
+                        return ""
                     last_err = e
                     elapsed_ms = (time.perf_counter() - t0) * 1000.0
                     record_llm_telemetry(model_name, elapsed_ms, usage=None, success=False, error=str(e))

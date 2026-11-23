@@ -85,184 +85,185 @@ async def start_adventure(
         from scenario_data import resolve_scenario_or_custom_key
         scenario_key = resolve_scenario_or_custom_key(tags)
 
-    await adb(db.reset_character_for_new_adventure, canonical_id, scenario_key, False)
-
-    is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scenario_key)
-    is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scenario_key)
-    char_app = char.get("appearance") or {}
-    if isinstance(char_app, str):
-        try:
-            char_app = json.loads(char_app)
-        except Exception:
-            char_app = {}
-    eff_origin = (origin_mode or char_app.get("origin_mode") or "").lower()
-    eff_student_grade = student_grade or char_app.get("student_grade") or "Sophomore"
-    if is_anom_hs and (eff_origin == "student" or (starting_faction or "").strip() in ("student_freelancer", "student")):
-        chosen_starting_faction = "student_freelancer"
-    else:
-        chosen_starting_faction = (starting_faction or "public_agency").strip() if is_anomalous_scen else ""
-
-    if is_anomalous_scen:
-        scen_templates = await adb(cd.get_class_templates, scenario_key, chosen_starting_faction) or {}
-    else:
-        scen_templates = await adb(cd.get_class_templates, scenario_key) or {}
-    safe_default_class = (
-        (next(iter(scen_templates.keys())) if scen_templates else "Public Safety Field Hunter")
-        if is_anomalous_scen
-        else (
-            "Student"
-            if scenario_data.is_school_scenario(scenario_key)
-            else (next(iter(scen_templates.keys())) if scen_templates else "Adventurer")
-        )
-    )
-    existing_char_class = char.get("char_class")
-    if char_class:
-        eff_char_class = char_class
-    elif not class_description and (not existing_char_class or existing_char_class not in scen_templates):
-        eff_char_class = safe_default_class
-    else:
-        eff_char_class = existing_char_class or safe_default_class
-
-    if eff_char_class:
-        if isinstance(starter_loadout, dict) and len(starter_loadout) > 0 and callable(starter_loadout_builder):
-            eff_loadout = await adb(
-                starter_loadout_builder,
-                starter_loadout,
-                scenario_key,
-                eff_char_class,
-                char.get("gender", "Male"),
-                char.get("race", "Human"),
-                chosen_starting_faction,
-            )
-        else:
-            eff_loadout = None
-        if not eff_loadout:
-            eff_loadout = await adb(
-                cd.generate_starter_equipment_loadout,
-                scenario_key,
-                eff_char_class,
-                char.get("gender", "Male"),
-                char.get("race", "Human"),
-                weapon_name or "",
-                3,
-                chosen_starting_faction,
-            )
-        eff_starting_items = await adb(
-            cd.get_starting_items,
-            scenario_key,
-            eff_char_class,
-            chosen_starting_faction,
-        )
-        await adb(
-            db.apply_adventure_loadout,
-            canonical_id,
-            scenario_key,
-            eff_char_class,
-            class_description or "",
-            weapon_name or "",
-            weapon_description or "",
-            eff_loadout,
-            eff_starting_items,
-            attribute,
-            combat_archetype,
-            ability_medium,
-        )
-
-    if (
-        stats_override
-        and any(v is not None for v in stats_override.values())
-        and str(user_settings.get("debug_stat_mode") or "off").lower() == "off"
-    ):
-        raw_stats_row = await adb(db.get_raw_character_stats, char["id"])
-        raw_defaults = {
-            "str": int(raw_stats_row.get("str_") or cd.BASE_STAT_VALUE),
-            "per": int(raw_stats_row.get("per_") or cd.BASE_STAT_VALUE),
-            "end": int(raw_stats_row.get("end_") or cd.BASE_STAT_VALUE),
-            "cha": int(raw_stats_row.get("cha") or cd.BASE_STAT_VALUE),
-            "int": int(raw_stats_row.get("int_") or cd.BASE_STAT_VALUE),
-            "agi": int(raw_stats_row.get("agi") or cd.BASE_STAT_VALUE),
-            "luk": int(raw_stats_row.get("luk") or cd.BASE_STAT_VALUE),
-        }
-        stats = {
-            k: int(stats_override[k]) if stats_override.get(k) is not None else raw_defaults[k]
-            for k in ("str", "per", "end", "cha", "int", "agi", "luk")
-        }
-        for sv in stats.values():
-            if sv < cd.BASE_STAT_VALUE or sv > cd.MAX_STAT_VALUE:
-                raise ValueError(
-                    f"Each stat must be between {cd.BASE_STAT_VALUE} and {cd.MAX_STAT_VALUE}."
-                )
-        base_budget = len(cd.STATS) * cd.BASE_STAT_VALUE + cd.POINT_BUY_POOL
-        allowed_budget = max(base_budget, sum(raw_defaults.values()))
-        if sum(stats.values()) > allowed_budget:
-            raise ValueError("Stat allocation exceeds maximum allowed points!")
-        if hasattr(db, "update_character_stats"):
-            await adb(db.update_character_stats, canonical_id, stats)
-
-    app_update = dict(appearance or {})
-    if scenario_data.is_nsfw_scenario(scenario_key):
-        if breast_size is not None:
-            app_update["breast_size"] = breast_size
-        if penis_size is not None:
-            app_update["penis_size"] = penis_size
-        if asset_texture is not None:
-            app_update["asset_texture"] = asset_texture
-    else:
-        for anatomy_key in ("breast_size", "penis_size", "asset_texture"):
-            app_update.pop(anatomy_key, None)
-    if app_update:
-        await adb(db.update_character_appearance, char["id"], app_update)
-
-    default_cap = 1 if eff_mode == "solo" else max(2, capacity or 4)
-    session_id = await adb(
-        db.create_session,
-        mode=eff_mode,
-        capacity=default_cap if eff_mode != "solo" else (capacity or 1),
-        host_user_id=canonical_id,
-        scenario=scenario_key,
-        verbosity=verbosity,
-        dialogue_mode=dialogue_mode,
-        image_gen_enabled=image_gen_enabled,
-        choices_style=choices_style,
-        result_display=result_display,
-        show_percentages=show_percentages,
-        language=language,
-        narration_language=narration_language,
-        character_id=char["id"],
-        slot=target_slot,
-        narrative_pacing=narrative_pacing,
-        show_enemy_hp=int(user_settings.get("show_enemy_hp", 1)),
-        show_enemy_intent=int(user_settings.get("show_enemy_intent", 1)),
-    )
-
-    await adb(db.add_session_member, session_id, canonical_id)
-    await adb(db.set_session_active, session_id, [canonical_id])
-
-    if is_anomalous_scen:
-        from mechanics.world.anomalous_events import bootstrap_anomalous_session
-        await adb(
-            bootstrap_anomalous_session,
-            session_id,
-            scenario_key,
-            canonical_id,
-            chosen_starting_faction,
-            char.get("name", ""),
-            eff_origin,
-            eff_student_grade,
-        )
-
-    char_row = await adb(db.get_character, canonical_id, settings=user_settings)
-    inv = await adb(db.get_inventory, canonical_id, char=char_row) if char_row else []
-    party = [(dict(char_row), inv)] if char_row else []
-    session_row = await adb(db.get_session, session_id)
-    session = dict(session_row)
-
-    from mechanics.social.factions import ensure_session_factions_seeded
-    await adb(ensure_session_factions_seeded, session_id, scenario_key)
-    from mechanics.world.world_forge.seeder import forge_world_state
-    await forge_world_state(session, party)
-
+    session_id: Optional[int] = None
     try:
+        await adb(db.reset_character_for_new_adventure, canonical_id, scenario_key, False)
+
+        is_anomalous_scen = scenario_data.is_anomalous_incursions_scenario(scenario_key)
+        is_anom_hs = scenario_data.is_anomalous_high_school_scenario(scenario_key)
+        char_app = char.get("appearance") or {}
+        if isinstance(char_app, str):
+            try:
+                char_app = json.loads(char_app)
+            except Exception:
+                char_app = {}
+        eff_origin = (origin_mode or char_app.get("origin_mode") or "").lower()
+        eff_student_grade = student_grade or char_app.get("student_grade") or "Sophomore"
+        if is_anom_hs and (eff_origin == "student" or (starting_faction or "").strip() in ("student_freelancer", "student")):
+            chosen_starting_faction = "student_freelancer"
+        else:
+            chosen_starting_faction = (starting_faction or "public_agency").strip() if is_anomalous_scen else ""
+
+        if is_anomalous_scen:
+            scen_templates = await adb(cd.get_class_templates, scenario_key, chosen_starting_faction) or {}
+        else:
+            scen_templates = await adb(cd.get_class_templates, scenario_key) or {}
+        safe_default_class = (
+            (next(iter(scen_templates.keys())) if scen_templates else "Public Safety Field Hunter")
+            if is_anomalous_scen
+            else (
+                "Student"
+                if scenario_data.is_school_scenario(scenario_key)
+                else (next(iter(scen_templates.keys())) if scen_templates else "Adventurer")
+            )
+        )
+        existing_char_class = char.get("char_class")
+        if char_class:
+            eff_char_class = char_class
+        elif not class_description and (not existing_char_class or existing_char_class not in scen_templates):
+            eff_char_class = safe_default_class
+        else:
+            eff_char_class = existing_char_class or safe_default_class
+
+        if eff_char_class:
+            if isinstance(starter_loadout, dict) and len(starter_loadout) > 0 and callable(starter_loadout_builder):
+                eff_loadout = await adb(
+                    starter_loadout_builder,
+                    starter_loadout,
+                    scenario_key,
+                    eff_char_class,
+                    char.get("gender", "Male"),
+                    char.get("race", "Human"),
+                    chosen_starting_faction,
+                )
+            else:
+                eff_loadout = None
+            if not eff_loadout:
+                eff_loadout = await adb(
+                    cd.generate_starter_equipment_loadout,
+                    scenario_key,
+                    eff_char_class,
+                    char.get("gender", "Male"),
+                    char.get("race", "Human"),
+                    weapon_name or "",
+                    3,
+                    chosen_starting_faction,
+                )
+            eff_starting_items = await adb(
+                cd.get_starting_items,
+                scenario_key,
+                eff_char_class,
+                chosen_starting_faction,
+            )
+            await adb(
+                db.apply_adventure_loadout,
+                canonical_id,
+                scenario_key,
+                eff_char_class,
+                class_description or "",
+                weapon_name or "",
+                weapon_description or "",
+                eff_loadout,
+                eff_starting_items,
+                attribute,
+                combat_archetype,
+                ability_medium,
+            )
+
+        if (
+            stats_override
+            and any(v is not None for v in stats_override.values())
+            and str(user_settings.get("debug_stat_mode") or "off").lower() == "off"
+        ):
+            raw_stats_row = await adb(db.get_raw_character_stats, char["id"])
+            raw_defaults = {
+                "str": int(raw_stats_row.get("str_") or cd.BASE_STAT_VALUE),
+                "per": int(raw_stats_row.get("per_") or cd.BASE_STAT_VALUE),
+                "end": int(raw_stats_row.get("end_") or cd.BASE_STAT_VALUE),
+                "cha": int(raw_stats_row.get("cha") or cd.BASE_STAT_VALUE),
+                "int": int(raw_stats_row.get("int_") or cd.BASE_STAT_VALUE),
+                "agi": int(raw_stats_row.get("agi") or cd.BASE_STAT_VALUE),
+                "luk": int(raw_stats_row.get("luk") or cd.BASE_STAT_VALUE),
+            }
+            stats = {
+                k: int(stats_override[k]) if stats_override.get(k) is not None else raw_defaults[k]
+                for k in ("str", "per", "end", "cha", "int", "agi", "luk")
+            }
+            for sv in stats.values():
+                if sv < cd.BASE_STAT_VALUE or sv > cd.MAX_STAT_VALUE:
+                    raise ValueError(
+                        f"Each stat must be between {cd.BASE_STAT_VALUE} and {cd.MAX_STAT_VALUE}."
+                    )
+            base_budget = len(cd.STATS) * cd.BASE_STAT_VALUE + cd.POINT_BUY_POOL
+            allowed_budget = max(base_budget, sum(raw_defaults.values()))
+            if sum(stats.values()) > allowed_budget:
+                raise ValueError("Stat allocation exceeds maximum allowed points!")
+            if hasattr(db, "update_character_stats"):
+                await adb(db.update_character_stats, canonical_id, stats)
+
+        app_update = dict(appearance or {})
+        if scenario_data.is_nsfw_scenario(scenario_key):
+            if breast_size is not None:
+                app_update["breast_size"] = breast_size
+            if penis_size is not None:
+                app_update["penis_size"] = penis_size
+            if asset_texture is not None:
+                app_update["asset_texture"] = asset_texture
+        else:
+            for anatomy_key in ("breast_size", "penis_size", "asset_texture"):
+                app_update.pop(anatomy_key, None)
+        if app_update:
+            await adb(db.update_character_appearance, char["id"], app_update)
+
+        default_cap = 1 if eff_mode == "solo" else max(2, capacity or 4)
+        session_id = await adb(
+            db.create_session,
+            mode=eff_mode,
+            capacity=default_cap if eff_mode != "solo" else (capacity or 1),
+            host_user_id=canonical_id,
+            scenario=scenario_key,
+            verbosity=verbosity,
+            dialogue_mode=dialogue_mode,
+            image_gen_enabled=image_gen_enabled,
+            choices_style=choices_style,
+            result_display=result_display,
+            show_percentages=show_percentages,
+            language=language,
+            narration_language=narration_language,
+            character_id=char["id"],
+            slot=target_slot,
+            narrative_pacing=narrative_pacing,
+            show_enemy_hp=int(user_settings.get("show_enemy_hp", 1)),
+            show_enemy_intent=int(user_settings.get("show_enemy_intent", 1)),
+        )
+
+        await adb(db.add_session_member, session_id, canonical_id)
+        await adb(db.set_session_active, session_id, [canonical_id])
+
+        if is_anomalous_scen:
+            from mechanics.world.anomalous_events import bootstrap_anomalous_session
+            await adb(
+                bootstrap_anomalous_session,
+                session_id,
+                scenario_key,
+                canonical_id,
+                chosen_starting_faction,
+                char.get("name", ""),
+                eff_origin,
+                eff_student_grade,
+            )
+
+        char_row = await adb(db.get_character, canonical_id, settings=user_settings)
+        inv = await adb(db.get_inventory, canonical_id, char=char_row) if char_row else []
+        party = [(dict(char_row), inv)] if char_row else []
+        session_row = await adb(db.get_session, session_id)
+        session = dict(session_row)
+
+        from mechanics.social.factions import ensure_session_factions_seeded
+        await adb(ensure_session_factions_seeded, session_id, scenario_key)
+        from mechanics.world.world_forge.seeder import forge_world_state
+        await forge_world_state(session, party)
+
         async def _run_eager_ch1_plan(sq_qid: str) -> Any:
             try:
                 from mechanics.narrative.chapter_plan import compile_or_apply_eager_quest_plan
@@ -277,10 +278,14 @@ async def start_adventure(
             sq_ch1 = await adb(game_engine.ensure_story_quest_exists, session)
             sq_qid = str((sq_ch1 or {}).get("quest_id") or "")
             if sq_qid:
-                scene, eager_plan = await asyncio.gather(
-                    game_engine.generate_opening_scene(session, party),
-                    _run_eager_ch1_plan(sq_qid),
-                )
+                eager_task = asyncio.create_task(_run_eager_ch1_plan(sq_qid))
+                try:
+                    scene = await game_engine.generate_opening_scene(session, party)
+                    eager_plan = await eager_task
+                finally:
+                    if not eager_task.done():
+                        eager_task.cancel()
+                        await asyncio.gather(eager_task, return_exceptions=True)
                 if eager_plan:
                     try:
                         from mechanics.narrative.chapter_plan import apply_chapter_plan_to_dossier
@@ -310,7 +315,8 @@ async def start_adventure(
     except Exception as e:
         log.error("Error generating opening scene: %s", e)
         try:
-            await adb(db.delete_session, session_id)
+            if session_id is not None:
+                await adb(db.delete_session, session_id)
             if pre_embark_snap is not None:
                 await adb(db.restore_embark_rollback_state, pre_embark_snap)
             if prev_active_sid:
@@ -319,6 +325,8 @@ async def start_adventure(
                     await adb(db.set_character_active_session, char["id"], prev_active_sid)
         except Exception as cleanup_err:
             logger.warning("Failed pruning aborted Turn-0 session %s: %s", session_id, cleanup_err)
+        if isinstance(e, (ValueError, LookupError, PermissionError)):
+            raise
         raise RuntimeError(f"Failed to generate scene: {str(e)}") from e
 
     updated_session = await adb(db.get_session, session_id)

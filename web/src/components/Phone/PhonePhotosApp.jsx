@@ -1,5 +1,6 @@
-import { Camera, Image as ImageIcon, Video } from 'lucide-react';
+import { Camera, Image as ImageIcon, Loader2, Play, Video } from 'lucide-react';
 import { formatTimestamp } from './phoneHelpers';
+import { isIntimateMediaItem, isVideoMediaItem } from './phoneWallpapers';
 
 const PhonePhotosApp = ({
   branding,
@@ -83,34 +84,73 @@ const PhonePhotosApp = ({
       ) : (
         <div className="grid grid-cols-2 gap-2.5">
           {filteredGallery.map((media) => {
-            const isVideo = media.media_type?.includes('video');
-            const isIntimate =
-              media.media_type?.includes('nsfw') || media.media_type?.includes('intimate');
+            const isVideo = isVideoMediaItem(media);
+            const isIntimate = isIntimateMediaItem(media);
+            const hasImage = Boolean(media.image_url);
+            const isGenerating = media.image_status === 'generating';
 
             return (
               <div
                 key={media.id || media.name}
                 onClick={() => onSelectPhoto(media)}
-                className="bg-neutral-900/80 border border-neutral-800 hover:border-pink-500/50 rounded-xl p-2.5 space-y-1.5 cursor-pointer transition-all hover:scale-[1.02] shadow-sm relative group overflow-hidden"
+                className="bg-neutral-900/80 border border-neutral-800 hover:border-pink-500/50 rounded-xl p-2 space-y-1.5 cursor-pointer transition-all hover:scale-[1.02] shadow-sm relative group overflow-hidden"
               >
-                <div className="h-24 rounded-lg bg-neutral-950 border border-neutral-800/80 flex flex-col items-center justify-center relative overflow-hidden text-center p-1.5">
-                  <div
-                    className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 ${
-                      isIntimate
-                        ? 'bg-pink-950/60 text-pink-400'
-                        : isVideo
-                          ? 'bg-cyan-950/60 text-cyan-400'
-                          : 'bg-purple-950/60 text-purple-400'
-                    }`}
-                  >
-                    {isVideo ? <Video size={16} /> : <Camera size={16} />}
-                  </div>
-                  <span className="text-[10px] font-semibold text-gray-300 truncate max-w-full">
-                    {media.contact_name}
-                  </span>
+                <div className="h-32 rounded-lg bg-neutral-950 border border-neutral-800/80 flex flex-col items-center justify-center relative overflow-hidden text-center">
+                  {hasImage ? (
+                    <>
+                      <img
+                        src={media.image_url}
+                        alt={media.caption || media.name}
+                        loading="lazy"
+                        className="absolute inset-0 w-full h-full object-cover object-top"
+                      />
+                      <div className="absolute inset-x-0 bottom-0 h-10 hk-phone-thumb-scrim pointer-events-none" />
+                      <span className="relative z-10 mt-auto pb-1.5 px-1.5 text-[10px] font-semibold hk-phone-home-text truncate max-w-full">
+                        {media.contact_name}
+                      </span>
+                      {isVideo && (
+                        <span className="absolute inset-0 m-auto w-8 h-8 rounded-full hk-phone-play-badge flex items-center justify-center hk-phone-icon-glyph pointer-events-none">
+                          <Play size={14} className="ml-0.5" />
+                        </span>
+                      )}
+                    </>
+                  ) : isGenerating ? (
+                    <div className="flex flex-col items-center justify-center gap-1.5 p-2 animate-pulse">
+                      <Loader2 size={18} className="animate-spin text-pink-400" />
+                      <span className="text-[10px] font-semibold text-pink-300">
+                        {t('phone.vault.generating', 'Developing...')}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center p-1.5">
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center mb-1 ${
+                          isIntimate
+                            ? 'bg-pink-950/60 text-pink-400'
+                            : isVideo
+                              ? 'bg-cyan-950/60 text-cyan-400'
+                              : 'bg-purple-950/60 text-purple-400'
+                        }`}
+                      >
+                        {isVideo ? <Video size={16} /> : <Camera size={16} />}
+                      </div>
+                      <span className="text-[10px] font-semibold text-gray-300 truncate max-w-full">
+                        {media.contact_name}
+                      </span>
+                    </div>
+                  )}
+
                   {isIntimate && (
-                    <span className="absolute top-1 right-1 text-[8px] px-1 bg-red-950/80 text-red-300 rounded border border-red-800 font-bold">
+                    <span className="absolute top-1 right-1 z-10 text-[8px] px-1 bg-red-950/85 text-red-300 rounded border border-red-800 font-bold">
                       18+
+                    </span>
+                  )}
+                  {!hasImage && !isGenerating && media.image_status === 'error' && (
+                    <span
+                      className="absolute top-1 left-1 z-10 text-[9px] px-1 bg-red-950/90 text-red-300 rounded border border-red-700/70 font-bold"
+                      title={t('phone.vault.generate_failed', 'Could not generate photo.')}
+                    >
+                      !
                     </span>
                   )}
                 </div>

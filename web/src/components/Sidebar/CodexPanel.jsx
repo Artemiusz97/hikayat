@@ -324,6 +324,7 @@ const CodexPanel = ({
   onTriggerAction,
   targetContactName,
   targetContactPulse,
+  onConsumeTargetContact = null,
   onJumpToSavedContact,
   isStreaming = false,
   processingTurn = false,
@@ -507,32 +508,42 @@ const CodexPanel = ({
     return list;
   }, [contacts, lorebook.entities]);
 
+  const lastHandledTargetPulseRef = useRef(0);
+  const targetScrollTimerRef = useRef(null);
+  const targetHighlightTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(targetScrollTimerRef.current);
+    clearTimeout(targetHighlightTimerRef.current);
+  }, []);
+
   useEffect(() => {
-    if (targetContactName) {
-      setSubTab('contacts');
-      setSearchQuery('');
-      const targetLow = String(targetContactName ?? '').trim().toLowerCase();
-      const matched = knownCharacters.find(c =>
-        String(c.name ?? '').trim().toLowerCase() === targetLow ||
-        String(c.id ?? '').trim().toLowerCase() === targetLow ||
-        String(c.npc_id ?? '').trim().toLowerCase() === targetLow
-      );
-      const key = matched ? (matched.id || matched.name) : targetContactName;
-      setExpandedNpc(key);
-      setHighlightedNpcKey(key);
-      const timer = setTimeout(() => {
-        const el = cardRefs.current[key] || (matched?.name && cardRefs.current[String(matched.name).toLowerCase()]) || cardRefs.current[targetLow];
-        if (el && typeof el.scrollIntoView === 'function') {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 80);
-      const clearTimer = setTimeout(() => setHighlightedNpcKey(null), 2400);
-      return () => {
-        clearTimeout(timer);
-        clearTimeout(clearTimer);
-      };
-    }
-  }, [targetContactName, targetContactPulse, knownCharacters]);
+    if (!targetContactName || targetContactPulse === lastHandledTargetPulseRef.current) return undefined;
+    const targetLow = String(targetContactName ?? '').trim().toLowerCase();
+    const matched = knownCharacters.find(c =>
+      String(c.name ?? '').trim().toLowerCase() === targetLow ||
+      String(c.id ?? '').trim().toLowerCase() === targetLow ||
+      String(c.npc_id ?? '').trim().toLowerCase() === targetLow
+    );
+    if (!matched && loading) return undefined;
+    lastHandledTargetPulseRef.current = targetContactPulse;
+    setSubTab('contacts');
+    setSearchQuery('');
+    const key = matched ? (matched.id || matched.name) : targetContactName;
+    setExpandedNpc(key);
+    setHighlightedNpcKey(key);
+    clearTimeout(targetScrollTimerRef.current);
+    clearTimeout(targetHighlightTimerRef.current);
+    targetScrollTimerRef.current = setTimeout(() => {
+      const el = cardRefs.current[key] || (matched?.name && cardRefs.current[String(matched.name).toLowerCase()]) || cardRefs.current[targetLow];
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 80);
+    targetHighlightTimerRef.current = setTimeout(() => setHighlightedNpcKey(null), 2400);
+    onConsumeTargetContact?.();
+    return undefined;
+  }, [targetContactName, targetContactPulse, knownCharacters, loading, onConsumeTargetContact]);
 
   // Filter known characters
   const filteredContacts = knownCharacters.filter(c => {

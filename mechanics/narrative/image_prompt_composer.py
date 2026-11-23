@@ -1109,3 +1109,119 @@ def compose_turn_image_prompt(
         focal_npc=npc1_name,
         character_count=len(valid_npcs)
     )
+
+
+def _sanitize_phone_caption_cues(caption: str) -> str:
+    """Extracts clean visual cues from a DM photo caption without leaking brackets or internal tags."""
+    raw = str(caption or "").strip()
+    if not raw:
+        return ""
+    raw = re.sub(r"\[(?:Attached|ITEM_JSON|GEAR_JSON|SPELLBOOK_JSON|DIGITAL_JSON)[^\]]*\]", " ", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"<ref\b[^>]*>(.*?)</ref>", r"\1", raw, flags=re.IGNORECASE | re.DOTALL)
+    raw = re.sub(r"\b(?:HP|MP|DC|XP)\s*[:=]?\s*\d+(?:/\d+)?", " ", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"[\[\]{}]", " ", raw)
+    raw = re.sub(r"\s+", " ", raw).strip(" .,:;\"'")
+    if not raw:
+        return ""
+    if len(raw) > 180:
+        raw = raw[:180].rsplit(" ", 1)[0].strip()
+    return raw
+
+
+def compose_phone_media_prompt(
+    session: Mapping[str, Any],
+    contact: Optional[Mapping[str, Any]] = None,
+    *,
+    media_type: str = "photo",
+    caption: str = "",
+    contact_name: str = "",
+) -> ComposedImagePrompt:
+    """Composes a deterministic 832x1216 portrait prompt for an NPC-sent smartphone DM photo or video thumbnail."""
+    sess_dict = dict(session or {})
+    session_id = int(sess_dict.get("id") or 0)
+    scen_key = str(sess_dict.get("scenario") or "fantasy")
+    style_tags = SCENARIO_STYLE_TOKENS.get(scen_key, DEFAULT_STYLE_TOKENS)
+
+    m_low = str(media_type or "photo").lower()
+    intimate_context = ("nsfw" in m_low) or ("intimate" in m_low)
+    is_video = "video" in m_low
+
+    contact_dict = dict(contact or {})
+    resolved_name = str(
+        contact_name
+        or contact_dict.get("name")
+        or contact_dict.get("npc_id")
+        or "Contact"
+    ).strip()
+
+    profile = _get_npc_profile(session_id, resolved_name, sess_dict)
+    for key in ("race", "gender", "species", "role", "pact_id", "pact_tier"):
+        if contact_dict.get(key) and not profile.get(key):
+            profile[key] = contact_dict[key]
+    if isinstance(contact_dict.get("appearance"), Mapping):
+        merged_app = dict(profile.get("appearance") or {})
+        merged_app.update(contact_dict["appearance"])
+        profile["appearance"] = merged_app
+    b_info = contact_dict.get("basic_info")
+    if isinstance(b_info, Mapping):
+        for b_key in ("race", "gender", "species", "description", "role"):
+            if b_info.get(b_key) and not profile.get(b_key):
+                profile[b_key] = b_info.get(b_key)
+        if isinstance(b_info.get("appearance"), Mapping):
+            merged_app = dict(profile.get("appearance") or {})
+            merged_app.update(b_info["appearance"])
+            profile["appearance"] = merged_app
+    profile["_scenario"] = scen_key
+
+    gender_raw = str(profile.get("gender") or "female").strip().lower()
+    if str(profile.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+        gender_tag = "1animal, no humans"
+    elif gender_raw in ("male", "m", "man", "boy"):
+        gender_tag = "1boy"
+    else:
+        gender_tag = "1girl"
+
+    app_tags = format_npc_appearance_tags(profile, intimate_context=intimate_context)
+    framing_tags = (
+        "solo, candid video still, handheld camera angle, upper body, looking at viewer, portrait framing"
+        if is_video
+        else "solo, smartphone selfie, candid portrait, upper body, looking at viewer, portrait framing"
+    )
+    mood_tags = (
+        "nsfw, suggestive, intimate lighting, soft bedroom glow, alluring expression"
+        if intimate_context
+        else "sfw, natural expression, warm smile, shallow depth of field, soft bokeh"
+    )
+
+    curr_min = sess_dict.get("current_minute")
+    time_desc = str(sess_dict.get("time_of_day") or sess_dict.get("formatted_time") or "")
+    time_lighting_tags, _ = format_time_lighting_tags(
+        minute=curr_min,
+        is_indoor=False,
+        time_desc=time_desc,
+    )
+    caption_cues = _sanitize_phone_caption_cues(caption)
+
+    prompt = _join_tags(
+        BASE_QUALITY_TOKENS,
+        style_tags,
+        gender_tag,
+        app_tags,
+        framing_tags,
+        mood_tags,
+        time_lighting_tags,
+        caption_cues,
+    )
+    negative_prompt = _join_tags(
+        DEFAULT_NEGATIVE_PROMPT,
+        "phone frame, smartphone bezel, ui, status bar, text overlay",
+        "" if intimate_context else "nsfw, nude, nipples, explicit",
+    )
+    return ComposedImagePrompt(
+        prompt=prompt,
+        negative_prompt=negative_prompt,
+        size=DIMENSION_PORTRAIT,
+        orientation="portrait",
+        focal_npc=resolved_name,
+        character_count=1,
+    )

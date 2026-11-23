@@ -13,6 +13,9 @@ echo  - To share with friends OUTSIDE your Wi-Fi (Automatic1111/Forge style):
 echo    Run: run_web.bat --share
 echo    Or double-click: run_web_share.bat
 echo.
+echo  - To play privately on your own devices via Tailscale:
+echo    Double-click: run_web_tailscale.bat
+echo.
 echo =======================================================
 cd /d "%~dp0"
 call venv\Scripts\activate.bat

@@ -1,9 +1,11 @@
 from __future__ import annotations
 import logging
+import os
 import random
 import time
 import discord
 import db
+import config
 log = logging.getLogger("hikayat.phone")
 
 
@@ -214,6 +216,26 @@ def build_media_gallery_embed(session_id: int, user_id: int, filter_contact: str
     embed.set_footer(text="Select a photo/video from the dropdown to view in full resolution:")
     return embed
 
+def resolve_digital_media_local_file(item: dict) -> str | None:
+    """Returns the verified local image file path in GENERATED_IMAGES_DIR for a digital media item, if present."""
+    if not isinstance(item, dict):
+        return None
+    from mechanics.combat.items import parse_digital_item_metadata
+
+    d_meta = parse_digital_item_metadata(item) or {}
+    image_url = str(d_meta.get("image_url") or item.get("image_url") or "").strip()
+    if not image_url.startswith("/images/"):
+        return None
+    fname = os.path.basename(image_url)
+    if not fname:
+        return None
+    gen_dir = os.path.abspath(config.GENERATED_IMAGES_DIR)
+    candidate = os.path.abspath(os.path.join(gen_dir, fname))
+    if not candidate.startswith(gen_dir + os.sep):
+        return None
+    return candidate if os.path.isfile(candidate) else None
+
+
 def _build_media_item_detail_embed(item: dict) -> discord.Embed:
     """Builds a full-resolution visual card for an individual photo or video item."""
     from mechanics.combat.items import parse_digital_item_metadata
@@ -260,6 +282,13 @@ def _build_media_item_detail_embed(item: dict) -> discord.Embed:
         value=f"> *\"{caption}\"*",
         inline=False
     )
+    local_file = resolve_digital_media_local_file(item)
+    if local_file:
+        embed.set_image(url=f"attachment://{os.path.basename(local_file)}")
+    else:
+        raw_img_url = str(d_meta.get("image_url") or item.get("image_url") or "").strip()
+        if raw_img_url.startswith(("http://", "https://")):
+            embed.set_image(url=raw_img_url)
     embed.set_footer(text="Digital media is stored on your device. Tap buttons below to manage:")
     return embed
 

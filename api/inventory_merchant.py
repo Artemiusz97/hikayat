@@ -462,7 +462,7 @@ async def drop_item(req: ItemDropRequest, request: Request = None):
         removed = await adb(db.remove_item, req.user_id, req.item_id)
         if not removed:
             raise HTTPException(status_code=404, detail="Item not found or could not be removed")
-        if target_item:
+        if target_item and not is_digital_item(target_item):
             await adb(db.drop_item_to_session_floor, req.user_id, target_item)
         if lock_sid:
             try:

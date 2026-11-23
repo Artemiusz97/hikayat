@@ -99,14 +99,16 @@ def get_household_members(household_id: int) -> list[dict]:
             (household_id,)
         ).fetchall()
         members = []
+        _list_json_cols = ("unlocked_traits_json", "preferences_json", "intimate_memories_json", "rel_history_json")
         for r in rows:
             d = dict(r)
-            for jcol in ("basic_info_json", "relations_json", "appearance_json", "unlocked_traits_json", "preferences_json", "intimate_memories_json", "rel_history_json"):
+            for jcol in ("basic_info_json", "relations_json", "appearance_json", *_list_json_cols):
                 plain = jcol.replace("_json", "")
+                default_val: list | dict = [] if jcol in _list_json_cols else {}
                 try:
-                    d[plain] = json.loads(d.get(jcol) or ("[]" if "json" in jcol and jcol in ("unlocked_traits_json", "preferences_json", "intimate_memories_json", "rel_history_json") else "{}"))
+                    d[plain] = json.loads(d.get(jcol) or ("[]" if jcol in _list_json_cols else "{}"))
                 except Exception:
-                    d[plain] = [] if "[]" in jcol else {}
+                    d[plain] = list(default_val) if isinstance(default_val, list) else {}
             members.append(d)
         return members
 
@@ -169,6 +171,16 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
     allies_json = json.dumps(allied_faction_ids) if isinstance(allied_faction_ids, list) else None
 
     with get_conn() as conn:
+        def _resolve_hq_display(node_id_val: str, loc_id_val: str) -> str:
+            if node_id_val:
+                wn = conn.execute(
+                    "SELECT name FROM world_nodes WHERE session_id=? AND node_id=?",
+                    (session_id, node_id_val),
+                ).fetchone()
+                if wn and wn["name"]:
+                    return str(wn["name"])
+            return loc_id_val
+
         existing = conn.execute(
             "SELECT * FROM factions WHERE session_id=? AND faction_id=?",
             (session_id, faction_id)).fetchone()
@@ -195,6 +207,25 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
             row = dict(existing)
             row["notes"] = final_notes
             row["reputation_score"] = new_score
+            if perks_json != "[]":
+                row["perks_json"] = perks_json
+            if category:
+                row["category"] = category
+            if hq_location_id:
+                row["hq_location_id"] = hq_location_id
+            if hq_node_id:
+                row["hq_node_id"] = hq_node_id
+            if hierarchy_template:
+                row["hierarchy_template"] = hierarchy_template
+            if roster_json and roster_json != "[]":
+                row["leadership_roster_json"] = roster_json
+            if rivals_json and rivals_json != "[]":
+                row["rival_faction_ids_json"] = rivals_json
+            if allies_json and allies_json != "[]":
+                row["allied_faction_ids_json"] = allies_json
+            row["hq_display_name"] = _resolve_hq_display(
+                str(row.get("hq_node_id") or ""), str(row.get("hq_location_id") or "")
+            )
             row["updated_at"] = now
             return db._parse_faction_row(row)
         else:
@@ -202,6 +233,9 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
             from mechanics.social.factions import guess_hierarchy_template
             cat = category or hierarchy_template or (guess_hierarchy_template(name) if name else "default")
             tmpl = hierarchy_template or category or cat
+            eff_hq_loc = hq_location_id or ""
+            eff_hq_node = hq_node_id or ""
+            hq_disp = _resolve_hq_display(eff_hq_node, eff_hq_loc)
             cursor = conn.execute(
                 """INSERT INTO factions (session_id, faction_id, name, reputation_score, perks_json, notes,
                                          category, hq_location_id, hq_node_id, hierarchy_template,
@@ -209,18 +243,21 @@ def upsert_faction(session_id: int, name: str, delta_score: int = 0, notes: str 
                                          created_at, updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (session_id, faction_id, name, initial_score, perks_json, notes or "",
-                 cat, hq_location_id or "", hq_node_id or "", tmpl,
+                 cat, eff_hq_loc, eff_hq_node, tmpl,
                  roster_json or "[]", rivals_json or "[]", allies_json or "[]", now, now))
             row = {
                 "id": cursor.lastrowid, "session_id": session_id, "faction_id": faction_id,
-                "name": name, "reputation_score": initial_score, "perks": perks or [],
-                "notes": notes, "category": cat, "hq_location_id": hq_location_id or "",
-                "hierarchy_template": tmpl, "leadership_roster": leadership_roster or [],
-                "rival_faction_ids": rival_faction_ids or [],
-                "allied_faction_ids": allied_faction_ids or [],
+                "name": name, "reputation_score": initial_score,
+                "perks_json": perks_json,
+                "notes": notes or "", "category": cat, "hq_location_id": eff_hq_loc,
+                "hq_node_id": eff_hq_node, "hq_display_name": hq_disp,
+                "hierarchy_template": tmpl,
+                "leadership_roster_json": roster_json or "[]",
+                "rival_faction_ids_json": rivals_json or "[]",
+                "allied_faction_ids_json": allies_json or "[]",
                 "created_at": now, "updated_at": now,
             }
-            return row
+            return db._parse_faction_row(row)
 
 def get_factions(session_id: int) -> list[dict]:
     with get_conn() as conn:
@@ -260,7 +297,109 @@ _MAJOR_CLUB_FACILITY_TO_CORE_ROOM: dict[str, tuple[str, ...]] = {
     "velvet basement salon": ("main velvet salon", "loc_nsfw_faction_hq"),
 }
 
-def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
+def _match_faction_by_hq_rows(
+    rows: list,
+    loc_clean: str,
+    loc_parts: list[str],
+    mapped_fac_nodes: tuple[str, ...],
+    *,
+    already_parsed: bool = False,
+) -> dict | None:
+    """Match parsed or SQLite faction rows against normalized location segments."""
+    if not rows:
+        return None
+
+    def _finish(matched_row) -> dict:
+        return dict(matched_row) if already_parsed else db._parse_faction_row(dict(matched_row))
+
+    parsed_rows = []
+    for row in rows:
+        r_keys = row.keys() if hasattr(row, "keys") else ()
+        hq_raw = str((row["hq_location_id"] if "hq_location_id" in r_keys else "") or "").strip()
+        hq_nid = str((row["hq_node_id"] if "hq_node_id" in r_keys else "") or "").strip().lower()
+        hq_clean = hq_raw.lower().replace("->", "➔")
+        hq_parts = [p.strip() for p in hq_clean.split("➔") if p.strip()]
+        parsed_rows.append((row, hq_clean, hq_parts, hq_nid))
+
+    if already_parsed:
+        exact_targets_set = {loc_clean, *mapped_fac_nodes}
+        for row, hq_clean, _hq_parts, hq_nid in parsed_rows:
+            if hq_clean in exact_targets_set or (hq_nid and hq_nid in exact_targets_set):
+                return _finish(row)
+
+    leaf_clean = loc_parts[-1]
+    is_room_level = len(loc_parts) >= 3
+
+    # Pass 1: Exact full match, hq_node_id match (full or leaf), or single-segment leaf-room HQ match
+    for row, hq_clean, hq_parts, hq_nid in parsed_rows:
+        if hq_clean and hq_clean == loc_clean:
+            return _finish(row)
+        if hq_nid and (
+            hq_nid == loc_clean
+            or hq_nid in mapped_fac_nodes
+            or hq_nid == leaf_clean
+        ):
+            return _finish(row)
+        if len(hq_parts) == 1:
+            bare_hq = hq_parts[0]
+            if len(bare_hq) >= 4 and (
+                bare_hq == leaf_clean
+                or (len(bare_hq) >= 5 and bare_hq in leaf_clean)
+                or (len(leaf_clean) >= 5 and leaf_clean in bare_hq)
+            ):
+                return _finish(row)
+
+    # Pass 2: Strict Major School Club core chamber check on 3-tier paths
+    # Prevents foyers, notice boards, quartermasters, or sibling facilities (e.g. Swimming Pool)
+    # from falsely inheriting Major Club HQ status via loc_parts[1].
+    if is_room_level:
+        fac_clean = loc_parts[1]
+        for maj_fac_key, allowed_core_leaves in _MAJOR_CLUB_FACILITY_TO_CORE_ROOM.items():
+            if maj_fac_key in fac_clean or fac_clean == maj_fac_key:
+                if not any(core_k in leaf_clean for core_k in allowed_core_leaves):
+                    return None
+                for row, hq_clean, _hq_parts, hq_nid in parsed_rows:
+                    if maj_fac_key in hq_clean or any(
+                        nid_k and nid_k == hq_nid
+                        for nid_k in ("loc_student_council_facility", "loc_drama_club_facility", "bld_school_athletics", "loc_school_athletics", "loc_nsfw_club_facility")
+                        if maj_fac_key in (
+                            "student council office" if "student_council" in nid_k
+                            else "campus auditorium & drama theater" if "drama" in nid_k
+                            else "varsity athletic directorate & gymnasium" if "athletics" in nid_k
+                            else "velvet basement salon"
+                        )
+                    ):
+                        return _finish(row)
+                return None
+
+    # Pass 3: Multi-tier HQs (e.g. Agency HQs) and Tier 2 Facility-level lookups
+    for row, hq_clean, hq_parts, hq_nid in parsed_rows:
+        if not hq_parts:
+            continue
+        if hq_nid and hq_nid in loc_parts[1:]:
+            return _finish(row)
+        if len(hq_parts) > 1:
+            if all(any(hq_seg == lp or (len(hq_seg) >= 4 and hq_seg in lp) for lp in loc_parts) for hq_seg in hq_parts):
+                return _finish(row)
+        else:
+            bare_hq = hq_parts[0]
+            if len(bare_hq) >= 4:
+                for i, lp in enumerate(loc_parts):
+                    if i == 0 and len(loc_parts) > 1:
+                        if bare_hq == lp:
+                            return _finish(row)
+                    else:
+                        if bare_hq == lp or (len(bare_hq) >= 5 and bare_hq in lp) or (len(lp) >= 5 and lp in bare_hq):
+                            return _finish(row)
+
+    return None
+
+
+def get_faction_by_hq(
+    session_id: int,
+    location_id: str,
+    preloaded_factions: list[dict] | None = None,
+) -> dict | None:
     """
     Return the faction whose HQ is at the given location_id, or None.
     Resolves leaf room HQs (e.g. minor clubrooms inside parent wings) before
@@ -269,14 +408,23 @@ def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
     """
     if not location_id:
         return None
-    with get_conn() as conn:
-        loc_clean = str(location_id).strip().lower().replace("->", "➔")
-        loc_parts = [p.strip() for p in loc_clean.split("➔") if p.strip()]
-        if not loc_parts:
-            return None
+    loc_clean = str(location_id).strip().lower().replace("->", "➔")
+    loc_parts = [p.strip() for p in loc_clean.split("➔") if p.strip()]
+    if not loc_parts:
+        return None
+    mapped_fac_nodes = _CORE_ROOM_TO_MAJOR_FAC_NODES.get(loc_clean, ())
 
+    if preloaded_factions is not None:
+        return _match_faction_by_hq_rows(
+            preloaded_factions,
+            loc_clean,
+            loc_parts,
+            mapped_fac_nodes,
+            already_parsed=True,
+        )
+
+    with get_conn() as conn:
         # Fast path: exact match on hq_location_id or hq_node_id (including Core HQ room -> facility node)
-        mapped_fac_nodes = _CORE_ROOM_TO_MAJOR_FAC_NODES.get(loc_clean, ())
         exact_targets = [loc_clean, *mapped_fac_nodes]
         placeholders = ",".join("?" for _ in exact_targets)
         r = conn.execute(
@@ -288,83 +436,13 @@ def get_faction_by_hq(session_id: int, location_id: str) -> dict | None:
         rows = conn.execute(
             "SELECT * FROM factions WHERE session_id=?",
             (session_id,)).fetchall()
-        if not rows:
-            return None
-
-        parsed_rows = []
-        for row in rows:
-            hq_raw = (row["hq_location_id"] or "").strip()
-            hq_nid = (row["hq_node_id"] or "").strip().lower()
-            hq_clean = hq_raw.lower().replace("->", "➔")
-            hq_parts = [p.strip() for p in hq_clean.split("➔") if p.strip()]
-            parsed_rows.append((row, hq_clean, hq_parts, hq_nid))
-
-        leaf_clean = loc_parts[-1]
-        is_room_level = len(loc_parts) >= 3
-
-        # Pass 1: Exact full match, hq_node_id match (full or leaf), or single-segment leaf-room HQ match
-        for row, hq_clean, hq_parts, hq_nid in parsed_rows:
-            if hq_clean and hq_clean == loc_clean:
-                return db._parse_faction_row(dict(row))
-            if hq_nid and (
-                hq_nid == loc_clean
-                or hq_nid in mapped_fac_nodes
-                or hq_nid == leaf_clean
-            ):
-                return db._parse_faction_row(dict(row))
-            if len(hq_parts) == 1:
-                bare_hq = hq_parts[0]
-                if len(bare_hq) >= 4 and (
-                    bare_hq == leaf_clean
-                    or (len(bare_hq) >= 5 and bare_hq in leaf_clean)
-                    or (len(leaf_clean) >= 5 and leaf_clean in bare_hq)
-                ):
-                    return db._parse_faction_row(dict(row))
-
-        # Pass 2: Strict Major School Club core chamber check on 3-tier paths
-        # Prevents foyers, notice boards, quartermasters, or sibling facilities (e.g. Swimming Pool)
-        # from falsely inheriting Major Club HQ status via loc_parts[1].
-        if is_room_level:
-            fac_clean = loc_parts[1]
-            for maj_fac_key, allowed_core_leaves in _MAJOR_CLUB_FACILITY_TO_CORE_ROOM.items():
-                if maj_fac_key in fac_clean or fac_clean == maj_fac_key:
-                    if not any(core_k in leaf_clean for core_k in allowed_core_leaves):
-                        return None
-                    for row, hq_clean, hq_parts, hq_nid in parsed_rows:
-                        if maj_fac_key in hq_clean or any(
-                            nid_k and nid_k == hq_nid
-                            for nid_k in ("loc_student_council_facility", "loc_drama_club_facility", "bld_school_athletics", "loc_school_athletics", "loc_nsfw_club_facility")
-                            if maj_fac_key in (
-                                "student council office" if "student_council" in nid_k
-                                else "campus auditorium & drama theater" if "drama" in nid_k
-                                else "varsity athletic directorate & gymnasium" if "athletics" in nid_k
-                                else "velvet basement salon"
-                            )
-                        ):
-                            return db._parse_faction_row(dict(row))
-                    return None
-
-        # Pass 3: Multi-tier HQs (e.g. Agency HQs) and Tier 2 Facility-level lookups
-        for row, hq_clean, hq_parts, hq_nid in parsed_rows:
-            if not hq_parts:
-                continue
-            if hq_nid and hq_nid in loc_parts[1:]:
-                return db._parse_faction_row(dict(row))
-            if len(hq_parts) > 1:
-                if all(any(hq_seg == lp or (len(hq_seg) >= 4 and hq_seg in lp) for lp in loc_parts) for hq_seg in hq_parts):
-                    return db._parse_faction_row(dict(row))
-            else:
-                bare_hq = hq_parts[0]
-                if len(bare_hq) >= 4:
-                    for i, lp in enumerate(loc_parts):
-                        if i == 0 and len(loc_parts) > 1:
-                            if bare_hq == lp:
-                                return db._parse_faction_row(dict(row))
-                        else:
-                            if bare_hq == lp or (len(bare_hq) >= 5 and bare_hq in lp) or (len(lp) >= 5 and lp in bare_hq):
-                                return db._parse_faction_row(dict(row))
-
-    return None
+        return _match_faction_by_hq_rows(
+            rows,
+            loc_clean,
+            loc_parts,
+            mapped_fac_nodes,
+            already_parsed=False,
+        )
 
 def update_faction_leadership_roster(session_id: int, faction_id: str, roster: list) -> bool:
     """Persist an updated leadership roster list for a faction."""

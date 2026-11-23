@@ -13,37 +13,85 @@ router = APIRouter()
 
 def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, char_name: str) -> dict:
     from mechanics.world.locations import (
-        process_llm_location_update,
+        build_access_eval_context,
+        build_location_occupancy_index,
+        format_travel_eta_tag,
+        get_node_effective_access_info,
         get_zone_summary_tree,
-        sanitize_location_target,
         parse_tiered_location,
+        process_llm_location_update,
+        sanitize_location_target,
     )
     from mechanics.world.waypoints import ensure_quest_waypoints_exist
-    try:
-        ensure_quest_waypoints_exist(session_id)
-    except Exception:
-        pass
 
-    active_wps = db.get_all_session_active_waypoints(session_id)
-    for wp in active_wps:
-        target_loc = (wp.get("target_location") or "").strip()
-        if target_loc:
+    appts_cache: list[dict] | None = None
+    if session_id and not db.is_in_readonly_uow():
+        try:
+            ensure_quest_waypoints_exist(session_id)
+        except Exception:
+            pass
+
+        existing_loc_strs: set[str] = set()
+        for _lr in (db.get_session_locations(session_id) or []):
+            if not isinstance(_lr, dict):
+                continue
+            _rz = str(_lr.get("zone_name") or "").strip()
+            _rp = str(_lr.get("primary_name") or "").strip()
+            _rs = str(_lr.get("sub_name") or "").strip()
+            if _rz and _rp:
+                existing_loc_strs.add(f"{_rz} ➔ {_rp}".lower())
+                if _rs:
+                    existing_loc_strs.add(f"{_rz} ➔ {_rp} ➔ {_rs}".lower())
+        processed_loc_keys: set[str] = set()
+        pending_seed_targets: list[str] = []
+
+        def _is_already_seeded_raw(loc_candidate: str) -> bool:
+            norm_cmp = str(loc_candidate or "").replace("->", "➔").strip().lower()
+            return bool(norm_cmp) and (norm_cmp in processed_loc_keys or norm_cmp in existing_loc_strs)
+
+        def _queue_loc_seed(loc_candidate: str) -> None:
+            norm = str(loc_candidate or "").strip()
+            if not norm:
+                return
+            norm_cmp = norm.replace("->", "➔").strip().lower()
+            if norm_cmp in processed_loc_keys or norm_cmp in existing_loc_strs:
+                return
+            processed_loc_keys.add(norm_cmp)
+            pending_seed_targets.append(norm)
+
+        active_wps = db.get_all_session_active_waypoints(session_id)
+        for wp in active_wps:
+            target_loc = (wp.get("target_location") or "").strip()
+            if not target_loc or _is_already_seeded_raw(target_loc):
+                continue
             clean_target = sanitize_location_target(target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
-            process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
+            _queue_loc_seed(clean_target)
 
-    # Seed any active rendezvous commitment destinations
-    from mechanics.system.commitments_engine import get_active_commitments
-    appts = get_active_commitments(session_id, commitment_type="rendezvous", limit=25) if session_id else []
-    for appt in appts:
-        appt_loc = (appt.get("target_location") or appt.get("rendezvous_location") or "").strip()
-        if appt_loc:
+        # Seed any active rendezvous commitment destinations
+        from mechanics.system.commitments_engine import get_active_commitments
+        appts_cache = get_active_commitments(session_id, commitment_type="rendezvous", limit=25) or []
+        for appt in appts_cache:
+            appt_loc = (appt.get("target_location") or appt.get("rendezvous_location") or "").strip()
+            if not appt_loc or _is_already_seeded_raw(appt_loc):
+                continue
             clean_appt_loc = sanitize_location_target(appt_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
-            process_llm_location_update(session_id, clean_appt_loc, scen_key, char_name=char_name)
+            _queue_loc_seed(clean_appt_loc)
 
-    if current_loc:
-        process_llm_location_update(session_id, current_loc, scen_key, char_name=char_name)
+        if current_loc:
+            _queue_loc_seed(current_loc)
 
-    zones_summary = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
+        if pending_seed_targets:
+            with db.UnitOfWork():
+                for _seed_loc in pending_seed_targets:
+                    process_llm_location_update(session_id, _seed_loc, scen_key, char_name=char_name)
+
+    zones_summary = get_zone_summary_tree(
+        session_id,
+        scen_key,
+        current_loc=current_loc,
+        char_name=char_name,
+        ensure_waypoints=False,
+    )
     curr_z, curr_p, curr_sub = (
         parse_tiered_location(current_loc, scen_key, session_id=session_id, char_name=char_name)
         if current_loc else ("", "", "")
@@ -53,9 +101,21 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
     curr_node_id = session.get("current_node_id") if session else None
     resolved_loc_nid = db.resolve_node_id_from_location(session_id, current_loc, prefer_facility=False) if (session_id and current_loc) else None
     eff_curr_node_id = resolved_loc_nid or curr_node_id
-    curr_node = db.get_world_node(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else None
     all_nodes = db.get_session_world_nodes(session_id) if session_id else []
     nodes_by_id = {str(n["node_id"]): n for n in all_nodes if isinstance(n, dict) and n.get("node_id")}
+    fac_zone_id_by_name_lower: dict[str, str] = {}
+    for _wn in all_nodes:
+        if not isinstance(_wn, dict):
+            continue
+        _wn_id = _wn.get("node_id")
+        if _wn_id and _wn.get("node_type") in ("FACILITY", "ZONE"):
+            _wn_nl = str(_wn.get("name") or "").strip().lower()
+            if _wn_nl:
+                fac_zone_id_by_name_lower.setdefault(_wn_nl, str(_wn_id))
+    curr_node = (
+        nodes_by_id.get(str(eff_curr_node_id))
+        or (db.get_world_node(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else None)
+    )
 
     def _is_transit_hub_in_mem(nid: str | None) -> bool:
         if not nid:
@@ -72,58 +132,17 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
 
     outgoing_edges = db.get_outgoing_edges(session_id, eff_curr_node_id) if (session_id and eff_curr_node_id) else []
     adjacent_node_ids = {e["to_node_id"] for e in outgoing_edges}
+    adjacent_parent_ids = {
+        str(nodes_by_id[str(nid)]["parent_id"])
+        for nid in adjacent_node_ids
+        if str(nid) in nodes_by_id and nodes_by_id[str(nid)].get("parent_id")
+    }
     player_at_transit_hub = _is_transit_hub_in_mem(eff_curr_node_id) if (session_id and eff_curr_node_id) else False
 
-    from mechanics.world.schedules import get_npc_scheduled_node_id
-    from mechanics.world.anchor_schedule import is_npc_on_active_shift, resolve_anchor_schedule_nodes
-    from mechanics.world.locations.access_gate import (
-        build_active_quest_gate_snapshot,
-        get_node_effective_access_info,
-    )
-    from mechanics.world.locations.residence_fog import SHARED_ABSTRACT_RESIDENCE_NODE
-    from mechanics.world.schedule_blocks import get_detailed_npc_time_phase, get_time_block_key
-    q_gate_snap = build_active_quest_gate_snapshot(session_id) if session_id else None
-
-    curr_day, curr_min, _ = db.get_session_time(session_id)
-    contacts = db.get_contacts(session_id) or []
-    world_roster_rows = (
-        db.get_world_roster(session_id, include_legacy_rosters=False) or []
-        if (session_id and hasattr(db, "get_world_roster"))
-        else []
-    )
-    world_roster_by_low = {
-        str(w.get("name") or "").strip().lower(): w
-        for w in world_roster_rows
-        if isinstance(w, dict) and w.get("name")
-    }
-    roster = db.get_school_roster(session_id) if hasattr(db, "get_school_roster") else []
-
-    occupancy_by_node: dict[str, dict] = {}
-    def _get_occ_entry(nid: str):
-        if nid not in occupancy_by_node:
-            occupancy_by_node[nid] = {"known_npcs": [], "unmet_count": 0}
-        return occupancy_by_node[nid]
-
-    for appt in appts:
-        tgt = appt.get("target_node_id")
-        a_loc = appt.get("target_location") or appt.get("rendezvous_location") or ""
-        if not tgt and a_loc:
-            tgt = db.resolve_node_id_from_location(session_id, a_loc, prefer_facility=True)
-        if tgt:
-            tgt_node = nodes_by_id.get(tgt)
-            fac_id = tgt_node.get("parent_id") if (tgt_node and tgt_node.get("node_type") == "ROOM") else tgt
-            if fac_id:
-                occ = _get_occ_entry(fac_id)
-                a_nm = appt.get("npc_name") or ""
-                if not a_nm and appt.get("participants"):
-                    for pt in appt["participants"]:
-                        if pt.get("role") != "organizer" and pt.get("person_key") != "player":
-                            a_nm = pt.get("name") or pt.get("person_key") or ""
-                            break
-                if not a_nm and appt.get("target_entity") and appt.get("target_entity") not in ("player", "group"):
-                    a_nm = str(appt["target_entity"]).replace("_", " ").title()
-                if a_nm and not any(kn["name"].lower() == a_nm.lower() for kn in occ["known_npcs"]):
-                    occ["known_npcs"].append({"name": a_nm, "status": "Rendezvous"})
+    fallback_eval_ctx: dict | None = None
+    fallback_occ_by_node: dict[str, dict] | None = None
+    curr_day: int | None = None
+    curr_min: int | None = None
 
     player_restrained = False
     if session_id:
@@ -136,80 +155,6 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                     player_restrained = True
         except Exception:
             pass
-
-    contact_names_lower = set()
-    for c in contacts:
-        c_nm = (c.get("name") or "").strip()
-        if not c_nm:
-            continue
-        contact_names_lower.add(c_nm.lower())
-        c_probe = c
-        c_wr = world_roster_by_low.get(c_nm.lower())
-        if isinstance(c_wr, dict):
-            c_bi = c.get("basic_info") if isinstance(c.get("basic_info"), dict) else {}
-            w_bi = c_wr.get("basic_info") if isinstance(c_wr.get("basic_info"), dict) else {}
-            c_probe = {
-                **c_wr,
-                **c,
-                "basic_info": {**w_bi, **c_bi},
-                "_roster_premerged": True,
-                "_db_hydrated": True,
-            }
-        sched_nid = get_npc_scheduled_node_id(c_probe, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
-        if sched_nid:
-            s_node = nodes_by_id.get(sched_nid)
-            fac_id = s_node.get("parent_id") if (s_node and s_node.get("node_type") == "ROOM") else sched_nid
-            if fac_id:
-                occ = _get_occ_entry(fac_id)
-                if not any(kn["name"].lower() == c_nm.lower() for kn in occ["known_npcs"]):
-                    occ["known_npcs"].append({"name": c_nm, "status": "Routine"})
-
-    seen_roster_names_lower: set[str] = set()
-    curr_phase_occ = get_detailed_npc_time_phase(curr_min, current_day=curr_day, scen_key=scen_key)
-    curr_blk_occ = get_time_block_key(curr_min)
-    for wr in world_roster_rows:
-        wr_nm = str(wr.get("name") or "").strip()
-        if not wr_nm or wr_nm.lower() in contact_names_lower:
-            continue
-        if str(wr.get("origin") or "").strip().lower() == "legacy_adapter":
-            continue
-        if str(wr.get("staff_status") or "active").strip().lower() != "active":
-            continue
-        wr_pre = {**wr, "_roster_premerged": True}
-        a_map = resolve_anchor_schedule_nodes(
-            wr_pre, current_day=curr_day, scen_key=scen_key, session_id=None, current_minute=curr_min
-        )
-        on_sh, work_nid = is_npc_on_active_shift(
-            wr_pre, curr_min, current_day=curr_day, scen_key=scen_key, session_id=None
-        )
-        sched_nid = (
-            (work_nid if (on_sh and work_nid) else "")
-            or str((a_map or {}).get(curr_phase_occ) or (a_map or {}).get(curr_blk_occ) or "").strip()
-        )
-        if not sched_nid or sched_nid in (SHARED_ABSTRACT_RESIDENCE_NODE, "loc_rival_academy_away"):
-            continue
-        s_node = nodes_by_id.get(sched_nid)
-        fac_id = s_node.get("parent_id") if (s_node and s_node.get("node_type") == "ROOM") else sched_nid
-        if fac_id:
-            occ = _get_occ_entry(fac_id)
-            if wr.get("met_in_person") or int(wr.get("affinity_score") or 0) != 0:
-                if not any(kn["name"].lower() == wr_nm.lower() for kn in occ["known_npcs"]):
-                    occ["known_npcs"].append({"name": wr_nm, "status": "Routine"})
-            else:
-                occ["unmet_count"] += 1
-            seen_roster_names_lower.add(wr_nm.lower())
-
-    for r in roster:
-        r_nm = (r.get("name") or "").strip()
-        if not r_nm or r_nm.lower() in contact_names_lower or r_nm.lower() in seen_roster_names_lower:
-            continue
-        sched_nid = get_npc_scheduled_node_id(r, current_minute=curr_min, scen_key=scen_key, current_day=curr_day)
-        if sched_nid:
-            s_node = nodes_by_id.get(sched_nid)
-            fac_id = s_node.get("parent_id") if (s_node and s_node.get("node_type") == "ROOM") else sched_nid
-            if fac_id:
-                occ = _get_occ_entry(fac_id)
-                occ["unmet_count"] += 1
 
     from mechanics.world.waypoints.core import _classify_waypoint_marker
     seen_dest_keys: set[tuple[str, str]] = set()
@@ -226,14 +171,20 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                 is_same_zone and curr_p and curr_p.lower() == (p_copy.get("name") or "").lower()
             )
 
-            p_node_id = db.resolve_node_id_from_location(session_id, f"{z_name} ➔ {p_copy.get('name', '')}", prefer_facility=True)
+            p_node_id = p_copy.get("node_id") or ""
+            if not p_node_id:
+                p_nm_raw = str(p_copy.get("name") or "")
+                if p_nm_raw and not any(sep in p_nm_raw for sep in ("->", "➔", ">", "/")):
+                    p_node_id = fac_zone_id_by_name_lower.get(p_nm_raw.strip().lower(), "")
+                if not p_node_id:
+                    p_node_id = db.resolve_node_id_from_location(session_id, f"{z_name} ➔ {p_nm_raw}", prefer_facility=True)
             node = nodes_by_id.get(p_node_id) if p_node_id else None
             is_transit_hub = bool(node and node.get("is_transit_hub"))
             can_transit_travel = _is_transit_hub_in_mem(p_node_id) if p_node_id else False
             is_adjacent = bool(
                 p_node_id and (
                     p_node_id in adjacent_node_ids or
-                    any(n.get("parent_id") == p_node_id and n["node_id"] in adjacent_node_ids for n in all_nodes)
+                    p_node_id in adjacent_parent_ids
                 )
             )
             can_travel = bool(
@@ -247,7 +198,6 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             else:
                 eta_tag = p_copy.get("travel_tag")
                 if not eta_tag or eta_tag in ("Travel", "Instant Local", "Inter-Zone Travel"):
-                    from mechanics.world.locations.formatting import format_travel_eta_tag
                     t_mins = int(p_copy.get("travel_minutes") or (4 if is_same_zone else 15))
                     eta_tag = format_travel_eta_tag(t_mins, is_same_zone=is_same_zone, scen_key=scen_key, is_here=False)
                 if player_at_transit_hub and can_transit_travel and not is_same_zone and "transit" not in eta_tag.lower():
@@ -255,19 +205,72 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
                 else:
                     p_copy["travel_tag"] = eta_tag
 
-            access_info = (
-                get_node_effective_access_info(
+            has_precomputed_access = (
+                isinstance(p_copy.get("access_badge"), str)
+                and "access_tier" in p_copy
+                and bool(p_node_id)
+                and str(p_copy.get("node_id") or "") == str(p_node_id)
+            )
+            if has_precomputed_access:
+                access_info = {
+                    "access_tier": p_copy.get("access_tier", "open"),
+                    "status_badge": p_copy.get("access_badge", "Open"),
+                    "curfew_active": p_copy.get("is_curfew_active", False),
+                    "schedule_locked": p_copy.get("schedule_locked", False),
+                    "is_trespassing": p_copy.get("is_trespassing", False),
+                    "is_unlocked": p_copy.get("is_unlocked", False),
+                    "scene_residue": p_copy.get("scene_residue") or "",
+                }
+            elif p_node_id:
+                if curr_day is None or curr_min is None:
+                    curr_day, curr_min, _ = db.get_session_time(session_id)
+                if fallback_eval_ctx is None:
+                    fallback_eval_ctx = build_access_eval_context(
+                        session_id,
+                        scen_key=scen_key,
+                        session=session if isinstance(session, dict) else None,
+                        all_nodes=all_nodes,
+                    )
+                access_info = get_node_effective_access_info(
                     session_id,
                     p_node_id,
                     current_day=curr_day,
                     current_minute=curr_min,
                     scen_key=scen_key,
-                    quest_gate_snapshot=q_gate_snap,
+                    session=session if isinstance(session, dict) else None,
+                    quest_gate_snapshot=fallback_eval_ctx.get("quest_gate_snapshot"),
+                    eval_ctx=fallback_eval_ctx,
                 )
-                if p_node_id
-                else {}
+            else:
+                access_info = {}
+
+            has_precomputed_occ = (
+                isinstance(p_copy.get("known_npcs_here"), list)
+                and "unmet_activity_count" in p_copy
+                and bool(p_node_id)
+                and str(p_copy.get("node_id") or "") == str(p_node_id)
             )
-            occ_data = occupancy_by_node.get(p_node_id, {"known_npcs": [], "unmet_count": 0}) if p_node_id else {"known_npcs": [], "unmet_count": 0}
+            if has_precomputed_occ:
+                known_npcs_here = p_copy["known_npcs_here"]
+                unmet_activity_count = p_copy["unmet_activity_count"]
+            elif p_node_id:
+                if fallback_occ_by_node is None:
+                    if curr_day is None or curr_min is None:
+                        curr_day, curr_min, _ = db.get_session_time(session_id)
+                    fallback_occ_by_node = build_location_occupancy_index(
+                        session_id,
+                        scen_key=scen_key,
+                        curr_day=curr_day,
+                        curr_min=curr_min,
+                        node_by_id=nodes_by_id,
+                        rendezvous_commitments=appts_cache,
+                    )
+                occ_data = fallback_occ_by_node.get(p_node_id, {"known_npcs": [], "unmet_count": 0})
+                known_npcs_here = occ_data["known_npcs"][:3]
+                unmet_activity_count = occ_data["unmet_count"]
+            else:
+                known_npcs_here = []
+                unmet_activity_count = 0
 
             p_copy["node_id"] = p_node_id or ""
             p_copy["is_transit_hub"] = is_transit_hub
@@ -280,8 +283,8 @@ def _build_locations_payload(session_id: int, scen_key: str, current_loc: str, c
             p_copy["is_trespassing"] = access_info.get("is_trespassing", False)
             p_copy["is_unlocked"] = access_info.get("is_unlocked", False)
             p_copy["scene_residue"] = access_info.get("scene_residue") or p_copy.get("scene_residue") or ""
-            p_copy["known_npcs_here"] = occ_data["known_npcs"][:3]
-            p_copy["unmet_activity_count"] = occ_data["unmet_count"]
+            p_copy["known_npcs_here"] = known_npcs_here
+            p_copy["unmet_activity_count"] = unmet_activity_count
             if p_copy.get("is_unpurchased_realty") or str(p_copy.get("access_badge") or "").startswith("For Sale"):
                 p_copy["is_unpurchased_realty"] = True
                 p_copy["sub_locations"] = []

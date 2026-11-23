@@ -10,5 +10,5 @@ echo.
 echo ========================================================================
 cd /d "%~dp0"
 call venv\Scripts\activate.bat
-python server.py --share
+python server.py --share --no-reload %*
 pause

@@ -99,6 +99,7 @@ def get_player_owned_or_starter_property_for_node(
     *,
     world_node: Mapping[str, Any] | None = None,
     world_node_loaded: bool = False,
+    player_properties: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """
     If `node_id` belongs to the player's active starter quarters, a Student Operative's
@@ -128,7 +129,7 @@ def get_player_owned_or_starter_property_for_node(
         except Exception:
             parent_id = ""
 
-    props = db.get_player_properties(int(session_id))
+    props = db.get_player_properties(int(session_id)) if player_properties is None else player_properties
     for p in props:
         fac_id = str(p.get("facility_node_id") or "")
         if target == fac_id or (parent_id and parent_id == fac_id):
@@ -300,6 +301,8 @@ def is_unpurchased_realty_node(
     session_id: int,
     node_id: str,
     session: Mapping[str, Any] | None = None,
+    *,
+    player_properties: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """
     If `node_id` is part of an unpurchased realty property in an Anomalous scenario,
@@ -315,7 +318,7 @@ def is_unpurchased_realty_node(
     if not entry:
         return None
 
-    props = db.get_player_properties(int(session_id))
+    props = db.get_player_properties(int(session_id)) if player_properties is None else player_properties
     for p in props:
         if not p.get("is_starter") and (
             p.get("property_id") == entry["property_id"]

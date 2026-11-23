@@ -815,4 +815,40 @@ def transfer_item_between_users(
             return True, f"Transferred {item_dict.get('name', 'Item')} to {target_disp}.", transferred
 
 
+def get_inventory_item_by_id(item_id: int, user_id: int | None = None) -> dict | None:
+    """Fetches a single inventory item row by ID (optionally scoped to user_id)."""
+    if not item_id:
+        return None
+    with get_conn() as conn:
+        if user_id is not None:
+            row = conn.execute(
+                "SELECT * FROM inventory WHERE id=? AND user_id=?",
+                (int(item_id), int(user_id)),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM inventory WHERE id=?",
+                (int(item_id),),
+            ).fetchone()
+    return dict(row) if row else None
+
+
+def update_inventory_item_effect(item_id: int, effect: str, user_id: int | None = None) -> bool:
+    """Updates an inventory item's serialized effect/metadata string by ID."""
+    if not item_id:
+        return False
+    with get_conn() as conn:
+        if user_id is not None:
+            cur = conn.execute(
+                "UPDATE inventory SET effect=? WHERE id=? AND user_id=?",
+                (str(effect or ""), int(item_id), int(user_id)),
+            )
+        else:
+            cur = conn.execute(
+                "UPDATE inventory SET effect=? WHERE id=?",
+                (str(effect or ""), int(item_id)),
+            )
+    return cur.rowcount > 0
+
+
 

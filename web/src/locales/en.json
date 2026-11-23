@@ -627,7 +627,13 @@
     "gender_male": "Male",
     "gender_non_binary": "Non-Binary",
     "race_human": "Human",
-    "student_tag": "Student"
+    "student_tag": "Student",
+    "inspect_npc_profile": "Inspect {{name}}'s profile",
+    "close_npc_profile": "Close {{name}}'s profile",
+    "npc_profile_panel": "{{name}} Profile",
+    "open_in_contacts": "Open in Contacts",
+    "open_in_codex": "Open in Codex",
+    "scene_only_npc_badge": "Just Met"
   },
   "conditions": {
     "aroused": "Aroused",
@@ -1186,7 +1192,10 @@
       "check_messages": "Check Messages for meetup details",
       "visit_requests": "Visit Campus Requests for active tasks",
       "open": "Open",
-      "no_active_meetups": "No Active Meetups or Promises"
+      "no_active_meetups": "No Active Meetups or Promises",
+      "vault_memories": "{{count}} Saved in Photo Vault",
+      "latest_from": "Latest from {{name}}",
+      "tap_to_view_photos": "Tap to view photos & wallpapers"
     },
     "apps": {
       "photos": "Photo Vault",
@@ -1200,7 +1209,12 @@
       "planner": "Planner & Agenda",
       "planner_sub": "Schedule & Rendezvous",
       "bounties": "Campus Requests",
-      "bounties_sub": "Student Bulletin"
+      "bounties_sub": "Student Bulletin",
+      "photos_short": "Photos",
+      "dms_short": "Messages",
+      "feed_short": "Social",
+      "settings": "Settings",
+      "settings_sub": "Wallpaper & Theme"
     },
     "vault": {
       "all": "All",
@@ -1208,7 +1222,16 @@
       "intimate": "🔥 Intimate",
       "videos": "🎥 Videos",
       "all_contacts": "👤 All Contacts ({{count}})",
-      "empty": "No matching media in vault."
+      "empty": "No matching media in vault.",
+      "generating": "Developing...",
+      "generate_photo": "Generate Photo",
+      "regenerate": "Regenerate",
+      "set_wallpaper": "Set as Wallpaper",
+      "active_wallpaper": "Active Wallpaper",
+      "deleting": "Deleting...",
+      "delete_media": "🗑️ Delete Media",
+      "generate_failed": "Could not generate photo.",
+      "delete_failed": "Could not delete media."
     },
     "dms": {
       "scheduled_meetup": "📍 Meetup Scheduled:",
@@ -1237,7 +1260,13 @@
       "action_ask_spicy_title": "Ask contact for a spicy photo (shared 3/day)",
       "action_send_spicy": "Send Spicy",
       "action_send_spicy_title": "Send contact a spicy photo of yourself (shared 3/day)",
-      "saved_to_vault": "Saved to Photo Vault!"
+      "saved_to_vault": "Saved to Photo Vault!",
+      "generating_photo": "Developing photo...",
+      "open_photo_vault": "Open Preview",
+      "attached_intimate": "Intimate Attachment",
+      "attached_video": "Video Attachment",
+      "attached_photo": "Photo Attachment",
+      "send_failed": "Failed to send message."
     },
     "feed": {
       "timeline_and_rumors": "Timeline & Rumors",
@@ -1268,7 +1297,64 @@
     "planner": {
       "no_active_tasks": "No active tasks in progress"
     },
-    "shop_load_failed": "Failed to load shop catalogue."
+    "shop_load_failed": "Failed to load shop catalogue.",
+    "wallpapers": {
+      "iphone_default": "Aurora Silk",
+      "iphone_default_sub": "iPhone-style Default",
+      "auto_scenario": "Match Scenario",
+      "auto_scenario_sub": "Auto-Follow World",
+      "fantasy": "Realms of Myth",
+      "dark_fantasy": "Ashen Crowns",
+      "isekai_fantasy": "Sky Guild",
+      "sci_fi": "Outer Rim",
+      "cyberpunk": "Neon Chrome",
+      "steampunk": "Brass & Aether",
+      "high_school_drama": "Rooftop Dusk",
+      "slice_of_life": "Evening Café",
+      "nuclear_post_apocalypse": "Fallout Aurora",
+      "anomalous_incursions": "Metro Rift",
+      "anomalous_high_school": "Anomalous High"
+    },
+    "settings": {
+      "live_preview": "Live Preview",
+      "preview_sample": "Theme & Wallpaper Active",
+      "ui_style": "Smartphone UI Style",
+      "style_classic": "Classic Dark",
+      "style_classic_desc": "OLED apps, Home wallpaper",
+      "style_glass": "Frosted Glass",
+      "style_glass_desc": "Matches game acrylic theme",
+      "wallpaper_picker": "Wallpaper",
+      "carousel_active_badge": "Carousel Active",
+      "tab_builtin": "Built-in",
+      "tab_npc": "NPC ({{count}})",
+      "tab_scenes": "Scenes ({{count}})",
+      "no_npc_photos": "No generated NPC photos yet.",
+      "no_npc_photos_hint": "Receive photos in DMs or generate them in Photo Vault to set them as your wallpaper.",
+      "no_scene_images": "No generated campaign scenes yet.",
+      "no_scene_images_hint": "Turn illustrations generated during this campaign will appear here automatically.",
+      "carousel_title": "Wallpaper Carousel",
+      "carousel_desc": "Auto-switch every time you open the phone",
+      "carousel_pool": "Rotation Pool",
+      "next_wallpaper": "Next Wallpaper",
+      "pool_all_builtin": "All Built-in",
+      "pool_scenario_photos": "Scenario + Photos",
+      "pool_photos_only": "Generated Photos",
+      "pool_custom": "Custom Picks",
+      "custom_pool_hint": "Choose wallpapers in rotation:",
+      "include_intimate": "Include 18+ intimate photos in carousel",
+      "display_clock": "Display & Clock",
+      "wallpaper_dim": "Wallpaper Dimming",
+      "framing": "Wallpaper Framing",
+      "focal_top": "Top",
+      "focal_center": "Center",
+      "focal_bottom": "Bottom",
+      "blur_in_apps": "Blur wallpaper inside apps",
+      "dynamic_tint": "Dynamic day/night tint",
+      "clock_style": "Clock Style",
+      "clock_modern": "Modern",
+      "clock_serif": "RPG Serif",
+      "clock_format": "Clock Format"
+    }
   },
   "awakened": {
     "section_title": "Awakened Resonance Attunement",

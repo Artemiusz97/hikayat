@@ -3,7 +3,7 @@ from .constants import *
 import json
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Mapping, Tuple
 import db
 
 
@@ -1898,11 +1898,89 @@ def get_room_contextual_props(room_name: str, primary_name: str = "") -> list[st
     return [f"{r_clean} Main Area", f"{r_clean} Focal Point", "Secluded Corner Alcove", "Inspection Feature"]
 
 
+def _parse_seed_node_state_json(node: Mapping[str, Any] | None) -> dict[str, Any]:
+    from mechanics.world.anomalous_sites.catalog import parse_node_state
+    return parse_node_state(node)
+
+
+def build_node_props_index(
+    session_id: int,
+    scenario_key: str = "high_school_drama",
+    char_name: str = "",
+    *,
+    all_nodes: list[dict[str, Any]] | None = None,
+    node_by_id: Mapping[str, dict[str, Any]] | None = None,
+    state_by_id: Mapping[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Prebuild O(1) lookup tables for seed/runtime node props once per sweep."""
+    resolved_nodes_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(node_by_id, Mapping):
+        resolved_nodes_by_id = dict(node_by_id)
+    elif all_nodes is not None:
+        for n in all_nodes:
+            if isinstance(n, dict) and n.get("node_id"):
+                resolved_nodes_by_id[str(n["node_id"])] = n
+    elif session_id:
+        try:
+            for n in (db.get_session_world_nodes(session_id) or []):
+                if isinstance(n, dict) and n.get("node_id"):
+                    resolved_nodes_by_id[str(n["node_id"])] = n
+        except Exception:
+            resolved_nodes_by_id = {}
+
+    resolved_state_by_id: dict[str, dict[str, Any]] = {}
+    if isinstance(state_by_id, Mapping):
+        resolved_state_by_id = dict(state_by_id)
+    else:
+        for nid, n in resolved_nodes_by_id.items():
+            resolved_state_by_id[nid] = _parse_seed_node_state_json(n)
+
+    seed_data = get_scenario_seed_data(scenario_key)
+    seed_zones = seed_data.get("zones", [])
+    if is_urban_anomalous_scenario(scenario_key):
+        seed_zones = inject_anomalous_faction_hq_facilities(seed_zones, session_id=session_id, scenario_key=scenario_key)
+    desk_name = get_session_player_desk_name(session_id, char_name=char_name) if is_school_scenario(scenario_key) else "Player's Desk"
+
+    props_by_id: dict[str, list[str]] = {}
+    props_by_name_lower: dict[str, list[str]] = {}
+    for z in seed_zones:
+        for p in z.get("primary_locations", []):
+            raw_p = p.get("props")
+            if isinstance(raw_p, list) and raw_p:
+                resolved_p = [desk_name if pr == "Player's Desk" else str(pr) for pr in raw_p]
+                p_id = str(p.get("id") or "")
+                p_name = str(p.get("name") or "").lower()
+                if p_id:
+                    props_by_id.setdefault(p_id, resolved_p)
+                if p_name:
+                    props_by_name_lower.setdefault(p_name, resolved_p)
+            for s in p.get("sub_locations", []):
+                if isinstance(s, dict):
+                    raw_s = s.get("props")
+                    if isinstance(raw_s, list) and raw_s:
+                        resolved_s = [desk_name if pr == "Player's Desk" else str(pr) for pr in raw_s]
+                        s_id = str(s.get("id") or "")
+                        s_name = str(s.get("name") or "").lower()
+                        if s_id:
+                            props_by_id.setdefault(s_id, resolved_s)
+                        if s_name:
+                            props_by_name_lower.setdefault(s_name, resolved_s)
+
+    return {
+        "node_by_id": resolved_nodes_by_id,
+        "state_by_id": resolved_state_by_id,
+        "props_by_id": props_by_id,
+        "props_by_name_lower": props_by_name_lower,
+    }
+
+
 def get_node_props(
     session_id: int,
     node_id: str,
     scenario_key: str = "high_school_drama",
     char_name: str = "",
+    *,
+    props_ctx: Mapping[str, Any] | None = None,
 ) -> list[str]:
     """
     Returns the list of interactive micro-location props for a given spatial node.
@@ -1917,6 +1995,33 @@ def get_node_props(
         nid = session_id.strip()
         node_name = str(node_id or "").strip()
         session_id = 0
+
+    if isinstance(props_ctx, Mapping):
+        ctx_states = props_ctx.get("state_by_id")
+        if session_id and nid and isinstance(ctx_states, Mapping):
+            st = ctx_states.get(nid)
+            if isinstance(st, dict) and isinstance(st.get("props"), list) and st["props"]:
+                return [str(p) for p in st["props"] if p]
+
+        parent_name = ""
+        ctx_nodes = props_ctx.get("node_by_id")
+        if session_id and nid and isinstance(ctx_nodes, Mapping):
+            n_row = ctx_nodes.get(nid)
+            if n_row:
+                node_name = n_row.get("name") or ""
+                p_id = n_row.get("parent_id") or n_row.get("parent_node_id") or ""
+                if p_id:
+                    p_row = ctx_nodes.get(p_id)
+                    if p_row:
+                        parent_name = p_row.get("name") or ""
+
+        props_by_id = props_ctx.get("props_by_id") or {}
+        props_by_name_lower = props_ctx.get("props_by_name_lower") or {}
+        if nid and nid in props_by_id:
+            return list(props_by_id[nid])
+        if node_name and node_name.lower() in props_by_name_lower:
+            return list(props_by_name_lower[node_name.lower()])
+        return get_room_contextual_props(node_name or nid, parent_name)
 
     if session_id and nid:
         try:

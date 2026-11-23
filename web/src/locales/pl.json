@@ -627,7 +627,13 @@
     "gender_male": "Mężczyzna",
     "gender_non_binary": "Niebinarna",
     "race_human": "Człowiek",
-    "student_tag": "Uczeń"
+    "student_tag": "Uczeń",
+    "inspect_npc_profile": "Pokaż profil: {{name}}",
+    "close_npc_profile": "Zamknij profil: {{name}}",
+    "npc_profile_panel": "Profil: {{name}}",
+    "open_in_contacts": "Otwórz w Kontaktach",
+    "open_in_codex": "Otwórz w Kodeksie",
+    "scene_only_npc_badge": "Nowo poznany"
   },
   "conditions": {
     "aroused": "Podekscytowany",
@@ -1186,7 +1192,10 @@
       "check_messages": "Sprawdź wiadomości, aby poznać szczegóły spotkania",
       "visit_requests": "Odwiedź Zlecenia Kampusu, aby przejrzeć aktywne zadania",
       "open": "Otwórz",
-      "no_active_meetups": "Brak aktywnych spotkań lub obietnic"
+      "no_active_meetups": "Brak aktywnych spotkań lub obietnic",
+      "vault_memories": "{{count}} w Sejfie Zdjęć",
+      "latest_from": "Najnowsze od: {{name}}",
+      "tap_to_view_photos": "Dotknij, aby obejrzeć zdjęcia i tapety"
     },
     "apps": {
       "photos": "Skarbiec zdjęć",
@@ -1200,7 +1209,12 @@
       "planner": "Terminarz i agenda",
       "planner_sub": "Harmonogram i spotkania",
       "bounties": "Zlecenia kampusu",
-      "bounties_sub": "Biuletyn studencki"
+      "bounties_sub": "Biuletyn studencki",
+      "photos_short": "Zdjęcia",
+      "dms_short": "Czaty",
+      "feed_short": "Radar",
+      "settings": "Ustawienia",
+      "settings_sub": "Tapeta i styl"
     },
     "vault": {
       "all": "Wszystkie",
@@ -1208,7 +1222,16 @@
       "intimate": "🔥 Intymne",
       "videos": "🎥 Filmy",
       "all_contacts": "👤 Wszystkie kontakty ({{count}})",
-      "empty": "Brak pasujących multimediów w skarbcu."
+      "empty": "Brak pasujących multimediów w skarbcu.",
+      "generating": "Wywoływanie...",
+      "generate_photo": "Wygeneruj zdjęcie",
+      "regenerate": "Wygeneruj ponownie",
+      "set_wallpaper": "Ustaw jako tapetę",
+      "active_wallpaper": "Aktywna tapeta",
+      "deleting": "Usuwanie...",
+      "delete_media": "🗑️ Usuń plik",
+      "generate_failed": "Nie udało się wygenerować zdjęcia.",
+      "delete_failed": "Nie udało się usunąć multimediów."
     },
     "dms": {
       "scheduled_meetup": "📍 Zaplanowane spotkanie:",
@@ -1237,7 +1260,13 @@
       "action_ask_spicy_title": "Poproś kontakt o pikantne zdjęcie (wspólne 3/dzień)",
       "action_send_spicy": "Wyślij pikantne",
       "action_send_spicy_title": "Wyślij kontaktowi swoje pikantne zdjęcie (wspólne 3/dzień)",
-      "saved_to_vault": "Zapisano w skarbcu zdjęć!"
+      "saved_to_vault": "Zapisano w skarbcu zdjęć!",
+      "generating_photo": "Wywoływanie zdjęcia...",
+      "open_photo_vault": "Otwórz podgląd",
+      "attached_intimate": "Intymny załącznik",
+      "attached_video": "Załącznik wideo",
+      "attached_photo": "Załącznik foto",
+      "send_failed": "Nie udało się wysłać wiadomości."
     },
     "feed": {
       "timeline_and_rumors": "Oś czasu i plotki",
@@ -1268,7 +1297,64 @@
     "planner": {
       "no_active_tasks": "Brak aktywnych zadań w toku"
     },
-    "shop_load_failed": "Nie udało się wczytać katalogu sklepu."
+    "shop_load_failed": "Nie udało się wczytać katalogu sklepu.",
+    "wallpapers": {
+      "iphone_default": "Jedwab Zorzy",
+      "iphone_default_sub": "Domyślna w stylu iPhone",
+      "auto_scenario": "Dopasuj do świata",
+      "auto_scenario_sub": "Automatyczny motyw",
+      "fantasy": "Krainy Mitów",
+      "dark_fantasy": "Popielne Korony",
+      "isekai_fantasy": "Podniebna Gildia",
+      "sci_fi": "Zewnętrzna Rubież",
+      "cyberpunk": "Neonowy Chrom",
+      "steampunk": "Mosiądz i Eter",
+      "high_school_drama": "Zmierzch na Dachu",
+      "slice_of_life": "Wieczorna Kawiarnia",
+      "nuclear_post_apocalypse": "Zorza Pustkowi",
+      "anomalous_incursions": "Szczelina Metropolii",
+      "anomalous_high_school": "Anomalne Liceum"
+    },
+    "settings": {
+      "live_preview": "Podgląd na żywo",
+      "preview_sample": "Aktywny motyw i tapeta",
+      "ui_style": "Styl interfejsu telefonu",
+      "style_classic": "Klasyczny Ciemny",
+      "style_classic_desc": "Aplikacje OLED, tapeta na ekranie",
+      "style_glass": "Mrożone Szkło",
+      "style_glass_desc": "Pasuje do akrylowego stylu gry",
+      "wallpaper_picker": "Tapeta",
+      "carousel_active_badge": "Karuzela aktywna",
+      "tab_builtin": "Wbudowane",
+      "tab_npc": "NPC ({{count}})",
+      "tab_scenes": "Sceny ({{count}})",
+      "no_npc_photos": "Brak wygenerowanych zdjęć NPC.",
+      "no_npc_photos_hint": "Otrzymuj zdjęcia w wiadomościach lub wygeneruj je w Sejfie Zdjęć, aby ustawić jako tapetę.",
+      "no_scene_images": "Brak wygenerowanych scen kampanii.",
+      "no_scene_images_hint": "Ilustracje scen z tej kampanii pojawią się tutaj automatycznie.",
+      "carousel_title": "Karuzela tapet",
+      "carousel_desc": "Automatyczna zmiana przy każdym otwarciu telefonu",
+      "carousel_pool": "Pula losowania",
+      "next_wallpaper": "Następna tapeta",
+      "pool_all_builtin": "Wszystkie wbudowane",
+      "pool_scenario_photos": "Scenariusz + Zdjęcia",
+      "pool_photos_only": "Wygenerowane zdjęcia",
+      "pool_custom": "Własny wybór",
+      "custom_pool_hint": "Wybierz tapety w rotacji:",
+      "include_intimate": "Uwzględnij zdjęcia 18+ w karuzeli",
+      "display_clock": "Ekran i zegar",
+      "wallpaper_dim": "Przyciemnienie tapety",
+      "framing": "Kadrowanie tapety",
+      "focal_top": "Góra",
+      "focal_center": "Środek",
+      "focal_bottom": "Dół",
+      "blur_in_apps": "Rozmyj tapetę w aplikacjach",
+      "dynamic_tint": "Dynamiczny odcień pory dnia",
+      "clock_style": "Styl zegara",
+      "clock_modern": "Nowoczesny",
+      "clock_serif": "RPG Szeryf",
+      "clock_format": "Format czasu"
+    }
   },
   "awakened": {
     "section_title": "Dostrajanie Przebudzonego Rezonansu",

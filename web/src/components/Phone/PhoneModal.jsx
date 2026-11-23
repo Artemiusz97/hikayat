@@ -1,14 +1,16 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import {
   X, Camera, Video, MessageSquare, Rss, Wifi,
-  Calendar, ChevronLeft, ShoppingBag, ShieldAlert, Home
+  Calendar, ChevronLeft, ShoppingBag, ShieldAlert, Home,
+  Settings, Sparkles, RefreshCw, Image as ImageIcon, Check, Loader2, Play
 } from 'lucide-react';
 import { apiCall } from '../../api/client';
 import { formatClockTime } from '../../utils/timeFormat';
 import { useUiPreferences } from '../../theme/UiPreferencesProvider';
+import { resolveTimeOfDayPhase, TIME_OF_DAY_GRADES } from '../../theme/backgrounds';
 import { EASE_OUT, SPRING_PANEL, isTopEscapeLayer, registerEscapeLayer } from '../Common/MotionPrimitives';
 import PhoneHomeApp from './PhoneHomeApp';
 import PhoneRealtyApp from './PhoneRealtyApp';
@@ -18,6 +20,16 @@ import PhoneDmsApp from './PhoneDmsApp';
 import PhoneFeedApp from './PhoneFeedApp';
 import PhoneShopApp from './PhoneShopApp';
 import PhoneBountiesApp from './PhoneBountiesApp';
+import PhoneSettingsApp from './PhoneSettingsApp';
+import {
+  FOCAL_OBJECT_CLASS,
+  buildCarouselCandidates,
+  isImageGenModeActive,
+  isIntimateMediaItem,
+  isVideoMediaItem,
+  pickNextCarouselWallpaper,
+  resolveActivePhoneWallpaper,
+} from './phoneWallpapers';
 
 const PhoneModal = ({
   isOpen,
@@ -26,6 +38,7 @@ const PhoneModal = ({
   codexHook,
   session,
   user,
+  imageGenMode = null,
   initialChatNpc = null,
   onClearInitialChatNpc = null,
   onRefreshInventory,
@@ -33,14 +46,23 @@ const PhoneModal = ({
   onRefreshCharacter,
 }) => {
   const { t } = useTranslation();
-  const { clockFormat } = useUiPreferences();
+  const {
+    clockFormat,
+    setClockFormat,
+    phonePrefs,
+    setPhonePref,
+    setSessionPhoneWallpaper,
+  } = useUiPreferences();
   const reduced = useReducedMotion();
-  const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'planner' | 'bounties' | 'realty'
+  const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'planner' | 'bounties' | 'realty' | 'settings'
+  const [activeCarouselEntry, setActiveCarouselEntry] = useState(null);
   const [messagesSubTab, setMessagesSubTab] = useState('contacts'); // 'contacts' | 'dispatch'
   const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [photoCategory, setPhotoCategory] = useState('all'); // 'all' | 'photo' | 'intimate' | 'video'
   const [photoContactFilter, setPhotoContactFilter] = useState('__all__');
   const [deletingPhoto, setDeletingPhoto] = useState(false);
+  const [generatingPhotoId, setGeneratingPhotoId] = useState(null);
+  const [photoActionError, setPhotoActionError] = useState(null);
   const [dmInput, setDmInput] = useState('');
   const [selectedIntent, setSelectedIntent] = useState('chat');
   const [dmOutcomeBanner, setDmOutcomeBanner] = useState(null);
@@ -80,11 +102,18 @@ const PhoneModal = ({
     branding, appointments, commitments: phoneCommitments = [], gossipFeed, mediaGallery, contacts,
     dispatchChannels = [], suggestedPeers = [], socialState,
     activeChatNpc, chatMessages, dailyLimits, loadingChat, sendingChat,
+    imageGenEnabled = 0, generateMediaPhoto,
     loadChatMessages, sendMessage, closeChat,
     refreshFeed, scourFeed, discoverPeer, sendFriendRequest, refreshPhoneData, cancelCommitment,
   } = phoneHook;
 
+  const effectiveImageGenMode =
+    session?.image_gen_enabled ?? imageGenMode ?? imageGenEnabled ?? 0;
+  const isImgGenActive = isImageGenModeActive(effectiveImageGenMode);
+
   const wasOpenRef = useRef(false);
+  const lastCarouselKeyRef = useRef(null);
+  const prevSessionIdRef = useRef(session?.id ?? null);
   const phoneDialogRef = useRef(null);
   const previousFocusRef = useRef(null);
   const onCloseRef = useRef(onClose);
@@ -92,6 +121,57 @@ const PhoneModal = ({
   const shopAbortRef = useRef(null);
   const realtySeqRef = useRef(0);
   const realtyAbortRef = useRef(null);
+
+  const phonePrefsRef = useRef(phonePrefs);
+  phonePrefsRef.current = phonePrefs;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const mediaGalleryRef = useRef(mediaGallery);
+  mediaGalleryRef.current = mediaGallery;
+
+  useEffect(() => {
+    const nextSid = session?.id ?? null;
+    if (prevSessionIdRef.current === nextSid) return;
+    prevSessionIdRef.current = nextSid;
+    setActiveApp('home');
+    setActiveCarouselEntry(null);
+    lastCarouselKeyRef.current = null;
+    setSelectedPhoto(null);
+    setPhotoCategory('all');
+    setPhotoContactFilter('__all__');
+    setPhotoActionError(null);
+    setDmInput('');
+    setDmOutcomeBanner(null);
+    setFeedBanner(null);
+    setPeerQuery('');
+    setPeerProfile(null);
+    setPeerFeedback(null);
+    setShopData(null);
+    setShopFeedback(null);
+    setBountyActionBanner(null);
+    setSelectedFactionFilter('all');
+    setRealtyData(sessionRef.current?.realty?.enabled ? sessionRef.current.realty : null);
+    setRealtyBanner(null);
+    setSelectedSpareKeyNpc({});
+  }, [session?.id]);
+
+  const advanceCarousel = useCallback(() => {
+    const p = phonePrefsRef.current;
+    const candidates = buildCarouselCandidates({
+      poolMode: p?.carouselPool || 'all_builtin',
+      customIds: p?.carouselCustomIds || [],
+      session: sessionRef.current,
+      mediaGallery: mediaGalleryRef.current || [],
+      includeIntimate: Boolean(p?.includeIntimateInCarousel),
+    });
+    const nextEntry = pickNextCarouselWallpaper(candidates, lastCarouselKeyRef.current);
+    if (nextEntry) {
+      lastCarouselKeyRef.current = nextEntry.key;
+      setActiveCarouselEntry(nextEntry);
+    } else {
+      setActiveCarouselEntry(null);
+    }
+  }, []);
 
   useEffect(() => {
     onCloseRef.current = onClose;
@@ -146,8 +226,13 @@ const PhoneModal = ({
     wasOpenRef.current = isOpen;
     if (!isOpen) return;
 
+    if (justOpened && phonePrefsRef.current?.carouselEnabled) {
+      advanceCarousel();
+    }
+
     if (initialChatNpc) {
       setSelectedPhoto(null);
+      setPhotoActionError(null);
       setActiveApp('dms');
       setMessagesSubTab('contacts');
       setDmOutcomeBanner(null);
@@ -159,14 +244,60 @@ const PhoneModal = ({
       }
     } else if (justOpened) {
       setSelectedPhoto(null);
+      setPhotoActionError(null);
       setActiveApp('home');
     }
-  }, [isOpen, initialChatNpc]);
+  }, [isOpen, initialChatNpc, advanceCarousel]);
+
+  const availablePhotoCount = useMemo(() => {
+    const npcCount = (mediaGallery || []).filter((m) => m?.image_url && !isVideoMediaItem(m)).length;
+    const histCount = Array.isArray(session?.history)
+      ? session.history.filter((h) => Boolean(h?.scene_image_url)).length
+      : 0;
+    const topSceneCount = session?.scene_image_url ? 1 : 0;
+    return npcCount + histCount + topSceneCount;
+  }, [mediaGallery, session?.scene_image_url, session?.history]);
+
+  useEffect(() => {
+    if (!phonePrefs?.carouselEnabled) return;
+    const candidates = buildCarouselCandidates({
+      poolMode: phonePrefs?.carouselPool || 'all_builtin',
+      customIds: phonePrefs?.carouselCustomIds || [],
+      session: sessionRef.current,
+      mediaGallery: mediaGalleryRef.current || [],
+      includeIntimate: Boolean(phonePrefs?.includeIntimateInCarousel),
+    });
+    const stillValid =
+      activeCarouselEntry &&
+      candidates.some(
+        (c) =>
+          c.key === activeCarouselEntry.key ||
+          (activeCarouselEntry.type === 'npc_photo' &&
+            c.type === 'npc_photo' &&
+            ((activeCarouselEntry.id != null && String(c.id) === String(activeCarouselEntry.id)) ||
+              (activeCarouselEntry.url && c.url === activeCarouselEntry.url))) ||
+          (activeCarouselEntry.type === 'scene' &&
+            c.type === 'scene' &&
+            c.url === activeCarouselEntry.url)
+      );
+    if (!stillValid) {
+      advanceCarousel();
+    }
+  }, [
+    phonePrefs?.carouselEnabled,
+    phonePrefs?.carouselPool,
+    phonePrefs?.includeIntimateInCarousel,
+    phonePrefs?.carouselCustomIds,
+    availablePhotoCount,
+    activeCarouselEntry,
+    advanceCarousel,
+  ]);
 
   const plannerItems = (phoneCommitments && phoneCommitments.length > 0) ? phoneCommitments : (appointments || []);
 
   const handleOpenChatWithContact = (npcIdOrName) => {
     if (!npcIdOrName) return;
+    setDmOutcomeBanner(null);
     setActiveApp('dms');
     if (loadChatMessages) {
       loadChatMessages(npcIdOrName);
@@ -179,8 +310,8 @@ const PhoneModal = ({
     try {
       await cancelCommitment(commitmentId, 'player_cancelled');
       if (onRefreshCodex) onRefreshCodex();
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Failed to cancel commitment:', err);
     } finally {
       setCancellingCommitmentId(null);
     }
@@ -189,6 +320,7 @@ const PhoneModal = ({
   const handleDeleteMedia = async (photo) => {
     if (!photo?.id || !user?.user_id || deletingPhoto) return;
     setDeletingPhoto(true);
+    setPhotoActionError(null);
     try {
       await apiCall('/api/inventory/drop', {
         method: 'POST',
@@ -197,13 +329,51 @@ const PhoneModal = ({
           item_id: photo.id,
         }),
       });
+      const sidKey = session?.id != null ? String(session.id) : null;
+      const activeOverride = sidKey ? phonePrefs?.sessionWallpapers?.[sidKey] : null;
+      if (
+        sidKey &&
+        activeOverride?.type === 'npc_photo' &&
+        (String(activeOverride.id) === String(photo.id) ||
+          (photo.image_url && activeOverride.url === photo.image_url))
+      ) {
+        setSessionPhoneWallpaper(sidKey, null);
+      }
+      if (
+        activeCarouselEntry?.type === 'npc_photo' &&
+        (String(activeCarouselEntry.id) === String(photo.id) ||
+          (photo.image_url && activeCarouselEntry.url === photo.image_url))
+      ) {
+        if (phonePrefs?.carouselEnabled) {
+          advanceCarousel();
+        } else {
+          setActiveCarouselEntry(null);
+        }
+      }
       setSelectedPhoto(null);
       if (refreshPhoneData) await refreshPhoneData();
       if (onRefreshInventory) onRefreshInventory();
-    } catch {
-      // ignore
+    } catch (err) {
+      setPhotoActionError(err?.message || t('phone.vault.delete_failed', 'Could not delete media.'));
     } finally {
       setDeletingPhoto(false);
+    }
+  };
+
+  const handleGenerateMediaPhoto = async (itemId, { forceRegenerate = false } = {}) => {
+    if (!itemId || !generateMediaPhoto) return;
+    setGeneratingPhotoId(itemId);
+    setPhotoActionError(null);
+    try {
+      await generateMediaPhoto(itemId, { forceRegenerate });
+    } catch (err) {
+      const errMsg = err?.message || t('phone.vault.generate_failed', 'Could not generate photo.');
+      setPhotoActionError(errMsg);
+      if (activeApp === 'dms' && !selectedPhoto) {
+        setDmOutcomeBanner({ error: errMsg });
+      }
+    } finally {
+      setGeneratingPhotoId(null);
     }
   };
 
@@ -439,9 +609,8 @@ const PhoneModal = ({
   ).sort();
 
   const filteredGallery = (mediaGallery || []).filter((m) => {
-    const mType = (m.media_type || '').toLowerCase();
-    const isVideo = mType.includes('video');
-    const isIntimate = mType.includes('nsfw') || mType.includes('intimate');
+    const isVideo = isVideoMediaItem(m);
+    const isIntimate = isIntimateMediaItem(m);
     if (photoCategory === 'video' && !isVideo) return false;
     if (photoCategory === 'intimate' && !isIntimate) return false;
     if (photoCategory === 'photo' && (isVideo || isIntimate)) return false;
@@ -555,7 +724,9 @@ const PhoneModal = ({
     ) {
       autoBountiesAttemptedRef.current = true;
       setGeneratingBounties(true);
-      codexGenerateBountiesRef.current().finally(() => setGeneratingBounties(false));
+      Promise.resolve(codexGenerateBountiesRef.current())
+        .catch(() => {})
+        .finally(() => setGeneratingBounties(false));
     }
   }, [isOpen, activeApp, allAvailableBounties.length, generatingBounties]);
 
@@ -576,6 +747,7 @@ const PhoneModal = ({
     {
       id: 'photos',
       name: branding.gallery_app_name || t('phone.apps.photos', 'Photo Vault'),
+      shortName: t('phone.apps.photos_short', 'Photos'),
       subtitle: t('phone.apps.photos_sub', 'Vault & Media'),
       icon: Camera,
       gradient: 'from-pink-500 via-rose-500 to-pink-600',
@@ -585,6 +757,7 @@ const PhoneModal = ({
     {
       id: 'dms',
       name: branding.dm_app_name || t('phone.apps.dms', 'Messages'),
+      shortName: t('phone.apps.dms_short', 'Messages'),
       subtitle: t('phone.apps.dms_sub', 'Chats & Meetups'),
       icon: MessageSquare,
       gradient: 'from-emerald-500 via-teal-500 to-cyan-600',
@@ -594,6 +767,10 @@ const PhoneModal = ({
     {
       id: 'feed',
       name: branding.feed_app_name || t('phone.apps.feed', 'PeerPulse'),
+      shortName:
+        branding.feed_app_name && branding.feed_app_name.length <= 10
+          ? branding.feed_app_name
+          : t('phone.apps.feed_short', 'Social'),
       subtitle: t('phone.apps.feed_sub', 'Radar & Social'),
       icon: Rss,
       gradient: 'from-violet-500 via-purple-600 to-indigo-600',
@@ -626,6 +803,16 @@ const PhoneModal = ({
       gradient: 'from-rose-500 via-red-600 to-rose-700',
       badge: availableBounties.length > 0 ? availableBounties.length : null,
       badgeColor: 'bg-rose-500',
+    },
+    {
+      id: 'settings',
+      name: t('phone.apps.settings', 'Settings'),
+      shortName: t('phone.apps.settings', 'Settings'),
+      subtitle: t('phone.apps.settings_sub', 'Wallpaper & Theme'),
+      icon: Settings,
+      gradient: 'from-slate-500 via-zinc-600 to-neutral-700',
+      badge: null,
+      badgeColor: 'bg-sky-500',
     },
   ];
 
@@ -822,12 +1009,66 @@ const PhoneModal = ({
       processDmOutcome(res);
       if (onRefreshInventory) onRefreshInventory();
       if (onRefreshCodex) onRefreshCodex();
-    } catch {
-      // ignore
+    } catch (err) {
+      setDmOutcomeBanner({
+        error: err?.message || t('phone.dms.send_failed', 'Failed to send message.'),
+      });
     }
   };
 
   const scenarioKey = session?.scenario || 'fantasy';
+  const uiStyle = phonePrefs?.uiStyle === 'glass' ? 'glass' : 'classic';
+  const isGlass = uiStyle === 'glass';
+  const focalCls = FOCAL_OBJECT_CLASS[phonePrefs?.wallpaperFocal || 'center'] || 'object-center';
+  const dimAlpha = Math.max(0, Math.min(0.7, (phonePrefs?.wallpaperDim ?? 25) / 100));
+  const timePhase = resolveTimeOfDayPhase(displayTime, session?.current_minute);
+  const timeGrade = TIME_OF_DAY_GRADES[timePhase] || 'none';
+
+  const activeWallpaper = useMemo(
+    () =>
+      resolveActivePhoneWallpaper({
+        phonePrefs,
+        session,
+        mediaGallery,
+        activeCarouselEntry,
+      }),
+    [phonePrefs, session, mediaGallery, activeCarouselEntry]
+  );
+
+  const liveSelectedPhoto = useMemo(() => {
+    if (!selectedPhoto) return null;
+    if (selectedPhoto.id) {
+      const fresh = (mediaGallery || []).find(
+        (m) => m?.id != null && String(m.id) === String(selectedPhoto.id)
+      );
+      if (fresh) return fresh;
+    }
+    return selectedPhoto;
+  }, [selectedPhoto, mediaGallery]);
+
+  const showWallpaperBackdrop = isGlass || activeApp === 'home';
+  const blurWallpaperNow = isGlass && activeApp !== 'home' && phonePrefs?.blurInApps !== false;
+
+  const isSelectedPhotoActiveWallpaper = Boolean(
+    liveSelectedPhoto?.image_url &&
+      session?.id != null &&
+      phonePrefs?.sessionWallpapers?.[String(session.id)]?.type === 'npc_photo' &&
+      (String(phonePrefs.sessionWallpapers[String(session.id)].id) === String(liveSelectedPhoto.id) ||
+        phonePrefs.sessionWallpapers[String(session.id)].url === liveSelectedPhoto.image_url)
+  );
+
+  const handleSetPhotoAsWallpaper = (photo) => {
+    if (!session?.id || !photo?.image_url) return;
+    setSessionPhoneWallpaper(session.id, {
+      type: 'npc_photo',
+      id: photo.id ?? null,
+      url: photo.image_url,
+      label: photo.contact_name || photo.name || 'NPC Photo',
+    });
+    if (phonePrefs?.carouselEnabled) {
+      setPhonePref('carouselEnabled', false);
+    }
+  };
 
   const modalContent = (
     <AnimatePresence>
@@ -841,7 +1082,7 @@ const PhoneModal = ({
           onClick={(e) => {
             if (e.target === e.currentTarget) onClose();
           }}
-          className="fixed inset-0 z-50 flex flex-col md:items-center md:justify-center md:p-4 bg-neutral-950 md:bg-black/80 md:backdrop-blur-md text-gray-100 select-none overflow-hidden"
+          className="fixed inset-0 z-50 flex flex-col md:items-center md:justify-center md:p-4 hk-phone-backdrop md:backdrop-blur-md text-gray-100 select-none overflow-hidden"
         >
           {/* Phone Shell: Full-screen on mobile, centered phone shell on desktop */}
           <motion.div
@@ -849,15 +1090,57 @@ const PhoneModal = ({
             role="dialog"
             aria-modal="true"
             aria-label={branding?.device_name || t('nav.smartphone', 'Smartphone')}
+            data-phone-style={uiStyle}
             tabIndex={-1}
             initial={reduced ? { opacity: 0 } : { opacity: 0, y: 18, scale: 0.96 }}
             animate={reduced ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
             exit={reduced ? { opacity: 0 } : { opacity: 0, y: 14, scale: 0.96 }}
             transition={reduced ? { duration: 0.14 } : SPRING_PANEL}
-            className="w-full h-full md:max-w-[420px] md:h-[840px] md:max-h-[calc(var(--app-height,100dvh)-1.5rem)] md:rounded-[44px] md:border-[6px] md:border-neutral-800 md:shadow-[0_0_50px_rgba(0,0,0,0.85)] md:ring-1 md:ring-neutral-700/50 flex flex-col bg-neutral-950 overflow-hidden relative pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-0 focus:outline-none"
+            className="hk-phone-shell w-full h-full md:max-w-[420px] md:h-[840px] md:max-h-[calc(var(--app-height,100dvh)-1.5rem)] md:rounded-[44px] md:border-[6px] md:border-neutral-800 md:shadow-[0_0_50px_rgba(0,0,0,0.85)] md:ring-1 md:ring-neutral-700/50 flex flex-col bg-neutral-950 overflow-hidden relative pb-[max(0.6rem,env(safe-area-inset-bottom))] md:pb-0 focus:outline-none"
           >
+            {/* Full-Bleed Wallpaper Layer */}
+            {showWallpaperBackdrop && (
+              <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+                <div
+                  className={`w-full h-full transition-all duration-300 ${
+                    blurWallpaperNow ? 'blur-[14px] scale-[1.06]' : 'scale-100'
+                  }`}
+                >
+                  {activeWallpaper?.url ? (
+                    <img
+                      key={activeWallpaper.url}
+                      src={activeWallpaper.url}
+                      alt=""
+                      className={`w-full h-full object-cover ${focalCls}`}
+                    />
+                  ) : (
+                    <div className="w-full h-full hk-phone-wp-iphone" />
+                  )}
+                </div>
+
+                {phonePrefs?.dynamicTimeTint && timeGrade !== 'none' && (
+                  <div
+                    className="absolute inset-0 pointer-events-none"
+                    style={{ backgroundImage: timeGrade }}
+                  />
+                )}
+                <div
+                  className="absolute inset-0 pointer-events-none transition-opacity duration-200"
+                  style={{ backgroundColor: `rgba(0, 0, 0, ${dimAlpha})` }}
+                />
+              </div>
+            )}
+
             {/* Dynamic Island / Speaker Notch & Status Bar */}
-            <div className="hidden md:flex relative px-6 pt-3 pb-2 justify-between items-center text-xs font-semibold text-gray-200 bg-neutral-950/90 z-20 shrink-0">
+            <div
+              className={`hidden md:flex relative px-6 pt-3 pb-2 justify-between items-center text-xs font-semibold z-20 shrink-0 ${
+                isGlass
+                  ? 'hk-phone-chrome border-b text-gray-100'
+                  : activeApp === 'home'
+                    ? 'bg-transparent hk-phone-home-text'
+                    : 'text-gray-200 bg-neutral-950/90'
+              }`}
+            >
               <span className="font-mono tabular-nums text-[11px] tracking-tight select-none">{displayTime}</span>
 
               <div className="absolute left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-24 h-4 bg-black rounded-full flex items-center justify-center gap-1.5 border border-neutral-800/80 shadow-inner pointer-events-none">
@@ -865,9 +1148,9 @@ const PhoneModal = ({
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-950/80" />
               </div>
 
-              <div className="flex items-center gap-1.5 text-gray-300 select-none">
-                <Wifi size={12} className="text-gray-300" />
-                <span className="text-[10px] font-mono text-gray-300">{t('phone.status_bar.network', '5G')}</span>
+              <div className="flex items-center gap-1.5 select-none">
+                <Wifi size={12} />
+                <span className="text-[10px] font-mono">{t('phone.status_bar.network', '5G')}</span>
                 <div
                   className="flex items-center gap-[1px]"
                   title={t('phone.status_bar.battery_title', 'Battery: 88%', { percent: 88 })}
@@ -882,7 +1165,13 @@ const PhoneModal = ({
 
             {/* In-App Header */}
             {activeApp !== 'home' && (
-              <div className="px-4 py-2 flex items-center justify-between border-b border-neutral-900 bg-neutral-950/95 shrink-0 select-none">
+              <div
+                className={`relative z-10 px-4 py-2 flex items-center justify-between border-b shrink-0 select-none ${
+                  isGlass
+                    ? 'hk-phone-chrome'
+                    : 'border-neutral-900 bg-neutral-950/95'
+                }`}
+              >
                 <button
                   type="button"
                   onClick={() => {
@@ -890,7 +1179,7 @@ const PhoneModal = ({
                     setSelectedPhoto(null);
                     if (closeChat) closeChat();
                   }}
-                  className="flex items-center gap-1 text-xs font-semibold text-pink-400 hover:text-pink-300 transition-colors cursor-pointer"
+                  className="hk-phone-header-accent flex items-center gap-1 text-xs font-semibold text-pink-400 hover:text-pink-300 transition-colors cursor-pointer"
                 >
                   <ChevronLeft size={16} />
                   <span>{t('phone.nav.back_to_apps', 'Back to Apps')}</span>
@@ -908,18 +1197,42 @@ const PhoneModal = ({
             )}
 
             {/* Screen Canvas */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar px-3.5 py-2.5 bg-gradient-to-b from-neutral-900/40 to-black relative flex flex-col min-h-0">
+            <div
+              data-phone-app={activeApp}
+              className={`hk-phone-canvas flex-1 overflow-y-auto custom-scrollbar px-3.5 py-2.5 relative z-10 flex flex-col min-h-0 ${
+                !isGlass && activeApp !== 'home' ? 'bg-gradient-to-b from-neutral-900/40 to-black' : ''
+              }`}
+            >
               {activeApp === 'home' && (
                 <PhoneHomeApp
                   displayTime={displayTime}
                   session={session}
                   appointments={appointments}
                   availableBounties={availableBounties}
+                  mediaGallery={mediaGallery}
                   apps={apps}
                   onSelectApp={(appId) => {
                     setActiveApp(appId);
                     setSelectedPhoto(null);
                   }}
+                  clockStyle={phonePrefs?.clockStyle || 'modern'}
+                  uiStyle={uiStyle}
+                  t={t}
+                />
+              )}
+
+              {activeApp === 'settings' && (
+                <PhoneSettingsApp
+                  displayTime={displayTime}
+                  session={session}
+                  mediaGallery={mediaGallery}
+                  phonePrefs={phonePrefs}
+                  setPhonePref={setPhonePref}
+                  setSessionPhoneWallpaper={setSessionPhoneWallpaper}
+                  clockFormat={clockFormat}
+                  setClockFormat={setClockFormat}
+                  activeWallpaper={activeWallpaper}
+                  onShuffleCarousel={advanceCarousel}
                   t={t}
                 />
               )}
@@ -970,7 +1283,10 @@ const PhoneModal = ({
                   onChangePhotoCategory={setPhotoCategory}
                   photoContactFilter={photoContactFilter}
                   onChangePhotoContactFilter={setPhotoContactFilter}
-                  onSelectPhoto={setSelectedPhoto}
+                  onSelectPhoto={(photo) => {
+                    setPhotoActionError(null);
+                    setSelectedPhoto(photo);
+                  }}
                   clockFormat={clockFormat}
                   t={t}
                 />
@@ -1003,6 +1319,13 @@ const PhoneModal = ({
                   dmDirectory={dmDirectory}
                   dispatchDirectory={dispatchDirectory}
                   onLoadChatMessages={loadChatMessages}
+                  mediaGallery={mediaGallery}
+                  imageGenEnabled={effectiveImageGenMode}
+                  onSelectPhoto={(photo) => {
+                    setPhotoActionError(null);
+                    setSelectedPhoto(photo);
+                  }}
+                  onGenerateMediaPhoto={(itemId) => handleGenerateMediaPhoto(itemId)}
                   clockFormat={clockFormat}
                   t={t}
                 />
@@ -1031,10 +1354,7 @@ const PhoneModal = ({
                   onSendFriendRequest={handleSendFriendReq}
                   suggestedPeers={suggestedPeers}
                   contacts={contacts}
-                  onOpenChatWithContact={(idOrName) => {
-                    setActiveApp('dms');
-                    loadChatMessages(idOrName);
-                  }}
+                  onOpenChatWithContact={handleOpenChatWithContact}
                   t={t}
                 />
               )}
@@ -1078,57 +1398,160 @@ const PhoneModal = ({
             </div>
 
             {/* Expanded Photo Preview Overlay */}
-            {selectedPhoto && (
-              <div className="absolute inset-0 bg-black/95 z-30 flex flex-col p-4">
-                <div className="flex justify-between items-center border-b border-neutral-800 pb-2 mb-3">
-                  <span className="font-bold text-xs text-pink-300 truncate">{selectedPhoto.contact_name}</span>
+            {liveSelectedPhoto && (
+              <div
+                data-phone-style="classic"
+                className="absolute inset-0 hk-phone-lightbox z-30 flex flex-col p-4"
+              >
+                <div className="flex justify-between items-center border-b border-neutral-800 pb-2 mb-3 shrink-0">
+                  <span className="font-bold text-xs text-pink-300 truncate">{liveSelectedPhoto.contact_name}</span>
                   <button
                     type="button"
-                    onClick={() => setSelectedPhoto(null)}
+                    onClick={() => {
+                      setSelectedPhoto(null);
+                      setPhotoActionError(null);
+                    }}
                     className="p-1 text-gray-400 hover:text-gray-100 cursor-pointer"
                   >
                     <X size={16} />
                   </button>
                 </div>
 
-                <div className="flex-1 flex flex-col items-center justify-center p-3 text-center space-y-3 bg-neutral-950 border border-neutral-800 rounded-2xl">
-                  <div className="w-16 h-16 rounded-full bg-pink-950/60 border border-pink-700/60 flex items-center justify-center text-pink-300">
-                    {selectedPhoto.media_type?.includes('video') ? <Video size={28} /> : <Camera size={28} />}
-                  </div>
-                  <h5 className="font-bold text-sm text-gray-100">{selectedPhoto.name}</h5>
-                  <p className="text-xs text-gray-300 leading-relaxed max-w-xs italic bg-neutral-900/80 p-3 rounded-xl border border-neutral-800">
-                    "{selectedPhoto.caption}"
-                  </p>
-                  <div className="flex flex-wrap gap-1 justify-center pt-2">
-                    {selectedPhoto.tags?.map((tag, i) => (
-                      <span key={i} className="text-[10px] px-2 py-0.5 bg-neutral-800 text-gray-400 rounded-full font-mono">
-                        #{tag}
-                      </span>
-                    ))}
-                  </div>
+                <div className="flex-1 overflow-y-auto custom-scrollbar flex flex-col items-center justify-center p-3 text-center space-y-3 bg-neutral-950 border border-neutral-800 rounded-2xl min-h-0">
+                  {(() => {
+                    const isVideo = isVideoMediaItem(liveSelectedPhoto);
+                    const isGenerating =
+                      liveSelectedPhoto.image_status === 'generating' ||
+                      (liveSelectedPhoto.id && String(generatingPhotoId) === String(liveSelectedPhoto.id));
+                    const hasImage = Boolean(liveSelectedPhoto.image_url);
 
-                  {selectedPhoto.id && (
-                    <button
-                      type="button"
-                      disabled={deletingPhoto}
-                      onClick={() => handleDeleteMedia(selectedPhoto)}
-                      className="mt-3 px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-800/60 text-xs font-bold transition-colors cursor-pointer"
-                    >
-                      {deletingPhoto ? 'Deleting...' : '🗑️ Delete Media'}
-                    </button>
-                  )}
+                    return (
+                      <>
+                        {hasImage ? (
+                          <div className="relative w-full max-w-[270px] rounded-xl overflow-hidden border border-white/15 hk-phone-media-frame shadow-lg shrink-0">
+                            <img
+                              src={liveSelectedPhoto.image_url}
+                              alt={liveSelectedPhoto.caption || liveSelectedPhoto.name}
+                              className="w-full max-h-[340px] object-cover object-top"
+                            />
+                            {isVideo && (
+                              <span className="absolute inset-0 m-auto w-11 h-11 rounded-full hk-phone-play-badge flex items-center justify-center hk-phone-icon-glyph">
+                                <Play size={18} className="ml-0.5" />
+                              </span>
+                            )}
+                          </div>
+                        ) : isGenerating ? (
+                          <div className="w-full max-w-[240px] h-52 rounded-xl border border-pink-500/40 bg-pink-950/20 flex flex-col items-center justify-center gap-2 animate-pulse shrink-0">
+                            <Loader2 size={26} className="animate-spin text-pink-400" />
+                            <span className="text-xs font-semibold text-pink-200">
+                              {t('phone.vault.generating', 'Developing...')}
+                            </span>
+                          </div>
+                        ) : (
+                          <div className="w-16 h-16 rounded-full bg-pink-950/60 border border-pink-700/60 flex items-center justify-center text-pink-300 shrink-0">
+                            {isVideo ? <Video size={28} /> : <Camera size={28} />}
+                          </div>
+                        )}
+
+                        <h5 className="font-bold text-sm text-gray-100">{liveSelectedPhoto.name}</h5>
+                        <p className="text-xs text-gray-300 leading-relaxed max-w-xs italic bg-neutral-900/80 p-3 rounded-xl border border-neutral-800">
+                          &ldquo;{liveSelectedPhoto.caption}&rdquo;
+                        </p>
+
+                        {photoActionError && (
+                          <p className="text-[11px] text-red-300 bg-red-950/50 border border-red-800/60 rounded-lg px-2.5 py-1.5 max-w-xs">
+                            {photoActionError}
+                          </p>
+                        )}
+
+                        <div className="flex flex-wrap gap-1 justify-center">
+                          {liveSelectedPhoto.tags?.map((tag, i) => (
+                            <span key={i} className="text-[10px] px-2 py-0.5 bg-neutral-800 text-gray-400 rounded-full font-mono">
+                              #{tag}
+                            </span>
+                          ))}
+                        </div>
+
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                          {liveSelectedPhoto.id && isImgGenActive && (
+                            <button
+                              type="button"
+                              disabled={isGenerating}
+                              onClick={() =>
+                                handleGenerateMediaPhoto(liveSelectedPhoto.id, { forceRegenerate: hasImage })
+                              }
+                              className="px-3 py-1.5 rounded-xl bg-pink-600/30 hover:bg-pink-600/50 text-pink-200 border border-pink-500/50 text-xs font-bold transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                              {isGenerating ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : hasImage ? (
+                                <RefreshCw size={13} />
+                              ) : (
+                                <Sparkles size={13} />
+                              )}
+                              <span>
+                                {hasImage
+                                  ? t('phone.vault.regenerate', 'Regenerate')
+                                  : t('phone.vault.generate_photo', 'Generate Photo')}
+                              </span>
+                            </button>
+                          )}
+
+                          {hasImage && !isVideo && session?.id && (
+                            <button
+                              type="button"
+                              onClick={() => handleSetPhotoAsWallpaper(liveSelectedPhoto)}
+                              className={`px-3 py-1.5 rounded-xl border text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                isSelectedPhotoActiveWallpaper
+                                  ? 'bg-emerald-600/35 text-emerald-200 border-emerald-400/60'
+                                  : 'bg-sky-600/30 hover:bg-sky-600/50 text-sky-200 border-sky-500/50'
+                              }`}
+                            >
+                              {isSelectedPhotoActiveWallpaper ? <Check size={13} /> : <ImageIcon size={13} />}
+                              <span>
+                                {isSelectedPhotoActiveWallpaper
+                                  ? t('phone.vault.active_wallpaper', 'Active Wallpaper')
+                                  : t('phone.vault.set_wallpaper', 'Set as Wallpaper')}
+                              </span>
+                            </button>
+                          )}
+
+                          {liveSelectedPhoto.id && (
+                            <button
+                              type="button"
+                              disabled={deletingPhoto}
+                              onClick={() => handleDeleteMedia(liveSelectedPhoto)}
+                              className="px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/70 text-red-300 border border-red-800/60 text-xs font-bold transition-colors cursor-pointer"
+                            >
+                              {deletingPhoto
+                                ? t('phone.vault.deleting', 'Deleting...')
+                                : t('phone.vault.delete_media', '🗑️ Delete Media')}
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             )}
 
             {/* Gesture Navigation Bar */}
-            <div className="px-5 py-2.5 bg-neutral-950/95 border-t border-neutral-800/70 flex items-center justify-between shrink-0 select-none">
+            <div
+              className={`relative z-10 px-5 py-2.5 border-t flex items-center justify-between shrink-0 select-none ${
+                isGlass
+                  ? 'hk-phone-chrome'
+                  : 'bg-neutral-950/95 border-neutral-800/70'
+              }`}
+            >
               <button
                 type="button"
                 onClick={() => {
                   if (selectedPhoto) {
                     setSelectedPhoto(null);
+                    setPhotoActionError(null);
                   } else if (activeApp === 'dms' && activeChatNpc) {
+                    setDmOutcomeBanner(null);
                     closeChat();
                   } else if (activeApp !== 'home') {
                     setActiveApp('home');
@@ -1149,12 +1572,14 @@ const PhoneModal = ({
                   if (activeApp !== 'home' || selectedPhoto || activeChatNpc) {
                     setActiveApp('home');
                     setSelectedPhoto(null);
+                    setPhotoActionError(null);
+                    setDmOutcomeBanner(null);
                     if (closeChat) closeChat();
                   } else {
                     onClose();
                   }
                 }}
-                className="group py-2 px-6 flex items-center justify-center cursor-pointer focus:outline-none"
+                className="group py-2 px-6 flex items-center justify-center cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/80 rounded-full"
                 title={activeApp !== 'home' ? t('phone.nav.tap_home', 'Tap for Home') : t('phone.nav.tap_lock', 'Tap to Lock Phone')}
               >
                 <div className="w-28 h-1.5 bg-neutral-600 group-hover:bg-neutral-300 rounded-full transition-all group-active:scale-95 group-hover:h-2" />

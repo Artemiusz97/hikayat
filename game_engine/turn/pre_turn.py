@@ -1122,6 +1122,8 @@ async def run_pre_turn_phase(
                 session["_active_quest_encounter"] = _q_enc_meta
                 ctx.combat.active_quest_encounter = _q_enc_meta
                 new_partners = []
+                if cast_plan is not None:
+                    cast_plan.dialogue_partners = []
                 _in_dialogue_mode = False
                 _names = ", ".join(m["name"] for m in _spawned_units if m.get("name"))
                 party_names_str = ", ".join(
@@ -1203,6 +1205,8 @@ async def run_pre_turn_phase(
             ambush_monsters = list(new_monsters)
             # Break peaceful 1-on-1 dialogue lock when an ambush interrupts the scene
             new_partners = []
+            if cast_plan is not None:
+                cast_plan.dialogue_partners = []
             _in_dialogue_mode = False
             names = ", ".join(m["name"] for m in new_monsters if m.get("name"))
             party_names_str = ", ".join(

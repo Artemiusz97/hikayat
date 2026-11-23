@@ -76,7 +76,7 @@ from mechanics.combat.items.consumables import (
     generate_procedural_potion, generate_procedural_food, generate_procedural_drink,
     parse_consumable_metadata, serialize_consumable_metadata,
     apply_item_to_target, parse_item_effect, parse_item_tier,
-    classify_and_enrich_ad_hoc_item, create_digital_media_item,
+    classify_and_enrich_ad_hoc_item, create_digital_media_item, update_digital_media_image,
     is_digital_item, parse_digital_item_metadata, is_giftable_item,
     is_key_item,
     classify_consumable_usage_mode,

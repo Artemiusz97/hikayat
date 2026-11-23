@@ -14,9 +14,9 @@ const PhonePlannerApp = ({
   t,
 }) => {
   return (
-    <div className="flex-1 flex flex-col min-h-0 bg-neutral-950 text-neutral-100 overflow-hidden">
+    <div className="flex-1 flex flex-col min-h-0 text-neutral-100 overflow-hidden">
       {/* App Subheader */}
-      <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between shrink-0">
+      <div className="px-4 py-3 bg-neutral-900/90 border-b border-neutral-800 rounded-t-xl flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-blue-500 to-sky-600 flex items-center justify-center text-white shadow-sm">
             <Calendar size={16} />

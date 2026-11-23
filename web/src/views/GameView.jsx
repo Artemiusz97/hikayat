@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft,
@@ -33,6 +33,7 @@ import CharacterSheet from '../components/Sidebar/CharacterSheet';
 import InventoryPanel from '../components/Sidebar/InventoryPanel';
 import PartyWidget from '../components/Sidebar/PartyWidget';
 import ContactsPanel from '../components/Sidebar/ContactsPanel';
+import NpcProfileSideCard from '../components/Sidebar/NpcProfileSideCard';
 import QuestLogPanel from '../components/Sidebar/QuestLogPanel';
 import CodexPanel from '../components/Sidebar/CodexPanel';
 import {
@@ -80,6 +81,8 @@ import { useUiPreferences } from '../theme/UiPreferencesProvider';
 import { formatCleanLocation } from '../utils/locationFormat';
 import { formatCleanDeviceName } from '../utils/consumables';
 import { isAnomalousScenarioKey, isValidSessionId } from '../utils/session';
+import { matchesNpcIdentity, resolveSceneNpcProfile } from '../utils/npcProfile';
+import { isAnomalousNpc, normalizeActorName } from '../utils/sceneTargets';
 import {
   formatClockTime,
   getDayOfWeekLabel,
@@ -156,6 +159,7 @@ const GameView = ({
   const headerCopyTimerRef = useRef(null);
   const [targetContactName, setTargetContactName] = useState(null);
   const [targetContactPulse, setTargetContactPulse] = useState(0);
+  const [inspectedSceneNpc, setInspectedSceneNpc] = useState(null);
   const [phoneInitialNpc, setPhoneInitialNpc] = useState(null);
   const [isStealthActive, setIsStealthActive] = useState(false);
   const [lastSeenChatCount, setLastSeenChatCount] = useState(
@@ -166,6 +170,14 @@ const GameView = ({
   const codex = useCodex(session?.id, user, session, refreshSession);
   const phone = usePhone(session?.id, user);
   const settings = useSettings(user?.user_id);
+
+  const resolvedSceneNpcProfile = useMemo(
+    () =>
+      inspectedSceneNpc
+        ? resolveSceneNpcProfile(inspectedSceneNpc, session, codex)
+        : null,
+    [inspectedSceneNpc, session, codex]
+  );
 
   const isPartyTabVisible =
     hud.leftPanel === 'utility' && activeUtilityTab === 'party';
@@ -220,6 +232,65 @@ const GameView = ({
     };
   }, [isDesktop, mobileSheet]);
 
+  useEffect(() => {
+    if (!inspectedSceneNpc) return;
+    const currentList = Array.isArray(session?.current_npcs) ? session.current_npcs : [];
+    const stillPresent = currentList.some(
+      (entry) =>
+        !isAnomalousNpc(entry) &&
+        matchesNpcIdentity(entry, inspectedSceneNpc)
+    );
+    if (!stillPresent) {
+      setInspectedSceneNpc(null);
+    }
+  }, [inspectedSceneNpc, session?.current_npcs]);
+
+  useEffect(() => {
+    setInspectedSceneNpc(null);
+  }, [session?.id]);
+
+  useEffect(() => {
+    if (!isDesktop && mobileSheet !== 'npcs' && inspectedSceneNpc) {
+      setInspectedSceneNpc(null);
+    }
+  }, [isDesktop, mobileSheet, inspectedSceneNpc]);
+
+  useEffect(() => {
+    if (!isDesktop || !inspectedSceneNpc) return undefined;
+    const token = Symbol('npc-profile-side-esc');
+    const unregister = registerEscapeLayer(token);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setInspectedSceneNpc(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [isDesktop, inspectedSceneNpc]);
+
+  useEffect(() => {
+    if (isDesktop || mobileSheet !== 'npcs' || !inspectedSceneNpc) return undefined;
+    const token = Symbol('mobile-npc-profile-esc');
+    const unregister = registerEscapeLayer(token);
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && !e.defaultPrevented && isTopEscapeLayer(token)) {
+        e.preventDefault();
+        e.stopPropagation();
+        setInspectedSceneNpc(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      unregister();
+      window.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [isDesktop, mobileSheet, inspectedSceneNpc]);
+
   const handleConfirmEndSession = async () => {
     if (!endSession || endingSessionBusy) return;
     setEndingSessionBusy(true);
@@ -231,22 +302,47 @@ const GameView = ({
     }
   };
 
-  const handleSelectContact = (name) => {
+  const handleConsumeTargetContact = useCallback(() => {
+    setTargetContactName(null);
+  }, []);
+
+  const handleOpenNpcInRoster = (name, preferredTarget = null) => {
+    setInspectedSceneNpc(null);
     setTargetContactName(name);
-    setTargetContactPulse(Date.now());
+    setTargetContactPulse((prev) => prev + 1);
     const needle = String(name ?? '').trim().toLowerCase();
-    const isPersonalContact =
-      needle &&
-      (codex.contacts || []).some(
-        (c) =>
-          !c.is_dispatch_channel &&
-          (String(c.name ?? '').trim().toLowerCase() === needle ||
-            String(c.id ?? '').trim().toLowerCase() === needle ||
-            String(c.npc_id ?? '').trim().toLowerCase() === needle)
-      );
-    setActiveUtilityTab(isPersonalContact ? 'contacts' : 'codex');
+    const isPersonalOrAcq =
+      preferredTarget === 'contacts' ||
+      preferredTarget === 'acquaintances' ||
+      (preferredTarget !== 'codex' &&
+        needle &&
+        ((codex.contacts || []).some(
+          (c) =>
+            !c.is_dispatch_channel &&
+            (String(c.name ?? '').trim().toLowerCase() === needle ||
+              String(c.id ?? '').trim().toLowerCase() === needle ||
+              String(c.npc_id ?? '').trim().toLowerCase() === needle)
+        ) ||
+          (codex.acquaintances || []).some(
+            (a) =>
+              String(a.name ?? '').trim().toLowerCase() === needle ||
+              String(a.id ?? '').trim().toLowerCase() === needle ||
+              String(a.npc_id ?? '').trim().toLowerCase() === needle ||
+              String(a.npc_key ?? '').trim().toLowerCase() === needle
+          )));
+    setActiveUtilityTab(isPersonalOrAcq ? 'contacts' : 'codex');
     setMobileSheet(null);
     setHudField('leftPanel', 'utility');
+  };
+
+  const handleInspectSceneNpc = (name) => {
+    const cleanTarget = normalizeActorName(name).toLowerCase();
+    if (!cleanTarget) return;
+    setInspectedSceneNpc((prev) =>
+      prev && (normalizeActorName(prev).toLowerCase() === cleanTarget || matchesNpcIdentity({ name: prev }, name))
+        ? null
+        : name
+    );
   };
 
   const handleMessageContact = (npc) => {
@@ -583,11 +679,12 @@ const GameView = ({
             onMessageContact={handleMessageContact}
             onJumpToCharacterInCodex={(npcName) => {
               setTargetContactName(npcName);
-              setTargetContactPulse(Date.now());
+              setTargetContactPulse((prev) => prev + 1);
               setActiveUtilityTab('codex');
             }}
             targetContactName={targetContactName}
             targetContactPulse={targetContactPulse}
+            onConsumeTargetContact={handleConsumeTargetContact}
           />
         );
       case 'quests':
@@ -613,11 +710,12 @@ const GameView = ({
             onTriggerAction={handleAction}
             targetContactName={targetContactName}
             targetContactPulse={targetContactPulse}
+            onConsumeTargetContact={handleConsumeTargetContact}
             isStreaming={isStreaming}
             processingTurn={processingTurn}
             onJumpToSavedContact={(npcName) => {
               setTargetContactName(npcName);
-              setTargetContactPulse(Date.now());
+              setTargetContactPulse((prev) => prev + 1);
               setActiveUtilityTab('contacts');
             }}
           />
@@ -644,6 +742,11 @@ const GameView = ({
     }
   };
 
+  const handleToggleWorldMapDrawer = () => {
+    setWorldMapTargetLocation(null);
+    toggleLeftPanel('map');
+  };
+
   const renderLeftPanelContent = () => {
     if (hud.leftPanel === 'map') {
       return (
@@ -651,7 +754,10 @@ const GameView = ({
           <WorldMapModal
             mode="drawer"
             isOpen={true}
-            onClose={() => setHudField('leftPanel', null)}
+            onClose={() => {
+              setWorldMapTargetLocation(null);
+              setHudField('leftPanel', null);
+            }}
             onExpandModal={() => {
               setHudField('leftPanel', null);
               setWorldMapExpandedOpen(true);
@@ -919,7 +1025,7 @@ const GameView = ({
       </MotionButton>
 
       <MotionButton
-        onClick={() => toggleLeftPanel('map')}
+        onClick={handleToggleWorldMapDrawer}
         aria-expanded={hud.leftPanel === 'map'}
         aria-label={t('nav.map', 'World Map')}
         title={t('nav.map', 'World Map')}
@@ -933,7 +1039,7 @@ const GameView = ({
       </MotionButton>
 
       <MotionButton
-        onClick={() => toggleLeftPanel('map')}
+        onClick={handleToggleWorldMapDrawer}
         title={session?.current_location || locationLabel}
         className={`hk-acrylic-pill min-h-10 h-auto py-1.5 px-3.5 inline-flex items-center gap-2 text-left min-w-0 ${
           compact ? 'flex-1' : 'max-w-[clamp(10rem,13vw,22rem)]'
@@ -1055,7 +1161,7 @@ const GameView = ({
       isStreaming={isStreaming}
       waitingForParty={waitingForParty}
       partyStatus={partyStatus}
-      onSelectContact={handleSelectContact}
+      onSelectContact={handleOpenNpcInRoster}
       actionError={actionError}
       clearActionError={clearActionError}
       collapsed={hud.actionBarCollapsed}
@@ -1107,6 +1213,31 @@ const GameView = ({
               >
                 {renderNarrationCard({ compactDesktop: true })}
               </section>
+
+              <AnimatePresence>
+                {inspectedSceneNpc && resolvedSceneNpcProfile && (
+                  <AcrylicPanel
+                    key="npc-profile-side-card"
+                    variant="panel"
+                    origin="right"
+                    role="complementary"
+                    aria-label={t('scene.npc_profile_panel', {
+                      name: resolvedSceneNpcProfile.npc?.name || inspectedSceneNpc,
+                      defaultValue: `${resolvedSceneNpcProfile.npc?.name || inspectedSceneNpc} Profile`,
+                    })}
+                    className="pointer-events-auto absolute top-[3.125rem] bottom-0 right-0 z-20 w-[clamp(21rem,24vw,26rem)] max-w-[calc(100%-1rem)] flex flex-col overflow-hidden"
+                  >
+                    <NpcProfileSideCard
+                      profile={resolvedSceneNpcProfile}
+                      session={session}
+                      codexHook={codex}
+                      onClose={() => setInspectedSceneNpc(null)}
+                      onOpenInRoster={handleOpenNpcInRoster}
+                      onInspectLinkedNpc={(linkedName) => setInspectedSceneNpc(linkedName)}
+                    />
+                  </AcrylicPanel>
+                )}
+              </AnimatePresence>
             </div>
 
             {/* Bottom Dock Row: Collapsible Special Actions Dock + Dedicated Smartphone + Action Choices */}
@@ -1212,7 +1343,8 @@ const GameView = ({
                 />
                 <PresentNpcsCard
                   session={session}
-                  onSelectContact={handleSelectContact}
+                  onSelectContact={handleInspectSceneNpc}
+                  selectedNpcName={inspectedSceneNpc}
                   onQuickAction={handleAction}
                   collapsed={hud.npcsCollapsed}
                   onToggleCollapse={() => toggleHudField('npcsCollapsed')}
@@ -1402,14 +1534,30 @@ const GameView = ({
 
                     {mobileSheet === 'npcs' && (
                       <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-                        <EpistemicWatchStrip session={session} isSheet />
-                        <PresentNpcsCard
-                          session={session}
-                          onSelectContact={handleSelectContact}
-                          onQuickAction={handleAction}
-                          isSheet
-                          className="flex-1"
-                        />
+                        {inspectedSceneNpc && resolvedSceneNpcProfile ? (
+                          <NpcProfileSideCard
+                            isSheet
+                            profile={resolvedSceneNpcProfile}
+                            session={session}
+                            codexHook={codex}
+                            onBack={() => setInspectedSceneNpc(null)}
+                            onClose={() => setMobileSheet(null)}
+                            onOpenInRoster={handleOpenNpcInRoster}
+                            onInspectLinkedNpc={(linkedName) => setInspectedSceneNpc(linkedName)}
+                          />
+                        ) : (
+                          <>
+                            <EpistemicWatchStrip session={session} isSheet />
+                            <PresentNpcsCard
+                              session={session}
+                              onSelectContact={handleInspectSceneNpc}
+                              selectedNpcName={inspectedSceneNpc}
+                              onQuickAction={handleAction}
+                              isSheet
+                              className="flex-1"
+                            />
+                          </>
+                        )}
                       </div>
                     )}
 
@@ -1503,6 +1651,7 @@ const GameView = ({
           codexHook={codex}
           session={session}
           user={user}
+          imageGenMode={settings.settings?.image_gen_enabled}
           initialChatNpc={phoneInitialNpc}
           onClearInitialChatNpc={() => setPhoneInitialNpc(null)}
           onRefreshInventory={inventory.refreshInventory}
@@ -1532,6 +1681,16 @@ const GameView = ({
           onSessionUpdated={handleSessionLoaded}
           onRefreshCharacter={refreshCharacter}
           onRefreshCodex={codex.refreshCodex}
+          onImageModeSaved={(nextMode) => {
+            if (
+              session &&
+              (Number(session.capacity || 1) <= 1 ||
+                String(session.host_user_id) === String(user?.user_id))
+            ) {
+              setSession((prev) => (prev ? { ...prev, image_gen_enabled: nextMode } : prev));
+              phone.refreshPhone?.();
+            }
+          }}
         />
       </LazyMount>
 

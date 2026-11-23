@@ -50,6 +50,7 @@ const SettingsModal = ({
   onSessionUpdated,
   onRefreshCharacter,
   onRefreshCodex,
+  onImageModeSaved = null,
 }) => {
   const { t, i18n } = useTranslation();
   const {
@@ -351,7 +352,12 @@ const SettingsModal = ({
                   return (
                     <MotionButton
                       key={mode.id}
-                      onClick={() => updateSettings({ image_gen_enabled: mode.id })}
+                      onClick={async () => {
+                        try {
+                          await updateSettings({ image_gen_enabled: mode.id });
+                          onImageModeSaved?.(mode.id);
+                        } catch {}
+                      }}
                       disabled={saving}
                       className={`p-2 rounded-xl text-left transition-all border ${
                         isSelected

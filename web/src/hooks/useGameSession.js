@@ -1,6 +1,11 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiCall } from '../api/client';
 
+const isAutoSceneImageGen = (s) =>
+  s?.image_gen_enabled === true ||
+  Number(s?.image_gen_enabled) === 1 ||
+  String(s?.image_gen_enabled || '').trim().toLowerCase() === 'auto';
+
 export const useGameSession = (user, character) => {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -31,7 +36,29 @@ export const useGameSession = (user, character) => {
   const processingTurnRef = useRef(false);
   const pendingAsyncPostRef = useRef(null);
   const activeTurnIdRef = useRef(null);
+  const turnGenerationRef = useRef(0);
+  const completedTurnIdsRef = useRef(new Set());
   const hasConnectedOnceRef = useRef(false);
+
+  const recordCompletedTurnId = useCallback((turnId) => {
+    if (!turnId) return;
+    if (completedTurnIdsRef.current.size > 32) {
+      completedTurnIdsRef.current.clear();
+    }
+    completedTurnIdsRef.current.add(turnId);
+  }, []);
+
+  const acceptAsyncTurn = useCallback((data, postPromise, canAsyncWs) => {
+    const alreadyFinished =
+      !processingTurnRef.current ||
+      (canAsyncWs && pendingAsyncPostRef.current !== postPromise) ||
+      Boolean(data?.turn_id && completedTurnIdsRef.current.has(data.turn_id));
+    if (alreadyFinished) {
+      return false;
+    }
+    activeTurnIdRef.current = data?.turn_id || null;
+    return true;
+  }, []);
 
   useEffect(() => {
     processingTurnRef.current = processingTurn;
@@ -81,6 +108,10 @@ export const useGameSession = (user, character) => {
     if (socketRef.current) {
       const ws = socketRef.current;
       socketRef.current = null;
+      if (ws._pingInterval) {
+        clearInterval(ws._pingInterval);
+        ws._pingInterval = null;
+      }
       ws._intentionalClose = true;
       ws.onclose = null;
       try {
@@ -154,6 +185,10 @@ export const useGameSession = (user, character) => {
     if (socketRef.current) {
       const prevWs = socketRef.current;
       socketRef.current = null;
+      if (prevWs._pingInterval) {
+        clearInterval(prevWs._pingInterval);
+        prevWs._pingInterval = null;
+      }
       prevWs._intentionalClose = true;
       prevWs.onclose = null;
       try {
@@ -173,6 +208,7 @@ export const useGameSession = (user, character) => {
 
     const applyCompletedScenePayload = (payload) => {
       clearSafetyTimer();
+      recordCompletedTurnId(payload?.turn_id);
       activeTurnIdRef.current = null;
       setIsThinking(false);
       setCancellingTurn(false);
@@ -185,7 +221,7 @@ export const useGameSession = (user, character) => {
       setProcessingState(false);
       setPendingAction(null);
       setLastSyncTimestamp(payload.sync_timestamp || Date.now());
-      if (payload.session?.image_gen_enabled && !payload.session?.scene_image_url) {
+      if (isAutoSceneImageGen(payload.session) && !payload.session?.scene_image_url) {
         pollForSceneImage(payload.session.id);
       }
     };
@@ -209,7 +245,7 @@ export const useGameSession = (user, character) => {
             if (res.session.in_flight_turn) {
               setPendingAction(res.session.in_flight_turn.action || { label: 'Resolving Action...' });
               setIsThinking(res.session.in_flight_turn.status === 'thinking');
-            } else if (!syncTurnRequestRef.current) {
+            } else if (processingTurnRef.current && !syncTurnRequestRef.current) {
               clearSafetyTimer();
               setSession(prev => ({
                 ...res.session,
@@ -228,7 +264,7 @@ export const useGameSession = (user, character) => {
                 setActionError(missedErr.error);
               }
               activeTurnIdRef.current = null;
-              if (res.session?.image_gen_enabled && !res.session?.scene_image_url) {
+              if (isAutoSceneImageGen(res.session) && !res.session?.scene_image_url) {
                 pollForSceneImage(res.session.id);
               }
             }
@@ -283,6 +319,7 @@ export const useGameSession = (user, character) => {
         setStreamingState(prev => (prev ? { ...prev, outcomeText: '', nextText: '' } : null));
       } else if (data.type === 'STREAM_ERROR') {
         clearSafetyTimer();
+        recordCompletedTurnId(data?.turn_id);
         activeTurnIdRef.current = null;
         setIsThinking(false);
         setCancellingTurn(false);
@@ -303,6 +340,7 @@ export const useGameSession = (user, character) => {
         }
       } else if (data.type === 'TURN_CANCELLED') {
         clearSafetyTimer();
+        recordCompletedTurnId(data?.turn_id);
         activeTurnIdRef.current = null;
         setIsThinking(false);
         setCancellingTurn(false);
@@ -368,6 +406,12 @@ export const useGameSession = (user, character) => {
             history: hist
           };
         });
+      } else if (data.type === 'PHONE_MEDIA_IMAGE') {
+        try {
+          window.dispatchEvent(new CustomEvent('hikayat:phone-media-image', { detail: data }));
+        } catch {
+          // ignore CustomEvent errors in non-browser environments
+        }
       } else if (data.type === 'CHAT_MESSAGE') {
         setPartyChatMessages(prev => [
           ...prev.slice(-49),
@@ -438,9 +482,13 @@ export const useGameSession = (user, character) => {
         ws.send(JSON.stringify({ type: 'PING' }));
       }
     }, 15000);
+    ws._pingInterval = interval;
 
     ws.onclose = (event) => {
       clearInterval(interval);
+      if (ws._pingInterval === interval) {
+        ws._pingInterval = null;
+      }
       if (socketRef.current === ws) {
         socketRef.current = null;
       }
@@ -473,7 +521,7 @@ export const useGameSession = (user, character) => {
         ws.close();
       } catch {}
     };
-  }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage, armSafetyTimer, clearSafetyTimer, setProcessingState]);
+  }, [user?.user_id, user?.auth_token, clearImagePoll, pollForSceneImage, armSafetyTimer, clearSafetyTimer, setProcessingState, recordCompletedTurnId]);
 
   const userId = user?.user_id;
   const activeCharacterId = character?.id;
@@ -580,16 +628,21 @@ export const useGameSession = (user, character) => {
     if (!processingTurn || !session?.id || session.id === 'embarking' || !user?.user_id) {
       return;
     }
+    const pollAbort = new AbortController();
     const pollId = setInterval(async () => {
       if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
         return;
       }
       try {
-        const res = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+        const res = await apiCall(`/api/adventure/active-session/${user.user_id}`, {
+          signal: pollAbort.signal,
+        });
+        if (pollAbort.signal.aborted) return;
         if (res?.session) {
           if (res.session.in_flight_turn) {
+            if (!processingTurnRef.current) return;
             setIsThinking(res.session.in_flight_turn.status === 'thinking');
-          } else {
+          } else if (processingTurnRef.current && !syncTurnRequestRef.current) {
             clearSafetyTimer();
             setSession(prev => ({
               ...res.session,
@@ -608,14 +661,17 @@ export const useGameSession = (user, character) => {
               setActionError(missedErr.error);
             }
             activeTurnIdRef.current = null;
-            if (res.session?.image_gen_enabled && !res.session?.scene_image_url) {
+            if (isAutoSceneImageGen(res.session) && !res.session?.scene_image_url) {
               pollForSceneImage(res.session.id);
             }
           }
         }
       } catch {}
     }, 5000);
-    return () => clearInterval(pollId);
+    return () => {
+      pollAbort.abort();
+      clearInterval(pollId);
+    };
   }, [processingTurn, session?.id, user?.user_id, clearSafetyTimer, pollForSceneImage, setProcessingState]);
 
   const sendPartyChat = useCallback((messageText, senderName) => {
@@ -645,6 +701,7 @@ export const useGameSession = (user, character) => {
   }, [user]);
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
+    turnGenerationRef.current += 1;
     const safeScenario = (!scenarioKey || ['none', 'null', 'undefined'].includes(String(scenarioKey).trim().toLowerCase()))
       ? 'fantasy'
       : scenarioKey;
@@ -697,6 +754,7 @@ export const useGameSession = (user, character) => {
   };
 
   const joinSession = async (joinCode) => {
+    turnGenerationRef.current += 1;
     const data = await apiCall('/api/adventure/join', {
       method: 'POST',
       body: JSON.stringify({
@@ -714,6 +772,7 @@ export const useGameSession = (user, character) => {
 
   const submitAction = async (actionData) => {
     if (processingTurnRef.current) return;
+    turnGenerationRef.current += 1;
     setProcessingState(true);
     setPendingAction(actionData);
     setIsThinking(false);
@@ -726,7 +785,7 @@ export const useGameSession = (user, character) => {
     const canAsyncWs = Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN);
     let asyncAccepted = false;
     activeTurnIdRef.current = null;
-    const abortCtrl = canAsyncWs ? null : new AbortController();
+    const abortCtrl = new AbortController();
     turnAbortControllerRef.current = abortCtrl;
     syncTurnRequestRef.current = !canAsyncWs;
     let postPromise = null;
@@ -756,7 +815,7 @@ export const useGameSession = (user, character) => {
       postPromise = apiCall('/api/adventure/action', {
         timeout: 240000,
         method: 'POST',
-        ...(abortCtrl ? { signal: abortCtrl.signal } : {}),
+        signal: abortCtrl.signal,
         body: JSON.stringify(payload)
       });
       if (canAsyncWs) {
@@ -765,8 +824,9 @@ export const useGameSession = (user, character) => {
       const data = await postPromise;
 
       if (data?.status === 'accepted') {
-        asyncAccepted = true;
-        activeTurnIdRef.current = data.turn_id || null;
+        if (acceptAsyncTurn(data, postPromise, canAsyncWs)) {
+          asyncAccepted = true;
+        }
         return data;
       }
 
@@ -786,7 +846,7 @@ export const useGameSession = (user, character) => {
         setStreamingNarrative(null);
         setStreamingState(null);
         setLastSyncTimestamp(Date.now());
-        if (data.session?.image_gen_enabled && !data.session?.scene_image_url) {
+        if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
           pollForSceneImage(data.session.id);
         }
       }
@@ -903,6 +963,7 @@ export const useGameSession = (user, character) => {
   }, [user?.user_id, fetchActiveSession]);
 
   const endSession = async () => {
+    turnGenerationRef.current += 1;
     if (turnAbortControllerRef.current) {
       turnAbortControllerRef.current.abort();
       turnAbortControllerRef.current = null;
@@ -936,6 +997,7 @@ export const useGameSession = (user, character) => {
 
   const retryGeneration = async () => {
     if (!session?.id || !user?.user_id || processingTurnRef.current) return null;
+    turnGenerationRef.current += 1;
     setProcessingState(true);
     armSafetyTimer(245000);
     setIsStreaming(false);
@@ -955,7 +1017,7 @@ export const useGameSession = (user, character) => {
     );
     let asyncAccepted = false;
     activeTurnIdRef.current = null;
-    const abortCtrl = canAsyncWs ? null : new AbortController();
+    const abortCtrl = new AbortController();
     turnAbortControllerRef.current = abortCtrl;
     syncTurnRequestRef.current = !canAsyncWs;
     let postPromise = null;
@@ -963,7 +1025,7 @@ export const useGameSession = (user, character) => {
       postPromise = apiCall('/api/adventure/retry', {
         timeout: 240000,
         method: 'POST',
-        ...(abortCtrl ? { signal: abortCtrl.signal } : {}),
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           session_id: session.id,
           user_id: user.user_id,
@@ -975,13 +1037,17 @@ export const useGameSession = (user, character) => {
       }
       const data = await postPromise;
       if (data?.status === 'accepted') {
-        asyncAccepted = true;
-        activeTurnIdRef.current = data.turn_id || null;
+        if (acceptAsyncTurn(data, postPromise, canAsyncWs)) {
+          asyncAccepted = true;
+        }
         return data;
       }
       if (data?.session) {
         setSession(data.session);
         setLastSyncTimestamp(Date.now());
+        if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
+          pollForSceneImage(data.session.id);
+        }
       }
       return data;
     } catch (e) {
@@ -1011,9 +1077,14 @@ export const useGameSession = (user, character) => {
   const cancelTurn = useCallback(async () => {
     if (!session?.id || session.id === 'embarking' || !user?.user_id || cancellingTurn) return;
     setCancellingTurn(true);
+    const cancelGen = turnGenerationRef.current;
+    const targetTurnId = activeTurnIdRef.current;
     if (pendingAsyncPostRef.current) {
       try {
-        await pendingAsyncPostRef.current;
+        await Promise.race([
+          pendingAsyncPostRef.current.catch(() => {}),
+          new Promise((resolve) => setTimeout(resolve, 400)),
+        ]);
       } catch {}
     }
     if (turnAbortControllerRef.current) {
@@ -1029,29 +1100,35 @@ export const useGameSession = (user, character) => {
           user_id: user.user_id,
         })
       });
-      clearSafetyTimer();
-      setIsStreaming(false);
-      setStreamingNarrative(null);
-      setStreamingState(null);
-      setIsThinking(false);
-      setProcessingState(false);
-      setPendingAction(null);
-      setWaitingForParty(false);
-      setActionError(null);
-      if (res?.session) {
-        setSession(prev => ({
-          ...res.session,
-          scene_image_url: res.session?.scene_image_url || prev?.scene_image_url || null
-        }));
-        setLastSyncTimestamp(Date.now());
+      recordCompletedTurnId(res?.turn_id || targetTurnId);
+      if (turnGenerationRef.current === cancelGen) {
+        clearSafetyTimer();
+        activeTurnIdRef.current = null;
+        setIsStreaming(false);
+        setStreamingNarrative(null);
+        setStreamingState(null);
+        setIsThinking(false);
+        setProcessingState(false);
+        setPendingAction(null);
+        setWaitingForParty(false);
+        setActionError(null);
+        if (res?.session) {
+          setSession(prev => ({
+            ...res.session,
+            scene_image_url: res.session?.scene_image_url || prev?.scene_image_url || null
+          }));
+          setLastSyncTimestamp(Date.now());
+        }
       }
     } catch (e) {
       console.error('Failed to cancel in-flight turn:', e);
-      setActionError(e?.detail || e?.message || 'Failed to cancel turn.');
+      if (turnGenerationRef.current === cancelGen) {
+        setActionError(e?.detail || e?.message || 'Failed to cancel turn.');
+      }
     } finally {
       setCancellingTurn(false);
     }
-  }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer, setProcessingState]);
+  }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer, recordCompletedTurnId, setProcessingState]);
 
   const [rerollingImage, setRerollingImage] = useState(false);
 

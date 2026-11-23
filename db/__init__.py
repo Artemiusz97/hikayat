@@ -114,6 +114,7 @@ from .inventory import (
     get_equipment,
     get_inventories_for_characters,
     get_inventory,
+    get_inventory_item_by_id,
     get_learned_spells,
     get_procedural_spell,
     get_skill_progress,
@@ -128,6 +129,7 @@ from .inventory import (
     set_skill_progress,
     transfer_item_between_users,
     unequip_slot,
+    update_inventory_item_effect,
     used_slots,
 )
 from .settings import (
@@ -711,6 +713,7 @@ __all__ = [
     "get_household_members",
     "get_inventories_for_characters",
     "get_inventory",
+    "get_inventory_item_by_id",
     "get_known_world_data",
     "get_learned_spells",
     "get_load_specs",
@@ -953,6 +956,7 @@ __all__ = [
     "update_contact_status_effects",
     "update_contact_track",
     "update_faction_leadership_roster",
+    "update_inventory_item_effect",
     "update_phone_appointment_status",
     "update_phone_social_state",
     "update_quest_anomaly_blueprint",

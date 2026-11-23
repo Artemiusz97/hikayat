@@ -1,5 +1,7 @@
 from __future__ import annotations
+import json
 import re
+import time
 from typing import Dict, Any, Optional, List
 import db
 
@@ -69,13 +71,11 @@ DRINK_SCALING = {
 
 def serialize_consumable_metadata(meta: Dict[str, Any]) -> str:
     """Serializes consumable metadata into [CONSUMABLE_JSON]{...} format."""
-    import json
     return f"[CONSUMABLE_JSON]{json.dumps(meta, separators=(',', ':'))}"
 
 
 def parse_consumable_metadata(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Extracts structured consumable metadata if present."""
-    import json
     effect = item.get("effect") or ""
     if isinstance(effect, str) and effect.startswith("[CONSUMABLE_JSON]"):
         try:
@@ -91,13 +91,11 @@ def parse_consumable_metadata(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def serialize_digital_item_metadata(meta: Dict[str, Any]) -> str:
     """Serializes digital media metadata into [DIGITAL_JSON]{...} format."""
-    import json
     return f"[DIGITAL_JSON]{json.dumps(meta, separators=(',', ':'))}"
 
 
 def parse_digital_item_metadata(item: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Extracts structured digital media metadata if present."""
-    import json
     effect = item.get("effect") or ""
     if isinstance(effect, str) and effect.startswith("[DIGITAL_JSON]"):
         try:
@@ -134,14 +132,17 @@ def create_digital_media_item(
     media_type: str,
     caption: str,
     subject: str = "",
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None,
+    *,
+    contact_npc_id: str = "",
+    image_url: str = "",
+    image_status: str = "idle",
 ) -> Optional[int]:
     """
     Creates a collectible digital photo or video in the player's inventory.
     media_type: 'photo', 'nsfw_photo', 'video', 'nsfw_video'
     Takes 0 inventory slots and is tagged as ['misc', 'digital'].
     """
-    import time
     tag_list = list(tags or ["misc", "digital"])
     if "misc" not in tag_list:
         tag_list.append("misc")
@@ -169,15 +170,63 @@ def create_digital_media_item(
     else:
         item_name = f"📸 Photo: {contact_name}{subj_label}"
 
+    resolved_status = str(image_status or ("ready" if image_url else "idle"))
     meta = {
         "tags": tag_list,
         "media_type": media_type,
         "contact_name": contact_name,
+        "contact_npc_id": str(contact_npc_id or "").strip(),
         "caption": caption_clean,
-        "timestamp": time.time()
+        "timestamp": time.time(),
+        "image_url": str(image_url or ""),
+        "image_status": resolved_status,
     }
     effect_str = serialize_digital_item_metadata(meta)
     return db.add_item(user_id, item_name, item_type="Misc", effect=effect_str, slot_cost=0, force=True)
+
+
+def update_digital_media_image(
+    item_id: int,
+    user_id: int | None = None,
+    *,
+    image_url: Optional[str] = None,
+    image_status: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Updates image_url and/or image_status inside a digital media item's [DIGITAL_JSON] metadata."""
+    item = db.get_inventory_item_by_id(item_id, user_id=user_id)
+    if not item or not is_digital_item(item):
+        return None
+    meta = dict(parse_digital_item_metadata(item) or {})
+    if not meta:
+        meta = {
+            "tags": ["misc", "digital"],
+            "media_type": "photo",
+            "contact_name": "Subject",
+            "caption": str(item.get("effect") or item.get("name") or ""),
+            "timestamp": time.time(),
+        }
+    if image_url is not None:
+        meta["image_url"] = str(image_url)
+    if image_status is not None:
+        meta["image_status"] = str(image_status)
+    elif image_url:
+        meta["image_status"] = "ready"
+    effect_str = serialize_digital_item_metadata(meta)
+    updated = db.update_inventory_item_effect(item_id, effect_str, user_id=user_id)
+    if not updated:
+        return None
+    return {
+        "id": item["id"],
+        "name": item.get("name", ""),
+        "contact_name": meta.get("contact_name") or "Subject",
+        "contact_npc_id": meta.get("contact_npc_id") or "",
+        "media_type": meta.get("media_type") or "photo",
+        "caption": meta.get("caption") or "",
+        "timestamp": meta.get("timestamp"),
+        "tags": meta.get("tags") or [],
+        "image_url": meta.get("image_url") or "",
+        "image_status": meta.get("image_status") or ("ready" if meta.get("image_url") else "idle"),
+    }
 
 
 # -----------------------------------------------------------------------------

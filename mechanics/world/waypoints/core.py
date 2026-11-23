@@ -307,9 +307,14 @@ def _classify_waypoint_marker(marker: str) -> tuple[str, str]:
     return ("", "")
 
 
-def _collect_raw_waypoint_items(session_id: int) -> list[tuple[str, str, str]]:
+def _collect_raw_waypoint_items(
+    session_id: int,
+    *,
+    ensure_waypoints: bool = True,
+) -> list[tuple[str, str, str]]:
     """Collects (target_location, marker_tag, target_npc) tuples across all active waypoint sources."""
-    ensure_quest_waypoints_exist(session_id)
+    if ensure_waypoints:
+        ensure_quest_waypoints_exist(session_id)
     active_wps = db.get_all_session_active_waypoints(session_id)
     items: list[tuple[str, str, str]] = []
 
@@ -399,11 +404,17 @@ def _collect_raw_waypoint_items(session_id: int) -> list[tuple[str, str, str]]:
     return items
 
 
-def get_location_waypoint_entries(session_id: int) -> list[dict]:
+def get_location_waypoint_entries(
+    session_id: int,
+    *,
+    raw_items: list[tuple[str, str, str]] | None = None,
+    ensure_waypoints: bool = True,
+) -> list[dict]:
     """Returns structured active waypoint/meetup/bonus entries with resolved node_id and 3-tier location hints."""
     if not session_id:
         return []
-    raw_items = _collect_raw_waypoint_items(session_id)
+    if raw_items is None:
+        raw_items = _collect_raw_waypoint_items(session_id, ensure_waypoints=ensure_waypoints)
     delimiters = ["\u2794", "->", ">", "|"]
     entries: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -452,13 +463,45 @@ def get_location_waypoint_entries(session_id: int) -> list[dict]:
     return entries
 
 
-def get_location_waypoint_markers(session_id: int) -> dict[str, list[str]]:
+def get_location_waypoint_markers_and_entries(
+    session_id: int,
+    *,
+    existing_locs: list[dict] | None = None,
+    ensure_waypoints: bool = True,
+) -> tuple[dict[str, list[str]], list[dict]]:
+    """Collect active waypoint items once and return `(waypoint_markers, waypoint_entries)`."""
+    if not session_id:
+        return ({}, [])
+    raw_items = _collect_raw_waypoint_items(session_id, ensure_waypoints=ensure_waypoints)
+    markers = get_location_waypoint_markers(
+        session_id,
+        raw_items=raw_items,
+        existing_locs=existing_locs,
+        ensure_waypoints=False,
+    )
+    entries = get_location_waypoint_entries(
+        session_id,
+        raw_items=raw_items,
+        ensure_waypoints=False,
+    )
+    return (markers, entries)
+
+
+def get_location_waypoint_markers(
+    session_id: int,
+    *,
+    raw_items: list[tuple[str, str, str]] | None = None,
+    existing_locs: list[dict] | None = None,
+    ensure_waypoints: bool = True,
+) -> dict[str, list[str]]:
     """Returns dict mapping 'Zone ➔ Primary' (and canonical 3-tier / bare keys) -> [marker labels] for LocationSelectView."""
-    raw_items = _collect_raw_waypoint_items(session_id)
+    if raw_items is None:
+        raw_items = _collect_raw_waypoint_items(session_id, ensure_waypoints=ensure_waypoints)
     markers: dict[str, list[str]] = {}
     arrow = "\u2794"
     delimiters = [arrow, "->", ">", "|"]
-    existing_locs = db.get_session_locations(session_id) if session_id else []
+    if existing_locs is None:
+        existing_locs = db.get_session_locations(session_id) if session_id else []
 
     generic_template_zones = {
         "ancient woods", "woodlands & forest", "capital city", "central farmlands & plains",

@@ -1,10 +1,13 @@
 """
-Automatic1111 / SD-Forge style public link sharing for Hikayat.
-Generates a secure, temporary public HTTPS/WSS link via Cloudflare Tunnel (trycloudflare.com)
-or SSH reverse tunnel (pinggy / localhost.run) so anyone with the URL can play without
-needing to be on the same Wi-Fi network.
+Automatic1111 / SD-Forge style link sharing for Hikayat.
+Generates a temporary public HTTPS/WSS link via Cloudflare Tunnel (trycloudflare.com)
+or SSH reverse tunnel (pinggy / localhost.run), or configures private remote access
+over Tailscale.
 """
+from __future__ import annotations
+
 import atexit
+import json
 import os
 import re
 import shutil
@@ -15,6 +18,7 @@ import time
 from typing import Optional
 
 _active_process: Optional[subprocess.Popen] = None
+_active_provider: Optional[str] = None
 _public_url: Optional[str] = None
 _lock = threading.Lock()
 
@@ -23,6 +27,11 @@ def get_public_url() -> Optional[str]:
     """Returns the currently active public URL if link sharing is enabled."""
     global _public_url
     return _public_url
+
+
+def get_active_provider() -> Optional[str]:
+    """Returns the currently active tunnel provider name, if any."""
+    return _active_provider
 
 
 def _get_bin_dir() -> str:
@@ -350,6 +359,123 @@ def _start_serveo_tunnel(port: int = 8000, timeout: float = 20.0) -> str:
     return url_found
 
 
+def ensure_tailscale() -> str:
+    """Locate the installed Tailscale CLI binary without hardcoding user-specific paths."""
+    found = shutil.which("tailscale")
+    if found:
+        return found
+
+    candidates: list[str] = []
+    if sys.platform.startswith("win"):
+        prog_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        prog_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local_appdata = os.environ.get("LOCALAPPDATA", "")
+        candidates.append(os.path.join(prog_files, "Tailscale", "tailscale.exe"))
+        candidates.append(os.path.join(prog_files_x86, "Tailscale", "tailscale.exe"))
+        if local_appdata:
+            candidates.append(os.path.join(local_appdata, "Tailscale", "tailscale.exe"))
+    elif sys.platform == "darwin":
+        candidates.extend([
+            "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            "/opt/homebrew/bin/tailscale",
+            "/usr/local/bin/tailscale",
+        ])
+    else:
+        candidates.extend([
+            "/usr/bin/tailscale",
+            "/usr/local/bin/tailscale",
+        ])
+
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+
+    raise RuntimeError(
+        "Tailscale CLI not found. Install Tailscale from https://tailscale.com/download and sign in first."
+    )
+
+
+def _start_tailscale_tunnel(port: int = 8000, timeout: float = 15.0) -> str:
+    """Resolve a private Tailscale URL (HTTPS via Serve if CertDomains enabled, else direct HTTP)."""
+    global _active_process, _active_provider, _public_url
+    ts_bin = ensure_tailscale()
+
+    creationflags = 0
+    if sys.platform.startswith("win"):
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
+    res = subprocess.run(
+        [ts_bin, "status", "--json"],
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        timeout=timeout,
+        creationflags=creationflags,
+    )
+    if res.returncode != 0:
+        detail = (res.stderr or res.stdout or "").strip()
+        raise RuntimeError(f"Tailscale status check failed (code {res.returncode}): {detail}")
+
+    data = json.loads(res.stdout or "{}")
+    backend_state = str(data.get("BackendState") or "")
+    if backend_state != "Running":
+        raise RuntimeError(
+            f"Tailscale is not connected (state: {backend_state or 'unknown'}). Open Tailscale and sign in first."
+        )
+
+    self_info = data.get("Self") or {}
+    dns_name = str(self_info.get("DNSName") or "").strip().rstrip(".")
+    ipv4_ips = [
+        str(ip).strip()
+        for ip in (self_info.get("TailscaleIPs") or [])
+        if ip and ":" not in str(ip)
+    ]
+    cert_domains = [str(d).strip().rstrip(".") for d in (data.get("CertDomains") or []) if d]
+    host_label = dns_name or (ipv4_ips[0] if ipv4_ips else "")
+    if not host_label:
+        raise RuntimeError("Tailscale is running, but no MagicDNS name or IPv4 address was found.")
+
+    resolved_url = f"http://{host_label}:{port}"
+    if dns_name and cert_domains:
+        try:
+            serve_res = subprocess.run(
+                [ts_bin, "serve", "--bg", "--yes", str(port)],
+                capture_output=True,
+                text=True,
+                stdin=subprocess.DEVNULL,
+                timeout=timeout,
+                creationflags=creationflags,
+            )
+            if serve_res.returncode == 0:
+                resolved_url = f"https://{dns_name}"
+                print(f"[TUNNEL] Tailscale Serve HTTPS active: {resolved_url} -> http://127.0.0.1:{port}")
+            else:
+                detail = (serve_res.stderr or serve_res.stdout or f"exit {serve_res.returncode}").strip()
+                print(
+                    f"[WARNING] Tailscale Serve HTTPS was unavailable ({detail}); "
+                    f"falling back to direct tailnet HTTP: {resolved_url}"
+                )
+        except Exception as serve_err:
+            print(
+                f"[WARNING] Tailscale Serve HTTPS was unavailable ({serve_err}); "
+                f"falling back to direct tailnet HTTP: {resolved_url}"
+            )
+    else:
+        print(f"[TUNNEL] Tailscale direct URL ready: {resolved_url}")
+        if ipv4_ips and ipv4_ips[0] != host_label:
+            print(f"[TUNNEL] Tailscale IPv4 fallback:    http://{ipv4_ips[0]}:{port}")
+        if dns_name:
+            print(
+                "[TUNNEL] Tip: Enable HTTPS Certificates in Tailscale Admin Console -> DNS "
+                f"to auto-upgrade to https://{dns_name}."
+            )
+
+    _active_process = None
+    _active_provider = "tailscale"
+    _public_url = resolved_url
+    return resolved_url
+
+
 _supervisor_thread: Optional[threading.Thread] = None
 _supervisor_running: bool = False
 
@@ -384,15 +510,23 @@ def _supervise_tunnel(port: int, provider: str):
 
 def start_tunnel(port: int = 8000, provider: str = "cloudflare") -> str:
     """
-    Starts a public tunnel for the given local port.
-    Returns the public HTTPS URL.
+    Starts a public tunnel or private Tailscale link for the given local port.
+    Returns the accessible URL.
     """
+    global _public_url, _active_provider, _supervisor_thread, _supervisor_running
     with _lock:
-        global _public_url
-        if _public_url and _active_process and _active_process.poll() is None:
+        if _public_url and (
+            _active_provider == "tailscale"
+            or (_active_process and _active_process.poll() is None)
+        ):
             return _public_url
 
         provider = provider.lower().strip()
+        if provider == "tailscale":
+            print("[TUNNEL] Establishing private Tailscale access...")
+            url = _start_tailscale_tunnel(port)
+            return url
+
         print(f"[TUNNEL] Establishing public link sharing using {provider.capitalize()}...")
 
         if provider == "serveo":
@@ -432,8 +566,9 @@ def start_tunnel(port: int = 8000, provider: str = "cloudflare") -> str:
                         except Exception as e4:
                             raise RuntimeError(f"All tunnel providers failed: Cloudflare ({e}), Serveo ({e2}), localhost.run ({e3}), Pinggy ({e4})")
 
+        _active_provider = provider
+
         # Start supervisor thread if not already running
-        global _supervisor_thread, _supervisor_running
         if not _supervisor_running:
             _supervisor_running = True
             _supervisor_thread = threading.Thread(
@@ -448,10 +583,9 @@ def start_tunnel(port: int = 8000, provider: str = "cloudflare") -> str:
 
 def stop_tunnel():
     """Terminates the running tunnel process and supervisor."""
-    global _supervisor_running
+    global _supervisor_running, _active_process, _active_provider, _public_url
     _supervisor_running = False
     with _lock:
-        global _active_process, _public_url
         if _active_process:
             try:
                 _active_process.terminate()
@@ -462,6 +596,7 @@ def stop_tunnel():
                 except Exception:
                     pass
             _active_process = None
+        _active_provider = None
         _public_url = None
 
 

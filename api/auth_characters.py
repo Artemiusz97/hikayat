@@ -2,7 +2,14 @@ import random
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_user_lock
-from .security import extract_actor_token, is_strict_auth_context, issue_actor_token, verify_actor_token, verify_user_access
+from .security import (
+    extract_actor_token,
+    is_strict_auth_context,
+    is_trusted_tailscale_request,
+    issue_actor_token,
+    verify_actor_token,
+    verify_user_access,
+)
 
 import db
 from db import adb
@@ -456,7 +463,7 @@ async def auth_discord(req: DiscordAuthRequest, request: Request = None):
             resolved_id = abs(hash(val)) % (10**18)
 
     user_id = resolved_id
-    if is_strict_auth_context(request):
+    if is_strict_auth_context(request) and not is_trusted_tailscale_request(request):
         existing_tok = extract_actor_token(request)
         if not verify_actor_token(existing_tok, int(user_id)):
             raise HTTPException(

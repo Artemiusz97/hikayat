@@ -130,12 +130,20 @@ def _get_port() -> int:
 def _launch_tunnel_sync(port: int, provider: str):
     try:
         pub_url = tunnel.start_tunnel(port=port, provider=provider)
-        print("\n" + "=" * 72)
-        print(f"  * Hikayat Local URL:   http://localhost:{port}")
-        print(f"  * Hikayat Public URL:  {pub_url}")
-        print("=" * 72)
-        print("  Share this public link with anyone! They can join from any phone,")
-        print("  PC, or network without needing to be on the same Wi-Fi.\n")
+        if provider.lower().strip() == "tailscale":
+            print("\n" + "=" * 72)
+            print(f"  * Hikayat Local URL:     http://localhost:{port}")
+            print(f"  * Hikayat Tailscale URL: {pub_url}")
+            print("=" * 72)
+            print("  Private to your Tailscale network! Open this URL on any phone,")
+            print("  tablet, or laptop signed into your Tailscale account.\n")
+        else:
+            print("\n" + "=" * 72)
+            print(f"  * Hikayat Local URL:   http://localhost:{port}")
+            print(f"  * Hikayat Public URL:  {pub_url}")
+            print("=" * 72)
+            print("  Share this public link with anyone! They can join from any phone,")
+            print("  PC, or network without needing to be on the same Wi-Fi.\n")
     except Exception as e:
         print(f"\n[WARNING] Failed to establish public tunnel: {e}\n")
 
@@ -157,7 +165,8 @@ async def lifespan(app: FastAPI):
         loop.run_in_executor(None, _launch_tunnel_sync, port, provider)
 
     # Pre-warm LLM model capability cache in background so turns have zero parameter mismatches
-    asyncio.create_task(llm_client.probe_all_configured_models())
+    if os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() not in ("1", "true", "yes"):
+        asyncio.create_task(llm_client.probe_all_configured_models())
 
     yield
 
@@ -269,7 +278,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default=os.getenv("HOST", "0.0.0.0"), help="Host IP to bind to")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")), help="Port number")
     parser.add_argument("--share", action="store_true", help="Generate a public Automatic1111/Forge style link")
-    parser.add_argument("--share-provider", type=str, default="cloudflare", choices=["cloudflare", "serveo", "localhost.run", "pinggy"], help="Tunnel provider")
+    parser.add_argument("--share-provider", type=str, default="cloudflare", choices=["cloudflare", "tailscale", "serveo", "localhost.run", "pinggy"], help="Tunnel provider")
     parser.add_argument("--no-reload", action="store_true", help="Disable auto-reload")
     args, _ = parser.parse_known_args()
 

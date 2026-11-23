@@ -627,7 +627,13 @@
     "gender_male": "Männlich",
     "gender_non_binary": "Nicht-binär",
     "race_human": "Mensch",
-    "student_tag": "Schüler"
+    "student_tag": "Schüler",
+    "inspect_npc_profile": "Profil von {{name}} ansehen",
+    "close_npc_profile": "Profil von {{name}} schließen",
+    "npc_profile_panel": "Profil: {{name}}",
+    "open_in_contacts": "In Kontakten öffnen",
+    "open_in_codex": "Im Kodex öffnen",
+    "scene_only_npc_badge": "Gerade getroffen"
   },
   "conditions": {
     "aroused": "Erregt",
@@ -1186,7 +1192,10 @@
       "check_messages": "Prüfe Nachrichten für Treffpunktdetails",
       "visit_requests": "Campus-Anfragen für aktive Aufgaben öffnen",
       "open": "Öffnen",
-      "no_active_meetups": "Keine aktiven Treffen oder Versprechen"
+      "no_active_meetups": "Keine aktiven Treffen oder Versprechen",
+      "vault_memories": "{{count}} im Foto-Tresor gespeichert",
+      "latest_from": "Neuestes von {{name}}",
+      "tap_to_view_photos": "Tippen für Fotos & Hintergründe"
     },
     "apps": {
       "photos": "Fototresor",
@@ -1200,7 +1209,12 @@
       "planner": "Planer & Agenda",
       "planner_sub": "Zeitplan & Treffen",
       "bounties": "Campus-Anfragen",
-      "bounties_sub": "Studenten-Schwarzes Brett"
+      "bounties_sub": "Studenten-Schwarzes Brett",
+      "photos_short": "Fotos",
+      "dms_short": "Chats",
+      "feed_short": "Radar",
+      "settings": "Einstellungen",
+      "settings_sub": "Hintergrund & Stil"
     },
     "vault": {
       "all": "Alle",
@@ -1208,7 +1222,16 @@
       "intimate": "🔥 Intim",
       "videos": "🎥 Videos",
       "all_contacts": "👤 Alle Kontakte ({{count}})",
-      "empty": "Keine passenden Medien im Tresor."
+      "empty": "Keine passenden Medien im Tresor.",
+      "generating": "Wird entwickelt...",
+      "generate_photo": "Foto generieren",
+      "regenerate": "Neu generieren",
+      "set_wallpaper": "Als Hintergrund",
+      "active_wallpaper": "Aktiver Hintergrund",
+      "deleting": "Löschen...",
+      "delete_media": "🗑️ Medium löschen",
+      "generate_failed": "Foto konnte nicht generiert werden.",
+      "delete_failed": "Medium konnte nicht gelöscht werden."
     },
     "dms": {
       "scheduled_meetup": "📍 Treffen geplant:",
@@ -1237,7 +1260,13 @@
       "action_ask_spicy_title": "Kontakt um ein pikantes Foto bitten (geteilt 3/Tag)",
       "action_send_spicy": "Pikantes senden",
       "action_send_spicy_title": "Kontakt ein pikantes Foto von dir senden (geteilt 3/Tag)",
-      "saved_to_vault": "Im Fototresor gespeichert!"
+      "saved_to_vault": "Im Fototresor gespeichert!",
+      "generating_photo": "Foto wird entwickelt...",
+      "open_photo_vault": "Vorschau öffnen",
+      "attached_intimate": "Intimer Anhang",
+      "attached_video": "Video-Anhang",
+      "attached_photo": "Foto-Anhang",
+      "send_failed": "Nachricht konnte nicht gesendet werden."
     },
     "feed": {
       "timeline_and_rumors": "Timeline & Gerüchte",
@@ -1268,7 +1297,64 @@
     "planner": {
       "no_active_tasks": "Keine aktiven Aufgaben in Bearbeitung"
     },
-    "shop_load_failed": "Shop-Katalog konnte nicht geladen werden."
+    "shop_load_failed": "Shop-Katalog konnte nicht geladen werden.",
+    "wallpapers": {
+      "iphone_default": "Aurora-Seide",
+      "iphone_default_sub": "iPhone-Stil Standard",
+      "auto_scenario": "Szenario anpassen",
+      "auto_scenario_sub": "Automatisch nach Welt",
+      "fantasy": "Reiche der Mythen",
+      "dark_fantasy": "Aschenkronen",
+      "isekai_fantasy": "Himmelsgilde",
+      "sci_fi": "Äußerer Rand",
+      "cyberpunk": "Neon-Chrom",
+      "steampunk": "Messing & Äther",
+      "high_school_drama": "Dachdämmerung",
+      "slice_of_life": "Abendcafé",
+      "nuclear_post_apocalypse": "Fallout-Aurora",
+      "anomalous_incursions": "Metro-Riss",
+      "anomalous_high_school": "Anomale Schule"
+    },
+    "settings": {
+      "live_preview": "Live-Vorschau",
+      "preview_sample": "Design & Hintergrund aktiv",
+      "ui_style": "Smartphone-UI-Stil",
+      "style_classic": "Klassisch Dunkel",
+      "style_classic_desc": "OLED-Apps, Start-Hintergrund",
+      "style_glass": "Milchglas",
+      "style_glass_desc": "Passend zum Spiel-Acryl-Design",
+      "wallpaper_picker": "Hintergrundbild",
+      "carousel_active_badge": "Karussell aktiv",
+      "tab_builtin": "Integriert",
+      "tab_npc": "NPC ({{count}})",
+      "tab_scenes": "Szenen ({{count}})",
+      "no_npc_photos": "Noch keine generierten NPC-Fotos.",
+      "no_npc_photos_hint": "Erhalte Fotos in DMs oder generiere sie im Foto-Tresor als Hintergrund.",
+      "no_scene_images": "Noch keine Szenen-Illustrationen.",
+      "no_scene_images_hint": "Generierte Szenenbilder dieser Kampagne erscheinen automatisch hier.",
+      "carousel_title": "Hintergrund-Karussell",
+      "carousel_desc": "Bei jedem Öffnen automatisch wechseln",
+      "carousel_pool": "Rotationspool",
+      "next_wallpaper": "Nächstes Bild",
+      "pool_all_builtin": "Alle integrierten",
+      "pool_scenario_photos": "Szenario + Fotos",
+      "pool_photos_only": "Generierte Fotos",
+      "pool_custom": "Eigene Auswahl",
+      "custom_pool_hint": "Hintergründe für Rotation wählen:",
+      "include_intimate": "18+-Intimfotos ins Karussell aufnehmen",
+      "display_clock": "Anzeige & Uhr",
+      "wallpaper_dim": "Abdunklung",
+      "framing": "Bildausschnitt",
+      "focal_top": "Oben",
+      "focal_center": "Mitte",
+      "focal_bottom": "Unten",
+      "blur_in_apps": "Hintergrund in Apps weichzeichnen",
+      "dynamic_tint": "Dynamische Tageszeit-Tönung",
+      "clock_style": "Uhr-Schrift",
+      "clock_modern": "Modern",
+      "clock_serif": "RPG Serif",
+      "clock_format": "Zeitformat"
+    }
   },
   "awakened": {
     "section_title": "Erwachte Resonanz-Abstimmung",

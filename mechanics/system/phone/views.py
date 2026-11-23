@@ -1,15 +1,18 @@
 from __future__ import annotations
 import logging
+import os
 import discord
 import db
 import scenario_data
 log = logging.getLogger("hikayat.phone")
+from mechanics.combat.items import update_digital_media_image
 from mechanics.social.relationships import can_player_dm_contact, safe_get_contacts
 
 from .embeds import (
     build_media_gallery_embed,
     build_phone_home_embed,
     get_phone_branding,
+    resolve_digital_media_local_file,
     _build_media_item_detail_embed,
     _build_dm_chat_embed,
     _build_gossip_feed_embed,
@@ -17,6 +20,12 @@ from .embeds import (
 )
 from .messaging import *
 from .media_captions import generate_player_photo_caption
+from .media_gen import (
+    generate_phone_media_image,
+    is_media_item_in_flight,
+    is_session_image_gen_enabled,
+    spawn_phone_media_image_task,
+)
 
 class PhoneOwnerRestrictedView(discord.ui.View):
     """Base phone view enforcing strict device ownership (fail-closed) without Layer-4 imports."""
@@ -456,6 +465,51 @@ class DMChatView(PhoneOwnerRestrictedView):
             message_text = await generate_player_chat_message(session, self.contact, char, intent=intent)
 
         reply_data = await generate_contact_dm_reply(session, self.contact, char, message_text, intent=intent)
+
+        raw_ids = (reply_data.get("digital_item_ids") if isinstance(reply_data, dict) else None) or (
+            [reply_data["digital_item_id"]]
+            if isinstance(reply_data, dict) and reply_data.get("digital_item_id")
+            else []
+        )
+        if raw_ids and is_session_image_gen_enabled(session, auto_only=True):
+            owner_uid = int((char or {}).get("user_id") or self.user_id)
+            contact_label = self.contact.get("name", "Contact")
+
+            async def _discord_notify_ready(payload: dict) -> None:
+                if payload.get("image_status") != "ready" or not payload.get("item_id"):
+                    return
+                try:
+                    fresh_item = await db.adb(
+                        db.get_inventory_item_by_id,
+                        int(payload["item_id"]),
+                        owner_uid,
+                    )
+                    if not fresh_item:
+                        return
+                    local_file = resolve_digital_media_local_file(fresh_item)
+                    if local_file:
+                        await interaction.followup.send(
+                            content=f"📸 **{contact_label}** sent you a photo (saved in Photo Vault):",
+                            file=discord.File(local_file, filename=os.path.basename(local_file)),
+                            ephemeral=True,
+                        )
+                except Exception:
+                    pass
+
+            for d_id in raw_ids:
+                await db.adb(
+                    update_digital_media_image,
+                    int(d_id),
+                    owner_uid,
+                    image_status="generating",
+                )
+                spawn_phone_media_image_task(
+                    self.session_id,
+                    owner_uid,
+                    int(d_id),
+                    auto_trigger=True,
+                    broadcast_fn=_discord_notify_ready,
+                )
 
         # Refresh contact data with new score
         npc_id = self.contact.get("npc_id") or self.contact["name"].lower().replace(" ", "_")
@@ -1006,20 +1060,39 @@ class PhoneMediaGalleryView(PhoneOwnerRestrictedView):
             page=page,
             inv_items=inv_items,
         )
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view, attachments=[])
 
     async def _on_select_item(self, interaction: discord.Interaction):
         item_id = interaction.data["values"][0]
-        item = self.items_dict.get(item_id)
+        item = None
+        if self.user_id and str(item_id).isdigit():
+            item = await db.adb(db.get_inventory_item_by_id, int(item_id), self.user_id)
+            if item:
+                self.items_dict[str(item_id)] = item
         if not item:
-            inv = (await db.adb(db.get_inventory, self.user_id)) if self.user_id else []
+            item = self.items_dict.get(item_id)
+        if not item and self.user_id:
+            inv = await db.adb(db.get_inventory, self.user_id)
             item = next((it for it in inv if str(it.get("id")) == str(item_id)), None)
         if not item:
             await interaction.response.send_message("Media item not found.", ephemeral=True)
             return
+        session = await db.adb(db.get_session, self.session_id)
+        can_generate = is_session_image_gen_enabled(session, auto_only=False)
         embed = _build_media_item_detail_embed(item)
-        view = PhoneMediaDetailView(self.cog, self.session_id, self.user_id, item, self.filter_contact, self.filter_type, self.page)
-        await interaction.response.edit_message(embed=embed, view=view)
+        local_file = resolve_digital_media_local_file(item)
+        attachments = [discord.File(local_file, filename=os.path.basename(local_file))] if local_file else []
+        view = PhoneMediaDetailView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            item,
+            self.filter_contact,
+            self.filter_type,
+            self.page,
+            can_generate=can_generate,
+        )
+        await interaction.response.edit_message(embed=embed, view=view, attachments=attachments)
 
     async def _on_select_contact_filter(self, interaction: discord.Interaction):
         chosen = interaction.data["values"][0]
@@ -1052,11 +1125,22 @@ class PhoneMediaGalleryView(PhoneOwnerRestrictedView):
 
         embed, session = await db.adb(_prep_home)
         view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view, attachments=[])
 
 class PhoneMediaDetailView(PhoneOwnerRestrictedView):
     """View to inspect and manage an individual media item."""
-    def __init__(self, cog, session_id: int, user_id: int, item: dict, filter_contact: str = None, filter_type: str = None, page: int = 0):
+    def __init__(
+        self,
+        cog,
+        session_id: int,
+        user_id: int,
+        item: dict,
+        filter_contact: str = None,
+        filter_type: str = None,
+        page: int = 0,
+        *,
+        can_generate: bool = False,
+    ):
         super().__init__(timeout=300)
         self.cog = cog
         self.session_id = session_id
@@ -1065,6 +1149,13 @@ class PhoneMediaDetailView(PhoneOwnerRestrictedView):
         self.filter_contact = filter_contact
         self.filter_type = filter_type
         self.page = page
+        self.can_generate = bool(can_generate)
+
+        from mechanics.combat.items import parse_digital_item_metadata
+
+        d_meta = parse_digital_item_metadata(item) or {}
+        has_image = bool(str(d_meta.get("image_url") or item.get("image_url") or "").strip())
+        in_flight_now = bool(item.get("id") and is_media_item_in_flight(int(item["id"])))
 
         back_btn = discord.ui.Button(label="Back to Gallery", emoji="🔙", style=discord.ButtonStyle.secondary, row=0)
         delete_btn = discord.ui.Button(label="Delete Media", emoji="🗑️", style=discord.ButtonStyle.danger, row=0)
@@ -1075,8 +1166,73 @@ class PhoneMediaDetailView(PhoneOwnerRestrictedView):
         home_btn.callback = self._back_home
 
         self.add_item(back_btn)
+        if self.can_generate and item.get("id"):
+            gen_btn = discord.ui.Button(
+                label="Generating..." if in_flight_now else ("Regenerate Photo" if has_image else "Generate Photo"),
+                emoji="⏳" if in_flight_now else ("🔄" if has_image else "✨"),
+                style=discord.ButtonStyle.primary,
+                disabled=in_flight_now,
+                row=0,
+            )
+            gen_btn.callback = self._generate_item_photo
+            self.add_item(gen_btn)
         self.add_item(delete_btn)
         self.add_item(home_btn)
+
+    async def _generate_item_photo(self, interaction: discord.Interaction):
+        if not self.item.get("id"):
+            await interaction.response.send_message("Media item ID missing.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        from mechanics.combat.items import parse_digital_item_metadata
+
+        d_meta = parse_digital_item_metadata(self.item) or {}
+        has_image = bool(str(d_meta.get("image_url") or self.item.get("image_url") or "").strip())
+        res = await generate_phone_media_image(
+            self.session_id,
+            self.user_id,
+            int(self.item["id"]),
+            auto_trigger=False,
+            force_regenerate=has_image,
+        )
+        if res.get("in_flight"):
+            await interaction.followup.send(
+                "⏳ This photo is already being generated — please check back in a moment.",
+                ephemeral=True,
+            )
+            return
+        if not res.get("success"):
+            err_msg = res.get("error") or (
+                "Image generation is disabled for this session."
+                if res.get("reason") == "image_gen_disabled"
+                else "Could not generate photo."
+            )
+            await interaction.followup.send(
+                f"❌ {err_msg}",
+                ephemeral=True,
+            )
+            return
+        fresh_item = await db.adb(db.get_inventory_item_by_id, int(self.item["id"]), self.user_id) or self.item
+        self.item = fresh_item
+        embed = _build_media_item_detail_embed(fresh_item)
+        local_file = resolve_digital_media_local_file(fresh_item)
+        attachments = [discord.File(local_file, filename=os.path.basename(local_file))] if local_file else []
+        next_view = PhoneMediaDetailView(
+            self.cog,
+            self.session_id,
+            self.user_id,
+            fresh_item,
+            self.filter_contact,
+            self.filter_type,
+            self.page,
+            can_generate=self.can_generate,
+        )
+        await interaction.followup.edit_message(
+            message_id=interaction.message.id,
+            embed=embed,
+            view=next_view,
+            attachments=attachments,
+        )
 
     async def _back_to_gallery(self, interaction: discord.Interaction):
         def _prep():
@@ -1094,7 +1250,7 @@ class PhoneMediaDetailView(PhoneOwnerRestrictedView):
             self.page,
             inv_items=inv_items,
         )
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view, attachments=[])
 
     async def _delete_item(self, interaction: discord.Interaction):
         item_id = self.item.get("id")
@@ -1116,7 +1272,7 @@ class PhoneMediaDetailView(PhoneOwnerRestrictedView):
             0,
             inv_items=inv_items,
         )
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view, attachments=[])
 
     async def _back_home(self, interaction: discord.Interaction):
         def _prep_home():
@@ -1126,7 +1282,7 @@ class PhoneMediaDetailView(PhoneOwnerRestrictedView):
 
         embed, session = await db.adb(_prep_home)
         view = PhoneMainView(self.cog, self.session_id, self.user_id, session=session)
-        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.response.edit_message(embed=embed, view=view, attachments=[])
 
 
 

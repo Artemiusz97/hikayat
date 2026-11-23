@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Briefcase,
   ChevronDown,
@@ -20,8 +20,57 @@ const formatItemText = (item) => {
   return item.trait || item.name || item.label || '';
 };
 
-const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = '', onMessageContact = null, t }) => {
+const AcquaintancesView = ({
+  acquaintances = [],
+  loading = false,
+  searchQuery = '',
+  onMessageContact = null,
+  targetAcquaintanceName = null,
+  targetAcquaintancePulse = 0,
+  onConsumeTargetContact = null,
+  t,
+}) => {
   const [expandedKey, setExpandedKey] = useState(null);
+  const [highlightedKey, setHighlightedKey] = useState(null);
+  const cardRefs = useRef({});
+  const lastHandledPulseRef = useRef(0);
+  const scrollTimerRef = useRef(null);
+  const highlightTimerRef = useRef(null);
+
+  useEffect(() => () => {
+    clearTimeout(scrollTimerRef.current);
+    clearTimeout(highlightTimerRef.current);
+  }, []);
+
+  useEffect(() => {
+    if (!targetAcquaintanceName || targetAcquaintancePulse === lastHandledPulseRef.current || !Array.isArray(acquaintances)) return undefined;
+    const needle = String(targetAcquaintanceName ?? '').trim().toLowerCase();
+    const matched = acquaintances.find(
+      (a) =>
+        String(a?.name ?? '').trim().toLowerCase() === needle ||
+        String(a?.id ?? '').trim().toLowerCase() === needle ||
+        String(a?.npc_id ?? '').trim().toLowerCase() === needle ||
+        String(a?.npc_key ?? '').trim().toLowerCase() === needle
+    );
+    if (!matched) return undefined;
+    lastHandledPulseRef.current = targetAcquaintancePulse;
+    const key = matched.npc_key || matched.npc_id || matched.id || matched.name;
+    setExpandedKey(key);
+    setHighlightedKey(key);
+    clearTimeout(scrollTimerRef.current);
+    clearTimeout(highlightTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      const el =
+        cardRefs.current[key] ||
+        cardRefs.current[String(matched.name ?? '').toLowerCase()];
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 80);
+    highlightTimerRef.current = setTimeout(() => setHighlightedKey(null), 2400);
+    onConsumeTargetContact?.();
+    return undefined;
+  }, [targetAcquaintanceName, targetAcquaintancePulse, acquaintances, onConsumeTargetContact]);
 
   if (loading && acquaintances.length === 0) {
     return (
@@ -75,7 +124,15 @@ const AcquaintancesView = ({ acquaintances = [], loading = false, searchQuery = 
         return (
           <div
             key={cardKey}
-            className="py-3 space-y-2.5 transition-colors"
+            ref={(el) => {
+              cardRefs.current[cardKey] = el;
+              if (acq.name) cardRefs.current[String(acq.name).toLowerCase()] = el;
+            }}
+            className={`py-3 space-y-2.5 transition-colors rounded-lg ${
+              highlightedKey === cardKey
+                ? 'px-2 -mx-2 bg-fantasy-accent/10 ring-2 ring-fantasy-accent/60'
+                : ''
+            }`}
           >
             <div
               role="button"

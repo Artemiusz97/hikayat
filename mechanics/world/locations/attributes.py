@@ -1147,6 +1147,81 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     return [{"type": "general_merchant", **MERCHANT_ARCHETYPES["general_merchant"]}]
 
+def _compile_word_boundary_union(terms: tuple[str, ...]) -> re.Pattern[str]:
+    ordered = sorted(terms, key=len, reverse=True)
+    return re.compile(r"\b(?:" + "|".join(re.escape(k) for k in ordered) + r")\b")
+
+
+_EXPLICIT_ROOM_SHOP_TERMS = (
+    "shop", "store", "market", "bazaar", "emporium", "armory", "ordnance",
+    "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
+    "requisition", "quartermaster", "outfitter", "tailoring", "tactical rigging",
+    "fitted armor", "cleansing bay", "psychic detox", "neural recovery",
+    "field infirmary", "dispensary", "apothecary", "apotheca", "pharmacy", "canteen",
+    "refectory", "commissary", "cafeteria", "espresso", "pour-over", "roastery", "kitchenette",
+    "cafe", "café", "taproom", "bar", "tavern", "bakery", "diner",
+    "ramen", "izakaya", "tea house", "boutique", "konbini", "convenience",
+    "kiosk", "vending", "co-op", "bookstore", "bookshop", "supply counter",
+    "velvet boutique", "clubroom", "pawn", "black market", "auction house",
+)
+_NON_SHOP_ROOM_TERMS = (
+    "lobby", "foyer", "corridor", "hallway", "stairwell", "bedroom", "loft",
+    "dorm", "dormitory", "dormitories", "quarters", "bathroom", "restroom",
+    "locker room", "classroom", "homeroom", "dispatch", "forensics",
+    "calibration", "firing range", "training", "containment", "quarantine",
+    "vault", "sub-cellar", "cell", "interrogation", "archive", "server",
+    "morgue", "icu", "helipad", "garage", "parking", "rooftop", "platform",
+    "turnstile", "ward", "triage", "trauma", "operating", "altar", "prayer",
+)
+_NON_SHOP_ANOM_ROOMS = (
+    "classroom", "lecture", "library", "study", "office", "hallway", "corridor",
+    "foyer", "lobby", "courtyard", "quad", "roof", "rooftop", "parking",
+    "platform", "turnstile", "gate", "ward", "triage", "trauma", "operating",
+    "morgue", "icu", "sanctuary", "altar", "shrine", "prayer", "pagoda",
+    "coaster", "ferris", "haunted house", "carousel", "dock", "pier", "beach",
+    "trail", "forest", "lookout", "bedroom", "living room", "kitchen",
+    "briefing", "command", "interrogation", "containment", "cell", "training",
+    "firing range", "helipad", "garage", "archive", "server",
+)
+_EXPLICIT_SHOP_NOUNS = (
+    "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
+    "armory", "ordnance", "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
+    "requisition", "quartermaster", "outfitter", "tailoring",
+    "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
+    "neural recovery", "field infirmary", "dispensary", "apotheca", "convenience", "konbini",
+    "boutique", "bakery", "stall", "canteen", "refectory", "commissary", "diner", "roastery", "pour-over",
+    "kitchenette", "izakaya", "ramen", "espresso", "tea house", "bookstore",
+    "duty-free", "midway", "omikuji", "talisman stand", "pawn", "black market",
+    "auction house", "boiler-room locker", "custodian's boiler", "campus co-op", "co-op",
+    "fox-fire apothecary", "spirit-fire curio", "myōbu spirit-fire", "myobu spirit-fire", "spirit curio", "pusaka", "artisan hall", "ranger station", "park ranger field station", "ranger field station", "trailhead information counter", "trailhead outpost", "trail permit", "tea street",
+)
+_SHOP_KEYWORDS = (
+    "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
+    "armory", "blacksmith", "weaponsmith", "quartermaster", "convenience", "boutique",
+    "bakery", "stall", "merchant", "trader", "noodle bar", "canteen", "saloon", "tavern", "taproom",
+    "inn", "trading post", "general store", "guild shop", "alchemist", "herbalist", "forge",
+    "outfitter", "tailoring", "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
+    "neural recovery", "field infirmary", "dispensary", "clinic", "roastery", "pour-over", "kitchenette", "izakaya", "ramen",
+    "antiquities", "licensed wards", "pawn", "black market", "afterdark", "red-lantern",
+    "konbini", "auction house", "espresso", "velvet mirage", "crimson masquerade", "fish market", "omikuji", "talisman", "carnival midway", "gift emporium", "duty-free", "night market", "apothecary", "black bazaar", "tea house", "bookstore", "trauma center", "emergency trauma", "ambulance triage",
+    "regional tower hq", "operations spire hq", "tower hq", "field office hq", "office hq", "operations hq", "requisition shop", "requisition depot",
+)
+_HQ_SHOP_WING_KEYWORDS = (
+    "armory", "ordnance", "requisition", "outfitter", "tailoring",
+    "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
+    "neural recovery", "field infirmary", "dispensary", "clinic", "medical",
+    "canteen", "espresso", "pour-over", "kitchenette", "cafe", "café", "shop", "store",
+)
+
+_EXPLICIT_ROOM_SHOP_RE = _compile_word_boundary_union(_EXPLICIT_ROOM_SHOP_TERMS)
+_NON_SHOP_ROOM_RE = _compile_word_boundary_union(_NON_SHOP_ROOM_TERMS)
+_NON_SHOP_ANOM_ROOM_RE = _compile_word_boundary_union(_NON_SHOP_ANOM_ROOMS)
+_EXPLICIT_SHOP_NOUNS_RE = _compile_word_boundary_union(_EXPLICIT_SHOP_NOUNS)
+_SHOP_KEYWORDS_RE = _compile_word_boundary_union(_SHOP_KEYWORDS)
+_HQ_SHOP_WING_RE = _compile_word_boundary_union(_HQ_SHOP_WING_KEYWORDS)
+_HQ_TOKEN_RE = re.compile(r"\bhq\b")
+
+
 def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
 
     """Checks if a location is an actual commercial shop, store, market, café, canteen, or merchant establishment."""
@@ -1212,90 +1287,20 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
             return False
 
     if is_room_level:
-        explicit_room_shop_terms = (
-            "shop", "store", "market", "bazaar", "emporium", "armory", "ordnance",
-            "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
-            "requisition", "quartermaster", "outfitter", "tailoring", "tactical rigging",
-            "fitted armor", "cleansing bay", "psychic detox", "neural recovery",
-            "field infirmary", "dispensary", "apothecary", "apotheca", "pharmacy", "canteen",
-            "refectory", "commissary", "cafeteria", "espresso", "pour-over", "roastery", "kitchenette",
-            "cafe", "café", "taproom", "bar", "tavern", "bakery", "diner",
-            "ramen", "izakaya", "tea house", "boutique", "konbini", "convenience",
-            "kiosk", "vending", "co-op", "bookstore", "bookshop", "supply counter",
-            "velvet boutique", "clubroom", "pawn", "black market", "auction house",
-        )
-        non_shop_room_terms = (
-            "lobby", "foyer", "corridor", "hallway", "stairwell", "bedroom", "loft",
-            "dorm", "dormitory", "dormitories", "quarters", "bathroom", "restroom",
-            "locker room", "classroom", "homeroom", "dispatch", "forensics",
-            "calibration", "firing range", "training", "containment", "quarantine",
-            "vault", "sub-cellar", "cell", "interrogation", "archive", "server",
-            "morgue", "icu", "helipad", "garage", "parking", "rooftop", "platform",
-            "turnstile", "ward", "triage", "trauma", "operating", "altar", "prayer",
-        )
         has_explicit_room_shop = (
-            any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in explicit_room_shop_terms)
+            bool(_EXPLICIT_ROOM_SHOP_RE.search(leaf_lower))
             or any(mc in leaf_lower for mc in DYNAMIC_MINOR_CLUB_ROOM_KEYWORDS)
         )
-        if not has_explicit_room_shop and any(re.search(rf"\b{re.escape(ns)}\b", leaf_lower) for ns in non_shop_room_terms):
+        if not has_explicit_room_shop and _NON_SHOP_ROOM_RE.search(leaf_lower):
             return False
-
-
 
     # General Scenarios (Fantasy, Cyberpunk, Sci-Fi, etc.)
-
-    raw_parts = [
-        pt.strip()
-        for pt in re.split(r"➔|->", str(location_str))
-        if pt.strip()
-    ]
-    leaf_lower = raw_parts[-1].lower() if raw_parts else p_lower
-
     if is_anom_scen:
-        non_shop_anom_rooms = (
-            "classroom", "lecture", "library", "study", "office", "hallway", "corridor",
-            "foyer", "lobby", "courtyard", "quad", "roof", "rooftop", "parking",
-            "platform", "turnstile", "gate", "ward", "triage", "trauma", "operating",
-            "morgue", "icu", "sanctuary", "altar", "shrine", "prayer", "pagoda",
-            "coaster", "ferris", "haunted house", "carousel", "dock", "pier", "beach",
-            "trail", "forest", "lookout", "bedroom", "living room", "kitchen",
-            "briefing", "command", "interrogation", "containment", "cell", "training",
-            "firing range", "helipad", "garage", "archive", "server",
-        )
-        explicit_shop_nouns = (
-            "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
-            "armory", "ordnance", "black-bag ballistics", "tailor", "loom", "vestment", "cognitohazard lab",
-            "requisition", "quartermaster", "outfitter", "tailoring",
-            "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
-            "neural recovery", "field infirmary", "dispensary", "apotheca", "convenience", "konbini",
-            "boutique", "bakery", "stall", "canteen", "refectory", "commissary", "diner", "roastery", "pour-over",
-            "kitchenette", "izakaya", "ramen", "espresso", "tea house", "bookstore",
-            "duty-free", "midway", "omikuji", "talisman stand", "pawn", "black market",
-            "auction house", "boiler-room locker", "custodian's boiler", "campus co-op", "co-op",
-            "fox-fire apothecary", "spirit-fire curio", "myōbu spirit-fire", "myobu spirit-fire", "spirit curio", "pusaka", "artisan hall", "ranger station", "park ranger field station", "ranger field station", "trailhead information counter", "trailhead outpost", "trail permit", "tea street",
-        )
-        if any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in explicit_shop_nouns):
+        if _EXPLICIT_SHOP_NOUNS_RE.search(leaf_lower):
             return True
-        if any(re.search(rf"\b{re.escape(ns)}\b", leaf_lower) for ns in non_shop_anom_rooms):
+        if _NON_SHOP_ANOM_ROOM_RE.search(leaf_lower):
             return False
-        return any(re.search(rf"\b{re.escape(k)}\b", p_lower) for k in explicit_shop_nouns)
-
-    shop_keywords = (
-
-        "shop", "store", "market", "bazaar", "emporium", "café", "cafe", "pharmacy",
-
-        "armory", "blacksmith", "weaponsmith", "quartermaster", "convenience", "boutique",
-
-        "bakery", "stall", "merchant", "trader", "noodle bar", "canteen", "saloon", "tavern", "taproom",
-
-        "inn", "trading post", "general store", "guild shop", "alchemist", "herbalist", "forge",
-        "outfitter", "tailoring", "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
-        "neural recovery", "field infirmary", "dispensary", "clinic", "roastery", "pour-over", "kitchenette", "izakaya", "ramen",
-        "antiquities", "licensed wards", "pawn", "black market", "afterdark", "red-lantern",
-        "konbini", "auction house", "espresso", "velvet mirage", "crimson masquerade", "fish market", "omikuji", "talisman", "carnival midway", "gift emporium", "duty-free", "night market", "apothecary", "black bazaar", "tea house", "bookstore", "trauma center", "emergency trauma", "ambulance triage",
-        "regional tower hq", "operations spire hq", "tower hq", "field office hq", "office hq", "operations hq", "requisition shop", "requisition depot"
-
-    )
+        return bool(_EXPLICIT_SHOP_NOUNS_RE.search(p_lower))
 
     parent_chain_lower = " ".join(raw_parts[:-1]).lower() if len(raw_parts) >= 2 else ""
     if len(raw_parts) >= 2 and (
@@ -1303,20 +1308,19 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
             hq_k in parent_chain_lower
             for hq_k in ("tower hq", "field office hq", "office hq", "operations hq", "operations spire hq", "headquarters", "agency hq")
         )
-        or re.search(r"\bhq\b", parent_chain_lower)
+        or _HQ_TOKEN_RE.search(parent_chain_lower)
     ):
-        hq_shop_wing_keywords = (
-            "armory", "ordnance", "requisition", "outfitter", "tailoring",
-            "tactical rigging", "fitted armor", "cleansing bay", "psychic detox",
-            "neural recovery", "field infirmary", "dispensary", "clinic", "medical",
-            "canteen", "espresso", "pour-over", "kitchenette", "cafe", "café", "shop", "store",
-        )
-        return any(re.search(rf"\b{re.escape(k)}\b", leaf_lower) for k in hq_shop_wing_keywords)
+        return bool(_HQ_SHOP_WING_RE.search(leaf_lower))
 
     full_lower = str(location_str).lower()
-    return any(re.search(rf"\b{re.escape(k)}\b", p_lower) or re.search(rf"\b{re.escape(k)}\b", full_lower) for k in shop_keywords)
+    return bool(_SHOP_KEYWORDS_RE.search(p_lower) or _SHOP_KEYWORDS_RE.search(full_lower))
 
-def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
+def location_has_faction_hq(
+    location_str: str,
+    session_id: int = None,
+    *,
+    preloaded_factions: list[dict] | None = None,
+) -> bool:
     """Checks if the given location (Tier 2 Facility or Tier 3 Room) is registered as a Faction HQ."""
     if not location_str:
         return False
@@ -1338,7 +1342,10 @@ def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
 
     if session_id:
         try:
-            faction = db.get_faction_by_hq(session_id, location_str)
+            if preloaded_factions is not None:
+                faction = db.get_faction_by_hq(session_id, location_str, preloaded_factions=preloaded_factions)
+            else:
+                faction = db.get_faction_by_hq(session_id, location_str)
             if faction:
                 return True
         except Exception:
@@ -1373,7 +1380,17 @@ def location_has_faction_hq(location_str: str, session_id: int = None) -> bool:
         return True
     return False
 
-def get_location_emoji(location_name: str, zone_name: str = "", waypoint_markers: dict = None, session_id: int = None, scen_key: str = None, char_name: str = "") -> str:
+def get_location_emoji(
+    location_name: str,
+    zone_name: str = "",
+    waypoint_markers: dict = None,
+    session_id: int = None,
+    scen_key: str = None,
+    char_name: str = "",
+    *,
+    preloaded_factions: list[dict] | None = None,
+    player_house_name: str | None = None,
+) -> str:
 
     """
 
@@ -1417,7 +1434,10 @@ def get_location_emoji(location_name: str, zone_name: str = "", waypoint_markers
 
 
 
-    if location_has_faction_hq(location_name, session_id=session_id) or (zone_name and location_has_faction_hq(zone_name, session_id=session_id)):
+    if (
+        location_has_faction_hq(location_name, session_id=session_id, preloaded_factions=preloaded_factions)
+        or (zone_name and location_has_faction_hq(zone_name, session_id=session_id, preloaded_factions=preloaded_factions))
+    ):
 
         return "🏛️"
 
@@ -1433,7 +1453,13 @@ def get_location_emoji(location_name: str, zone_name: str = "", waypoint_markers
 
     # Check if player residence
 
-    if session_id or char_name:
+    if player_house_name is not None:
+
+        if player_house_name and (location_name == player_house_name or player_house_name in location_name):
+
+            return "🏠"
+
+    elif session_id or char_name:
 
         try:
 

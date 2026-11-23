@@ -1045,7 +1045,7 @@ def ensure_session_locations_seeded(session_id: int, scenario_key: str = "high_s
 
     """Ensures seed locations exist in SQLite for the session."""
 
-    if not is_location_engine_enabled(scenario_key):
+    if not is_location_engine_enabled(scenario_key) or db.is_in_readonly_uow():
 
         return
 

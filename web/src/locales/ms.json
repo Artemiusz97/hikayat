@@ -627,7 +627,13 @@
     "gender_male": "Lelaki",
     "gender_non_binary": "Bukan Binari",
     "race_human": "Manusia",
-    "student_tag": "Pelajar"
+    "student_tag": "Pelajar",
+    "inspect_npc_profile": "Lihat profil {{name}}",
+    "close_npc_profile": "Tutup profil {{name}}",
+    "npc_profile_panel": "Profil {{name}}",
+    "open_in_contacts": "Buka di Kenalan",
+    "open_in_codex": "Buka di Kodeks",
+    "scene_only_npc_badge": "Baru Ditemui"
   },
   "conditions": {
     "aroused": "Terangsang",
@@ -1186,7 +1192,10 @@
       "check_messages": "Semak Mesej untuk butiran pertemuan",
       "visit_requests": "Buka Permintaan Kampus untuk tugas aktif",
       "open": "Buka",
-      "no_active_meetups": "Tiada Pertemuan atau Janji Aktif"
+      "no_active_meetups": "Tiada Pertemuan atau Janji Aktif",
+      "vault_memories": "{{count}} Disimpan dalam Peti Foto",
+      "latest_from": "Terbaharu daripada {{name}}",
+      "tap_to_view_photos": "Ketik untuk lihat foto & hias latar"
     },
     "apps": {
       "photos": "Peti Foto",
@@ -1200,7 +1209,12 @@
       "planner": "Perancang & Agenda",
       "planner_sub": "Jadual & Pertemuan",
       "bounties": "Permintaan Kampus",
-      "bounties_sub": "Buletin Pelajar"
+      "bounties_sub": "Buletin Pelajar",
+      "photos_short": "Foto",
+      "dms_short": "Mesej",
+      "feed_short": "Sosial",
+      "settings": "Tetapan",
+      "settings_sub": "Hias & Tema"
     },
     "vault": {
       "all": "Semua",
@@ -1208,7 +1222,16 @@
       "intimate": "🔥 Intim",
       "videos": "🎥 Video",
       "all_contacts": "👤 Semua Kenalan ({{count}})",
-      "empty": "Tiada media yang sepadan dalam peti."
+      "empty": "Tiada media yang sepadan dalam peti.",
+      "generating": "Memproses...",
+      "generate_photo": "Jana Foto",
+      "regenerate": "Jana Semula",
+      "set_wallpaper": "Jadikan Hias Latar",
+      "active_wallpaper": "Hias Latar Aktif",
+      "deleting": "Memadam...",
+      "delete_media": "🗑️ Padam Media",
+      "generate_failed": "Gagal menjana foto.",
+      "delete_failed": "Gagal memadam media."
     },
     "dms": {
       "scheduled_meetup": "📍 Pertemuan Dijadualkan:",
@@ -1237,7 +1260,13 @@
       "action_ask_spicy_title": "Minta foto hangat daripada kenalan (kongsi 3/hari)",
       "action_send_spicy": "Hantar Foto Hangat",
       "action_send_spicy_title": "Hantar foto hangat diri anda kepada kenalan (kongsi 3/hari)",
-      "saved_to_vault": "Disimpan ke Peti Foto!"
+      "saved_to_vault": "Disimpan ke Peti Foto!",
+      "generating_photo": "Menjana foto...",
+      "open_photo_vault": "Buka Pratonton",
+      "attached_intimate": "Lampiran Intim",
+      "attached_video": "Lampiran Video",
+      "attached_photo": "Lampiran Foto",
+      "send_failed": "Gagal menghantar mesej."
     },
     "feed": {
       "timeline_and_rumors": "Garis Masa & Khabar Angin",
@@ -1268,7 +1297,64 @@
     "planner": {
       "no_active_tasks": "Tiada tugas aktif yang sedang berjalan"
     },
-    "shop_load_failed": "Gagal memuatkan katalog kedai."
+    "shop_load_failed": "Gagal memuatkan katalog kedai.",
+    "wallpapers": {
+      "iphone_default": "Sutera Aurora",
+      "iphone_default_sub": "Lalai Gaya iPhone",
+      "auto_scenario": "Ikut Senario",
+      "auto_scenario_sub": "Ikut Dunia Secara Auto",
+      "fantasy": "Alam Mitos",
+      "dark_fantasy": "Mahkota Abu",
+      "isekai_fantasy": "Persatuan Langit",
+      "sci_fi": "Pinggir Angkasa",
+      "cyberpunk": "Krom Neon",
+      "steampunk": "Loyang & Eter",
+      "high_school_drama": "Senja Bumbung",
+      "slice_of_life": "Kafe Malam",
+      "nuclear_post_apocalypse": "Aurora Runtuhan",
+      "anomalous_incursions": "Rekahan Metro",
+      "anomalous_high_school": "Sekolah Anomali"
+    },
+    "settings": {
+      "live_preview": "Pratonton Langsung",
+      "preview_sample": "Tema & Hias Latar Aktif",
+      "ui_style": "Gaya UI Telefon Pintar",
+      "style_classic": "Gelap Klasik",
+      "style_classic_desc": "Aplikasi OLED, latar Skrin Utama",
+      "style_glass": "Kaca Kabur",
+      "style_glass_desc": "Ikut tema akrilik permainan",
+      "wallpaper_picker": "Hias Latar",
+      "carousel_active_badge": "Karusel Aktif",
+      "tab_builtin": "Bawaan",
+      "tab_npc": "NPC ({{count}})",
+      "tab_scenes": "Babak ({{count}})",
+      "no_npc_photos": "Tiada foto NPC dijana lagi.",
+      "no_npc_photos_hint": "Terima foto dalam mesej atau jana dalam Peti Foto untuk dijadikan hias latar.",
+      "no_scene_images": "Tiada ilustrasi babak kempen lagi.",
+      "no_scene_images_hint": "Ilustrasi babak yang dijana dalam kempen ini akan muncul di sini.",
+      "carousel_title": "Karusel Hias Latar",
+      "carousel_desc": "Tukar automatik setiap kali telefon dibuka",
+      "carousel_pool": "Kumpulan Putaran",
+      "next_wallpaper": "Hias Latar Seterusnya",
+      "pool_all_builtin": "Semua Bawaan",
+      "pool_scenario_photos": "Senario + Foto",
+      "pool_photos_only": "Foto Dijana",
+      "pool_custom": "Pilihan Sendiri",
+      "custom_pool_hint": "Pilih hias latar untuk putaran:",
+      "include_intimate": "Sertakan foto intim 18+ dalam karusel",
+      "display_clock": "Paparan & Jam",
+      "wallpaper_dim": "Kegelapan Hias Latar",
+      "framing": "Bingkai Hias Latar",
+      "focal_top": "Atas",
+      "focal_center": "Tengah",
+      "focal_bottom": "Bawah",
+      "blur_in_apps": "Kaburkan latar dalam aplikasi",
+      "dynamic_tint": "Tona siang/malam dinamik",
+      "clock_style": "Gaya Jam",
+      "clock_modern": "Moden",
+      "clock_serif": "RPG Serif",
+      "clock_format": "Format Jam"
+    }
   },
   "awakened": {
     "section_title": "Penalaan Resonans Terbangkit",

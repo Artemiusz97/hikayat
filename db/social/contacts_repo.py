@@ -888,10 +888,6 @@ def ensure_scene_npcs_in_contacts(session_id: int, character_id: int = 0):
             if tc and tc.get("name"):
                 party_char_names.add(str(tc["name"]).strip().lower())
 
-        from mechanics.world.mobility import get_session_dialogue_partners
-        dialogue_partners = {p.lower() for p in get_session_dialogue_partners(sess)}
-
-        scene_narrative = str(sess.get("narrative") or "")
         for npc in unadded:
             n_name = game_engine._get_npc_name(npc)
             if not n_name or n_name.lower() in enemy_names or n_name.lower() in party_char_names:
@@ -1324,7 +1320,7 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                     )
                     _apply_contact_household_residence(session_id, d, hh, scen_key)
                     d["household_id"] = hh["id"]
-            elif not d.get("relations") or not d["relations"].get("family"):
+            elif (not d.get("relations") or not d["relations"].get("family")) and not is_in_readonly_uow():
                 resolving_set = _get_resolving_contacts_set()
                 resolving_set.add(session_id)
                 try:
@@ -1647,14 +1643,6 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             conn, session_id, d.get("name", ""), raw_info,
             scenario=scen_key, narrative_text=scene_narrative
         )
-        if enriched_info != raw_info and d.get("id"):
-            try:
-                conn.execute(
-                    "UPDATE contacts SET basic_info_json=? WHERE id=?",
-                    (json.dumps(enriched_info), d["id"])
-                )
-            except Exception:
-                pass
     d["basic_info"] = enriched_info
     try:
         raw_traits = json.loads(d.get("unlocked_traits_json") or "[]")
@@ -1865,7 +1853,7 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             )
             _apply_contact_household_residence(session_id, d, hh, scen_key)
             d["household_id"] = hh["id"]
-    elif not d.get("relations") or not d["relations"].get("family"):
+    elif (not d.get("relations") or not d["relations"].get("family")) and not is_in_readonly_uow():
         import mechanics.social.genealogy as genealogy
         d["relations"] = genealogy.ensure_contact_relations(d, session_id=session_id, scenario=scen_key)
         if session_id and d.get("id") and not is_in_readonly_uow():

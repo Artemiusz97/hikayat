@@ -64,6 +64,10 @@ from mechanics.system.phone import (
     discover_suggested_peer,
     resolve_social_friend_request,
     get_suggested_peers,
+    is_media_item_in_flight,
+    is_session_image_gen_enabled,
+    generate_phone_media_image,
+    spawn_phone_media_image_task,
 )
 from mechanics.social.factions import (
     get_faction_tier,
@@ -90,13 +94,14 @@ from mechanics.social.factions import (
     resolve_board_club_faction_for_location,
 )
 from mechanics.world.locations import location_has_bounty_board, get_notice_board_label, reveal_hidden_club_facility
-from mechanics.combat.items import is_digital_item, parse_digital_item_metadata
+from mechanics.combat.items import is_digital_item, parse_digital_item_metadata, update_digital_media_image
 from mechanics.combat.loadouts import build_combatant_stat_sheet, compute_companion_vitals, ensure_combatant_loadout
 from mechanics.world.world_events.engine import build_client_world_pulse_payload
 from .deps import (
     manager,
     _serializable_action,
     PhoneMessageRequest,
+    PhoneMediaGenerateRequest,
     CompanionPartyRequest,
     FactionHQActionRequest,
     PhoneFeedActionRequest,
@@ -2718,10 +2723,15 @@ async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceR
 @router.get("/api/phone/{session_id}")
 async def get_phone_state(session_id: int, user_id: int = Query(...), request: Request = None):
     """Fetches smartphone OS state: scenario branding, appointments, gossip feed, contacts, social state, and digital media gallery."""
-    session, _ = await verify_session_participant(request, session_id, user_id)
+    session, eff_uid = await verify_session_participant(request, session_id, user_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, eff_uid)
+    char_row = await adb(db.get_character, canonical_id, session_id=session_id)
+    if not char_row:
+        char_row = await adb(db.get_character, canonical_id)
+    media_owner_uid = int(char_row.get("user_id") or canonical_id) if isinstance(char_row, dict) else int(canonical_id)
 
     scen_key = session.get("scenario", "fantasy")
-    inv = await adb(db.get_inventory, user_id)
+    inv = await adb(db.get_inventory, media_owner_uid)
     is_supported = True
 
     branding = get_phone_branding(scen_key)
@@ -2733,25 +2743,31 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
     if _sd_phone.is_anomalous_incursions_scenario(scen_key):
         from mechanics.social.agent_roster import prune_unmet_preseeded_special_agents
         await adb(prune_unmet_preseeded_special_agents, session_id)
-    char_row = await adb(db.get_character, user_id)
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await _get_contacts_ro(session_id, char_id)
-    if not contacts and char_id != user_id:
-        contacts = await _get_contacts_ro(session_id, user_id)
+    if not contacts and char_id != canonical_id:
+        contacts = await _get_contacts_ro(session_id, canonical_id)
     social_state = await adb(get_social_state_summary, session_id, session)
 
     digital_media = []
     for it in inv:
         if is_digital_item(it):
             meta = parse_digital_item_metadata(it) or {}
+            img_url = str(meta.get("image_url") or "")
+            img_status = str(meta.get("image_status") or ("ready" if img_url else "idle"))
+            if img_status == "generating" and not is_media_item_in_flight(int(it.get("id") or 0)):
+                img_status = "ready" if img_url else "idle"
             digital_media.append({
                 "id": it.get("id"),
                 "name": it.get("name"),
                 "contact_name": meta.get("contact_name") or "Subject",
+                "contact_npc_id": meta.get("contact_npc_id") or "",
                 "media_type": meta.get("media_type") or "photo",
                 "caption": meta.get("caption") or it.get("effect") or "",
                 "timestamp": meta.get("timestamp"),
-                "tags": meta.get("tags") or []
+                "tags": meta.get("tags") or [],
+                "image_url": img_url,
+                "image_status": img_status,
             })
 
     party_npcs = await adb(db.get_session_party_npcs, session_id)
@@ -2766,10 +2782,10 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
             uc_copy["can_dm"] = True
             if not uc_copy.get("debug_revealed"):
                 if "_phone_fow_ctx" not in locals():
-                    _ph_uid = locals().get("user_id") or (getattr(locals().get("req"), "user_id", 0) if "req" in locals() else 0)
+                    _ph_uid = canonical_id
                     _ph_set = await adb(db.get_settings, _ph_uid) if _ph_uid else {}
                     _ph_dbg = bool((_ph_set or {}).get("debug_reveal_all_info", 0))
-                    _ph_cid = int(locals().get("char_id") or ((await adb(db.get_character, _ph_uid)) or {}).get("id", 0) if _ph_uid else 0)
+                    _ph_cid = int(char_id or 0)
                     _phone_fow_ctx = None if _ph_dbg else await adb(_preload_fog_of_war_context, session_id, _ph_cid, party_names, str((_ph_set or {}).get("ui_language") or "en"))
                 if isinstance(_phone_fow_ctx, dict):
                     from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact as _apply_ph_fow
@@ -2790,7 +2806,7 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
     if _sd_phone.is_anomalous_incursions_scenario(scen_key):
         try:
             from mechanics.social.factions import get_anomalous_faction_state
-            a_st = await adb(get_anomalous_faction_state, session_id, user_id)
+            a_st = await adb(get_anomalous_faction_state, session_id, canonical_id)
             dispatch_defs = [
                 ("metropolitan_anomaly_watch", "Metropolitan Anomaly Watch", "Citywide Anomaly Broadcast"),
             ]
@@ -2835,6 +2851,7 @@ async def get_phone_state(session_id: int, user_id: int = Query(...), request: R
     return {
         "is_supported": is_supported,
         "scenario": scen_key,
+        "image_gen_enabled": session.get("image_gen_enabled", 0),
         "branding": {
             "device_name": branding.get("device_name", "📱 Smartphone") if branding else "📱 Smartphone",
             "os_name": branding.get("os_name", "Mobile OS") if branding else "Mobile OS",
@@ -3150,6 +3167,30 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             intent=intent
         )
 
+        raw_ids = (reply_data.get("digital_item_ids") if isinstance(reply_data, dict) else None) or (
+            [reply_data["digital_item_id"]]
+            if isinstance(reply_data, dict) and reply_data.get("digital_item_id")
+            else []
+        )
+        media_owner_uid = int(player_char.get("user_id") or canonical_id)
+        if raw_ids and is_session_image_gen_enabled(session, auto_only=True):
+            for d_id in raw_ids:
+                await adb(
+                    update_digital_media_image,
+                    int(d_id),
+                    media_owner_uid,
+                    image_status="generating",
+                )
+                spawn_phone_media_image_task(
+                    session_id,
+                    media_owner_uid,
+                    int(d_id),
+                    auto_trigger=True,
+                    broadcast_fn=lambda payload, _sid=session_id: manager.broadcast(_sid, payload),
+                )
+            if isinstance(reply_data.get("media_dropped"), dict):
+                reply_data["media_dropped"]["image_status"] = "generating"
+
         messages = await adb(db.get_phone_messages, session_id, contact.get("npc_id", npc_id), limit=20)
         return {
             "success": True,
@@ -3158,6 +3199,37 @@ async def send_npc_message(session_id: int, npc_id: str, req: PhoneMessageReques
             "messages": [dict(m) for m in messages],
             "daily_limits": reply_data.get("daily_limits"),
         }
+
+
+@router.post("/api/phone/{session_id}/media/{item_id}/generate")
+async def generate_phone_media(
+    session_id: int,
+    item_id: int,
+    req: PhoneMediaGenerateRequest,
+    request: Request = None,
+):
+    """Generates or regenerates an AI portrait image for a digital media item in Photo Vault."""
+    session, eff_uid = await verify_session_participant(request, session_id, req.user_id)
+    canonical_id = await adb(db.resolve_canonical_user_id, eff_uid)
+    if not is_session_image_gen_enabled(session, auto_only=False):
+        raise HTTPException(status_code=400, detail="Image generation is disabled for this session.")
+
+    char_row = await adb(db.get_character, canonical_id, session_id=session_id)
+    media_owner_uid = int(char_row.get("user_id") or canonical_id) if isinstance(char_row, dict) else int(canonical_id)
+
+    res = await generate_phone_media_image(
+        session_id,
+        media_owner_uid,
+        item_id,
+        auto_trigger=False,
+        force_regenerate=bool(req.force_regenerate),
+        broadcast_fn=lambda payload: manager.broadcast(session_id, payload),
+    )
+    if res.get("reason") in ("session_not_found", "media_not_found"):
+        raise HTTPException(status_code=404, detail=res.get("error") or "Media item not found.")
+    if not res.get("success"):
+        raise HTTPException(status_code=502, detail=res.get("error") or "Image generation failed.")
+    return {"success": True, "media": res.get("media")}
 
 
 @router.post("/api/commitments/{session_id}/{commitment_id}/cancel")

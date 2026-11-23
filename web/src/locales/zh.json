@@ -627,7 +627,13 @@
     "gender_male": "男性",
     "gender_non_binary": "非二元",
     "race_human": "人类",
-    "student_tag": "学生"
+    "student_tag": "学生",
+    "inspect_npc_profile": "查看{{name}}的档案",
+    "close_npc_profile": "关闭{{name}}的档案",
+    "npc_profile_panel": "{{name}}档案",
+    "open_in_contacts": "在联系人中打开",
+    "open_in_codex": "在图鉴中打开",
+    "scene_only_npc_badge": "初识"
   },
   "conditions": {
     "aroused": "动情",
@@ -1186,7 +1192,10 @@
       "check_messages": "查看消息以获取会面详情",
       "visit_requests": "前往校园委托查看进行中的任务",
       "open": "打开",
-      "no_active_meetups": "当前没有活跃的会面或约定"
+      "no_active_meetups": "当前没有活跃的会面或约定",
+      "vault_memories": "私密相册已保存 {{count}} 项",
+      "latest_from": "最新来自 {{name}}",
+      "tap_to_view_photos": "点击查看照片与壁纸"
     },
     "apps": {
       "photos": "照片保险库",
@@ -1200,7 +1209,12 @@
       "planner": "日程与备忘",
       "planner_sub": "日程与会面",
       "bounties": "校园委托",
-      "bounties_sub": "学生公告栏"
+      "bounties_sub": "学生公告栏",
+      "photos_short": "相册",
+      "dms_short": "消息",
+      "feed_short": "动态",
+      "settings": "设置",
+      "settings_sub": "壁纸与主题"
     },
     "vault": {
       "all": "全部",
@@ -1208,7 +1222,16 @@
       "intimate": "🔥 私密",
       "videos": "🎥 视频",
       "all_contacts": "👤 所有联系人 ({{count}})",
-      "empty": "保险库中没有匹配的媒体文件。"
+      "empty": "保险库中没有匹配的媒体文件。",
+      "generating": "正在生成...",
+      "generate_photo": "生成照片",
+      "regenerate": "重新生成",
+      "set_wallpaper": "设为壁纸",
+      "active_wallpaper": "当前壁纸",
+      "deleting": "正在删除...",
+      "delete_media": "🗑️ 删除媒体",
+      "generate_failed": "无法生成照片。",
+      "delete_failed": "无法删除媒体文件。"
     },
     "dms": {
       "scheduled_meetup": "📍 已安排会面：",
@@ -1237,7 +1260,13 @@
       "action_ask_spicy_title": "向联系人索要性感照片（共享每日 3 次）",
       "action_send_spicy": "发辣照",
       "action_send_spicy_title": "向联系人发送自己的性感照片（共享每日 3 次）",
-      "saved_to_vault": "已保存至照片保险库！"
+      "saved_to_vault": "已保存至照片保险库！",
+      "generating_photo": "正在冲印照片...",
+      "open_photo_vault": "打开预览",
+      "attached_intimate": "私密附件",
+      "attached_video": "视频附件",
+      "attached_photo": "照片附件",
+      "send_failed": "发送消息失败。"
     },
     "feed": {
       "timeline_and_rumors": "动态与传闻",
@@ -1268,7 +1297,64 @@
     "planner": {
       "no_active_tasks": "当前没有进行中的任务"
     },
-    "shop_load_failed": "无法加载商店目录。"
+    "shop_load_failed": "无法加载商店目录。",
+    "wallpapers": {
+      "iphone_default": "极光丝绸",
+      "iphone_default_sub": "iPhone 风格默认",
+      "auto_scenario": "跟随剧本",
+      "auto_scenario_sub": "自动匹配当前世界",
+      "fantasy": "神话诸界",
+      "dark_fantasy": "灰烬王冠",
+      "isekai_fantasy": "浮空公会",
+      "sci_fi": "星海边陲",
+      "cyberpunk": "霓虹铬光",
+      "steampunk": "黄铜以太",
+      "high_school_drama": "天台暮色",
+      "slice_of_life": "夜雨咖啡街",
+      "nuclear_post_apocalypse": "废土极光",
+      "anomalous_incursions": "都市裂隙",
+      "anomalous_high_school": "异象学园"
+    },
+    "settings": {
+      "live_preview": "实时预览",
+      "preview_sample": "当前主题与壁纸生效中",
+      "ui_style": "手机界面风格",
+      "style_classic": "经典深色",
+      "style_classic_desc": "深黑应用，主屏展示壁纸",
+      "style_glass": "磨砂玻璃",
+      "style_glass_desc": "同步游戏主界面亚克力风格",
+      "wallpaper_picker": "壁纸选择",
+      "carousel_active_badge": "轮播已开启",
+      "tab_builtin": "内置壁纸",
+      "tab_npc": "NPC 照片 ({{count}})",
+      "tab_scenes": "剧情插画 ({{count}})",
+      "no_npc_photos": "暂无生成的 NPC 照片。",
+      "no_npc_photos_hint": "在私信接收照片或在相册中生成后即可设为壁纸。",
+      "no_scene_images": "暂无生成的剧情插画。",
+      "no_scene_images_hint": "当前冒险生成的回合插画会自动出现在这里。",
+      "carousel_title": "壁纸轮播模式",
+      "carousel_desc": "每次打开手机时自动切换壁纸",
+      "carousel_pool": "轮播范围",
+      "next_wallpaper": "换一张壁纸",
+      "pool_all_builtin": "全部内置壁纸",
+      "pool_scenario_photos": "剧本 + 生成照片",
+      "pool_photos_only": "仅生成的照片",
+      "pool_custom": "自定义选择",
+      "custom_pool_hint": "勾选参与轮播的壁纸：",
+      "include_intimate": "在轮播中包含 18+ 私密照片",
+      "display_clock": "显示与时钟",
+      "wallpaper_dim": "壁纸压暗",
+      "framing": "壁纸构图对齐",
+      "focal_top": "顶部",
+      "focal_center": "居中",
+      "focal_bottom": "底部",
+      "blur_in_apps": "在应用内模糊壁纸背景",
+      "dynamic_tint": "随游戏时间动态染霜色调",
+      "clock_style": "时钟字体",
+      "clock_modern": "现代极简",
+      "clock_serif": "奇幻衬线",
+      "clock_format": "时间制式"
+    }
   },
   "awakened": {
     "section_title": "觉醒共鸣调律",
