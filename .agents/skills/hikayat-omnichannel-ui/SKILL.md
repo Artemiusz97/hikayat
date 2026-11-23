@@ -35,7 +35,7 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 
 ### FastAPI Backend (`api/`)
 - `api/adventure/` (`routes_session.py`, `routes_turn.py`, `locations.py`): Session lifecycle (`/api/adventure/start`, `/join`, `/action`, `/end`, `/active-session/{uid}`), debug sandbox (`/api/debug/{uid}`).
-- `api/codex_phone.py`: Contacts dossier (`/api/contacts/{sid}`), lorebook & commitments (`/api/lorebook/{sid}`), quests/bounties/clue deduction (`/api/quests/{sid}/...`), world map (`/api/locations/{sid}`), factions HQ (`/api/factions/{sid}/...`), and Smartphone/PeerPulse (`/api/phone/{sid}/...`).
+- `api/codex_phone/` (`common.py`, `party.py`, `lorebook.py`, `contacts.py`, `factions.py`, `quests.py`, `phone.py`): Contacts dossier (`/api/contacts/{sid}`), lorebook & commitments (`/api/lorebook/{sid}`), quests/bounties/clue deduction (`/api/quests/{sid}/...`), factions HQ (`/api/factions/{sid}/...`), and Smartphone/PeerPulse (`/api/phone/{sid}/...`).
 - `api/inventory_merchant.py`: Inventory inspector (`vs_equipped` deltas, `[GEAR_JSON]` stripping, Key Item drop protection) & merchant shop/haggle.
 - `api/auth_characters.py`: Guest & Discord ID auth, character creation, starter gear regeneration, switching, and deletion.
 - `api/settings_ws.py` & `api/deps.py`: User settings, WebSocket endpoint, and `ConnectionManager`.
