@@ -5,7 +5,7 @@ description: "Use this skill whenever modifying LLM prompts, KV-cache prompt ord
 
 # Hikayat LLM Orchestration, Prose Guardrails & Image Prompt Runbook
 
-Use this guide whenever working on `llm_client/`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner.py`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
+Use this guide whenever working on `llm_client/`, `game_engine/prompts.py`, `game_engine/prompt_layout.py`, `game_engine/turn/narration.py`, `game_engine/pronoun_resolver.py`, `game_engine/choices_cleaner/`, `models/llm_schemas.py`, or `mechanics/narrative/image_prompt_composer.py`.
 
 ---
 
@@ -52,7 +52,7 @@ When a turn produces empty/emergency fallback prose (`_is_fallback_narrative`), 
 2. **Pronoun Resolution (`game_engine/pronoun_resolver.py`)**:
    - Wraps resolved 3rd-person pronouns in `<ref char="Name" role="Role">pronoun</ref>` using `build_actor_registry()`.
    - Always call `strip_pronoun_tags()` / `format_pronouns_for_prompt()` before injecting stored history back into LLM prompts so `<ref>` markup never leaks into future completions.
-3. **Hybrid Choice Pipeline (`game_engine/choices_cleaner.py`)**:
+3. **Hybrid Choice Pipeline (`game_engine/choices_cleaner/`)**:
    - Deduplicates semantically overlapping LLM choices via `_extract_choice_semantic_stems()`.
    - Enforces Hikayat's check rules: active dialogue choices require skill checks (`DC 5–8`) except the 1 dedicated `dialogue_exit` choice (`stat: "NONE"`, `requirement: 0`, `"ends_dialogue": true`); quest actions require skill checks; never offer/share items not in the player's carried inventory.
 4. **5-Language Narration (`en`, `pl`, `ms`, `zh`, `de`)**:
