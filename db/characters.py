@@ -56,6 +56,14 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         norm_app["student_grade"] = app_dict["student_grade"]
     app_json = json.dumps(norm_app)
 
+    innate_spells: list[str] | None = None
+    if is_anom and attr_val and arch_val and med_val:
+        try:
+            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
+            innate_spells = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
+        except Exception as e:
+            log.warning("Failed resolving innate 3-axis spells in create_character for user %s: %s", user_id, e)
+
     with UnitOfWork() as conn:
         char_count = conn.execute(
             "SELECT COUNT(*) FROM characters WHERE user_id=?",
@@ -75,14 +83,16 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
              hp, hp, mp, mp, pending_stat_points, gold, app_json, attr_val, arch_val, med_val, time.time()),
         )
         char_id = cur.lastrowid
-    if is_anom and attr_val and arch_val and med_val:
-        try:
-            from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
-            innate = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
-            db.set_skill_progress(user_id, {"innate_spells": innate, "equipped_granted_spells": [], "empowered_granted_spells": []})
-            db.set_learned_spells(user_id, innate)
-        except Exception as e:
-            log.warning("Failed seeding innate 3-axis spells in create_character for user %s: %s", user_id, e)
+        if innate_spells is not None:
+            db.set_skill_progress(
+                user_id,
+                {
+                    "innate_spells": innate_spells,
+                    "equipped_granted_spells": [],
+                    "empowered_granted_spells": [],
+                },
+            )
+            db.set_learned_spells(user_id, innate_spells)
     return get_character_by_id(char_id)
 
 def apply_adventure_loadout(

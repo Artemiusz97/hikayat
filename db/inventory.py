@@ -23,16 +23,16 @@ def get_learned_spells(user_id: int, char: dict | None = None) -> list[str]:
         return []
 
 def learn_spell(user_id: int, spell_id: str, spell_data: dict | None = None) -> bool:
-    char = db.get_character(user_id)
-    if not char:
-        return False
-    if spell_data and isinstance(spell_data, dict):
-        save_procedural_spell(spell_data)
-    spells = get_learned_spells(user_id)
-    if spell_id in spells:
-        return False
-    spells.append(spell_id)
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
+        char = db.get_character(user_id)
+        if not char:
+            return False
+        if spell_data and isinstance(spell_data, dict):
+            save_procedural_spell(spell_data)
+        spells = get_learned_spells(user_id, char=char)
+        if spell_id in spells:
+            return False
+        spells.append(spell_id)
         conn.execute("UPDATE characters SET learned_spells=? WHERE id=?", (json.dumps(spells), char["id"]))
     return True
 

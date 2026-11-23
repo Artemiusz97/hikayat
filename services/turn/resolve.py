@@ -590,52 +590,6 @@ async def _resolve_action_inner(
                 session["combat_boss_telegraph"] = copy.deepcopy(snapshot["pre_turn"]["combat_boss_telegraph"])
             else:
                 session.pop("combat_boss_telegraph", None)
-        try:
-            await adb(db.rollback_session_normalized_state_after_turn, session_id, pre_turn_count_val)
-        except Exception as _rb_norm_err:
-            log.warning("Normalized state rollback failed for session %s: %s", session_id, _rb_norm_err)
-        try:
-            rollback_kwargs: Dict[str, Any] = {
-                "turn_count": pre_turn_count_val,
-                "history_json": json.dumps(pre_turn_history_snapshot, default=str),
-                "nearby_enemies": pre_turn_nearby_enemies_snapshot,
-                "current_npcs": snapshot["pre_turn"]["npcs"],
-                "dialogue_partner": pre_turn_dialogue_partner,
-                "combat_threat_ledger": copy.deepcopy(snapshot["pre_turn"]["combat_threat_ledger"]),
-                "combat_boss_telegraph": copy.deepcopy(snapshot["pre_turn"]["combat_boss_telegraph"]),
-            }
-            if "party_npcs" in snapshot["pre_turn"]:
-                rollback_kwargs["party_npcs"] = snapshot["pre_turn"]["party_npcs"]
-                try:
-                    await adb(db.set_session_party_npcs, session_id, snapshot["pre_turn"]["party_npcs"])
-                    if isinstance(session, dict):
-                        session["party_npcs"] = copy.deepcopy(snapshot["pre_turn"]["party_npcs"])
-                except Exception as _rb_comp_err:
-                    log.warning("party_npcs rollback failed for session %s: %s", session_id, _rb_comp_err)
-            for _rb_uid, _rb_effs in pre_turn_char_status_effects.items():
-                try:
-                    await adb(db.set_status_effects, int(_rb_uid), copy.deepcopy(_rb_effs))
-                except Exception as _rb_st_err:
-                    log.warning("status_effects rollback failed for user %s: %s", _rb_uid, _rb_st_err)
-                for _p_entry in (party or []):
-                    _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
-                    if isinstance(_p_char, dict) and _p_char.get("user_id") and int(_p_char["user_id"]) == int(_rb_uid):
-                        _p_char["status_effects"] = copy.deepcopy(_rb_effs)
-            if prev_st_rollback is not None:
-                rollback_kwargs["stealth_state"] = prev_st_rollback
-            if sync_picks_rollback_json is not None:
-                rollback_kwargs["pending_picks_json"] = sync_picks_rollback_json
-            extra_restore: Dict[str, Any] = dict(pre_turn_anomaly_extra_snapshot)
-            extra_restore["player_resonance_pips"] = copy.deepcopy(snapshot["pre_turn"]["player_resonance_pips"])
-            extra_restore["telemetry_calibrations_used"] = copy.deepcopy(snapshot["pre_turn"]["telemetry_calibrations_used"])
-            if pre_turn_daily_incursions_snapshot is not None:
-                extra_restore["daily_incursions"] = pre_turn_daily_incursions_snapshot
-                extra_restore["daily_breaches"] = pre_turn_daily_incursions_snapshot
-            if extra_restore:
-                rollback_kwargs["extra"] = extra_restore
-            await adb(db.update_session, session_id, **rollback_kwargs)
-        except Exception:
-            pass
         if isinstance(err, Exception):
             log.error("Hard failure during turn execution for session %s: %s", session_id, err, exc_info=True)
         snapshot["status"] = "failed_hard"
@@ -644,7 +598,59 @@ async def _resolve_action_inner(
         else:
             snapshot["fallback_reason"] = "engine_error"
             snapshot["error"] = f"{type(err).__name__}: {err}"
-        await adb(db.set_turn_snapshot, session_id, snapshot)
+
+        rollback_kwargs: Dict[str, Any] = {
+            "turn_count": pre_turn_count_val,
+            "history_json": json.dumps(pre_turn_history_snapshot, default=str),
+            "nearby_enemies": pre_turn_nearby_enemies_snapshot,
+            "current_npcs": snapshot["pre_turn"]["npcs"],
+            "dialogue_partner": pre_turn_dialogue_partner,
+            "combat_threat_ledger": copy.deepcopy(snapshot["pre_turn"]["combat_threat_ledger"]),
+            "combat_boss_telegraph": copy.deepcopy(snapshot["pre_turn"]["combat_boss_telegraph"]),
+        }
+        has_party_npcs_rb = "party_npcs" in snapshot["pre_turn"]
+        if has_party_npcs_rb:
+            rollback_kwargs["party_npcs"] = snapshot["pre_turn"]["party_npcs"]
+        if prev_st_rollback is not None:
+            rollback_kwargs["stealth_state"] = prev_st_rollback
+        if sync_picks_rollback_json is not None:
+            rollback_kwargs["pending_picks_json"] = sync_picks_rollback_json
+        extra_restore: Dict[str, Any] = dict(pre_turn_anomaly_extra_snapshot)
+        extra_restore["player_resonance_pips"] = copy.deepcopy(snapshot["pre_turn"]["player_resonance_pips"])
+        extra_restore["telemetry_calibrations_used"] = copy.deepcopy(snapshot["pre_turn"]["telemetry_calibrations_used"])
+        if pre_turn_daily_incursions_snapshot is not None:
+            extra_restore["daily_incursions"] = pre_turn_daily_incursions_snapshot
+            extra_restore["daily_breaches"] = pre_turn_daily_incursions_snapshot
+        if extra_restore:
+            rollback_kwargs["extra"] = extra_restore
+
+        def _apply_turn_failure_rollback_bundle() -> None:
+            with db.UnitOfWork():
+                db.rollback_session_normalized_state_after_turn(session_id, pre_turn_count_val)
+                if has_party_npcs_rb:
+                    db.set_session_party_npcs(session_id, snapshot["pre_turn"]["party_npcs"])
+                for _rb_uid, _rb_effs in pre_turn_char_status_effects.items():
+                    db.set_status_effects(int(_rb_uid), copy.deepcopy(_rb_effs))
+                db.update_session(session_id, **rollback_kwargs)
+                db.set_turn_snapshot(session_id, snapshot)
+
+        try:
+            await adb(_apply_turn_failure_rollback_bundle)
+            if has_party_npcs_rb and isinstance(session, dict):
+                session["party_npcs"] = copy.deepcopy(snapshot["pre_turn"]["party_npcs"])
+            for _rb_uid, _rb_effs in pre_turn_char_status_effects.items():
+                for _p_entry in (party or []):
+                    _p_char = _p_entry[0] if isinstance(_p_entry, (tuple, list)) and _p_entry else _p_entry
+                    if isinstance(_p_char, dict) and _p_char.get("user_id") and int(_p_char["user_id"]) == int(_rb_uid):
+                        _p_char["status_effects"] = copy.deepcopy(_rb_effs)
+        except Exception as _rb_err:
+            log.error(
+                "Atomic turn failure rollback failed for session %s: %s",
+                session_id,
+                _rb_err,
+                exc_info=True,
+            )
+            await adb(db.set_turn_snapshot, session_id, snapshot)
 
     # Resolve the turn with the LLM — resolve_turn now always returns a dict
     try:

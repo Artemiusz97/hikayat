@@ -1,11 +1,14 @@
 import db
 import json
+import logging
 import time
 import re
 import heapq
 from collections import defaultdict
 from .core import *
 from .core import _to_str, _find_anomalous_agent_entry
+
+log = logging.getLogger(__name__)
 
 def save_merchant_state(session_id: int, merchant: dict):
     """Persists the full merchant encounter/shop blob for a session -- see
@@ -295,7 +298,7 @@ def save_session_location(
     is_dynamic: int = 0
 ):
     """Upserts a discovered or seed location into the session map."""
-    with get_conn() as conn:
+    with UnitOfWork() as conn:
         conn.execute(
             """INSERT INTO session_locations
                (session_id, location_id, zone_name, primary_name, sub_name, atmosphere, is_dynamic, created_at)
@@ -308,13 +311,19 @@ def save_session_location(
                is_dynamic=excluded.is_dynamic""",
             (session_id, location_id, zone_name, primary_name, sub_name, atmosphere, is_dynamic, time.time())
         )
-    try:
-        _sync_location_to_spatial_graph(
-            session_id, location_id, zone_name, primary_name, sub_name,
-            atmosphere=atmosphere, is_dynamic=is_dynamic
-        )
-    except Exception:
-        pass
+        try:
+            with savepoint(conn, "sp_sync_spatial"):
+                _sync_location_to_spatial_graph(
+                    session_id, location_id, zone_name, primary_name, sub_name,
+                    atmosphere=atmosphere, is_dynamic=is_dynamic
+                )
+        except Exception as exc:
+            log.warning(
+                "Spatial graph sync failed in save_session_location for session %s (%s): %s",
+                session_id,
+                location_id,
+                exc,
+            )
     return True
 
 def format_node_tiered_location(session_id: int, node_id: str, fallback_zone: str = "World Region") -> str:
