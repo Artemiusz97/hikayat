@@ -1117,8 +1117,8 @@ def _reduce_vitals_and_inventory(session_id: int, session: dict, party: list, ou
                   **(p_exc.get("refractory_partners") or {})
               }
               c_name = char.get("name", "") if isinstance(char, dict) else ""
-              from mechanics.social.physical_state import _match_actor_key
-              m_k = _match_actor_key(c_name, part_climax_map) if part_climax_map else ""
+              from mechanics.social.physical_state import match_actor_key
+              m_k = match_actor_key(c_name, part_climax_map) if part_climax_map else ""
               char_climaxed_flag = bool(part_climax_map.get(m_k or c_name, False) or p_climax_st.get("partner_climaxed", False))
 
           if in_refr_check and refr_mins_check > 0 and char_climaxed_flag:
@@ -1889,7 +1889,7 @@ def _reduce_physical_state_and_memories(
     # 4. Ensure any new NPCs present have baseline physical grounding & resolved schedule wardrobe
     present_npcs = outcome.get("npcs_present") or []
     if isinstance(present_npcs, list) and isinstance(updated_phys.get("actors"), dict):
-        from mechanics.social.physical_state import _match_actor_key
+        from mechanics.social.physical_state import match_actor_key
         from mechanics.social.wardrobe.resolver import resolve_actor_wardrobe_state
 
         for npc in present_npcs:
@@ -1906,7 +1906,7 @@ def _reduce_physical_state_and_memories(
             elif isinstance(npc, str) and npc.strip():
                 n_name = npc.strip()
             if n_name:
-                matched_k = _match_actor_key(n_name, updated_phys["actors"])
+                matched_k = match_actor_key(n_name, updated_phys["actors"])
                 if matched_k not in updated_phys["actors"]:
                     base_c = _wardrobe_npcs_by_name.get(n_name.strip().lower()) or _contacts_by_name.get(n_name.strip().lower())
                     npc_obj = dict(base_c) if isinstance(base_c, dict) else {"name": n_name}
@@ -1973,7 +1973,7 @@ def _reduce_physical_state_and_memories(
         from mechanics.social.physical_state import (
             is_erotic_intimate_contact,
             detect_intimate_disengagement,
-            _match_actor_key,
+            match_actor_key,
         )
         from mechanics.world.mobility import get_session_dialogue_partners
         dps = get_session_dialogue_partners(session)
@@ -2264,7 +2264,7 @@ def _reduce_physical_state_and_memories(
                                         cur_effs = [cur_effs] if cur_effs else []
                                 is_lead = (u_lead == lead_user_id_tick)
                                 ch_name = ch_lead.get("name", "") if isinstance(ch_lead, dict) else ""
-                                m_k_t = _match_actor_key(ch_name, refr_p_tick) if refr_p_tick else ""
+                                m_k_t = match_actor_key(ch_name, refr_p_tick) if refr_p_tick else ""
                                 ch_in_refr = pl_in_refr_tick if is_lead else bool(refr_p_tick.get(m_k_t or ch_name, False))
                                 cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
                                 if ch_in_refr:
@@ -2280,7 +2280,7 @@ def _reduce_physical_state_and_memories(
                             if isinstance(c_full, dict) and c_full.get("name"):
                                 c_effs = c_full.get("status_effects") or []
                                 c_name_t = c_full.get("name", "")
-                                m_k_t = _match_actor_key(c_name_t, refr_p_tick) if refr_p_tick else ""
+                                m_k_t = match_actor_key(c_name_t, refr_p_tick) if refr_p_tick else ""
                                 if bool(refr_p_tick.get(m_k_t or c_name_t, False)) or any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied")):
                                     c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_name_t).lower().replace(" ", "_")
                                     p_gen_t = (c_full.get("appearance") or {}).get("gender") or c_full.get("gender") or "Female"
@@ -2389,12 +2389,12 @@ def _reduce_physical_state_and_memories(
                     hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
                     updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
                     actors = updated_phys.get("actors", {})
-                    c_matched = _match_actor_key(player_name, actors) if player_name else None
+                    c_matched = match_actor_key(player_name, actors) if player_name else None
                     if c_matched and c_matched in actors:
                         actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
                     for pc_item in partner_contacts:
                         pn = pc_item.get("name", "")
-                        mk = _match_actor_key(pn, actors) if pn else None
+                        mk = match_actor_key(pn, actors) if pn else None
                         if mk and mk in actors:
                             actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
                 else:
@@ -2462,7 +2462,7 @@ def _reduce_physical_state_and_memories(
                                 if pc_name_low_ac in unsat_partners_ac or (was_premature_ac and not pt_clim_ac):
                                     p_did_climax_ac = False
                                 elif pt_map_ac:
-                                    m_k_ac = _match_actor_key(pc_name_ac, pt_map_ac)
+                                    m_k_ac = match_actor_key(pc_name_ac, pt_map_ac)
                                     p_did_climax_ac = bool(pt_map_ac.get(m_k_ac or pc_name_ac, False))
                                 else:
                                     p_did_climax_ac = pt_clim_ac or (not pl_clim_ac and not was_premature_ac)
@@ -2520,14 +2520,14 @@ def _reduce_physical_state_and_memories(
                         from mechanics.social.physical_state import enforce_anatomical_barriers_on_act, find_player_actor_key
                         barrier_cue = f"{act_label} {act_text}".strip()
                         if is_genital_act or any(k in act_text for k in ("suck breast", "fondle breast", "grope breast", "kiss breast", "lick nipple", "suck nipple", "tease nipple")):
-                            p_bar_k = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or _match_actor_key(player_name, updated_phys["actors"])
+                            p_bar_k = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or match_actor_key(player_name, updated_phys["actors"])
                             if p_bar_k and p_bar_k in updated_phys["actors"] and isinstance(updated_phys["actors"][p_bar_k], dict):
                                 p_cl = updated_phys["actors"][p_bar_k].get("clothing") or {}
                                 if isinstance(p_cl, dict) and is_genital_act:
                                     updated_phys["actors"][p_bar_k]["clothing"] = enforce_anatomical_barriers_on_act(p_cl, barrier_cue)
                             target_partner_names = [c.get("name") for c in (partner_contacts or []) if isinstance(c, dict) and c.get("name")] or ([partner] if partner else [])
                             for tp_nm in target_partner_names:
-                                tp_k = _match_actor_key(tp_nm, updated_phys["actors"])
+                                tp_k = match_actor_key(tp_nm, updated_phys["actors"])
                                 if tp_k and tp_k in updated_phys["actors"] and isinstance(updated_phys["actors"][tp_k], dict):
                                     tp_cl = updated_phys["actors"][tp_k].get("clothing") or {}
                                     if isinstance(tp_cl, dict):
@@ -2585,14 +2585,14 @@ def _reduce_physical_state_and_memories(
                             try:
                                 from mechanics.social.physical_state import enforce_anatomical_barriers_on_act, find_player_actor_key
                                 barrier_cue = f"{act_label} {act_text}".strip()
-                                p_bar_k = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or _match_actor_key(player_name, updated_phys["actors"])
+                                p_bar_k = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or match_actor_key(player_name, updated_phys["actors"])
                                 if p_bar_k and p_bar_k in updated_phys["actors"] and isinstance(updated_phys["actors"][p_bar_k], dict):
                                     p_cl = updated_phys["actors"][p_bar_k].get("clothing") or {}
                                     if isinstance(p_cl, dict):
                                         updated_phys["actors"][p_bar_k]["clothing"] = enforce_anatomical_barriers_on_act(p_cl, barrier_cue)
                                 target_partner_names = [c.get("name") for c in (partner_contacts or []) if isinstance(c, dict) and c.get("name")] or ([partner] if partner else [])
                                 for tp_nm in target_partner_names:
-                                    tp_k = _match_actor_key(tp_nm, updated_phys["actors"])
+                                    tp_k = match_actor_key(tp_nm, updated_phys["actors"])
                                     if tp_k and tp_k in updated_phys["actors"] and isinstance(updated_phys["actors"][tp_k], dict):
                                         tp_cl = updated_phys["actors"][tp_k].get("clothing") or {}
                                         if isinstance(tp_cl, dict):
@@ -2635,7 +2635,7 @@ def _reduce_physical_state_and_memories(
                         )
                         pl_gender_str = "Female" if is_female_player else "Male"
                         exc_actors_stim = (updated_phys.get("excitement") or {}).get("actors") or {}
-                        p_act_k_st = _match_actor_key(player_name, exc_actors_stim) if player_name and exc_actors_stim else None
+                        p_act_k_st = match_actor_key(player_name, exc_actors_stim) if player_name and exc_actors_stim else None
                         p_actor_st = exc_actors_stim.get(p_act_k_st or player_name) if exc_actors_stim else None
                         if isinstance(p_actor_st, dict) and "aroused_turns" in p_actor_st:
                             p_ar_t_st = int(p_actor_st.get("aroused_turns", 0) or 0)
@@ -2696,7 +2696,7 @@ def _reduce_physical_state_and_memories(
                                 npc_effs = list(pc_item.get("status_effects") or [])
                                 if any("satisfied" in str(s).lower() or "refractory" in str(s).lower() for s in npc_effs):
                                     continue
-                                n_act_k_st = _match_actor_key(pc_item.get("name", ""), exc_actors_stim) if pc_item.get("name") else None
+                                n_act_k_st = match_actor_key(pc_item.get("name", ""), exc_actors_stim) if pc_item.get("name") else None
                                 n_actor_st = exc_actors_stim.get(n_act_k_st or pc_item.get("name", "")) if exc_actors_stim else None
                                 if isinstance(n_actor_st, dict) and "aroused_turns" in n_actor_st:
                                     n_ar_t_st = int(n_actor_st.get("aroused_turns", 0) or 0)
@@ -2721,7 +2721,7 @@ def _reduce_physical_state_and_memories(
                     elif excitement_res:
                         all_cooled = bool(excitement_res.get("all_cooled_down"))
                         exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
-                        p_act_k = _match_actor_key(player_name, exc_actors_map) if player_name else None
+                        p_act_k = match_actor_key(player_name, exc_actors_map) if player_name else None
                         p_aroused_t = 0 if all_cooled else int((exc_actors_map.get(p_act_k or player_name) or {}).get("aroused_turns", 0) or 0)
                         p_aroused_lbl = f"Aroused [{p_aroused_t} turn{'s' if p_aroused_t != 1 else ''}]" if p_aroused_t > 0 else None
 
@@ -2765,7 +2765,7 @@ def _reduce_physical_state_and_memories(
                                 cur_npc_effs = list(pc_item.get("status_effects") or [])
                                 if not all_cooled and any("satisfied" in str(s).lower() or "refractory" in str(s).lower() for s in cur_npc_effs):
                                     continue
-                                n_act_k = _match_actor_key(pc_item.get("name", ""), exc_actors_map) if pc_item.get("name") else None
+                                n_act_k = match_actor_key(pc_item.get("name", ""), exc_actors_map) if pc_item.get("name") else None
                                 n_aroused_t = 0 if all_cooled else int((exc_actors_map.get(n_act_k or pc_item.get("name", "")) or {}).get("aroused_turns", 0) or 0)
                                 n_aroused_lbl = f"Aroused [{n_aroused_t} turn{'s' if n_aroused_t != 1 else ''}]" if n_aroused_t > 0 else None
                                 if n_aroused_lbl and any("aroused" in str(s).lower() for s in cur_npc_effs):
@@ -2815,7 +2815,7 @@ def _reduce_physical_state_and_memories(
                                     lead_c["status_effects"] = new_c_effs
                                 _sync_player_outcome_status(new_c_effs)
                                 exc_actors_map = (updated_phys.get("excitement") or {}).get("actors") or {}
-                                p_act_k = _match_actor_key(player_name, exc_actors_map) if player_name else None
+                                p_act_k = match_actor_key(player_name, exc_actors_map) if player_name else None
                                 if p_act_k and isinstance(exc_actors_map.get(p_act_k), dict):
                                     exc_actors_map[p_act_k]["aroused_turns"] = next_aroused_t
                         except Exception as e:
@@ -2843,7 +2843,7 @@ def _reduce_physical_state_and_memories(
                                         c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
                                         db.update_contact_status_effects(session_id, c_id, first_char_id, new_npc_effs)
                                         _sync_companion_party_status(c_full.get("name"), new_npc_effs)
-                                        n_act_k = _match_actor_key(c_full.get("name", ""), exc_actors_map)
+                                        n_act_k = match_actor_key(c_full.get("name", ""), exc_actors_map)
                                         if n_act_k and isinstance(exc_actors_map.get(n_act_k), dict):
                                             exc_actors_map[n_act_k]["aroused_turns"] = next_npc_t
                         except Exception as e:
@@ -2934,8 +2934,8 @@ def _reduce_physical_state_and_memories(
                                 p_name_item = pc_item.get("name", "")
                                 if not p_name_item:
                                     continue
-                                m_key = _match_actor_key(p_name_item, actors)
-                                p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                                m_key = match_actor_key(p_name_item, actors)
+                                p_clim_k = match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
                                 p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
                                 if m_key in actors:
                                     posture_str = str(actors[m_key].get("posture", "")).lower()
@@ -2967,12 +2967,12 @@ def _reduce_physical_state_and_memories(
                             hold_str = f"both {p_names_str}" if len(p_names_list) == 2 else f"all of {p_names_str}"
                             updated_phys["intimate_contact"] = f"Cuddling / aftercare with {p_names_str}"
                             actors = updated_phys.get("actors", {})
-                            c_matched = _match_actor_key(player_name, actors) if player_name else None
+                            c_matched = match_actor_key(player_name, actors) if player_name else None
                             if c_matched and c_matched in actors:
                                 actors[c_matched]["posture"] = f"Resting in aftercare, holding {hold_str}"
                             for pc_item in partner_contacts:
                                 pn = pc_item.get("name", "")
-                                mk = _match_actor_key(pn, actors) if pn else None
+                                mk = match_actor_key(pn, actors) if pn else None
                                 if mk and mk in actors:
                                     actors[mk]["posture"] = f"Resting against {player_name} in shared aftercare"
                         else:
@@ -3024,7 +3024,7 @@ def _reduce_physical_state_and_memories(
                                 for pc_item in (partner_contacts or ([partner_contact] if partner_contact else [])):
                                     if isinstance(pc_item, dict) and pc_item.get("name"):
                                         pc_name_mc = str(pc_item.get("name")).strip()
-                                        m_k_mc = _match_actor_key(pc_name_mc, partner_climaxes_res) if partner_climaxes_res else ""
+                                        m_k_mc = match_actor_key(pc_name_mc, partner_climaxes_res) if partner_climaxes_res else ""
                                         p_did_clim_mc = bool(partner_climaxes_res.get(m_k_mc or pc_name_mc, True)) if partner_climaxes_res else True
                                         p_gen = (pc_item.get("appearance") or {}).get("gender") or pc_item.get("gender") or "Female"
                                         p_rec_tag = format_partner_recovery_status_tag(refr_mins, p_gen)
@@ -3046,15 +3046,15 @@ def _reduce_physical_state_and_memories(
                     if excitement_res and excitement_res.get("partner_climaxes"):
                         updated_phys["climax_state"]["partner_climaxes"] = dict(excitement_res["partner_climaxes"])
                     actors = updated_phys.get("actors", {})
-                    c_matched = _match_actor_key(player_name, actors) if player_name else None
+                    c_matched = match_actor_key(player_name, actors) if player_name else None
                     partner_climaxes_map = (excitement_res.get("partner_climaxes") if excitement_res else None) or {}
 
                     for pc_item in (partner_contacts or ([{"name": target_p}] if target_p else [])):
                         p_name_item = pc_item.get("name", "")
                         if not p_name_item:
                             continue
-                        m_key = _match_actor_key(p_name_item, actors)
-                        p_clim_k = _match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
+                        m_key = match_actor_key(p_name_item, actors)
+                        p_clim_k = match_actor_key(p_name_item, partner_climaxes_map) if partner_climaxes_map else ""
                         p_clim = bool(partner_climaxes_map.get(p_clim_k or p_name_item, False)) if partner_climaxes_map else has_partner_climax
                         if m_key in actors:
                             posture_str = str(actors[m_key].get("posture", "")).lower()
@@ -3211,7 +3211,7 @@ def _reduce_physical_state_and_memories(
                                 cur_effs = [s for s in cur_effs if s and s not in ("[]", "{}", '""', "''") and not any(k in str(s).lower() for k in ("refractory", "spent", "aroused", "breathless", "satisfied"))]
                                 is_lead_entry = (u_lead == lead_user_id)
                                 ch_name = ch_lead.get("name", "") if isinstance(ch_lead, dict) else ""
-                                m_k_ch = _match_actor_key(ch_name, p_clim_map_dis) if p_clim_map_dis else ""
+                                m_k_ch = match_actor_key(ch_name, p_clim_map_dis) if p_clim_map_dis else ""
                                 ch_clim_dis = pl_climaxed_dis if is_lead_entry else bool(p_clim_map_dis.get(m_k_ch or ch_name, False))
                                 if ch_clim_dis:
                                     ch_gen = (char_rec.get("gender") if char_rec else None) or (ch_lead.get("gender") if isinstance(ch_lead, dict) else "Male")
@@ -3226,7 +3226,7 @@ def _reduce_physical_state_and_memories(
                             if isinstance(c_full, dict) and c_full.get("name"):
                                 c_effs = c_full.get("status_effects") or []
                                 c_name_dis = c_full.get("name", "")
-                                m_k_dis = _match_actor_key(c_name_dis, p_clim_map_dis) if p_clim_map_dis else ""
+                                m_k_dis = match_actor_key(c_name_dis, p_clim_map_dis) if p_clim_map_dis else ""
                                 c_climaxed_dis = bool(p_clim_map_dis.get(m_k_dis or c_name_dis, False))
                                 if c_climaxed_dis or any(k in str(s).lower() for s in c_effs for k in ("refractory", "satisfied", "spent")):
                                     c_id = c_full.get("npc_id") or c_full.get("contact_id") or str(c_full.get("name")).lower().replace(" ", "_")
@@ -3271,14 +3271,14 @@ def _reduce_physical_state_and_memories(
 
 
     # 7. Downed / 0 HP character posture synchronization
-    from mechanics.social.physical_state import _match_actor_key
+    from mechanics.social.physical_state import match_actor_key
     if party and isinstance(party, list):
         for entry in party:
             char = entry[0] if isinstance(entry, (tuple, list)) else entry
             if not isinstance(char, dict) or not char.get("name"):
                 continue
             c_name = char["name"]
-            matched_actor = _match_actor_key(c_name, updated_phys.get("actors", {}))
+            matched_actor = match_actor_key(c_name, updated_phys.get("actors", {}))
             if matched_actor in updated_phys.get("actors", {}):
                 fresh_char = db.get_character(char.get("user_id", 0))
                 if fresh_char and fresh_char.get("hp", 1) <= 0:
@@ -3290,7 +3290,7 @@ def _reduce_physical_state_and_memories(
     for p_npc in ((session.get("party_npcs") or []) if session else []):
         if isinstance(p_npc, dict) and p_npc.get("name"):
             if p_npc.get("hp", 1) <= 0 or p_npc.get("current_hp", 1) <= 0:
-                matched_p = _match_actor_key(p_npc["name"], updated_phys.get("actors", {}))
+                matched_p = match_actor_key(p_npc["name"], updated_phys.get("actors", {}))
                 if matched_p in updated_phys.get("actors", {}):
                     updated_phys["actors"][matched_p]["posture"] = "Prone / Downed (Unconscious)"
                     updated_phys["actors"][matched_p]["holding"] = "Dropped / Empty hands"
@@ -3306,7 +3306,7 @@ def _reduce_physical_state_and_memories(
         
     for d_name in all_deceased:
         if d_name and isinstance(d_name, str):
-            matched_dead = _match_actor_key(d_name.strip(), updated_phys.get("actors", {}))
+            matched_dead = match_actor_key(d_name.strip(), updated_phys.get("actors", {}))
             if matched_dead in updated_phys.get("actors", {}):
                 held = updated_phys["actors"][matched_dead].get("holding", "")
                 if held and held not in ("Empty hands", "Dropped / Empty hands", "Equipped weapon"):
@@ -3366,8 +3366,8 @@ def _reduce_physical_state_and_memories(
     # 11. Handle putting down carried burden or breaking free from physical restraint
     lead_char = party[0][0] if party and isinstance(party[0], (tuple, list)) else (party[0] if party and isinstance(party[0], dict) else None)
     if lead_char and lead_char.get("name") and updated_phys.get("actors"):
-        from mechanics.social.physical_state import _match_actor_key, find_player_actor_key
-        lead_key = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or _match_actor_key(lead_char["name"], updated_phys["actors"])
+        from mechanics.social.physical_state import match_actor_key, find_player_actor_key
+        lead_key = find_player_actor_key(updated_phys["actors"], party=party, session_id=session_id) or match_actor_key(lead_char["name"], updated_phys["actors"])
         if lead_key in updated_phys["actors"]:
             for a in actions:
                 if isinstance(a, dict):
@@ -3380,7 +3380,7 @@ def _reduce_physical_state_and_memories(
                         if old_tether:
                             carried_name = old_tether.replace("Carrying ", "").replace("carrying ", "").replace("holding ", "").strip()
                             if carried_name:
-                                matched_c = _match_actor_key(carried_name, updated_phys["actors"])
+                                matched_c = match_actor_key(carried_name, updated_phys["actors"])
                                 if matched_c in updated_phys["actors"]:
                                     updated_phys["actors"][matched_c]["posture"] = "Resting safely on the ground"
                                     updated_phys["actors"][matched_c].pop("tether", None)
@@ -3403,7 +3403,7 @@ def _reduce_physical_state_and_memories(
             prepare_witnessed_wardrobe_entries,
             sync_player_cosmetic_slice_of_life_attire,
         )
-        from mechanics.social.physical_state import _match_actor_key, is_erotic_intimate_contact
+        from mechanics.social.physical_state import match_actor_key, is_erotic_intimate_contact
 
         _w_turn = int(
             (ctx.clock.target_turn if ctx is not None and ctx.clock.target_turn else None)
@@ -3478,7 +3478,7 @@ def _reduce_physical_state_and_memories(
             if not isinstance(_por, dict) or not _por.get("npc_name"):
                 continue
             if isinstance(_por.get("clothing_override"), dict) and isinstance(updated_phys.get("actors"), dict):
-                _mk = _match_actor_key(str(_por["npc_name"]).strip(), updated_phys["actors"])
+                _mk = match_actor_key(str(_por["npc_name"]).strip(), updated_phys["actors"])
                 if _mk in updated_phys["actors"] and isinstance(updated_phys["actors"][_mk], dict):
                     updated_phys["actors"][_mk]["clothing"] = dict(_por["clothing_override"])
                     updated_phys["actors"][_mk]["canonical_outfit"] = dict(_por["clothing_override"])
@@ -3731,11 +3731,11 @@ def _reduce_physical_state_and_memories(
                                 _c_appr = _c_match.get("appearance") or {}
                                 if isinstance(_c_appr, dict) and (_c_appr.get("sensitive_spots_revealed") or _c_appr.get("turn_ons_revealed")):
                                     _c_spots = _c_appr.get("sensitive_spots")
-                            _exc_k = _match_actor_key(_p_name, _exc_act_map) if _exc_act_map else ""
-                            _phys_k = _match_actor_key(_p_name, _phys_act_map) if _phys_act_map else ""
+                            _exc_k = match_actor_key(_p_name, _exc_act_map) if _exc_act_map else ""
+                            _phys_k = match_actor_key(_p_name, _phys_act_map) if _phys_act_map else ""
                             _p_meter = int((_exc_act_map.get(_exc_k, {}) if _exc_k else {}).get("meter", 0) or 0)
                             _p_posture = str((_phys_act_map.get(_phys_k, {}) if _phys_k else {}).get("posture", ""))
-                            _pc_k = _match_actor_key(_p_name, _partner_climaxes_now) if _partner_climaxes_now else ""
+                            _pc_k = match_actor_key(_p_name, _partner_climaxes_now) if _partner_climaxes_now else ""
                             _ac_partner_actors.append({
                                 "name": _p_name,
                                 "meter": _p_meter,
@@ -3782,7 +3782,7 @@ def _reduce_physical_state_and_memories(
                     if not isinstance(_ch, dict) or not _ch.get("name"):
                         continue
                     _cn = _ch["name"]
-                    _mk = _match_actor_key(_cn, _actors_now)
+                    _mk = match_actor_key(_cn, _actors_now)
                     if _mk in _actors_now:
                         _cl = _actors_now[_mk].get("clothing") or {}
                         if isinstance(_cl, dict):

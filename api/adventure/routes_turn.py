@@ -24,9 +24,9 @@ from ..deps import (
     RetryAdventureRequest,
     ToggleNonLethalRequest,
     ToggleStealthRequest,
-    _serializable_action,
     logger,
     manager,
+    serializable_action,
 )
 from .in_flight import (
     _IN_FLIGHT_TURN_TASKS,
@@ -165,7 +165,7 @@ async def _execute_action_locked(
         mode = session["mode"]
         is_started_fn = lambda: False
         flush_buffer = None
-        safe_action = _serializable_action(action)
+        safe_action = serializable_action(action)
         if in_flight_entry is not None:
             in_flight_entry["action"] = safe_action
 

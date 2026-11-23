@@ -30,7 +30,7 @@ from mechanics.social.factions import (
 )
 from mechanics.system.concurrency import distributed_session_lock, distributed_user_lock
 from mechanics.world.locations import reveal_hidden_club_facility
-from ..deps import FactionHQActionRequest, _serializable_action
+from ..deps import FactionHQActionRequest, serializable_action
 from ..security import verify_session_participant
 from .common import _verify_missing_session_codex_auth
 
@@ -330,7 +330,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         )
         await adb(db.save_merchant_state, session_id, merchant)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return _serializable_action(
+        return serializable_action(
             {
                 "success": True,
                 "action": "quartermaster",
@@ -348,7 +348,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             raise HTTPException(status_code=hq_code, detail=hq_err)
         bounties = await game_engine.generate_faction_bounty_board(session, faction)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return _serializable_action(
+        return serializable_action(
             {
                 "success": True,
                 "action": "bounty",
@@ -396,7 +396,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             await adb(db.update_faction_leadership_roster, session_id, faction["faction_id"], new_roster)
             await adb(db.set_character_faction_membership, char_id, faction["faction_id"], target_rank, new_title)
             payload = await adb(_enrich_factions_list, session_id, req.user_id)
-            return _serializable_action(
+            return serializable_action(
                 {
                     "success": True,
                     "action": "promote",
@@ -547,7 +547,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
         learned_after = await adb(db.get_learned_spells, req.user_id)
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
-        return _serializable_action(
+        return serializable_action(
             {
                 "success": True,
                 "action": "calibrate",

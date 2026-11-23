@@ -14,7 +14,7 @@ import db
 from db import adb
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
 from mechanics.world.locations.residences import build_realty_payload
-from .deps import _serializable_action, manager, require_active_session
+from .deps import serializable_action, manager, require_active_session
 from .security import verify_session_participant
 
 router = APIRouter()
@@ -79,7 +79,7 @@ async def get_realty_state(
     uid = user_id if isinstance(user_id, int) and not isinstance(user_id, bool) else None
     _, canonical_uid = await verify_session_participant(request, session_id, uid)
     payload = await adb(build_realty_payload, session_id, canonical_uid or uid)
-    return _serializable_action(payload)
+    return serializable_action(payload)
 
 
 @router.post("/api/realty/{session_id}/purchase")
@@ -110,7 +110,7 @@ async def purchase_realty_property(
         payload = await adb(build_realty_payload, session_id, eff_uid)
 
     prop_name = (res.get("catalog_entry") or {}).get("name") or req.property_id
-    out = _serializable_action({
+    out = serializable_action({
         "success": True,
         "message": f"Purchased deed to {prop_name}!",
         **payload,
@@ -138,7 +138,7 @@ async def set_realty_primary_home(
             _raise_for_realty_failure(res)
         payload = await adb(build_realty_payload, session_id, eff_uid or None)
 
-    out = _serializable_action({
+    out = serializable_action({
         "success": True,
         "message": "Primary Home updated.",
         **payload,
@@ -174,7 +174,7 @@ async def manage_realty_spare_key(
         if req.revoke
         else f"Gave a spare key to {res.get('npc_name') or req.npc_id}!"
     )
-    out = _serializable_action({
+    out = serializable_action({
         "success": True,
         "message": msg,
         **payload,

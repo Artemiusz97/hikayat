@@ -899,9 +899,9 @@ async def get_character(user_id: int, request: Request = None):
         if active_sid:
             phys_st = await adb(db.get_session_physical_state, active_sid)
             if isinstance(phys_st, dict):
-                from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
+                from mechanics.social.physical_state import compute_clothing_summary_badge, match_actor_key, find_player_actor_key
                 phys_actors = phys_st.get("actors", {}) or {}
-                matched_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=active_sid) or _match_actor_key(char_dict.get("name", ""), phys_actors)
+                matched_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=active_sid) or match_actor_key(char_dict.get("name", ""), phys_actors)
                 p_data = phys_actors.get(matched_key) or {}
                 char_dict["clothing_status"] = compute_clothing_summary_badge(p_data.get("clothing"), gender=char_dict.get("gender", "Male"))
     except Exception:

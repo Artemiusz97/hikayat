@@ -1,10 +1,12 @@
 from .deps import (
     ConnectionManager,
     manager,
-    _serializable_action,
+    serializable_action,
     enrich_choices_with_odds,
     enrich_session_party_members,
 )
+
+_serializable_action = serializable_action
 from .auth_characters import router as auth_characters_router
 from .inventory_merchant import router as inventory_merchant_router
 from .adventure import router as adventure_router

@@ -10,7 +10,7 @@ from typing import Any
 from db import adb
 from scenario_data import get_scenario_display_name
 from mechanics.combat.loadouts import ensure_combatant_loadout
-from mechanics.narrative.campaign_spine import _PLACEHOLDER_ACTOR_RE
+from mechanics.narrative.campaign_spine import PLACEHOLDER_ACTOR_RE
 from mechanics.narrative.dossier_compiler import resolve_quest_npc_fallback_gender
 from mechanics.social.races import roll_scenario_npc_race
 from mechanics.world import resolve_scene_merchant_ui_state
@@ -36,7 +36,7 @@ _UNNAMED_ACTOR_TOKENS: frozenset[str] = frozenset(
 
 def _is_unnamed_or_generic_actor(name: str, npc_dict: dict[str, Any]) -> bool:
     clean = str(name or "").strip()
-    if not clean or _PLACEHOLDER_ACTOR_RE.search(clean):
+    if not clean or PLACEHOLDER_ACTOR_RE.search(clean):
         return True
     if bool(
         npc_dict.get("is_monster")
@@ -635,7 +635,7 @@ def _enrich_session_for_client_body(
 
     # Dynamic Clothing Status & Present NPC Enrichment
     try:
-        from mechanics.social.physical_state import compute_clothing_summary_badge, _match_actor_key, find_player_actor_key
+        from mechanics.social.physical_state import compute_clothing_summary_badge, match_actor_key, find_player_actor_key
         phys_st = db.get_session_physical_state(session.get("id")) if session.get("id") else None
         phys_actors = (phys_st.get("actors") or {}) if isinstance(phys_st, dict) else {}
 
@@ -643,9 +643,9 @@ def _enrich_session_for_client_body(
         sess_char = session.get("character") if isinstance(session.get("character"), dict) else {}
         char_dict = dict(char) if char else sess_char
         char_name = char_dict.get("name") if isinstance(char_dict, dict) else ""
-        matched_p_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=session.get("id")) or (_match_actor_key(char_name, phys_actors) if char_name else "")
+        matched_p_key = find_player_actor_key(phys_actors, party=[(char_dict, [])], session_id=session.get("id")) or (match_actor_key(char_name, phys_actors) if char_name else "")
         if matched_p_key not in phys_actors and sess_char.get("name"):
-            alt_key = find_player_actor_key(phys_actors, party=[(sess_char, [])], session_id=session.get("id")) or _match_actor_key(str(sess_char["name"]), phys_actors)
+            alt_key = find_player_actor_key(phys_actors, party=[(sess_char, [])], session_id=session.get("id")) or match_actor_key(str(sess_char["name"]), phys_actors)
             if alt_key in phys_actors:
                 matched_p_key = alt_key
                 char_dict = sess_char
@@ -663,7 +663,7 @@ def _enrich_session_for_client_body(
         if isinstance(session.get("party_members"), list):
             for pm in session["party_members"]:
                 if isinstance(pm, dict) and pm.get("name"):
-                    m_pm_key = _match_actor_key(str(pm["name"]), phys_actors)
+                    m_pm_key = match_actor_key(str(pm["name"]), phys_actors)
                     pm_act_data = phys_actors.get(m_pm_key) or {}
                     pm["clothing_status"] = compute_clothing_summary_badge(
                         pm_act_data.get("clothing"),
@@ -797,15 +797,15 @@ def _enrich_session_for_client_body(
             if not n_name:
                 return None
 
-            matched_n_key = _match_actor_key(n_name, phys_actors)
+            matched_n_key = match_actor_key(n_name, phys_actors)
             n_act_data = phys_actors.get(matched_n_key) or {}
             matched_contact = contacts_by_name.get(n_name.lower())
             if not matched_contact and contacts_by_name:
-                m_c_key = _match_actor_key(n_name, contacts_by_name)
+                m_c_key = match_actor_key(n_name, contacts_by_name)
                 matched_contact = contacts_by_name.get(m_c_key)
             matched_lore = lore_characters.get(n_name.lower()) if lore_characters else None
             if not matched_lore and lore_characters:
-                m_l_key = _match_actor_key(n_name, lore_characters)
+                m_l_key = match_actor_key(n_name, lore_characters)
                 matched_lore = lore_characters.get(m_l_key)
             matched_wr = world_roster_by_name.get(n_name.lower()) if world_roster_by_name else None
             if isinstance(matched_wr, dict):
@@ -820,7 +820,7 @@ def _enrich_session_for_client_body(
                     n_dict["basic_info"] = {**matched_wr["basic_info"], **_cur_bi}
             matched_agent = agent_roster_by_name.get(n_name.lower()) if agent_roster_by_name else None
             if not matched_agent and agent_roster_by_name:
-                m_a_key = _match_actor_key(n_name, agent_roster_by_name)
+                m_a_key = match_actor_key(n_name, agent_roster_by_name)
                 matched_agent = agent_roster_by_name.get(m_a_key)
             c_rec = matched_contact or matched_lore
             demo_sources: list[dict | None] = [n_dict, c_rec, matched_wr, matched_agent]
@@ -842,7 +842,7 @@ def _enrich_session_for_client_body(
                 if legacy_roster_by_name:
                     matched_legacy = legacy_roster_by_name.get(n_name.lower())
                     if not matched_legacy:
-                        m_leg_key = _match_actor_key(n_name, legacy_roster_by_name)
+                        m_leg_key = match_actor_key(n_name, legacy_roster_by_name)
                         matched_legacy = legacy_roster_by_name.get(m_leg_key)
                 if isinstance(matched_legacy, dict):
                     demo_sources.append(matched_legacy)
@@ -957,7 +957,7 @@ def _enrich_session_for_client_body(
 
             # 3. Synchronize intimate excitement meter (when applicable)
             exc_actors = (phys_st.get("excitement") or {}).get("actors") or {}
-            matched_exc_key = _match_actor_key(n_name, exc_actors) if exc_actors else ""
+            matched_exc_key = match_actor_key(n_name, exc_actors) if exc_actors else ""
             exc_data = exc_actors.get(matched_exc_key) or {}
 
             partner_meter_data = None
@@ -971,12 +971,12 @@ def _enrich_session_for_client_body(
             if isinstance(last_intimate, dict) and last_intimate.get("active"):
                 p_meters = last_intimate.get("partner_meters") or []
                 for pm in p_meters:
-                    if isinstance(pm, dict) and _match_actor_key(n_name, {pm.get("name", ""): pm}):
+                    if isinstance(pm, dict) and match_actor_key(n_name, {pm.get("name", ""): pm}):
                         partner_meter_data = pm
                         break
                 if not partner_meter_data and last_intimate.get("partner_meter") is not None:
                     p_name = last_intimate.get("partner_name") or session.get("dialogue_partner") or ""
-                    if _match_actor_key(n_name, {p_name: True}):
+                    if match_actor_key(n_name, {p_name: True}):
                         partner_meter_data = {
                             "meter": last_intimate.get("partner_meter", 0),
                             "status": last_intimate.get("act_type", ""),

@@ -163,11 +163,14 @@ def require_active_session(session: Optional[Dict[str, Any]]) -> None:
         raise HTTPException(status_code=400, detail="This adventure session is no longer active.")
 
 
-def _serializable_action(action: dict) -> dict:
+def serializable_action(action: dict) -> dict:
     """Returns a deep copy of the action dict safe for json.dumps (no raw dataclass objects at any depth)."""
     if not isinstance(action, dict):
         return {}
     return _to_json_safe(action)
+
+
+_serializable_action = serializable_action
 
 
 def enrich_choices_with_odds(

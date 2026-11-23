@@ -1157,6 +1157,9 @@ def _match_actor_key(name: str, actors: dict) -> str:
     return name
 
 
+match_actor_key = _match_actor_key
+
+
 def _canonical_clothing_slot(slot_name: str) -> str:
     s = str(slot_name).strip().lower().replace("-", "_").replace(" ", "_")
     if s in ("outerwear", "outer", "cloak", "coat", "overcoat", "blazer", "cape", "robe", "cuirass", "armor_plate"):

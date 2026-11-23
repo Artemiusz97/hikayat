@@ -988,7 +988,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
             contacts = ctx.contacts
 
             curr_phys = (db.get_session_physical_state(session.get("id", 0)) if session.get("id") else None) or session.get("physical_state", {})
-            from mechanics.social.physical_state import is_erotic_intimate_contact, _match_actor_key
+            from mechanics.social.physical_state import is_erotic_intimate_contact, match_actor_key
             from mechanics.social.intimate_excitement import is_in_refractory_cooldown, infer_last_act_from_state
 
             contact_peer_pool_2 = [c.get("name", "") for c in contacts if isinstance(c, dict) and c.get("name")]
@@ -1050,15 +1050,15 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                     lead_name = lead_char.get("name") or "Player"
                     p_val = 0
                     if excitement_data.get("active") and actors_exc:
-                        p_exc_key = _match_actor_key(p, actors_exc)
-                        pl_exc_key = _match_actor_key(lead_name, actors_exc)
+                        p_exc_key = match_actor_key(p, actors_exc)
+                        pl_exc_key = match_actor_key(lead_name, actors_exc)
                         p_val = actors_exc.get(p_exc_key, {}).get("meter", 0)
                         pl_val = actors_exc.get(pl_exc_key, {}).get("meter", 0)
                         gauge_str = f" [Current Excitement Gauges: {lead_name}: {pl_val}% | {p}: {p_val}%]"
                     else:
                         gauge_str = ""
 
-                    p_clim_k = _match_actor_key(p, partner_climaxes_map) if partner_climaxes_map else ""
+                    p_clim_k = match_actor_key(p, partner_climaxes_map) if partner_climaxes_map else ""
                     this_p_clim = bool(partner_climaxes_map.get(p_clim_k or p, False)) if partner_climaxes_map else (partner_peaked or p_val >= 100)
 
                     if premature_finish and not this_p_clim and p_val < 100:
@@ -1143,7 +1143,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
                 elif not _in_active_erotic_dlg:
                     refr_partners_dlg = exc_dlg.get("refractory_partners") if isinstance(exc_dlg.get("refractory_partners"), dict) else {}
                     for p in (new_partners or []):
-                        matched_rp = _match_actor_key(p, refr_partners_dlg) if refr_partners_dlg else ""
+                        matched_rp = match_actor_key(p, refr_partners_dlg) if refr_partners_dlg else ""
                         if matched_rp and refr_partners_dlg.get(matched_rp):
                             intimate_dynamic_openness_blocks.append(
                                 f"  * [PARTNER POST-CLIMAX RECOVERY ({p})]: {p} recently reached climax and is resting in post-climax recovery (~{refr_mins} in-game minutes remaining). "

@@ -47,9 +47,11 @@ from ..deps import (
     PhoneMessageRequest,
     QuestTurnInRequest,
     SuspectAccusationRequest,
-    _serializable_action,
     manager,
+    serializable_action,
 )
+
+_serializable_action = serializable_action
 from ..encyclopedia import get_codex_encyclopedia
 from ..security import (
     extract_actor_token,

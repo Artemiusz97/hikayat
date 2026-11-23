@@ -20,7 +20,7 @@ from ..deps import (
     EpilogueChoiceRequest,
     QuestTurnInRequest,
     SuspectAccusationRequest,
-    _serializable_action,
+    serializable_action,
 )
 from ..security import verify_session_participant
 from .common import _verify_missing_session_codex_auth
@@ -479,7 +479,7 @@ async def get_quests(session_id: int, user_id: Optional[int] = Query(None), requ
     else:
         await _verify_missing_session_codex_auth(request, user_id)
     res = await adb(_build_quests_payload, session_id, user_id)
-    return _serializable_action(res)
+    return serializable_action(res)
 
 
 @router.post("/api/quests/{session_id}/bounties/generate")
@@ -521,7 +521,7 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
     resp_bounties = (
         bounties if (req.faction_id or scoped_club_faction) and bounties else (payload.get("available_bounties") or [])
     )
-    return _serializable_action(
+    return serializable_action(
         {
             "success": True,
             "bounties": [dict(b) for b in resp_bounties if b],
@@ -601,7 +601,7 @@ async def bounty_contract_action(session_id: int, req: BountyActionRequest, requ
                     detail=forfeit_res.get("reason") or "Cannot abandon this contract.",
                 )
             new_status = str(forfeit_res.get("status") or "Abandoned")
-            forfeit_details = _serializable_action(forfeit_res)
+            forfeit_details = serializable_action(forfeit_res)
             if new_status == "Failed":
                 msg = f"Forfeited engaged contract '{quest.get('title', 'Bounty')}' — marked Failed with regional fallout!"
             else:
@@ -610,7 +610,7 @@ async def bounty_contract_action(session_id: int, req: BountyActionRequest, requ
         raise HTTPException(status_code=400, detail=f"Invalid bounty action: {req.action}")
 
     payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return _serializable_action(
+    return serializable_action(
         {
             "success": True,
             "quest_id": req.quest_id,
@@ -667,7 +667,7 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
         await adb(db.update_session, session_id, extra={"deduction_attempts_turn": attempts_map})
 
         payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return _serializable_action(
+    return serializable_action(
         {
             "success": True,
             "is_valid": bool(ded_res.get("is_valid")),
@@ -709,7 +709,7 @@ async def accuse_caseboard_suspect(session_id: int, req: SuspectAccusationReques
             )
 
         payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return _serializable_action({**res, **payload})
+    return serializable_action({**res, **payload})
 
 
 @router.post("/api/quests/{session_id}/turn-in")
@@ -737,7 +737,7 @@ async def resolve_contract_turn_in(session_id: int, req: QuestTurnInRequest, req
             )
 
         payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return _serializable_action({**res, **payload})
+    return serializable_action({**res, **payload})
 
 
 @router.post("/api/quests/{session_id}/epilogue")
@@ -756,4 +756,4 @@ async def resolve_campaign_epilogue_choice(session_id: int, req: EpilogueChoiceR
             [req.user_id] if req.user_id is not None else None,
         )
         payload = await adb(_build_quests_payload, session_id, req.user_id)
-    return _serializable_action({"success": True, **res, **payload})
+    return serializable_action({"success": True, **res, **payload})

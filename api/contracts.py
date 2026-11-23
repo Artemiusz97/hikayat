@@ -15,7 +15,7 @@ from db import adb
 from mechanics.pacts import build_contracts_overview_payload, execute_pact_ritual_action
 from mechanics.system.concurrency import distributed_adventure_lock
 from .adventure import enrich_session_for_client
-from .deps import _serializable_action, manager, require_active_session
+from .deps import serializable_action, manager, require_active_session
 from .security import verify_session_participant
 
 router = APIRouter()
@@ -48,7 +48,7 @@ async def get_entity_contracts_overview(
     settings = await adb(db.get_settings, eff_uid) if eff_uid else {}
     eff_lang = _resolve_request_lang(lang, settings)
     payload = await adb(build_contracts_overview_payload, session_id, eff_uid, lang=eff_lang)
-    return _serializable_action(payload)
+    return serializable_action(payload)
 
 
 @router.post("/api/contracts/{session_id}/{ritual_action}")
@@ -109,7 +109,7 @@ async def perform_entity_contract_ritual(
                     pre_healed=True,
                 )
 
-    safe_res = _serializable_action({
+    safe_res = serializable_action({
         "success": True,
         **res,
         **({"updated_session": enriched_session} if enriched_session else {}),

@@ -72,8 +72,10 @@ import config
 import db
 
 from api.deps import (
-    _serializable_action,  # static-check: ignore[unused-import]
+    serializable_action,
 )
+
+_serializable_action = serializable_action
 from api import (
     auth_characters_router,
     inventory_merchant_router,
