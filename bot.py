@@ -151,7 +151,7 @@ async def on_interaction(interaction: discord.Interaction):
 
     # View listener was lost due to bot restart or long idle. Recover gracefully:
     try:
-        session_id = db.get_active_session_id_for_user(interaction.user.id)
+        session_id = await db.adb(db.get_active_session_id_for_user, interaction.user.id)
         if not session_id:
             await interaction.response.send_message(
                 "⚠️ This message's buttons expired after an idle period or restart.\n"
@@ -160,7 +160,7 @@ async def on_interaction(interaction: discord.Interaction):
             )
             return
 
-        session = db.get_session(session_id)
+        session = await db.adb(db.get_session, session_id)
         if not session or session.get("status") != "active":
             await interaction.response.send_message(
                 "⚠️ This message's buttons expired after an idle period or restart.\n"
@@ -268,9 +268,9 @@ def acquire_single_instance_lock():
 
 async def main():
     validate_runtime_config(require_discord=True)
-    db.init_db()
+    await db.adb(db.init_db)
     try:
-        snapshot_path = db.create_database_snapshot(tag="bot_startup")
+        snapshot_path = await db.adb(db.create_database_snapshot, tag="bot_startup")
         print(f"📦 [Database Snapshot] Automatic backup created at: {snapshot_path}")
     except Exception as e:
         print(f"⚠️ [Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")

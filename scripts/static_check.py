@@ -548,7 +548,7 @@ def analyze_possibly_unbound(path: Path, rel: str) -> List[Finding]:
 # Analyzers 3–5: Bundle B DB/Async/Registry Architecture Contracts
 # ---------------------------------------------------------------------------
 
-_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/", "mechanics/", "server.py")
+_SYNC_DB_ASYNC_PREFIXES = ("api/", "cogs/", "services/", "game_engine/", "mechanics/", "server.py", "bot.py")
 _ASYNC_SAFE_DB_ATTRS = frozenset({
     "adb",
     "distributed_session_lock",

@@ -64,23 +64,48 @@ class ZoneSelectDropdown(discord.ui.Select):
             sync=self.sync,
             user_id=self.user_id,
         )
-        embed = build_zone_places_embed(self.session_id, selected_zone, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        embed = await adb(
+            build_zone_places_embed,
+            self.session_id,
+            selected_zone,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
+
+
+def _load_zone_select_summary(
+    session_id: int,
+    scen_key: str,
+    current_loc: str = "",
+    char_name: str = "",
+) -> list[dict]:
+    from mechanics.world.locations import (
+        get_zone_summary_tree,
+        process_llm_location_update,
+        sanitize_location_target,
+    )
+    # Auto-discover any active quest target locations so they exist in SQLite and show in the dropdown
+    active_wps = db.get_all_session_active_waypoints(session_id)
+    for wp in active_wps:
+        target_loc = wp.get("target_location", "").strip()
+        if target_loc:
+            clean_target = sanitize_location_target(
+                target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name
+            )
+            process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
+    return get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
+
 
 class ZoneSelectView(SessionRestrictedView):
     def __init__(self, cog: "AdventureCog", session_id: int, scen_key: str, current_loc: str = "", char_name: str = "", sync: bool = False, zones_summary: list = None, user_id: int | None = None):
         super().__init__(session_id=session_id, timeout=180, owner_user_id=user_id)
         self.user_id = user_id
         if zones_summary is None:
-            from mechanics.world.locations import process_llm_location_update, get_zone_summary_tree, sanitize_location_target
-            # Auto-discover any active quest target locations so they exist in SQLite and show in the dropdown
-            active_wps = db.get_all_session_active_waypoints(session_id)
-            for wp in active_wps:
-                target_loc = wp.get("target_location", "").strip()
-                if target_loc:
-                    clean_target = sanitize_location_target(target_loc, session_id=session_id, scen_key=scen_key, char_name=char_name)
-                    process_llm_location_update(session_id, clean_target, scen_key, char_name=char_name)
-            zones_summary = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
+            zones_summary = _load_zone_select_summary(
+                session_id, scen_key, current_loc=current_loc, char_name=char_name
+            )
 
         self.add_item(ZoneSelectDropdown(cog, session_id, scen_key, zones_summary, current_loc=current_loc, char_name=char_name, sync=sync, user_id=user_id))
 
@@ -191,8 +216,31 @@ class PrimarySelectView(SessionRestrictedView):
         self.add_item(back_btn)
 
     async def _on_back(self, interaction: discord.Interaction):
-        embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
+        zones_summary = await adb(
+            _load_zone_select_summary,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+        )
+        embed = await adb(
+            build_world_map_embed,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+            zones_summary,
+        )
+        view = ZoneSelectView(
+            self.cog,
+            self.session_id,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+            sync=self.sync,
+            zones_summary=zones_summary,
+            user_id=self.user_id,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
 
@@ -327,12 +375,42 @@ class SubLocationSelectView(SessionRestrictedView):
             sync=self.sync,
             user_id=self.user_id,
         )
-        embed = build_zone_places_embed(self.session_id, self.zone_name, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
+        embed = await adb(
+            build_zone_places_embed,
+            self.session_id,
+            self.zone_name,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _on_world_map(self, interaction: discord.Interaction):
-        embed = build_world_map_embed(self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name)
-        view = ZoneSelectView(self.cog, self.session_id, self.scen_key, current_loc=self.current_loc, char_name=self.char_name, sync=self.sync, user_id=self.user_id)
+        zones_summary = await adb(
+            _load_zone_select_summary,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+        )
+        embed = await adb(
+            build_world_map_embed,
+            self.session_id,
+            self.scen_key,
+            self.current_loc,
+            self.char_name,
+            zones_summary,
+        )
+        view = ZoneSelectView(
+            self.cog,
+            self.session_id,
+            self.scen_key,
+            current_loc=self.current_loc,
+            char_name=self.char_name,
+            sync=self.sync,
+            zones_summary=zones_summary,
+            user_id=self.user_id,
+        )
         await interaction.response.edit_message(embed=embed, view=view)
 
 class SceneItemSelectDropdown(discord.ui.Select):

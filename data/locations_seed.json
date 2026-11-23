@@ -7972,7 +7972,7 @@
                                     "Bullet-Proof Ticket Glass Fused With Grey Static",
                                     "Popcorn Kettle Overflowing With Ash & Copper Wire",
                                     "Marquee Letters Rearranging Themselves Into Warnings",
-                                    "Lead-Foil Tape Sealed Over Fire Exit Push-Bars"
+                                    "Lead-Foil Tape Sealed Over Emergency Push-Bars"
                                 ]
                             },
                             {
@@ -9351,7 +9351,7 @@
                                     "Biometric Steel Deadbolt",
                                     "Concealed Stairwell Mirror",
                                     "Unmarked Parcel Lockbox",
-                                    "Heavy Iron Fire Door"
+                                    "Heavy Iron Fire Bulkhead"
                                 ],
                                 "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
                             },
@@ -11999,7 +11999,7 @@
                                     "Caution-Taped Euler Fire Bulkhead Hanging Horizontally",
                                     "Shattered Spirit-Level Bubbling Sideways Against Mortar",
                                     "Abandoned Grad-Student Notebook Filled With Endless Spirals",
-                                    "Exit Arrow Sign Looping Around Four Walls"
+                                    "Wayfinding Arrow Sign Looping Around Four Walls"
                                 ]
                             },
                             {
@@ -12657,8 +12657,8 @@
                                 "name": "Warded Cellar Threshold",
                                 "is_entrance": 1,
                                 "props": [
-                                    "Ironbound Oak Door",
-                                    "Salt-Traced Stone Threshold",
+                                    "Ironbound Oak Partition",
+                                    "Salt-Traced Stone Lintel",
                                     "Oil Sconce Lantern",
                                     "Chalk Ward Ledger"
                                 ],
@@ -13547,7 +13547,7 @@
                                     "Bullet-Proof Ticket Glass Fused With Grey Static",
                                     "Popcorn Kettle Overflowing With Ash & Copper Wire",
                                     "Marquee Letters Rearranging Themselves Into Warnings",
-                                    "Lead-Foil Tape Sealed Over Fire Exit Push-Bars"
+                                    "Lead-Foil Tape Sealed Over Emergency Push-Bars"
                                 ]
                             },
                             {
@@ -14926,7 +14926,7 @@
                                     "Biometric Steel Deadbolt",
                                     "Concealed Stairwell Mirror",
                                     "Unmarked Parcel Lockbox",
-                                    "Heavy Iron Fire Door"
+                                    "Heavy Iron Fire Bulkhead"
                                 ],
                                 "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
                             },
@@ -18300,7 +18300,7 @@
                                     "Caution-Taped Euler Fire Bulkhead Hanging Horizontally",
                                     "Shattered Spirit-Level Bubbling Sideways Against Mortar",
                                     "Abandoned Grad-Student Notebook Filled With Endless Spirals",
-                                    "Exit Arrow Sign Looping Around Four Walls"
+                                    "Wayfinding Arrow Sign Looping Around Four Walls"
                                 ]
                             },
                             {
@@ -18958,8 +18958,8 @@
                                 "name": "Warded Cellar Threshold",
                                 "is_entrance": 1,
                                 "props": [
-                                    "Ironbound Oak Door",
-                                    "Salt-Traced Stone Threshold",
+                                    "Ironbound Oak Partition",
+                                    "Salt-Traced Stone Lintel",
                                     "Oil Sconce Lantern",
                                     "Chalk Ward Ledger"
                                 ],
@@ -19848,7 +19848,7 @@
                                     "Bullet-Proof Ticket Glass Fused With Grey Static",
                                     "Popcorn Kettle Overflowing With Ash & Copper Wire",
                                     "Marquee Letters Rearranging Themselves Into Warnings",
-                                    "Lead-Foil Tape Sealed Over Fire Exit Push-Bars"
+                                    "Lead-Foil Tape Sealed Over Emergency Push-Bars"
                                 ]
                             },
                             {
@@ -21227,7 +21227,7 @@
                                     "Biometric Steel Deadbolt",
                                     "Concealed Stairwell Mirror",
                                     "Unmarked Parcel Lockbox",
-                                    "Heavy Iron Fire Door"
+                                    "Heavy Iron Fire Bulkhead"
                                 ],
                                 "sensory": "Damp concrete stairwell chill beneath buzzing amber sodium cage lights."
                             },
@@ -23875,7 +23875,7 @@
                                     "Caution-Taped Euler Fire Bulkhead Hanging Horizontally",
                                     "Shattered Spirit-Level Bubbling Sideways Against Mortar",
                                     "Abandoned Grad-Student Notebook Filled With Endless Spirals",
-                                    "Exit Arrow Sign Looping Around Four Walls"
+                                    "Wayfinding Arrow Sign Looping Around Four Walls"
                                 ]
                             },
                             {
@@ -24533,8 +24533,8 @@
                                 "name": "Warded Cellar Threshold",
                                 "is_entrance": 1,
                                 "props": [
-                                    "Ironbound Oak Door",
-                                    "Salt-Traced Stone Threshold",
+                                    "Ironbound Oak Partition",
+                                    "Salt-Traced Stone Lintel",
                                     "Oil Sconce Lantern",
                                     "Chalk Ward Ledger"
                                 ],
