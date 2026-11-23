@@ -51,15 +51,15 @@ def _coerce_status_labels(raw_status: Any) -> list[str]:
     return [lbl for lbl in labels if lbl]
 
 
-def _character_sheet_text(char: dict, inventory: list) -> str:
-    if inventory is not None:
-        equipment = {
-            item["slot"]: item
-            for item in inventory
-            if isinstance(item, dict) and item.get("equipped") and item.get("slot")
-        }
-    else:
-        equipment = db.get_equipment(char.get("user_id", 0)) if char.get("user_id") else {}
+def _character_sheet_text(char: dict, inventory: list | None = None) -> str:
+    inventory_list = inventory if isinstance(inventory, list) else []
+    equipment = {
+        item["slot"]: item
+        for item in inventory_list
+        if isinstance(item, dict) and item.get("equipped") and item.get("slot")
+    }
+    if not equipment and not inventory_list and char.get("user_id"):
+        equipment = db.get_equipment(char.get("user_id", 0))
     from mechanics.combat.items.tags import is_narrative_item
     equip_items = []
     for slot, item in equipment.items():
