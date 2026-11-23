@@ -39,10 +39,10 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 - `api/inventory_merchant.py`: Inventory inspector (`vs_equipped` deltas, `[GEAR_JSON]` stripping, Key Item drop protection) & merchant shop/haggle.
 - `api/auth_characters.py`: Guest & Discord ID auth, character creation, starter gear regeneration, switching, and deletion.
 - `api/settings_ws.py` & `api/deps.py`: User settings, WebSocket endpoint, and `ConnectionManager`.
-- **Serialization Rule**: Always convert `CheckResult` objects via `server._serializable_action()` before returning JSON or calling `ws.send_json()`.
+- **Serialization Rule**: Always convert `CheckResult` objects via `api/deps.py` (`serializable_action()`; `server._serializable_action` compatibility alias) before returning JSON or calling `ws.send_json()`.
 
 ### Discord Parity (`cogs/`)
-- `cogs/adventure/cog.py` composes `game_loop_mixin.py`, `merchant_mixin.py`, `faction_mixin.py`, `embeds.py`, and interactive `discord.ui.View` classes in `cogs/adventure/views/` (`loadout.py`, `locations.py`, `quests.py`, etc.), alongside `cogs/{character,contacts,factions,inventory,settings,debug}.py`.
+- `cogs/adventure/cog.py` composes `game_loop_mixin.py`, `merchant_mixin.py`, `faction_mixin.py`, `cogs/adventure/embeds/`, and interactive `discord.ui.View` classes in `cogs/adventure/views/` (`loadout.py`, `locations.py`, `quests.py`, etc.), alongside `cogs/{character,contacts,factions,inventory,settings,debug}.py`.
 - When adding a new player-facing capability (e.g., bounty action, faction HQ perk, stealth toggle, phone feature), expose it cleanly through `TurnService` / `mechanics/` so both `api/` + `web/` and `cogs/` stay synchronized.
 
 ---
@@ -65,7 +65,7 @@ Do **not** send turn actions over WebSockets. Hikayat separates HTTP command sub
 ## 4. Build, Dev & Browser Verification
 
 - **Dev Mode**: Run `python server.py` (port `8000`) + `cd web && npm run dev` (Vite port `5173`, proxying `/api` and `/ws` to `8000`).
-- **Standalone Production Sync**: `server.py` serves compiled static files from `web/dist`. **Always run `cd web && npm run build`** after modifying `web/src/` so standalone `run_web.bat` reflects your UI changes!
+- **Standalone Production Sync**: `server.py` serves compiled static files from `web/dist`. **Always run `cd web && npm run lint && npm run build`** after modifying `web/src/` and include rebuilt `web/dist/` so standalone `run_web.bat` reflects your UI changes!
 - **Verification**:
   - API parity tests: `pytest tests/test_web_api.py tests/test_codebase_contracts.py -q`
   - Live DOM/CSS/network inspection: Use the `chrome-devtools-mcp` tools (`navigate_page`, `take_snapshot`, `get_css_styles`, `list_console_messages`, `list_network_requests`).

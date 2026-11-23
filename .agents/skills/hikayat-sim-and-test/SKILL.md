@@ -70,13 +70,14 @@ All 6 simulators automatically create an isolated temporary SQLite DB via `db.is
 
 ## 3. Writing New Tests Safely
 
-- **Isolate SQLite Paths**: Always redirect **both** `db.DB_PATH` and `db.core.DB_PATH` before calling `db.init_db()`:
+- **Isolate SQLite Paths**: Always isolate tests with `db.use_temporary_db()` or `db.set_db_path(test_db)` (which clears pooled connections and updates `db.DB_PATH`, `db.core.DB_PATH`, and `config.DB_PATH` atomically) before calling `db.init_db()`:
   ```python
   test_db = str(tmp_path / "test_feature.db")
-  monkeypatch.setattr(db, "DB_PATH", test_db)
-  monkeypatch.setattr(db.core, "DB_PATH", test_db)
-  db.init_db()
+  with db.use_temporary_db(test_db):
+      db.init_db()
+      ...
   ```
+  (If patching via `monkeypatch`, redirect both `db.DB_PATH` and `db.core.DB_PATH` and restore on teardown.)
 - **Mock External LLM / Image Calls**: Patch `llm_client` / `TurnService.resolve_action` with `unittest.mock.AsyncMock` or `MagicMock` so unit/integration tests remain fast, offline, and deterministic.
 - **Apply Pytest Markers** (`pytest.ini`): Tag new tests with `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.api`, `@pytest.mark.contract`, or `@pytest.mark.slow`.
 

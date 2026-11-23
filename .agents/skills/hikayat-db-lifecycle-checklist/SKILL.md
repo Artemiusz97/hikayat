@@ -60,7 +60,7 @@ If the table is scoped to an adventure session (`session_id` column) — or if a
 
 ## 6. Mandatory Isolated Test Verification
 
-Never let a test touch the live repository `hikayat.db`. Use the isolation fixture pattern in the `hikayat-sim-and-test` skill (§3, "Isolate SQLite Paths"), which redirects **both** `db.DB_PATH` and `db.core.DB_PATH` before `db.init_db()`.
+Never let a test touch the live repository `hikayat.db`. Use the isolation pattern in the `hikayat-sim-and-test` skill (§3, "Isolate SQLite Paths") via `db.use_temporary_db()` / `db.set_db_path(...)` (or monkeypatching both `db.DB_PATH` and `db.core.DB_PATH`) before `db.init_db()`.
 
 Run both contract and normalized-lifecycle suites before finishing:
 ```bash
