@@ -102,44 +102,52 @@ export const useAuth = () => {
 
   const loginGuest = async (displayName) => {
     const cleanName = (displayName || '').trim();
+    const loginEpoch = ++authEpochRef.current;
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
     const data = await apiCall('/api/auth/guest', {
       method: 'POST',
       body: JSON.stringify({ guest_name: cleanName, display_name: cleanName })
     });
+    if (authEpochRef.current !== loginEpoch) {
+      return null;
+    }
     const userObj = {
       ...data,
       user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanName || 'Guest',
       display_name: data.display_name || data.username || cleanName || 'Guest'
     };
-    authEpochRef.current += 1;
-    if (fetchAbortRef.current) {
-      fetchAbortRef.current.abort();
-      fetchAbortRef.current = null;
-    }
     localStorage.setItem('cf_user', JSON.stringify(userObj));
     setUser(userObj);
+    return userObj;
   };
 
   const loginDiscord = async (discordId) => {
     const cleanId = (discordId || '').trim();
+    const loginEpoch = ++authEpochRef.current;
+    if (fetchAbortRef.current) {
+      fetchAbortRef.current.abort();
+      fetchAbortRef.current = null;
+    }
     const data = await apiCall('/api/auth/discord', {
       method: 'POST',
       body: JSON.stringify({ user_id_or_name: cleanId, discord_id: cleanId })
     });
+    if (authEpochRef.current !== loginEpoch) {
+      return null;
+    }
     const userObj = {
       ...data,
       user_id: data.user_id_str || String(data.user_id),
       username: data.username || data.display_name || cleanId || 'Discord User',
       display_name: data.display_name || data.username || cleanId || 'Discord User'
     };
-    authEpochRef.current += 1;
-    if (fetchAbortRef.current) {
-      fetchAbortRef.current.abort();
-      fetchAbortRef.current = null;
-    }
     localStorage.setItem('cf_user', JSON.stringify(userObj));
     setUser(userObj);
+    return userObj;
   };
 
   const logout = useCallback(() => {
@@ -161,7 +169,7 @@ export const useAuth = () => {
   }, [logout]);
 
   const allocateStatPoint = async (stat) => {
-    if (!user) return;
+    if (!user?.user_id) return null;
     const res = await apiCall('/api/character/allocate', {
       method: 'POST',
       body: JSON.stringify({ user_id: user.user_id, stat })
@@ -171,6 +179,7 @@ export const useAuth = () => {
   };
 
   const createCharacter = async (nameOrPayload, class_name) => {
+    if (!user?.user_id) return null;
     const payload = typeof nameOrPayload === 'object' && nameOrPayload !== null
       ? { user_id: user.user_id, ...nameOrPayload }
       : { user_id: user.user_id, name: nameOrPayload, char_class: class_name || 'Warrior' };
@@ -184,12 +193,14 @@ export const useAuth = () => {
   };
 
   const switchCharacter = async (charId) => {
-    await apiCall('/api/character/switch', {
+    if (!user?.user_id) return null;
+    const res = await apiCall('/api/character/switch', {
       method: 'POST',
       body: JSON.stringify({ user_id: user.user_id, character_id: charId })
     });
     await fetchCharacters();
     await fetchActiveCharacter();
+    return res;
   };
 
   const deleteCharacter = async (characterId) => {

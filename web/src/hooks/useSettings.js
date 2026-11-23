@@ -18,18 +18,36 @@ export const useSettings = (userId) => {
   });
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
+  const fetchAbortRef = useRef(null);
+  const fetchSeqRef = useRef(0);
+  const updateSeqRef = useRef(0);
+  const savingCountRef = useRef(0);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchSettings = useCallback(async () => {
+    if (fetchAbortRef.current) {
+      try {
+        fetchAbortRef.current.abort();
+      } catch {}
+      fetchAbortRef.current = null;
+    }
+    const seq = ++fetchSeqRef.current;
     if (!userId) {
       setLoading(false);
       return;
     }
+    const controller = new AbortController();
+    fetchAbortRef.current = controller;
     try {
       setLoading(true);
-      const data = await apiCall(`/api/settings/${userId}`);
+      const data = await apiCall(`/api/settings/${userId}`, {
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted || fetchSeqRef.current !== seq) {
+        return;
+      }
       if (data && data.settings) {
         settingsRef.current = data.settings;
         setSettings(data.settings);
@@ -40,21 +58,47 @@ export const useSettings = (userId) => {
         }
       }
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || controller.signal.aborted || fetchSeqRef.current !== seq) {
+        return;
+      }
       console.error('Failed to fetch settings:', err);
       setError(err.message || 'Could not load settings');
     } finally {
-      setLoading(false);
+      if (fetchAbortRef.current === controller) {
+        fetchAbortRef.current = null;
+      }
+      if (fetchSeqRef.current === seq) {
+        setLoading(false);
+      }
     }
   }, [userId]);
 
   useEffect(() => {
     fetchSettings();
+    return () => {
+      if (fetchAbortRef.current) {
+        try {
+          fetchAbortRef.current.abort();
+        } catch {}
+        fetchAbortRef.current = null;
+      }
+    };
   }, [fetchSettings]);
 
   const updateSettings = async (newFields) => {
     if (!userId) return;
+    if (fetchAbortRef.current) {
+      try {
+        fetchAbortRef.current.abort();
+      } catch {}
+      fetchAbortRef.current = null;
+    }
+    fetchSeqRef.current += 1;
+    const seq = ++updateSeqRef.current;
+    savingCountRef.current += 1;
     try {
       setSaving(true);
+      setError(null);
       const merged = { ...settingsRef.current, ...newFields, user_id: userId };
       if (
         newFields?.narrative_pacing &&
@@ -79,19 +123,24 @@ export const useSettings = (userId) => {
         method: 'POST',
         body: JSON.stringify(merged)
       });
-      if (res && res.settings) {
+      if (res && res.settings && seq === updateSeqRef.current) {
         settingsRef.current = res.settings;
         setSettings(res.settings);
       }
       return res;
     } catch (err) {
       console.error('Failed to save settings:', err);
-      setError(err.message || 'Could not save settings');
-      // Re-fetch on error to revert
-      fetchSettings();
+      if (seq === updateSeqRef.current) {
+        setError(err.message || 'Could not save settings');
+        // Re-fetch on error to revert
+        fetchSettings();
+      }
       throw err;
     } finally {
-      setSaving(false);
+      savingCountRef.current = Math.max(0, savingCountRef.current - 1);
+      if (savingCountRef.current === 0) {
+        setSaving(false);
+      }
     }
   };
 

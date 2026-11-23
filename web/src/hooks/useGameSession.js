@@ -29,6 +29,7 @@ export const useGameSession = (user, character) => {
   const reconnectTimeoutRef = useRef(null);
   const activeSessionIdRef = useRef(null);
   const imagePollIntervalRef = useRef(null);
+  const imagePollAbortRef = useRef(null);
   const safetyTimerRef = useRef(null);
   const turnAbortControllerRef = useRef(null);
   const fetchSessionAbortRef = useRef(null);
@@ -73,6 +74,12 @@ export const useGameSession = (user, character) => {
     if (imagePollIntervalRef.current) {
       clearInterval(imagePollIntervalRef.current);
       imagePollIntervalRef.current = null;
+    }
+    if (imagePollAbortRef.current) {
+      try {
+        imagePollAbortRef.current.abort();
+      } catch {}
+      imagePollAbortRef.current = null;
     }
   }, []);
 
@@ -127,12 +134,27 @@ export const useGameSession = (user, character) => {
     let attempts = 0;
     const interval = setInterval(async () => {
       attempts++;
+      if (imagePollAbortRef.current) {
+        try {
+          imagePollAbortRef.current.abort();
+        } catch {}
+      }
+      const controller = new AbortController();
+      imagePollAbortRef.current = controller;
       try {
-        const res = await apiCall(`/api/adventure/session-image/${sessionId}`);
+        const res = await apiCall(`/api/adventure/session-image/${sessionId}`, {
+          signal: controller.signal,
+        });
+        if (imagePollIntervalRef.current !== interval || controller.signal.aborted) {
+          return;
+        }
         if (res && res.scene_image_url) {
           clearInterval(interval);
           if (imagePollIntervalRef.current === interval) {
             imagePollIntervalRef.current = null;
+          }
+          if (imagePollAbortRef.current === controller) {
+            imagePollAbortRef.current = null;
           }
           setSession(prev => {
             if (!prev || (prev.id !== sessionId && String(prev.id) !== String(sessionId))) return prev;
@@ -154,12 +176,21 @@ export const useGameSession = (user, character) => {
           if (imagePollIntervalRef.current === interval) {
             imagePollIntervalRef.current = null;
           }
+          if (imagePollAbortRef.current === controller) {
+            imagePollAbortRef.current = null;
+          }
         }
-      } catch {
+      } catch (err) {
+        if (err?.isUserAbort || err?.name === 'AbortError' || controller.signal.aborted) {
+          return;
+        }
         if (attempts >= maxAttempts) {
           clearInterval(interval);
           if (imagePollIntervalRef.current === interval) {
             imagePollIntervalRef.current = null;
+          }
+          if (imagePollAbortRef.current === controller) {
+            imagePollAbortRef.current = null;
           }
         }
       }
@@ -206,7 +237,14 @@ export const useGameSession = (user, character) => {
     ws._sessionId = sessionId;
     socketRef.current = ws;
 
+    const isStaleTurnEvent = (turnId) =>
+      Boolean(
+        (turnId && completedTurnIdsRef.current.has(turnId)) ||
+        (turnId && activeTurnIdRef.current && turnId !== activeTurnIdRef.current)
+      );
+
     const applyCompletedScenePayload = (payload) => {
+      if (isStaleTurnEvent(payload?.turn_id)) return;
       clearSafetyTimer();
       recordCompletedTurnId(payload?.turn_id);
       activeTurnIdRef.current = null;
@@ -283,12 +321,14 @@ export const useGameSession = (user, character) => {
       }
       if (!data || typeof data !== 'object') return;
       if (data.type === 'STREAM_THINKING') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         setIsThinking(true);
         if (data.action) {
           setPendingAction(prev => prev || data.action);
         }
         armSafetyTimer(182000);
       } else if (data.type === 'STREAM_START') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         setIsThinking(false);
         setIsStreaming(true);
         setStreamingNarrative('');
@@ -298,6 +338,7 @@ export const useGameSession = (user, character) => {
           nextText: '',
         });
       } else if (data.type === 'STREAM_CHUNK') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         const chunkText = data.text || '';
         const field = data.field || 'outcome_narrative';
         setIsThinking(false);
@@ -312,12 +353,15 @@ export const useGameSession = (user, character) => {
           return { ...base, outcomeText: base.outcomeText + chunkText };
         });
       } else if (data.type === 'STREAM_END' || data.type === 'NEW_SCENE') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         applyCompletedScenePayload(data);
       } else if (data.type === 'STREAM_RESET') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         setIsThinking(false);
         setStreamingNarrative('');
         setStreamingState(prev => (prev ? { ...prev, outcomeText: '', nextText: '' } : null));
       } else if (data.type === 'STREAM_ERROR') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         clearSafetyTimer();
         recordCompletedTurnId(data?.turn_id);
         activeTurnIdRef.current = null;
@@ -339,6 +383,7 @@ export const useGameSession = (user, character) => {
           setActionError(data.error);
         }
       } else if (data.type === 'TURN_CANCELLED') {
+        if (isStaleTurnEvent(data?.turn_id)) return;
         clearSafetyTimer();
         recordCompletedTurnId(data?.turn_id);
         activeTurnIdRef.current = null;
@@ -701,12 +746,23 @@ export const useGameSession = (user, character) => {
   }, [user]);
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
-    turnGenerationRef.current += 1;
+    const startGen = ++turnGenerationRef.current;
+    if (turnAbortControllerRef.current) {
+      turnAbortControllerRef.current.abort();
+      turnAbortControllerRef.current = null;
+    }
+    syncTurnRequestRef.current = false;
+    activeTurnIdRef.current = null;
+    clearSafetyTimer();
+    clearImagePoll();
+    const abortCtrl = new AbortController();
+    turnAbortControllerRef.current = abortCtrl;
     const safeScenario = (!scenarioKey || ['none', 'null', 'undefined'].includes(String(scenarioKey).trim().toLowerCase()))
       ? 'fantasy'
       : scenarioKey;
     // Immediately transition to narration UI with active processing banner
     setActionError(null);
+    setCancellingTurn(false);
     setPausedOnDashboard(false);
     setProcessingState(true);
     setPendingAction({ label: 'Embarking on new journey...' });
@@ -727,6 +783,7 @@ export const useGameSession = (user, character) => {
       const data = await apiCall('/api/adventure/start', {
         timeout: 240000,
         method: 'POST',
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           ...options,
           user_id: user.user_id,
@@ -736,6 +793,9 @@ export const useGameSession = (user, character) => {
           tags: options.tags,
         })
       });
+      if (turnGenerationRef.current !== startGen) {
+        return null;
+      }
 
       setSession(data.session);
       setPartyChatMessages([]);
@@ -743,31 +803,65 @@ export const useGameSession = (user, character) => {
       setLastSyncTimestamp(Date.now());
       return data;
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || turnGenerationRef.current !== startGen) {
+        return null;
+      }
       setSession(null);
       setPausedOnDashboard(true);
       setActionError(err.message || 'Failed to embark on adventure.');
       throw err;
     } finally {
-      setProcessingState(false);
-      setPendingAction(null);
+      if (turnAbortControllerRef.current === abortCtrl) {
+        turnAbortControllerRef.current = null;
+      }
+      if (turnGenerationRef.current === startGen) {
+        setProcessingState(false);
+        setPendingAction(null);
+      }
     }
   };
 
   const joinSession = async (joinCode) => {
-    turnGenerationRef.current += 1;
-    const data = await apiCall('/api/adventure/join', {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id: user.user_id,
-        join_code: joinCode
-      })
-    });
-    setSession(data.session);
-    setPausedOnDashboard(false);
-    setPartyChatMessages([]);
-    connectWebSocket(data.session.id);
-    setLastSyncTimestamp(Date.now());
-    return data;
+    const joinGen = ++turnGenerationRef.current;
+    if (turnAbortControllerRef.current) {
+      turnAbortControllerRef.current.abort();
+      turnAbortControllerRef.current = null;
+    }
+    syncTurnRequestRef.current = false;
+    activeTurnIdRef.current = null;
+    clearSafetyTimer();
+    clearImagePoll();
+    setCancellingTurn(false);
+    const abortCtrl = new AbortController();
+    turnAbortControllerRef.current = abortCtrl;
+    try {
+      const data = await apiCall('/api/adventure/join', {
+        method: 'POST',
+        signal: abortCtrl.signal,
+        body: JSON.stringify({
+          user_id: user.user_id,
+          join_code: joinCode
+        })
+      });
+      if (turnGenerationRef.current !== joinGen) {
+        return null;
+      }
+      setSession(data.session);
+      setPausedOnDashboard(false);
+      setPartyChatMessages([]);
+      connectWebSocket(data.session.id);
+      setLastSyncTimestamp(Date.now());
+      return data;
+    } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || turnGenerationRef.current !== joinGen) {
+        return null;
+      }
+      throw err;
+    } finally {
+      if (turnAbortControllerRef.current === abortCtrl) {
+        turnAbortControllerRef.current = null;
+      }
+    }
   };
 
   const submitAction = async (actionData) => {
@@ -1126,7 +1220,9 @@ export const useGameSession = (user, character) => {
         setActionError(e?.detail || e?.message || 'Failed to cancel turn.');
       }
     } finally {
-      setCancellingTurn(false);
+      if (turnGenerationRef.current === cancelGen) {
+        setCancellingTurn(false);
+      }
     }
   }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer, recordCompletedTurnId, setProcessingState]);
 
