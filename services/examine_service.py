@@ -53,6 +53,11 @@ def invalidate_examine_cache(session_id: int) -> None:
 
 def _clear_examine_cache_all() -> None:
     """Test helper to clear all cached Examine prose."""
+
+
+db.register_session_rollback_hook = getattr(db, "register_session_rollback_hook", None)
+if callable(db.register_session_rollback_hook):
+    db.register_session_rollback_hook(invalidate_examine_cache)
     with _CACHE_LOCK:
         _EXAMINE_CACHE.clear()
         _INFLIGHT_LOCKS.clear()

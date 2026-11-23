@@ -170,6 +170,7 @@ from .sessions import (
     join_session,
     list_open_lobbies_with_members,
     prune_orphaned_and_finished_sessions,
+    register_session_rollback_hook,
     remove_session_party_npc,
     remove_temporary_companion,
     reset_character_for_new_adventure,
@@ -261,7 +262,6 @@ from .dossiers import (
     get_users_folklore_codex_batch,
     hydrate_session_anomaly_records,
     normalize_clue_graph_nodes,
-    persist_anomalous_quest_containment,
     promote_prewarmed_dossier,
     record_folklore_codex_progress,
     record_session_anomaly_field_log,
@@ -858,6 +858,7 @@ __all__ = [
     "record_phone_daily_interaction",
     "record_session_anomaly_field_log",
     "record_world_roster_interaction",
+    "register_session_rollback_hook",
     "release_distributed_lock",
     "remove_item",
     "remove_item_by_name",
@@ -996,3 +997,10 @@ __all__ = [
     "vacuum_database",
     "verify_session_clue",
 ]
+
+
+def persist_anomalous_quest_containment(*args, **kwargs):
+    """Backward-compatible facade delegating to Layer-3 `services.anomalous_containment_service`."""
+    from services.anomalous_containment_service import persist_anomalous_quest_containment as _impl
+
+    return _impl(*args, **kwargs)

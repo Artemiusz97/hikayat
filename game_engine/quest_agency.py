@@ -659,8 +659,9 @@ def resolve_quest_turn_in_or_betrayal(
         net_gold = max(0, base_gold - adv_paid)
         try:
             from scenario_data import is_anomalous_incursions_scenario
+            from services.anomalous_containment_service import persist_anomalous_quest_containment
             if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")):
-                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
+                res_tax = persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     net_gold = 0
         except Exception:
@@ -713,8 +714,9 @@ def resolve_quest_turn_in_or_betrayal(
         payout = max(0, int(round(base_gold * 1.25)) - adv_paid)
         try:
             from scenario_data import is_anomalous_incursions_scenario
+            from services.anomalous_containment_service import persist_anomalous_quest_containment
             if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")):
-                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
+                res_tax = persist_anomalous_quest_containment(session_id, q, int(user_id), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     payout = 0
         except Exception:

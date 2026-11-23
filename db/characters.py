@@ -3,7 +3,7 @@ import db
 import logging
 import json
 import time
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 import character_data as cd
 from .core import *
 from .core import _delete_session_records
@@ -14,7 +14,8 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
                      gender: str = "Male", scenario: str = "fantasy",
                      race: str = "human", race_description: str = "", appearance: dict = None,
                      attribute: str | None = None, combat_archetype: str | None = None,
-                     ability_medium: str | None = None) -> dict:
+                     ability_medium: str | None = None,
+                     innate_spells: list[str] | None = None) -> dict:
     if stats is None:
         stats = {s: cd.BASE_STAT_VALUE for s in cd.STATS}
     existing = get_user_characters(user_id)
@@ -56,11 +57,11 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
         norm_app["student_grade"] = app_dict["student_grade"]
     app_json = json.dumps(norm_app)
 
-    innate_spells: list[str] | None = None
-    if is_anom and attr_val and arch_val and med_val:
+    resolved_innate_spells: list[str] | None = list(innate_spells) if innate_spells is not None else None
+    if resolved_innate_spells is None and is_anom and attr_val and arch_val and med_val:
         try:
             from mechanics.combat.spells.awakened_kits import build_awakened_kit_ids
-            innate_spells = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
+            resolved_innate_spells = list(build_awakened_kit_ids(attr_val, arch_val, med_val))
         except Exception as e:
             log.warning("Failed resolving innate 3-axis spells in create_character for user %s: %s", user_id, e)
 
@@ -83,16 +84,16 @@ def create_character(user_id: int, name: str, char_class: str = "Adventurer", cl
              hp, hp, mp, mp, pending_stat_points, gold, app_json, attr_val, arch_val, med_val, time.time()),
         )
         char_id = cur.lastrowid
-        if innate_spells is not None:
+        if resolved_innate_spells is not None:
             db.set_skill_progress(
                 user_id,
                 {
-                    "innate_spells": innate_spells,
+                    "innate_spells": resolved_innate_spells,
                     "equipped_granted_spells": [],
                     "empowered_granted_spells": [],
                 },
             )
-            db.set_learned_spells(user_id, innate_spells)
+            db.set_learned_spells(user_id, resolved_innate_spells)
     return get_character_by_id(char_id)
 
 def apply_adventure_loadout(
@@ -340,6 +341,7 @@ def _apply_debug_stat_override(
     session_id: int | None = None,
     active_pacts: list[dict] | None = None,
     active_grudges: list[dict] | None = None,
+    pact_modifier_fn: Callable[..., dict] | None = None,
 ) -> dict | None:
     if not char:
         return char
@@ -413,8 +415,11 @@ def _apply_debug_stat_override(
                     else (db.get_session_active_grudges(int(eff_sid), holder_id=int(user_id)) if eff_sid else [])
                 )
                 if pacts or grudges:
-                    from mechanics.pacts.appraisal import apply_active_pact_modifiers
-                    char = apply_active_pact_modifiers(char, pacts, active_grudges=grudges)
+                    mod_fn = pact_modifier_fn
+                    if mod_fn is None:
+                        from mechanics.pacts.appraisal import apply_active_pact_modifiers
+                        mod_fn = apply_active_pact_modifiers
+                    char = mod_fn(char, pacts, active_grudges=grudges)
             except Exception:
                 pass
     return char

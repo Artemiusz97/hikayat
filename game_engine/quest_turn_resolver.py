@@ -1531,7 +1531,8 @@ def resolve_quest_optional_objective(
         final_xp = int(q_row.get("reward_xp") or 100)
         if scenario_data.is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
             try:
-                res_tax = db.persist_anomalous_quest_containment(session_id, q_row, int(uids[0]), party_user_ids=uids)
+                from services.anomalous_containment_service import persist_anomalous_quest_containment
+                res_tax = persist_anomalous_quest_containment(session_id, q_row, int(uids[0]), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     final_gold = 0
             except Exception:
@@ -2097,8 +2098,9 @@ def resolve_quest_combat_outcome(
         part_xp = int(round(int(q.get("reward_xp") or 100) * 0.75))
         try:
             from scenario_data import is_anomalous_incursions_scenario
+            from services.anomalous_containment_service import persist_anomalous_quest_containment
             if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
-                res_tax = db.persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
+                res_tax = persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
                 if res_tax.get("confiscate_gold"):
                     part_gold = 0
         except Exception:
@@ -2130,8 +2132,9 @@ def resolve_quest_combat_outcome(
     final_gold = max(0, int(round(int(q.get("reward_gold") or 50) * mult)) - adv_paid)
     try:
         from scenario_data import is_anomalous_incursions_scenario
+        from services.anomalous_containment_service import persist_anomalous_quest_containment
         if is_anomalous_incursions_scenario(str(sess.get("scenario") or "")) and uids:
-            res_tax = db.persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
+            res_tax = persist_anomalous_quest_containment(session_id, q, int(uids[0]), party_user_ids=uids)
             if res_tax.get("confiscate_gold"):
                 final_gold = 0
     except Exception:

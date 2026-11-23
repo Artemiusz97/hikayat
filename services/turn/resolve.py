@@ -624,9 +624,15 @@ async def _resolve_action_inner(
         if extra_restore:
             rollback_kwargs["extra"] = extra_restore
 
+        from services.examine_service import invalidate_examine_cache
+
         def _apply_turn_failure_rollback_bundle() -> None:
             with db.UnitOfWork():
-                db.rollback_session_normalized_state_after_turn(session_id, pre_turn_count_val)
+                db.rollback_session_normalized_state_after_turn(
+                    session_id,
+                    pre_turn_count_val,
+                    invalidate_cache_cb=invalidate_examine_cache,
+                )
                 if has_party_npcs_rb:
                     db.set_session_party_npcs(session_id, snapshot["pre_turn"]["party_npcs"])
                 for _rb_uid, _rb_effs in pre_turn_char_status_effects.items():

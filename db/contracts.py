@@ -13,7 +13,7 @@ import json
 import logging
 import sqlite3
 import time
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import db
 from .core import UnitOfWork, _restore_session_table_rows, get_conn
@@ -821,13 +821,24 @@ def upgrade_entity_contract_tier(
     *,
     target_tier: Optional[int] = None,
     turn_number: int = 1,
+    xp_thresholds: Optional[Dict[int, int]] = None,
+    compute_locks_fn: Optional[Callable[..., Any]] = None,
+    can_afford_locks_fn: Optional[Callable[..., Any]] = None,
 ) -> Dict[str, Any]:
     """Upgrades an active Pact to Tier II or Tier III (checking Resonance XP, Appraisal cap, stat locks & exclusivity)."""
-    from mechanics.pacts.appraisal import (
-        RESONANCE_XP_THRESHOLDS,
-        can_afford_stat_locks,
-        compute_tier_locks_for_patron,
-    )
+    if xp_thresholds is None or compute_locks_fn is None or can_afford_locks_fn is None:
+        from mechanics.pacts.appraisal import (
+            RESONANCE_XP_THRESHOLDS,
+            can_afford_stat_locks,
+            compute_tier_locks_for_patron,
+        )
+        eff_thresholds = xp_thresholds if xp_thresholds is not None else RESONANCE_XP_THRESHOLDS
+        eff_compute_locks = compute_locks_fn if compute_locks_fn is not None else compute_tier_locks_for_patron
+        eff_can_afford = can_afford_locks_fn if can_afford_locks_fn is not None else can_afford_stat_locks
+    else:
+        eff_thresholds = xp_thresholds
+        eff_compute_locks = compute_locks_fn
+        eff_can_afford = can_afford_locks_fn
 
     sid = int(session_id)
     uid = int(user_id)
@@ -852,7 +863,7 @@ def upgrade_entity_contract_tier(
         if app_state == "disdained" and next_tier >= 3:
             raise ValueError(f"{current['entity_name']} disdains you and refuses Exclusive Tier III binding.")
 
-        req_xp = RESONANCE_XP_THRESHOLDS.get(next_tier, 99)
+        req_xp = eff_thresholds.get(next_tier, 99)
         if app_state != "favored" and int(current.get("resonance_xp") or 0) < req_xp:
             raise ValueError(
                 f"Insufficient Pact Resonance ({current.get('resonance_xp', 0)}/{req_xp}) for Tier {next_tier}."
@@ -873,8 +884,8 @@ def upgrade_entity_contract_tier(
         ).fetchone()
         raw_char = dict(char_row)
 
-        stat_locks, hp_lock_pct = compute_tier_locks_for_patron(patron, next_tier, app_state)
-        ok_stats, stat_err = can_afford_stat_locks(
+        stat_locks, hp_lock_pct = eff_compute_locks(patron, next_tier, app_state)
+        ok_stats, stat_err = eff_can_afford(
             raw_char, stat_locks, active, replacing_contract_key=current["contract_key"]
         )
         if not ok_stats:
@@ -1315,6 +1326,8 @@ def rollback_entity_contracts_after_turn(
     session_id: int,
     turn_number: int,
     conn: Optional[sqlite3.Connection] = None,
+    *,
+    patron_lookup_fn: Optional[Callable[[str], Optional[Dict[str, Any]]]] = None,
 ) -> Dict[str, int]:
     """Restores contracts, grudges, and `[Pact-Bound]` gear to `turn_number` inside atomic session rollback."""
     if not session_id:
@@ -1375,7 +1388,10 @@ def rollback_entity_contracts_after_turn(
         pruned_gear = int(gear_cur.rowcount or 0)
 
         # Re-create & re-link [Pact-Bound] gear if an active contract lost its item (e.g., violent severance rolled back!)
-        from mechanics.pacts.catalog import get_patron_by_id
+        lookup_patron = patron_lookup_fn
+        if lookup_patron is None:
+            from mechanics.pacts.catalog import get_patron_by_id
+            lookup_patron = get_patron_by_id
         active_player_rows = c.execute(
             "SELECT * FROM session_entity_contracts WHERE session_id = ? AND holder_type = 'player' AND status = 'active'",
             (sid,),
@@ -1385,7 +1401,7 @@ def rollback_entity_contracts_after_turn(
             if not str(phd.get("holder_id") or "").isdigit():
                 continue
             uid = int(phd["holder_id"])
-            patron = get_patron_by_id(phd["patron_id"])
+            patron = lookup_patron(phd["patron_id"])
             if not patron or not patron.get("bound_gear"):
                 continue
             c_row = c.execute("SELECT * FROM characters WHERE id = ? LIMIT 1", (phd.get("character_id"),)).fetchone()

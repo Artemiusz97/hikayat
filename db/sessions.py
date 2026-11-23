@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Optional, Any
+from typing import Callable, Optional, Any
 import db
 import json
 import logging
@@ -1048,7 +1048,21 @@ def reset_session_for_opening_retry(session_id: int, user_id: int = 0) -> None:
         )
 
 
-def rollback_session_normalized_state_after_turn(session_id: int, turn_number: int) -> dict:
+_SESSION_ROLLBACK_HOOKS: list[Callable[[int], Any]] = []
+
+
+def register_session_rollback_hook(cb: Callable[[int], Any]) -> None:
+    """Register an observer callback invoked after `rollback_session_normalized_state_after_turn` commits."""
+    if callable(cb) and cb not in _SESSION_ROLLBACK_HOOKS:
+        _SESSION_ROLLBACK_HOOKS.append(cb)
+
+
+def rollback_session_normalized_state_after_turn(
+    session_id: int,
+    turn_number: int,
+    *,
+    invalidate_cache_cb: Optional[Callable[[int], Any]] = None,
+) -> dict:
     """Atomically rolls back social_ties, intimate_events, commitments_ledger, world_events, quest_dossiers, campaign_spines, npc_memories, and session_digests after turn_number."""
     if not session_id:
         return {
@@ -1422,8 +1436,15 @@ def rollback_session_normalized_state_after_turn(session_id: int, turn_number: i
                     restore_quarters_arch,
                     exc,
                 )
-    from services.examine_service import invalidate_examine_cache
-    invalidate_examine_cache(int(session_id))
+
+    invoked_hooks: set[int] = set()
+    if callable(invalidate_cache_cb):
+        invoked_hooks.add(id(invalidate_cache_cb))
+        invalidate_cache_cb(int(session_id))
+    for hook in tuple(_SESSION_ROLLBACK_HOOKS):
+        if id(hook) not in invoked_hooks:
+            invoked_hooks.add(id(hook))
+            hook(int(session_id))
     return {
         "ties_rolled_back": ties_cnt,
         "intimate_events_deleted": intimate_cnt,
