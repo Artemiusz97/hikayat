@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import re
 import time
@@ -1407,11 +1406,11 @@ def evaluate_quest_state_predicates(
                                     sub_dirty = True
                                     results.append({"quest_id": qid, "sub_obj_id": so_id, "type": "partial_progress", "progress": new_so_prog})
             if sub_dirty:
-                cleaned_sub_objs = db._clean_sub_objectives_for_storage(sub_objs) if hasattr(db, "_clean_sub_objectives_for_storage") else sub_objs
+                sub_objs_json = db._clean_sub_objectives_for_storage(sub_objs)
                 with db.get_conn() as conn:
                     conn.execute(
                         "UPDATE quests SET sub_objectives_json=?, updated_at=? WHERE session_id=? AND quest_id=?",
-                        (json.dumps(cleaned_sub_objs), time.time(), session_id, qid)
+                        (sub_objs_json, time.time(), session_id, qid)
                     )
 
         # 3. Reactive NPCStatusChanged check

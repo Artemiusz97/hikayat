@@ -202,6 +202,7 @@ from .saves import (
     save_adventure_slot,
 )
 from .quests import (
+    _clean_sub_objectives_for_storage,
     _enrich_quest_dict,
     add_session_clue,
     advance_waypoint,
