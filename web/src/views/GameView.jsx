@@ -162,6 +162,8 @@ const GameView = ({
   const [inspectedSceneNpc, setInspectedSceneNpc] = useState(null);
   const [phoneInitialNpc, setPhoneInitialNpc] = useState(null);
   const [isStealthActive, setIsStealthActive] = useState(false);
+  const [stealthError, setStealthError] = useState(null);
+  const stealthPendingRef = useRef(false);
   const [lastSeenChatCount, setLastSeenChatCount] = useState(
     () => partyChatMessages.length
   );
@@ -445,9 +447,13 @@ const GameView = ({
   }, [session?.stealth_state?.is_hidden]);
 
   const handleToggleStealth = async () => {
-    const nextState = !isStealthActive;
+    if (stealthPendingRef.current) return;
+    const prevState = isStealthActive;
+    const nextState = !prevState;
     setIsStealthActive(nextState);
+    setStealthError(null);
     if (isValidSessionId(session?.id) && user?.user_id) {
+      stealthPendingRef.current = true;
       try {
         const res = await apiCall('/api/adventure/toggle_stealth', {
           method: 'POST',
@@ -466,6 +472,10 @@ const GameView = ({
         }
       } catch (err) {
         console.warn('Failed to sync stealth stance to server:', err);
+        setIsStealthActive(prevState);
+        setStealthError(err?.message || 'Failed to sync stealth stance.');
+      } finally {
+        stealthPendingRef.current = false;
       }
     }
   };
@@ -1162,8 +1172,22 @@ const GameView = ({
       waitingForParty={waitingForParty}
       partyStatus={partyStatus}
       onSelectContact={handleOpenNpcInRoster}
-      actionError={actionError}
-      clearActionError={clearActionError}
+      actionError={actionError || stealthError}
+      clearActionError={() => {
+        setStealthError(null);
+        if (clearActionError) clearActionError();
+      }}
+      onReloadSession={(loadedSess) => {
+        if (loadedSess && setSession) {
+          setSession(loadedSess);
+        } else if (refreshSession) {
+          refreshSession();
+        }
+        if (refreshCharacter) {
+          refreshCharacter();
+        }
+      }}
+      onExitToDashboard={exitToDashboard}
       collapsed={hud.actionBarCollapsed}
       onToggleCollapse={() => toggleHudField('actionBarCollapsed')}
     />

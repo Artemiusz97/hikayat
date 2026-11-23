@@ -864,19 +864,27 @@ export const useGameSession = (user, character) => {
     }
   };
 
-  const submitAction = async (actionData) => {
-    if (processingTurnRef.current) return;
+  const runTurnRequest = async ({
+    endpoint,
+    body,
+    optimisticAction,
+    canAsyncWs,
+    resetStreamBeforeRequest = false,
+    onSyncSuccess,
+    onHttpError,
+  }) => {
     turnGenerationRef.current += 1;
     setProcessingState(true);
-    setPendingAction(actionData);
+    armSafetyTimer(245000);
+    if (resetStreamBeforeRequest) {
+      setIsStreaming(false);
+      setStreamingNarrative(null);
+      setStreamingState(null);
+    }
     setIsThinking(false);
+    setPendingAction(optimisticAction);
     setActionError(null);
 
-    armSafetyTimer(245000);
-
-    const prevTurnCount = session?.turn_count ?? 0;
-    const prevHistLen = Array.isArray(session?.history) ? session.history.length : 0;
-    const canAsyncWs = Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN);
     let asyncAccepted = false;
     activeTurnIdRef.current = null;
     const abortCtrl = new AbortController();
@@ -885,110 +893,42 @@ export const useGameSession = (user, character) => {
     let postPromise = null;
 
     try {
-      const payload = {
-        session_id: session.id,
-        user_id: user.user_id,
-        choice_index: actionData?.choice_index !== undefined ? actionData.choice_index : null,
-        custom_action_text: actionData?.custom_action_text || actionData?.custom_text || null,
-        direct_choice: actionData?.direct_choice || null,
-        combat_target: actionData?.combat_target || null,
-        intent: actionData?.intent || null,
-        target_npc: actionData?.target_npc || null,
-        item_id: actionData?.item_id !== undefined ? actionData.item_id : null,
-        target_type: actionData?.target_type || null,
-        target_name: actionData?.target_name || null,
-        target_user_id: actionData?.target_user_id !== undefined ? actionData.target_user_id : null,
-        use_mode: actionData?.use_mode || null,
-        skip_minutes: actionData?.skip_minutes !== undefined ? actionData.skip_minutes : null,
-        sleep_mode: actionData?.sleep_mode || null,
-        is_stealth: Boolean(actionData?.is_stealth),
-        stance: actionData?.stance || null,
-        action: actionData,
-        async_ws: canAsyncWs
-      };
-      postPromise = apiCall('/api/adventure/action', {
+      postPromise = apiCall(endpoint, {
         timeout: 240000,
         method: 'POST',
         signal: abortCtrl.signal,
-        body: JSON.stringify(payload)
+        body: JSON.stringify(body),
       });
       if (canAsyncWs) {
         pendingAsyncPostRef.current = postPromise;
       }
       const data = await postPromise;
-
       if (data?.status === 'accepted') {
         if (acceptAsyncTurn(data, postPromise, canAsyncWs)) {
           asyncAccepted = true;
         }
         return data;
       }
-
-      if (data.status === 'waiting_for_party') {
-        setWaitingForParty(true);
-        setPartyStatus({
-          lockedCount: data.locked_picks,
-          total: data.total
-        });
-      } else {
-        setSession(prev => ({
-          ...data.session,
-          scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null
-        }));
-        setWaitingForParty(false);
-        setIsStreaming(false);
-        setStreamingNarrative(null);
-        setStreamingState(null);
-        setLastSyncTimestamp(Date.now());
-        if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
-          pollForSceneImage(data.session.id);
-        }
+      if (onSyncSuccess) {
+        onSyncSuccess(data);
       }
       return data;
     } catch (e) {
       if (e?.name === 'AbortError' || e?.isUserAbort) {
-        setIsStreaming(false);
-        setStreamingNarrative(null);
-        setStreamingState(null);
+        if (!resetStreamBeforeRequest) {
+          setIsStreaming(false);
+          setStreamingNarrative(null);
+          setStreamingState(null);
+        }
         return null;
       }
-      console.warn('Action API error or timeout, checking active session recovery...', e);
-      const errMsg = e?.detail || e?.message || 'The action could not be completed. Please try again.';
-      setActionError(errMsg);
-      try {
-        const recoveryData = await apiCall(`/api/adventure/active-session/${user.user_id}`);
-        if (recoveryData && recoveryData.session) {
-          const recTurnCount = recoveryData.session.turn_count ?? 0;
-          const recHistLen = Array.isArray(recoveryData.session.history) ? recoveryData.session.history.length : 0;
-          const inFlight = recoveryData.session.in_flight_turn;
-          if (inFlight || recTurnCount > prevTurnCount || recHistLen > prevHistLen) {
-            setActionError(null);
-          }
-          setSession(prev => ({
-            ...recoveryData.session,
-            scene_image_url: recoveryData.session?.scene_image_url || prev?.scene_image_url || null
-          }));
-          setWaitingForParty(false);
-          if (inFlight) {
+      if (onHttpError) {
+        return await onHttpError(e, {
+          markAsyncAccepted: () => {
             asyncAccepted = true;
-            activeTurnIdRef.current = inFlight.turn_id || null;
-            setPendingAction(inFlight.action || actionData);
-            setIsThinking(inFlight.status === 'thinking');
-            armSafetyTimer(245000);
-          } else {
-            setIsStreaming(false);
-            setStreamingNarrative(null);
-            setStreamingState(null);
-            setLastSyncTimestamp(Date.now());
-          }
-          return;
-        }
-      } catch (recErr) {
-        console.error('State recovery check failed:', recErr);
+          },
+        });
       }
-      setIsStreaming(false);
-      setStreamingNarrative(null);
-      setStreamingState(null);
       throw e;
     } finally {
       if (pendingAsyncPostRef.current === postPromise) {
@@ -1005,6 +945,103 @@ export const useGameSession = (user, character) => {
         setIsThinking(false);
       }
     }
+  };
+
+  const submitAction = async (actionData) => {
+    if (processingTurnRef.current) return;
+    const prevTurnCount = session?.turn_count ?? 0;
+    const prevHistLen = Array.isArray(session?.history) ? session.history.length : 0;
+    const canAsyncWs = Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN);
+    const payload = {
+      session_id: session.id,
+      user_id: user.user_id,
+      choice_index: actionData?.choice_index !== undefined ? actionData.choice_index : null,
+      custom_action_text: actionData?.custom_action_text || actionData?.custom_text || null,
+      direct_choice: actionData?.direct_choice || null,
+      combat_target: actionData?.combat_target || null,
+      intent: actionData?.intent || null,
+      target_npc: actionData?.target_npc || null,
+      item_id: actionData?.item_id !== undefined ? actionData.item_id : null,
+      target_type: actionData?.target_type || null,
+      target_name: actionData?.target_name || null,
+      target_user_id: actionData?.target_user_id !== undefined ? actionData.target_user_id : null,
+      use_mode: actionData?.use_mode || null,
+      skip_minutes: actionData?.skip_minutes !== undefined ? actionData.skip_minutes : null,
+      sleep_mode: actionData?.sleep_mode || null,
+      is_stealth: Boolean(actionData?.is_stealth),
+      stance: actionData?.stance || null,
+      action: actionData,
+      async_ws: canAsyncWs,
+    };
+
+    return runTurnRequest({
+      endpoint: '/api/adventure/action',
+      body: payload,
+      optimisticAction: actionData,
+      canAsyncWs,
+      onSyncSuccess: (data) => {
+        if (data.status === 'waiting_for_party') {
+          setWaitingForParty(true);
+          setPartyStatus({
+            lockedCount: data.locked_picks,
+            total: data.total,
+          });
+        } else {
+          setSession(prev => ({
+            ...data.session,
+            scene_image_url: data.session?.scene_image_url || prev?.scene_image_url || null,
+          }));
+          setWaitingForParty(false);
+          setIsStreaming(false);
+          setStreamingNarrative(null);
+          setStreamingState(null);
+          setLastSyncTimestamp(Date.now());
+          if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
+            pollForSceneImage(data.session.id);
+          }
+        }
+      },
+      onHttpError: async (e, { markAsyncAccepted }) => {
+        console.warn('Action API error or timeout, checking active session recovery...', e);
+        const errMsg = e?.message || 'The action could not be completed. Please try again.';
+        setActionError(errMsg);
+        try {
+          const recoveryData = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+          if (recoveryData && recoveryData.session) {
+            const recTurnCount = recoveryData.session.turn_count ?? 0;
+            const recHistLen = Array.isArray(recoveryData.session.history) ? recoveryData.session.history.length : 0;
+            const inFlight = recoveryData.session.in_flight_turn;
+            if (inFlight || recTurnCount > prevTurnCount || recHistLen > prevHistLen) {
+              setActionError(null);
+            }
+            setSession(prev => ({
+              ...recoveryData.session,
+              scene_image_url: recoveryData.session?.scene_image_url || prev?.scene_image_url || null,
+            }));
+            setWaitingForParty(false);
+            if (inFlight) {
+              markAsyncAccepted();
+              activeTurnIdRef.current = inFlight.turn_id || null;
+              setPendingAction(inFlight.action || actionData);
+              setIsThinking(inFlight.status === 'thinking');
+              armSafetyTimer(245000);
+            } else {
+              setIsStreaming(false);
+              setStreamingNarrative(null);
+              setStreamingState(null);
+              setLastSyncTimestamp(Date.now());
+            }
+            return undefined;
+          }
+        } catch (recErr) {
+          console.error('State recovery check failed:', recErr);
+        }
+        setIsStreaming(false);
+        setStreamingNarrative(null);
+        setStreamingState(null);
+        throw e;
+      },
+    });
   };
 
   const exitToDashboard = useCallback(() => {
@@ -1091,81 +1128,40 @@ export const useGameSession = (user, character) => {
 
   const retryGeneration = async () => {
     if (!session?.id || !user?.user_id || processingTurnRef.current) return null;
-    turnGenerationRef.current += 1;
-    setProcessingState(true);
-    armSafetyTimer(245000);
-    setIsStreaming(false);
-    setIsThinking(false);
-    setStreamingNarrative(null);
-    setStreamingState(null);
     const hasHistory = Array.isArray(session?.history) && session.history.length > 0;
-    setPendingAction({
-      label: 'Regenerating scene...',
-      ...(hasHistory ? {} : { isSyncTurnZeroRetry: true }),
-    });
-    setActionError(null);
     const canAsyncWs = Boolean(
       hasHistory &&
       socketRef.current &&
       socketRef.current.readyState === WebSocket.OPEN
     );
-    let asyncAccepted = false;
-    activeTurnIdRef.current = null;
-    const abortCtrl = new AbortController();
-    turnAbortControllerRef.current = abortCtrl;
-    syncTurnRequestRef.current = !canAsyncWs;
-    let postPromise = null;
-    try {
-      postPromise = apiCall('/api/adventure/retry', {
-        timeout: 240000,
-        method: 'POST',
-        signal: abortCtrl.signal,
-        body: JSON.stringify({
-          session_id: session.id,
-          user_id: user.user_id,
-          async_ws: canAsyncWs
-        })
-      });
-      if (canAsyncWs) {
-        pendingAsyncPostRef.current = postPromise;
-      }
-      const data = await postPromise;
-      if (data?.status === 'accepted') {
-        if (acceptAsyncTurn(data, postPromise, canAsyncWs)) {
-          asyncAccepted = true;
+    return runTurnRequest({
+      endpoint: '/api/adventure/retry',
+      body: {
+        session_id: session.id,
+        user_id: user.user_id,
+        async_ws: canAsyncWs,
+      },
+      optimisticAction: {
+        label: 'Regenerating scene...',
+        ...(hasHistory ? {} : { isSyncTurnZeroRetry: true }),
+      },
+      canAsyncWs,
+      resetStreamBeforeRequest: true,
+      onSyncSuccess: (data) => {
+        if (data?.session) {
+          setSession(data.session);
+          setLastSyncTimestamp(Date.now());
+          if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
+            pollForSceneImage(data.session.id);
+          }
         }
-        return data;
-      }
-      if (data?.session) {
-        setSession(data.session);
-        setLastSyncTimestamp(Date.now());
-        if (isAutoSceneImageGen(data.session) && !data.session?.scene_image_url) {
-          pollForSceneImage(data.session.id);
-        }
-      }
-      return data;
-    } catch (e) {
-      if (e?.name === 'AbortError' || e?.isUserAbort) {
+      },
+      onHttpError: async (e) => {
+        const errMsg = e?.message || 'Failed to regenerate narration. Please try again.';
+        setActionError(errMsg);
         return null;
-      }
-      const errMsg = e?.detail || e?.message || 'Failed to regenerate narration. Please try again.';
-      setActionError(errMsg);
-      return null;
-    } finally {
-      if (pendingAsyncPostRef.current === postPromise) {
-        pendingAsyncPostRef.current = null;
-      }
-      syncTurnRequestRef.current = false;
-      if (turnAbortControllerRef.current === abortCtrl) {
-        turnAbortControllerRef.current = null;
-      }
-      if (!asyncAccepted) {
-        clearSafetyTimer();
-        setProcessingState(false);
-        setPendingAction(null);
-        setIsThinking(false);
-      }
-    }
+      },
+    });
   };
 
   const cancelTurn = useCallback(async () => {
@@ -1217,7 +1213,7 @@ export const useGameSession = (user, character) => {
     } catch (e) {
       console.error('Failed to cancel in-flight turn:', e);
       if (turnGenerationRef.current === cancelGen) {
-        setActionError(e?.detail || e?.message || 'Failed to cancel turn.');
+        setActionError(e?.message || 'Failed to cancel turn.');
       }
     } finally {
       if (turnGenerationRef.current === cancelGen) {
@@ -1225,6 +1221,8 @@ export const useGameSession = (user, character) => {
       }
     }
   }, [session?.id, user?.user_id, cancellingTurn, clearSafetyTimer, recordCompletedTurnId, setProcessingState]);
+
+  const clearActionError = useCallback(() => setActionError(null), []);
 
   const [rerollingImage, setRerollingImage] = useState(false);
 
@@ -1297,7 +1295,7 @@ export const useGameSession = (user, character) => {
     rerollImage,
     rerollingImage,
     actionError,
-    clearActionError: () => setActionError(null),
+    clearActionError,
     refreshSession: useCallback(() => fetchActiveSession({ silent: true }), [fetchActiveSession])
   };
 };

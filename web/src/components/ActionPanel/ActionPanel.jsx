@@ -344,6 +344,8 @@ const ActionPanel = ({
   partyStatus,
   actionError,
   clearActionError,
+  onReloadSession = null,
+  onExitToDashboard = null,
   collapsed = undefined,
   onToggleCollapse = null
 }) => {
@@ -575,11 +577,13 @@ const ActionPanel = ({
       if (saves.length > 0) {
         saves.sort((a, b) => (b.saved_at || 0) - (a.saved_at || 0));
         const latestSlot = saves[0].slot_name;
-        await apiCall('/api/saves/load', {
+        const loadRes = await apiCall('/api/saves/load', {
           method: 'POST',
           body: JSON.stringify({ user_id: uid, slot_name: latestSlot }),
         });
-        window.location.reload();
+        if (onReloadSession) {
+          onReloadSession(loadRes?.session || loadRes?.loaded || null);
+        }
       } else {
         setReloadError(t('game_over.no_saves', 'No saved checkpoints found. Please return to dashboard.'));
       }
@@ -615,7 +619,11 @@ const ActionPanel = ({
               <span>{t('game_over.reload_checkpoint', 'Reload Latest Checkpoint')}</span>
             </MotionButton>
             <MotionButton
-              onClick={() => { window.location.hash = ''; window.location.reload(); }}
+              onClick={() => {
+                if (onExitToDashboard) {
+                  onExitToDashboard();
+                }
+              }}
               className="hk-btn hk-btn-ghost text-xs md:text-sm"
             >
               <span>{t('game_over.return_dashboard', 'Return to Dashboard')}</span>

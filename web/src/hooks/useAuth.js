@@ -225,6 +225,6 @@ export const useAuth = () => {
     switchCharacter,
     deleteCharacter,
     allocateStatPoint,
-    refreshCharacter: () => fetchActiveCharacter()
+    refreshCharacter: useCallback(() => fetchActiveCharacter(), [fetchActiveCharacter])
   };
 };
