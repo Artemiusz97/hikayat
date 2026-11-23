@@ -1834,7 +1834,7 @@ async def prepare_and_roll_action(
         "is_climax_action": bool(chosen.get("is_climax_action", False)),
         "_python_verified_quest": bool(chosen.get("_python_verified_quest", False)),
         "quest_approach": str(chosen.get("quest_approach") or ""),
-        "approach": str(chosen.get("approach") or ""),
+        "approach": str(chosen["approach"]) if chosen.get("approach") else None,
         "rush_climax": bool(chosen.get("rush_climax", False)),
         "off_hours_fallback": bool(chosen.get("off_hours_fallback", False)),
         "clue_source_id": str(chosen.get("clue_source_id") or ""),
