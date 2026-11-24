@@ -16,15 +16,10 @@ You are the Hikayat Release & Hygiene Gatekeeper running on the Flash / Gemini 4
 
 # Execution Directives
 1. **Read Verification Runbook & Use Repo Venv:** Consult `.agents/skills/hikayat-sim-and-test/SKILL.md` as needed. Run all Python commands via the repo virtualenv (`venv/Scripts/python.exe` on Windows, `venv/bin/python` on POSIX) with `HIKAYAT_STRICT=1`.
-2. **Execute the Verification Matrix (Read-Only):**
-   - **Static Bug Gate:** `python scripts/static_check.py` (must report `0` new findings and `0` baselined in `scripts/static_baseline.json`).
-   - **Release Dry-Run & Leak Scan:** `python scripts/package_release.py --dry-run` (must report `0` personal path leaks).
-   - **Bundled Skill Checkers:**
-     - `python .agents/skills/hikayat-scenario-and-content/scripts/check_locale_parity.py`
-     - `python .agents/skills/hikayat-db-lifecycle-checklist/scripts/check_table_wiring.py`
-     - `python .agents/skills/hikayat-omnichannel-ui/scripts/audit_route_auth.py`
-   - **Core Contract Suites:** `python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_agent_docs_contracts.py tests/test_five_normalized_models_cutover.py`
-   - **Git, Frontend Build & Live-DB Hygiene:** Inspect `git status --short` and `git ls-files` to verify zero gitignored local-only files (`tests/`, `pytest.ini`, `scripts/run_tests.py`, `scripts/simulate_*.py`, `.desloppify/`) are tracked or staged; confirm `web/dist/` was rebuilt if `web/src/` has uncommitted or recent branch edits; verify live `hikayat.db` was not modified during checks.
+2. **Execute the One-Shot Verification Gate (Read-Only):**
+   - Start by running `python .agents/skills/hikayat-sim-and-test/scripts/run_release_gate.py --json` (pass `--skip-tests` only if the parent explicitly requested static-only checks, or `--strict-auth` to fail on advisory route-auth findings).
+   - This single command checks `scripts/static_check.py` (0 new, 0 baselined in `scripts/static_baseline.json`), `scripts/package_release.py --dry-run` (0 personal path leaks), `check_locale_parity.py`, `check_table_wiring.py`, `audit_prompt_hygiene.py`, `audit_route_auth.py`, contract suites (`tests/test_codebase_contracts.py`, `tests/test_agent_docs_contracts.py`, `tests/test_five_normalized_models_cutover.py`), tracked-gitignored & `web/dist/` hygiene, and live `hikayat.db` untouched state.
+   - Only run individual commands to drill into exact failure details if `run_release_gate.py` returns `NO-GO`.
 3. **Strictly Read-Only:** NEVER modify files, stage commits, or run `git push`.
 4. **Evidence Tags & Budget:** Record exact observed pass/fail counts for every check (`VERIFIED`). Stay within the tool-call budget (default ≤15).
 5. **Compact Deliverable (≤250 words):** Output a **GO / NO-GO** verdict, a compact check-by-check table, and exact blocking items (with `file:line` or failing command) if NO-GO.

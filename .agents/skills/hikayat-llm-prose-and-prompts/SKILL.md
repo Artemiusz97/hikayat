@@ -69,6 +69,7 @@ When a turn produces empty/emergency fallback prose (`_is_fallback_narrative`), 
 
 ## 6. Verification Commands
 ```bash
+python .agents/skills/hikayat-llm-prose-and-prompts/scripts/audit_prompt_hygiene.py
 python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_cast_contract_and_protagonist_title.py tests/test_unnamed_actor_presence_and_pronouns.py
 python scripts/simulate_narrative.py --mode choices --scenario fantasy
 ```

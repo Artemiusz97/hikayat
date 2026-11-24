@@ -49,7 +49,9 @@ Follow this runbook whenever decomposing large logic modules (`~800–1,500+` li
 ---
 
 ## 5. Verification & Common Mistakes
+Before splitting any file, generate its inbound caller & re-export manifest (or scan repo-wide large logic modules and layer boundaries):
 ```bash
+python .agents/skills/hikayat-refactoring-playbook/scripts/audit_module_boundaries.py
 python scripts/static_check.py
 python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_agent_docs_contracts.py tests/test_submodule_direct_contracts.py
 python scripts/package_release.py --dry-run

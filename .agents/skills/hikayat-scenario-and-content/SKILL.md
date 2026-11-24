@@ -88,7 +88,7 @@ Whenever adding item categories, 2H weapon keywords, enemy affixes, movement pre
 
 ## 5. Content Validation Commands
 ```bash
-python .agents/skills/hikayat-scenario-and-content/scripts/check_locale_parity.py
+python .agents/skills/hikayat-scenario-and-content/scripts/check_locale_parity.py --check-usage
 python scripts/run_tests.py agent tests/test_locations.py tests/test_class_templates.py tests/test_tags_scenarios_refactor.py tests/test_tier3_locations_vs_props_separation.py
 ```
 

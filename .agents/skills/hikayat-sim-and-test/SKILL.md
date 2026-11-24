@@ -90,10 +90,11 @@ All 6 simulators automatically create an isolated temporary SQLite DB via `db.is
 
 ---
 
-## 5. Pre-Release Packaging Gate
+## 5. Pre-Release Packaging & One-Shot Gate
 
-Before cutting a release or committing broad workspace changes, run the release packager dry-run to verify zero personal path leaks and clean archive exclusions:
+Before cutting a release or closing a milestone, run the one-shot read-only release gate (combines `static_check.py`, `package_release.py --dry-run`, all bundled skill checkers, contract suites, git/dist hygiene, and live `hikayat.db` protection) or run the packager dry-run directly:
 ```bash
+python .agents/skills/hikayat-sim-and-test/scripts/run_release_gate.py
 python scripts/package_release.py --dry-run
 ```
 

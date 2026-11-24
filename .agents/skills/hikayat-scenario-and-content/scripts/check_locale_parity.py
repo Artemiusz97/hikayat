@@ -156,21 +156,77 @@ def _check_python_locales() -> Dict[str, Any]:
     }
 
 
+T_CALL_RE = re.compile(r"(?<![A-Za-z0-9_$.])t\(\s*['\"]([A-Za-z0-9_]+(?:\.[A-Za-z0-9_\-]+)+)['\"]")
+PLURAL_SUFFIXES: Tuple[str, ...] = ("_one", "_other", "_zero", "_few", "_many")
+
+
+def _check_frontend_usage(en_keys: Set[str]) -> Dict[str, Any]:
+    src_root = REPO_ROOT / "web" / "src"
+    if not src_root.is_dir():
+        return {"files_scanned": 0, "keys_checked": 0, "missing_in_en": [], "issues": 0}
+
+    key_prefixes: Set[str] = set()
+    for key in en_keys:
+        parts = key.split(".")
+        for idx in range(1, len(parts)):
+            key_prefixes.add(".".join(parts[:idx]))
+
+    files = sorted(p for p in src_root.rglob("*") if p.is_file() and p.suffix in {".js", ".jsx"})
+    seen_keys: Set[str] = set()
+    missing_refs: List[str] = []
+
+    for path in files:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for line_no, line in enumerate(text.splitlines(), 1):
+            for key in T_CALL_RE.findall(line):
+                seen_keys.add(key)
+                if key in en_keys or key in key_prefixes:
+                    continue
+                if any(f"{key}{suf}" in en_keys for suf in PLURAL_SUFFIXES):
+                    continue
+                missing_refs.append(f"{rel}:{line_no} -> {key}")
+
+    return {
+        "files_scanned": len(files),
+        "keys_checked": len(seen_keys),
+        "missing_in_en": sorted(set(missing_refs)),
+        "issues": len(set(missing_refs)),
+    }
+
+
 def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check 5-language JSON and Python locale parity.")
     parser.add_argument("--json", action="store_true", help="Print structured JSON output.")
+    parser.add_argument(
+        "--check-usage",
+        action="store_true",
+        help="Also scan web/src/**/*.{js,jsx} for static t('...') keys missing from en.json.",
+    )
     args = parser.parse_args(argv)
 
     json_report = _check_json_locales()
     py_report = _check_python_locales()
-    total_issues = int(json_report.get("issues", 0)) + int(py_report.get("issues", 0))
-    payload = {
+    usage_report: Dict[str, Any] = {}
+    if args.check_usage:
+        en_path = REPO_ROOT / "web" / "src" / "locales" / "en.json"
+        en_keys = set(_flatten_json(json.loads(en_path.read_text(encoding="utf-8"))).keys()) if en_path.is_file() else set()
+        usage_report = _check_frontend_usage(en_keys)
+
+    total_issues = (
+        int(json_report.get("issues", 0))
+        + int(py_report.get("issues", 0))
+        + int(usage_report.get("issues", 0))
+    )
+    payload: Dict[str, Any] = {
         "ok": total_issues == 0,
         "total_issues": total_issues,
         "locales": list(localization.SUPPORTED_LOCALES),
         "frontend_json": json_report,
         "backend_python": py_report,
     }
+    if args.check_usage:
+        payload["frontend_usage"] = usage_report
 
     if args.json:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -180,11 +236,17 @@ def main(argv: List[str] | None = None) -> int:
             f"({', '.join(localization.SUPPORTED_LOCALES)}): "
             f"{json_report.get('total_en_keys', 0)} JSON keys checked."
         )
+        if args.check_usage:
+            print(
+                f"Frontend usage scan: {usage_report.get('files_scanned', 0)} file(s), "
+                f"{usage_report.get('keys_checked', 0)} unique t(...) key(s), "
+                f"{usage_report.get('issues', 0)} missing in en.json."
+            )
         if total_issues == 0:
             print("OK: 0 key/placeholder/sequence mismatches in web/src/locales/*.json and localization/*.py.")
         else:
             print(f"FOUND {total_issues} parity issue(s):")
-            print(json.dumps({"frontend_json": json_report, "backend_python": py_report}, indent=2, ensure_ascii=False))
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
 
     return 0 if total_issues == 0 else 1
 

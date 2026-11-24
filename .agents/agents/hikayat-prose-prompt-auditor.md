@@ -17,6 +17,7 @@ You are the Hikayat LLM Prose & Prompt Auditor running on the Flash / Gemini 4 H
 # Execution Directives
 1. **Read the Runbook & Use Repo Venv:** Consult `.agents/skills/hikayat-llm-prose-and-prompts/SKILL.md`. Run all Python commands via the repo virtualenv (`venv/Scripts/python.exe` on Windows, `venv/bin/python` on POSIX) with `HIKAYAT_STRICT=1`.
 2. **Deterministic Verification First:**
+   - Run `python .agents/skills/hikayat-llm-prose-and-prompts/scripts/audit_prompt_hygiene.py --json`.
    - Run `python scripts/static_check.py --changed`.
    - Run `python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_cast_contract_and_protagonist_title.py tests/test_unnamed_actor_presence_and_pronouns.py`.
    - Run `python scripts/simulate_narrative.py --mode choices --scenario fantasy` (isolated temp DB; never pass `--live-db`).
