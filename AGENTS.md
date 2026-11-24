@@ -49,3 +49,5 @@ These architectural contracts apply to **every** code change in Hikayat. They ar
 | `data/*.json`, scenarios, items, spells, `localization/`, `web/src/locales/` | `hikayat-scenario-and-content` |
 | Pytest presets, 6 fuzz simulators, seed replay, release packaging | `hikayat-sim-and-test` |
 | Splitting >800L Python/React modules, package barrels, layer inversions | `hikayat-refactoring-playbook` |
+
+**Subagent Offloading (`.agents/agents/`):** Delegate noisy read-only verification sweeps to `hikayat-fuzz-hunter` (fuzz sims & seed replay), `hikayat-locale-omnicheck` (5-locale & omnichannel/route-auth parity), `hikayat-db-migration-auditor` (`db/` lifecycle & UoW checks), `hikayat-prose-prompt-auditor` (prompt cache, retries, pronouns & `llm_client/`), and `hikayat-release-gatekeeper` (pre-release Go/No-Go matrix).
