@@ -72,3 +72,12 @@ When a turn produces empty/emergency fallback prose (`_is_fallback_narrative`), 
 python scripts/run_tests.py agent tests/test_codebase_contracts.py tests/test_cast_contract_and_protagonist_title.py tests/test_unnamed_actor_presence_and_pronouns.py
 python scripts/simulate_narrative.py --mode choices --scenario fantasy
 ```
+
+---
+
+## 7. Common Mistakes & Red Flags
+- **Breaking live HTTP client proxy interception**: Replacing `_http_client`, `_embed_http_client`, or `_nsfw_http_client` proxy bindings in `llm_client/__init__.py` with static imports breaks `tests/conftest.py` offline blocking (`test_module_proxies_preserve_submodule_bindings_on_patch_and_delattr`).
+- **Polluting `Z0a` / `Z0b` static zones**: Injecting timestamps, random IDs, or session state inside `@functools.cache def build_static_core` destroys KV-cache hit rates and leaks across sessions.
+- **Unfrozen retry side effects**: Allowing `run_narration_pass` (`game_engine/turn/narration.py`) to mutate vitals, location, or `npcs_present` violates Invariant D13; always restore mechanical state from `snapshot["applied"]`.
+- **Re-feeding raw `<ref>` tags**: Passing stored history into prompts without `strip_pronoun_tags()` / `format_pronouns_for_prompt()` leaks `<ref char="...">` markup into completions.
+- **Single-access LLM schemas**: Adding fields to `models/llm_schemas.py` without dict access (`obj["field"]`, `obj.get()`) and `""`/`None` coercion breaks local/open-weights model handling.

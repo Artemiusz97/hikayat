@@ -60,9 +60,19 @@ If the table is scoped to an adventure session (`session_id` column) — or if a
 
 ## 6. Mandatory Isolated Test Verification
 
-Never let a test touch the live repository `hikayat.db`. Use the isolation pattern in the `hikayat-sim-and-test` skill (§3, "Isolate SQLite Paths") via `db.use_temporary_db()` / `db.set_db_path(...)` (or monkeypatching both `db.DB_PATH` and `db.core.DB_PATH`) before `db.init_db()`.
+Never let a test touch the live repository `hikayat.db`. Use the isolation pattern in the `hikayat-sim-and-test` skill (§4, "Isolate SQLite Paths") via `db.use_temporary_db()` / `db.set_db_path(...)` (or monkeypatching both `db.DB_PATH` and `db.core.DB_PATH`) before `db.init_db()`.
 
-Run both contract and normalized-lifecycle suites before finishing:
+Copy-pasteable `SCHEMA`, `SCHEMA_MIGRATIONS`, and `SessionTableSpec` snippets live in `references/new_table_template.md`. Run both the table-wiring checker and contract suites before finishing:
 ```bash
+python .agents/skills/hikayat-db-lifecycle-checklist/scripts/check_table_wiring.py
 python scripts/run_tests.py agent tests/test_five_normalized_models_cutover.py tests/test_codebase_contracts.py
 ```
+
+---
+
+## 7. Common Mistakes & Red Flags
+- **Fresh vs. migrated drift**: Editing `SCHEMA` in `db/core/schema.py` without an identical tuple in `SCHEMA_MIGRATIONS` (`db/core/migrations.py`) — or vice versa — fails `test_fresh_schema_matches_migrated_schema_parity`.
+- **Running DDL inside `UnitOfWork`**: Invoking schema/table-rebuild helpers when `db.is_in_uow()` is `True` breaks active savepoint/transaction guarantees.
+- **Inverted FK ordering**: Setting `purge_order` higher on children than parents or `load_tier` lower on children than parents causes FK failures (`purge` must delete children before parents, e.g. `20 < 80`; `load` must clone parents before children, e.g. `10 < 20`).
+- **Naive session ID string replacement**: Using `.replace(str(old_sid), str(new_sid))` on composite key columns corrupts trailing digits when `old_session_id == 1`; declare `session_key_cols` in `db/registry.py` or use `_rewrite_session_key_id`.
+- **Bypassing `adb(...)` or `db/core/`**: Calling blocking `db` helpers directly inside `async def`, importing `services/`/`api/`/`cogs/` from `db/`, or calling raw `conn.commit()` outside `db/core/` fails `scripts/static_check.py` and `tests/test_codebase_contracts.py`.

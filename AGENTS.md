@@ -48,3 +48,4 @@ These architectural contracts apply to **every** code change in Hikayat. They ar
 | `api/`, `cogs/`, `web/src/` (REST/WS protocol, SPA UI, Discord parity) | `hikayat-omnichannel-ui` |
 | `data/*.json`, scenarios, items, spells, `localization/`, `web/src/locales/` | `hikayat-scenario-and-content` |
 | Pytest presets, 6 fuzz simulators, seed replay, release packaging | `hikayat-sim-and-test` |
+| Splitting >800L Python/React modules, package barrels, layer inversions | `hikayat-refactoring-playbook` |

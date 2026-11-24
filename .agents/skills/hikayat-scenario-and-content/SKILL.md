@@ -5,13 +5,13 @@ description: "Use this skill whenever authoring or expanding Hikayat game conten
 
 # Hikayat Scenario, Content & Localization Authoring Guide
 
-All content in Hikayat feeds directly into deterministic Python mechanics. Always follow the exact schemas below rather than inventing ad-hoc JSON fields.
+All content in Hikayat feeds directly into deterministic Python mechanics. Always follow the exact schemas below (and copy-pasteable templates in `references/content_templates.md`) rather than inventing ad-hoc JSON fields.
 
 ---
 
 ## 1. Full 8-Point Scenario / Genre Expansion Checklist
 
-When adding or overhauling a playable scenario (see `tests/test_anomalous_incursions.py` as the reference pattern), wire **all 8 touchpoints**:
+When adding or overhauling a playable scenario (see `tests/test_anomalous_incursions.py` as the reference pattern), wire **all 8 touchpoints** (see `references/content_templates.md` for JSON shapes):
 
 1. **`data/scenarios.json`**: Register scenario key (`name`, `display_name`, `emoji`, `dropdown_label`, `tags`, `description`, `tone_guidelines`).
 2. **`scenario_data.py`**: Add scenario key aliases in `resolve_scenario_key()` and tag aliases in `resolve_tag_keys()`.
@@ -80,14 +80,23 @@ World geography uses a 3-tier hierarchy joined by `" ➔ "` (`Zone ➔ Primary F
 
 ## 4. Dual-Layer 5-Language Localization (`en`, `pl`, `ms`, `zh`, `de`)
 
-Whenever adding item categories, 2H weapon keywords, enemy affixes, movement prefixes, or UI labels, update **both** layers across all 5 locales:
+Whenever adding item categories, 2H weapon keywords, enemy affixes, movement prefixes, or UI labels, update **both** layers across all 5 locales and verify with `.agents/skills/hikayat-scenario-and-content/scripts/check_locale_parity.py`:
 1. **Backend Mechanics (`localization/{en,pl,ms,zh,de}.py`)**: `ENEMY_AFFIXES`, `ITEM_ICON_KEYWORDS`, `TWO_HANDED_KEYWORDS`, and localized intent/item lemmas aggregated by `localization/__init__.py`.
-2. **Frontend SPA (`web/src/locales/{en,pl,ms,zh,de}.json`)**: Mirror every new `react-i18next` translation key across all 5 JSON files.
+2. **Frontend SPA (`web/src/locales/{en,pl,ms,zh,de}.json`)**: Mirror every new `react-i18next` translation key (and `{placeholder}` tokens) across all 5 JSON files.
 
 ---
 
 ## 5. Content Validation Commands
 ```bash
-python -c "import scenario_data, character_data; scenario_data.load_genres(reload=True); character_data.load_class_templates(reload=True)"
-pytest tests/test_locations.py tests/test_class_templates.py tests/test_tags_scenarios_refactor.py -q
+python .agents/skills/hikayat-scenario-and-content/scripts/check_locale_parity.py
+python scripts/run_tests.py agent tests/test_locations.py tests/test_class_templates.py tests/test_tags_scenarios_refactor.py tests/test_tier3_locations_vs_props_separation.py
 ```
+
+---
+
+## 6. Common Mistakes & Red Flags
+- **Missing `is_entrance: 1`**: Adding a `primary_location` in `data/locations_seed.json` without an entrance `sub_location` breaks `graph_seeder.py` traversal wiring.
+- **Portal/passageway words inside Tier-3 props**: Using structural movement nouns (`door`, `gate`, `stairs`, `corridor`, `exit`, `stairwell`) in static room `props` fails `tests/test_tier3_locations_vs_props_separation.py`.
+- **Locale key or `{placeholder}` drift**: Editing `web/src/locales/en.json` or `localization/en.py` without updating `pl`, `ms`, `zh`, and `de` (or dropping `{dest}` / `{npc}` tokens) fails parity checks.
+- **Hardcoded class totals**: Adding or counting classes without accounting for anomalous faction classes breaks `character_data.py` template tests (`tests/test_class_templates.py`).
+- **Exposing raw metadata prefixes**: Allowing `[ITEM_JSON]`, `[GEAR_JSON]`, or `[SPELLBOOK_JSON]` strings to bypass UI/prose strippers leaks internal payloads to players.
