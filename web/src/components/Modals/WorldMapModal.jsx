@@ -237,13 +237,17 @@ const WorldMapModal = ({
     abortRef.current = controller;
 
     const cleanInitialTarget = initialTargetLocation ?? null;
+    const sessionChanged = lastSessionIdRef.current !== session?.id;
     const isFreshOpenOrSwitch =
       (!wasOpenRef.current && isOpen) ||
-      lastSessionIdRef.current !== session?.id ||
+      sessionChanged ||
       Boolean(cleanInitialTarget && cleanInitialTarget !== lastInitialTargetRef.current);
     wasOpenRef.current = isOpen;
     lastSessionIdRef.current = session?.id;
     lastInitialTargetRef.current = cleanInitialTarget;
+    if (sessionChanged) {
+      setMapData(null);
+    }
 
     setLoading(true);
     setError(null);
@@ -408,6 +412,11 @@ const WorldMapModal = ({
   };
 
   const zones = useMemo(() => mapData?.zones || [], [mapData?.zones]);
+  const realmGateways = useMemo(() => mapData?.realm_gateways || [], [mapData?.realm_gateways]);
+  const offRealmQuestDests = useMemo(
+    () => mapData?.off_realm_quest_destinations || [],
+    [mapData?.off_realm_quest_destinations]
+  );
   const canTravel = mapData?.can_travel !== false;
   const travelBlockedReason = mapData?.travel_blocked_reason || '';
   const activeZoneObj = zones.find(z => z.zone_name === selectedZone) || zones[0] || null;
@@ -566,6 +575,18 @@ const WorldMapModal = ({
                   <h2 id={titleId} className={`hk-atlas-heading font-rpg font-bold ${isDrawer ? 'text-sm' : 'text-base sm:text-lg'} text-gray-100 tracking-wide truncate`}>
                     {t('atlas.title', 'World Atlas & Fast-Travel')}
                   </h2>
+                  {mapData?.show_realm_badge && mapData?.current_realm && (
+                    <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-cyan-950/70 text-cyan-200 border border-cyan-500/50 inline-flex items-center gap-1">
+                      <span aria-hidden="true">{mapData.current_realm.portal_icon || '🌀'}</span>
+                      <span>{mapData.current_realm.name}</span>
+                      {mapData.current_realm.comms_isolated && (
+                        <span className="text-rose-300" title={t('phone.no_signal_banner', 'No Signal — Isolated Realm')}>📵</span>
+                      )}
+                      {Number(mapData.current_realm.time_scale ?? 1) <= 0 && (
+                        <span className="text-sky-300" title={t('atlas.stasis_badge', 'Temporal Stasis')}>⏳</span>
+                      )}
+                    </span>
+                  )}
                   {activeQuestDestinations.length > 0 && (
                     <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-200 border border-amber-500/45">
                       {activeQuestDestinations.length === 1
@@ -739,7 +760,8 @@ const WorldMapModal = ({
                   {/* Rail Scroll List */}
                   <div className={`hk-atlas-scroll flex-1 min-h-0 overflow-y-auto custom-scrollbar ${useTwoColumnDrawer ? 'p-2.5 space-y-2' : 'p-3.5 space-y-2.5'}`}>
                     {leftTab === 'regions' ? (
-                      filteredZones.length === 0 ? (
+                      <>
+                        {filteredZones.length === 0 ? (
                         <div className="p-6 text-center space-y-3 text-gray-400">
                           <p className="text-sm hk-atlas-prose">{t('atlas.no_search_results', 'No matching regions, locations, or rooms found.')}</p>
                           <button
@@ -818,8 +840,84 @@ const WorldMapModal = ({
                             </button>
                           );
                         })
-                      )
-                    ) : filteredQuests.length === 0 ? (
+                      )}
+                      {realmGateways.length > 0 && (
+                        <div className="pt-2 mt-2 border-t border-fantasy-border/45 space-y-2">
+                          <div className="text-[11px] font-bold uppercase tracking-wider text-cyan-300/90 px-0.5 flex items-center gap-1.5">
+                            <span aria-hidden="true">🌀</span>
+                            <span>{t('atlas.realm_gateways_heading', 'Realm Gateways')}</span>
+                          </div>
+                          {realmGateways.map((gw, gwIdx) => {
+                            const actionLabel =
+                              gw.action_kind === 'starship_jump'
+                                ? t('atlas.plot_ftl_jump', 'Plot FTL Jump')
+                                : gw.action_kind === 'recall_starship'
+                                  ? t('atlas.recall_starship', 'Recall Starship')
+                                  : t('atlas.cross_portal', 'Cross Portal');
+                            return (
+                              <div
+                                key={`${gw.access_point_node_id}-${gw.target_realm_id}-${gwIdx}`}
+                                className="hk-card p-2.5 space-y-1.5 border-cyan-700/45 bg-cyan-950/15"
+                              >
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <div className="text-xs font-semibold text-gray-100 flex items-center gap-1.5 flex-wrap">
+                                      <span aria-hidden="true">{gw.icon || '🌀'}</span>
+                                      <span className="truncate">{gw.target_realm_name}</span>
+                                      {gw.is_locked && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/70 text-rose-200 border border-rose-700/50">🔒</span>
+                                      )}
+                                      {Number(gw.off_realm_objective_count || 0) > 0 && (
+                                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-950/75 text-amber-200 border border-amber-500/50 font-bold">
+                                          🎯 {gw.off_realm_objective_count}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 truncate">
+                                      {gw.access_point_name}
+                                    </div>
+                                  </div>
+                                </div>
+                                {gw.can_cross_now ? (
+                                  <button
+                                    type="button"
+                                    disabled={processingTurn || !canTravel}
+                                    onClick={() =>
+                                      handleTravel({
+                                        direct_choice: {
+                                          label: gw.label,
+                                          intent: 'movement',
+                                          sub_intent: gw.action_kind || 'portal_cross',
+                                          target_node_id: gw.target_node_id || '',
+                                          target_realm_id: gw.target_realm_id || '',
+                                          vessel_realm_id: gw.vessel_realm_id || '',
+                                          portal_edge_type: gw.edge_type || '',
+                                        },
+                                      })
+                                    }
+                                    className="hk-btn hk-btn-primary w-full min-h-[34px] text-xs px-2.5"
+                                  >
+                                    <span>{actionLabel}</span>
+                                    <ArrowRight size={13} aria-hidden="true" />
+                                  </button>
+                                ) : gw.access_point_location ? (
+                                  <button
+                                    type="button"
+                                    disabled={processingTurn || !canTravel}
+                                    onClick={() => handleTravel(gw.access_point_location)}
+                                    className="hk-btn hk-btn-ghost border border-fantasy-border/70 w-full min-h-[34px] text-xs px-2.5"
+                                  >
+                                    <Navigation size={12} aria-hidden="true" />
+                                    <span className="truncate">{t('atlas.route_to_ap', 'Route to Access Point')}</span>
+                                  </button>
+                                ) : null}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
+                  ) : filteredQuests.length === 0 ? (
                       <div className="p-6 text-center space-y-3 text-gray-400">
                         <p className="text-sm hk-atlas-prose">
                           {trimmedQuery
@@ -903,6 +1001,37 @@ const WorldMapModal = ({
                           </div>
                         );
                       })
+                    )}
+                    {leftTab === 'quests' && offRealmQuestDests.length > 0 && (
+                      <div className="pt-2.5 mt-2.5 border-t border-fantasy-border/45 space-y-2 opacity-80">
+                        <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 px-0.5">
+                          {t('atlas.in_another_realm', 'In Another Realm')}
+                        </div>
+                        {offRealmQuestDests.map((oq, oqIdx) => (
+                          <button
+                            key={`${oq.access_point_node_id}-${oq.target_realm_id}-${oqIdx}`}
+                            type="button"
+                            disabled={!oq.access_point_location || processingTurn || !canTravel}
+                            onClick={() => oq.access_point_location && handleTravel(oq.access_point_location)}
+                            className="hk-card w-full text-left p-2.5 border-fantasy-border/50 bg-fantasy-darker/55 hover:border-cyan-500/50 transition-colors space-y-1"
+                          >
+                            <div className="flex items-center justify-between gap-2 text-xs font-semibold text-gray-300">
+                              <span className="truncate">
+                                {oq.icon || '🌀'} {t('atlas.return_via_ap', {
+                                  ap: oq.access_point_name,
+                                  defaultValue: `In Another Realm — return via ${oq.access_point_name}`,
+                                })}
+                              </span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-950/70 text-amber-200 border border-amber-600/45 shrink-0">
+                                {oq.objective_count}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {oq.target_realm_name}{oq.markers?.[0] ? ` · ${oq.markers[0]}` : ''}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     )}
                   </div>
                 </aside>

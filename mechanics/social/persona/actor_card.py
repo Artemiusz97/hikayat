@@ -31,6 +31,10 @@ from mechanics.social.persona.core import (
 )
 from mechanics.social.races import format_race_display
 from mechanics.combat.traits import format_trait_behavioral_prompt
+from mechanics.social.persona.intimacy.constants import (
+    ACT_PREFERENCE_REGISTRY,
+    ACT_ID_TO_EXPERIENCE_TRACK,
+)
 from mechanics.social.persona.intimacy.formatting import (
     format_demeanor_prompt_directive,
     format_dynamic_prompt_directive,
@@ -42,8 +46,11 @@ from mechanics.social.persona.intimacy.formatting import (
     format_stature_and_physique_narrative_directive,
 )
 from mechanics.social.persona.intimacy.logic import (
-    sanitize_sensitive_spots_for_species,
+    compute_with_you_comfort,
     get_erotic_openness_label,
+    normalize_openness_tier,
+    resolve_openness_contrast,
+    sanitize_sensitive_spots_for_species,
 )
 from mechanics.social.persona.intimacy.appearance import clean_attribute_list_string
 from mechanics.social.relationships import get_unlocked_info_level
@@ -683,26 +690,63 @@ def build_actor_direction_card(
         if t_block:
             lines.append(f"  * Trait Directives: {t_block.strip()}")
 
-    demeanor_val = str(npc.get("demeanor") or basic.get("demeanor") or "").lower()
+    demeanor_val = str(appr.get("intimate_demeanor") or npc.get("demeanor") or basic.get("demeanor") or "").lower()
     persona_val = str(npc.get("persona") or basic.get("persona") or "").lower()
-    open_temp = str(appr.get("erotic_openness") or appr.get("openness") or "").lower()
-    is_shameless = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) or k in open_temp for k in ("shameless", "lewd", "provocative", "seductive", "hedonist", "nympho", "lascivious", "pervert"))
-    is_bold = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) or k in open_temp for k in ("bold", "flirtatious", "uninhibited", "forward"))
-    is_prude = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) or k in open_temp for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "proper"))
+    open_temp = str(appr.get("erotic_openness") or appr.get("openness") or "").strip()
+    if open_temp:
+        _op_tier_ac = normalize_openness_tier(open_temp)
+        is_shameless = _op_tier_ac == "shameless"
+        is_bold = _op_tier_ac == "bold"
+        is_prude = _op_tier_ac == "prude"
+    else:
+        is_shameless = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) for k in ("shameless", "lewd", "provocative", "seductive", "hedonist", "nympho", "lascivious", "pervert"))
+        is_bold = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) for k in ("bold", "flirtatious", "uninhibited", "forward"))
+        is_prude = any(k in demeanor_val or k in persona_val or any(k in t.lower() for t in traits_clean) for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "proper"))
 
-    if is_shameless:
-        lines.append(
-            f"  * ⚡ SHAMELESS / LEWD SPOKEN DIALOGUE DIRECTIVE ({name}): "
-            f"{name} has an unapologetically shameless and lewd disposition. In spoken dialogue, THEY HAVE NO VERBAL FILTER! "
-            f"They freely make unsolicited sexual innuendos, playfully dirty remarks, cheeky double entendres, and provocative flirtations even during regular conversation and at early affinity. "
-            f"DO NOT sanitize their speech or force them into bashful modesty! "
-            f"However, their lack of verbal filter reflects frankness about desires and playful teasing, NOT cruelty, hostility, or fabricating fake past partners/suitors if they are a virgin!"
-        )
-    elif is_bold:
-        lines.append(
-            f"  * ⚡ BOLD / UNINHIBITED SPOKEN DIALOGUE DIRECTIVE ({name}): "
-            f"{name} is bold, confident, and uninhibited. In spoken dialogue, they speak their mind openly, flirt proactively, and meet romantic or suggestive topics without stammering or awkward shame."
-        )
+    _shared_cnt_ac = int((npc.get("shared_intimacy_stats") or {}).get("shared_encounters") or len(npc.get("gameplay_intimate_events") or []) or 0)
+    _is_hostile_ac = str(npc.get("disposition") or "").strip().lower() == "hostile"
+    _dyn_ac = str(appr.get("intimate_dynamic") or appr.get("dynamic") or "").strip()
+    _dem_ac = str(appr.get("intimate_demeanor") or "").strip()
+    _ic_exp_ac = str(appr.get("intercourse_experience") or appr.get("predetermined_intercourse") or "").strip().lower()
+    _pre_comfort_ac = compute_with_you_comfort(
+        open_temp or ("shameless" if is_shameless else ("bold" if is_bold else ("prude" if is_prude else "moderate"))),
+        relationship_score=score,
+        relationship_track=track,
+        shared_intimate_count=_shared_cnt_ac,
+        is_hostile=_is_hostile_ac,
+    )
+    _contrast_ac = resolve_openness_contrast(
+        open_temp or ("shameless" if is_shameless else ("bold" if is_bold else ("prude" if is_prude else "moderate"))),
+        _dem_ac,
+        _dyn_ac,
+        intercourse_experience=_ic_exp_ac,
+        shared_intimate_count=_shared_cnt_ac,
+        comfort_stage=_pre_comfort_ac["stage"],
+    )
+    _comfort_ac = compute_with_you_comfort(
+        open_temp or ("shameless" if is_shameless else ("bold" if is_bold else ("prude" if is_prude else "moderate"))),
+        relationship_score=score,
+        relationship_track=track,
+        shared_intimate_count=_shared_cnt_ac,
+        is_hostile=_is_hostile_ac,
+        contrast_archetype=_contrast_ac["archetype"],
+        bluff_crack_active=_contrast_ac["bluff_crack_active"],
+    )
+
+    if is_nsfw:
+        if is_shameless:
+            lines.append(
+                f"  * ⚡ SHAMELESS / LEWD SPOKEN DIALOGUE DIRECTIVE ({name}): "
+                f"{name} has an unapologetically shameless and lewd disposition. In spoken dialogue, THEY HAVE NO VERBAL FILTER! "
+                f"They freely make unsolicited sexual innuendos, playfully dirty remarks, cheeky double entendres, and provocative flirtations even during regular conversation and at early affinity. "
+                f"DO NOT sanitize their speech or force them into bashful modesty! "
+                f"However, their lack of verbal filter reflects frankness about desires and playful teasing, NOT cruelty, hostility, or fabricating fake past partners/suitors if they are a virgin!"
+            )
+        elif is_bold:
+            lines.append(
+                f"  * ⚡ BOLD / UNINHIBITED SPOKEN DIALOGUE DIRECTIVE ({name}): "
+                f"{name} is bold, confident, and uninhibited. In spoken dialogue, they speak their mind openly, flirt proactively, and meet romantic or suggestive topics without stammering or awkward shame."
+            )
 
     # Physical Stature & Height Contrast Directive
     if player_char:
@@ -870,8 +914,20 @@ def build_actor_direction_card(
     # ── Social Surface of Erotic Openness ──
     openness_val = appr.get("erotic_openness") or appr.get("openness") or ""
     if openness_val:
-        lines.append(f"  * Erotic Openness: {openness_val} ({get_erotic_openness_label(openness_val)})")
-        op_dir = format_openness_prompt_directive(name, openness_val)
+        if is_nsfw:
+            lines.append(f"  * Erotic Openness: {openness_val} ({get_erotic_openness_label(openness_val)})")
+        else:
+            lines.append(f"  * Romantic Modesty & Decorum: {normalize_openness_tier(openness_val).capitalize()}")
+        op_dir = format_openness_prompt_directive(
+            name,
+            openness_val,
+            demeanor_val=_dem_ac,
+            traits=traits_clean,
+            dynamic_val=_dyn_ac,
+            comfort=_comfort_ac,
+            contrast=_contrast_ac,
+            is_nsfw=is_nsfw,
+        )
         if op_dir:
             lines.append(op_dir)
 
@@ -987,15 +1043,19 @@ def build_actor_direction_card(
         curr_loc_low = curr_loc.lower()
         is_private_room = any(k in curr_loc_low for k in ("bedroom", "dorm", "private room", "inn room", "quarters", "personal chamber", "bath", "onsen", "cabin", "tent"))
         is_alone_together = (not bystander_names) or is_private_room
-        is_prude = any(k in demeanor_val or any(k in t.lower() for t in traits_clean) or k in open_temp for k in ("prude", "modest", "chaste", "prudish", "sheltered", "timid", "proper"))
-        dyn_val = str(appr.get("intimate_dynamic") or appr.get("dynamic") or "").strip()
+        dyn_val = _dyn_ac
 
         if is_alone_together:
-            if is_prude:
+            if is_prude and _comfort_ac["stage"] == "guarded":
                 lines.append(
                     f"  * [SITUATIONAL PRIVACY & MODESTY ({name})]: You and {name} are alone together (no other characters present). "
-                    f"However, {name} is naturally modest/prude: they remain bashful and flustered around direct advances, "
+                    f"However, {name} has a high modesty barrier and is still guarded with you: they remain reserved around direct advances, "
                     f"treasuring gentle emotional bonding before overt physical passion."
+                )
+            elif is_prude and _comfort_ac["stage"] == "warming_up":
+                lines.append(
+                    f"  * [SITUATIONAL PRIVACY & WARMING UP ({name})]: You and {name} are alone together (no bystanders present). "
+                    f"Although {name} guards strict public decorum, behind closed doors with you their walls are softening—they shyly make a trusting exception for unhurried, heartfelt closeness."
                 )
             else:
                 loc_name = curr_loc or "the current secluded spot"
@@ -1083,6 +1143,8 @@ def build_actor_direction_card(
             is_pl_male = "male" in pl_gender and "female" not in pl_gender
             pl_asset_size = str(pl_app.get("penis_size" if is_pl_male else "breast_size") or "").strip()
             p_asset_tex = str(appr.get("asset_texture") or "").strip()
+            p_rear_size = str(appr.get("rear_size") or "").strip()
+            p_rear_tex = str(appr.get("rear_texture") or "").strip()
             body_asset = format_body_asset_narrative_directive(
                 partner_name=name,
                 gender=p_gender,
@@ -1094,8 +1156,11 @@ def build_actor_direction_card(
                 player_asset=pl_asset_size,
                 player_gender=pl_gender,
                 asset_texture=p_asset_tex,
+                rear_size=p_rear_size,
+                rear_texture=p_rear_tex,
                 affinity=score,
                 npc_appearance=appr,
+                player_appearance=pl_app,
                 npc_name=name,
                 npc_gender=gender
             )
@@ -1107,9 +1172,29 @@ def build_actor_direction_card(
         if fet and str(fet).lower() not in ("none", "unknown", "none (vanilla)"):
             lines.append(format_fetish_prompt_directive(name, fet))
 
-        act_prefs = appr.get("act_preferences") or {}
-        if act_prefs:
-            lines.append(format_act_preferences_prompt_directive(name, act_prefs))
+        dyn_val_l3 = str(appr.get("intimate_dynamic") or appr.get("dynamic") or "").strip()
+        raw_act_prefs = appr.get("act_preferences") if isinstance(appr.get("act_preferences"), dict) else {}
+        likes_raw = clean_attribute_list_string(appr.get("act_likes") or raw_act_prefs.get("likes") or raw_act_prefs.get("act_likes"))
+        dislikes_raw = clean_attribute_list_string(appr.get("act_dislikes") or raw_act_prefs.get("dislikes") or raw_act_prefs.get("act_dislikes"))
+        if likes_raw:
+            annotated_likes = []
+            for item in [x.strip() for x in likes_raw.split(",") if x.strip()]:
+                il = item.lower()
+                is_curious = False
+                for reg in ACT_PREFERENCE_REGISTRY:
+                    if reg["name"].lower() == il or reg["id"] == il:
+                        track = ACT_ID_TO_EXPERIENCE_TRACK.get(reg["id"])
+                        if track == "intercourse" and str(appr.get("intercourse_experience") or "virgin").lower() in ("virgin", "unknown", ""):
+                            is_curious = True
+                        elif track == "oral" and str(appr.get("oral_experience") or "inexperienced").lower() in ("inexperienced", "unknown", ""):
+                            is_curious = True
+                        elif track == "anal" and str(appr.get("anal_experience") or "inexperienced").lower() in ("inexperienced", "unknown", ""):
+                            is_curious = True
+                        break
+                annotated_likes.append(f"{item} (curious / untried)" if is_curious else item)
+            likes_raw = ", ".join(annotated_likes)
+        if likes_raw or dislikes_raw:
+            lines.append(format_act_preferences_prompt_directive(name, likes_val=likes_raw, dislikes_val=dislikes_raw, dynamic_val=dyn_val_l3))
 
         # Intimate experience canon
         exp_parts = []

@@ -28,6 +28,7 @@ def calculate_combat_attributes(
     equipped_items: Optional[List[Dict[str, Any]]] = None,
     scenario: Optional[str] = None,
     allow_non_combat: bool = False,
+    session_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Computes base combat attributes dynamically from a character's SPECIAL stats
@@ -48,10 +49,28 @@ def calculate_combat_attributes(
             "is_non_combat": True
         }
 
+    spirit_bonuses: Dict[str, int] = {}
+    eff_char: Dict[str, Any] = dict(character or {})
+    if not eff_char.get("is_monster") and not eff_char.get("is_enemy") and not eff_char.get("is_summon"):
+        try:
+            from mechanics.combat.spells.spirit_court_perks import (
+                apply_spirit_court_stat_bonuses,
+                get_spirit_court_stat_bonuses,
+            )
+            eff_sid = session_id if session_id is not None else eff_char.get("session_id")
+            if eff_char.get("_spirit_court_bonuses_applied"):
+                spirit_bonuses = dict(eff_char.get("_spirit_court_stat_bonuses") or {})
+            elif eff_sid:
+                spirit_bonuses = get_spirit_court_stat_bonuses(int(eff_sid))
+                if spirit_bonuses:
+                    eff_char = apply_spirit_court_stat_bonuses(eff_char, bonuses=spirit_bonuses)
+        except Exception:
+            spirit_bonuses = {}
+
     # Normalize stat extraction supporting both top-level and nested stats dict, with safe type coercion
     def _extract_stat(k_low: str, k_up: str, default: int = cd.BASE_STAT_VALUE) -> int:
-        nested = character.get("stats") if isinstance(character.get("stats"), dict) else {}
-        for src in (character, nested):
+        nested = eff_char.get("stats") if isinstance(eff_char.get("stats"), dict) else {}
+        for src in (eff_char, nested):
             for k in (k_low, k_up):
                 val = src.get(k)
                 if val is not None:
@@ -70,8 +89,8 @@ def calculate_combat_attributes(
     luk = _extract_stat("luk", "LUK")
 
     def _extract_level(default: int = 1) -> int:
-        nested = character.get("stats") if isinstance(character.get("stats"), dict) else {}
-        for src in (character, nested):
+        nested = eff_char.get("stats") if isinstance(eff_char.get("stats"), dict) else {}
+        for src in (eff_char, nested):
             for k in ("level", "tier", "agent_tier", "tier_rank"):
                 val = src.get(k)
                 if val is not None:
@@ -532,6 +551,7 @@ def calculate_combat_attributes(
         "on_hit_debuffs": list(anom_passives.get("on_hit_debuffs") or []),
         "turn_regen_pct": float(anom_passives.get("turn_regen_pct", 0.0) or 0.0),
         "cursed_hp_drain_per_turn": int(anom_passives.get("cursed_hp_drain_per_turn", 0) or 0),
+        "spirit_court_stat_bonuses": dict(spirit_bonuses),
     }
     result.update(elem_atks)
     result.update(elem_res)

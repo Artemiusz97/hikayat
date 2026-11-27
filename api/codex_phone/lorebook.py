@@ -121,7 +121,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
 
     contact_map = {(c.get("name") or "").lower().strip(): c for c in contacts if c.get("name")}
 
-    char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
+    char_row = await adb(db.get_character, lookup_uid, session_id=session_id) if lookup_uid else None
     player_char_name = str((char_row or {}).get("name") or session.get("character_name") or "").strip().lower()
 
     party_names = {
@@ -149,6 +149,7 @@ async def get_lorebook(session_id: int, user_id: int | None = Query(None), reque
         party_npcs,
         scen_key,
         session if raw_sess else None,
+        char_row if isinstance(char_row, dict) else None,
     )
 
     discovered_people_names = set()

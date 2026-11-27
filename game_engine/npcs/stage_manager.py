@@ -523,7 +523,25 @@ def _spawn_canonical_role_npc_pre_turn(
                     if any(re.search(rf"\b{re.escape(t)}\b", c_role) or re.search(rf"\b{re.escape(t)}\b", c_club) for t in role_toks if t not in ("rep", "club", "student", "member", "representative")):
                         is_match = True
                 if is_match:
+                    from mechanics.social.employment_policy import is_prohibited_teen_civilian_assignment
                     from mechanics.world.locations.access_gate import can_npc_stage_at_facility
+
+                    if is_prohibited_teen_civilian_assignment(
+                        c,
+                        role=clean_role,
+                        workplace_node_id=fac_nid or "",
+                        workplace_name=effective_location,
+                        scen_key=scen_key,
+                    ):
+                        continue
+                    c_club_fac = str(
+                        c.get("club") or c.get("faction") or (c.get("basic_info") or {}).get("club") or (c.get("basic_info") or {}).get("faction") or ""
+                    ).strip().lower()
+                    loc_fac_low = f"{fac_nid or ''} {effective_location}".lower()
+                    if ("loc_agency_hq" in loc_fac_low or "m.c.o.a" in loc_fac_low) and c_club_fac and not any(
+                        tok in c_club_fac for tok in ("m.c.o.a", "oversight", "public_agency")
+                    ):
+                        continue
                     if not can_npc_stage_at_facility(c, effective_location, session=session, current_minute=eff_min, scen_key=scen_key):
                         continue
                     if c.get("appearance") and isinstance(c.get("appearance"), dict):
@@ -602,7 +620,18 @@ def _spawn_canonical_role_npc_pre_turn(
     demeanor = str(app_dict.get("intimate_demeanor") or "attentive")
 
     char_grade = str((matched_seed_char or {}).get("grade") or ((matched_seed_char or {}).get("basic_info") or {}).get("grade") or "").strip()
-    if is_school_scenario(scen_key) and not char_grade:
+    from mechanics.social.employment_policy import (
+        is_prohibited_teen_civilian_role,
+        is_prohibited_teen_civilian_workplace,
+    )
+
+    is_prohibited_for_teen = is_prohibited_teen_civilian_role(clean_role) or is_prohibited_teen_civilian_workplace(
+        fac_nid or "", effective_location
+    )
+    if is_prohibited_for_teen and char_grade.lower() in ("freshman", "sophomore", "junior", "senior", "student", "youth peer", ""):
+        derived_st = normalize_standing(clean_role, "", scen_key=scen_key)
+        char_grade = "Staff" if derived_st == "Staff" else "Citizen"
+    elif is_school_scenario(scen_key) and not char_grade:
         derived_standing = normalize_standing(clean_role, "", scen_key=scen_key)
         if derived_standing in ("Faculty", "Staff", "Citizen"):
             char_grade = derived_standing
@@ -613,7 +642,7 @@ def _spawn_canonical_role_npc_pre_turn(
                 char_grade = "Sophomore"
             else:
                 char_grade = "Citizen"
-    char_age_group = derive_age_group(grade=char_grade, role=clean_role, scen_key=scen_key)
+    char_age_group = "adult" if is_prohibited_for_teen else derive_age_group(grade=char_grade, role=clean_role, scen_key=scen_key)
     slug_id = re.sub(r"[^a-z0-9]+", "_", npc_name.lower()).strip("_")
 
     npc_dict = {
@@ -741,7 +770,11 @@ def compute_pre_turn_stage(
             "blocked_invalid_exit": False,
             "party_cohesion_deferred": False,
             "pending_folklore_ops": {},
+            "pending_realm_ops": {},
             "pending_roster_ops": {},
+            "crossed_realm": False,
+            "waiting_outside_companions": [],
+            "waiting_outside_companions_dirty": False,
             "doorbell_events": [],
             "crowd_flavor": "",
             "epistemic_matrix": {},
@@ -776,7 +809,11 @@ def compute_pre_turn_stage(
     effective_node_id: Optional[str] = None
     access_gate_info: dict = {"gated": False}
     pending_folklore_ops: dict = {}
+    pending_realm_ops: dict = {}
     pending_roster_ops: dict = {}
+    crossed_realm: bool = False
+    _dest_r_rules: dict[str, Any] = {}
+    waiting_outside_companions_dirty: bool = False
     doorbell_events: list[dict] = []
     crowd_flavor: str = ""
     _prev_cs = session.get("crowd_state") if isinstance(session.get("crowd_state"), dict) else None
@@ -1001,6 +1038,10 @@ def compute_pre_turn_stage(
 
         target_nid = None
         target_loc_candidate = None
+        target_realm_candidate = ""
+        vessel_realm_candidate = ""
+        move_sub_intent = ""
+        move_action_dict: dict[str, Any] = {}
         move_action_lbl = ""
         move_action_intent = ""
         is_privacy_action = False
@@ -1061,10 +1102,28 @@ def compute_pre_turn_stage(
                     continue
                 a_lbl = str(a.get("label") or "")
                 a_int = str(a.get("intent") or "").strip().lower()
+                a_sub_int = str(a.get("sub_intent") or "").strip().lower()
+                if a_sub_int in (
+                    "portal_cross",
+                    "starship_jump",
+                    "recall_starship",
+                    "unseal_chinatown_shortcut",
+                    "overland_spirit_trail",
+                ):
+                    move_sub_intent = a_sub_int
+                    move_action_dict = dict(a)
+                    target_realm_candidate = str(a.get("target_realm_id") or "").strip()
+                    vessel_realm_candidate = str(a.get("vessel_realm_id") or "").strip()
                 if a.get("target_node_id"):
                     target_nid = a["target_node_id"]
+                    if not move_action_dict:
+                        move_action_dict = dict(a)
                     move_action_lbl = a_lbl
                     move_action_intent = a_int or "movement"
+                    if not target_realm_candidate:
+                        target_realm_candidate = str(a.get("target_realm_id") or "").strip()
+                    if not vessel_realm_candidate:
+                        vessel_realm_candidate = str(a.get("vessel_realm_id") or "").strip()
                     break
                 if a.get("target_location"):
                     target_loc_candidate = a["target_location"]
@@ -1075,10 +1134,17 @@ def compute_pre_turn_stage(
                     move_action_lbl = a_lbl
                     move_action_intent = a_int
 
-        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and not target_nid and target_loc_candidate and sess_id:
-            target_nid = db.resolve_node_id_from_location(sess_id, target_loc_candidate)
-
         curr_nid = session.get("current_node_id") or (db.resolve_node_id_from_location(sess_id, raw_curr) if sess_id else None)
+        curr_realm_id = ""
+        if sess_id and curr_nid:
+            try:
+                from mechanics.world.locations.realms import get_node_realm_id
+                curr_realm_id = get_node_realm_id(sess_id, str(curr_nid))
+            except Exception:
+                curr_realm_id = ""
+
+        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and not target_nid and target_loc_candidate and sess_id:
+            target_nid = db.resolve_node_id_from_location(sess_id, target_loc_candidate, preferred_realm_id=curr_realm_id)
 
         # Freeform text matching (A10) — strictly gated on movement intent + word boundaries
         if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and not target_nid and sess_id and curr_nid:
@@ -1204,20 +1270,235 @@ def compute_pre_turn_stage(
                         if unmatched_res.get("directive"):
                             stage_directives.append(unmatched_res["directive"])
 
-        if not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and target_nid and sess_id:
+        _vessel_action_handled = False
+        if (
+            not party_cohesion_deferred
+            and not (is_privacy_action and not privacy_check_passed)
+            and move_sub_intent in ("starship_jump", "recall_starship")
+            and sess_id
+            and curr_nid
+        ):
+            from mechanics.world.locations.realms import (
+                check_realm_comms_available,
+                execute_recall_starship,
+                execute_starship_jump,
+                get_realm_rules,
+                is_at_access_point_in_memory,
+            )
+            _cur_turn_num = len(session.get("history") or []) + 1
+            _nodes_map_v = {n["node_id"]: n for n in (db.get_session_world_nodes(sess_id) or []) if n.get("node_id")}
+            if move_sub_intent == "starship_jump":
+                _v_rid = vessel_realm_candidate or curr_realm_id
+                _v_rules = get_realm_rules(_nodes_map_v.get(_v_rid))
+                if not _v_rules.get("is_mobile_vessel") or str(_v_rules.get("bridge_node_id") or "") != str(curr_nid):
+                    blocked_invalid_exit = True
+                    session["travel_minutes_elapsed"] = 0
+                    stage_directives.append("[STAGE DIRECTION — FTL JUMP DENIED]: Must be at the vessel's Bridge to plot an FTL jump.")
+                else:
+                    _j_res = execute_starship_jump(sess_id, _v_rid, target_realm_candidate, turn_number=_cur_turn_num, persist_db=persist_db)
+                    if _j_res.get("success"):
+                        if not persist_db:
+                            pending_realm_ops["starship_jump"] = {
+                                "vessel_realm_id": _v_rid,
+                                "target_realm_id": target_realm_candidate,
+                                "turn_number": _cur_turn_num,
+                            }
+                        session["travel_minutes_elapsed"] = int(_j_res.get("travel_minutes") or 45)
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — FTL JUMP]: Plotted an FTL jump to orbit {_j_res.get('target_realm_name', target_realm_candidate)}. "
+                            f"Remain aboard {raw_curr} until disembarking via the Airlock."
+                        )
+                    else:
+                        blocked_invalid_exit = True
+                        session["travel_minutes_elapsed"] = 0
+                        stage_directives.append(f"[STAGE DIRECTION — FTL JUMP BLOCKED]: {_j_res.get('reason', 'Unable to plot jump.')}")
+                _vessel_action_handled = True
+            elif move_sub_intent == "recall_starship":
+                _r_rules = get_realm_rules(_nodes_map_v.get(curr_realm_id))
+                _dock_nid = str(_r_rules.get("dock_node_id") or "")
+                _comms_chk = check_realm_comms_available(sess_id, str(curr_nid))
+                if not _comms_chk.get("available"):
+                    blocked_invalid_exit = True
+                    session["travel_minutes_elapsed"] = 0
+                    stage_directives.append(f"[STAGE DIRECTION — NO SIGNAL]: {_comms_chk.get('reason', 'Comms are isolated in this realm.')}")
+                elif not _dock_nid or not is_at_access_point_in_memory(str(curr_nid), _dock_nid, _nodes_map_v):
+                    blocked_invalid_exit = True
+                    session["travel_minutes_elapsed"] = 0
+                    stage_directives.append("[STAGE DIRECTION — RECALL DENIED]: Must be at an orbital dock or spaceport to recall the vessel.")
+                else:
+                    _rc_res = execute_recall_starship(
+                        sess_id,
+                        vessel_realm_candidate,
+                        str(curr_nid),
+                        turn_number=_cur_turn_num,
+                        persist_db=persist_db,
+                    )
+                    if _rc_res.get("success"):
+                        if not persist_db:
+                            pending_realm_ops["recall_starship"] = {
+                                "vessel_realm_id": _rc_res.get("vessel_realm_id", vessel_realm_candidate),
+                                "current_node_id": str(curr_nid),
+                                "turn_number": _cur_turn_num,
+                            }
+                        session["travel_minutes_elapsed"] = int(_rc_res.get("travel_minutes") or 45)
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — STARSHIP RECALLED]: Autopilot recalled {_rc_res.get('vessel_name', 'your vessel')} to dock at {raw_curr}."
+                        )
+                    else:
+                        blocked_invalid_exit = True
+                        session["travel_minutes_elapsed"] = 0
+                        stage_directives.append(f"[STAGE DIRECTION — RECALL BLOCKED]: {_rc_res.get('reason', 'Unable to recall vessel.')}")
+                _vessel_action_handled = True
+
+        if (
+            not _vessel_action_handled
+            and not party_cohesion_deferred
+            and not (is_privacy_action and not privacy_check_passed)
+            and move_sub_intent == "unseal_chinatown_shortcut"
+            and sess_id
+        ):
+            from mechanics.world.locations.folklore_spirit_realm import (
+                can_unseal_chinatown_shortcut,
+                unseal_chinatown_shortcut,
+            )
+            _unseal_m = str(move_action_dict.get("unseal_method") or "").strip().lower()
+            if not _unseal_m:
+                _act_stat_u = str(move_action_dict.get("stat") or "").upper()
+                _act_lbl_u = str(move_action_dict.get("label") or "").lower()
+                if _act_stat_u == "PER":
+                    _unseal_m = "per"
+                elif "reputation" in _act_lbl_u or "favor" in _act_lbl_u or "court" in _act_lbl_u:
+                    _unseal_m = "reputation"
+                else:
+                    _unseal_m = "gold"
+            _chk_u = move_action_dict.get("check")
+            _per_roll_u = (
+                _chk_u.get("total")
+                if isinstance(_chk_u, dict)
+                else (getattr(_chk_u, "total", None) if _chk_u is not None else None)
+            )
+            _uid_u = int((session or {}).get("host_user_id") or 0)
+            _cur_turn_u = _resolve_active_turn_1based(session)
+            if persist_db:
+                _ur = unseal_chinatown_shortcut(
+                    sess_id,
+                    method=_unseal_m,
+                    user_id=_uid_u or None,
+                    per_roll=_per_roll_u,
+                    turn_number=_cur_turn_u,
+                    from_node_id=str(curr_nid or ""),
+                )
+            else:
+                _ct_chk = can_unseal_chinatown_shortcut(sess_id, user_id=_uid_u or None)
+                _ur = {"ok": False}
+                if str(curr_nid or "") == "sub_ct_curio_stalls":
+                    _ur = {"ok": False, "reason": "spirit_side_unlock_only"}
+                elif _ct_chk.get("unlocked"):
+                    _ur = {"ok": True, "already_unlocked": True}
+                elif _unseal_m == "gold" and _ct_chk.get("can_gold"):
+                    _ur = {"ok": True, "method": "gold"}
+                elif _unseal_m == "reputation" and _ct_chk.get("can_rep"):
+                    _ur = {"ok": True, "method": "reputation"}
+                elif _unseal_m == "per" and int(_per_roll_u or 0) >= 12:
+                    _ur = {"ok": True, "method": "per"}
+                if _ur.get("ok") and not _ur.get("already_unlocked"):
+                    pending_folklore_ops["unseal_chinatown"] = {
+                        "method": _unseal_m,
+                        "user_id": _uid_u,
+                        "per_roll": _per_roll_u,
+                        "from_node_id": str(curr_nid or ""),
+                    }
+            if _ur.get("ok"):
+                stage_directives.append(
+                    "[STAGE DIRECTION — CHINATOWN SPIRIT SHORTCUT UNSEALED]: The stone lantern pier chimes softly "
+                    "as a misty canal shortcut unseals between Boundary Mist-Wharf and Chinatown's Curio Stalls."
+                )
+            else:
+                blocked_invalid_exit = True
+                session["travel_minutes_elapsed"] = 0
+                stage_directives.append(
+                    "[STAGE DIRECTION — CHINATOWN SHORTCUT STILL SEALED]: The canal mist refuses to part until the Spirit-side rite is fulfilled."
+                )
+            _vessel_action_handled = True
+
+        if not _vessel_action_handled and not party_cohesion_deferred and not (is_privacy_action and not privacy_check_passed) and target_nid and sess_id:
             from mechanics.world.locations.pathfinding import find_spatial_path, evaluate_spatial_route, is_node_hidden
+            from mechanics.world.locations.realms import (
+                discover_realm,
+                find_nearest_access_point_for_realm,
+                get_node_realm_id_in_memory,
+                get_portal_edges_in_memory,
+                get_realm_rules,
+                is_at_access_point_in_memory,
+            )
+            _nodes_list_r = db.get_session_world_nodes(sess_id) or []
+            _nodes_map_r = {n["node_id"]: n for n in _nodes_list_r if n.get("node_id")}
+            _edges_list_r = db.get_session_world_edges(sess_id) or []
+            _eff_curr_realm = curr_realm_id or (get_node_realm_id_in_memory(str(curr_nid), _nodes_map_r) if curr_nid else "")
+            _target_realm = target_realm_candidate or get_node_realm_id_in_memory(str(target_nid), _nodes_map_r)
+            route: list[str] = []
+            _allow_cross = False
+
             if not curr_nid or target_nid == curr_nid:
                 route = [target_nid]
+            elif _eff_curr_realm and _target_realm and _eff_curr_realm != _target_realm:
+                _curr_realm_rules = get_realm_rules(_nodes_map_r.get(_eff_curr_realm))
+                _portals_here = [
+                    p for p in get_portal_edges_in_memory(_nodes_map_r, _edges_list_r, from_realm_id=_eff_curr_realm, include_hidden=False)
+                    if p.get("target_realm_id") == _target_realm
+                    and is_at_access_point_in_memory(str(curr_nid), str(p.get("from_node_id") or ""), _nodes_map_r)
+                ]
+                _FOLKLORE_THRESHOLD_PAIRS = {
+                    ("loc_et_fox_torii_tunnel", "sub_kitsune_inner_plaza"),
+                    ("loc_kitsune_torii_approach", "sub_kitsune_inner_plaza"),
+                    ("loc_bunian_threshold_glade", "sub_bunian_inner_plaza"),
+                    ("loc_bunian_mist_glade", "sub_bunian_inner_plaza"),
+                    ("sub_uc_black_font", "sub_ghoul_inner_plaza"),
+                    ("sub_kitsune_inner_plaza", "loc_et_fox_torii_tunnel"),
+                    ("sub_bunian_inner_plaza", "loc_bunian_threshold_glade"),
+                    ("sub_ghoul_inner_plaza", "sub_uc_black_font"),
+                }
+                _is_folklore_threshold_cross = (str(curr_nid), str(target_nid)) in _FOLKLORE_THRESHOLD_PAIRS
+                if (_portals_here or _is_folklore_threshold_cross) and (
+                    _curr_realm_rules.get("exit_mode") == "lockdown_until_cleared"
+                    and not _curr_realm_rules.get("pacified")
+                ):
+                    blocked_invalid_exit = True
+                    session["travel_minutes_elapsed"] = 0
+                    stage_directives.append(
+                        "[STAGE DIRECTION — REALM LOCKDOWN]: The return portal is sealed until this anomalous rift is pacified or cleared."
+                    )
+                elif _portals_here or _is_folklore_threshold_cross:
+                    _allow_cross = True
+                    route = find_spatial_path(sess_id, curr_nid, target_nid, allow_cross_realm=True)
+                else:
+                    _ap_info = find_nearest_access_point_for_realm(sess_id, str(curr_nid), _target_realm)
+                    _ap_nid_raw = (_ap_info.get("access_point_node_id") or _ap_info.get("node_id") or _ap_info.get("from_node_id")) if _ap_info else ""
+                    if _ap_nid_raw:
+                        _ap_nid = str(_ap_nid_raw)
+                        _ap_nm = str(_ap_info.get("access_point_name") or _ap_info.get("from_node_name") or _ap_nid)
+                        target_nid = _ap_nid
+                        target_loc_candidate = ""
+                        route = [str(curr_nid)] if str(curr_nid) == _ap_nid else find_spatial_path(sess_id, curr_nid, _ap_nid, allow_cross_realm=False)
+                        stage_directives.append(
+                            f"[STAGE DIRECTION — ACCESS POINT ARRIVAL]: Direct cross-realm fast travel is blocked; routed first to Access Point {_ap_nm}."
+                        )
+                    else:
+                        blocked_invalid_exit = True
+                        session["travel_minutes_elapsed"] = 0
+                        stage_directives.append(
+                            "[STAGE DIRECTION — CROSS-REALM ROUTE UNAVAILABLE]: No known Access Point leads to that realm from here."
+                        )
             else:
-                route = find_spatial_path(sess_id, curr_nid, target_nid)
+                route = find_spatial_path(sess_id, curr_nid, target_nid, allow_cross_realm=False)
 
-            if not route:
+            if not route and not blocked_invalid_exit:
                 dest_node = db.get_world_node(sess_id, target_nid)
                 if dest_node and is_node_hidden(dest_node):
                     stage_directives.append("[STAGE DIRECTION — ACCESS BLOCKED]: Location is hidden or undiscovered.")
                     blocked_invalid_exit = True
                     session["travel_minutes_elapsed"] = 0
-            else:
+            elif route and not blocked_invalid_exit:
                 dest_node = db.get_world_node(sess_id, target_nid)
                 dest_primary = (dest_node.get("name") if dest_node else "") or ""
                 t_comps, l_patrons = classify_scene_npcs(session, actions, old_primary=old_primary, dest_primary=dest_primary)
@@ -1244,6 +1525,12 @@ def compute_pre_turn_stage(
                         traveling_companions.append(pn)
                         existing_comp_names.add(pn_name.lower())
                 left_behind_patrons = l_patrons or []
+                _pre_route_wait_list = list(
+                    session.get("waiting_outside_companions")
+                    if "waiting_outside_companions" in session
+                    else ((session.get("extra") or {}).get("waiting_outside_companions") or [])
+                )
+                _pre_route_wait_names = {_get_npc_name(c).lower() for c in _pre_route_wait_list if _get_npc_name(c)}
 
                 route_res = evaluate_spatial_route(
                     sess_id, route, session,
@@ -1257,6 +1544,63 @@ def compute_pre_turn_stage(
                 effective_location = route_res["effective_location"]
                 effective_node_id = route_res["effective_node_id"]
                 movement_dest_str = effective_location
+                _dest_realm_after = get_node_realm_id_in_memory(str(effective_node_id or ""), _nodes_map_r) if effective_node_id else ""
+                if not route_res.get("gated"):
+                    from mechanics.world.locations.folklore_spirit_realm import (
+                        SPIRIT_REALM_ID as _FK_SPIRIT_REALM_ID,
+                        SPIRIT_ZONE_BY_VILLAGE as _FK_ZONE_BY_V,
+                        infer_spirit_village_for_node as _infer_vk,
+                        is_node_in_crossroads_truce as _in_xroads,
+                        on_enter_village_overland_from_spirit_realm as _on_ov_enter,
+                        on_exit_village_to_human_threshold as _on_bd_exit,
+                        on_visit_spirit_crossroads as _on_xroads_visit,
+                    )
+                    _fk_tnum = _resolve_active_turn_1based(session)
+                    if str(curr_nid) in ("sub_kitsune_inner_plaza", "sub_bunian_inner_plaza", "sub_ghoul_inner_plaza") and str(effective_node_id) in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade", "sub_uc_black_font"):
+                        _vk_bd = (
+                            "kitsune"
+                            if str(effective_node_id) == "loc_et_fox_torii_tunnel"
+                            else ("bunian" if str(effective_node_id) == "loc_bunian_threshold_glade" else "ghoul")
+                        )
+                        if persist_db:
+                            _on_bd_exit(sess_id, _vk_bd, turn_number=_fk_tnum)
+                        else:
+                            pending_folklore_ops["backdoor_attune_village"] = _vk_bd
+                        stage_directives.append(
+                            "[STAGE DIRECTION — BACK-DOOR PORTAL ATTUNED]: Stepping outward from the Spirit Enclave attunes your resonance to its mortal threshold."
+                        )
+                    if _in_xroads(str(effective_node_id or "")):
+                        if persist_db:
+                            _on_xroads_visit(sess_id, turn_number=_fk_tnum)
+                        else:
+                            pending_folklore_ops["visit_spirit_crossroads"] = True
+                    if _eff_curr_realm == _FK_SPIRIT_REALM_ID and _dest_realm_after == _FK_SPIRIT_REALM_ID:
+                        _vk_ov = _infer_vk(str(effective_node_id or ""))
+                        if _vk_ov in ("kitsune", "bunian", "ghoul"):
+                            _src_z_ov = _nodes_map_r.get(str(curr_nid), {}).get("parent_id")
+                            _src_fac_ov = _nodes_map_r.get(str(_src_z_ov or ""), {}).get("parent_id")
+                            _already_in_vk = (
+                                str(curr_nid).startswith(f"sub_{_vk_ov}_")
+                                or str(curr_nid).startswith(f"loc_{_vk_ov}_")
+                                or str(_src_z_ov or "") == _FK_ZONE_BY_V[_vk_ov]
+                                or str(_src_fac_ov or "") == _FK_ZONE_BY_V[_vk_ov]
+                            )
+                            if not _already_in_vk:
+                                if persist_db:
+                                    _on_ov_enter(sess_id, _vk_ov, turn_number=_fk_tnum)
+                                else:
+                                    pending_folklore_ops["overland_enter_village"] = _vk_ov
+                if _eff_curr_realm and _dest_realm_after and _dest_realm_after != _eff_curr_realm:
+                    crossed_realm = True
+                    _dest_r_rules = get_realm_rules(_nodes_map_r.get(_dest_realm_after))
+                    _cur_turn_num_d = len(session.get("history") or []) + 1
+                    if persist_db:
+                        discover_realm(sess_id, _dest_realm_after, turn_number=_cur_turn_num_d)
+                    else:
+                        pending_realm_ops["discover_realm_id"] = {
+                            "realm_id": _dest_realm_after,
+                            "turn_number": _cur_turn_num_d,
+                        }
                 _spatial_loop_rerouted = False
 
                 if sess_id and curr_nid and effective_node_id:
@@ -1331,8 +1675,91 @@ def compute_pre_turn_stage(
                     session["extra"]["previous_node_id"] = curr_nid
                 session["current_node_id"] = effective_node_id
                 session["travel_minutes_elapsed"] = route_res["travel_minutes"]
-                traveling_companions = route_res["traveling_companions"]
+                traveling_companions = list(route_res["traveling_companions"] or [])
+                if crossed_realm:
+                    _cur_wait_list = list(
+                        session.get("waiting_outside_companions")
+                        if "waiting_outside_companions" in session
+                        else ((session.get("extra") or {}).get("waiting_outside_companions") or [])
+                    )
+                    existing_comp_names = {_get_npc_name(c).lower() for c in traveling_companions if _get_npc_name(c)}
+                    if _dest_r_rules.get("restrict_companions"):
+                        _ward_candidates = []
+                        _ward_seen_names = set()
+                        for _wc_grp in (
+                            traveling_companions,
+                            session.get("party_npcs") or (),
+                            session.get("temporary_companions") or (),
+                        ):
+                            for _wc_raw in _wc_grp:
+                                _wc_obj = _wc_raw[0] if isinstance(_wc_raw, (tuple, list)) and _wc_raw else _wc_raw
+                                if isinstance(_wc_obj, dict):
+                                    _wc_nm = _get_npc_name(_wc_obj).lower()
+                                    if _wc_nm and _wc_nm not in _ward_seen_names:
+                                        _ward_candidates.append(dict(_wc_obj))
+                                        _ward_seen_names.add(_wc_nm)
+                                elif isinstance(_wc_obj, str) and _wc_obj.strip():
+                                    _wc_nm = _wc_obj.strip().lower()
+                                    if _wc_nm not in _ward_seen_names:
+                                        _ward_candidates.append({"name": _wc_obj.strip(), "role": "Companion"})
+                                        _ward_seen_names.add(_wc_nm)
+                        if _ward_candidates:
+                            _wait_out = list(_cur_wait_list)
+                            _wait_names = {_get_npc_name(c).lower() for c in _wait_out if _get_npc_name(c)}
+                            for _tc_wait in _ward_candidates:
+                                _tc_nm = _get_npc_name(_tc_wait).lower()
+                                if _tc_nm and _tc_nm not in _wait_names:
+                                    _wait_out.append(_tc_wait)
+                                    _wait_names.add(_tc_nm)
+                                elif not _tc_nm and _tc_wait not in _wait_out:
+                                    _wait_out.append(_tc_wait)
+                            session["waiting_outside_companions"] = _wait_out
+                            if "extra" not in session or not isinstance(session["extra"], dict):
+                                session["extra"] = {}
+                            session["extra"]["waiting_outside_companions"] = list(_wait_out)
+                            waiting_outside_companions_dirty = True
+                            traveling_companions = []
+                            stage_directives.append(
+                                "[STAGE DIRECTION — REALM COMPANION WARD]: Companions cannot pass this threshold and wait by the portal for your return."
+                            )
+                    elif not _dest_r_rules.get("restrict_companions") and (_cur_wait_list or _pre_route_wait_list):
+                        _rejoin_pool = _cur_wait_list or _pre_route_wait_list
+                        session["waiting_outside_companions"] = []
+                        if "extra" not in session or not isinstance(session["extra"], dict):
+                            session["extra"] = {}
+                        session["extra"]["waiting_outside_companions"] = []
+                        waiting_outside_companions_dirty = True
+                        for _w_comp in _rejoin_pool:
+                            _w_nm = _get_npc_name(_w_comp).lower()
+                            if _w_nm and _w_nm not in existing_comp_names:
+                                traveling_companions.append(_w_comp)
+                                existing_comp_names.add(_w_nm)
+                        if not any("COMPANION REUNION" in str(d) for d in (route_res.get("stage_directives") or [])):
+                            stage_directives.append(
+                                "[STAGE DIRECTION — COMPANION REUNION]: Companions waiting at the threshold rejoin your party."
+                            )
+                elif _dest_realm_after and get_realm_rules(_nodes_map_r.get(_dest_realm_after)).get("restrict_companions"):
+                    _ward_intra = list(_pre_route_wait_list)
+                    _ward_intra_names = {_get_npc_name(c).lower() for c in _ward_intra if _get_npc_name(c)}
+                    for _tc_i in traveling_companions:
+                        _tc_inm = _get_npc_name(_tc_i).lower()
+                        if _tc_inm and _tc_inm not in _ward_intra_names:
+                            _ward_intra.append(_tc_i)
+                            _ward_intra_names.add(_tc_inm)
+                    if _ward_intra:
+                        session["waiting_outside_companions"] = _ward_intra
+                        if "extra" not in session or not isinstance(session["extra"], dict):
+                            session["extra"] = {}
+                        session["extra"]["waiting_outside_companions"] = list(_ward_intra)
+                    traveling_companions = []
                 stage_directives.extend(route_res["stage_directives"])
+                _post_route_wait_list = list(session.get("waiting_outside_companions") or [])
+                _post_route_wait_names = {_get_npc_name(c).lower() for c in _post_route_wait_list if _get_npc_name(c)}
+                if _post_route_wait_names != _pre_route_wait_names:
+                    waiting_outside_companions_dirty = True
+                    if "extra" not in session or not isinstance(session["extra"], dict):
+                        session["extra"] = {}
+                    session["extra"]["waiting_outside_companions"] = list(_post_route_wait_list)
                 unlocked_edges = list(route_res.get("unlocked_edges") or [])
                 unlocked_nodes = list(route_res.get("unlocked_nodes") or [])
                 consumed_key_items = list(route_res.get("consumed_key_items") or [])
@@ -1572,6 +1999,24 @@ def compute_pre_turn_stage(
             seen_stage_names.add(nm_low)
             stage_npcs.append(dict(npc_dict))
 
+    def _get_waiting_outside_names_low() -> set[str]:
+        raw_wait = (
+            session.get("waiting_outside_companions")
+            if "waiting_outside_companions" in session
+            else (session.get("extra") or {}).get("waiting_outside_companions")
+        )
+        wait_set: set[str] = set()
+        for w_item in (raw_wait or ()):
+            if isinstance(w_item, dict):
+                w_nm = _get_npc_name(w_item).strip().lower()
+                if w_nm:
+                    wait_set.add(w_nm)
+                if w_item.get("npc_id"):
+                    wait_set.add(str(w_item["npc_id"]).strip().lower())
+            elif isinstance(w_item, str) and w_item.strip():
+                wait_set.add(w_item.strip().lower())
+        return wait_set
+
     def _build_party_names_set() -> set[str]:
         p_set: set[str] = set()
         for grp in (party or session.get("party") or [], session.get("party_npcs") or [], session.get("temporary_companions") or []):
@@ -1585,7 +2030,7 @@ def compute_pre_turn_stage(
             t_nm = _get_npc_name(tc).strip().lower()
             if t_nm:
                 p_set.add(t_nm)
-        return p_set
+        return p_set - _get_waiting_outside_names_low()
 
     def _apply_presence_outputs(
         pres_res: dict,
@@ -1829,11 +2274,14 @@ def compute_pre_turn_stage(
                         if not is_co_located:
                             schedule_departed_npcs.append(n_nm)
 
+        _wait_low_same = _get_waiting_outside_names_low()
         for n in old_npcs:
             if not isinstance(n, dict):
                 continue
             nm = _get_npc_name(n)
             if not nm or nm in schedule_departed_npcs:
+                continue
+            if nm.strip().lower() in _wait_low_same or str(n.get("npc_id") or "").strip().lower() in _wait_low_same:
                 continue
             if has_exited_convo and nm.strip().lower() in [p.lower() for p in get_session_dialogue_partners(session)]:
                 pass
@@ -1843,7 +2291,11 @@ def compute_pre_turn_stage(
         for comp in (session.get("temporary_companions") or []) + (party or session.get("party") or []):
             if isinstance(comp, dict) and comp.get("name"):
                 c_name = comp.get("name")
-                if c_name.strip().lower() not in seen_stage_names:
+                c_low_same = c_name.strip().lower()
+                c_id_same = str(comp.get("npc_id") or "").strip().lower()
+                if c_low_same in _wait_low_same or (c_id_same and c_id_same in _wait_low_same):
+                    continue
+                if c_low_same not in seen_stage_names:
                     _add_stage_npc({
                         "name": c_name,
                         "role": comp.get("role") or "Companion",
@@ -1917,10 +2369,11 @@ def compute_pre_turn_stage(
         focal_low = str(session.get("focal_point") or "").lower()
         curr_nid_thresh = str(session.get("current_node_id") or "")
         if (
-            curr_nid_thresh in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade")
+            curr_nid_thresh in ("loc_et_fox_torii_tunnel", "loc_bunian_threshold_glade", "sub_uc_black_font", "sub_ghoul_inner_plaza")
             or "illusion veil" in focal_low
             or "sealed sanctuary veil" in focal_low
-            or any(w in action_str for w in ("atonement", "sacred aburaage", "bunga rampai", "present sacred offering"))
+            or "sentinel" in focal_low
+            or any(w in action_str for w in ("atonement", "sacred aburaage", "bunga rampai", "black myrrh", "cypress incense", "present sacred offering", "outsider toll", "pay toll"))
         ):
             is_threshold_turn = True
         if is_threshold_turn and sess_id:
@@ -2110,9 +2563,20 @@ def compute_pre_turn_stage(
         try:
             from mechanics.social.folklore_roster import (
                 ensure_folklore_villager_roster,
+                ensure_spirit_crossroads_roster,
+                get_scheduled_crossroads_npcs_for_node,
                 get_scheduled_villagers_for_node,
+                hydrate_crossroads_cast_for_node,
                 hydrate_village_cast_for_node,
                 resolve_glamour_wanderer_interaction,
+            )
+            from mechanics.world.locations.folklore_spirit_realm import (
+                SPIRIT_SPARRING_ROOMS,
+                is_node_in_crossroads_truce,
+                is_node_in_sanctuary_pact_zone,
+                is_node_in_spirit_realm,
+                resolve_crossroads_neutral_truce_ejection,
+                resolve_spirit_sparring_drill,
             )
             from mechanics.world.locations.folklore_veil import (
                 VEILED_INNER_ROOM_IDS,
@@ -2133,16 +2597,25 @@ def compute_pre_turn_stage(
                 or ""
             ).strip()
             v_key_here, _ = resolve_folklore_village_for_node(sess_id, active_stage_nid) if active_stage_nid else (None, None)
-            in_inner_enclave = bool(
-                v_key_here and active_stage_nid in VEILED_INNER_ROOM_IDS.get(v_key_here, ())
-            )
 
             act_text_combined = " ".join(str(a.get("label", "") if isinstance(a, dict) else a) for a in (actions or [])).lower()
             lead_act_dict = actions[0] if (actions and isinstance(actions[0], dict)) else {}
             lead_intent_low = str(lead_act_dict.get("intent") or "").strip().lower()
-            is_hostile_sanctuary_action = bool(
-                in_inner_enclave
+            is_sparring_action = bool(
+                active_stage_nid in SPIRIT_SPARRING_ROOMS
                 and (
+                    lead_intent_low == "spirit_spar_drill"
+                    or any(tok in act_text_combined for tok in ("spar", "drill", "practice", "form", "katana", "bokken", "silat", "stance"))
+                )
+            )
+            sanctuary_vk = is_node_in_sanctuary_pact_zone(
+                active_stage_nid,
+                action_intent=lead_intent_low,
+                action_label=act_text_combined,
+            )
+            in_crossroads_truce = is_node_in_crossroads_truce(active_stage_nid)
+            is_hostile_verb = bool(
+                (
                     lead_intent_low in (
                         "combat_hostile",
                         "combat_attack",
@@ -2167,22 +2640,71 @@ def compute_pre_turn_stage(
                 and not any(benign in act_text_combined for benign in ("friendly spar", "practice", "apologize", "atonement"))
             )
 
-            if is_hostile_sanctuary_action and v_key_here:
+            if is_sparring_action:
+                spar_stat = str(lead_act_dict.get("stat") or "AGI").strip().upper()
+                spar_uid = int((session or {}).get("host_user_id") or 0)
+                if persist_db:
+                    spar_res = resolve_spirit_sparring_drill(
+                        sess_id,
+                        active_stage_nid,
+                        stat=spar_stat,
+                        user_id=spar_uid or None,
+                        turn_number=eff_turn_num,
+                    )
+                    stage_directives.append(
+                        f"[STAGE DIRECTION — FRIENDLY SPIRIT SPARRING DRILL]: Non-lethal sparring drill completed "
+                        f"({spar_res.get('buff_name', 'Stance')}, +{spar_res.get('xp_gained', 0)} XP, +3 Court standing, 0 HP harm)."
+                    )
+                else:
+                    pending_folklore_ops["sparring_drill"] = {
+                        "node_id": active_stage_nid,
+                        "stat": spar_stat,
+                        "user_id": spar_uid,
+                    }
+                    stage_directives.append(
+                        "[STAGE DIRECTION — FRIENDLY SPIRIT SPARRING DRILL]: Non-lethal sparring practice begins in the courtyard (Sanctuary Pact exempt; zero lethal risk)."
+                    )
+            elif is_hostile_verb and in_crossroads_truce:
+                if persist_db:
+                    truce_res = resolve_crossroads_neutral_truce_ejection(
+                        sess_id,
+                        turn_number=eff_turn_num,
+                    )
+                else:
+                    pending_folklore_ops["crossroads_truce_ejection"] = True
+                    truce_res = {
+                        "expelled": True,
+                        "ejected_node_id": "sub_wilds_ward_camp",
+                        "ejected_location": db.format_node_tiered_location(sess_id, "sub_wilds_ward_camp")
+                        or "The Weeping Bleedwood — Untamed Spirit Wilds ➔ Joint Ward-Stone Perimeter Camp ➔ Joint Frontier Ward-Stone Triage Camp",
+                        "prompt_directive": (
+                            "[STAGE DIRECTION — DUSK CONFLUENCE NEUTRAL TRUCE]: Market wardens dissolve the brawl beneath golden "
+                            "truce-lanterns, escorting the party 15 minutes down the mist-path to the Joint Ward-Stone Perimeter Camp without banishing either village."
+                        ),
+                    }
+                if truce_res.get("expelled"):
+                    is_movement = True
+                    effective_node_id = truce_res["ejected_node_id"]
+                    effective_location = truce_res["ejected_location"]
+                    movement_dest_str = effective_location
+                    focal_point = None
+                    stage_directives.append(truce_res["prompt_directive"])
+            elif is_hostile_verb and sanctuary_vk:
                 if persist_db:
                     expel_res = apply_sanctuary_treaty_violation(
                         sess_id,
-                        v_key_here,
+                        sanctuary_vk,
                         turn_number=eff_turn_num,
                         session=session,
                     )
                 else:
                     expel_res = preview_sanctuary_treaty_violation(
                         sess_id,
-                        v_key_here,
+                        sanctuary_vk,
                         session=session,
                     )
                     if expel_res.get("expelled"):
-                        pending_folklore_ops["treaty_violation_village"] = v_key_here
+                        pending_folklore_ops["treaty_violation_village"] = sanctuary_vk
                 if expel_res.get("expelled"):
                     is_movement = True
                     effective_node_id = expel_res["ejected_node_id"]
@@ -2219,9 +2741,11 @@ def compute_pre_turn_stage(
                     folklore_candidate_nodes = (
                         set(VEILED_INNER_ROOM_IDS["kitsune"])
                         | set(VEILED_INNER_ROOM_IDS["bunian"])
+                        | set(VEILED_INNER_ROOM_IDS["ghoul"])
                         | {
                             "loc_et_fox_torii_tunnel",
                             "loc_bunian_threshold_glade",
+                            "sub_uc_black_font",
                             "loc_es_lantern_tea_street",
                             "sub_es_lantern_steps",
                             "loc_es_bamboo_footbath_bridge",
@@ -2229,10 +2753,67 @@ def compute_pre_turn_stage(
                             "loc_forest_trails",
                             "sub_trail_gateway",
                             "sub_cedar_bridge",
+                            "loc_hosp_emergency_triage",
+                            "loc_hosp_morgue",
+                            "sub_crypt_ossuary",
+                            "sub_uc_salvage_stalls",
+                            "sub_uc_tunnel_cantina",
                         }
                     )
-                    if active_stage_nid in folklore_candidate_nodes:
-                        curr_min_fk = int(session.get("current_minute", 480) or 480)
+                    in_spirit_now = is_node_in_spirit_realm(sess_id, active_stage_nid)
+                    curr_min_fk = int(session.get("current_minute", 480) or 480)
+                    if in_spirit_now and (
+                        active_stage_nid.startswith((
+                            "loc_crossroads_", "sub_crossroads_",
+                            "loc_wilds_", "sub_wilds_",
+                            "loc_peaks_", "sub_peaks_",
+                            "loc_mire_", "sub_mire_",
+                            "loc_boneyard_", "sub_boneyard_",
+                        ))
+                    ):
+                        ensure_spirit_crossroads_roster(sess_id, session=session, persist_db=persist_db)
+                        if persist_db:
+                            xr_here = hydrate_crossroads_cast_for_node(
+                                sess_id,
+                                active_stage_nid,
+                                current_minute=curr_min_fk,
+                                turn_number=eff_turn_num,
+                            )
+                        else:
+                            xr_here = get_scheduled_crossroads_npcs_for_node(
+                                sess_id,
+                                active_stage_nid,
+                                current_minute=curr_min_fk,
+                                session=session,
+                                persist_db=False,
+                            )
+                            if xr_here:
+                                pending_folklore_ops["hydrate_crossroads_node"] = {
+                                    "node_id": active_stage_nid,
+                                    "current_minute": curr_min_fk,
+                                }
+                        for x_ct in xr_here:
+                            if len(stage_npcs) >= 5:
+                                break
+                            x_nm = _get_npc_name(x_ct)
+                            if not x_nm or x_nm.strip().lower() in seen_stage_names:
+                                continue
+                            x_bi = x_ct.get("basic_info") if isinstance(x_ct.get("basic_info"), dict) else {}
+                            _add_stage_npc({
+                                "npc_id": x_ct.get("npc_id"),
+                                "name": x_nm,
+                                "role": x_ct.get("role") or x_bi.get("role") or "Spirit Conduit Resident",
+                                "race": x_ct.get("race") or x_bi.get("race") or "",
+                                "gender": x_ct.get("gender") or x_bi.get("gender") or "",
+                                "appearance": x_ct.get("appearance") or {},
+                                "basic_info": x_bi,
+                                "relationship_score": x_ct.get("relationship_score", 0),
+                                "track": x_ct.get("track", "platonic"),
+                                "status_effects": ["Present"],
+                                "stage_role": "room_bystander",
+                                "attention_ring": "ring_3_bystander",
+                            })
+                    if active_stage_nid in folklore_candidate_nodes or in_spirit_now:
                         if persist_db:
                             villagers_here = hydrate_village_cast_for_node(
                                 sess_id,
@@ -2279,8 +2860,12 @@ def compute_pre_turn_stage(
                             })
                             fk_added += 1
 
-                        if villagers_here and (540 <= (curr_min_fk % 1440) <= 1020) and active_stage_nid not in (
-                            set(VEILED_INNER_ROOM_IDS["kitsune"]) | set(VEILED_INNER_ROOM_IDS["bunian"])
+                        has_ghoul_wanderer = any(
+                            "ghoul" in str(v.get("folklore_village") or v.get("race") or "").lower()
+                            for v in (villagers_here or [])
+                        )
+                        if villagers_here and (has_ghoul_wanderer or (540 <= (curr_min_fk % 1440) <= 1020)) and not in_spirit_now and active_stage_nid not in (
+                            set(VEILED_INNER_ROOM_IDS["kitsune"]) | set(VEILED_INNER_ROOM_IDS["bunian"]) | set(VEILED_INNER_ROOM_IDS["ghoul"])
                         ):
                             chk_fk = lead_act_dict.get("check")
                             chk_fk_tier = str(
@@ -2300,6 +2885,7 @@ def compute_pre_turn_stage(
                                     kw in act_text_combined
                                     for kw in (
                                         "glamour", "disguise", "illusion", "tell", "suzu", "cempaka", "serunai",
+                                        "signet", "catacomb", "myrrh", "canine", "fang", "ghoul",
                                         "ear", "tail", "shadow", "wanderer", "stranger", "traveller", "traveler",
                                         "spirit", "fox", "bunian",
                                     )
@@ -2636,6 +3222,10 @@ def compute_pre_turn_stage(
         "blocked_invalid_exit": blocked_invalid_exit,
         "party_cohesion_deferred": party_cohesion_deferred,
         "pending_folklore_ops": pending_folklore_ops,
+        "pending_realm_ops": pending_realm_ops,
+        "crossed_realm": crossed_realm,
+        "waiting_outside_companions": list(session.get("waiting_outside_companions") or []),
+        "waiting_outside_companions_dirty": waiting_outside_companions_dirty,
         "pending_roster_ops": pending_roster_ops,
         "doorbell_events": doorbell_events,
         "crowd_flavor": crowd_flavor,
@@ -2857,7 +3447,25 @@ def resolve_post_turn_stage_delta(
         _get_npc_name(x) for x in list(baseline) + list(raw_npcs_present or []) if _get_npc_name(x)
     ]
 
-    # Normalize excluded names (e.g. left behind, remote, departed)
+    # Extract warded companions waiting outside a restrict_companions realm so LLM hallucinations never leak them inside
+    _wait_out_low: set[str] = set()
+    if isinstance(session, dict):
+        _raw_wait_delta = (
+            session.get("waiting_outside_companions")
+            if "waiting_outside_companions" in session
+            else (session.get("extra") or {}).get("waiting_outside_companions")
+        )
+        for _w_item in (_raw_wait_delta or ()):
+            if isinstance(_w_item, dict):
+                _w_nm = _get_npc_name(_w_item).strip().lower()
+                if _w_nm:
+                    _wait_out_low.add(_w_nm)
+                if _w_item.get("npc_id"):
+                    _wait_out_low.add(str(_w_item["npc_id"]).strip().lower())
+            elif isinstance(_w_item, str) and _w_item.strip():
+                _wait_out_low.add(_w_item.strip().lower())
+
+    # Normalize excluded names (e.g. left behind, remote, departed, or warded outside realm)
     clean_excluded = set()
     for ex in (excluded_names or set()):
         if ex:
@@ -2866,6 +3474,10 @@ def resolve_post_turn_stage_delta(
                 clean_excluded.add(ex_s)
                 if " " in ex_s:
                     clean_excluded |= namegen.get_unique_person_tokens(ex_s, peer_names=all_stage_peer_names)
+    for _w_ex in _wait_out_low:
+        clean_excluded.add(_w_ex)
+        if " " in _w_ex:
+            clean_excluded |= namegen.get_unique_person_tokens(_w_ex, peer_names=all_stage_peer_names)
 
     # Collect nearby enemies to prevent hostile enemies from being staged as social bystanders
     enemy_names = set()
@@ -2984,6 +3596,9 @@ def resolve_post_turn_stage_delta(
             _pm_nm = _get_npc_name(_pm).strip().lower()
             if _pm_nm:
                 pre_move_names_lower.add(_pm_nm)
+    if _wait_out_low:
+        party_names_lower -= _wait_out_low
+        pre_move_names_lower -= _wait_out_low
     appt_names_lower: set[str] = set()
     if closed_world_active and session and session.get("id"):
         try:

@@ -228,14 +228,25 @@ def get_session_clue_by_id(
         return _execute(local_conn)
 
 
-def verify_session_clue(clue_id: int) -> bool:
+def verify_session_clue(clue_id: int, conn: Optional[sqlite3.Connection] = None, session_id: Optional[int] = None) -> bool:
     """Marks an evidence record as verified."""
-    with get_conn() as conn:
-        cur = conn.execute(
-            "UPDATE session_clues SET is_verified=1, updated_at=? WHERE id=?",
-            (time.time(), clue_id),
-        )
+    def _execute(c: sqlite3.Connection) -> bool:
+        if session_id is not None:
+            cur = c.execute(
+                "UPDATE session_clues SET is_verified=1, updated_at=? WHERE id=? AND session_id=?",
+                (time.time(), clue_id, int(session_id)),
+            )
+        else:
+            cur = c.execute(
+                "UPDATE session_clues SET is_verified=1, updated_at=? WHERE id=?",
+                (time.time(), clue_id),
+            )
         return cur.rowcount > 0
+
+    if conn is not None:
+        return _execute(conn)
+    with get_conn() as c:
+        return _execute(c)
 
 
 def apply_caseboard_breakthrough_to_quests(
@@ -370,39 +381,57 @@ def synthesize_deduction_clue(
     turn_created: int | None = None,
 ) -> int:
     """Creates a verified deduction breakthrough linking parent clues and applying quest breakthrough shortcuts."""
-    inherited_npc = ""
-    inherited_qid = ""
-    for pid in clue_ids:
-        cl = get_session_clue_by_id(pid)
-        if cl:
-            if not inherited_npc and cl.get("linked_npc"):
+    clean_ids = list(dict.fromkeys(int(pid) for pid in (clue_ids or []) if pid is not None))
+    with UnitOfWork() as conn:
+        inherited_npc = ""
+        inherited_qid = ""
+        by_id: dict[int, sqlite3.Row] = {}
+        if clean_ids:
+            rows = conn.execute(
+                "SELECT id, linked_npc, quest_id FROM session_clues "
+                "WHERE session_id=? AND id IN (SELECT value FROM json_each(?))",
+                (session_id, json.dumps(clean_ids)),
+            ).fetchall()
+            by_id = {int(r["id"]): r for r in rows}
+        valid_ids = [pid for pid in clean_ids if pid in by_id]
+        for pid in valid_ids:
+            cl = by_id[pid]
+            if not inherited_npc and cl["linked_npc"]:
                 inherited_npc = str(cl["linked_npc"]).strip()
-            if not inherited_qid and cl.get("quest_id"):
+            if not inherited_qid and cl["quest_id"]:
                 inherited_qid = str(cl["quest_id"]).strip()
 
-    cid = add_session_clue(
-        session_id=session_id,
-        title=title,
-        lead_text=lead_text,
-        category="deduction",
-        source_location="Mind Palace / Caseboard",
-        linked_npc=inherited_npc,
-        quest_id=inherited_qid,
-        chapter=chapter,
-        is_verified=1,
-        deduction_parents=clue_ids,
-        turn_created=turn_created,
-    )
-    for parent_id in clue_ids:
-        verify_session_clue(parent_id)
-        try:
-            with get_conn() as conn:
+        cid = add_session_clue(
+            session_id=session_id,
+            title=title,
+            lead_text=lead_text,
+            category="deduction",
+            source_location="Mind Palace / Caseboard",
+            linked_npc=inherited_npc,
+            quest_id=inherited_qid,
+            chapter=chapter,
+            is_verified=1,
+            deduction_parents=valid_ids,
+            turn_created=turn_created,
+            conn=conn,
+        )
+        if valid_ids:
+            now_ts = time.time()
+            valid_json = json.dumps(valid_ids)
+            try:
                 conn.execute(
-                    "UPDATE session_clues SET is_consumed=1, updated_at=? WHERE id=?",
-                    (time.time(), parent_id),
+                    "UPDATE session_clues SET is_verified=1, is_consumed=1, updated_at=? "
+                    "WHERE session_id=? AND id IN (SELECT value FROM json_each(?))",
+                    (now_ts, session_id, valid_json),
                 )
-        except sqlite3.OperationalError:
-            pass
+            except sqlite3.OperationalError as exc:
+                if "no such column" not in str(exc).lower():
+                    raise
+                conn.execute(
+                    "UPDATE session_clues SET is_verified=1, updated_at=? "
+                    "WHERE session_id=? AND id IN (SELECT value FROM json_each(?))",
+                    (now_ts, session_id, valid_json),
+                )
 
-    apply_caseboard_breakthrough_to_quests(session_id, clue_ids, title, lead_text)
-    return cid
+        apply_caseboard_breakthrough_to_quests(session_id, valid_ids, title, lead_text)
+        return cid

@@ -502,7 +502,7 @@ def _build_dialogue_prompt_block(session: dict, ctx, new_partners: list, party: 
         lead_char = actions[0]["char"]
     if not lead_char and session.get("host_user_id"):
         try:
-            lead_char = db.get_character(session.get("host_user_id")) or {}
+            lead_char = db.get_character(session.get("host_user_id"), session_id=session.get("id")) or {}
         except Exception:
             pass
     pl_name = str(lead_char.get("name") or "you").strip()

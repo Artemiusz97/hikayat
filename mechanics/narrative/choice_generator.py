@@ -165,7 +165,8 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
     from mechanics.combat.equipment import parse_equipment_metadata
 
     equipped_items = [item for item in inventory if isinstance(item, dict) and item.get("equipped")] if inventory else []
-    p_attrs = calculate_combat_attributes(char, equipped_items, allow_non_combat=True)
+    _cg_sid = int(session["id"]) if isinstance(session, dict) and session.get("id") else None
+    p_attrs = calculate_combat_attributes(char, equipped_items, allow_non_combat=True, session_id=_cg_sid)
     m_attrs = calculate_combat_attributes(monster_stats)
 
     acc_val = p_attrs.get("acc", 66)
@@ -537,10 +538,20 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
 
     # 2. MAGIC & SPELLS / AWAKENED ABILITIES CATEGORY
     magic = []
-    from mechanics.combat.spells import get_spell, get_starter_spells, format_spell_choice_label
+    from mechanics.combat.spells import (
+        format_spell_choice_label,
+        get_active_spirit_court_summon_spell_ids,
+        get_spell,
+        get_starter_spells,
+    )
     from mechanics.combat.spells.awakened_kits import get_actor_spell as _get_actor_spell_safe
     user_id = char.get("user_id")
-    learned_spells = db.get_learned_spells(user_id) if user_id else []
+    eff_sid_mc = int(session["id"]) if isinstance(session, dict) and session.get("id") else None
+    learned_spells = list(db.get_learned_spells(user_id, char=char, session_id=eff_sid_mc) if user_id else [])
+    if isinstance(session, dict) and session.get("id"):
+        for _sc_sid in get_active_spirit_court_summon_spell_ids(int(session["id"])):
+            if _sc_sid not in learned_spells:
+                learned_spells.append(_sc_sid)
     skill_prog = db.get_skill_progress(char) if char else {}
     if is_anom_combat:
         from mechanics.combat.awakened_resonance import get_actor_resonance_pips
@@ -554,7 +565,7 @@ def generate_categorized_combat_actions(party: list, monster: dict, location: st
         class_desc = char.get("class_description", "")
         learned_spells = get_starter_spells(scenario or "fantasy", char.get("char_class", ""), int_stat=int_val, class_description=class_desc)
         if user_id:
-            db.set_learned_spells(user_id, learned_spells)
+            db.set_learned_spells(user_id, learned_spells, char=char, session_id=eff_sid_mc)
 
     for spell_id in learned_spells:
         spell = _get_actor_spell_safe(spell_id, skill_prog) or get_spell(spell_id)

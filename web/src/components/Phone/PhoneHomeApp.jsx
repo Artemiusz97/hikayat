@@ -34,16 +34,24 @@ const PhoneHomeApp = ({
     });
   }
   if (availableBounties.length > 0) {
+    const bountyAppId = apps.some((a) => a.id === 'bounties')
+      ? 'bounties'
+      : apps.some((a) => a.id === 'school_bounties')
+      ? 'school_bounties'
+      : 'bounties';
     notifications.push({
       id: 'bounties',
-      appId: 'bounties',
+      appId: bountyAppId,
       icon: ShieldAlert,
       iconBg: 'bg-rose-500/25 text-rose-300',
       btnCls: 'bg-rose-600/35 hover:bg-rose-600/55 text-rose-100 border-rose-400/40',
       title: t('phone.home.requests_posted', '{{count}} Requests Posted', {
         count: availableBounties.length,
       }),
-      sub: t('phone.home.visit_requests', 'Visit Requests for active tasks'),
+      sub:
+        bountyAppId === 'school_bounties'
+          ? t('phone.home.visit_requests', 'Visit Campus Requests for active tasks')
+          : t('phone.home.visit_bounty_board', 'Visit Bounty Board for active contracts'),
     });
   }
   if (notifications.length < 2 && mediaGallery.length > 0) {

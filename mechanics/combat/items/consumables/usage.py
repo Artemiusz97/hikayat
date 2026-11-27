@@ -14,18 +14,24 @@ from .metadata import (
 )
 
 
-def _remove_inventory_item_entry(user_id: int, item: Dict[str, Any], *, force: bool = False) -> bool:
+def _remove_inventory_item_entry(
+    user_id: int,
+    item: Dict[str, Any],
+    *,
+    force: bool = False,
+    char: Optional[Dict[str, Any]] = None,
+) -> bool:
     """Removes the exact item row by ID when present, falling back to name lookup."""
     it_id = item.get("id") if isinstance(item, dict) else None
     if it_id is not None:
         try:
-            if db.remove_item(user_id, int(it_id), force=force):
+            if db.remove_item(user_id, int(it_id), force=force, char=char):
                 return True
         except Exception:
             pass
     it_name = item.get("name", "") if isinstance(item, dict) else ""
     if it_name:
-        return bool(db.remove_item_by_name(user_id, it_name, force=force))
+        return bool(db.remove_item_by_name(user_id, it_name, force=force, char=char))
     return False
 
 
@@ -75,7 +81,7 @@ def evaluate_gift_reaction(
 
     item_name = item.get("name", "Gift")
     tier = parse_item_tier(item)
-    char = db.get_character(user_id) or {}
+    char = db.get_character(user_id, session_id=session_id) or {}
     player_cha = char.get("cha", 10)
     player_luk = char.get("luk", 10)
 
@@ -134,9 +140,42 @@ def evaluate_gift_reaction(
                 dislike_keyword = clean_pref
                 break
 
-    # Sensitive/modest check for NSFW novelties
-    if any(k in item_text for k in ["lingerie", "adult toy", "pleasure", "bondage", "whip", "aphrodisiac"]):
-        if any(t in " ".join(traits + preferences).lower() for t in ["shy", "modest", "innocent", "proper", "prude", "pious"]):
+    # Sensitive/modest check for NSFW novelties (canonical openness precedence + graduated Prude comfort)
+    is_soft_lingerie = any(k in item_text for k in ("lingerie", "silk nightgown", "lace"))
+    is_explicit_toy = any(k in item_text for k in ("adult toy", "pleasure", "bondage", "whip", "aphrodisiac"))
+    if is_soft_lingerie or is_explicit_toy:
+        c_app_gift = (contact or {}).get("appearance") if isinstance((contact or {}).get("appearance"), dict) else {}
+        raw_op_gift = c_app_gift.get("erotic_openness") or c_app_gift.get("openness")
+        if raw_op_gift not in (None, ""):
+            from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+            op_t_gift = normalize_openness_tier(raw_op_gift)
+            if op_t_gift == "prude":
+                fet_blob = str(c_app_gift.get("fetishes") or "").lower()
+                matches_kink = (
+                    ("lingerie" in fet_blob and is_soft_lingerie)
+                    or ("bondage" in fet_blob and any(k in item_text for k in ("bondage", "whip")))
+                    or (any(k in fet_blob for k in ("restraint", "silk")) and "bondage" in item_text)
+                )
+                if not matches_kink:
+                    rel_score_g = int((contact or {}).get("relationship_score", (contact or {}).get("score", 0)) or 0)
+                    rel_track_g = str((contact or {}).get("relationship_track") or (contact or {}).get("track") or "platonic")
+                    sh_cnt_g = len((contact or {}).get("gameplay_intimate_events") or [])
+                    is_host_g = str((contact or {}).get("disposition") or "").strip().lower() == "hostile"
+                    comf_g = compute_with_you_comfort(
+                        op_t_gift,
+                        relationship_score=rel_score_g,
+                        relationship_track=rel_track_g,
+                        shared_intimate_count=sh_cnt_g,
+                        is_hostile=is_host_g,
+                    )
+                    if comf_g["stage"] == "guarded":
+                        is_disliked = True
+                        dislike_keyword = "indecency"
+                    elif comf_g["stage"] == "warming_up" and is_explicit_toy:
+                        is_disliked = True
+                        dislike_keyword = "indecency"
+        elif any(t in " ".join(traits + preferences).lower() for t in ["shy", "modest", "innocent", "proper", "prude", "pious"]):
             is_disliked = True
             dislike_keyword = "indecency"
 
@@ -175,7 +214,7 @@ def evaluate_gift_reaction(
                     basic_info=gift_info,
                     delta_score=score_delta,
                 )
-            _remove_inventory_item_entry(user_id, item, force=force_remove)
+            _remove_inventory_item_entry(user_id, item, force=force_remove, char=char)
             return True, (
                 f"💢 **Disliked Gift!** You offered {badge} **{item_name}** to **{target_name}**, but they strongly dislike {dislike_keyword or 'this kind of gift'}!\n"
                 f"🎲 *CHA Check Failed ({check.chance}% chance — {check.tier_label})*\n"
@@ -194,7 +233,7 @@ def evaluate_gift_reaction(
                     basic_info=gift_info,
                     delta_score=score_delta,
                 )
-            _remove_inventory_item_entry(user_id, item, force=force_remove)
+            _remove_inventory_item_entry(user_id, item, force=force_remove, char=char)
             return True, (
                 f"💬 **Charming Recovery!** **{target_name}** isn't fond of {dislike_keyword or 'this gift'}, but your charm and pleasant words saved the gesture!\n"
                 f"🎲 *CHA Check Succeeded ({check.chance}% chance — {check.tier_label})*\n"
@@ -254,7 +293,7 @@ def evaluate_gift_reaction(
                 worn_note = f"\n👗 **{target_name}** gladly tries on and wears **{item_name}**!"
         except Exception:
             pass
-    _remove_inventory_item_entry(user_id, item, force=force_remove)
+    _remove_inventory_item_entry(user_id, item, force=force_remove, char=char)
 
     return True, (
         f"{feedback_title}\n{reaction_text}{worn_note}\n"
@@ -370,25 +409,28 @@ def apply_item_to_target(
 
         sp_name = sp["name"] if sp else "Ancient Spell"
 
-        if db.has_learned_spell(user_id, spell_id):
+        eff_sid_sp = int((session or {}).get("id") or 0) or None
+        char = db.get_character(user_id, session_id=eff_sid_sp) if eff_sid_sp else db.get_character(user_id)
+        if db.has_learned_spell(user_id, spell_id, char=char, session_id=eff_sid_sp):
             return False, f"📖 You have already mastered **{sp_name}**!"
 
         spell_payload = meta.get("spell_data") if ("meta" in locals() and isinstance(meta, dict)) else None
-        db.learn_spell(user_id, spell_id, spell_data=spell_payload)
-        db.remove_item(user_id, item["id"])
+        db.learn_spell(user_id, spell_id, spell_data=spell_payload, char=char, session_id=eff_sid_sp)
+        db.remove_item(user_id, item["id"], char=char, session_id=eff_sid_sp)
         tier_str = sp.get("tier_name", "Basic") if sp else "Basic"
         disc_str = sp.get("discipline", "attack").title() if sp else "Magic"
         mp_cost = sp.get("mp_cost", 0) if sp else 0
-        char = db.get_character(user_id)
         max_mp = char.get("max_mp", 0) if char else 0
         warning_note = ""
         if mp_cost > max_mp:
             warning_note = f"\n⚠️ *Note: This spell requires **{mp_cost} MP**, but your maximum MP capacity is currently **{max_mp} MP**. You will need to raise your INT/arcane pool before casting it in battle!*"
         return True, f"✨ **Spell Learned!** You studied **{item_name}** and mastered **{sp_name}** ({tier_str} {disc_str} Magic)!{warning_note}"
 
+    eff_sid_use = int((session or {}).get("id") or 0) or None
+
     # 1. Target: SELF
     if target_type == "self" or target_name.lower() in ("yourself", "self", "me"):
-        char = db.get_character(user_id)
+        char = (db.get_character(user_id, session_id=eff_sid_use) if eff_sid_use else None) or db.get_character(user_id)
         if not char:
             return False, "❌ Character not found."
 
@@ -398,16 +440,16 @@ def apply_item_to_target(
         actual_hp = min(hp_restore, char["max_hp"] - char["hp"]) if hp_restore > 0 else 0
         actual_mp = min(mp_restore, char["max_mp"] - char["mp"]) if mp_restore > 0 else 0
 
-        db.apply_hp_mp_delta(user_id, hp_delta=actual_hp, mp_delta=actual_mp)
+        db.apply_hp_mp_delta(user_id, hp_delta=actual_hp, mp_delta=actual_mp, character_id=char.get("id"))
 
         if parsed["cure_status"]:
-            status_list = db.get_status_effects(user_id)
+            status_list = db.get_status_effects(user_id, character_id=char.get("id"), session_id=eff_sid_use)
             cured = [s for s in status_list if s in parsed["cure_status"] or "all" in parsed["cure_status"]]
             if cured:
                 for c in cured:
-                    db.remove_status_effect(user_id, c)
+                    db.remove_status_effect(user_id, c, character_id=char.get("id"), session_id=eff_sid_use)
 
-        _remove_inventory_item_entry(user_id, item)
+        _remove_inventory_item_entry(user_id, item, char=char)
 
         feedback = []
         if actual_hp > 0:
@@ -428,27 +470,28 @@ def apply_item_to_target(
                 else:
                     lbl = f"+{v} {k.upper()}"
                 feedback.append(lbl)
-                db.add_status_effect(user_id, f"[{lbl}] [{dur} turns]")
+                db.add_status_effect(user_id, f"[{lbl}] [{dur} turns]", character_id=char.get("id"), session_id=eff_sid_use)
         if parsed["cure_status"]:
             feedback.append(f"cleansed {', '.join(parsed['cure_status'])}")
 
         desc = f" ({', '.join(feedback)})" if feedback else ""
-        new_char = db.get_character(user_id)
+        new_char = (db.get_character_by_id(char["id"]) if char.get("id") else None) or db.get_character(user_id)
         return True, f"✨ You used **{item_name}** on yourself!{desc}\n❤️ **{new_char['hp']}/{new_char['max_hp']}** | 💙 **{new_char['mp']}/{new_char['max_mp']}**"
 
     # 2. Target: OTHER PLAYER (Multiplayer)
     elif target_type == "player" and target_user_id:
-        target_char = db.get_character(target_user_id)
+        actor_char = (db.get_character(user_id, session_id=eff_sid_use) if eff_sid_use else None) or db.get_character(user_id)
+        target_char = (db.get_character(target_user_id, session_id=eff_sid_use) if eff_sid_use else None) or db.get_character(target_user_id)
         if not target_char:
             return False, f"❌ Player '{target_name}' not found."
 
         actual_hp = min(parsed["hp_restore"], target_char["max_hp"] - target_char["hp"]) if parsed["hp_restore"] > 0 else 0
         actual_mp = min(parsed["mp_restore"], target_char["max_mp"] - target_char["mp"]) if parsed["mp_restore"] > 0 else 0
 
-        db.apply_hp_mp_delta(target_user_id, hp_delta=actual_hp, mp_delta=actual_mp)
+        db.apply_hp_mp_delta(target_user_id, hp_delta=actual_hp, mp_delta=actual_mp, character_id=target_char.get("id"))
         if parsed["cure_status"]:
             for c in parsed["cure_status"]:
-                db.remove_status_effect(target_user_id, c)
+                db.remove_status_effect(target_user_id, c, character_id=target_char.get("id"), session_id=eff_sid_use)
 
         feedback = []
         if actual_hp > 0:
@@ -469,12 +512,12 @@ def apply_item_to_target(
                 else:
                     lbl = f"+{v} {k.upper()}"
                 feedback.append(lbl)
-                db.add_status_effect(target_user_id, f"[{lbl}] [{dur} turns]")
+                db.add_status_effect(target_user_id, f"[{lbl}] [{dur} turns]", character_id=target_char.get("id"), session_id=eff_sid_use)
         if parsed["cure_status"]:
             feedback.append(f"cleansed {', '.join(parsed['cure_status'])}")
 
-        _remove_inventory_item_entry(user_id, item)
-        new_target = db.get_character(target_user_id)
+        _remove_inventory_item_entry(user_id, item, char=actor_char)
+        new_target = (db.get_character_by_id(target_char["id"]) if target_char.get("id") else None) or db.get_character(target_user_id)
         desc = f" ({', '.join(feedback)})" if feedback else ""
         return True, (
             f"✨ You used **{item_name}** on **{target_char['name']}**!{desc}\n"
@@ -493,7 +536,8 @@ def apply_item_to_target(
         npc_idx = next((idx for idx, n in enumerate(npcs) if isinstance(n, dict) and n.get("name", "").strip().lower() == target_low), None)
         target_npc = npcs[npc_idx] if npc_idx is not None else None
 
-        _remove_inventory_item_entry(user_id, item)
+        actor_char = (db.get_character(user_id, session_id=eff_sid_use) if eff_sid_use else None) or db.get_character(user_id) or {}
+        _remove_inventory_item_entry(user_id, item, char=actor_char)
 
         if target_npc is not None:
             max_hp = int(target_npc.get("max_hp", 40) or 40)
@@ -531,7 +575,6 @@ def apply_item_to_target(
                 db.update_session_npcs(session["id"], npcs)
                 session["current_npcs"] = npcs
                 if (actual_hp > 0 or cured_any) and not parsed["inflict_status"]:
-                    actor_char = db.get_character(user_id) or {}
                     db.upsert_contact(
                         int(session["id"]),
                         target_npc.get("name", target_name).lower().replace(" ", "_"),

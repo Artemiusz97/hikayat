@@ -156,6 +156,37 @@ def _hydrate_contract_row(row: sqlite3.Row | Dict[str, Any]) -> Dict[str, Any]:
     return d
 
 
+def _query_player_pacts(
+    c: sqlite3.Connection,
+    session_ids_json: str,
+    hid: str,
+    *,
+    character_id: Optional[int] = None,
+    include_inactive: bool = False,
+) -> List[Dict[str, Any]]:
+    _ensure_contracts_v52_tables(c)
+    status_clause = "" if include_inactive else " AND status = 'active'"
+    if character_id is not None:
+        rows = c.execute(
+            f"""SELECT * FROM session_entity_contracts
+                WHERE session_id IN (SELECT value FROM json_each(?))
+                  AND holder_type = 'player'{status_clause}
+                  AND (holder_id = ? OR character_id = ?)
+                ORDER BY id ASC""",
+            (session_ids_json, hid, int(character_id)),
+        ).fetchall()
+    else:
+        rows = c.execute(
+            f"""SELECT * FROM session_entity_contracts
+                WHERE session_id IN (SELECT value FROM json_each(?))
+                  AND holder_type = 'player'{status_clause}
+                  AND holder_id = ?
+                ORDER BY id ASC""",
+            (session_ids_json, hid),
+        ).fetchall()
+    return [_hydrate_contract_row(r) for r in rows]
+
+
 def get_player_active_pacts(
     session_id: int,
     user_id: int | str,
@@ -167,44 +198,48 @@ def get_player_active_pacts(
     """Returns active Entity Contracts for a specific player (`holder_id=str(user_id)`) in `session_id`."""
     if not session_id or user_id is None:
         return []
-    sid = int(session_id)
+    sid_json = json.dumps([int(session_id)])
     hid = str(user_id).strip()
 
-    def _run(c: sqlite3.Connection) -> List[Dict[str, Any]]:
-        _ensure_contracts_v52_tables(c)
-        if include_inactive:
-            if character_id is not None:
-                rows = c.execute(
-                    """SELECT * FROM session_entity_contracts
-                       WHERE session_id = ? AND holder_type = 'player'
-                         AND (holder_id = ? OR character_id = ?)
-                       ORDER BY id ASC""",
-                    (sid, hid, int(character_id)),
-                ).fetchall()
-            else:
-                rows = c.execute(
-                    """SELECT * FROM session_entity_contracts
-                       WHERE session_id = ? AND holder_type = 'player' AND holder_id = ?
-                       ORDER BY id ASC""",
-                    (sid, hid),
-                ).fetchall()
-        else:
-            if character_id is not None:
-                rows = c.execute(
-                    """SELECT * FROM session_entity_contracts
-                       WHERE session_id = ? AND holder_type = 'player' AND status = 'active'
-                         AND (holder_id = ? OR character_id = ?)
-                       ORDER BY id ASC""",
-                    (sid, hid, int(character_id)),
-                ).fetchall()
-            else:
-                rows = c.execute(
-                    """SELECT * FROM session_entity_contracts
-                       WHERE session_id = ? AND holder_type = 'player' AND holder_id = ? AND status = 'active'
-                       ORDER BY id ASC""",
-                    (sid, hid),
-                ).fetchall()
-        return [_hydrate_contract_row(r) for r in rows]
+    if conn is not None:
+        return _query_player_pacts(conn, sid_json, hid, character_id=character_id, include_inactive=include_inactive)
+    with get_conn() as c:
+        return _query_player_pacts(c, sid_json, hid, character_id=character_id, include_inactive=include_inactive)
+
+
+def get_sessions_player_pacts_and_grudges_batch(
+    session_ids: Iterable[int],
+    user_id: int | str,
+    *,
+    character_id: Optional[int] = None,
+    conn: Optional[sqlite3.Connection] = None,
+) -> Tuple[Dict[int, List[Dict[str, Any]]], Dict[int, List[Dict[str, Any]]]]:
+    """Batch-loads active player pacts and active grudges across multiple sessions in two queries."""
+    sids = list(dict.fromkeys(int(s) for s in (session_ids or []) if s))
+    if not sids or user_id is None:
+        return {}, {}
+    hid = str(user_id).strip()
+    sids_json = json.dumps(sids)
+
+    def _run(c: sqlite3.Connection) -> Tuple[Dict[int, List[Dict[str, Any]]], Dict[int, List[Dict[str, Any]]]]:
+        pacts_by_sid: Dict[int, List[Dict[str, Any]]] = {s: [] for s in sids}
+        grudges_by_sid: Dict[int, List[Dict[str, Any]]] = {s: [] for s in sids}
+
+        for hd in _query_player_pacts(c, sids_json, hid, character_id=character_id, include_inactive=False):
+            pacts_by_sid.setdefault(int(hd["session_id"]), []).append(hd)
+
+        grudge_rows = c.execute(
+            """SELECT * FROM session_contract_grudges
+               WHERE session_id IN (SELECT value FROM json_each(?))
+                 AND holder_id = ? AND status = 'active'
+               ORDER BY id ASC""",
+            (sids_json, hid),
+        ).fetchall()
+        for r in grudge_rows:
+            gd = dict(r)
+            grudges_by_sid.setdefault(int(gd["session_id"]), []).append(gd)
+
+        return pacts_by_sid, grudges_by_sid
 
     if conn is not None:
         return _run(conn)
@@ -1416,8 +1451,15 @@ def rollback_entity_contracts_after_turn(
                         "UPDATE session_entity_contracts SET bound_gear_item_id = ?, bound_gear_slot = ? WHERE id = ?",
                         (g_id, g_slot, phd["id"]),
                     )
-            except Exception:
-                pass
+            except sqlite3.Error:
+                raise
+            except Exception as exc:
+                log.warning(
+                    "Symbiotic gear rebinding skipped on contract rollback (session=%s, contract=%s): %s",
+                    sid,
+                    phd.get("contract_key"),
+                    exc,
+                )
 
         return {
             "contracts_restored": contracts_restored,

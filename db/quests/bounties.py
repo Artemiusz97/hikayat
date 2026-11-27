@@ -1,7 +1,9 @@
 """Quest reward claims, anomalous faction payouts/vault logs, strike counters, and contract failures."""
 from __future__ import annotations
 
+import logging
 import re
+import sqlite3
 import time
 
 import db
@@ -13,6 +15,8 @@ from ..dossiers import (
     get_quest_dossier,
 )
 from .core import get_quest_by_id
+
+log = logging.getLogger(__name__)
 
 
 def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]) -> dict:
@@ -32,8 +36,10 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
             from game_engine.quests import consume_quest_delivery_item_if_needed
 
             consume_quest_delivery_item_if_needed(session_id, quest, party_user_ids)
-        except Exception:
-            pass
+        except sqlite3.Error:
+            raise
+        except Exception as exc:
+            log.warning("Delivery item consumption failed for quest %s (session=%s): %s", quest_id, session_id, exc)
 
         rxp = quest.get("reward_xp", 100)
         rgold = quest.get("reward_gold", 25)
@@ -69,7 +75,7 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                     quest_id or ""
                 ).upper().startswith("MAND-")
 
-                if player_arch == "public_agency" and (
+                if board_src != "spirit_court" and player_arch == "public_agency" and (
                     board_src == "public_agency" or is_story_q or is_mandatory
                 ):
                     rgold = 0
@@ -77,7 +83,7 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                     anom_reward_note = (
                         "Taxpayer Mandate: 0G / 0 Loot (salaried Public Agency duty)."
                     )
-                elif player_arch == "monastic_order" and (
+                elif board_src != "spirit_court" and player_arch == "monastic_order" and (
                     board_src == "monastic_order" or is_mandatory
                 ):
                     rgold = 0
@@ -99,7 +105,7 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                             "Black-Ledger Bonus Suspended (0 Rep — complete Mandatory Dispatch to restore +35% Hazard Gold)."
                         )
 
-                if player_arch != "freelancer":
+                if board_src != "spirit_court" and player_arch != "freelancer":
                     earns_promo_rep = is_mandatory or (board_src == player_arch) or is_story_q
                     if earns_promo_rep:
                         rep_delta = 15 if (is_mandatory or is_story_q) else 10
@@ -155,16 +161,18 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                         user_id=lead_uid,
                         quest_id=str(quest_id or ""),
                     )
-        except Exception:
-            pass
+        except sqlite3.Error:
+            raise
+        except Exception as exc:
+            log.warning("Anomalous quest payout/containment hook failed (quest=%s, session=%s): %s", quest_id, session_id, exc)
 
         levels_gained_by_user = {}
         for uid in party_user_ids:
-            lvl_ups = db.add_xp(uid, rxp)
+            lvl_ups = db.add_xp(uid, rxp, session_id=session_id)
             if lvl_ups:
                 levels_gained_by_user[uid] = lvl_ups
 
-            db.apply_hp_mp_delta(uid, 0, 0, rgold)
+            db.apply_hp_mp_delta(uid, 0, 0, rgold, session_id=session_id)
 
             if ritem:
                 if scenario_data.is_anomalous_incursions_scenario(scen_key):
@@ -208,11 +216,14 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                 db.update_relationship_score(
                     session_id, client_npc, delta_score=client_affinity_gain
                 )
-            except Exception:
-                pass
+            except sqlite3.Error:
+                raise
+            except Exception as exc:
+                log.warning("Client affinity update failed for %s (quest=%s): %s", client_npc, quest_id, exc)
 
         faction_rep_gained = 0
         rival_rep_deltas = {}
+        agency_heat_delta = 0
         if "faction:" in notes or "rival_faction:" in notes:
             try:
                 parts = [p.strip() for p in re.split(r"[|\n]+", notes) if p.strip()]
@@ -230,23 +241,49 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                 if faction_id:
                     if faction_rep_gained <= 0:
                         faction_rep_gained = 10
-                    db.upsert_faction(
-                        session_id,
-                        faction_id,
-                        delta_score=faction_rep_gained,
-                        notes="Faction bounty completed",
-                    )
-                    try:
-                        s_fac = db.get_faction(session_id, faction_id)
-                        if s_fac and s_fac.get("rival_faction_ids"):
-                            for r in s_fac["rival_faction_ids"]:
-                                if r and str(r).strip() not in riv_ids:
-                                    riv_ids.append(str(r).strip())
-                    except Exception:
-                        pass
+                    if faction_id in (
+                        "faction_spirit_kitsune",
+                        "faction_spirit_bunian",
+                        "faction_spirit_ghoul",
+                    ):
+                        from mechanics.narrative.spirit_court_bounties import (
+                            resolve_spirit_court_quest_claim_effects,
+                        )
+
+                        dos_sc = get_quest_dossier(session_id, quest_id)
+                        sc_fx = resolve_spirit_court_quest_claim_effects(
+                            session_id,
+                            quest,
+                            faction_id=faction_id,
+                            rep_reward=faction_rep_gained,
+                            notes=notes,
+                            dossier=dos_sc,
+                            conn=conn,
+                        )
+                        faction_rep_gained = int(sc_fx.get("faction_rep_gained") or faction_rep_gained)
+                        agency_heat_delta = int(sc_fx.get("agency_heat_delta") or 0)
+                        for r_fid, r_del in (sc_fx.get("rival_rep_deltas") or {}).items():
+                            rival_rep_deltas[r_fid] = r_del
+                    else:
+                        db.upsert_faction(
+                            session_id,
+                            faction_id,
+                            delta_score=faction_rep_gained,
+                            notes="Faction bounty completed",
+                        )
+                        try:
+                            s_fac = db.get_faction(session_id, faction_id)
+                            if s_fac and s_fac.get("rival_faction_ids"):
+                                for r in s_fac["rival_faction_ids"]:
+                                    if r and str(r).strip() not in riv_ids:
+                                        riv_ids.append(str(r).strip())
+                        except sqlite3.Error:
+                            raise
+                        except Exception as exc:
+                            log.warning("Rival faction lookup failed (faction=%s, session=%s): %s", faction_id, session_id, exc)
 
                 for rid in riv_ids:
-                    if rid and rid != faction_id:
+                    if rid and rid != faction_id and rid not in rival_rep_deltas:
                         try:
                             db.upsert_faction(
                                 session_id,
@@ -255,10 +292,14 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                                 notes=f"Rival operation '{quest.get('title')}' completed",
                             )
                             rival_rep_deltas[rid] = -5
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except sqlite3.Error:
+                            raise
+                        except Exception as exc:
+                            log.warning("Rival faction penalty failed (rival=%s, quest=%s): %s", rid, quest_id, exc)
+            except sqlite3.Error:
+                raise
+            except Exception as exc:
+                log.warning("Faction reward tag parsing failed for quest %s (session=%s): %s", quest_id, session_id, exc)
 
         dos_cl = get_quest_dossier(session_id, quest_id)
         if dos_cl:
@@ -278,8 +319,10 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
                 db.upsert_quest_dossier(
                     session_id, quest_id, engaged_flag=1, outcome_tier=eff_tier_cl
                 )
-            except Exception:
-                pass
+            except sqlite3.Error:
+                raise
+            except Exception as exc:
+                log.warning("Quest dossier claim sync failed for quest %s (session=%s): %s", quest_id, session_id, exc)
 
     return {
         "claimed": True,
@@ -296,6 +339,7 @@ def claim_quest_reward(session_id: int, quest_id: str, party_user_ids: list[int]
         "client_affinity_gained": client_affinity_gain,
         "faction_rep_gained": faction_rep_gained,
         "rival_rep_deltas": rival_rep_deltas,
+        "agency_heat_delta": agency_heat_delta,
         "anomalous_promotion": anom_promotion_result,
         "anomalous_reward_note": anom_reward_note,
     }

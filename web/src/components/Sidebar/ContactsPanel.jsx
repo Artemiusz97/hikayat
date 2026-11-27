@@ -12,6 +12,7 @@ import AcquaintancesView from './AcquaintancesView';
 import NpcDossierBody, {
   defaultBulletRenderer as renderBulletPoints,
   formatPersonEntity,
+  isRedundantAgentTierGrade,
   resolveAffiliations,
   resolveAgeGroupLabel,
 } from './NpcDossierBody';
@@ -473,12 +474,7 @@ const ContactsPanel = ({
                 {/* Summary Badges + Actions */}
                 <div className="pt-1.5 space-y-1.5 text-[11px]">
                   <div className="flex flex-wrap items-center gap-1">
-                    {(npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role) && (
-                      <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
-                        Role: <strong className="text-gray-100">{npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role}</strong>
-                      </span>
-                    )}
-                    {(basic.grade || npc.grade) && (
+                    {(basic.grade || npc.grade) && !isRedundantAgentTierGrade(basic.grade || npc.grade, isSpecialAgent) && (
                       <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40 text-[10.5px]">
                         {formatTitle(basic.grade || npc.grade)}
                       </span>

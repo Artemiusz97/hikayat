@@ -19,6 +19,7 @@ export function usePhoneSocialControllers({
   setSessionPhoneWallpaper,
   onRefreshInventory,
   onRefreshCodex,
+  commsOffline = false,
   t,
 }) {
   const {
@@ -326,7 +327,7 @@ export function usePhoneSocialControllers({
   handleRefreshFeedRef.current = handleRefreshFeed;
 
   useEffect(() => {
-    if (!isOpen || activeApp !== 'feed') {
+    if (!isOpen || activeApp !== 'feed' || commsOffline) {
       autoFeedAttemptedRef.current = false;
       return;
     }
@@ -334,7 +335,7 @@ export function usePhoneSocialControllers({
       autoFeedAttemptedRef.current = true;
       handleRefreshFeedRef.current?.();
     }
-  }, [isOpen, activeApp, gossipFeed, feedBusy, hasRefreshFeed]);
+  }, [isOpen, activeApp, commsOffline, gossipFeed, feedBusy, hasRefreshFeed]);
 
   const galleryContacts = Array.from(
     new Set((mediaGallery || []).map((m) => m.contact_name).filter(Boolean))
@@ -364,6 +365,7 @@ export function usePhoneSocialControllers({
         role: c.basic_info?.role || c.basic_info?.occupation || 'Contact',
         score: scoreVal,
         is_blocked_contact: Boolean(c.is_blocked_contact || scoreVal <= -50),
+        spirit_relay_unlocked: Boolean(c.spirit_relay_unlocked || c.basic_info?.spirit_relay_unlocked),
         anomalous_npc_tag: c.anomalous_npc_tag || c.basic_info?.anomalous_npc_tag || null,
         deceased: Boolean(c.deceased || c.basic_info?.deceased),
       });
@@ -437,8 +439,11 @@ export function usePhoneSocialControllers({
       processDmOutcome(res);
       if (onRefreshInventory) onRefreshInventory();
       if (onRefreshCodex) onRefreshCodex();
-    } catch {
+    } catch (err) {
       setDmInput(text);
+      setDmOutcomeBanner({
+        error: err?.message || t('phone.dms.send_failed', 'Failed to send message.'),
+      });
     }
   };
 

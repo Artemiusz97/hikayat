@@ -698,7 +698,9 @@ def get_actor_endurance(actor: Dict[str, Any], is_player: bool = False) -> int:
     # Physique impact
     if any(k in physique for k in ("athletic", "muscular", "toned", "tall", "beastfolk")):
         base += 2
-    elif any(k in physique for k in ("petite", "frail", "slender", "soft")):
+    elif any(k in physique for k in ("stocky", "burly", "sturdy")):
+        base += 1
+    elif any(k in physique for k in ("slim", "petite", "frail", "slender", "soft")):
         base -= 1
 
     # Dynamic impact
@@ -1284,23 +1286,25 @@ def classify_intimate_act(
                 res["sensitive_spot_matched"] = True
                 res["matched_spot"] = "Anal Intimacy"
 
-    if (res["partner_stimulated"] or res["act_type"] == "foreplay_nongenital") and partner_contact and not res["sensitive_spot_matched"] and not res.get("turn_off_triggered"):
+    if (res["partner_stimulated"] or res["act_type"] == "foreplay_nongenital") and partner_contact and not res.get("turn_off_triggered"):
         appr = partner_contact.get("appearance", {}) if isinstance(partner_contact, dict) else {}
-        spots = appr.get("sensitive_spots") or appr.get("desires_and_kinks") or []
-        if isinstance(spots, str):
-            spots = [s.strip() for s in spots.split(",") if s.strip()]
+        from mechanics.social.persona.intimacy.logic import (
+            match_desires_and_kinks,
+            match_sensitive_spots,
+        )
         target_spot_text = act_only if action_str else clean_text
-        stop_words = {"physical", "action", "base", "line", "slow", "firm", "soft", "with", "from"}
-        for s in spots:
-            s_clean = re.sub(r'\([^)]*\)', '', str(s).lower()).strip()
-            if not s_clean:
-                continue
-            # Clean words for sub-matching (e.g. "inner thighs" -> "thighs", "nape of neck" -> "nape")
-            core_words = [w for w in re.split(r'[\s/&]+', s_clean) if len(w) >= 4 and w not in stop_words]
-            if s_clean in target_spot_text or any(w in target_spot_text for w in core_words):
+        if not res["sensitive_spot_matched"]:
+            matched_spots = match_sensitive_spots(target_spot_text, appr.get("sensitive_spots"))
+            if matched_spots:
                 res["sensitive_spot_matched"] = True
-                res["matched_spot"] = s
-                break
+                res["matched_spot"] = matched_spots[0]
+        m_desires, m_kinks = match_desires_and_kinks(
+            target_spot_text,
+            appr.get("desires_and_kinks") or appr.get("turn_ons"),
+            appr.get("fetishes"),
+        )
+        res["matched_desires"] = m_desires
+        res["matched_kinks"] = m_kinks
 
     return res
 
@@ -1310,26 +1314,628 @@ def calculate_excitement_delta(
     endurance: int,
     sensitive_spot_bonus: bool = False,
     event_arousal_multiplier: float = 1.0,
+    anatomy_multiplier: float = 1.0,
+    preference_multiplier: float = 1.0,
 ) -> int:
-    """Calculates single-turn excitement delta scaled inversely by endurance."""
+    """Calculates single-turn excitement delta scaled inversely by endurance and combined anatomy/preference modifiers."""
     if base_stim <= 0:
         return 0
+    from mechanics.social.persona.intimacy.constants import (
+        ANATOMY_COMBINED_MULT_MAX,
+        ANATOMY_COMBINED_MULT_MIN,
+        COMBINED_INTIMATE_MULT_MAX,
+        COMBINED_INTIMATE_MULT_MIN,
+    )
     safe_end = max(1, min(10, endurance))
     multiplier = 10.0 / (5.0 + safe_end)
-    raw_delta = int(round(base_stim * multiplier * max(0.5, min(2.0, float(event_arousal_multiplier or 1.0)))))
+    safe_ev = max(0.5, min(2.0, float(event_arousal_multiplier or 1.0)))
+    safe_anat = max(
+        ANATOMY_COMBINED_MULT_MIN,
+        min(ANATOMY_COMBINED_MULT_MAX, float(anatomy_multiplier if anatomy_multiplier is not None else 1.0)),
+    )
+    safe_pref = max(0.5, min(2.0, float(preference_multiplier if preference_multiplier is not None else 1.0)))
+    if abs(safe_pref - 1.0) > 1e-6:
+        combined_mult = max(
+            COMBINED_INTIMATE_MULT_MIN,
+            min(COMBINED_INTIMATE_MULT_MAX, safe_anat * safe_pref),
+        )
+    else:
+        combined_mult = safe_anat
+    raw_delta = int(round(base_stim * multiplier * safe_ev * combined_mult))
     if sensitive_spot_bonus:
-        raw_delta += 6  # +6% flat bonus for targeting revealed sensitive spot
+        raw_delta += 6  # +6% flat bonus for targeting revealed sensitive spot (strictly x1.00)
     return max(5, min(35, raw_delta))
 
 
-def roll_partner_demand(partner_contact: Dict[str, Any]) -> bool:
+def evaluate_preference_excitement_modifiers(
+    partner_contact: Optional[Dict[str, Any]],
+    act_type: str,
+    action_str: str = "",
+    sub_intent: str = "",
+    partner_classification: Optional[Dict[str, Any]] = None,
+    *,
+    relationship_score: int = 0,
+    relationship_track: str = "platonic",
+    shared_intimate_count: int = 0,
+    is_hostile: bool = False,
+    has_bystanders: bool = False,
+    partner_count: int = 1,
+    partner_current_excitement: int = 0,
+) -> Dict[str, Any]:
+    """Evaluates Desires, Active Kinks, Liked/Disliked Acts, Openness pacing/privacy/multi-partner, Giving/Service reward, and discovery emission."""
+    from mechanics.social.persona.intimacy.constants import (
+        ACT_DISLIKE_EXCITEMENT_MULT,
+        ACT_LIKE_EXCITEMENT_MULT,
+        COMBINED_INTIMATE_MULT_MAX,
+        COMBINED_INTIMATE_MULT_MIN,
+        DESIRE_EXCITEMENT_MULT,
+        GIVING_SERVICE_PLAYER_MULT,
+        KINK_EXCITEMENT_MULT,
+        OPENNESS_BOLD_MOMENTUM_MULT,
+        OPENNESS_BYSTANDER_DAMPEN_MULT,
+        OPENNESS_BYSTANDER_THRILL_MULT,
+        OPENNESS_HIDDEN_FIRE_MULT,
+        OPENNESS_MULTIPARTNER_BOLD_MULT,
+        OPENNESS_MULTIPARTNER_SHY_MULT,
+        OPENNESS_RUSHED_AROUSAL_THRESHOLD,
+        OPENNESS_RUSHED_WARMUP_MULT,
+        OPENNESS_TENDER_FOREPLAY_MULT,
+    )
+    from mechanics.social.persona.intimacy.logic import (
+        compute_with_you_comfort,
+        match_act_preferences,
+        match_desires_and_kinks,
+        match_sensitive_spots,
+        normalize_openness_tier,
+        resolve_openness_contrast,
+    )
+
+    n_char = partner_contact if isinstance(partner_contact, dict) else {}
+    n_app = _coerce_app_dict(n_char)
+    cl = partner_classification if isinstance(partner_classification, dict) else {}
+    npc_name = str(n_char.get("name") or "").strip()
+
+    type_l = str(act_type or "").strip().lower()
+    sub_l = str(sub_intent or "").strip().lower()
+    act_l = str(action_str or "").lower()
+
+    turn_off_hit = bool(cl.get("turn_off_triggered"))
+    discoveries: List[Dict[str, str]] = []
+
+    if turn_off_hit:
+        raw_to = str(n_app.get("turn_offs") or "").strip()
+        if npc_name and raw_to and raw_to.lower() not in ("none", "unknown"):
+            from mechanics.social.persona.intimacy.constants import TURN_OFF_DETECTION_REGISTRY
+            matched_to = None
+            for reg in TURN_OFF_DETECTION_REGISTRY:
+                if reg["name"].lower() in raw_to.lower() and any(
+                    (kw in act_l) if " " in kw else bool(re.search(r'\b' + re.escape(kw) + r'\b', act_l))
+                    for kw in reg["keywords"]
+                ):
+                    matched_to = reg["name"]
+                    break
+            if not matched_to:
+                matched_to = [x.strip() for x in raw_to.split(",") if x.strip()][0]
+            discoveries.append({
+                "npc_name": npc_name,
+                "fact_category": "turn_off",
+                "fact_key": f"turn_off:{matched_to.lower()}",
+                "fact_value": matched_to,
+            })
+        return {
+            "player_multiplier": 1.0,
+            "partner_multiplier": 1.0,
+            "matched_desires": [],
+            "matched_kinks": [],
+            "matched_liked_acts": [],
+            "matched_disliked_acts": [],
+            "giving_service_reward": False,
+            "discoveries": discoveries,
+        }
+
+    # Spots discovery if matched
+    matched_spots = match_sensitive_spots(act_l, n_app.get("sensitive_spots"))
+    if cl.get("sensitive_spot_matched") and cl.get("matched_spot") and cl["matched_spot"] != "Anal Intimacy":
+        raw_sp = re.sub(r'\([^)]*\)', '', str(cl["matched_spot"])).strip()
+        if npc_name and raw_sp:
+            discoveries.append({
+                "npc_name": npc_name,
+                "fact_category": "sensitive_spot",
+                "fact_key": f"sensitive_spot:{raw_sp.lower()}",
+                "fact_value": raw_sp,
+            })
+    elif matched_spots and npc_name:
+        for ms in matched_spots[:1]:
+            raw_sp = re.sub(r'\([^)]*\)', '', ms).strip()
+            if raw_sp:
+                discoveries.append({
+                    "npc_name": npc_name,
+                    "fact_category": "sensitive_spot",
+                    "fact_key": f"sensitive_spot:{raw_sp.lower()}",
+                    "fact_value": raw_sp,
+                })
+
+    matched_desires, matched_kinks = match_desires_and_kinks(
+        act_l,
+        n_app.get("desires_and_kinks") or n_app.get("turn_ons"),
+        n_app.get("fetishes"),
+    )
+    matched_liked_acts, matched_disliked_acts = match_act_preferences(
+        act_l,
+        n_app.get("act_likes"),
+        n_app.get("act_dislikes"),
+        sub_intent=sub_l,
+        act_type=type_l,
+    )
+
+    partner_mult = 1.0
+    player_mult = 1.0
+
+    if matched_desires:
+        partner_mult *= DESIRE_EXCITEMENT_MULT
+        if npc_name:
+            for d_item in matched_desires[:2]:
+                discoveries.append({
+                    "npc_name": npc_name,
+                    "fact_category": "desire",
+                    "fact_key": f"desire:{d_item.lower()}",
+                    "fact_value": d_item,
+                })
+
+    if matched_kinks:
+        partner_mult *= KINK_EXCITEMENT_MULT
+        if npc_name:
+            for k_item in matched_kinks[:1]:
+                discoveries.append({
+                    "npc_name": npc_name,
+                    "fact_category": "kink",
+                    "fact_key": f"kink:{k_item.lower()}",
+                    "fact_value": k_item,
+                })
+
+    if matched_liked_acts:
+        partner_mult *= ACT_LIKE_EXCITEMENT_MULT
+        if npc_name:
+            for a_item in matched_liked_acts[:2]:
+                discoveries.append({
+                    "npc_name": npc_name,
+                    "fact_category": "act_pref",
+                    "fact_key": f"act_pref:{a_item.lower()}",
+                    "fact_value": a_item,
+                })
+
+    if matched_disliked_acts:
+        partner_mult *= ACT_DISLIKE_EXCITEMENT_MULT
+        if npc_name:
+            for a_item in matched_disliked_acts[:2]:
+                discoveries.append({
+                    "npc_name": npc_name,
+                    "fact_category": "act_pref",
+                    "fact_key": f"act_pref:{a_item.lower()}",
+                    "fact_value": a_item,
+                })
+
+    # Giving / Service-Oriented Dual Reward
+    act_likes_str = str(n_app.get("act_likes") or "").lower()
+    dyn_str = str(n_app.get("intimate_dynamic") or n_app.get("dynamic") or "").lower()
+    eff_act = sub_l or type_l
+    giving_service_reward = False
+    if eff_act in ("oral_receive", "manual_receive"):
+        if "service" in dyn_str or (eff_act == "oral_receive" and ("giving oral" in act_likes_str or "giving_oral" in act_likes_str)):
+            giving_service_reward = True
+            player_mult *= GIVING_SERVICE_PLAYER_MULT
+
+    # Openness + With-You Comfort + Gap-Moe Contrast + Bystander + Multi-Partner Scaling
+    openness_cue = ""
+    multipartner_cue = ""
+    raw_open_ev = n_app.get("erotic_openness") or n_app.get("openness")
+    if raw_open_ev not in (None, ""):
+        op_tier = normalize_openness_tier(raw_open_ev)
+        dem_ev = str(n_app.get("intimate_demeanor") or n_char.get("demeanor") or "")
+        dyn_ev = str(n_app.get("intimate_dynamic") or n_app.get("dynamic") or "")
+        ic_ev = str(n_app.get("intercourse_experience") or n_app.get("predetermined_intercourse") or "")
+        eff_score = int(relationship_score or n_char.get("relationship_score", n_char.get("score", 0)) or 0)
+        eff_track = str(relationship_track if relationship_track != "platonic" else (n_char.get("relationship_track") or n_char.get("track") or "platonic"))
+        eff_shared = int(shared_intimate_count or (n_char.get("shared_intimacy_stats") or {}).get("shared_encounters") or len(n_char.get("gameplay_intimate_events") or []) or 0)
+        eff_hostile = bool(is_hostile or str(n_char.get("disposition") or "").strip().lower() == "hostile")
+
+        pre_comf = compute_with_you_comfort(
+            op_tier,
+            relationship_score=eff_score,
+            relationship_track=eff_track,
+            shared_intimate_count=eff_shared,
+            is_hostile=eff_hostile,
+        )
+        contrast_ev = resolve_openness_contrast(
+            op_tier,
+            dem_ev,
+            dyn_ev,
+            intercourse_experience=ic_ev,
+            shared_intimate_count=eff_shared,
+            comfort_stage=pre_comf["stage"],
+        )
+        comf_ev = compute_with_you_comfort(
+            op_tier,
+            relationship_score=eff_score,
+            relationship_track=eff_track,
+            shared_intimate_count=eff_shared,
+            is_hostile=eff_hostile,
+            contrast_archetype=contrast_ev["archetype"],
+            bluff_crack_active=contrast_ev["bluff_crack_active"],
+        )
+
+        needs_warmup = (
+            (op_tier == "prude" and comf_ev["stage"] in ("guarded", "warming_up"))
+            or (contrast_ev["archetype"] == "all_talk_tease" and contrast_ev["bluff_crack_active"])
+        )
+        is_explicit_fast = type_l in ("penetrative", "anal_give", "anal_receive") or any(
+            k in act_l for k in ("rush", "hurry", "force", "slam", "shove", "straight inside", "skip foreplay", "thrust", "penetrat")
+        )
+        is_tender_foreplay = (type_l == "foreplay_nongenital" and not is_explicit_fast) or any(
+            k in act_l for k in ("gentle", "gently", "slow", "slowly", "tender", "tenderly", "reassur", "warm up", "caress", "kiss")
+        )
+        if needs_warmup:
+            if is_explicit_fast and int(partner_current_excitement or 0) < OPENNESS_RUSHED_AROUSAL_THRESHOLD:
+                partner_mult *= OPENNESS_RUSHED_WARMUP_MULT
+                openness_cue = "warmup_rushed"
+            elif is_tender_foreplay:
+                partner_mult *= OPENNESS_TENDER_FOREPLAY_MULT
+                openness_cue = "tender_warmup"
+
+        if op_tier in ("bold", "shameless") and not (contrast_ev["archetype"] == "all_talk_tease" and contrast_ev["bluff_crack_active"]):
+            if any(k in act_l for k in ("teas", "dirty", "urgent", "passion", "bold", "claim", "deep", "eager", "hard", "fast")):
+                partner_mult *= OPENNESS_BOLD_MOMENTUM_MULT
+        if contrast_ev["archetype"] == "hidden_fire" and contrast_ev["mechanical_active"] and not has_bystanders:
+            partner_mult *= OPENNESS_HIDDEN_FIRE_MULT
+            if not openness_cue:
+                openness_cue = "hidden_fire_unleashed"
+
+        if has_bystanders:
+            pref_blob = f"{n_app.get('fetishes') or ''} {n_app.get('desires_and_kinks') or ''} {n_app.get('turn_ons') or ''}".lower()
+            has_public_thrill = any(k in pref_blob for k in ("public", "exhibition", "risk of being caught", "voyeur"))
+            if op_tier in ("prude", "moderate") and not has_public_thrill:
+                partner_mult *= OPENNESS_BYSTANDER_DAMPEN_MULT
+                openness_cue = "bystander_hesitation"
+            elif op_tier == "shameless" or (op_tier == "bold" and has_public_thrill):
+                partner_mult *= OPENNESS_BYSTANDER_THRILL_MULT
+                openness_cue = "bystander_thrill"
+
+        if int(partner_count or 1) >= 2:
+            if op_tier in ("bold", "shameless"):
+                partner_mult *= OPENNESS_MULTIPARTNER_BOLD_MULT
+                multipartner_cue = "bold_group"
+            elif op_tier == "prude" or (op_tier == "moderate" and comf_ev["stage"] == "guarded"):
+                if comf_ev["stage"] != "trusting_private":
+                    partner_mult *= OPENNESS_MULTIPARTNER_SHY_MULT
+                    multipartner_cue = "shy_group"
+
+    partner_mult = max(COMBINED_INTIMATE_MULT_MIN, min(COMBINED_INTIMATE_MULT_MAX, partner_mult))
+    player_mult = max(COMBINED_INTIMATE_MULT_MIN, min(COMBINED_INTIMATE_MULT_MAX, player_mult))
+
+    return {
+        "player_multiplier": round(player_mult, 4),
+        "partner_multiplier": round(partner_mult, 4),
+        "matched_desires": matched_desires,
+        "matched_kinks": matched_kinks,
+        "matched_liked_acts": matched_liked_acts,
+        "matched_disliked_acts": matched_disliked_acts,
+        "giving_service_reward": giving_service_reward,
+        "openness_cue": openness_cue,
+        "multipartner_cue": multipartner_cue,
+        "discoveries": discoveries,
+    }
+
+
+def _coerce_app_dict(entity: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not isinstance(entity, dict):
+        return {}
+    app = entity.get("appearance")
+    if isinstance(app, str):
+        try:
+            import json
+            parsed = json.loads(app)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return dict(app) if isinstance(app, dict) else {}
+
+
+def _clean_anatomy_raw(val: Any) -> str:
+    s = str(val or "").strip()
+    if s.lower() in ("", "none", "unknown", "null", "n/a", "false", "0"):
+        return ""
+    return s
+
+
+def _size_tier_to_pref_bucket(tier: str) -> Optional[str]:
+    t = str(tier or "").strip().lower()
+    if t in ("flat", "small"):
+        return "smaller"
+    if t in ("large", "huge"):
+        return "bigger"
+    return None
+
+
+def detect_targeted_anatomy_parts(
+    action_str: str,
+    act_type: str = "",
+    sub_intent: str = "",
+) -> set[str]:
+    """Detects whether the turn directly targets breasts ('bb') or rear/anal ('ass')."""
+    targeted: set[str] = set()
+    act_l = str(action_str or "").lower()
+    sub_l = str(sub_intent or "").strip().lower()
+    type_l = str(act_type or "").strip().lower()
+
+    if re.search(
+        r"\b(breasts?|bust|cleavage|nipples?|boobs?|tits?|titties|titjob|paizuri|underbust|bosom|(?<!treasure )chest)\b",
+        act_l,
+    ):
+        targeted.add("bb")
+
+    if (
+        type_l in ("anal_give", "anal_receive")
+        or sub_l in ("anal_give", "anal_receive", "anal_mutual")
+        or re.search(
+            r"\b(ass|asshole|arse|rear|rear\s+entry|butt|butts|buttocks?|butt[\s\-]?cheeks?|ass[\s\-]?cheeks?|booty|glutes?|spank|spanks|spanking|backdoor|anal|anally|pegging|doggy|doggy[\s\-]?style|from\s+behind)\b",
+            act_l,
+        )
+    ):
+        targeted.add("ass")
+
+    return targeted
+
+
+def evaluate_anatomy_excitement_modifiers(
+    player_char: Optional[Dict[str, Any]],
+    partner_contact: Optional[Dict[str, Any]],
+    act_type: str,
+    action_str: str = "",
+    sub_intent: str = "",
+    partner_classification: Optional[Dict[str, Any]] = None,
+    refractory_downgraded: bool = False,
+    targeted_parts: Optional[set[str]] = None,
+) -> Dict[str, Any]:
+    """Evaluates PP penetrative multiplier (bidirectional) and NPC BB/Ass size preferences (ambient + targeted)."""
+    from mechanics.social.persona.intimacy.constants import (
+        ANATOMY_COMBINED_MULT_MAX,
+        ANATOMY_COMBINED_MULT_MIN,
+        BODY_PREF_AMBIENT_DISLIKE_MULT,
+        BODY_PREF_AMBIENT_LIKE_MULT,
+        BODY_PREF_TARGETED_DISLIKE_MULT,
+        BODY_PREF_TARGETED_LIKE_MULT,
+        PP_PENETRATIVE_MULTIPLIERS,
+    )
+    from mechanics.social.persona.intimacy.appearance import (
+        classify_asset_size_tier,
+        classify_rear_size_tier,
+        is_feral_rear_excluded,
+    )
+    from mechanics.social.persona.intimacy.generation import (
+        generate_dynamic_body_preferences,
+        normalize_body_preferences,
+    )
+
+    p_char = player_char if isinstance(player_char, dict) else {}
+    n_char = partner_contact if isinstance(partner_contact, dict) else {}
+    p_app = _coerce_app_dict(p_char)
+    n_app = _coerce_app_dict(n_char)
+    cl = partner_classification if isinstance(partner_classification, dict) else {}
+
+    p_gender_l = str(p_char.get("gender") or p_app.get("gender") or "").strip().lower()
+    n_gender_l = str(n_char.get("gender") or n_app.get("gender") or "").strip().lower()
+    from mechanics.social.persona.core import is_female_gender, is_male_gender
+
+    p_is_male = is_male_gender(p_gender_l)
+    p_is_female = is_female_gender(p_gender_l)
+    n_is_male = is_male_gender(n_gender_l)
+    n_is_female = is_female_gender(n_gender_l)
+
+    raw_p_pp = _clean_anatomy_raw(p_char.get("penis_size") or p_app.get("penis_size"))
+    raw_n_pp = _clean_anatomy_raw(n_char.get("penis_size") or n_app.get("penis_size"))
+    p_has_pp = bool(raw_p_pp) or (p_is_male and not p_is_female)
+    n_has_pp = bool(raw_n_pp) or (n_is_male and not n_is_female)
+
+    p_pp_tier = classify_asset_size_tier(raw_p_pp, "male") if raw_p_pp else "average"
+    n_pp_tier = classify_asset_size_tier(raw_n_pp, "male") if raw_n_pp else "average"
+
+    type_l = str(act_type or "").strip().lower()
+    act_l = str(action_str or "").lower()
+    targets = targeted_parts if targeted_parts is not None else detect_targeted_anatomy_parts(action_str, type_l, sub_intent)
+
+    # 1. Bidirectional PP penetrative multiplier (strictly penetrative / anal_give / anal_receive only)
+    p_pp_mult = 1.0
+    n_pp_mult = 1.0
+    penetrator_side: Optional[str] = None
+    penetrator_pp_tier = "average"
+
+    if (not refractory_downgraded) and type_l in ("penetrative", "anal_give", "anal_receive"):
+        if type_l == "anal_give":
+            if p_has_pp:
+                n_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(p_pp_tier, 1.0)
+                penetrator_side = "player"
+                penetrator_pp_tier = p_pp_tier
+        elif type_l == "anal_receive":
+            if n_has_pp:
+                p_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(n_pp_tier, 1.0)
+                penetrator_side = "partner"
+                penetrator_pp_tier = n_pp_tier
+        else:
+            if p_has_pp and not n_has_pp:
+                n_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(p_pp_tier, 1.0)
+                penetrator_side = "player"
+                penetrator_pp_tier = p_pp_tier
+            elif n_has_pp and not p_has_pp:
+                p_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(n_pp_tier, 1.0)
+                penetrator_side = "partner"
+                penetrator_pp_tier = n_pp_tier
+            elif p_has_pp and n_has_pp:
+                if any(cue in act_l for cue in ("inside you", "inside me", "into you", "into me", "fucks you", "fucks me", "takes you", "rides his", "ride him")):
+                    p_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(n_pp_tier, 1.0)
+                    penetrator_side = "partner"
+                    penetrator_pp_tier = n_pp_tier
+                else:
+                    n_pp_mult = PP_PENETRATIVE_MULTIPLIERS.get(p_pp_tier, 1.0)
+                    penetrator_side = "player"
+                    penetrator_pp_tier = p_pp_tier
+
+    # 2. Player BB & Ass size buckets (strict guard: male without breast_size -> None, feral myobu_fox -> skip rear)
+    player_race = str(p_char.get("race") or p_app.get("race") or "").strip().lower()
+    npc_race = str(n_char.get("race") or n_app.get("race") or "").strip().lower()
+
+    raw_p_bb = _clean_anatomy_raw(p_char.get("breast_size") or p_app.get("breast_size"))
+    bb_bucket = _size_tier_to_pref_bucket(classify_asset_size_tier(raw_p_bb, "female")) if raw_p_bb else None
+
+    raw_p_rear = _clean_anatomy_raw(p_char.get("rear_size") or p_app.get("rear_size"))
+    if raw_p_rear and not is_feral_rear_excluded(player_race) and not is_feral_rear_excluded(npc_race):
+        ass_bucket = _size_tier_to_pref_bucket(classify_rear_size_tier(raw_p_rear))
+    else:
+        ass_bucket = None
+
+    # 3. NPC BB & Ass preferences (preserve explicit []; lazy-seed only real legacy contact records)
+    has_pref_keys = (
+        ("body_likes" in n_app and n_app["body_likes"] is not None)
+        or ("body_dislikes" in n_app and n_app["body_dislikes"] is not None)
+        or ("body_likes" in n_char and n_char["body_likes"] is not None)
+        or ("body_dislikes" in n_char and n_char["body_dislikes"] is not None)
+    )
+    if has_pref_keys:
+        npc_likes, npc_dislikes = normalize_body_preferences(
+            n_char.get("body_likes") if "body_likes" in n_char else n_app.get("body_likes"),
+            n_char.get("body_dislikes") if "body_dislikes" in n_char else n_app.get("body_dislikes"),
+        )
+    elif n_app and not is_feral_rear_excluded(npc_race):
+        seed_str = f"{n_char.get('desc', '')}_{npc_race}_{n_char.get('name', '')}".encode("utf-8")
+        h_val = int(hashlib.md5(seed_str).hexdigest(), 16)
+        seeded = generate_dynamic_body_preferences(h_val)
+        npc_likes = list(seeded.get("body_likes") or [])
+        npc_dislikes = list(seeded.get("body_dislikes") or [])
+    else:
+        npc_likes, npc_dislikes = [], []
+
+    bb_mult = 1.0
+    ass_mult = 1.0
+    height_mult = 1.0
+    triggered_prefs: List[Dict[str, Any]] = []
+    partner_active = bool(cl.get("partner_stimulated", True)) and not bool(cl.get("turn_off_triggered", False))
+    npc_name = str(n_char.get("name") or "").strip()
+
+    if partner_active:
+        if bb_bucket is not None:
+            bb_key = f"{bb_bucket}_bb"
+            bb_targeted = "bb" in targets
+            if bb_key in npc_likes:
+                bb_mult = BODY_PREF_TARGETED_LIKE_MULT if bb_targeted else BODY_PREF_AMBIENT_LIKE_MULT
+                triggered_prefs.append({
+                    "npc_name": npc_name,
+                    "fact_category": "body_pref",
+                    "fact_key": f"body_pref:{bb_key}",
+                    "fact_value": bb_key,
+                    "sentiment": "like",
+                    "part": "bb",
+                    "targeted": bb_targeted,
+                })
+            elif bb_key in npc_dislikes:
+                bb_mult = BODY_PREF_TARGETED_DISLIKE_MULT if bb_targeted else BODY_PREF_AMBIENT_DISLIKE_MULT
+                triggered_prefs.append({
+                    "npc_name": npc_name,
+                    "fact_category": "body_pref",
+                    "fact_key": f"body_pref:{bb_key}",
+                    "fact_value": bb_key,
+                    "sentiment": "dislike",
+                    "part": "bb",
+                    "targeted": bb_targeted,
+                })
+
+        if ass_bucket is not None:
+            ass_key = f"{ass_bucket}_ass"
+            ass_targeted = "ass" in targets
+            if ass_key in npc_likes:
+                ass_mult = BODY_PREF_TARGETED_LIKE_MULT if ass_targeted else BODY_PREF_AMBIENT_LIKE_MULT
+                triggered_prefs.append({
+                    "npc_name": npc_name,
+                    "fact_category": "body_pref",
+                    "fact_key": f"body_pref:{ass_key}",
+                    "fact_value": ass_key,
+                    "sentiment": "like",
+                    "part": "ass",
+                    "targeted": ass_targeted,
+                })
+            elif ass_key in npc_dislikes:
+                ass_mult = BODY_PREF_TARGETED_DISLIKE_MULT if ass_targeted else BODY_PREF_AMBIENT_DISLIKE_MULT
+                triggered_prefs.append({
+                    "npc_name": npc_name,
+                    "fact_category": "body_pref",
+                    "fact_key": f"body_pref:{ass_key}",
+                    "fact_value": ass_key,
+                    "sentiment": "dislike",
+                    "part": "ass",
+                    "targeted": ass_targeted,
+                })
+
+        from mechanics.social.persona.intimacy.logic import evaluate_height_preference
+
+        p_height_app = dict(p_app)
+        if p_char.get("stature") and not p_height_app.get("stature"):
+            p_height_app["stature"] = p_char.get("stature")
+        n_height_app = dict(n_app)
+        if n_char.get("stature") and not n_height_app.get("stature"):
+            n_height_app["stature"] = n_char.get("stature")
+        if "body_likes" in n_char and n_char.get("body_likes") is not None and "body_likes" not in n_height_app:
+            n_height_app["body_likes"] = n_char.get("body_likes")
+        if "body_dislikes" in n_char and n_char.get("body_dislikes") is not None and "body_dislikes" not in n_height_app:
+            n_height_app["body_dislikes"] = n_char.get("body_dislikes")
+        if "height_pref_seeded" in n_char and n_char.get("height_pref_seeded") is not None and "height_pref_seeded" not in n_height_app:
+            n_height_app["height_pref_seeded"] = n_char.get("height_pref_seeded")
+        if n_char.get("desc") and "desc" not in n_height_app:
+            n_height_app["desc"] = n_char.get("desc")
+
+        h_eval = evaluate_height_preference(
+            p_height_app,
+            n_height_app,
+            npc_gender=n_gender_l,
+            npc_race=npc_race,
+            npc_name=npc_name,
+            player_race=player_race,
+        )
+        height_mult = float(h_eval.get("excitement_mult", 1.0))
+        h_tp = h_eval.get("triggered_pref")
+        if isinstance(h_tp, dict) and h_tp.get("fact_key"):
+            triggered_prefs.append(h_tp)
+
+    n_combined = max(ANATOMY_COMBINED_MULT_MIN, min(ANATOMY_COMBINED_MULT_MAX, n_pp_mult * bb_mult * ass_mult * height_mult))
+    p_combined = max(ANATOMY_COMBINED_MULT_MIN, min(ANATOMY_COMBINED_MULT_MAX, p_pp_mult))
+
+    return {
+        "player_multiplier": round(p_combined, 4),
+        "partner_multiplier": round(n_combined, 4),
+        "pp_player_mult": p_pp_mult,
+        "pp_partner_mult": n_pp_mult,
+        "bb_mult": bb_mult,
+        "ass_mult": ass_mult,
+        "height_mult": height_mult,
+        "penetrator_side": penetrator_side,
+        "penetrator_pp_tier": penetrator_pp_tier,
+        "triggered_preferences": triggered_prefs,
+    }
+
+
+def roll_partner_demand(partner_contact: Dict[str, Any], *, has_bystanders: bool = False) -> bool:
     """
     Computes whether an unsatisfied partner demands manual or oral stimulation
-    based on their intimate dynamic and erotic openness.
+    based on their intimate dynamic, erotic openness, and active Hidden Fire contrast.
     """
+    from mechanics.social.persona.intimacy.constants import OPENNESS_HIDDEN_FIRE_DEMAND_BONUS
+    from mechanics.social.persona.intimacy.logic import (
+        compute_with_you_comfort,
+        normalize_openness_tier,
+        resolve_openness_contrast,
+    )
+
     appr = partner_contact.get("appearance", {}) if isinstance(partner_contact, dict) else {}
     dyn = str(appr.get("intimate_dynamic") or appr.get("dynamic") or "").lower()
     openness = str(appr.get("erotic_openness") or appr.get("openness") or "").lower()
+    op_tier = normalize_openness_tier(openness or "moderate")
 
     # Determine base chance
     base_rate = 0.30
@@ -1339,13 +1945,43 @@ def roll_partner_demand(partner_contact: Dict[str, Any]) -> bool:
             break
 
     # Determine openness modifier
-    mod = 0.0
-    for k, m in OPENNESS_MODIFIERS.items():
-        if k in openness:
-            mod = m
-            break
+    mod = OPENNESS_MODIFIERS.get(op_tier, 0.0)
+    if mod == 0.0 and openness:
+        for k, m in OPENNESS_MODIFIERS.items():
+            if k in openness:
+                mod = m
+                break
 
-    final_chance = max(0.05, min(0.95, base_rate + mod))
+    # Hidden Fire demand boost once private and comfortable
+    hf_bonus = 0.0
+    if isinstance(partner_contact, dict) and not has_bystanders:
+        rel_score = int(partner_contact.get("relationship_score", partner_contact.get("score", 0)) or 0)
+        rel_track = str(partner_contact.get("relationship_track") or partner_contact.get("track") or "platonic")
+        shared_cnt = int(
+            (partner_contact.get("shared_intimacy_stats") or {}).get("shared_encounters")
+            or len(partner_contact.get("gameplay_intimate_events") or [])
+            or 0
+        )
+        is_host = str(partner_contact.get("disposition") or "").strip().lower() == "hostile"
+        comf = compute_with_you_comfort(
+            op_tier,
+            relationship_score=rel_score,
+            relationship_track=rel_track,
+            shared_intimate_count=shared_cnt,
+            is_hostile=is_host,
+        )
+        cont = resolve_openness_contrast(
+            op_tier,
+            appr.get("intimate_demeanor") or "",
+            dyn,
+            intercourse_experience=str(appr.get("intercourse_experience") or ""),
+            shared_intimate_count=shared_cnt,
+            comfort_stage=comf["stage"],
+        )
+        if cont["archetype"] == "hidden_fire" and cont["mechanical_active"]:
+            hf_bonus = OPENNESS_HIDDEN_FIRE_DEMAND_BONUS
+
+    final_chance = max(0.05, min(0.95, base_rate + mod + hf_bonus))
     import random
     return random.random() < final_chance
 
@@ -1367,6 +2003,13 @@ def compute_excitement_step(
     partner_contacts: Optional[List[Dict[str, Any]]] = None,
     sub_intent: Optional[str] = None,
     target_npc: Optional[str] = None,
+    action_check_margin: Optional[int] = None,
+    has_bystanders: Optional[bool] = None,
+    partner_count: Optional[int] = None,
+    relationship_score: Optional[int] = None,
+    relationship_track: Optional[str] = None,
+    shared_intimate_count: Optional[int] = None,
+    is_hostile: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Executes a turn step on the intimate excitement meters.
@@ -1597,20 +2240,23 @@ def compute_excitement_step(
                 spot_matched = False
                 matched_spot = None
                 if not turn_off_hit and (sub_intent != "none"):
-                    spots = appr.get("sensitive_spots") or appr.get("desires_and_kinks") or []
-                    if isinstance(spots, str):
-                        spots = [s.strip() for s in spots.split(",") if s.strip()]
+                    from mechanics.social.persona.intimacy.logic import match_sensitive_spots
                     act_spot_text = (action_str or "").lower()
-                    stop_words = {"physical", "action", "base", "line", "slow", "firm", "soft", "with", "from"}
-                    for s in spots:
-                        s_clean = re.sub(r'\([^)]*\)', '', str(s).lower()).strip()
-                        if not s_clean:
-                            continue
-                        core_words = [w for w in re.split(r'[\s/&]+', s_clean) if len(w) >= 4 and w not in stop_words]
-                        if s_clean in act_spot_text or any(w in act_spot_text for w in core_words):
+                    if "anal" in sub_intent:
+                        likes_val_s = appr.get("act_likes") or appr.get("desires_and_kinks") or ""
+                        likes_str_s = (
+                            ", ".join(str(x) for x in likes_val_s).lower()
+                            if isinstance(likes_val_s, (list, tuple))
+                            else str(likes_val_s).lower()
+                        )
+                        if "anal" in likes_str_s or "backdoor" in likes_str_s:
                             spot_matched = True
-                            matched_spot = s
-                            break
+                            matched_spot = "Anal Intimacy"
+                    if not spot_matched:
+                        m_spots = match_sensitive_spots(act_spot_text, appr.get("sensitive_spots"))
+                        if m_spots:
+                            spot_matched = True
+                            matched_spot = m_spots[0]
 
                 p_cl = {
                     "act_type": mapped_type,
@@ -1698,7 +2344,9 @@ def compute_excitement_step(
             t[1]["meter"] = 0
             t[1]["delta"] = 0
             t[1]["idle_turns"] = 0
+            t[1]["turn_off_strikes"] = 0
             t[1]["status"] = "Warming Up"
+        curr_excitement["turn_off_terminated"] = False
 
     is_sensual_action = bool(
         (matches_boundary(act_low, SENSUAL_MAINTENANCE_KEYWORDS)
@@ -1732,6 +2380,107 @@ def compute_excitement_step(
         except Exception:
             _ev_arousal_mult = 1.0
     any_partner_stimulated_now = any(cl.get("partner_stimulated") for cl in partner_classifications.values())
+    targeted_parts_turn = detect_targeted_anatomy_parts(action_str, act_type=act_type, sub_intent=sub_intent or "")
+    eff_partner_count = int(partner_count or len(partner_actor_tuples) or 1)
+    if has_bystanders is None:
+        _pl_nm_l = player_name.strip().lower()
+        _active_partner_names_l = {str(t[0] or "").strip().lower() for t in partner_actor_tuples if t[0]}
+        _room_chars = (session.get("npcs_present") or session.get("current_npcs") or []) if isinstance(session, dict) else []
+        eff_has_bystanders = any(
+            (isinstance(rc, dict) and str(rc.get("name") or "").strip().lower() not in _active_partner_names_l and str(rc.get("name") or "").strip().lower() != _pl_nm_l)
+            or (isinstance(rc, str) and rc.strip().lower() not in _active_partner_names_l and rc.strip().lower() != _pl_nm_l)
+            for rc in (_room_chars if isinstance(_room_chars, list) else [])
+        )
+    else:
+        eff_has_bystanders = bool(has_bystanders)
+
+    partner_anatomy_mods: Dict[str, Dict[str, Any]] = {}
+    partner_pref_mods: Dict[str, Dict[str, Any]] = {}
+    triggered_body_preferences: List[Dict[str, Any]] = []
+    triggered_intimate_discoveries: List[Dict[str, str]] = []
+    for n_k_a, n_d_a, pc_a in partner_actor_tuples:
+        cl_a = partner_classifications[n_k_a]
+        is_explicit_untargeted = any_named_in_act and not named_in_act.get(n_k_a, False)
+        scoped_act_a = "" if is_explicit_untargeted else (scoped_acts.get(n_k_a) or action_str)
+        partner_targeted_parts = (
+            set()
+            if is_explicit_untargeted
+            else (
+                detect_targeted_anatomy_parts(scoped_act_a, act_type=act_type, sub_intent=sub_intent or "")
+                if scoped_act_a != action_str
+                else targeted_parts_turn
+            )
+        )
+        anat_res = evaluate_anatomy_excitement_modifiers(
+            player_char=player_char,
+            partner_contact=pc_a,
+            act_type=act_type,
+            action_str=scoped_act_a,
+            sub_intent=sub_intent or "",
+            partner_classification=cl_a,
+            refractory_downgraded=refractory_downgraded,
+            targeted_parts=partner_targeted_parts,
+        )
+        partner_anatomy_mods[n_k_a] = anat_res
+        if not is_explicit_untargeted:
+            for tp in anat_res.get("triggered_preferences") or []:
+                triggered_body_preferences.append(tp)
+
+        if is_explicit_untargeted:
+            pref_res = {
+                "player_multiplier": 1.0,
+                "partner_multiplier": 1.0,
+                "matched_desires": [],
+                "matched_kinks": [],
+                "matched_liked_acts": [],
+                "matched_disliked_acts": [],
+                "giving_service_reward": False,
+                "openness_cue": "",
+                "multipartner_cue": "",
+                "discoveries": [],
+            }
+        else:
+            pc_dict = pc_a if isinstance(pc_a, dict) else {}
+            eff_score_a = int(relationship_score if relationship_score is not None else (pc_dict.get("relationship_score", pc_dict.get("score", 0)) or 0))
+            eff_track_a = str(relationship_track if relationship_track is not None else (pc_dict.get("relationship_track") or pc_dict.get("track") or "platonic"))
+            eff_shared_a = int(
+                shared_intimate_count
+                if shared_intimate_count is not None
+                else ((pc_dict.get("shared_intimacy_stats") or {}).get("shared_encounters") or len(pc_dict.get("gameplay_intimate_events") or []) or 0)
+            )
+            eff_hostile_a = bool(is_hostile if is_hostile is not None else (str(pc_dict.get("disposition") or "").strip().lower() == "hostile"))
+            pref_res = evaluate_preference_excitement_modifiers(
+                partner_contact=pc_a,
+                act_type=cl_a.get("act_type") or act_type,
+                action_str=scoped_act_a,
+                sub_intent=sub_intent or "",
+                partner_classification=cl_a,
+                relationship_score=eff_score_a,
+                relationship_track=eff_track_a,
+                shared_intimate_count=eff_shared_a,
+                is_hostile=eff_hostile_a,
+                has_bystanders=eff_has_bystanders,
+                partner_count=eff_partner_count,
+                partner_current_excitement=int(n_d_a.get("meter", 0) or 0),
+            )
+        partner_pref_mods[n_k_a] = pref_res
+        for disc_rec in pref_res.get("discoveries") or []:
+            triggered_intimate_discoveries.append(disc_rec)
+
+    p_anat_cands: List[float] = []
+    p_pref_cands: List[float] = []
+    for n_k_a, _, _ in partner_actor_tuples:
+        cl_a = partner_classifications[n_k_a]
+        if cl_a.get("player_stimulated"):
+            cand_pm = float(partner_anatomy_mods[n_k_a].get("player_multiplier", 1.0))
+            if cand_pm != 1.0:
+                p_anat_cands.append(cand_pm)
+            cand_pref = float(partner_pref_mods[n_k_a].get("player_multiplier", 1.0))
+            if cand_pref != 1.0:
+                p_pref_cands.append(cand_pref)
+    p_anatomy_mult = round(sum(p_anat_cands) / len(p_anat_cands), 4) if p_anat_cands else 1.0
+    p_pref_mult = round(sum(p_pref_cands) / len(p_pref_cands), 4) if p_pref_cands else 1.0
+
     p_delta = 0
     if male_spent:
         p_delta = 0
@@ -1739,7 +2488,13 @@ def compute_excitement_step(
         p_data["idle_turns"] = 0
         p_data["aroused_turns"] = 3
         base_p = 18 if act_type in ("penetrative", "anal_give", "anal_receive", "oral_receive", "oral_mutual") else 14
-        p_delta = calculate_excitement_delta(base_p, p_data.get("endurance", 10), event_arousal_multiplier=_ev_arousal_mult)
+        p_delta = calculate_excitement_delta(
+            base_p,
+            p_data.get("endurance", 10),
+            event_arousal_multiplier=_ev_arousal_mult,
+            anatomy_multiplier=p_anatomy_mult,
+            preference_multiplier=p_pref_mult,
+        )
     elif is_sensual_action:
         p_data["idle_turns"] = 0
         p_data["aroused_turns"] = 3
@@ -1772,9 +2527,18 @@ def compute_excitement_step(
 
     # Process deltas, baselines, and climaxes for all partners
     newly_climaxed_partners: List[str] = []
+    any_turn_off_terminated = False
+    from mechanics.social.persona.intimacy.constants import (
+        FOREPLAY_SPOT_WARMUP_BONUS,
+        FOREPLAY_SPOT_WARMUP_CAP,
+        GIVING_SERVICE_NPC_BONUS,
+        GIVING_SERVICE_NPC_CAP,
+        TURN_OFF_EXCITEMENT_DROP,
+    )
 
     for n_k, n_d, pc in partner_actor_tuples:
         cl = partner_classifications[n_k]
+        pref_mod_n = partner_pref_mods.get(n_k, {})
         p_already_climaxed = bool(partner_climaxes.get(n_k, False))
         is_targeted_p = named_in_act.get(n_k, False) if any_named_in_act else True
         n_gender = str(pc.get("gender") or (pc.get("appearance") or {}).get("gender") or "Female").lower()
@@ -1782,21 +2546,48 @@ def compute_excitement_step(
         male_npc_spent = (not is_female_npc) and p_already_climaxed
 
         n_delta = 0
+        secondary_only = False
         if cl.get("turn_off_triggered"):
-            n_delta = 0
+            cur_m = int(n_d.get("meter", 0) or 0)
+            n_delta = -min(cur_m, TURN_OFF_EXCITEMENT_DROP)
+            n_d["turn_off_strikes"] = int(n_d.get("turn_off_strikes", 0) or 0) + 1
             n_d["idle_turns"] = n_d.get("idle_turns", 0) + 1
             if n_d.get("aroused_turns", 0) > 0:
                 n_d["aroused_turns"] = max(0, n_d["aroused_turns"] - 1)
+            if n_d["turn_off_strikes"] >= 2 or (action_check_margin is not None and action_check_margin <= -5):
+                any_turn_off_terminated = True
         elif cl["partner_stimulated"]:
             n_d["idle_turns"] = 0
             n_d["aroused_turns"] = 3
             base_n = 14 if refractory_downgraded else (18 if act_type in ("penetrative", "anal_give", "anal_receive", "oral_give", "oral_mutual") else 14)
+            n_anat_mult = float(partner_anatomy_mods.get(n_k, {}).get("partner_multiplier", 1.0))
+            n_pref_mult = float(pref_mod_n.get("partner_multiplier", 1.0))
             n_delta = calculate_excitement_delta(
                 base_n,
                 n_d.get("endurance", 10),
                 sensitive_spot_bonus=cl["sensitive_spot_matched"],
                 event_arousal_multiplier=_ev_arousal_mult,
+                anatomy_multiplier=n_anat_mult,
+                preference_multiplier=n_pref_mult,
             )
+        elif act_type == "foreplay_nongenital" and cl.get("sensitive_spot_matched") and (is_targeted_p or not any_named_in_act) and not male_npc_spent:
+            cur_m = int(n_d.get("meter", 0) or 0)
+            if cur_m < FOREPLAY_SPOT_WARMUP_CAP:
+                n_delta = min(FOREPLAY_SPOT_WARMUP_CAP - cur_m, FOREPLAY_SPOT_WARMUP_BONUS)
+            else:
+                n_delta = 0
+            n_d["idle_turns"] = 0
+            n_d["aroused_turns"] = 3
+            secondary_only = True
+        elif pref_mod_n.get("giving_service_reward") and not male_npc_spent:
+            cur_m = int(n_d.get("meter", 0) or 0)
+            if cur_m < GIVING_SERVICE_NPC_CAP:
+                n_delta = min(GIVING_SERVICE_NPC_CAP - cur_m, GIVING_SERVICE_NPC_BONUS)
+            else:
+                n_delta = 0
+            n_d["idle_turns"] = 0
+            n_d["aroused_turns"] = 3
+            secondary_only = True
         elif len(partner_actor_tuples) > 1 and act_type not in ("none", "foreplay_nongenital"):
             # Passive spectator warmth or secondary foreplay warmth in active multi-partner scene
             spot_bonus = 6 if (is_targeted_p and cl.get("sensitive_spot_matched")) else 0
@@ -1859,7 +2650,7 @@ def compute_excitement_step(
                 )
             )
             partner_newly_climaxed = False
-            if act_type != "foreplay_nongenital" and not male_npc_spent:
+            if act_type != "foreplay_nongenital" and not male_npc_spent and not secondary_only:
                 if cl["partner_stimulated"] and (n_d["meter"] >= 100 or (n_d["meter"] >= 80 and explicit_partner_finisher)):
                     partner_newly_climaxed = True
                 elif n_delta > 0 and n_d["meter"] >= 100 and not p_already_climaxed:
@@ -2080,8 +2871,10 @@ def compute_excitement_step(
         for t in partner_actor_tuples
     ]
 
+    curr_excitement["turn_off_terminated"] = any_turn_off_terminated
+
     return {
-        "active": True,
+        "active": not any_turn_off_terminated,
         "act_type": act_type,
         "player_meter": p_data["meter"],
         "player_delta": p_delta,
@@ -2112,6 +2905,11 @@ def compute_excitement_step(
         "any_partner_stimulated": bool(any(cl.get("partner_stimulated") for cl in partner_classifications.values())),
         "refractory_downgraded": bool(refractory_downgraded),
         "effective_sub_intent": effective_sub_intent,
+        "anatomy_modifiers": partner_anatomy_mods,
+        "preference_modifiers": partner_pref_mods,
+        "triggered_body_preferences": triggered_body_preferences,
+        "triggered_intimate_discoveries": triggered_intimate_discoveries,
+        "turn_off_terminated": any_turn_off_terminated,
     }
 
 
@@ -2693,9 +3491,11 @@ def build_intimate_choice_blueprints(
     sensitive_spots: Any = None,
     partner_actors: Optional[List[Dict[str, Any]]] = None,
     partner_gender: str = "Female",
+    discovered_intimate: Optional[Dict[str, Any]] = None,
+    openness_profile: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
-    Builds Act-, Posture-, Sensitive-Spot-, and Meter-Aware choice blueprints for the
+    Builds Act-, Posture-, Sensitive-Spot-, Preference-, and Meter-Aware choice blueprints for the
     Hybrid Guided Intimate System. Supports single or multiple partners:
       - Used by `format_physical_state_prompt` to guide the LLM before generation.
       - Used by `clean_choices_impl` as the state-accurate fallback safety net.
@@ -2703,8 +3503,29 @@ def build_intimate_choice_blueprints(
     p_name = partner_name or "Partner"
     act_norm = str(last_act or "foreplay_nongenital").lower()
     is_kneeling = "kneel" in str(player_posture or "").lower() or act_norm == "oral_give"
-    spot_phrase = _clean_spot_phrase(sensitive_spots, is_kneeling=is_kneeling)
+    disc = discovered_intimate if isinstance(discovered_intimate, dict) else {}
+    eff_spots = sensitive_spots or disc.get("sensitive_spots")
+    spot_phrase = _clean_spot_phrase(eff_spots, is_kneeling=is_kneeling)
     high_excitement = (player_meter >= 70 or partner_meter >= 70)
+
+    def _disc_list(key: str) -> List[str]:
+        val = disc.get(key)
+        if not val:
+            return []
+        if isinstance(val, (list, tuple, set)):
+            items = [str(x).strip() for x in val if str(x).strip()]
+        else:
+            items = [x.strip() for x in str(val).split(",") if x.strip()]
+        return [re.sub(r'\([^)]*\)', '', x).strip() for x in items if x and x.lower() not in ("none", "unknown", "none (vanilla)")]
+
+    disc_desires = _disc_list("desires") + _disc_list("kinks")
+    disc_likes_low = ", ".join(_disc_list("act_likes")).lower()
+    disc_dislikes_low = ", ".join(_disc_list("act_dislikes")).lower()
+    prefers_receiving_oral = ("receiving oral" in disc_likes_low or "receiving_oral" in disc_likes_low)
+    dislikes_receiving_oral = ("receiving oral" in disc_dislikes_low or "receiving_oral" in disc_dislikes_low)
+    prefers_slow = ("slow & sensual" in disc_likes_low or "slow_sensual" in disc_likes_low)
+    dislikes_rough = ("rough handling" in disc_dislikes_low or "rough_handling" in disc_dislikes_low)
+    first_desire_cue = disc_desires[0].lower() if disc_desires else ""
 
     def _stamp_intimate_choice(c: dict, default_partner: str, act_nm: str, ex_lbl: str) -> dict:
         lbl = c.get("label", "")
@@ -3074,40 +3895,59 @@ def build_intimate_choice_blueprints(
     # 1. Post-Premature Finish Negotiation
     if player_climaxed and premature_finish:
         if partner_demanded:
-            choices = [
-                {
-                    "label": f"Use your fingers to stroke and please {p_name} toward {p_poss} climax",
-                    "stat": "AGI",
-                    "requirement": 6,
-                    "mp_cost": 0,
-                    "is_fallback": False,
-                },
-                {
-                    "label": f"Kneel close and use your tongue passionately to bring {p_name} over the edge",
-                    "stat": "CHA",
-                    "requirement": 6,
-                    "mp_cost": 0,
-                    "is_fallback": False,
-                },
-                {
-                    "label": f"Apologize breathlessly, hold {p_name} close, and promise to make it up to {p_obj}",
-                    "stat": "END",
-                    "requirement": 6,
-                    "mp_cost": 0,
-                    "is_fallback": False,
-                },
-                {
-                    "label": f"Step back gently, excuse yourself, and catch your breath with {p_name}",
-                    "stat": "NONE",
-                    "requirement": 0,
-                    "mp_cost": 0,
-                    "is_fallback": False,
-                },
-            ]
+            finger_opt = {
+                "label": f"Use your fingers to stroke and please {p_name} toward {p_poss} climax",
+                "stat": "AGI",
+                "requirement": 6,
+                "mp_cost": 0,
+                "is_fallback": False,
+            }
+            oral_opt = {
+                "label": f"Kneel close and use your tongue passionately to bring {p_name} over the edge",
+                "stat": "CHA",
+                "requirement": 6,
+                "mp_cost": 0,
+                "is_fallback": False,
+            }
+            hold_opt = {
+                "label": f"Apologize breathlessly, hold {p_name} close, and promise to make it up to {p_obj}",
+                "stat": "END",
+                "requirement": 6,
+                "mp_cost": 0,
+                "is_fallback": False,
+            }
+            exit_opt = {
+                "label": f"Step back gently, excuse yourself, and catch your breath with {p_name}",
+                "stat": "NONE",
+                "requirement": 0,
+                "mp_cost": 0,
+                "is_fallback": False,
+            }
+            if dislikes_receiving_oral:
+                choices = [
+                    finger_opt,
+                    {
+                        "label": f"Caress {p_name}'s {spot_phrase} with tender fingers to keep {p_poss} arousal warm",
+                        "stat": "CHA",
+                        "requirement": 6,
+                        "mp_cost": 0,
+                        "is_fallback": False,
+                    },
+                    hold_opt,
+                    exit_opt,
+                ]
+            elif prefers_receiving_oral:
+                choices = [oral_opt, finger_opt, hold_opt, exit_opt]
+            else:
+                choices = [finger_opt, oral_opt, hold_opt, exit_opt]
         else:
             choices = [
                 {
-                    "label": f"Notice {p_name}'s flushed longing and tenderly use your hands to please {p_obj}",
+                    "label": (
+                        f"Kneel close and please {p_name} warmly with your tongue"
+                        if prefers_receiving_oral and not dislikes_receiving_oral
+                        else f"Notice {p_name}'s flushed longing and tenderly use your hands to please {p_obj}"
+                    ),
                     "stat": "AGI",
                     "requirement": 5,
                     "mp_cost": 0,
@@ -3347,9 +4187,35 @@ def build_intimate_choice_blueprints(
         ]
     # 8. Non-Genital Foreplay / Kissing / Touching Body
     else:
-        slot1_lbl = f"Deepen your kiss and caress {p_name}'s {spot_phrase} with lingering warmth"
-        slot2_lbl = f"Slide your hands lower to tease {p_name} more intimately and build {p_poss} arousal"
-        slot3_lbl = f"Draw {p_name} closer and guide {p_obj} into a more intimate position"
+        desire_hook = f", indulging {first_desire_cue}" if first_desire_cue else ""
+        op_prof = openness_profile if isinstance(openness_profile, dict) else {}
+        op_tier_bp = str(op_prof.get("tier") or "").lower()
+        op_comfort_bp = str(op_prof.get("comfort_stage") or "guarded").lower()
+        op_contrast_bp = str(op_prof.get("contrast_archetype") or "").lower()
+        needs_gentle_warmup_bp = bool(
+            partner_meter < 40
+            and (
+                (op_tier_bp == "prude" and op_comfort_bp in ("guarded", "warming_up"))
+                or (op_contrast_bp == "all_talk_tease" and op_prof.get("bluff_crack_active"))
+            )
+        )
+        is_daring_bp = bool(
+            (op_tier_bp in ("bold", "shameless") and not op_prof.get("bluff_crack_active"))
+            or (op_contrast_bp == "hidden_fire" and op_prof.get("hidden_fire_active"))
+        )
+        slot1_lbl = f"Deepen your kiss and caress {p_name}'s {spot_phrase} with lingering warmth{desire_hook}"
+        if needs_gentle_warmup_bp:
+            slot2_lbl = f"Speak softly and tease {p_name}'s {spot_phrase} with gentle, unhurried reassurance to ease {p_poss} nerves"
+            slot3_lbl = f"Check in tenderly with {p_name} as you draw {p_obj} closer at {p_poss} own comfort pace"
+        elif prefers_slow or dislikes_rough:
+            slot2_lbl = f"Take an unhurried, sensual pace as your hands tease {p_name} gently to build {p_poss} arousal"
+            slot3_lbl = f"Draw {p_name} closer and guide {p_obj} into a more intimate position"
+        elif is_daring_bp:
+            slot2_lbl = f"Whisper daring encouragement as your hands slide boldly over {p_name} to stoke {p_poss} heat"
+            slot3_lbl = f"Draw {p_name} flush against you and steer {p_obj} eagerly into deeper intimacy"
+        else:
+            slot2_lbl = f"Slide your hands lower to tease {p_name} more intimately and build {p_poss} arousal"
+            slot3_lbl = f"Draw {p_name} closer and guide {p_obj} into a more intimate position"
         exit_label = f"Ease back gently, pause to catch your breath, and hold {p_name} close"
         choices = [
             {"label": slot1_lbl, "stat": "CHA", "requirement": 6, "mp_cost": 0, "is_fallback": False},
@@ -3358,9 +4224,24 @@ def build_intimate_choice_blueprints(
             {"label": exit_label, "stat": "NONE", "requirement": 0, "mp_cost": 0, "is_fallback": False},
         ]
 
+    if dislikes_receiving_oral:
+        for _c in choices:
+            if "tongue" in _c["label"].lower() and "edge" in _c["label"].lower():
+                _c["label"] = f"Use gentle, attentive fingers along {p_name}'s {spot_phrase} to bring {p_obj} closer"
+
     guide_lines = [
         f"- HYBRID CHOICE BLUEPRINTS (Adapt these situational archetypes to the exact intimate act, partner reactions, and postures for `next_choices` — NEVER mix in quest objectives, clues, or investigation props, and NEVER prefix with ⭐, 🎯, or ⚡):"
     ]
+    if disc:
+        cue_parts = []
+        if first_desire_cue:
+            cue_parts.append(f"discovered desires/kinks ({first_desire_cue})")
+        if disc_likes_low:
+            cue_parts.append(f"liked acts ({disc_likes_low})")
+        if disc_dislikes_low:
+            cue_parts.append(f"EXCLUDE disliked acts ({disc_dislikes_low})")
+        if cue_parts:
+            guide_lines.append(f"  * Discovered Preference Guidance: " + "; ".join(cue_parts) + ".")
     for idx, c in enumerate(choices, 1):
         _stamp_intimate_choice(c, p_name, act_norm, exit_label)
         stat_tag = "FREE" if c["stat"] in ("NONE", "FREE") else c["stat"]
@@ -3616,6 +4497,15 @@ def resolve_pre_turn_intimacy_and_clothing(
     excitement_res = None
 
     if is_erotic:
+        _pre_margin = None
+        if selected_act_dict and isinstance(selected_act_dict.get("check"), dict):
+            _chk_d = selected_act_dict["check"]
+            if _chk_d.get("roll") is not None and _chk_d.get("requirement") is not None:
+                _pre_margin = int(_chk_d["roll"]) - int(_chk_d["requirement"])
+        elif selected_act_dict and selected_act_dict.get("check") is not None:
+            _chk_o = selected_act_dict["check"]
+            if getattr(_chk_o, "roll", None) is not None and getattr(_chk_o, "requirement", None) is not None:
+                _pre_margin = int(getattr(_chk_o, "roll")) - int(getattr(_chk_o, "requirement"))
         excitement_res = compute_excitement_step(
             physical_state=physical_state,
             action_str=action_str,
@@ -3626,10 +4516,131 @@ def resolve_pre_turn_intimacy_and_clothing(
             partner_contacts=partner_contacts,
             sub_intent=orig_sub_intent if refractory_soft_gated else (sub_intent or None),
             target_npc=target_npc or None,
+            action_check_margin=_pre_margin,
         )
         session["_pre_turn_excitement_res"] = excitement_res
 
         if excitement_res:
+            # Qualitative zero-number anatomy reaction cues
+            anat_mods_map = excitement_res.get("anatomy_modifiers") or {}
+            for _n_k, _amod in anat_mods_map.items():
+                _pside = _amod.get("penetrator_side")
+                _ptier = _amod.get("penetrator_pp_tier")
+                if _pside == "player" and _ptier in ("large", "huge"):
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {player_name}'s generous thickness fills and stretches {_n_k} snugly; weave sensations of heavy fullness and breath-stealing depth into {_n_k}'s reaction."
+                    )
+                elif _pside == "player" and _ptier in ("flat", "small"):
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {player_name}'s compact size glides with gentle, tight friction that invites unhurried closeness and steady, attentive rhythm to satisfy {_n_k}."
+                    )
+                elif _pside == "partner" and _ptier in ("large", "huge"):
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_n_k}'s thick proportions press deeply into {player_name}; highlight intense stretching fullness and overwhelming sensation."
+                    )
+                elif _pside == "partner" and _ptier in ("flat", "small"):
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_n_k}'s modest size moves smoothly with light, focused contact rather than overwhelming depth."
+                    )
+
+            seen_cue_pairs: set[tuple[str, str, str]] = set()
+            for _tpref in excitement_res.get("triggered_body_preferences") or []:
+                _npc_nm = str(_tpref.get("npc_name") or partner_name).strip()
+                _sent = str(_tpref.get("sentiment") or "").strip()
+                _part = str(_tpref.get("part") or "").strip()
+                _pair = (_npc_nm, _sent, _part)
+                if not _npc_nm or _pair in seen_cue_pairs:
+                    continue
+                seen_cue_pairs.add(_pair)
+                if _part == "bb" and _sent == "like":
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} is visibly captivated by {player_name}'s bust contours—show lingering admiring glances, ragged breath, or eager cradling."
+                    )
+                elif _part == "bb" and _sent == "dislike":
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} shows understated or mild response toward {player_name}'s chest, naturally gravitating to other caresses without discourtesy."
+                    )
+                elif _part == "ass" and _sent == "like":
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} is clearly thrilled by {player_name}'s rear silhouette—weave appreciative grips, heated focus, or eager rhythm into the moment."
+                    )
+                elif _part == "ass" and _sent == "dislike":
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} reacts more neutrally to {player_name}'s rear contours, letting attention drift naturally toward other intimate focal points."
+                    )
+                elif _part == "height" and _sent == "like":
+                    _gap = int(_tpref.get("gap") or 1)
+                    _scale_phrase = (
+                        "dramatic height contrast"
+                        if _gap >= 2
+                        else "noticeable height difference"
+                    )
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} is visibly charmed and stirred by the {_scale_phrase} with {player_name}—weave subtle posture awareness, upturned or downward gazes, and natural physical closeness into {_npc_nm}'s reaction."
+                    )
+                elif _part == "height" and _sent == "dislike":
+                    directives.append(
+                        f"[ANATOMY REACTION CUE]: {_npc_nm} finds the height pairing slightly awkward to align at first, gently adjusting posture and angle for comfort without discourtesy."
+                    )
+
+            # Qualitative zero-number preference, kink, and turn-off cues
+            pref_mods_map = excitement_res.get("preference_modifiers") or {}
+            for _p_nm, _pmod in pref_mods_map.items():
+                if _pmod.get("matched_kinks"):
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: Indulging {_p_nm}'s active kink ({', '.join(_pmod['matched_kinks'])}) sends an electric shiver of thrilled surrender through them."
+                    )
+                if _pmod.get("matched_desires"):
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: Touching upon {_p_nm}'s desire ({', '.join(_pmod['matched_desires'])}) sparks ragged breath and eager closeness."
+                    )
+                if _pmod.get("matched_liked_acts"):
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm} enthusiastically melts into a preferred act ({', '.join(_pmod['matched_liked_acts'])})."
+                    )
+                if _pmod.get("matched_disliked_acts"):
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm} stiffens slightly through a disliked act ({', '.join(_pmod['matched_disliked_acts'])}), enduring it with muted enthusiasm."
+                    )
+                if _pmod.get("giving_service_reward"):
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm} visibly thrills with devoted warmth as they focus on pleasing {player_name}."
+                    )
+                _ocue = str(_pmod.get("openness_cue") or "").strip()
+                if _ocue == "warmup_rushed":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm} tenses and flusters at the sudden rush before catching their breath—slower reassurance will win deeper response."
+                    )
+                elif _ocue == "tender_warmup":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm}'s guard melts visibly under patient, tender warm-up and gentle reassurance."
+                    )
+                elif _ocue == "hidden_fire_unleashed":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: Behind closed doors and trusting you, {_p_nm}'s modest veil slips—their hidden intensity takes over fiercely."
+                    )
+                elif _ocue == "bystander_hesitation":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: Aware of nearby strangers, {_p_nm} stays self-conscious and restrained rather than letting go."
+                    )
+                elif _ocue == "bystander_thrill":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: The nearness of unsuspecting onlookers sparks an audacious thrill through {_p_nm}."
+                    )
+                _mcue = str(_pmod.get("multipartner_cue") or "").strip()
+                if _mcue == "bold_group":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: {_p_nm} leans eagerly into the shared group heat without hesitation."
+                    )
+                elif _mcue == "shy_group":
+                    directives.append(
+                        f"[PREFERENCE & SYNERGY CUE]: Sharing the moment with multiple partners leaves {_p_nm} shyly flustered and seeking reassurance."
+                    )
+            if excitement_res.get("turn_off_terminated"):
+                directives.append(
+                    "[TURN-OFF TERMINATION DIRECTIVE]: A partner's tolerance snapped after hitting their turn-off; they abruptly pull away, put a firm stop to the intimate encounter, and refuse to continue."
+                )
+
             if excitement_res.get("player_climaxed") and not male_refr_active:
                 directives.append(
                     f"[MANDATORY CLIMAX DIRECTIVE]: Player character {player_name} has deterministically reached climax (meter at {excitement_res.get('player_meter', 100)}%). Narrate {player_name}'s peak/release vividly and authentically."

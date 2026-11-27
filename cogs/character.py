@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+import random
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -21,8 +25,81 @@ from character_data import (
 from scenario_data import load_scenarios
 
 
-def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str = "") -> discord.Embed:
+def _is_male_gender(gender: str) -> bool:
+    from mechanics.social.persona.core import is_male_gender
+    return is_male_gender(gender)
+
+
+def _is_female_gender(gender: str) -> bool:
+    from mechanics.social.persona.core import is_female_gender
+    return is_female_gender(gender)
+
+
+def _allowed_physiques_for(gender: str, stature: str = "", race: str = "") -> list[str]:
+    from mechanics.social.persona.core import (
+        PHYSIQUE_TIERS,
+        STATURE_INCOMPATIBLE_PHYSIQUES,
+        GENDER_INCOMPATIBLE_PHYSIQUES,
+    )
+    from mechanics.social.persona.intimacy.appearance import normalize_stature_tier
+
+    excluded: set[str] = set()
+    norm_s = normalize_stature_tier(stature) if stature else ""
+    if norm_s:
+        excluded.update(STATURE_INCOMPATIBLE_PHYSIQUES.get(norm_s, set()))
+    if _is_male_gender(gender):
+        excluded.update(GENDER_INCOMPATIBLE_PHYSIQUES.get("male", set()))
+    elif _is_female_gender(gender):
+        excluded.update(GENDER_INCOMPATIBLE_PHYSIQUES.get("female", set()))
+    if "bunian" in str(race or "").strip().lower():
+        excluded.update({"Stocky", "Chubby"})
+    return [p for p in PHYSIQUE_TIERS if p not in excluded]
+
+
+_STATURE_RANGE_HINTS: dict[str, str] = {
+    "miniature": "(Under 140 cm / <4'7\")",
+    "short": "(~145-158 cm / 4'9\"-5'2\")",
+    "below_average": "(~158-168 cm / 5'2\"-5'6\")",
+    "average": "(~168-178 cm / 5'6\"-5'10\")",
+    "tall": "(~178-190 cm / 5'10\"-6'3\")",
+    "towering": "(193+ cm / 6'4\"+)",
+}
+
+
+def _format_stature_display(stature: str) -> str:
+    if not stature:
+        return ""
+    from mechanics.social.persona.intimacy.appearance import normalize_stature_tier
+
+    norm = normalize_stature_tier(stature)
+    return (norm or str(stature)).replace("_", " ").title()
+
+
+def _format_stature_option_label(stature: str) -> str:
+    label = _format_stature_display(stature)
+    hint = _STATURE_RANGE_HINTS.get(str(stature or "").strip().lower(), "")
+    return f"{label} {hint}" if (label and hint) else label
+
+
+def _get_anatomy_option_lists():
+    # Lazy import breaks module-top circularity: cogs.adventure.views.loadout imports build_character_sheet_embed.
+    from cogs.adventure.views.loadout import (
+        FEMALE_SIZE_OPTIONS,
+        MALE_SIZE_OPTIONS,
+        FEMALE_TEXTURE_OPTIONS,
+        MALE_TEXTURE_OPTIONS,
+    )
+    return FEMALE_SIZE_OPTIONS, MALE_SIZE_OPTIONS, FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS
+
+
+def _get_rear_anatomy_option_lists():
+    from cogs.adventure.views.loadout import REAR_SIZE_OPTIONS, REAR_TEXTURE_OPTIONS
+    return REAR_SIZE_OPTIONS, REAR_TEXTURE_OPTIONS
+
+
+def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str = "", *, is_nsfw: bool | None = None) -> discord.Embed:
     from mechanics.social.races import format_race_display
+    from mechanics.social.persona.core import heal_physique_for_context
     title = f"{title_prefix}{char['name']}"
     if char.get('char_class') and char['char_class'] != 'Adventurer':
         title += f" the {char['char_class']}"
@@ -39,6 +116,7 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
     if char.get("pending_stat_points"):
         xp_line += f"  |  🌟 {char['pending_stat_points']} unspent stat point(s) — use `/allocate`"
     embed.add_field(name="Level / XP", value=xp_line, inline=False)
+    app = char.get("appearance") or {}
     scen_key = char.get("scenario", "fantasy")
     from scenario_data import get_scenario_display_name
     scen_name = get_scenario_display_name(scen_key)
@@ -47,17 +125,44 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
         identity_line += f"  |  Race: **{format_race_display(char['race'])}**"
     if char.get("gender"):
         identity_line += f"  |  Gender: **{char['gender']}**"
+    stature_raw = app.get("stature") or app.get("height") or char.get("stature")
+    physique_raw = app.get("physique") or char.get("physique")
+    build_parts = [
+        p for p in (
+            _format_stature_display(stature_raw) if stature_raw else "",
+            heal_physique_for_context(
+                str(physique_raw),
+                gender=str(char.get("gender", "")),
+                stature=str(stature_raw or "average"),
+                race=str(char.get("race", "human")),
+            ) if physique_raw else "",
+        )
+        if p
+    ]
+    if build_parts:
+        identity_line += f"  |  Build: **{' • '.join(build_parts)}**"
     embed.add_field(name="Identity", value=identity_line, inline=False)
 
-    app = char.get("appearance") or {}
     b_size = char.get("breast_size") or app.get("breast_size")
     p_size = char.get("penis_size") or app.get("penis_size")
     a_tex = char.get("asset_texture") or app.get("asset_texture")
+    r_size = char.get("rear_size") or app.get("rear_size")
+    r_tex = char.get("rear_texture") or app.get("rear_texture")
     from scenario_data import is_nsfw_scenario
-    is_nsfw = is_nsfw_scenario(scen_key) or bool(b_size or p_size or a_tex)
-    if is_nsfw:
+    from mechanics.social.persona.intimacy.appearance import (
+        is_feral_rear_excluded,
+        normalize_asset_texture,
+        normalize_rear_size_label,
+        normalize_rear_texture,
+    )
+    show_nsfw = (
+        bool(is_nsfw)
+        if is_nsfw is not None
+        else (is_nsfw_scenario(scen_key) or ("nsfw" in str(char.get("tags") or "").lower()))
+    )
+    if show_nsfw:
         anat_parts = []
-        is_m = any(kw in str(char.get("gender", "")).lower() for kw in ("male", "man", "boy")) and "female" not in str(char.get("gender", "")).lower()
+        is_m = _is_male_gender(str(char.get("gender", "")))
         if is_m:
             if p_size:
                 anat_parts.append(f"**Size:** {str(p_size).title()}")
@@ -65,7 +170,15 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
             if b_size:
                 anat_parts.append(f"**Size:** {str(b_size).title()}")
         if a_tex:
-            anat_parts.append(f"**Tactile/Texture:** {a_tex}")
+            norm_a_tex = normalize_asset_texture(str(a_tex), gender="male" if is_m else "female") or str(a_tex)
+            anat_parts.append(f"**Tactile/Texture:** {norm_a_tex}")
+        if not is_feral_rear_excluded(str(char.get("race", ""))):
+            if r_size:
+                norm_r_sz = normalize_rear_size_label(str(r_size)) or str(r_size).title()
+                anat_parts.append(f"**Rear:** {norm_r_sz}")
+            if r_tex:
+                norm_r_tex = normalize_rear_texture(str(r_tex)) or str(r_tex)
+                anat_parts.append(f"**Rear Texture:** {norm_r_tex}")
         if anat_parts:
             embed.add_field(name="🔞 Intimate Anatomy", value=" • ".join(anat_parts), inline=False)
 
@@ -82,6 +195,7 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
 
     from scenario_data import is_non_combat_scenario
     char_scen = char.get("scenario", "fantasy")
+    active_sid = db.get_active_session_id_for_user(char.get("user_id", 0)) if char.get("user_id") else None
     if is_non_combat_scenario(char_scen):
         embed.add_field(
             name="🎭 Scenario Mode",
@@ -91,7 +205,7 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
     else:
         from mechanics.social.attributes import calculate_combat_attributes, format_combat_attributes_text
         equipped_list = [item for item in equipment.values() if item] if equipment else None
-        attrs = calculate_combat_attributes(char, equipped_list, scenario=char_scen)
+        attrs = calculate_combat_attributes(char, equipped_list, scenario=char_scen, session_id=active_sid)
         embed.add_field(name="⚔️ Combat Attributes", value=format_combat_attributes_text(attrs), inline=False)
 
     from mechanics.combat.equipment import is_two_handed
@@ -120,7 +234,15 @@ def build_character_sheet_embed(char: dict, equipment: dict, title_prefix: str =
         embed.add_field(name="Equipment", value="\n".join(equip_lines), inline=False)
 
     if not is_non_combat_scenario(char_scen):
-        known_sids = db.get_learned_spells(char.get("user_id", 0))
+        known_sids = list(db.get_learned_spells(char.get("user_id", 0), char=char) or [])
+        if active_sid:
+            try:
+                from mechanics.combat.spells.spirit_court_perks import get_active_spirit_court_summon_spell_ids
+                for _sc_sid in get_active_spirit_court_summon_spell_ids(int(active_sid)):
+                    if _sc_sid not in known_sids:
+                        known_sids.append(_sc_sid)
+            except Exception:
+                pass
         if known_sids:
             from mechanics.combat.spells import get_spell
             s_tags = []
@@ -150,6 +272,8 @@ class StatAllocationView(discord.ui.View):
         self.race = race
         self.race_description = race_description
         self.scenario = scenario
+        self.selected_stature: str = ""
+        self.selected_physique: str = ""
         self.values = {s: BASE_STAT_VALUE for s in STATS}
         self.selected_stat = STATS[0]
         self._rebuild()
@@ -164,6 +288,8 @@ class StatAllocationView(discord.ui.View):
 
     def _rebuild(self):
         self.clear_items()
+
+        from mechanics.social.persona.core import STATURE_TIERS
 
         options = []
         for s in STATS:
@@ -201,6 +327,51 @@ class StatAllocationView(discord.ui.View):
         confirm.callback = self._on_confirm
         self.add_item(confirm)
 
+        stature_options = [
+            discord.SelectOption(
+                label="Height: Auto-Roll (Race-Aware)",
+                value="__auto__",
+                default=(not self.selected_stature),
+            )
+        ] + [
+            discord.SelectOption(
+                label=_format_stature_option_label(tier),
+                value=tier,
+                default=(tier == self.selected_stature),
+            )
+            for tier in STATURE_TIERS
+        ]
+        stature_select = discord.ui.Select(
+            placeholder="Height (optional — default Auto-Roll)",
+            options=stature_options,
+            row=3,
+        )
+        stature_select.callback = self._on_stature_select
+        self.add_item(stature_select)
+
+        allowed_physiques = _allowed_physiques_for(self.gender, self.selected_stature, race=self.race)
+        physique_options = [
+            discord.SelectOption(
+                label="Physique: Auto-Roll",
+                value="__auto__",
+                default=(not self.selected_physique),
+            )
+        ] + [
+            discord.SelectOption(
+                label=p,
+                value=p,
+                default=(p == self.selected_physique),
+            )
+            for p in allowed_physiques
+        ]
+        physique_select = discord.ui.Select(
+            placeholder="Physique (optional — default Auto-Roll)",
+            options=physique_options,
+            row=4,
+        )
+        physique_select.callback = self._on_physique_select
+        self.add_item(physique_select)
+
     def build_embed(self) -> discord.Embed:
         from mechanics.social.races import format_race_display
         embed = discord.Embed(
@@ -218,7 +389,13 @@ class StatAllocationView(discord.ui.View):
         race_str = format_race_display(self.race)
         if self.race_description:
             race_str += f"\n*{self.race_description}*"
-        embed.add_field(name="Identity", value=f"Race: {race_str}\nGender: {self.gender}", inline=True)
+        stature_label = _format_stature_display(self.selected_stature) if self.selected_stature else "Auto-Roll"
+        physique_label = self.selected_physique if self.selected_physique else "Auto-Roll"
+        embed.add_field(
+            name="Identity",
+            value=f"Race: {race_str}\nGender: {self.gender}\nBuild: {stature_label} • {physique_label}",
+            inline=True,
+        )
         embed.add_field(name=f"Selected — {STAT_NAMES[self.selected_stat]}",
                          value=STAT_EFFECTS[self.selected_stat], inline=False)
         embed.set_footer(text=f"Every stat starts at {BASE_STAT_VALUE} · {MAX_STAT_VALUE} max per stat · "
@@ -235,6 +412,31 @@ class StatAllocationView(discord.ui.View):
         if not await self._guard(interaction):
             return
         self.selected_stat = interaction.data["values"][0]
+        self._rebuild()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _on_stature_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        val = interaction.data["values"][0]
+        self.selected_stature = "" if val == "__auto__" else val
+        if self.selected_physique:
+            from mechanics.social.persona.core import heal_physique_for_context
+
+            self.selected_physique = heal_physique_for_context(
+                self.selected_physique,
+                gender=self.gender,
+                stature=self.selected_stature or "average",
+                race=self.race,
+            )
+        self._rebuild()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _on_physique_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        val = interaction.data["values"][0]
+        self.selected_physique = "" if val == "__auto__" else val
         self._rebuild()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
 
@@ -271,11 +473,17 @@ class StatAllocationView(discord.ui.View):
             return
 
         leftover = self.points_remaining
+        appearance_payload = {}
+        if self.selected_stature:
+            appearance_payload["stature"] = self.selected_stature
+        if self.selected_physique:
+            appearance_payload["physique"] = self.selected_physique
         char = await adb(db.create_character,
             self.user_id, self.name, char_class="Adventurer", class_description="",
             stats=self.values, gold=STARTING_GOLD, pending_stat_points=leftover,
             gender=self.gender, scenario=self.scenario,
-            race=self.race, race_description=self.race_description
+            race=self.race, race_description=self.race_description,
+            appearance=appearance_payload or None,
         )
         equipment = await adb(db.get_equipment, self.user_id)
 
@@ -284,6 +492,463 @@ class StatAllocationView(discord.ui.View):
 
         await interaction.response.edit_message(content=None, embed=embed, view=None)
         self.stop()
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+
+
+class CharacterAppearanceEditView(discord.ui.View):
+    """Ephemeral editor for height, physique, and (when NSFW-gated) intimate anatomy."""
+
+    def __init__(self, owner_id: int, char: dict, allow_nsfw: bool = False):
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+        self.char = char
+        self.allow_nsfw = bool(allow_nsfw)
+        self._edit_tab = "primary"
+        self._rebuild()
+
+    def _current_state(self) -> tuple[str, str, bool]:
+        from mechanics.social.persona.core import heal_physique_for_context
+        from mechanics.social.persona.intimacy.appearance import normalize_stature_tier
+
+        app = self.char.get("appearance") or {}
+        stature_raw = app.get("stature") or app.get("height") or self.char.get("stature") or "average"
+        physique_raw = app.get("physique") or self.char.get("physique") or "Average"
+        cur_stature = normalize_stature_tier(str(stature_raw)) or "average"
+        cur_physique = heal_physique_for_context(
+            str(physique_raw),
+            gender=self.char.get("gender", ""),
+            stature=cur_stature,
+            race=self.char.get("race", "human"),
+        ) or "Average"
+        is_male = _is_male_gender(self.char.get("gender", ""))
+        return cur_stature, cur_physique, is_male
+
+    def _rebuild(self):
+        self.clear_items()
+        from mechanics.social.persona.core import STATURE_TIERS
+        from mechanics.social.persona.intimacy.appearance import is_feral_rear_excluded
+
+        cur_stature, cur_physique, is_male = self._current_state()
+        feral_rear_excluded = is_feral_rear_excluded(str(self.char.get("race", "")))
+        if feral_rear_excluded and self._edit_tab == "rear":
+            self._edit_tab = "primary"
+        allowed_physiques = _allowed_physiques_for(
+            self.char.get("gender", ""),
+            cur_stature,
+            race=str(self.char.get("race", "")),
+        )
+
+        stature_options = [
+            discord.SelectOption(
+                label=_format_stature_option_label(tier),
+                value=tier,
+                default=(tier == cur_stature),
+            )
+            for tier in STATURE_TIERS
+        ]
+        stature_select = discord.ui.Select(placeholder="Select Height...", options=stature_options, row=0)
+        stature_select.callback = self._on_stature_select
+        self.add_item(stature_select)
+
+        physique_options = [
+            discord.SelectOption(
+                label=p,
+                value=p,
+                default=(p == cur_physique),
+            )
+            for p in allowed_physiques
+        ]
+        physique_select = discord.ui.Select(placeholder="Select Physique...", options=physique_options, row=1)
+        physique_select.callback = self._on_physique_select
+        self.add_item(physique_select)
+
+        roll_build_btn = discord.ui.Button(
+            label="Roll Build",
+            emoji="🎲",
+            style=discord.ButtonStyle.secondary,
+            row=2,
+        )
+        roll_build_btn.callback = self._on_roll_build
+        self.add_item(roll_build_btn)
+
+        if self.allow_nsfw:
+            roll_feature_btn = discord.ui.Button(
+                label="Roll Rear Feature" if (self._edit_tab == "rear" and not feral_rear_excluded) else "Roll Feature",
+                emoji="✨",
+                style=discord.ButtonStyle.secondary,
+                row=2,
+            )
+            roll_feature_btn.callback = self._on_roll_feature
+            self.add_item(roll_feature_btn)
+
+            if not feral_rear_excluded:
+                toggle_tab_btn = discord.ui.Button(
+                    label=("Edit Phallus" if is_male else "Edit Breasts") if self._edit_tab == "rear" else "Edit Rear / Ass",
+                    emoji="🔞" if self._edit_tab == "rear" else "🍑",
+                    style=discord.ButtonStyle.primary if self._edit_tab == "rear" else discord.ButtonStyle.secondary,
+                    row=2,
+                )
+                toggle_tab_btn.callback = self._on_toggle_anatomy_tab
+                self.add_item(toggle_tab_btn)
+
+            app = self.char.get("appearance") or {}
+            if self._edit_tab == "rear" and not feral_rear_excluded:
+                from mechanics.social.persona.intimacy.constants import REAR_TIER_INCOMPATIBLE_TEXTURES
+                from mechanics.social.persona.intimacy.appearance import (
+                    classify_rear_size_tier,
+                    normalize_rear_texture,
+                )
+
+                REAR_SIZE_OPTIONS, REAR_TEXTURE_OPTIONS = _get_rear_anatomy_option_lists()
+                cur_rear_raw = self.char.get("rear_size") or app.get("rear_size", "average")
+                cur_rear_tier = classify_rear_size_tier(str(cur_rear_raw))
+                rear_size_opts = [
+                    discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"].lower() == cur_rear_tier.lower() or opt["value"].lower() == str(cur_rear_raw).lower()),
+                    )
+                    for opt in REAR_SIZE_OPTIONS
+                ]
+                rear_size_select = discord.ui.Select(
+                    placeholder="Select Rear / Ass Size Tier...",
+                    options=rear_size_opts,
+                    row=3,
+                )
+                rear_size_select.callback = self._on_rear_size_select
+                self.add_item(rear_size_select)
+
+                raw_rtex = self.char.get("rear_texture") or app.get("rear_texture", "")
+                cur_rtex = normalize_rear_texture(str(raw_rtex), size_tier=cur_rear_tier) if raw_rtex else ""
+                r_incompat = REAR_TIER_INCOMPATIBLE_TEXTURES.get(cur_rear_tier, set())
+                r_tex_pool = [opt for opt in REAR_TEXTURE_OPTIONS if opt["value"] not in r_incompat] or REAR_TEXTURE_OPTIONS
+                r_tex_options = [
+                    discord.SelectOption(
+                        label="Auto-Assign from Race & Build (Dynamic Roll)",
+                        value="auto",
+                        default=(not cur_rtex or cur_rtex == "auto"),
+                    )
+                ] + [
+                    discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"] == cur_rtex),
+                    )
+                    for opt in r_tex_pool[:24]
+                ]
+                r_tex_select = discord.ui.Select(
+                    placeholder="Select Rear Tactile Texture...",
+                    options=r_tex_options,
+                    row=4,
+                )
+                r_tex_select.callback = self._on_rear_texture_select
+                self.add_item(r_tex_select)
+            else:
+                from mechanics.social.persona.intimacy.constants import (
+                    FEMALE_TIER_INCOMPATIBLE_TEXTURES,
+                    MALE_TIER_INCOMPATIBLE_TEXTURES,
+                )
+                from mechanics.social.persona.intimacy.appearance import (
+                    classify_asset_size_tier,
+                    normalize_asset_texture,
+                )
+
+                FEMALE_SIZE_OPTIONS, MALE_SIZE_OPTIONS, FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS = _get_anatomy_option_lists()
+                if is_male:
+                    cur_size_raw = self.char.get("penis_size") or app.get("penis_size", "average")
+                    cur_size_tier = classify_asset_size_tier(str(cur_size_raw), "male")
+                    size_opts = [
+                        discord.SelectOption(
+                            label=opt["label"][:100],
+                            value=opt["value"],
+                            default=(opt["value"].lower() == cur_size_tier.lower() or opt["value"].lower() == str(cur_size_raw).lower()),
+                        )
+                        for opt in MALE_SIZE_OPTIONS
+                    ]
+                    size_placeholder = "Select Penis Size Tier..."
+                    incompat = MALE_TIER_INCOMPATIBLE_TEXTURES.get(cur_size_tier, set())
+                    tex_pool = [opt for opt in MALE_TEXTURE_OPTIONS if opt["value"] not in incompat] or MALE_TEXTURE_OPTIONS
+                    tex_placeholder = "Select Tactile Feature & Texture (Phallus)..."
+                else:
+                    cur_size_raw = self.char.get("breast_size") or app.get("breast_size", "average")
+                    cur_size_tier = classify_asset_size_tier(str(cur_size_raw), "female")
+                    size_opts = [
+                        discord.SelectOption(
+                            label=opt["label"][:100],
+                            value=opt["value"],
+                            default=(opt["value"].lower() == cur_size_tier.lower() or opt["value"].lower() == str(cur_size_raw).lower()),
+                        )
+                        for opt in FEMALE_SIZE_OPTIONS
+                    ]
+                    size_placeholder = "Select Breast Size Tier..."
+                    incompat = FEMALE_TIER_INCOMPATIBLE_TEXTURES.get(cur_size_tier, set())
+                    tex_pool = [opt for opt in FEMALE_TEXTURE_OPTIONS if opt["value"] not in incompat] or FEMALE_TEXTURE_OPTIONS
+                    tex_placeholder = "Select Tactile Feature & Texture (Breasts)..."
+
+                size_select = discord.ui.Select(placeholder=size_placeholder, options=size_opts, row=3)
+                size_select.callback = self._on_size_select
+                self.add_item(size_select)
+
+                raw_tex = self.char.get("asset_texture") or app.get("asset_texture", "")
+                cur_tex = normalize_asset_texture(str(raw_tex), gender="male" if is_male else "female", size_tier=cur_size_tier) if raw_tex else ""
+                tex_options = [
+                    discord.SelectOption(
+                        label="Auto-Assign from Race & Build (Dynamic Roll)",
+                        value="auto",
+                        default=(not cur_tex or cur_tex == "auto"),
+                    )
+                ] + [
+                    discord.SelectOption(
+                        label=opt["label"][:100],
+                        value=opt["value"],
+                        default=(opt["value"] == cur_tex),
+                    )
+                    for opt in tex_pool[:24]
+                ]
+                tex_select = discord.ui.Select(placeholder=tex_placeholder, options=tex_options, row=4)
+                tex_select.callback = self._on_texture_select
+                self.add_item(tex_select)
+
+    def build_embed(self) -> discord.Embed:
+        from mechanics.social.races import format_race_display
+        from mechanics.social.persona.intimacy.appearance import (
+            classify_rear_size_tier,
+            get_species_surface_profile,
+            is_feral_rear_excluded,
+            normalize_asset_texture,
+            normalize_rear_size_label,
+            normalize_rear_texture,
+        )
+
+        cur_stature, cur_physique, is_male = self._current_state()
+        app = self.char.get("appearance") or {}
+        embed = discord.Embed(
+            title=f"📐 Customize Appearance — {self.char.get('name', 'Character')}",
+            description="Adjust your character's physical build and appearance.",
+            color=discord.Color.gold(),
+        )
+        race_str = format_race_display(self.char.get("race", "human"))
+        gender_str = self.char.get("gender", "Unknown")
+        embed.add_field(
+            name="Identity",
+            value=f"Race: **{race_str}**  |  Gender: **{gender_str}**",
+            inline=False,
+        )
+        embed.add_field(
+            name="Physical Build",
+            value=f"Height: **{_format_stature_display(cur_stature)}**\nPhysique: **{cur_physique}**",
+            inline=False,
+        )
+        if self.allow_nsfw:
+            feral_rear_excluded = is_feral_rear_excluded(str(self.char.get("race", "")))
+            size_label = (
+                self.char.get("penis_size") or app.get("penis_size") or "Average"
+                if is_male
+                else self.char.get("breast_size") or app.get("breast_size") or "Modest B-Cup"
+            )
+            raw_tex = self.char.get("asset_texture") or app.get("asset_texture") or ""
+            tex_label = (
+                normalize_asset_texture(str(raw_tex), gender="male" if is_male else "female") or raw_tex or "Auto-Assigned"
+            )
+            tab_label = (
+                "🍑 Rear / Ass"
+                if (self._edit_tab == "rear" and not feral_rear_excluded)
+                else ("🔞 Phallus" if is_male else "🔞 Breasts")
+            )
+            surf = get_species_surface_profile(self.char.get("race", "human"), str(app.get("skin_type") or ""))
+            anat_lines = [
+                f"Active Tab: **{tab_label}**",
+                f"Size: **{size_label}**",
+                f"Tactile Texture: **{tex_label}**",
+            ]
+            if not feral_rear_excluded:
+                r_size_raw = self.char.get("rear_size") or app.get("rear_size") or "average"
+                r_size_label = normalize_rear_size_label(str(r_size_raw)) or str(r_size_raw).title()
+                raw_rtex = self.char.get("rear_texture") or app.get("rear_texture") or ""
+                r_tex_label = (
+                    normalize_rear_texture(str(raw_rtex), size_tier=classify_rear_size_tier(str(r_size_raw)))
+                    or raw_rtex
+                    or "Auto-Assigned"
+                )
+                anat_lines.append(f"Rear: **{r_size_label}**")
+                anat_lines.append(f"Rear Texture: **{r_tex_label}**")
+            if surf.get("label"):
+                anat_lines.append(f"Species Surface: **{surf['label']}** *(auto from race)*")
+            anat_val = "\n".join(anat_lines)
+            embed.add_field(
+                name="🔞 Intimate Anatomy",
+                value=anat_val,
+                inline=False,
+            )
+        return embed
+
+    async def _guard(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the character owner can edit this appearance.", ephemeral=True)
+            return False
+        return True
+
+    async def _apply_update(self, interaction: discord.Interaction, payload: dict):
+        updated = await adb(db.update_character_appearance, self.char["id"], payload)
+        if updated:
+            self.char = updated
+        self._rebuild()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _on_stature_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        from mechanics.social.persona.core import heal_physique_for_context
+
+        new_stature = interaction.data["values"][0]
+        _, cur_physique, _ = self._current_state()
+        healed = heal_physique_for_context(
+            cur_physique,
+            gender=self.char.get("gender", ""),
+            stature=new_stature,
+            race=self.char.get("race", "human"),
+        )
+        await self._apply_update(interaction, {"stature": new_stature, "physique": healed})
+
+    async def _on_physique_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        new_physique = interaction.data["values"][0]
+        await self._apply_update(interaction, {"physique": new_physique})
+
+    async def _on_roll_build(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        from mechanics.social.persona.intimacy.appearance import roll_dynamic_stature, roll_dynamic_physique
+
+        race = self.char.get("race", "human")
+        gender = self.char.get("gender", "female")
+        new_stature = roll_dynamic_stature(race=race, gender=gender, seed=None)
+        new_physique = roll_dynamic_physique(gender=gender, stature=new_stature, race=race, seed=None)
+        await self._apply_update(interaction, {"stature": new_stature, "physique": new_physique})
+
+    async def _on_toggle_anatomy_tab(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        self._edit_tab = "primary" if self._edit_tab == "rear" else "rear"
+        self._rebuild()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def _on_roll_feature(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        from mechanics.social.persona.intimacy.appearance import (
+            classify_asset_size_tier,
+            classify_rear_size_tier,
+            roll_dynamic_asset_texture,
+            roll_dynamic_rear_texture,
+        )
+
+        _, cur_physique, is_male = self._current_state()
+        app = self.char.get("appearance") or {}
+        if self._edit_tab == "rear":
+            raw_rear = self.char.get("rear_size") or app.get("rear_size", "average")
+            rear_tier = classify_rear_size_tier(str(raw_rear))
+            chosen = roll_dynamic_rear_texture(
+                seed=random.randint(1, 10**9),
+                race=self.char.get("race", "human"),
+                physique=cur_physique,
+                size_tier=rear_tier,
+            )
+            await self._apply_update(interaction, {"rear_texture": chosen})
+            return
+
+        eff_g = "male" if is_male else "female"
+        raw_sz = self.char.get("penis_size") or app.get("penis_size", "average") if is_male else self.char.get("breast_size") or app.get("breast_size", "average")
+        cur_tier = classify_asset_size_tier(str(raw_sz), eff_g)
+        chosen = roll_dynamic_asset_texture(
+            seed=random.randint(1, 10**9),
+            gender=eff_g,
+            race=self.char.get("race", "human"),
+            physique=cur_physique,
+            size_tier=cur_tier,
+        )
+        await self._apply_update(interaction, {"asset_texture": chosen})
+
+    async def _on_size_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        from mechanics.social.persona.intimacy.appearance import heal_asset_texture_for_context
+
+        _, _, is_male = self._current_state()
+        app = self.char.get("appearance") or {}
+        val = interaction.data["values"][0]
+        eff_g = "male" if is_male else "female"
+        payload = {"penis_size": val} if is_male else {"breast_size": val}
+        cur_tex = self.char.get("asset_texture") or app.get("asset_texture")
+        if cur_tex:
+            healed_tex = heal_asset_texture_for_context(cur_tex, gender=eff_g, size_tier=val)
+            if healed_tex:
+                payload["asset_texture"] = healed_tex
+        await self._apply_update(interaction, payload)
+
+    async def _on_texture_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        val = interaction.data["values"][0]
+        payload = {"asset_texture": "" if val == "auto" else val}
+        await self._apply_update(interaction, payload)
+
+    async def _on_rear_size_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        from mechanics.social.persona.intimacy.appearance import heal_rear_texture_for_context
+
+        app = self.char.get("appearance") or {}
+        val = interaction.data["values"][0]
+        payload = {"rear_size": val}
+        cur_rtex = self.char.get("rear_texture") or app.get("rear_texture")
+        if cur_rtex:
+            healed = heal_rear_texture_for_context(cur_rtex, size_tier=val)
+            if healed:
+                payload["rear_texture"] = healed
+        await self._apply_update(interaction, payload)
+
+    async def _on_rear_texture_select(self, interaction: discord.Interaction):
+        if not await self._guard(interaction):
+            return
+        val = interaction.data["values"][0]
+        payload = {"rear_texture": "" if val == "auto" else val}
+        await self._apply_update(interaction, payload)
+
+    async def on_timeout(self):
+        for child in self.children:
+            child.disabled = True
+
+
+class CharacterSheetView(discord.ui.View):
+    """Attached to `/character sheet` with an owner-locked ephemeral Edit Appearance button."""
+
+    def __init__(self, owner_id: int):
+        super().__init__(timeout=300)
+        self.owner_id = owner_id
+
+    @discord.ui.button(label="Edit Appearance", emoji="📐", style=discord.ButtonStyle.secondary)
+    async def edit_appearance(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message("Only the character owner can edit appearance.", ephemeral=True)
+            return
+        char = await adb(db.get_character, self.owner_id)
+        if not char:
+            await interaction.response.send_message(
+                "No active character found. Use `/character create` first.",
+                ephemeral=True,
+            )
+            return
+        from scenario_data import is_nsfw_scenario
+        from cogs.scenario_picker import channel_allows_nsfw
+
+        allow_nsfw = is_nsfw_scenario(char.get("scenario", "fantasy")) and channel_allows_nsfw(interaction.channel)
+        view = CharacterAppearanceEditView(self.owner_id, char, allow_nsfw=allow_nsfw)
+        await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
 
     async def on_timeout(self):
         for child in self.children:
@@ -597,7 +1262,21 @@ class CharacterCog(commands.Cog):
             return
         equipment = await adb(db.get_equipment, interaction.user.id)
         embed = build_character_sheet_embed(char, equipment)
-        await interaction.response.send_message(embed=embed)
+        await interaction.response.send_message(embed=embed, view=CharacterSheetView(interaction.user.id))
+
+    @character_group.command(name="appearance", description="Customize your character's height, physique, and appearance")
+    async def appearance(self, interaction: discord.Interaction):
+        char = await adb(db.get_character, interaction.user.id)
+        if not char:
+            await interaction.response.send_message(
+                "You don't have a character yet. Use `/character create` first.", ephemeral=True)
+            return
+        from scenario_data import is_nsfw_scenario
+        from cogs.scenario_picker import channel_allows_nsfw
+
+        allow_nsfw = is_nsfw_scenario(char.get("scenario", "fantasy")) and channel_allows_nsfw(interaction.channel)
+        view = CharacterAppearanceEditView(interaction.user.id, char, allow_nsfw=allow_nsfw)
+        await interaction.response.send_message(embed=view.build_embed(), view=view, ephemeral=True)
 
     @character_group.command(name="delete", description="Delete your character (irreversible)")
     async def delete(self, interaction: discord.Interaction):

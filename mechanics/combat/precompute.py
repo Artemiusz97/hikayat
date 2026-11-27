@@ -583,9 +583,26 @@ def precompute_combat_turn(session: dict, party: list, actions: list, *, persist
     total_player_damage = int(ctx.get("total_player_damage", 0) or 0)
     anom_passives = ctx.get("anom_passives") or {}
 
+    active_sworn_courts: set[str] | None = None
+    if sess_id_cbt and any(
+        isinstance(n, dict) and n.get("is_summon") and n.get("spirit_court")
+        for n in (current_npcs or [])
+    ):
+        from mechanics.combat.spells.spirit_court_perks import get_active_sworn_ally_courts
+        active_sworn_courts = set(get_active_sworn_ally_courts(int(sess_id_cbt)))
+
     surviving_npcs: List[Dict[str, Any]] = []
     for npc in current_npcs:
         if npc.get("is_summon"):
+            if (
+                npc.get("spirit_court")
+                and active_sworn_courts is not None
+                and str(npc["spirit_court"]) not in active_sworn_courts
+            ):
+                combat_log.append(
+                    f"⚠️ **{npc['name']}** dissolved as the Sovereign's Sworn Ally pact fell dormant (Spirit Court standing below 90)."
+                )
+                continue
             npc["summon_duration"] = int(npc.get("summon_duration") if npc.get("summon_duration") is not None else 1) - 1
             npc_hp = int(npc.get("hp") or 0)
             if npc["summon_duration"] <= 0 or npc_hp <= 0:

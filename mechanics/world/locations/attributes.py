@@ -5,8 +5,16 @@ import re
 
 import db
 from .constants import *
+from .constants import (
+    _EXPLICIT_ROOM_SHOP_RE,
+    _EXPLICIT_SHOP_NOUNS_RE,
+    _HQ_SHOP_WING_RE,
+    _HQ_TOKEN_RE,
+    _NON_SHOP_ANOM_ROOM_RE,
+    _NON_SHOP_ROOM_RE,
+    _SHOP_KEYWORDS_RE,
+)
 from .seeds import *
-from .seeds import _load_seeds
 
 
 def is_hub_location(location_str: str) -> bool:
@@ -47,9 +55,11 @@ def get_location_scout_description(session_id: int, location_str: str, scen_key:
     ensure_session_locations_seeded(session_id, scen_key, char_name=char_name)
     z_name, p_name, s_name = parse_tiered_location(location_str, scen_key, session_id=session_id, char_name=char_name)
 
-    seeds = _load_seeds()
-    scen_data = seeds.get(scen_key) or seeds.get("fantasy") or {}
-    zone_list = scen_data.get("zones", [])
+    scen_data = get_scenario_seed_data(scen_key or "fantasy")
+    zone_list = list(scen_data.get("zones", []))
+    for r in scen_data.get("realms") or []:
+        if r.get("primary_locations"):
+            zone_list.append({"id": r.get("id", ""), "name": r.get("name", ""), "primary_locations": r.get("primary_locations") or []})
 
     matched_zone = None
     matched_primary = None
@@ -291,6 +301,56 @@ def location_has_bounty_board(location_str: str, scen_key: str = None) -> bool:
     return any(re.search(rf"\b{re.escape(k)}\b", loc_lower) for k in BOUNTY_BOARD_KEYWORDS)
 
 
+def _get_folklore_spirit_merchant_stores(location_str: str) -> list[dict]:
+    """
+    Resolves Spirit Night Market 4-wing multi-culture stalls and Spirit Enclave / Ranger shops
+    across `anomalous_incursions`, `anomalous_high_school`, and `urban_anomalies`.
+    """
+    from mechanics.combat.merchant import MERCHANT_ARCHETYPES
+
+    loc_lower = str(location_str or "").lower()
+    raw_parts = [p.strip() for p in re.split(r"➔|->", str(location_str or "")) if p.strip()]
+    leaf_lower = raw_parts[-1].lower() if raw_parts else loc_lower
+
+    def _pack(keys: tuple[str, ...]) -> list[dict]:
+        return [{"type": k, **MERCHANT_ARCHETYPES[k]} for k in keys if k in MERCHANT_ARCHETYPES]
+
+    def _match_target(target_lower: str) -> list[dict]:
+        if any(k in target_lower for k in ("sub_crossroads_bazaar_walk", "lotus-canal lantern bazaar promenade", "lantern bazaar promenade")):
+            return _pack(("bazaar_foxfire_tea_stall", "bazaar_cempaka_kuih_stall"))
+        if any(k in target_lower for k in ("sub_crossroads_kitsune_alley", "kitsunebi craft", "mask alley")):
+            return _pack(("bazaar_kagura_mask_stall", "bazaar_inari_ofuda_stall"))
+        if any(k in target_lower for k in ("sub_crossroads_bunian_arcade", "songket & pusaka", "pusaka arcade", "seri nusantara")):
+            return _pack(("bazaar_songket_silk_stall", "bazaar_empu_pusaka_stall"))
+        if any(k in target_lower for k in ("sub_crossroads_curio_arcade", "dual-tradition spirit curio", "curio arcade")):
+            return _pack(("crossroads_bazaar_merchant", "bazaar_ghoul_curio_stall"))
+        if any(k in target_lower for k in ("loc_crossroads_night_market", "pasar malam ghaib", "lantern bazaar", "dusk confluence")):
+            return _pack((
+                "crossroads_bazaar_merchant",
+                "bazaar_foxfire_tea_stall",
+                "bazaar_cempaka_kuih_stall",
+                "bazaar_kagura_mask_stall",
+                "bazaar_inari_ofuda_stall",
+                "bazaar_songket_silk_stall",
+                "bazaar_empu_pusaka_stall",
+                "bazaar_ghoul_curio_stall",
+            ))
+        if any(k in target_lower for k in ("sub_ghoul_curio_morgue", "formalin & bone-relic", "bone-relic apothecary", "ossuary court & inner crypt")):
+            return _pack(("ghoul_ossuary_merchant",))
+        if any(k in target_lower for k in ("sub_kitsune_curio_shop", "fox-fire apothecary", "spirit-fire curio", "myōbu spirit-fire", "myobu spirit-fire", "spirit curio", "sato-no-inari inner sanctuary")):
+            return _pack(("kitsune_spirit_merchant",))
+        if any(k in target_lower for k in ("sub_bunian_artisan_hall", "artisan hall", "istana & laman seri cempaka", "balai pusaka")):
+            return _pack(("bunian_pusaka_merchant",))
+        if any(k in target_lower for k in ("ranger station", "park ranger", "ranger field station", "trailhead information counter", "trailhead outpost", "trail permit", "emergency supply counter")):
+            return _pack(("ranger_station_outfitter",))
+        return []
+
+    hits = _match_target(leaf_lower)
+    if not hits and leaf_lower != loc_lower:
+        hits = _match_target(loc_lower)
+    return hits
+
+
 def get_available_merchant_types_for_location(location_str: str, scen_key: str = None) -> list[dict]:
     """Returns a list of available specialist merchant stores for the current location."""
     from mechanics.combat.merchant import MERCHANT_ARCHETYPES
@@ -298,6 +358,10 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     if not location_str:
         return [{"type": "general_merchant", **MERCHANT_ARCHETYPES["general_merchant"]}]
+
+    folklore_stores = _get_folklore_spirit_merchant_stores(location_str)
+    if folklore_stores:
+        return folklore_stores
 
     loc_lower = str(location_str).lower()
     is_nsfw = is_nsfw_scenario(scen_key) if scen_key else False
@@ -391,11 +455,34 @@ def get_available_merchant_types_for_location(location_str: str, scen_key: str =
 
     def _collect_specialist_stores(target_lower: str) -> list[dict]:
         found = []
-        if any(k in target_lower for k in ("fox-fire apothecary", "spirit-fire curio", "myōbu spirit-fire", "myobu spirit-fire", "spirit curio", "sato-no-inari")) and "kitsune_spirit_merchant" in MERCHANT_ARCHETYPES:
+        if any(k in target_lower for k in ("formalin & bone-relic", "bone-relic apothecary", "ossuary court & inner crypt")) and "ghoul_ossuary_merchant" in MERCHANT_ARCHETYPES:
+            found.append({"type": "ghoul_ossuary_merchant", **MERCHANT_ARCHETYPES["ghoul_ossuary_merchant"]})
+            return found
+        if any(k in target_lower for k in ("kitsunebi craft", "mask alley")) and "kitsune_spirit_merchant" in MERCHANT_ARCHETYPES:
+            found.append({"type": "kitsune_spirit_merchant", **MERCHANT_ARCHETYPES["kitsune_spirit_merchant"]})
+            if "crossroads_bazaar_merchant" in MERCHANT_ARCHETYPES:
+                found.append({"type": "crossroads_bazaar_merchant", **MERCHANT_ARCHETYPES["crossroads_bazaar_merchant"]})
+            return found
+        if any(k in target_lower for k in ("songket & pusaka", "pusaka arcade", "seri nusantara")) and "bunian_pusaka_merchant" in MERCHANT_ARCHETYPES:
+            found.append({"type": "bunian_pusaka_merchant", **MERCHANT_ARCHETYPES["bunian_pusaka_merchant"]})
+            if "crossroads_bazaar_merchant" in MERCHANT_ARCHETYPES:
+                found.append({"type": "crossroads_bazaar_merchant", **MERCHANT_ARCHETYPES["crossroads_bazaar_merchant"]})
+            return found
+        if any(k in target_lower for k in ("pasar malam ghaib", "lantern bazaar", "curio arcade", "dusk confluence")) and "crossroads_bazaar_merchant" in MERCHANT_ARCHETYPES:
+            found.append({"type": "crossroads_bazaar_merchant", **MERCHANT_ARCHETYPES["crossroads_bazaar_merchant"]})
+            return found
+        if any(k in target_lower for k in ("fox-fire apothecary", "spirit-fire curio", "myōbu spirit-fire", "myobu spirit-fire", "spirit curio", "sato-no-inari inner sanctuary")) and "kitsune_spirit_merchant" in MERCHANT_ARCHETYPES:
             found.append({"type": "kitsune_spirit_merchant", **MERCHANT_ARCHETYPES["kitsune_spirit_merchant"]})
             return found
-        if any(k in target_lower for k in ("pusaka", "artisan hall", "kampung kayangan")) and "bunian_pusaka_merchant" in MERCHANT_ARCHETYPES:
+        if any(k in target_lower for k in ("pusaka", "artisan hall", "istana & laman seri cempaka")) and "bunian_pusaka_merchant" in MERCHANT_ARCHETYPES:
             found.append({"type": "bunian_pusaka_merchant", **MERCHANT_ARCHETYPES["bunian_pusaka_merchant"]})
+            return found
+        if any(k in target_lower for k in ("salvage stalls", "drifter bazaar", "relic, ammo & salvage")) and "potion_merchant" in MERCHANT_ARCHETYPES:
+            found.append({"type": "general_merchant", **MERCHANT_ARCHETYPES["general_merchant"]})
+            found.append({"type": "potion_merchant", **MERCHANT_ARCHETYPES["potion_merchant"]})
+            return found
+        if any(k in target_lower for k in ("wake parlor", "velvet & clove lounge", "black-velvet wake")):
+            found.append({"type": "food_merchant", **MERCHANT_ARCHETYPES["food_merchant"]})
             return found
         if any(k in target_lower for k in ("ranger station", "park ranger", "ranger field station", "trailhead information counter", "trailhead outpost", "trail permit", "emergency supply")) and "ranger_station_outfitter" in MERCHANT_ARCHETYPES:
             found.append({"type": "ranger_station_outfitter", **MERCHANT_ARCHETYPES["ranger_station_outfitter"]})
@@ -479,6 +566,21 @@ def location_has_merchant_shop(location_str: str, scen_key: str = None) -> bool:
     p_lower = target.lower()
     leaf_lower = leaf_target.lower()
     school_check_lower = leaf_lower if is_room_level else p_lower
+
+    _folklore_shop_leaf_markers = (
+        "sub_crossroads_bazaar_walk", "lotus-canal lantern bazaar promenade", "lantern bazaar promenade",
+        "sub_crossroads_kitsune_alley", "kitsunebi craft", "mask alley",
+        "sub_crossroads_bunian_arcade", "songket & pusaka", "pusaka arcade", "seri nusantara",
+        "sub_crossroads_curio_arcade", "dual-tradition spirit curio", "curio arcade",
+        "loc_crossroads_night_market", "pasar malam ghaib", "lantern bazaar",
+        "sub_kitsune_curio_shop", "fox-fire apothecary", "spirit-fire curio",
+        "sub_bunian_artisan_hall", "artisan hall", "balai pusaka",
+        "sub_ghoul_curio_morgue", "formalin & bone-relic", "bone-relic apothecary",
+    )
+    if any(k in leaf_lower for k in _folklore_shop_leaf_markers) or (
+        not is_room_level and any(k in p_lower for k in _folklore_shop_leaf_markers)
+    ):
+        return True
 
     from scenario_data import has_school_campus_mechanics, is_anomalous_incursions_scenario
     is_anom_scen = is_anomalous_incursions_scenario(scen_key) if scen_key else False

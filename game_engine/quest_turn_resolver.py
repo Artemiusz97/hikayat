@@ -578,7 +578,7 @@ def resolve_quest_approach_failure(
                 db.set_quest_resolution_approach(session_id, qid, "dire_cost")
                 db.reset_quest_strikes(session_id, qid)
                 if temp == "timid" and lead_uid:
-                    db.apply_hp_mp_delta(int(lead_uid), hp_delta=-5)
+                    db.apply_hp_mp_delta(int(lead_uid), hp_delta=-5, session_id=session_id)
                 dire_dir = (
                     f"[MANDATORY DIRE COST — SPECIMEN ESCAPED]: {side_fx_final['directive']} "
                     f"Salvage residual telemetry to press '{q_fresh.get('title')}' forward (0 HP lost)."
@@ -1080,7 +1080,7 @@ def resolve_quest_approach_failure(
         db.upsert_quest_dossier(session_id, qid, alert_level=0, turn_number=eff_turn, sync_projection=True)
         db.reset_quest_strikes(session_id, qid)
         lead_uid = party_user_ids[0] if party_user_ids else 1
-        db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
+        db.apply_hp_mp_delta(lead_uid, hp_delta=-5, session_id=session_id)
         return {
             "status": "dire_cost",
             "failed": False,
@@ -1138,7 +1138,7 @@ def resolve_quest_approach_failure(
         sub_obj["resolution_approach"] = "dire_cost"
     db.reset_quest_strikes(session_id, qid)
     lead_uid = party_user_ids[0] if party_user_ids else 1
-    db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
+    db.apply_hp_mp_delta(lead_uid, hp_delta=-5, session_id=session_id)
     return {
         "status": "dire_cost",
         "failed": False,
@@ -1258,10 +1258,10 @@ def resolve_quest_optional_objective(
             None,
         )
         cost = int((appr_obj or {}).get("gold_cost") or 20)
-        char = db.get_character(int(user_id)) or {}
+        char = db.get_character(int(user_id), session_id=session_id) or {}
         if int(char.get("gold") or 0) < cost:
             return {"success": False, "blocked": True, "reason": "insufficient_gold", "required_gold": cost}
-        db.apply_hp_mp_delta(int(user_id), gold_delta=-cost)
+        db.apply_hp_mp_delta(int(user_id), gold_delta=-cost, session_id=session_id)
         econ["bribes_spent_gold"] = int(econ.get("bribes_spent_gold") or 0) + cost
 
     if not succeeded:
@@ -1301,9 +1301,9 @@ def resolve_quest_optional_objective(
         fb_aff = int(fb_spec.get("affinity") or 0)
         for uid in uids:
             if fb_xp > 0:
-                db.add_xp(int(uid), fb_xp)
+                db.add_xp(int(uid), fb_xp, session_id=session_id)
             if fb_gold > 0:
-                db.apply_hp_mp_delta(int(uid), gold_delta=fb_gold)
+                db.apply_hp_mp_delta(int(uid), gold_delta=fb_gold, session_id=session_id)
         if fb_aff > 0 and lead.get("target_npc"):
             try:
                 db.update_relationship_score(session_id, str(lead["target_npc"]), delta_score=fb_aff)
@@ -1544,8 +1544,8 @@ def resolve_quest_optional_objective(
                 (time.time(), session_id, quest_id),
             )
         for uid in uids:
-            db.apply_hp_mp_delta(int(uid), gold_delta=final_gold)
-            db.add_xp(int(uid), final_xp)
+            db.apply_hp_mp_delta(int(uid), gold_delta=final_gold, session_id=session_id)
+            db.add_xp(int(uid), final_xp, session_id=session_id)
 
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q_row.get("status") or "Active"), "Completed")
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "alternative_deal")
@@ -1807,10 +1807,10 @@ def evaluate_nonlinear_leads_and_climax_gate(
     if norm_appr == "BRIBE" and user_id:
         appr_obj = next((a for a in (lead.get("approaches") or []) if str(a.get("approach_id") or "").lower() == "bribe"), None)
         cost = int((appr_obj or {}).get("gold_cost") or 20)
-        char = db.get_character(int(user_id)) or {}
+        char = db.get_character(int(user_id), session_id=session_id) or {}
         if int(char.get("gold") or 0) < cost:
             return {"success": False, "blocked": True, "reason": "insufficient_gold", "required_gold": cost}
-        db.apply_hp_mp_delta(int(user_id), gold_delta=-cost)
+        db.apply_hp_mp_delta(int(user_id), gold_delta=-cost, session_id=session_id)
         econ["bribes_spent_gold"] = int(econ.get("bribes_spent_gold") or 0) + cost
 
     if not succeeded:
@@ -2111,8 +2111,8 @@ def resolve_quest_combat_outcome(
                 (part_gold, part_xp, time.time(), session_id, quest_id),
             )
         for uid in uids:
-            db.apply_hp_mp_delta(int(uid), gold_delta=part_gold)
-            db.add_xp(int(uid), part_xp)
+            db.apply_hp_mp_delta(int(uid), gold_delta=part_gold, session_id=session_id)
+            db.add_xp(int(uid), part_xp, session_id=session_id)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), "partial_success")
         db.upsert_quest_dossier(session_id, quest_id, outcome_tier="partial_success")
@@ -2155,8 +2155,8 @@ def resolve_quest_combat_outcome(
             (time.time(), session_id, quest_id),
         )
     for uid in uids:
-        db.apply_hp_mp_delta(int(uid), gold_delta=final_gold)
-        db.add_xp(int(uid), final_xp)
+        db.apply_hp_mp_delta(int(uid), gold_delta=final_gold, session_id=session_id)
+        db.add_xp(int(uid), final_xp, session_id=session_id)
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax, climax)
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")
     db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", str(dossier.get("outcome_tier") or ""), tier)
@@ -2243,11 +2243,11 @@ def evaluate_intimate_liaison_turn(
         salvage_ok = False
 
         if not already_salvaged and user_id:
-            char = db.get_character(int(user_id)) or {}
+            char = db.get_character(int(user_id), session_id=session_id) or {}
             if norm_appr == "BRIBE":
                 b_cost = int(salvage_cfg.get("bribe_gold") or 35)
                 if int(char.get("gold") or 0) >= b_cost:
-                    db.apply_hp_mp_delta(int(user_id), gold_delta=-b_cost)
+                    db.apply_hp_mp_delta(int(user_id), gold_delta=-b_cost, session_id=session_id)
                     salvage_ok = True
             else:
                 st_col = "agi" if norm_appr == "AGI" else "cha"
@@ -2299,8 +2299,8 @@ def evaluate_intimate_liaison_turn(
                 (time.time(), session_id, quest_id),
             )
         for uid in uids:
-            db.apply_hp_mp_delta(int(uid), gold_delta=gold)
-            db.add_xp(int(uid), xp)
+            db.apply_hp_mp_delta(int(uid), gold_delta=gold, session_id=session_id)
+            db.add_xp(int(uid), xp, session_id=session_id)
         if climax != prev_climax_int:
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax_int, climax)
         db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", str(q.get("status") or "Active"), "Completed")

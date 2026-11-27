@@ -13,6 +13,16 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 import db
+from mechanics.social.persona import (
+    classify_asset_size_tier,
+    classify_rear_size_tier,
+    heal_physique_for_context,
+    is_female_gender,
+    is_feral_rear_excluded,
+    is_male_gender,
+    normalize_physique,
+    normalize_stature_tier,
+)
 
 logger = logging.getLogger("hikayat.image_composer")
 
@@ -105,6 +115,13 @@ def format_species_tags(race: str = "", species: str = "", bio: str = "") -> str
         return "feral, quadruped, spirit fox, multiple tails, foxfire wisps"
     if r_low in ("kitsune:humanoid", "kitsune"):
         return "human, kemonomimi, fox ears, multiple tails, fox tail"
+    if r_low in ("ghoul:canid", "al_ghul:canid"):
+        sp_tok = (s_low or "jackal").strip().replace(" ", "_")
+        from mechanics.social.folklore_ghoul import CANID_SPECIES_SDXL_TAGS, normalize_canid_species
+        norm_sp = normalize_canid_species(sp_tok, seed=f"{s_low}:{b_low}")
+        return CANID_SPECIES_SDXL_TAGS.get(norm_sp, "feral, quadruped, dark canid hound, glowing pale eyes")
+    if r_low in ("ghoul:humanoid", "al_ghul:humanoid", "al_ghul"):
+        return "human, pale porcelain skin, subtle sharp fangs, glowing eyes"
 
     # Extract animal species name if prefixed with beastfolk: or half_beast:
     spec_target = ""
@@ -220,6 +237,65 @@ def _synthesize_sdxl_wardrobe_tags(
         out.append(fallback_outfit)
     return out
 
+def format_stature_tags(stature: str = "", race: str = "") -> str:
+    """Emit subtle Danbooru/SDXL solo stature tags for tall/towering figures (skipping feral myobu_fox)."""
+    if is_feral_rear_excluded(race):
+        return ""
+    norm_st = normalize_stature_tier(stature) if stature else ""
+    if norm_st == "towering":
+        return "towering height, tall, long legs, slight low angle"
+    if norm_st == "tall":
+        return "tall, long legs"
+    return ""
+
+
+def format_physique_tags(
+    physique: str,
+    gender: str = "",
+    race: str = "",
+    stature: str = "",
+) -> str:
+    """Maps canonical physique tiers and short/compact female statures to Danbooru/SDXL visual tags."""
+    r_low = str(race or "").strip().lower()
+    if r_low in ("kitsune:myobu_fox", "ghoul:canid"):
+        return ""
+    raw_canon = normalize_physique(physique)
+    if "bunian" in r_low and raw_canon in ("Chubby", "Stocky"):
+        return ""
+
+    canon = (
+        heal_physique_for_context(physique, gender=gender, stature=stature or "average", race=race)
+        if physique
+        else ""
+    )
+    g_low = str(gender or "").strip().lower()
+    is_male = is_male_gender(g_low)
+    is_female = is_female_gender(g_low)
+
+    norm_st = normalize_stature_tier(stature) if stature else ""
+    eff_phys = canon or "Average"
+    add_petite = is_female and (
+        (norm_st in ("miniature", "short") and eff_phys in ("Slim", "Average", "Athletic"))
+        or (norm_st == "below_average" and eff_phys == "Slim")
+    )
+
+    tag_map = {
+        "Slim": "slender",
+        "Athletic": "athletic, toned",
+        "Muscular": "muscular",
+        "Voluptuous": "voluptuous, curvy, thick thighs",
+        "Stocky": "broad shoulders, stocky" if is_male else "stocky, sturdy build",
+        "Chubby": "plump, chubby",
+    }
+    parts = []
+    if add_petite:
+        parts.append("petite")
+    phys_tag = tag_map.get(canon, "")
+    if phys_tag:
+        parts.append(phys_tag)
+    return ", ".join(parts)
+
+
 def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool = False) -> str:
     """Extracts physical Danbooru tags for an NPC from their appearance dictionary."""
     app = npc_data.get("appearance") or {}
@@ -230,12 +306,16 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
 
     r_low_npc = str(npc_data.get("race") or "").strip().lower()
     is_myobu_fox = (r_low_npc == "kitsune:myobu_fox")
+    is_ghoul_canid = (r_low_npc == "ghoul:canid")
+    is_ghoul_humanoid = (r_low_npc in ("ghoul:humanoid", "al_ghul:humanoid", "al_ghul"))
+    is_folklore_beast = is_myobu_fox or is_ghoul_canid
     is_kitsune_humanoid = r_low_npc in ("kitsune:humanoid", "kitsune")
     is_bunian = (r_low_npc == "orang_bunian" or "bunian" in r_low_npc)
     # 1. Species / Race
+    canid_sp_val = str(app.get("canid_species") or npc_data.get("species") or "").strip()
     spec_tags = format_species_tags(
         race=str(npc_data.get("race") or ""),
-        species=str(npc_data.get("species") or ""),
+        species=canid_sp_val,
         bio=str(npc_data.get("description") or "")
     )
     if spec_tags:
@@ -255,7 +335,7 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
     hair_col = app.get("hair_color") or ""
     hair_len = app.get("hair_length") or ""
     hair_sty = app.get("hair_style") or ""
-    hair_parts = [] if is_myobu_fox else [p.lower().strip() for p in (hair_len, hair_sty, hair_col) if p and str(p).strip()]
+    hair_parts = [] if is_folklore_beast else [p.lower().strip() for p in (hair_len, hair_sty, hair_col) if p and str(p).strip()]
     if hair_parts:
         h_str = " ".join(hair_parts)
         if "hair" not in h_str:
@@ -313,6 +393,27 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
         else:
             tags.append("shrine suzu bell collar")
         return _join_tags(tags)
+    if is_ghoul_canid:
+        if outfit and any(kw in outfit.lower() for kw in ("collar", "tag", "chain", "silver")):
+            tags.append(outfit)
+        else:
+            tags.append("iron-silver pack collar")
+        return _join_tags(tags)
+
+    phys_tags = format_physique_tags(
+        str(app.get("physique") or ""),
+        gender=str(npc_data.get("gender") or ""),
+        race=r_low_npc,
+        stature=str(app.get("stature") or app.get("height") or ""),
+    )
+    if phys_tags:
+        tags.append(phys_tags)
+    stature_tags = format_stature_tags(
+        str(app.get("stature") or app.get("height") or ""),
+        race=r_low_npc,
+    )
+    if stature_tags:
+        tags.append(stature_tags)
 
     if is_bunian:
         tags = [
@@ -339,6 +440,8 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
             tags.append("ornate royal songket baju sikap, gold embroidery" if is_male_b else "ornate royal songket kebaya, gold embroidery")
         elif is_kitsune_humanoid:
             tags.append("ornate shrine kimono, haori, obijime")
+        elif is_ghoul_humanoid:
+            tags.append("dark tailored gothic coat, high collar, monochrome formalwear")
         else:
             tags.append("school uniform, collared shirt, pleated skirt" if "school" in str(npc_data.get("role", "")).lower() else "casual clothes")
 
@@ -356,14 +459,33 @@ def format_npc_appearance_tags(npc_data: Dict[str, Any], intimate_context: bool 
             pass
 
     # 7. Assets (if intimate/NSFW context)
-    if intimate_context and str(npc_data.get("gender", "")).lower() in ("female", "f", "woman", "girl"):
-        breast = str(app.get("breast_size") or "").lower()
-        if any(kw in breast for kw in ("dd", "e-cup", "f-cup", "huge", "voluptuous")):
-            tags.append("large breasts")
-        elif any(kw in breast for kw in ("c-cup", "d-cup", "bouncy")):
-            tags.append("medium breasts")
-        elif any(kw in breast for kw in ("a-cup", "petite", "flat", "small")):
-            tags.append("small breasts")
+    if intimate_context and not is_feral_rear_excluded(r_low_npc):
+        if str(npc_data.get("gender", "")).lower() in ("female", "f", "woman", "girl"):
+            raw_breast = str(app.get("breast_size") or "").strip()
+            if raw_breast and raw_breast.lower() not in ("none", "unknown", "n/a", ""):
+                b_tier = classify_asset_size_tier(raw_breast, gender="female")
+                bb_tag_map = {
+                    "flat": "flat chest",
+                    "small": "small breasts",
+                    "average": "medium breasts",
+                    "large": "large breasts",
+                    "huge": "huge breasts",
+                }
+                bb_tag = bb_tag_map.get(b_tier, "")
+                if bb_tag:
+                    tags.append(bb_tag)
+
+        raw_rear = str(app.get("rear_size") or "").strip()
+        if raw_rear and raw_rear.lower() not in ("none", "unknown", "n/a", ""):
+            r_tier = classify_rear_size_tier(raw_rear)
+            if r_tier == "flat":
+                tags.append("flat ass")
+            elif r_tier == "small":
+                tags.append("small ass")
+            elif r_tier == "large":
+                tags.append("curvy ass, wide hips" if is_bunian else "plump ass, wide hips")
+            elif r_tier == "huge":
+                tags.append("curvy ass, wide hips" if is_bunian else "huge ass, wide hips, thick thighs")
 
     return _join_tags(tags)
 
@@ -1028,7 +1150,7 @@ def compose_turn_image_prompt(
         profile["_active_outfit_preset"] = _f_actor.get("active_outfit_preset", "")
 
         gender_raw = str(profile.get("gender") or "female").lower()
-        if str(profile.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+        if str(profile.get("race") or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid"):
             gender_tag = "1animal, no humans"
         else:
             gender_tag = "1girl" if gender_raw in ("female", "f", "woman", "girl") else "1boy"
@@ -1084,8 +1206,36 @@ def compose_turn_image_prompt(
     pose1 = format_pose_tags(actor_poses.get(npc1_name, {}), location=location, focal_point=focal_point)
     pose2 = format_pose_tags(actor_poses.get(npc2_name, {}), location=location, focal_point=focal_point)
 
+    height_diff_tag = ""
+    if (
+        str(p1.get("race") or "").strip().lower() not in ("kitsune:myobu_fox", "ghoul:canid")
+        and str(p2.get("race") or "").strip().lower() not in ("kitsune:myobu_fox", "ghoul:canid")
+    ):
+        _app1_dict = p1.get("appearance") if isinstance(p1.get("appearance"), dict) else {}
+        _app2_dict = p2.get("appearance") if isinstance(p2.get("appearance"), dict) else {}
+        _raw_s1 = _app1_dict.get("stature") or _app1_dict.get("height") or ""
+        _raw_s2 = _app2_dict.get("stature") or _app2_dict.get("height") or ""
+        if _raw_s1 or _raw_s2:
+            _rank_map = {"miniature": 1, "short": 2, "below_average": 3, "average": 4, "tall": 5, "towering": 6}
+            _r1 = _rank_map.get(normalize_stature_tier(str(_raw_s1 or "average")), 4)
+            _r2 = _rank_map.get(normalize_stature_tier(str(_raw_s2 or "average")), 4)
+            if _r1 - _r2 >= 2:
+                height_diff_tag = "height difference"
+                if "tall" not in [t.strip().lower() for t in app1.split(",")]:
+                    app1 = _join_tags(app1, "tall")
+                if "short" not in [t.strip().lower() for t in app2.split(",")]:
+                    app2 = _join_tags(app2, "short")
+            elif _r2 - _r1 >= 2:
+                height_diff_tag = "height difference"
+                if "short" not in [t.strip().lower() for t in app1.split(",")]:
+                    app1 = _join_tags(app1, "short")
+                if "tall" not in [t.strip().lower() for t in app2.split(",")]:
+                    app2 = _join_tags(app2, "tall")
+
     camera_tags = "talking to each other, medium shot, cowboy shot, shallow depth of field, slight bokeh, cinematic composition, key visual"
     extra_ambient = "students in background, ambient crowd" if len(valid_npcs) > 2 else ""
+    if height_diff_tag:
+        count_tag = _join_tags(count_tag, height_diff_tag)
 
     header_tags = _join_tags(
         BASE_QUALITY_TOKENS,
@@ -1174,7 +1324,7 @@ def compose_phone_media_prompt(
     profile["_scenario"] = scen_key
 
     gender_raw = str(profile.get("gender") or "female").strip().lower()
-    if str(profile.get("race") or "").strip().lower() == "kitsune:myobu_fox":
+    if str(profile.get("race") or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid"):
         gender_tag = "1animal, no humans"
     elif gender_raw in ("male", "m", "man", "boy"):
         gender_tag = "1boy"

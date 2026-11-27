@@ -1,9 +1,12 @@
 from __future__ import annotations
 from .constants import (
-    FEMALE_ASSET_TEXTURE_TEMPLATES,
-    MALE_ASSET_TEXTURE_TEMPLATES,
-    SPECIES_TEXTURE_AFFINITIES,
-    TIER_INCOMPATIBLE_TEXTURES,
+    ASSET_TEXTURE_LEGACY_MAP_FEMALE,
+    ASSET_TEXTURE_LEGACY_MAP_MALE,
+    FEMALE_ASSET_TEXTURES,
+    FEMALE_TIER_INCOMPATIBLE_TEXTURES,
+    MALE_ASSET_TEXTURES,
+    MALE_TIER_INCOMPATIBLE_TEXTURES,
+    SPECIES_SURFACE_PROFILES,
 )
 from .constants import *
 import json
@@ -44,12 +47,23 @@ def extract_appearance_from_text(text: str, name: str = "") -> Dict[str, str]:
 
     # 2. Stature
     m_stat = re.search(
-        r"\b(miniature|dwarf|diminutive|below[\s\-_]average|short|petite|compact|average[\s\-_]height|average|tall|towering|gigantic|statuesque)\b",
+        r"\b(miniature|dwarf|diminutive|below[\s\-_]average|short(?!\s+(?:wait|time|while|moment|distance|walk|trip|pause|break|notice|span|list|temper|hair|skirt|dress|sleeves|cropped|crop|coat|fur|breath|[a-z\-]+\s+hair)\b)|petite|compact|average[\s\-_]height|average(?!\s+(?:day|week|score|grade|price|cost|speed|range|wait|time|person|joe|amount|rate|build|frame|physique|figure)\b)|tall|towering|gigantic|statuesque)\b",
         target,
         re.IGNORECASE
     )
     if m_stat:
         extracted["stature"] = normalize_stature_tier(m_stat.group(1))
+
+    # 2b. Physique
+    m_phys = re.search(
+        r"\b(full[\s\-_]+figured|barrel[\s\-_]+chested|plus[\s\-_]+size|soft\s+curves|broad[\s\-_]+shoulders|average[\s\-_]+(?:build|frame|physique|figure)|voluptuous|curvy|hourglass|muscular|ripped|brawny|athletic|toned|stocky|burly|chubby|plump|overweight|(?:slender|slim)(?!\s+(?:tail|ears?|horns?|wings?|fingers?|wrists?|ankles?|neck|blade|sword|wand|dagger|staff|chance|margin|lead)\b)|lithe|lanky|petite|dainty)\b",
+        target,
+        re.IGNORECASE
+    )
+    if m_phys:
+        norm_phys = normalize_physique(m_phys.group(1))
+        if norm_phys:
+            extracted["physique"] = norm_phys
 
     # 3. Coat / Fur / Scales
     _coat_col_pat = r"((?:(?:vibrant|pastel|shimmering|glistening|sleek|velvety|dense|silky|soft|fluffy|deep|light|dark|bright|pale|iridescent|radiant|electric|neon)\s+)?(?:[a-z]+[\-_])?(?:snow[\s\-_]white|pure[\s\-_]white|white|midnight[\s\-_]black|jet[\s\-_]black|black|ash[\s\-_]gray|silver[\s\-_]white|frost[\s\-_]white|golden[\s\-_]amber|golden|gold|rust[\s\-_]red|tawny|chestnut|charcoal|fawn|cream|calico|spotted|striped|cerulean|azure|cobalt|sapphire|cyan|sky[\s\-_]blue|blue|sakura[\s\-_]pink|bubblegum|magenta|rose|pink|amethyst|lavender|violet|lilac|purple|emerald|jade|mint[\s\-_]green|mint|olive|forest[\s\-_]green|seafoam|sage|green|crimson|ruby|scarlet|copper|amber|orange|flame|red|blonde|silver|bronze|turquoise|coral|peach|caramel|cocoa)(?:[\s\-_](?!and\b|with\b|while\b|but\b|her\b|his\b|their\b|whose\b|also\b|or\b)[a-z]+)?)"
@@ -180,137 +194,269 @@ def classify_asset_size_tier(size_str: str, gender: str = "female") -> str:
         return "average"
 
 
+def get_species_surface_profile(race: str = "", skin_type: str = "") -> Dict[str, str]:
+    """Derives the automatic biological surface profile (skin/coat/scale/plumage/heat) from race and skin_type."""
+    r = str(race or "").strip().lower()
+    st = str(skin_type or "").strip().lower()
+
+    if r in ("kitsune:myobu_fox", "ghoul:canid"):
+        return dict(SPECIES_SURFACE_PROFILES["natural"])
+    if r == "ghoul:humanoid":
+        return dict(SPECIES_SURFACE_PROFILES["porcelain_silky"])
+    if "half" in r or "hybrid" in r:
+        return dict(SPECIES_SURFACE_PROFILES["natural"])
+    if any(k in r for k in ("cyborg", "android", "synth")) or st == "synthetic":
+        return dict(SPECIES_SURFACE_PROFILES["bio_synthetic"])
+    if any(k in r for k in ("angel", "elf", "dark_elf", "drow", "orang_bunian", "bunian")):
+        return dict(SPECIES_SURFACE_PROFILES["porcelain_silky"])
+    if any(k in r for k in ("demon", "tiefling", "oni", "succubus", "incubus")):
+        return dict(SPECIES_SURFACE_PROFILES["fever_warm"])
+    if any(k in r for k in ("dragon", "dragonkin", "reptile", "snake", "lizard", "serpentine", "scaly")) or st == "scaly":
+        return dict(SPECIES_SURFACE_PROFILES["scaled"])
+    if any(k in r for k in ("avian", "bird", "harpy", "feathered")) or st == "feathered":
+        return dict(SPECIES_SURFACE_PROFILES["feathered"])
+    if any(k in r for k in ("aquatic", "merfolk", "siren", "fish")):
+        return dict(SPECIES_SURFACE_PROFILES["aquatic"])
+    if st != "skin" and (
+        any(
+            k in r
+            for k in (
+                "beastfolk", "fox", "cat", "neko", "kitsune", "wolf", "rabbit", "bunny",
+                "tiger", "lion", "bear", "mouse", "rat", "hamster", "squirrel",
+                "hedgehog", "ferret", "weasel", "fennec", "cheetah", "minotaur", "boar", "bovine",
+            )
+        )
+        or st == "furry"
+    ):
+        return dict(SPECIES_SURFACE_PROFILES["furred"])
+    return dict(SPECIES_SURFACE_PROFILES["natural"])
+
+
+def normalize_asset_texture(texture_str: Any, gender: str = "female", size_tier: str = "") -> str:
+    """Normalizes canonical, legacy 'X & Y', and synonym asset texture strings to canonical single-word labels."""
+    if not texture_str or not isinstance(texture_str, str):
+        return ""
+    s_clean = re.sub(r"\s+", " ", texture_str.strip())
+    s_low = s_clean.lower()
+    if s_low in ("", "unknown", "none", "null", "n/a", "auto", "__auto__"):
+        return ""
+
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    canonical_list = MALE_ASSET_TEXTURES if is_male else FEMALE_ASSET_TEXTURES
+    canonical_lower = {item.lower(): item for item in canonical_list}
+    legacy_map = ASSET_TEXTURE_LEGACY_MAP_MALE if is_male else ASSET_TEXTURE_LEGACY_MAP_FEMALE
+
+    if s_low in canonical_lower:
+        return canonical_lower[s_low]
+    if s_low in legacy_map:
+        return legacy_map[s_low]
+
+    if is_male:
+        if any(k in s_low for k in ("veined", "throbbing")):
+            return "Veined"
+        if any(k in s_low for k in ("curved", "angled")):
+            return "Curved"
+        if any(k in s_low for k in ("tapered", "slender")):
+            return "Tapered"
+        if "heavy" in s_low:
+            return "Heavy"
+        if any(k in s_low for k in ("thick", "dense", "formidable", "sturdy", "girthy")):
+            return "Thick"
+        if any(k in s_low for k in ("firm", "toned", "compact", "athletic", "resilient")):
+            return "Firm"
+        if any(k in s_low for k in ("sensitive", "responsive", "pulsing", "trembling")):
+            return "Sensitive"
+        if any(k in s_low for k in ("smooth", "silky", "glistening", "velvety", "supple", "soft", "warm", "fur", "scale", "feather", "plumage")):
+            return "Smooth"
+    else:
+        if any(k in s_low for k in ("perky", "high-set", "high set", "buoyant")):
+            return "Perky"
+        if any(k in s_low for k in ("pillowy", "yielding")):
+            return "Pillowy"
+        if "plush" in s_low or "heavy" in s_low:
+            return "Plush"
+        if "bouncy" in s_low:
+            return "Bouncy"
+        if "teardrop" in s_low:
+            return "Teardrop"
+        if any(k in s_low for k in ("delicate", "tender")):
+            return "Delicate"
+        if any(k in s_low for k in ("firm", "toned", "compact", "athletic", "resilient", "dense")):
+            return "Firm"
+        if any(k in s_low for k in ("sensitive", "responsive", "pulsing", "trembling")):
+            return "Sensitive"
+        if any(k in s_low for k in ("smooth", "silky", "glistening", "velvety", "supple", "soft", "warm", "fur", "scale", "feather", "plumage")):
+            tier_low = str(size_tier or "").strip().lower()
+            if "soft" in s_low and tier_low in ("flat", "small") and not any(w in s_low for w in ("smooth", "supple", "fur", "scale", "feather")):
+                return "Delicate"
+            return "Supple"
+    return ""
+
+
+def heal_asset_texture_for_context(texture: Any, gender: str = "female", size_tier: str = "average") -> str:
+    """Heals a normalized asset texture when it contradicts the character's size tier."""
+    tier = str(size_tier or "average").strip().lower()
+    norm = normalize_asset_texture(texture, gender=gender, size_tier=tier)
+    if not norm:
+        return ""
+
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    if is_male:
+        if tier in ("flat", "small"):
+            if norm == "Heavy":
+                return "Firm"
+            if norm == "Thick":
+                return "Smooth"
+        elif tier == "huge" and norm == "Tapered":
+            return "Thick"
+        return norm
+
+    if tier == "flat":
+        if norm in ("Plush", "Pillowy", "Teardrop"):
+            return "Supple"
+        if norm == "Bouncy":
+            return "Perky"
+    elif tier == "small":
+        if norm in ("Plush", "Pillowy"):
+            return "Supple"
+        if norm == "Bouncy":
+            return "Perky"
+    elif tier in ("large", "huge") and norm == "Delicate":
+        return "Supple"
+    return norm
+
+
+def strip_asset_texture_from_size(size_str: str, gender: str = "female") -> str:
+    """Strips stacked canonical or legacy texture prefixes and parentheticals from a size string."""
+    s = str(size_str or "").strip()
+    if not s:
+        return ""
+    s = re.sub(r"^\((.*?)\)$", r"\1", s).strip()
+
+    # Strip trailing parenthetical if it contains a recognized texture
+    paren_m = re.search(r"\s*\(([^()]+)\)\s*$", s)
+    if paren_m and normalize_asset_texture(paren_m.group(1), gender=gender):
+        s = s[:paren_m.start()].strip()
+
+    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    legacy_keys = sorted(
+        list((ASSET_TEXTURE_LEGACY_MAP_MALE if is_male else ASSET_TEXTURE_LEGACY_MAP_FEMALE).keys()),
+        key=len,
+        reverse=True,
+    )
+    canonical_tokens = {t.lower() for t in (MALE_ASSET_TEXTURES if is_male else FEMALE_ASSET_TEXTURES)}
+
+    changed = True
+    while changed and s:
+        changed = False
+        s_low = s.lower()
+        for leg in legacy_keys:
+            if s_low == leg:
+                return ""
+            if s_low.startswith(leg + " "):
+                s = s[len(leg):].strip(" ,-")
+                changed = True
+                break
+        if changed:
+            continue
+        parts = s.split(None, 1)
+        if len(parts) == 2 and parts[0].strip(",-").lower() in canonical_tokens:
+            s = parts[1].strip()
+            changed = True
+
+    return s
+
+
 def extract_asset_texture(size_str: str, gender: str = "female") -> str:
-    """Extracts known tactile/shape trait from a compound size string (e.g. 'Soft A-Cup' -> 'Tender & Delicate')."""
+    """Extracts a canonical single-word tactile/shape trait from a compound size string."""
     if not size_str or not isinstance(size_str, str):
         return ""
-    s_low = size_str.lower().strip()
     is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
-    templates = MALE_ASSET_TEXTURE_TEMPLATES if is_male else FEMALE_ASSET_TEXTURE_TEMPLATES
-
-    for t in templates:
-        if t.lower() in s_low:
-            return t
-        t_first = t.split("&")[0].strip().lower()
-        if len(t_first.split()) >= 2 and t_first in s_low:
-            return t
-
-    # Fuzzy & flaring keyword mappings
-    if "perky" in s_low:
-        return "Perky & High-Set"
-    if "fluffy" in s_low or "chest fur" in s_low or "fur-rimmed" in s_low:
-        return "Soft & Downy Chest Fur"
-    if "fur" in s_low:
-        return "Soft Fur-Ringed Base" if is_male else "Soft & Downy Chest Fur"
-    if "firm" in s_low:
-        return "Veined & Firm" if is_male else "Firm & Toned"
-    if "pillowy" in s_low or "yielding" in s_low:
-        return "Pillowy Soft & Yielding"
-    if "soft" in s_low:
-        if not is_male:
-            tier = classify_asset_size_tier(size_str, gender="female")
-            return "Tender & Delicate" if tier in ("flat", "small") else "Pillowy Soft & Yielding"
-        return "Smooth & Supple"
-    if "veined" in s_low:
-        return "Veined & Firm"
-    if "pulsing" in s_low:
-        return "Warm & Pulsing"
-    if "micro-scale" in s_low or "scale" in s_low:
-        return "Sleek Scaled Base & Firm" if is_male else "Silky Warm with Smooth Micro-Scales"
-    if "feather" in s_low:
-        return "Downy Feather-Lined"
-    if "plumage" in s_low:
-        return "Velvety Plumage Accents"
-    if "bouncy" in s_low:
-        return "Bouncy & Sensitive"
-    if "heavy" in s_low or "plush" in s_low:
-        return "Smooth & Heavy" if is_male else "Heavy & Plush"
-    if "delicate" in s_low or "tender" in s_low:
-        return "Tender & Delicate"
-    if "teardrop" in s_low:
-        return "Shapely Teardrop"
-    if "compact" in s_low or "dense" in s_low:
-        return "Dense & Formidable" if is_male else "Compact & Dense"
-    if "responsive" in s_low or "sensitive" in s_low:
-        return "Slender & Ultra-Sensitive" if is_male else "Sensitive & Responsive"
-    if "athletic" in s_low:
-        return "Toned & Athletic"
-    if "draconic" in s_low or "drake" in s_low:
-        return "Sturdy Draconic Build" if is_male else "Sleek & Supple Drake-Contour"
+    tier = classify_asset_size_tier(size_str, gender="male" if is_male else "female")
+    direct = normalize_asset_texture(size_str, gender="male" if is_male else "female", size_tier=tier)
+    if direct:
+        return direct
     return ""
 
 
 def fuse_asset_size_and_texture(size_str: str, texture_str: str, gender: str = "female") -> str:
-    """Combines a base size string and a tactile texture trait into a seamless, natural
-    compound narrative phrase without parentheses (e.g. 'Bouncy & Sensitive DD-Cup', 'Veined & Firm 7.5"').
-    """
+    """Combines a size string and canonical tactile texture into a clean phrase without stacking or brackets."""
     s = str(size_str or "").strip()
     t = str(texture_str or "").strip()
-    if not s and not t:
+    norm_t = normalize_asset_texture(t, gender=gender) or re.sub(r"^\((.*?)\)$", r"\1", t).strip()
+    if not s and not norm_t:
         return ""
-    if not t:
+    if not norm_t:
         return s
     if not s:
-        return t
-
-    # Strip outer parentheses if already present
-    s = re.sub(r'^\((.*?)\)$', r'\1', s).strip()
-    t = re.sub(r'^\((.*?)\)$', r'\1', t).strip()
+        return norm_t
 
     is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
+    s_stripped = strip_asset_texture_from_size(s, gender="male" if is_male else "female") or s
+    s_stripped = re.sub(r"^\((.*?)\)$", r"\1", s_stripped).strip()
+    s_low = s_stripped.lower().strip()
 
-    # If s already contains the texture (or substantial part of it), avoid duplication
-    t_clean = t.replace("&", "").strip().lower()
-    s_clean = s.replace("&", "").strip().lower()
-    if t.lower() in s.lower() or (len(t_clean) > 3 and t_clean in s_clean):
-        return s
+    bare_female_tiers = {
+        "flat": "AA-Cup",
+        "small": "B-Cup",
+        "average": "C-Cup",
+        "large": "D-Cup",
+        "huge": "E-Cup",
+    }
+    bare_male_tiers = {
+        "flat": "Tiny",
+        "small": "Compact",
+        "average": "Average",
+        "large": "Large",
+        "huge": "Huge",
+    }
+    if not is_male and s_low in bare_female_tiers:
+        return f"{norm_t} {bare_female_tiers[s_low]}"
+    if is_male and s_low in bare_male_tiers:
+        return f"{norm_t} {bare_male_tiers[s_low]}"
 
     if not is_male:
-        # Female breasts: look for cup pattern like 'AA-Cup', 'DD-Cup', 'B-Cup', etc.
-        cup_match = re.search(r'\b([A-Ha-h]+(?:\+)?-Cup)\b', s, re.IGNORECASE)
+        cup_match = re.search(r"\b([A-Ha-h]+(?:\+)?-Cup)\b", s_stripped, re.IGNORECASE)
         if cup_match:
             cup_part = cup_match.group(1).upper()
             if cup_part.endswith("-CUP"):
                 cup_part = cup_part[:-4] + "-Cup"
-            return f"{t} {cup_part}"
+            return f"{norm_t} {cup_part}"
 
-        # If s mentions 'flat' or 'barely'
-        if any(w in s.lower() for w in ("flat", "barely")):
-            if "flat" not in t.lower():
-                return f"{t} Flat Chest"
-            return t
+        if any(w in s_low for w in ("flat", "barely")):
+            if "flat" not in norm_t.lower():
+                return f"{norm_t} Flat Chest"
+            return norm_t
 
-        # Strip generic redundant adjectives like 'Generous', 'Voluptuous', 'Modest', 'Petite'
         redundant_prefixes = {
             "generous", "voluptuous", "modest", "petite", "heavy", "bountiful",
-            "shapely", "toned", "firm", "soft", "full", "small", "large", "average"
+            "shapely", "toned", "firm", "soft", "full", "small", "large", "average",
         }
-        words = s.split()
+        words = s_stripped.split()
         filtered_words = [w for w in words if w.lower() not in redundant_prefixes]
         base_remainder = " ".join(filtered_words).strip()
         if base_remainder:
-            return f"{t} {base_remainder}"
-        return f"{t} {s}"
+            return f"{norm_t} {base_remainder}"
+        return f"{norm_t} {s_stripped}"
     else:
-        # Male anatomy: look for inch measurement e.g. 7.5", 8", 6.5 inches
-        inch_match = re.search(r'(\d+(?:\.\d+)?\s*(?:\"|inch(?:es)?))', s, re.IGNORECASE)
+        inch_match = re.search(r'(\d+(?:\.\d+)?\s*(?:"|inch(?:es)?))', s_stripped, re.IGNORECASE)
         if inch_match:
             inch_part = inch_match.group(1).strip()
             if "inch" in inch_part.lower():
-                val = re.findall(r'\d+(?:\.\d+)?', inch_part)[0]
+                val = re.findall(r"\d+(?:\.\d+)?", inch_part)[0]
                 inch_part = f'{val}"'
-            return f"{t} {inch_part}"
+            return f"{norm_t} {inch_part}"
 
         redundant_prefixes = {
             "thick", "long", "massive", "compact", "slender", "sturdy",
-            "dense", "toned", "formidable", "large", "huge", "small"
+            "dense", "toned", "formidable", "large", "huge", "small",
         }
-        words = s.split()
+        words = s_stripped.split()
         filtered_words = [w for w in words if w.lower() not in redundant_prefixes]
         base_remainder = " ".join(filtered_words).strip()
         if base_remainder:
-            return f"{t} {base_remainder}"
-        return f"{t} {s}"
+            return f"{norm_t} {base_remainder}"
+        return f"{norm_t} {s_stripped}"
 
 
 def roll_dynamic_asset_texture(
@@ -322,9 +468,7 @@ def roll_dynamic_asset_texture(
     size_tier: str = "average",
     seed: Any = None,
 ) -> str:
-    """Rolls a tactile texture/shape trait from the open template pool with a +20% weighted
-    synergy boost for matching criteria, strictly filtering out tier-incompatible traits.
-    """
+    """Rolls a canonical single-word tactile texture with size-, physique-, and race-aware weights."""
     raw_seed = seed if seed is not None else seed_val
     if isinstance(raw_seed, str):
         try:
@@ -338,50 +482,113 @@ def roll_dynamic_asset_texture(
             effective_seed = 0
 
     is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy")) and "female" not in str(gender).lower()
-    pool = list(MALE_ASSET_TEXTURE_TEMPLATES if is_male else FEMALE_ASSET_TEXTURE_TEMPLATES)
+    pool = list(MALE_ASSET_TEXTURES if is_male else FEMALE_ASSET_TEXTURES)
 
-    # 1. Apply tier incompatibility exclusion filter
-    incompat = TIER_INCOMPATIBLE_TEXTURES.get(size_tier, set())
-    candidate_pool = [t for t in pool if t not in incompat]
-    if not candidate_pool:
-        candidate_pool = pool
+    tier_low = str(size_tier or "average").strip().lower()
+    incompat_map = MALE_TIER_INCOMPATIBLE_TEXTURES if is_male else FEMALE_TIER_INCOMPATIBLE_TEXTURES
+    incompat = incompat_map.get(tier_low, set())
+    candidate_pool = [t for t in pool if t not in incompat] or pool
 
-    # 2. Identify synergies for the 20% weight boost
-    r_low = str(race or "").lower()
-    p_low = str(physique or "").lower()
-    d_low = str(demeanor or "").lower()
+    weights: Dict[str, float] = {item: 1.0 for item in candidate_pool}
 
-    synergy_candidates = set()
-    if any(k in r_low for k in ("fox", "cat", "wolf", "neko", "kitsune", "rabbit", "bunny", "tiger", "lion", "bear", "mouse", "beastfolk", "beast")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("furred", []))
-    if any(k in r_low for k in ("reptile", "dragon", "snake", "lizard", "draconic", "scaly")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("scaled", []))
-    if any(k in r_low for k in ("bird", "avian", "harpy", "feathered", "angel")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("feathered", []))
-    if any(k in r_low for k in ("aquatic", "merfolk", "siren", "fish")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("aquatic", []))
+    # 1. Size tier modulation
+    if is_male:
+        if tier_low in ("flat", "small"):
+            for k, m in (("Firm", 1.4), ("Smooth", 1.5), ("Sensitive", 1.5), ("Tapered", 1.4)):
+                if k in weights:
+                    weights[k] *= m
+        elif tier_low in ("large", "huge"):
+            for k, m in (("Thick", 1.6), ("Heavy", 1.5), ("Veined", 1.5), ("Curved", 1.3)):
+                if k in weights:
+                    weights[k] *= m
+            if tier_low == "large" and "Tapered" in weights:
+                weights["Tapered"] *= 0.5
+    else:
+        if tier_low in ("flat", "small"):
+            for k, m in (("Perky", 1.6), ("Delicate", 1.5), ("Firm", 1.3), ("Sensitive", 1.3)):
+                if k in weights:
+                    weights[k] *= m
+        elif tier_low in ("large", "huge"):
+            for k, m in (("Pillowy", 1.6), ("Plush", 1.6), ("Bouncy", 1.5), ("Teardrop", 1.3)):
+                if k in weights:
+                    weights[k] *= m
+            if "Perky" in weights:
+                weights["Perky"] *= 0.35 if tier_low == "huge" else 0.6
 
-    if any(k in p_low for k in ("toned", "athletic", "muscular", "lean", "fit")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("athletic", []))
-    if any(k in p_low for k in ("voluptuous", "curvy", "busty", "full-figured", "stacked", "hourglass")):
-        synergy_candidates.update(SPECIES_TEXTURE_AFFINITIES.get("voluptuous", []))
+    # 2. Physique modulation (aligned with canonical 9-tier physique)
+    p_low = str(physique or "").strip().lower()
+    if any(k in p_low for k in ("athletic", "muscular", "toned", "fit")):
+        for k, m in (("Firm", 1.6), ("Perky", 1.3), ("Veined", 1.5)):
+            if k in weights:
+                weights[k] *= m
+    elif any(k in p_low for k in ("voluptuous", "chubby", "overweight", "plump")):
+        for k, m in (("Pillowy", 1.6), ("Plush", 1.6), ("Bouncy", 1.3), ("Heavy", 1.5), ("Thick", 1.5)):
+            if k in weights:
+                weights[k] *= m
+    elif any(k in p_low for k in ("slim", "petite", "slender", "thin", "lean")):
+        for k, m in (("Delicate", 1.5), ("Perky", 1.4), ("Sensitive", 1.3), ("Tapered", 1.4), ("Smooth", 1.3)):
+            if k in weights:
+                weights[k] *= m
+    elif "curvy" in p_low:
+        for k, m in (("Supple", 1.4), ("Teardrop", 1.4), ("Plush", 1.3), ("Bouncy", 1.3)):
+            if k in weights:
+                weights[k] *= m
+    elif "stocky" in p_low:
+        for k, m in (("Firm", 1.3), ("Plush", 1.3), ("Thick", 1.5), ("Heavy", 1.4)):
+            if k in weights:
+                weights[k] *= m
 
-    # 3. Construct weights (Base = 10; Synergy = 12, a +20% boost)
-    weights = []
-    for item in candidate_pool:
-        w = 12 if item in synergy_candidates else 10
-        weights.append(w)
+    # 3. Race / Species archetype soft weights (zero species leakage into strings)
+    r_low = str(race or "").strip().lower()
+    surface_key = get_species_surface_profile(race=r_low).get("key", "natural")
+    is_small_beast = any(
+        k in r_low for k in ("cat", "neko", "fox", "kitsune", "fennec", "rabbit", "bunny", "mouse", "rat", "hamster", "squirrel", "ferret", "weasel")
+    )
+    is_large_race = not is_small_beast and (
+        any(k in r_low for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "boar", "bovine", "dwarf"))
+        or bool(re.search(r"\box(en)?\b", r_low))
+    )
 
-    total_weight = sum(weights)
+    if surface_key == "porcelain_silky" or is_small_beast:
+        for k, m in (("Perky", 1.25), ("Supple", 1.25), ("Delicate", 1.25), ("Sensitive", 1.25), ("Smooth", 1.25), ("Tapered", 1.25)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "scaled" or is_large_race:
+        for k, m in (("Firm", 1.3), ("Plush", 1.2), ("Thick", 1.35), ("Heavy", 1.3), ("Veined", 1.25)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "fever_warm":
+        for k, m in (("Sensitive", 1.3), ("Supple", 1.2), ("Plush", 1.2), ("Veined", 1.25), ("Curved", 1.25), ("Heavy", 1.2)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "bio_synthetic":
+        for k, m in (("Firm", 1.35), ("Perky", 1.3), ("Smooth", 1.3), ("Supple", 1.2)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "aquatic":
+        for k, m in (("Supple", 1.3), ("Smooth", 1.35), ("Sensitive", 1.2), ("Curved", 1.2)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "feathered":
+        for k, m in (("Perky", 1.3), ("Delicate", 1.3), ("Supple", 1.2), ("Smooth", 1.2), ("Tapered", 1.25)):
+            if k in weights:
+                weights[k] *= m
+    elif surface_key == "furred":
+        for k, m in (("Supple", 1.25), ("Plush", 1.25), ("Sensitive", 1.2), ("Smooth", 1.2)):
+            if k in weights:
+                weights[k] *= m
+
+    total_weight = sum(weights.values())
     if total_weight <= 0:
-        return candidate_pool[abs(effective_seed) % len(candidate_pool)]
+        return candidate_pool[0]
 
-    pick_val = abs(effective_seed) % total_weight
-    cumulative = 0
-    for item, w in zip(candidate_pool, weights):
-        cumulative += w
-        if pick_val < cumulative:
+    roll = (((abs(effective_seed) * 2654435761) % 10000) / 10000.0) * total_weight
+    cumulative = 0.0
+    for item in candidate_pool:
+        cumulative += weights.get(item, 1.0)
+        if roll <= cumulative:
             return item
+    return candidate_pool[-1]
 def normalize_stature_tier(stature_str: str) -> str:
     """Normalizes any stature descriptor or legacy alias into one of the 6 canonical tiers:
     'miniature', 'short', 'below_average', 'average', 'tall', 'towering'.
@@ -414,11 +621,15 @@ def normalize_stature_tier(stature_str: str) -> str:
 
 def get_stature_distribution_for_race(race_str: str, gender: str = "") -> Dict[str, float]:
     """Returns the 6-tier probability distribution dictionary for a given race or species and gender.
-    - Miniature races (dwarf, gnome, halfling, goblin): 100% miniature for both genders.
+    - Miniature races (dwarf, gnome, halfling, goblin, kobold, pixie, fairy): 100% miniature for all genders.
+    - Non-binary / custom genders use the M/F midpoint distribution of their species bracket.
     - Male Standard Races & Medium Beastfolk (Default): 5% short, 15% below_avg, 50% avg, 25% tall, 5% towering.
     - Female Standard Races & Medium Beastfolk (Default): 10% short, 34% below_avg, 45% avg, 10% tall, 1% towering.
-    - Male Large Beastfolk & Strong Races: 1% short, 4% below_avg, 25% avg, 45% tall, 25% towering.
-    - Female Large Beastfolk & Strong Races: 1% short, 14% below_avg, 55% avg, 20% tall, 10% towering.
+    - Tall / Graceful Races (elf, high_elf, dark_elf, drow, angel, orang_bunian):
+      * Male: 2% short, 8% below_avg, 40% avg, 38% tall, 12% towering.
+      * Female: 4% short, 16% below_avg, 45% avg, 28% tall, 7% towering.
+    - Male Large Beastfolk & Large Humanoids (orc, oni, giant, troll, ogre, etc.): 1/4/25/45/25.
+    - Female Large Beastfolk & Large Humanoids: 1/14/55/20/10.
     - Male Small Agile Beastfolk: 10% short, 30% below_avg, 43% avg, 15% tall, 2% towering.
     - Female Small Agile Beastfolk: 15% short, 45% below_avg, 34% avg, 5% tall, 1% towering.
     - Male Tiny Beastfolk: 34% short, 45% below_avg, 15% avg, 5% tall, 1% towering.
@@ -426,35 +637,52 @@ def get_stature_distribution_for_race(race_str: str, gender: str = "") -> Dict[s
     """
     r = (race_str or "human").strip().lower()
     g = (gender or "").strip().lower()
-    is_male = any(kw in g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in g for kw in ("female", "woman", "girl", "lady", "she", "her"))
-    is_fem = any(kw in g for kw in ("female", "woman", "girl", "lady", "she", "her")) or (not is_male and ("fem" in g or g.startswith("f")))
+    is_male = is_male_gender(g)
+    is_fem = is_female_gender(g)
+    is_nonbinary = bool(g) and not is_male and not is_fem
 
-    # 1. Miniature Fantasy Species (strictly miniature for both genders)
+    def _pick_gender_table(male_tbl: Dict[str, float], fem_tbl: Dict[str, float]) -> Dict[str, float]:
+        if is_nonbinary:
+            return {
+                tier: round((float(male_tbl.get(tier, 0.0)) + float(fem_tbl.get(tier, 0.0))) / 2.0, 6)
+                for tier in STATURE_TIERS
+            }
+        return dict(fem_tbl if is_fem else male_tbl)
+
+    # 1. Miniature Fantasy Species (strictly miniature for all genders)
     if any(k in r for k in ("dwarf", "gnome", "halfling", "goblin", "kobold", "pixie", "fairy")):
         return dict(STATURE_WEIGHTS_MINIATURE)
 
     # 2. Hybrids / Half-Beast default to Standard
     if "half" in r or "hybrid" in r:
-        return dict(STATURE_WEIGHTS_FEMALE_STANDARD if is_fem else STATURE_WEIGHTS_MALE_STANDARD)
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_STANDARD, STATURE_WEIGHTS_FEMALE_STANDARD)
 
     # 3. Tiny/Smallest Beastfolk (rabbit, mouse, etc.)
     if any(k in r for k in ("rabbit", "bunny", "mouse", "rat", "hamster", "squirrel", "hedgehog")):
-        return dict(STATURE_WEIGHTS_FEMALE_TINY_BEASTFOLK if is_fem else STATURE_WEIGHTS_MALE_TINY_BEASTFOLK)
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_TINY_BEASTFOLK, STATURE_WEIGHTS_FEMALE_TINY_BEASTFOLK)
 
     # 4. Small Agile Beastfolk (cat, fox, fennec, etc.)
     if any(k in r for k in ("cat", "neko", "fox", "kitsune", "fennec", "ferret", "weasel")):
-        return dict(STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK if is_fem else STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK)
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_SMALL_BEASTFOLK, STATURE_WEIGHTS_FEMALE_SMALL_BEASTFOLK)
 
     # 5. Cheetah and similarly sized medium species (same as standard race)
     if "cheetah" in r:
-        return dict(STATURE_WEIGHTS_FEMALE_STANDARD if is_fem else STATURE_WEIGHTS_MALE_STANDARD)
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_STANDARD, STATURE_WEIGHTS_FEMALE_STANDARD)
 
-    # 6. Large Beastfolk (wolf, tiger, lion, bear, dragon, orc, etc.)
-    if any((bool(re.search(r"\box(en)?\b", r)) if k == "ox" else k in r) for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "ox", "boar", "bovine")):
-        return dict(STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK if is_fem else STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK)
+    # 6. Large Beastfolk & Large Humanoids (wolf, tiger, lion, bear, dragon, orc, oni, giant, troll, ogre, etc.)
+    large_kws = (
+        "wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino",
+        "elephant", "ox", "boar", "bovine", "oni", "giant", "troll", "ogre",
+    )
+    if any((bool(re.search(rf"\b{k}(?:en)?\b", r)) if k in ("ox", "oni") else k in r) for k in large_kws):
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_LARGE_BEASTFOLK, STATURE_WEIGHTS_FEMALE_LARGE_BEASTFOLK)
 
-    # 7. Standard Races (human, elf, default)
-    return dict(STATURE_WEIGHTS_FEMALE_STANDARD if is_fem else STATURE_WEIGHTS_MALE_STANDARD)
+    # 7. Tall / Graceful Fantasy Races (elf, high_elf, dark_elf, drow, angel, orang_bunian)
+    if any(k in r for k in ("elf", "drow", "angel", "bunian")):
+        return _pick_gender_table(STATURE_WEIGHTS_MALE_TALL_GRACEFUL, STATURE_WEIGHTS_FEMALE_TALL_GRACEFUL)
+
+    # 8. Standard Races (human, demon, default)
+    return _pick_gender_table(STATURE_WEIGHTS_MALE_STANDARD, STATURE_WEIGHTS_FEMALE_STANDARD)
 
 
 def roll_dynamic_stature(race: str = "", gender: str = "", seed: Any = None) -> str:
@@ -488,91 +716,142 @@ def roll_dynamic_physique(
     race: str = "",
     seed: Any = None
 ) -> str:
-    """Rolls a height- and race-aware physique template.
-    - Decoupled from height names (e.g. 'Muscular & Powerful').
-    - Height-aware: tall/towering cannot be petite; short/below-average favors petite/soft; tall favors slender.
-    - Race-aware: large beastfolk favor toned/muscular; small beastfolk favor petite/soft.
-    - Thick and overweight physiques have a low baseline roll chance.
-    - All non-incompatible physiques remain rollable via probabilistic variance.
+    """Rolls a height-, gender-, and race-aware canonical physique tier.
+    - Uses the unified 7 single-word canonical tiers (`PHYSIQUE_TIERS`).
+    - Symmetric 6 vs. 6 gender options (Custom/Non-Binary uses all 7):
+      * male excludes Voluptuous
+      * female excludes Muscular
+      * orang_bunian excludes Stocky, Chubby
+    - Soft probability weights for height, gender, and race (no role/occupation weighting).
     """
     raw_g = (gender or "female").strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+    is_male = is_male_gender(raw_g)
+    is_female = is_female_gender(raw_g)
 
-    pool = list(PHYSIQUE_MALE_TEMPLATES if is_male else PHYSIQUE_FEMALE_TEMPLATES)
-
-    # 1. Compatibility filter (tall/towering cannot be petite)
     norm_stature = normalize_stature_tier(stature)
-    incompatible = STATURE_INCOMPATIBLE_PHYSIQUES.get(norm_stature, set())
-    candidates = [p for p in pool if p not in incompatible]
+    r = (race or "").lower()
 
-    # 2. Base weights (thick & overweight have low chance rates)
-    weights = {}
-    for p in candidates:
-        if p in ("Thick & Curvy", "Stocky & Thick"):
-            weights[p] = 0.35  # Low chance rate for thick
-        elif p in ("Soft & Overweight", "Heavy & Overweight"):
-            weights[p] = 0.15  # Low chance rate for overweight
-        else:
-            weights[p] = 1.0   # Standard baseline
+    # 1. Hard exclusions
+    excluded = set(STATURE_INCOMPATIBLE_PHYSIQUES.get(norm_stature, set()))
+    if is_male:
+        excluded.update(GENDER_INCOMPATIBLE_PHYSIQUES.get("male", set()))
+    elif is_female:
+        excluded.update(GENDER_INCOMPATIBLE_PHYSIQUES.get("female", set()))
+    if "bunian" in r:
+        excluded.update({"Stocky", "Chubby"})
+
+    candidates = [p for p in PHYSIQUE_TIERS if p not in excluded]
+    if not candidates:
+        candidates = ["Average"]
+
+    # 2. Gender baseline weights (non-binary/custom uses balanced baseline across all 7)
+    if is_male:
+        base_weights = {
+            "Average": 1.10,
+            "Athletic": 1.00,
+            "Slim": 0.85,
+            "Muscular": 0.85,
+            "Stocky": 0.45,
+            "Chubby": 0.15,
+        }
+    elif is_female:
+        base_weights = {
+            "Slim": 1.40,
+            "Average": 1.25,
+            "Athletic": 1.00,
+            "Voluptuous": 0.95,
+            "Stocky": 0.25,
+            "Chubby": 0.15,
+        }
+    else:
+        base_weights = {
+            "Average": 1.00,
+            "Slim": 1.00,
+            "Athletic": 0.95,
+            "Muscular": 0.60,
+            "Voluptuous": 0.60,
+            "Stocky": 0.35,
+            "Chubby": 0.15,
+        }
+
+    weights = {p: base_weights.get(p, 0.5) for p in candidates}
 
     # 3. Stature modifiers
     if norm_stature in ("miniature", "short", "below_average"):
-        if "Petite & Soft" in weights:
-            weights["Petite & Soft"] *= 2.0
-        if "Soft & Curved" in weights:
-            weights["Soft & Curved"] *= 1.3
-        if "Stocky & Thick" in weights:
-            weights["Stocky & Thick"] *= 1.3
+        if "Slim" in weights:
+            weights["Slim"] *= 1.6
+        if "Stocky" in weights:
+            weights["Stocky"] *= 1.3
+        if "Voluptuous" in weights:
+            weights["Voluptuous"] *= 1.1
     elif norm_stature in ("tall", "towering"):
-        if "Hourglass & Slender" in weights:
-            weights["Hourglass & Slender"] *= 1.8
-        if "Slender & Lanky" in weights:
-            weights["Slender & Lanky"] *= 1.8
-        if "Broad Shoulders & Lean" in weights:
-            weights["Broad Shoulders & Lean"] *= 1.4
-        if "Muscular & Powerful" in weights:
-            weights["Muscular & Powerful"] *= 1.3
+        if "Slim" in weights:
+            weights["Slim"] *= 1.5
+        if "Athletic" in weights:
+            weights["Athletic"] *= 1.4
+        if "Muscular" in weights:
+            weights["Muscular"] *= 1.4
+        if "Voluptuous" in weights:
+            weights["Voluptuous"] *= 1.2
 
-    # 4. Race modifiers
-    r = (race or "").lower()
+    # 4. Race modifiers (explicitly no role/occupation bias)
     if "bunian" in r:
-        for _forb in ("Soft & Overweight", "Heavy & Overweight", "Stocky & Thick", "Thick & Curvy"):
-            weights.pop(_forb, None)
-        for _grace in ("Hourglass & Slender", "Toned & Athletic", "Petite & Soft", "Soft & Curved", "Broad Shoulders & Lean", "Slender & Lanky"):
+        for _grace, _mult in (("Slim", 2.0), ("Athletic", 1.4), ("Voluptuous", 1.1)):
             if _grace in weights:
-                weights[_grace] *= 1.8
-        candidates = [c for c in candidates if c in weights]
+                weights[_grace] *= _mult
+    elif any(k in r for k in ("elf", "dark_elf", "drow")):
+        for _grace, _mult in (("Slim", 2.0), ("Athletic", 1.4)):
+            if _grace in weights:
+                weights[_grace] *= _mult
+
     if "dwarf" in r:
-        if "Stocky & Thick" in weights:
-            weights["Stocky & Thick"] *= 2.2
-        if "Muscular & Powerful" in weights:
-            weights["Muscular & Powerful"] *= 1.8
-    is_small_beast = any(k in r for k in ("cat", "neko", "fox", "kitsune", "fennec", "rabbit", "bunny", "mouse", "rat", "hamster", "squirrel"))
-    is_large_beast = not is_small_beast and any((bool(re.search(r"\box(en)?\b", r)) if k == "ox" else k in r) for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "ox", "boar", "bovine"))
+        if "Stocky" in weights:
+            weights["Stocky"] *= 2.8
+        if "Muscular" in weights:
+            weights["Muscular"] *= 1.8
+        if is_female and "Athletic" in weights:
+            weights["Athletic"] *= 1.4
+        if "Voluptuous" in weights:
+            weights["Voluptuous"] *= 1.15
+        if "Slim" in weights:
+            weights["Slim"] *= 0.6
+
+    is_small_beast = any(
+        k in r for k in (
+            "cat", "neko", "fox", "kitsune", "fennec", "rabbit", "bunny",
+            "mouse", "rat", "hamster", "squirrel", "hedgehog", "ferret", "weasel",
+        )
+    )
+    is_large_beast = not is_small_beast and any(
+        (bool(re.search(r"\box(en)?\b", r)) if k == "ox" else k in r)
+        for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "ox", "boar", "bovine")
+    )
 
     if is_large_beast:
-        if "Toned & Athletic" in weights:
-            weights["Toned & Athletic"] *= 1.6
-        if "Muscular & Powerful" in weights:
-            weights["Muscular & Powerful"] *= 1.8
-        if "Full-Figured & Voluptuous" in weights:
-            weights["Full-Figured & Voluptuous"] *= 1.3
-        if "Stocky & Thick" in weights:
-            weights["Stocky & Thick"] *= 1.4
+        if "Athletic" in weights:
+            weights["Athletic"] *= 1.8 if is_female else 1.5
+        if "Muscular" in weights:
+            weights["Muscular"] *= 1.8
+        if "Stocky" in weights:
+            weights["Stocky"] *= 1.4
+        if "Voluptuous" in weights:
+            weights["Voluptuous"] *= 1.3
+        if "Slim" in weights:
+            weights["Slim"] *= 0.65
     elif is_small_beast:
-        if "Petite & Soft" in weights:
-            weights["Petite & Soft"] *= 1.6
-        if "Soft & Curved" in weights:
-            weights["Soft & Curved"] *= 1.4
-        if "Hourglass & Slender" in weights:
-            weights["Hourglass & Slender"] *= 1.3
-        if "Slender & Lanky" in weights:
-            weights["Slender & Lanky"] *= 1.3
+        if "Slim" in weights:
+            weights["Slim"] *= 2.0
+        if "Voluptuous" in weights:
+            weights["Voluptuous"] *= 1.1
+        if "Muscular" in weights:
+            weights["Muscular"] *= 0.5
+        if "Stocky" in weights:
+            weights["Stocky"] *= 0.5
 
     # 5. Deterministic roulette roll
     total_weight = sum(weights.values())
     if total_weight <= 0:
-        return candidates[0] if candidates else ("Average & Proportionate" if is_male else "Soft & Curved")
+        return candidates[0] if candidates else "Average"
 
     if seed is not None:
         seed_bytes = f"physique_{seed}_{gender}_{norm_stature}_{race}".encode("utf-8")
@@ -587,6 +866,478 @@ def roll_dynamic_physique(
         if roll <= cumulative:
             return p
     return candidates[0]
+
+
+def roll_dynamic_breast_size(physique: str = "Average", hash_val: int = 0) -> str:
+    """Soft-weighted cup correlation for NSFW female NPCs based on canonical physique."""
+    canon = normalize_physique(physique) or "Average"
+    if canon == "Slim":
+        pool = [
+            ("Flat AA-Cup", 10),
+            ("Petite A-Cup", 18),
+            ("Soft A-Cup", 18),
+            ("Modest B-Cup", 20),
+            ("Perky B-Cup", 20),
+            ("Shapely C-Cup", 10),
+            ("Voluptuous D-Cup", 4),
+        ]
+    elif canon in ("Athletic", "Muscular"):
+        pool = [
+            ("Soft A-Cup", 12),
+            ("Perky B-Cup", 22),
+            ("Athletic B-Cup", 22),
+            ("Toned C-Cup", 18),
+            ("Shapely C-Cup", 16),
+            ("Full D-Cup", 10),
+        ]
+    elif canon == "Voluptuous":
+        pool = [
+            ("Full C-Cup", 12),
+            ("Voluptuous D-Cup", 36),
+            ("Generous DD-Cup", 30),
+            ("Heavy D-Cup", 12),
+            ("Bountiful E-Cup", 10),
+        ]
+    elif canon == "Chubby":
+        pool = [
+            ("Modest B-Cup", 10),
+            ("Full C-Cup", 30),
+            ("Heavy D-Cup", 20),
+            ("Generous DD-Cup", 18),
+            ("Bountiful E-Cup", 22),
+        ]
+    else:  # Average / Stocky
+        pool = [
+            ("Soft A-Cup", 10),
+            ("Modest B-Cup", 35),
+            ("Shapely C-Cup", 20),
+            ("Full C-Cup", 18),
+            ("Voluptuous D-Cup", 17),
+        ]
+
+    total = sum(w for _, w in pool)
+    pick = (abs(int(hash_val or 0)) // 17) % total
+    acc = 0
+    for cup, w in pool:
+        acc += w
+        if pick < acc:
+            return cup
+    return pool[0][0]
+
+
+def roll_dynamic_penis_size(stature: str = "average", race: str = "", hash_val: int = 0) -> str:
+    """Weighted procedural fallback for NSFW male NPCs centered around Average with gentle race/stature skew."""
+    norm_st = normalize_stature_tier(stature)
+    r = str(race or "").lower()
+    weights = {
+        "Small": 15.0,
+        "Average": 50.0,
+        "Large": 25.0,
+        "Huge": 10.0,
+    }
+    is_tiny = any(k in r for k in ("rabbit", "bunny", "mouse", "rat", "hamster", "squirrel", "hedgehog"))
+    is_large = not is_tiny and any(
+        (bool(re.search(r"\box(en)?\b", r)) if k == "ox" else k in r)
+        for k in ("wolf", "tiger", "lion", "bear", "dragon", "orc", "minotaur", "rhino", "elephant", "ox", "boar", "bovine")
+    )
+    if is_large or norm_st in ("tall", "towering"):
+        weights["Small"] *= 0.6
+        weights["Large"] *= 1.35
+        weights["Huge"] *= 1.5
+    elif is_tiny or norm_st in ("miniature", "short"):
+        weights["Small"] *= 1.4
+        weights["Large"] *= 0.75
+        weights["Huge"] *= 0.5
+
+    total = sum(weights.values())
+    roll = (((abs(int(hash_val or 0)) * 2654435761) % 10000) / 10000.0) * total
+    acc = 0.0
+    for sz, w in weights.items():
+        acc += w
+        if roll <= acc:
+            return sz
+    return "Average"
+
+
+def is_feral_rear_excluded(race: str = "") -> bool:
+    """Returns True for feral non-humanoid species that skip humanoid rear anatomy and SDXL rear tags."""
+    r = str(race or "").strip().lower().replace("-", "_")
+    return r in (
+        "kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox",
+        "ghoul:canid", "ghoul_canid", "al_ghul:canid", "ghoul:hound", "ghoul:beast",
+    )
+
+
+def normalize_rear_texture(texture_str: Any, size_tier: str = "") -> str:
+    """Normalizes rear tactile texture strings to canonical single-word labels in REAR_ASSET_TEXTURES."""
+    if not texture_str or not isinstance(texture_str, str):
+        return ""
+    s_clean = re.sub(r"\s+", " ", texture_str.strip())
+    s_low = s_clean.lower()
+    if s_low in ("", "unknown", "none", "null", "n/a", "auto", "__auto__"):
+        return ""
+
+    canonical_lower = {item.lower(): item for item in REAR_ASSET_TEXTURES}
+    if s_low in canonical_lower:
+        return canonical_lower[s_low]
+    if s_low in REAR_TEXTURE_SYNONYMS:
+        return REAR_TEXTURE_SYNONYMS[s_low]
+
+    # Do not confuse size labels ('flat', 'compact', 'shapely', 'plump', 'bountiful') as textures unless a texture keyword appears
+    for syn_k, canon_v in REAR_TEXTURE_SYNONYMS.items():
+        if re.search(rf"\b{re.escape(syn_k)}\b", s_low):
+            return canon_v
+    for tex_l, canon_v in canonical_lower.items():
+        if re.search(rf"\b{re.escape(tex_l)}\b", s_low):
+            return canon_v
+    return ""
+
+
+def strip_rear_texture_from_size(size_str: Any) -> str:
+    """Strips canonical/synonym rear texture prefixes and parentheticals, returning the bare canonical rear size label."""
+    s = str(size_str or "").strip()
+    if not s or s.lower() in ("none", "unknown", "null", "n/a", "auto", "__auto__"):
+        return ""
+    s = re.sub(r"^\((.*?)\)$", r"\1", s).strip()
+
+    paren_m = re.search(r"\s*\(([^()]+)\)\s*$", s)
+    if paren_m and normalize_rear_texture(paren_m.group(1)):
+        s = s[:paren_m.start()].strip()
+
+    size_label_tokens = {lbl.lower() for lbl in REAR_SIZE_LABELS.values()}
+    tex_tokens = ({t.lower() for t in REAR_ASSET_TEXTURES} | set(REAR_TEXTURE_SYNONYMS.keys())) - size_label_tokens
+
+    parts = [p.strip(",-") for p in s.split() if p.strip(",-")]
+    remaining = [p for p in parts if p.lower() not in tex_tokens and p.lower() not in ("rear", "ass", "butt", "hips")]
+    if not remaining:
+        # Check if original had only a size word mixed with 'rear'
+        return ""
+    candidate = " ".join(remaining).strip()
+    return normalize_rear_size_label(candidate) or candidate
+
+
+def classify_rear_size_tier(size_str: Any) -> str:
+    """Classifies a rear size string into one of 5 canonical tiers: 'flat', 'small', 'average', 'large', 'huge'."""
+    if not size_str or not isinstance(size_str, str):
+        return "average"
+    s = str(size_str or "").strip()
+    if not s or s.lower() in ("none", "unknown", "null", "n/a", "auto", "__auto__"):
+        return "average"
+
+    s = re.sub(r"^\((.*?)\)$", r"\1", s).strip()
+    paren_m = re.search(r"\s*\(([^()]+)\)\s*$", s)
+    if paren_m and normalize_rear_texture(paren_m.group(1)):
+        s = s[:paren_m.start()].strip()
+
+    size_label_tokens = {lbl.lower() for lbl in REAR_SIZE_LABELS.values()}
+    tex_tokens = ({t.lower() for t in REAR_ASSET_TEXTURES} | set(REAR_TEXTURE_SYNONYMS.keys())) - size_label_tokens
+    parts = [p.strip(",-").lower() for p in s.split() if p.strip(",-")]
+    core_parts = [p for p in parts if p not in tex_tokens] or parts
+    s_low = " ".join(core_parts)
+
+    if any(w in s_low for w in ("flat", "tiny", "slight", "barely")):
+        return "flat"
+    if any(w in s_low for w in ("compact", "small", "modest")):
+        return "small"
+    if any(w in s_low for w in ("bountiful", "huge", "massive", "enormous", "gigantic", "colossal", "voluptuous")):
+        return "huge"
+    if any(w in s_low for w in ("plump", "large", "generous", "thick", "wide", "full", "heavy", "curvy")):
+        return "large"
+    if any(w in s_low for w in ("shapely", "average", "medium", "moderate", "balanced")):
+        return "average"
+    return "average"
+
+
+def normalize_rear_size_label(raw_rear_size: Any) -> str:
+    """Normalizes a rear size descriptor or tier key to its canonical label (Flat/Compact/Shapely/Plump/Bountiful)."""
+    if not raw_rear_size or not isinstance(raw_rear_size, str):
+        return ""
+    s_low = str(raw_rear_size).strip().lower()
+    if s_low in ("", "none", "unknown", "null", "n/a", "auto", "__auto__"):
+        return ""
+    if s_low in REAR_SIZE_LABELS:
+        return REAR_SIZE_LABELS[s_low]
+    # Ensure string actually expresses a size word rather than only a texture word
+    size_label_tokens = {lbl.lower() for lbl in REAR_SIZE_LABELS.values()}
+    tex_only = ({t.lower() for t in REAR_ASSET_TEXTURES} | set(REAR_TEXTURE_SYNONYMS.keys())) - size_label_tokens
+    tokens = [p.strip("(),-").lower() for p in s_low.split() if p.strip("(),-")]
+    non_tex = [t for t in tokens if t not in tex_only and t not in ("rear", "ass", "butt")]
+    if not non_tex:
+        return ""
+    tier = classify_rear_size_tier(" ".join(non_tex))
+    return REAR_SIZE_LABELS.get(tier, "Shapely")
+
+
+def heal_rear_texture_for_context(texture: Any, size_tier: str = "average") -> str:
+    """Heals a rear texture when incompatible with the character's rear size tier."""
+    raw_t = str(size_tier or "average").strip().lower()
+    tier = raw_t if raw_t in REAR_SIZE_TIERS else classify_rear_size_tier(raw_t)
+    norm = normalize_rear_texture(texture, size_tier=tier)
+    if not norm:
+        return ""
+    incompat = REAR_TIER_INCOMPATIBLE_TEXTURES.get(tier, set())
+    if norm in incompat:
+        if tier in ("flat", "small"):
+            return "Supple"
+        if tier in ("large", "huge"):
+            return "Firm"
+    return norm
+
+
+def extract_rear_texture(raw_rear_size: Any, explicit_texture: Any = "") -> str:
+    """Extracts canonical rear texture from explicit texture or fused rear size string."""
+    if explicit_texture:
+        direct = normalize_rear_texture(str(explicit_texture))
+        if direct:
+            return direct
+    if not raw_rear_size or not isinstance(raw_rear_size, str):
+        return ""
+    s = str(raw_rear_size).strip()
+    paren_m = re.search(r"\s*\(([^()]+)\)\s*$", s)
+    if paren_m:
+        t_paren = normalize_rear_texture(paren_m.group(1))
+        if t_paren:
+            return t_paren
+    tokens = [p.strip(",-") for p in re.sub(r"\([^)]*\)", "", s).split() if p.strip(",-")]
+    size_label_tokens = {lbl.lower() for lbl in REAR_SIZE_LABELS.values()}
+    for tok in tokens:
+        if tok.lower() in size_label_tokens:
+            continue
+        t_tok = normalize_rear_texture(tok)
+        if t_tok:
+            return t_tok
+    return ""
+
+
+def fuse_rear_size_and_texture(size_label: str, texture: str = "") -> str:
+    """Combines rear size and texture into a crisp 2-word phrase (e.g., 'Plush Plump'), never repeating 'Rear'."""
+    bare_size = strip_rear_texture_from_size(size_label) or normalize_rear_size_label(size_label)
+    norm_t = normalize_rear_texture(texture)
+    if not bare_size and not norm_t:
+        return ""
+    if not norm_t:
+        return bare_size
+    if not bare_size:
+        return norm_t
+    if norm_t.lower() == bare_size.lower():
+        return bare_size
+    return f"{norm_t} {bare_size}"
+
+
+def heal_character_rear_appearance(app_dict: Dict[str, Any], race: str = "") -> Dict[str, Any]:
+    """Heals rear size/texture coherence on character read-hydration and strips feral myobu_fox rear fields."""
+    if not isinstance(app_dict, dict):
+        return app_dict
+    if is_feral_rear_excluded(race):
+        app_dict.pop("rear_size", None)
+        app_dict.pop("rear_texture", None)
+        return app_dict
+    raw_rear = str(app_dict.get("rear_size") or "").strip()
+    if not raw_rear:
+        app_dict.pop("rear_size", None)
+        app_dict.pop("rear_texture", None)
+        return app_dict
+    r_tier = classify_rear_size_tier(raw_rear)
+    old_r_tex = str(app_dict.get("rear_texture") or "")
+    source_tex = old_r_tex or extract_rear_texture(raw_rear)
+    healed_r_tex = heal_rear_texture_for_context(source_tex, size_tier=r_tier) if source_tex else ""
+    norm_r_lbl = normalize_rear_size_label(raw_rear) or raw_rear
+    if healed_r_tex:
+        app_dict["rear_texture"] = healed_r_tex
+        fused_rear = fuse_rear_size_and_texture(norm_r_lbl, healed_r_tex)
+        if fused_rear:
+            app_dict["rear_size"] = fused_rear
+    else:
+        app_dict.pop("rear_texture", None)
+        if norm_r_lbl:
+            app_dict["rear_size"] = norm_r_lbl
+    return app_dict
+
+
+def roll_dynamic_rear_size(
+    physique: str = "Average",
+    gender: str = "female",
+    race: str = "",
+    hash_val: int = 0,
+    seed: Any = None,
+) -> str:
+    """Physique- x gender-weighted procedural rear size roll. Caps Orang Bunian below Bountiful; skips feral myobu_fox."""
+    if is_feral_rear_excluded(race):
+        return ""
+    raw_seed = seed if seed is not None else hash_val
+    try:
+        eff_seed = int(raw_seed or 0)
+    except (ValueError, TypeError):
+        eff_seed = int(hashlib.md5(str(raw_seed).encode("utf-8")).hexdigest()[:8], 16)
+
+    canon_phys = normalize_physique(physique) or "Average"
+    g_low = str(gender or "female").strip().lower()
+    is_male = is_male_gender(g_low)
+
+    if canon_phys == "Slim":
+        weights = {"Flat": 18.0, "Compact": 42.0, "Shapely": 30.0, "Plump": 8.0, "Bountiful": 2.0}
+    elif canon_phys in ("Athletic", "Muscular"):
+        weights = {"Flat": 6.0, "Compact": 26.0, "Shapely": 48.0, "Plump": 16.0, "Bountiful": 4.0}
+    elif canon_phys == "Voluptuous":
+        weights = {"Flat": 0.0, "Compact": 4.0, "Shapely": 24.0, "Plump": 44.0, "Bountiful": 28.0}
+    elif canon_phys == "Chubby":
+        weights = {"Flat": 0.0, "Compact": 4.0, "Shapely": 20.0, "Plump": 42.0, "Bountiful": 34.0}
+    elif canon_phys == "Stocky":
+        weights = {"Flat": 4.0, "Compact": 18.0, "Shapely": 40.0, "Plump": 28.0, "Bountiful": 10.0}
+    else:  # Average
+        weights = {"Flat": 8.0, "Compact": 26.0, "Shapely": 42.0, "Plump": 18.0, "Bountiful": 6.0}
+
+    if is_male:
+        weights["Flat"] *= 1.4
+        weights["Compact"] *= 1.35
+        weights["Shapely"] *= 1.0
+        weights["Plump"] *= 0.45
+        weights["Bountiful"] *= 0.25
+
+    if "bunian" in str(race or "").lower():
+        weights["Bountiful"] = 0.0
+
+    total = sum(weights.values())
+    if total <= 0:
+        return "Shapely"
+    roll = (((abs(eff_seed) * 1103515245 + 12345) % 10000) / 10000.0) * total
+    acc = 0.0
+    for lbl, w in weights.items():
+        if w <= 0:
+            continue
+        acc += w
+        if roll <= acc:
+            return lbl
+    return "Shapely"
+
+
+def roll_dynamic_rear_texture(
+    hash_val: int = 0,
+    size_tier: str = "average",
+    physique: str = "",
+    gender: str = "",
+    race: str = "",
+    seed: Any = None,
+) -> str:
+    """Rolls a canonical single-word rear texture compatible with size tier and physique."""
+    if is_feral_rear_excluded(race):
+        return ""
+    raw_seed = seed if seed is not None else hash_val
+    try:
+        eff_seed = int(raw_seed or 0)
+    except (ValueError, TypeError):
+        eff_seed = int(hashlib.md5(str(raw_seed).encode("utf-8")).hexdigest()[:8], 16)
+
+    raw_t = str(size_tier or "average").strip().lower()
+    tier = raw_t if raw_t in REAR_SIZE_TIERS else classify_rear_size_tier(raw_t)
+    incompat = REAR_TIER_INCOMPATIBLE_TEXTURES.get(tier, set())
+    candidate_pool = [t for t in REAR_ASSET_TEXTURES if t not in incompat] or list(REAR_ASSET_TEXTURES)
+
+    weights: Dict[str, float] = {t: 1.0 for t in candidate_pool}
+
+    if tier in ("flat", "small"):
+        for k, m in (("Firm", 1.5), ("Taut", 1.5), ("Supple", 1.3)):
+            if k in weights:
+                weights[k] *= m
+    elif tier in ("large", "huge"):
+        for k, m in (("Plush", 1.6), ("Jiggly", 1.5), ("Rounded", 1.5)):
+            if k in weights:
+                weights[k] *= m
+    else:
+        for k, m in (("Supple", 1.4), ("Rounded", 1.4)):
+            if k in weights:
+                weights[k] *= m
+
+    p_low = str(physique or "").strip().lower()
+    if any(k in p_low for k in ("athletic", "muscular", "slim", "toned", "fit")):
+        for k, m in (("Firm", 1.6), ("Taut", 1.5)):
+            if k in weights:
+                weights[k] *= m
+    elif any(k in p_low for k in ("voluptuous", "chubby", "plump", "curvy")):
+        for k, m in (("Plush", 1.6), ("Jiggly", 1.5), ("Rounded", 1.4)):
+            if k in weights:
+                weights[k] *= m
+    elif "stocky" in p_low:
+        for k, m in (("Firm", 1.3), ("Rounded", 1.3), ("Supple", 1.2)):
+            if k in weights:
+                weights[k] *= m
+    else:
+        for k, m in (("Supple", 1.3), ("Rounded", 1.3)):
+            if k in weights:
+                weights[k] *= m
+
+    g_low = str(gender or "").strip().lower()
+    is_male = is_male_gender(g_low)
+    if is_male:
+        for k, m in (("Firm", 1.35), ("Taut", 1.35), ("Supple", 1.15)):
+            if k in weights:
+                weights[k] *= m
+
+    total = sum(weights.values())
+    if total <= 0:
+        return candidate_pool[0]
+    roll = (((abs(eff_seed) * 1664525 + 1013904223) % 10000) / 10000.0) * total
+    acc = 0.0
+    for t in candidate_pool:
+        acc += weights.get(t, 1.0)
+        if roll <= acc:
+            return t
+    return candidate_pool[-1]
+
+
+def heal_intimate_preferences_surgically(appr: Dict[str, Any], gender: str = "") -> Dict[str, Any]:
+    """Surgically heals legacy preference contradictions without mutating established experience tracks or kinks.
+    - Strips biologically impossible female `Giving anal intimacy`.
+    - Removes direct `act_likes` <-> `turn_offs` and `act_likes` <-> `act_dislikes` collisions.
+    """
+    if not isinstance(appr, dict):
+        return appr
+    raw_g = str(gender or appr.get("gender") or appr.get("sex") or "").strip().lower()
+    if not raw_g:
+        if appr.get("breast_size") and not appr.get("penis_size"):
+            raw_g = "female"
+        elif appr.get("penis_size") and not appr.get("breast_size"):
+            raw_g = "male"
+    is_fem = is_female_gender(raw_g)
+
+    raw_likes = clean_attribute_list_string(appr.get("act_likes"))
+    raw_dislikes = clean_attribute_list_string(appr.get("act_dislikes"))
+    raw_turn_offs = clean_attribute_list_string(appr.get("turn_offs") or appr.get("aversions") or appr.get("dislikes_intimate"))
+
+    name_to_id = {item["name"].lower(): item["id"] for item in ACT_PREFERENCE_REGISTRY}
+    blocked_ids: set[str] = set()
+    if is_fem:
+        blocked_ids.update(FEMALE_EXCLUDED_ACT_IDS)
+
+    if raw_turn_offs:
+        to_l = raw_turn_offs.lower()
+        from .generation import _turn_off_matches_key
+        for to_name, conflict_ids in TURN_OFF_VS_ACT_LIKE_CONFLICTS.items():
+            if _turn_off_matches_key(to_name, to_l):
+                blocked_ids.update(conflict_ids)
+
+    disliked_items_lower = {x.strip().lower() for x in raw_dislikes.split(",") if x.strip()} if raw_dislikes else set()
+
+    if raw_likes:
+        healed_likes = []
+        for item in [x.strip() for x in raw_likes.split(",") if x.strip()]:
+            il = item.lower()
+            aid = name_to_id.get(il, il)
+            if aid in blocked_ids or any(bid in il for bid in blocked_ids):
+                continue
+            if il in disliked_items_lower:
+                continue
+            healed_likes.append(item)
+        appr["act_likes"] = ", ".join(healed_likes)
+
+    if is_fem and raw_dislikes:
+        healed_dislikes = [
+            item for item in [x.strip() for x in raw_dislikes.split(",") if x.strip()]
+            if name_to_id.get(item.lower(), item.lower()) not in FEMALE_EXCLUDED_ACT_IDS
+        ]
+        appr["act_dislikes"] = ", ".join(healed_dislikes)
+
+    return appr
 
 
 def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "", race: str = "human", scen_key: str = "fantasy", desc: Any = "", traits: List[str] = None, role: str = "", name: str = "") -> Dict[str, Any]:
@@ -613,7 +1364,7 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
     seed_str = (desc_text + "_" + str(race) + "_" + str(char_name)).encode("utf-8")
     hash_val = int(hashlib.md5(seed_str).hexdigest(), 16) if seed_str else 0
     raw_g = (gender or (app_dict.get("gender") if isinstance(app_dict, dict) else "") or "").strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+    is_male = is_male_gender(raw_g)
 
     raw_eye = app_dict.get("eye_color") or app_dict.get("eyes")
     if raw_eye and str(raw_eye).strip().lower() not in ("unknown", ""):
@@ -692,22 +1443,13 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
     outfit_style = str(app_dict.get("outfit_style") or app_dict.get("outfit") or app_dict.get("clothing") or "").strip()
 
     raw_g = (gender or (app_dict.get("gender") if isinstance(app_dict, dict) else "") or "").strip().lower()
-    is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
+    is_male = is_male_gender(raw_g)
 
-    physique = str(app_dict.get("physique") or "").strip()
-    if physique == "Muscular & Tall":
-        physique = "Muscular & Powerful"
-    if not physique and extracted_app.get("physique"):
-        physique = str(extracted_app["physique"]).strip()
-        if physique == "Muscular & Tall":
-            physique = "Muscular & Powerful"
+    raw_phys = str(app_dict.get("physique") or "").strip()
+    if not raw_phys and extracted_app.get("physique"):
+        raw_phys = str(extracted_app["physique"]).strip()
 
-    # Enforce incompatibility invariant: tall/towering cannot be petite
-    if stature in ("tall", "towering") and physique == "Petite & Soft":
-        physique = ""
-
-    if "bunian" in str(race or "").lower() and any(w in physique.lower() for w in ("overweight", "chubby", "heavy", "stocky")):
-        physique = ""
+    physique = heal_physique_for_context(raw_phys, gender=raw_g, stature=stature, race=race) if raw_phys else ""
     if not physique:
         physique = roll_dynamic_physique(gender=raw_g, stature=stature, race=race, seed=seed_str)
 
@@ -805,10 +1547,20 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
         if app_dict.get("natural_hair_color"):
             result["natural_hair_color"] = natural_color
 
-    # Scenario-gated NSFW body attributes
-    has_explicit_intimate = any(
+    # Scenario-gated NSFW body attributes (height preferences alone are SFW-safe and must not trigger NSFW hydration)
+    _raw_bl_chk = app_dict.get("body_likes")
+    _raw_bd_chk = app_dict.get("body_dislikes")
+    _has_erotic_body_prefs = any(
+        str(x).strip().lower().endswith(("_bb", "_ass"))
+        for x in (
+            (list(_raw_bl_chk) if isinstance(_raw_bl_chk, (list, tuple, set)) else [])
+            + (list(_raw_bd_chk) if isinstance(_raw_bd_chk, (list, tuple, set)) else [])
+        )
+    )
+    has_explicit_intimate = _has_erotic_body_prefs or any(
         app_dict.get(k) for k in (
-            "breast_size", "penis_size", "asset_texture", "turn_ons", "sensitive_spots",
+            "breast_size", "penis_size", "asset_texture", "rear_size", "rear_texture",
+            "turn_ons", "sensitive_spots",
             "fetishes", "intimate_demeanor", "intimate_dynamic",
             "act_likes", "act_dislikes", "undergarments", "bra", "underwear",
             "predetermined_intercourse", "intercourse_experience", "intimate_revealed",
@@ -831,23 +1583,14 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
             if p_size:
                 result["penis_size"] = p_size
             else:
-                result["penis_size"] = "average"
+                result["penis_size"] = roll_dynamic_penis_size(stature=stature, race=race, hash_val=hash_val)
             demeanor_fallback = infer_intimate_demeanor_from_traits(desc=desc, race=race, gender="male", traits=effective_traits, role=effective_role)
             dynamic_fallback = infer_intimate_dynamic_from_traits(desc=desc, race=race, gender="male", traits=effective_traits, role=effective_role)
         else:
             if b_size:
                 result["breast_size"] = b_size
             else:
-                physique_lower = str(physique).lower()
-                if any(w in physique_lower for w in ("petite", "slender", "lithe", "lean", "flat")):
-                    cup_pool = ["Petite A-Cup", "Modest B-Cup", "Perky B-Cup", "Soft A-Cup"]
-                elif any(w in physique_lower for w in ("voluptuous", "curvy", "busty", "full-figured", "stacked", "hourglass", "thick", "overweight")):
-                    cup_pool = ["Voluptuous D-Cup", "Generous DD-Cup", "Heavy D-Cup", "Bountiful E-Cup"]
-                elif any(w in physique_lower for w in ("toned", "athletic", "muscular")):
-                    cup_pool = ["Firm & Perky B-Cup", "Toned C-Cup", "Athletic B-Cup", "Shapely C-Cup"]
-                else:
-                    cup_pool = ["Modest B-Cup", "Shapely C-Cup", "Full C-Cup", "Voluptuous D-Cup"]
-                result["breast_size"] = cup_pool[hash_val % len(cup_pool)]
+                result["breast_size"] = roll_dynamic_breast_size(physique=physique, hash_val=hash_val)
             demeanor_fallback = infer_intimate_demeanor_from_traits(desc=desc, race=race, gender="female", traits=effective_traits, role=effective_role)
             dynamic_fallback = infer_intimate_dynamic_from_traits(desc=desc, race=race, gender="female", traits=effective_traits, role=effective_role)
 
@@ -875,27 +1618,29 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
 
         # Resolve tactile asset texture with coherence guardrail
         curr_tier = classify_asset_size_tier(result.get("penis_size" if is_male else "breast_size", ""), "male" if is_male else "female")
-        incompat_set = TIER_INCOMPATIBLE_TEXTURES.get(curr_tier, set())
+        raw_tex = app_dict.get("asset_texture")
+        eff_gender = "male" if is_male else "female"
 
-        tex_val = app_dict.get("asset_texture")
-        if not tex_val or str(tex_val).lower() in ("none", "unknown", ""):
-            tex_val = extract_asset_texture(result.get("penis_size" if is_male else "breast_size", ""), "male" if is_male else "female")
-
-        # Anatomy & Gender Incompatibility guard: ensure texture matches character anatomy
+        raw_tex_low = str(raw_tex or "").strip().lower()
         is_gender_incompatible = False
-        if tex_val:
-            if is_male:
-                if tex_val in FEMALE_ASSET_TEXTURE_TEMPLATES or any(w in str(tex_val).lower() for w in ("teardrop", "perky", "bouncy", "chest fur", "underbelly down", "buoyant", "plumage")):
-                    is_gender_incompatible = True
-            else:
-                if tex_val in MALE_ASSET_TEXTURE_TEMPLATES or any(w in str(tex_val).lower() for w in ("veined", "pulsing", "formidable", "ringed base")):
-                    is_gender_incompatible = True
+        if raw_tex_low:
+            if is_male and any(w in raw_tex_low for w in ("teardrop", "perky", "bouncy", "pillowy", "plush", "delicate", "chest fur", "underbelly down", "buoyant", "plumage")):
+                is_gender_incompatible = True
+            elif not is_male and any(w in raw_tex_low for w in ("veined", "curved", "tapered", "pulsing", "formidable", "ringed base")):
+                is_gender_incompatible = True
 
-        # Incompatibility guard: if tex_val contradicts size tier or anatomy gender, re-roll a compatible texture
-        if not tex_val or str(tex_val).lower() in ("none", "unknown", "") or any(inc.lower() in str(tex_val).lower() for inc in incompat_set) or is_gender_incompatible:
+        tex_val = ""
+        if not is_gender_incompatible and raw_tex and str(raw_tex).strip().lower() not in ("none", "unknown", "", "auto", "__auto__"):
+            tex_val = heal_asset_texture_for_context(raw_tex, gender=eff_gender, size_tier=curr_tier)
+        if not tex_val and not raw_tex:
+            extracted_tex = extract_asset_texture(result.get("penis_size" if is_male else "breast_size", ""), eff_gender)
+            if extracted_tex:
+                tex_val = heal_asset_texture_for_context(extracted_tex, gender=eff_gender, size_tier=curr_tier)
+
+        if not tex_val:
             tex_val = roll_dynamic_asset_texture(
                 hash_val,
-                gender="male" if is_male else "female",
+                gender=eff_gender,
                 race=race,
                 physique=physique,
                 demeanor=result.get("intimate_demeanor", ""),
@@ -903,14 +1648,70 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
             )
         if tex_val:
             result["asset_texture"] = str(tex_val).strip()
-            # Seamlessly fuse the texture into the primary display size description
             if is_male and result.get("penis_size"):
                 result["penis_size"] = fuse_asset_size_and_texture(result["penis_size"], result["asset_texture"], gender="male")
             elif not is_male and result.get("breast_size"):
                 result["breast_size"] = fuse_asset_size_and_texture(result["breast_size"], result["asset_texture"], gender="female")
 
         # Dynamic procedural generator for fallback with dynamic synergy
-        dyn_intimate = generate_dynamic_intimate_attributes(hash_val, race=race, gender=gender, dynamic=result["intimate_dynamic"], openness=result["erotic_openness"])
+        dyn_intimate = generate_dynamic_intimate_attributes(
+            hash_val,
+            race=race,
+            gender=gender,
+            dynamic=result["intimate_dynamic"],
+            openness=result["erotic_openness"],
+            traits=effective_traits,
+        )
+
+        # Rear / Ass anatomy (all humanoids & anthropomorphic beastfolk; skipped for feral myobu_fox)
+        if is_feral_rear_excluded(race):
+            result.pop("rear_size", None)
+            result.pop("rear_texture", None)
+            result.pop("body_likes", None)
+            result.pop("body_dislikes", None)
+        else:
+            raw_rear_size = _clean_nsfw_val(app_dict.get("rear_size"))
+            norm_rear_size = normalize_rear_size_label(raw_rear_size) if raw_rear_size else ""
+            if not norm_rear_size:
+                norm_rear_size = roll_dynamic_rear_size(physique=physique, gender=eff_gender, race=race, hash_val=hash_val)
+            rear_tier = classify_rear_size_tier(norm_rear_size)
+            raw_r_tex = app_dict.get("rear_texture")
+            r_tex_val = ""
+            if raw_r_tex and str(raw_r_tex).strip().lower() not in ("none", "unknown", "", "auto", "__auto__"):
+                r_tex_val = heal_rear_texture_for_context(raw_r_tex, size_tier=rear_tier)
+            if not r_tex_val and raw_rear_size and not (raw_r_tex and str(raw_r_tex).strip().lower() in ("auto", "__auto__")):
+                extracted_r_tex = extract_rear_texture(raw_rear_size)
+                if extracted_r_tex:
+                    r_tex_val = heal_rear_texture_for_context(extracted_r_tex, size_tier=rear_tier)
+            if not r_tex_val:
+                r_tex_val = roll_dynamic_rear_texture(
+                    hash_val,
+                    size_tier=rear_tier,
+                    physique=physique,
+                    gender=eff_gender,
+                    race=race,
+                )
+            if r_tex_val:
+                result["rear_texture"] = str(r_tex_val).strip()
+                result["rear_size"] = fuse_rear_size_and_texture(norm_rear_size, result["rear_texture"])
+            else:
+                result["rear_size"] = norm_rear_size
+
+            # Body preferences (BB & Ass size likes/dislikes): preserve explicit empty [] lists; lazy-seed only when absent
+            has_explicit_body_prefs = (
+                ("body_likes" in app_dict and app_dict["body_likes"] is not None)
+                or ("body_dislikes" in app_dict and app_dict["body_dislikes"] is not None)
+            )
+            if has_explicit_body_prefs:
+                clean_b_likes, clean_b_dislikes = normalize_body_preferences(
+                    app_dict.get("body_likes"),
+                    app_dict.get("body_dislikes"),
+                )
+                result["body_likes"] = clean_b_likes
+                result["body_dislikes"] = clean_b_dislikes
+            else:
+                result["body_likes"] = list(dyn_intimate.get("body_likes") or [])
+                result["body_dislikes"] = list(dyn_intimate.get("body_dislikes") or [])
 
         # 3-Track Experience: Intercourse, Oral, Manual
         mems = app_dict.get("intimate_memories") or []
@@ -1191,13 +1992,44 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
             else:
                 result["undergarments"] = dyn_under
 
+    # Height preferences (SFW-safe: seeded once across both SFW & NSFW unless feral myobu_fox)
+    _is_nsfw_ctx = bool(is_nsfw_scenario(scen_key) or has_explicit_intimate)
+    _existing_likes, _existing_dislikes = normalize_body_preferences(
+        result.get("body_likes") if "body_likes" in result else app_dict.get("body_likes"),
+        result.get("body_dislikes") if "body_dislikes" in result else app_dict.get("body_dislikes"),
+    )
+    if is_feral_rear_excluded(race):
+        result.pop("body_likes", None)
+        result.pop("body_dislikes", None)
+        result.pop("height_pref_seeded", None)
+    else:
+        if not _is_nsfw_ctx:
+            _existing_likes = [k for k in _existing_likes if k in HEIGHT_PREFERENCE_KEYS]
+            _existing_dislikes = [k for k in _existing_dislikes if k in HEIGHT_PREFERENCE_KEYS]
+        _height_seeded = bool(app_dict.get("height_pref_seeded")) or any(
+            k in HEIGHT_PREFERENCE_KEYS for k in (_existing_likes + _existing_dislikes)
+        )
+        if not _height_seeded:
+            _h_seeded = generate_dynamic_height_preference(
+                hash_val,
+                gender=(gender or raw_g),
+                stature=stature,
+                race=race,
+            )
+            _existing_likes.extend(_h_seeded.get("body_likes") or [])
+            _existing_dislikes.extend(_h_seeded.get("body_dislikes") or [])
+            _existing_likes, _existing_dislikes = normalize_body_preferences(_existing_likes, _existing_dislikes)
+        result["body_likes"] = _existing_likes
+        result["body_dislikes"] = _existing_dislikes
+        result["height_pref_seeded"] = True
+
     # Preserve all revealed flags and metadata state from input dictionary
     for flag_k in (
         "social_flags",
         "intimate_revealed", "intercourse_revealed", "oral_revealed", "manual_revealed",
         "demeanor_revealed", "dynamic_revealed", "openness_revealed",
         "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
-        "act_preferences_revealed", "mannerisms_revealed", "underwear_revealed", "all_revealed",
+        "act_preferences_revealed", "body_preferences_revealed", "mannerisms_revealed", "underwear_revealed", "all_revealed",
         "had_first_time_with_player", "intimate_memories", "past_intimate_history", "past_intimate_entries"
     ):
         if flag_k in app_dict:
@@ -1210,6 +2042,8 @@ def normalize_appearance(raw_app: Dict[str, Any] | str = None, gender: str = "",
         if _fk in app_dict:
             result[_fk] = app_dict[_fk]
     result = enforce_intimacy_safeguard_invariants(result, gender=gender)
+    if _is_nsfw_ctx:
+        result = heal_intimate_preferences_surgically(result, gender=gender)
     return result
 
 def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str, Any]) -> Dict[str, Any]:
@@ -1221,6 +2055,10 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
     Live active virginity and experience dynamically advance forward upon intimate encounters via a one-way ratchet.
     """
     merged = dict(existing_app or {})
+    if merged.get("physique"):
+        norm_existing_p = normalize_physique(merged["physique"])
+        if norm_existing_p:
+            merged["physique"] = norm_existing_p
     if not incoming_app or not isinstance(incoming_app, dict):
         return merged
 
@@ -1229,7 +2067,7 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
         "intercourse_revealed", "oral_revealed", "manual_revealed", "anal_revealed",
         "intimate_revealed", "demeanor_revealed", "dynamic_revealed", "openness_revealed",
         "sensitive_spots_revealed", "turn_ons_revealed", "turn_offs_revealed", "fetishes_revealed",
-        "act_preferences_revealed", "underwear_revealed", "had_first_time_with_player", "all_revealed", "mannerisms_revealed"
+        "act_preferences_revealed", "body_preferences_revealed", "height_pref_seeded", "underwear_revealed", "had_first_time_with_player", "all_revealed", "mannerisms_revealed"
     )
     prior_trues = {f for f in _one_way_true_flags if merged.get(f)}
 
@@ -1285,6 +2123,33 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
             if not is_valid_persona_attribute_string(existing_val):
                 if is_valid_persona_attribute_string(v):
                     merged[k] = v
+        elif k in ("body_likes", "body_dislikes"):
+            if k not in merged or merged.get(k) is None:
+                c_likes, c_dislikes = normalize_body_preferences(
+                    v if k == "body_likes" else merged.get("body_likes"),
+                    v if k == "body_dislikes" else merged.get("body_dislikes"),
+                )
+                if k == "body_likes":
+                    merged["body_likes"] = c_likes
+                else:
+                    merged["body_dislikes"] = c_dislikes
+            elif (
+                not existing_app.get("height_pref_seeded")
+                and incoming_app.get("height_pref_seeded")
+                and isinstance(v, list)
+            ):
+                has_merged_height = any(
+                    str(hk).strip().lower() in HEIGHT_PREFERENCE_KEYS
+                    for hk in (list(merged.get("body_likes") or []) + list(merged.get("body_dislikes") or []))
+                )
+                if not has_merged_height:
+                    h_incoming = [x for x in v if str(x).strip().lower() in HEIGHT_PREFERENCE_KEYS]
+                    if h_incoming:
+                        base_likes = list(merged.get("body_likes") or []) + (h_incoming if k == "body_likes" else [])
+                        base_dislikes = list(merged.get("body_dislikes") or []) + (h_incoming if k == "body_dislikes" else [])
+                        c_likes, c_dislikes = normalize_body_preferences(base_likes, base_dislikes)
+                        merged["body_likes"] = c_likes
+                        merged["body_dislikes"] = c_dislikes
         elif k in ("undergarments", "bra", "underwear"):
             existing_val = merged.get(k)
             if not existing_val or str(existing_val).strip().lower() in ("", "unknown", "none", "n/a", "null", "{}"):
@@ -1350,6 +2215,32 @@ def merge_appearance_safely(existing_app: Dict[str, Any], incoming_app: Dict[str
 
     merged = enforce_intimacy_safeguard_invariants(merged, gender=merged.get("gender", ""))
 
+    if merged.get("physique"):
+        norm_merged_p = normalize_physique(merged["physique"])
+        if norm_merged_p:
+            merged["physique"] = norm_merged_p
+
+    if merged.get("asset_texture"):
+        merged_g = str(merged.get("gender") or "")
+        is_merged_m = any(kw in merged_g.lower() for kw in ("male", "man", "boy")) and "female" not in merged_g.lower()
+        merged_size = merged.get("penis_size" if is_merged_m else "breast_size", "")
+        merged_tier = classify_asset_size_tier(str(merged_size or ""), "male" if is_merged_m else "female")
+        healed_tex = heal_asset_texture_for_context(
+            merged["asset_texture"],
+            gender="male" if is_merged_m else "female",
+            size_tier=merged_tier,
+        )
+        if healed_tex:
+            merged["asset_texture"] = healed_tex
+
+    if merged.get("rear_texture"):
+        rear_tier = classify_rear_size_tier(str(merged.get("rear_size") or ""))
+        healed_r_tex = heal_rear_texture_for_context(merged["rear_texture"], size_tier=rear_tier)
+        if healed_r_tex:
+            merged["rear_texture"] = healed_r_tex
+            if merged.get("rear_size"):
+                merged["rear_size"] = fuse_rear_size_and_texture(str(merged["rear_size"]), healed_r_tex)
+
     # 5. Restore one-way true flags
     for _flag in prior_trues:
         merged[_flag] = True
@@ -1364,4 +2255,4 @@ from .logic import (
     merge_oral_states, sanitize_sensitive_spots_for_species,
     partition_sensitivities_and_turn_ons
 )
-from .generation import generate_dynamic_intimate_attributes
+from .generation import generate_dynamic_intimate_attributes, generate_dynamic_height_preference, normalize_body_preferences

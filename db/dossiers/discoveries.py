@@ -155,6 +155,14 @@ def _rebase_clue_graph_snapshot(snap: Any, new_cg: Any) -> Any:
     return out
 
 
+def _lead_key(raw: dict[str, Any], idx: int) -> str:
+    for field in ("lead_id", "hook_id", "id"):
+        val = raw.get(field)
+        if val is not None and val != "":
+            return str(val)
+    return str(idx)
+
+
 def _rebase_leads_graph_snapshot(snap: Any, new_lg: Any) -> Any:
     if not isinstance(snap, list) or not isinstance(new_lg, list):
         return snap
@@ -162,14 +170,14 @@ def _rebase_leads_graph_snapshot(snap: Any, new_lg: Any) -> Any:
     by_key: dict[str, dict[str, Any]] = {}
     for idx, raw in enumerate(new_lg):
         if isinstance(raw, dict):
-            lk = str(raw.get("lead_id") or raw.get("hook_id") or raw.get("id") or idx)
+            lk = _lead_key(raw, idx)
             by_key[lk] = raw
     seen: set[str] = set()
     for idx, raw in enumerate(snap):
         if not isinstance(raw, dict):
             continue
         lead = copy.deepcopy(raw)
-        lk = str(lead.get("lead_id") or lead.get("hook_id") or lead.get("id") or idx)
+        lk = _lead_key(lead, idx)
         seen.add(lk)
         src = by_key.get(lk)
         if (
@@ -185,7 +193,7 @@ def _rebase_leads_graph_snapshot(snap: Any, new_lg: Any) -> Any:
     for idx, raw in enumerate(new_lg):
         if not isinstance(raw, dict):
             continue
-        lk = str(raw.get("lead_id") or raw.get("hook_id") or lead_k if (lead_k := raw.get("id")) else idx)
+        lk = _lead_key(raw, idx)
         if lk not in seen:
             out.append(copy.deepcopy(raw))
     return out

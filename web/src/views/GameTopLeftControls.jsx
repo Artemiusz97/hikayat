@@ -65,6 +65,9 @@ const GameTopLeftControls = ({
     defaultValue: `D${currentDay}`,
   });
 
+  const realmHud = session?.realm_hud;
+  const showRealmPill = Boolean(realmHud?.show_realm_badge && realmHud?.realm_name);
+
   return (
     <div
       className={
@@ -73,6 +76,25 @@ const GameTopLeftControls = ({
           : 'flex flex-wrap items-center gap-1.5 min-w-0'
       }
     >
+      {showRealmPill && (
+        <span
+          title={
+            realmHud.docked_realm_name
+              ? `${realmHud.realm_name} · ${t('atlas.docked_at', 'Docked:')} ${realmHud.docked_realm_name}`
+              : realmHud.realm_name
+          }
+          className="hk-acrylic-pill min-h-10 h-auto py-1.5 px-2.5 inline-flex items-center gap-1.5 text-xs font-semibold text-cyan-200 border border-cyan-500/40 shrink-0 max-w-[11rem]"
+        >
+          <span aria-hidden="true">{realmHud.portal_icon || '🌀'}</span>
+          <span className="truncate">{realmHud.realm_name}</span>
+          {realmHud.comms_isolated && (
+            <span title={t('phone.no_signal_short', 'No Signal')} aria-hidden="true">📵</span>
+          )}
+          {Number(realmHud.time_scale ?? 1) <= 0 && (
+            <span title={t('atlas.stasis_badge', 'Temporal Stasis')} aria-hidden="true">⏳</span>
+          )}
+        </span>
+      )}
       <MotionButton
         onClick={onToggleUtility}
         aria-expanded={leftPanel === 'utility'}
@@ -123,7 +145,7 @@ const GameTopLeftControls = ({
         title={
           inCombat
             ? `${dayLabel} • ${formattedClock} (${timePhase.label}) • ${dayCountLabel} • ${turnLabel} — ${t('actions.cannot_rest_combat', 'Cannot rest during combat')}`
-            : `${dayLabel} • ${formattedClock} (${timePhase.label}) • ${dayCountLabel} • ${turnLabel} — ${t('actions.open_chronos', 'Open Chronos Dial to advance time and rest')}`
+            : `${dayLabel} • ${formattedClock} (${timePhase.label}) • ${dayCountLabel} • ${turnLabel} — ${t('actions.open_chronos', 'Skip time or rest')}`
         }
         className={`hk-acrylic-pill min-h-10 h-auto py-1.5 ${
           compact ? 'px-2.5' : 'px-3.5'

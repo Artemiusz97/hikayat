@@ -17,6 +17,31 @@ from services import crash_capture
 from typing import Any, Dict, List, Optional, Tuple
 from .models import TurnResponse, _BACKGROUND_TASKS, _callable_accepts_kwarg, _get_turn_service, _is_llm_unavailable_exception, log
 
+
+def _flush_deferred_dossier_discoveries(session_id: int, actions: List[Any], target_turn: int) -> None:
+    """Persist pre-turn deferred dossier discoveries inside resolve's UnitOfWork at target_turn."""
+    for _act_dd in (actions or []):
+        if not isinstance(_act_dd, dict):
+            continue
+        for _dd_entry in (_act_dd.get("_deferred_dossier_discoveries") or []):
+            if not isinstance(_dd_entry, dict):
+                continue
+            _dd_npc = str(_dd_entry.get("npc_name") or "").strip()
+            _dd_recs = _dd_entry.get("records") or []
+            if not _dd_npc or not _dd_recs:
+                continue
+            try:
+                db.record_contact_dossier_discoveries(
+                    session_id,
+                    _dd_npc,
+                    _dd_recs,
+                    discovered_turn=target_turn,
+                    primary_character_id=int(_dd_entry.get("primary_character_id") or 0),
+                    discovery_source=str(_dd_entry.get("discovery_source") or "intimacy"),
+                )
+            except (ValueError, TypeError, KeyError) as _dd_err:
+                log.warning("Deferred dossier discovery write skipped (invalid entry): %s", _dd_err)
+
 async def _finalize_and_save_scene(
     session_id: int,
     session_obj: Dict[str, Any],
@@ -412,6 +437,9 @@ async def _resolve_action_inner(
             "combat_target": a.get("combat_target") or a.get("target_npc") or a.get("target_name"),
             "target_node_id": a.get("target_node_id") or "",
             "target_location": a.get("target_location") or "",
+            "target_realm_id": a.get("target_realm_id") or "",
+            "vessel_realm_id": a.get("vessel_realm_id") or "",
+            "portal_edge_type": a.get("portal_edge_type") or "",
             "spell_id": a.get("spell_id"),
             "is_pact_skill": bool(a.get("is_pact_skill", False)),
             "is_lethal_overdraw": bool(a.get("is_lethal_overdraw", False)),
@@ -435,6 +463,7 @@ async def _resolve_action_inner(
             "breakthrough_leveraged": bool(a.get("breakthrough_leveraged", False)),
             "clue_pair_ids": list(a.get("clue_pair_ids") or []),
             "active_recall": a.get("active_recall"),
+            "_deferred_dossier_discoveries": list(a.get("_deferred_dossier_discoveries") or []),
             "is_stealth": a.get("is_stealth", False),
             "stance": a.get("stance", "normal"),
             "stealth_state": a.get("stealth_state"),
@@ -513,6 +542,7 @@ async def _resolve_action_inner(
             "location": session.get("current_location", ""),
             "current_node_id": session.get("current_node_id", ""),
             "focal_point": session.get("focal_point", ""),
+            "waiting_outside_companions": copy.deepcopy(list(session.get("waiting_outside_companions") or [])),
             "narrative": session.get("narrative", ""),
             "scene_title": session.get("scene_title", ""),
             "npcs": copy.deepcopy(list(session.get("current_npcs") or [])),
@@ -580,6 +610,12 @@ async def _resolve_action_inner(
         if isinstance(session, dict):
             session.pop("_target_turn", None)
             session.pop("_pre_turn_quest_res", None)
+            session["current_location"] = snapshot["pre_turn"].get("location", "")
+            session["current_node_id"] = snapshot["pre_turn"].get("current_node_id", "")
+            session["focal_point"] = snapshot["pre_turn"].get("focal_point", "")
+            session["waiting_outside_companions"] = copy.deepcopy(
+                list(snapshot["pre_turn"].get("waiting_outside_companions") or [])
+            )
             session["nearby_enemies"] = copy.deepcopy(pre_turn_nearby_enemies_snapshot)
             session["current_npcs"] = copy.deepcopy(snapshot["pre_turn"]["npcs"])
             if pre_turn_had_threat_ledger:
@@ -602,6 +638,9 @@ async def _resolve_action_inner(
         rollback_kwargs: Dict[str, Any] = {
             "turn_count": pre_turn_count_val,
             "history_json": json.dumps(pre_turn_history_snapshot, default=str),
+            "current_location": snapshot["pre_turn"].get("location", ""),
+            "current_node_id": snapshot["pre_turn"].get("current_node_id", ""),
+            "focal_point": snapshot["pre_turn"].get("focal_point", ""),
             "nearby_enemies": pre_turn_nearby_enemies_snapshot,
             "current_npcs": snapshot["pre_turn"]["npcs"],
             "dialogue_partner": pre_turn_dialogue_partner,
@@ -618,6 +657,9 @@ async def _resolve_action_inner(
         extra_restore: Dict[str, Any] = dict(pre_turn_anomaly_extra_snapshot)
         extra_restore["player_resonance_pips"] = copy.deepcopy(snapshot["pre_turn"]["player_resonance_pips"])
         extra_restore["telemetry_calibrations_used"] = copy.deepcopy(snapshot["pre_turn"]["telemetry_calibrations_used"])
+        extra_restore["waiting_outside_companions"] = copy.deepcopy(
+            list(snapshot["pre_turn"].get("waiting_outside_companions") or [])
+        )
         if pre_turn_daily_incursions_snapshot is not None:
             extra_restore["daily_incursions"] = pre_turn_daily_incursions_snapshot
             extra_restore["daily_breaches"] = pre_turn_daily_incursions_snapshot
@@ -844,6 +886,8 @@ async def _resolve_action_inner(
                 except Exception as _qd_post_err:
                     log.warning("Quest dossier post-turn hooks failed (non-fatal): %s", _qd_post_err)
 
+                _flush_deferred_dossier_discoveries(session_id, actions, target_turn)
+
                 # Single post-turn snapshot bundle capturing both apply_outcome & post-turn dossier hooks
                 try:
                     db.snapshot_session_physical_state_for_turn(session_id, target_turn)
@@ -1058,14 +1102,14 @@ async def _resolve_action_inner(
                 if isinstance(c, dict) and c.get("user_id") is not None
             }
             if user_id not in uid_char_cache:
-                uid_char_cache[user_id] = db.get_character(user_id)
+                uid_char_cache[user_id] = db.get_character(user_id, session_id=session_id)
             char_row_main = uid_char_cache.get(user_id)
 
             deduction_xp_bonus = int(outcome.get("_deduction_xp_bonus") or 0) if isinstance(outcome, dict) else 0
             for a in actions:
                 uid = a.get("user_id") or (a.get("char") or {}).get("user_id", user_id)
                 if uid not in uid_char_cache:
-                    uid_char_cache[uid] = db.get_character(uid)
+                    uid_char_cache[uid] = db.get_character(uid, session_id=session_id)
                 char_for_xp = uid_char_cache[uid]
                 if not char_for_xp:
                     continue
@@ -1085,7 +1129,7 @@ async def _resolve_action_inner(
                     bonus_xp += max(0, int(auth_xp_map.get(char_for_xp["name"].lower(), 0) or 0))
 
                 total_xp = base_xp + bonus_xp
-                lvls = db.add_xp(uid, total_xp)
+                lvls = db.add_xp(uid, total_xp, session_id=session_id, character_id=char_for_xp.get("id"))
                 xp_by_u[uid] = total_xp
                 levels_by_u[uid] = list(lvls or [])
 
@@ -1166,7 +1210,7 @@ async def _resolve_action_inner(
                 update_kwargs["extra"] = {"prompt_epoch": _epoch_to_save}
             db.update_session(session_id, **update_kwargs)
             f_sess = db.get_session(session_id)
-            n_char = db.get_character(user_id)
+            n_char = db.get_character(user_id, session_id=session_id)
             if isinstance(f_sess, dict):
                 f_sess["world_pulse"] = _build_wp_payload(session_id)
             snapshot["status"] = "completed"

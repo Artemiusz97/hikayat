@@ -45,6 +45,21 @@ def _from_abs_minutes(abs_min: int) -> tuple[int, int]:
     return (clamped // 1440) + 1, clamped % 1440
 
 
+def _resolve_session_realm_id(session_id: int, sess: dict[str, Any] | None = None) -> str:
+    """Resolves the session PC's current realm_id (defaulting to realm_city_metro)."""
+    s_obj = sess if isinstance(sess, dict) else (db.get_session(session_id) or {})
+    cur_nid = str(s_obj.get("current_node_id") or "").strip()
+    if cur_nid:
+        try:
+            from mechanics.world.locations.realms import get_node_realm_id
+            r_id = get_node_realm_id(session_id, cur_nid)
+            if r_id:
+                return str(r_id)
+        except Exception:
+            pass
+    return "realm_city_metro"
+
+
 def _gather_world_slots(session_id: int, rng: random.Random, template: dict[str, Any] | None = None) -> dict[str, Any]:
     """Extracts live faction, zone, venue, and scandal-safe NPC slots from session tables."""
     sess = db.get_session(session_id) or {}
@@ -58,6 +73,27 @@ def _gather_world_slots(session_id: int, rng: random.Random, template: dict[str,
     faction_name = "Local Council"
     npc_name = "a prominent insider"
     implicated_contact_id: int | None = None
+
+    if isinstance(template, dict) and str(template.get("realm_scope") or "") == "realm_veiled_spirit_world":
+        from .spirit_realm_events import pick_discovered_spirit_event_target
+
+        sp_target = pick_discovered_spirit_event_target(session_id, template, rng)
+        return {
+            "slots": {
+                "faction": sp_target["faction_name"],
+                "npc": npc_name,
+                "zone": sp_target["zone_name"],
+                "venue": sp_target["location_name"],
+            },
+            "faction_id": sp_target["faction_id"],
+            "location_node_id": sp_target["location_node_id"],
+            "location_name": sp_target["location_name"],
+            "implicated_contact_id": None,
+            "implicated_npc_name": "",
+            "lang": str(sess.get("narration_language") or sess.get("language") or "en"),
+            "scen_key": str(sess.get("scenario") or "fantasy"),
+            "turn_number": db.infer_session_turn(sess),
+        }
 
     party_names = {
         str(p.get("name") or "").strip().lower()
@@ -118,6 +154,33 @@ def _gather_world_slots(session_id: int, rng: random.Random, template: dict[str,
     }
 
 
+def _filter_undiscovered_spirit_enclave_templates(
+    session_id: int,
+    pool: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Never fires enclave ceremony events for villages the player has not discovered yet."""
+    from mechanics.world.locations.folklore_spirit_courts import SPIRIT_ZONE_BY_VILLAGE
+    from mechanics.world.world_events.spirit_realm_events import _parse_json_obj
+
+    nodes_by_id = {
+        str(n.get("node_id") or ""): n
+        for n in (db.get_session_world_nodes(session_id) or [])
+        if n.get("node_id")
+    }
+    filtered: list[dict[str, Any]] = []
+    for tmpl in pool:
+        tvk = str(tmpl.get("target_village_key") or "").strip().lower()
+        if tvk and tvk in SPIRIT_ZONE_BY_VILLAGE:
+            z_node = nodes_by_id.get(SPIRIT_ZONE_BY_VILLAGE[tvk])
+            if not z_node:
+                continue
+            z_st = _parse_json_obj(z_node.get("state_json"))
+            if z_st.get("is_hidden"):
+                continue
+        filtered.append(tmpl)
+    return filtered
+
+
 def _spawn_from_catalog(
     session_id: int,
     entity_type: str,
@@ -130,8 +193,17 @@ def _spawn_from_catalog(
     lang: str = "en",
     preferred_subtype: str = "",
     preferred_family: str = "",
+    current_realm_id: str | None = None,
 ) -> dict[str, Any] | None:
-    templates = get_eligible_templates(scen_key, entity_type=entity_type, include_nsfw=include_nsfw)
+    eff_realm = str(current_realm_id or "").strip() or _resolve_session_realm_id(session_id)
+    templates = get_eligible_templates(
+        scen_key,
+        entity_type=entity_type,
+        include_nsfw=include_nsfw,
+        current_realm_id=eff_realm,
+    )
+    if eff_realm == "realm_veiled_spirit_world":
+        templates = _filter_undiscovered_spirit_enclave_templates(session_id, templates)
     if not templates:
         return None
 
@@ -168,9 +240,22 @@ def _spawn_from_catalog(
     seq = rng.randint(100, 999999)
     ev_key = f"we_{session_id}_{rendered['event_subtype']}_{seq}"
 
+    loc_realm_id = str(chosen.get("realm_scope") or "").strip()
+    if not loc_realm_id and session_id and ctx.get("location_node_id"):
+        try:
+            from mechanics.world.locations.realms import get_node_realm_id
+            loc_realm_id = get_node_realm_id(session_id, str(ctx["location_node_id"]))
+        except Exception:
+            loc_realm_id = ""
+
     metadata: dict[str, Any] = {
         "bounty_title": rendered["bounty_title"],
         "bounty_objective": rendered["bounty_objective"],
+        "realm_id": loc_realm_id,
+        "realm_scope": str(chosen.get("realm_scope") or ""),
+        "allowed_zone_ids": list(chosen.get("allowed_zone_ids") or []),
+        "target_village_key": str(chosen.get("target_village_key") or ""),
+        "is_cross_realm": bool(chosen.get("is_cross_realm", False)),
     }
     if is_minor:
         metadata["can_spawn_bounty"] = bool(rendered.get("can_spawn_bounty", False))
@@ -182,7 +267,7 @@ def _spawn_from_catalog(
     is_disc = 1 if (is_macro or is_minor) else 0
     disc_src = "world_event" if is_macro else ("bulletin" if is_minor else "")
 
-    return db.create_world_event(
+    created_ev = db.create_world_event(
         session_id=session_id,
         event_key=ev_key,
         template_key=rendered["template_key"],
@@ -205,6 +290,11 @@ def _spawn_from_catalog(
         modifiers={} if is_minor else rendered["modifiers"],
         metadata=metadata,
     )
+    if created_ev:
+        from .spirit_realm_events import VEILED_SPIRIT_EVENT_KEYS, apply_spirit_event_on_spawn
+        if rendered["template_key"] in VEILED_SPIRIT_EVENT_KEYS:
+            apply_spirit_event_on_spawn(session_id, created_ev, turn_number=int(turn_number))
+    return created_ev
 
 
 def seed_opening_world_events(
@@ -232,6 +322,7 @@ def seed_opening_world_events(
     eff_nsfw = scenario_data.has_tag(eff_scen, "nsfw") if include_nsfw is None else (bool(include_nsfw) and scenario_data.has_tag(eff_scen, "nsfw"))
     rng = random.Random(seed if seed is not None else int(session_id) * 7919)
 
+    eff_realm = _resolve_session_realm_id(session_id, sess)
     spawned: list[dict[str, Any]] = []
     for _ in range(DAY_1_MACRO_EVENTS):
         ev = _spawn_from_catalog(
@@ -244,6 +335,7 @@ def seed_opening_world_events(
             rng=rng,
             include_nsfw=eff_nsfw,
             lang=eff_lang,
+            current_realm_id=eff_realm,
         )
         if ev:
             spawned.append(ev)
@@ -262,6 +354,7 @@ def seed_opening_world_events(
             include_nsfw=eff_nsfw,
             lang=eff_lang,
             preferred_family=rumor_fams[_r_idx] if _r_idx < len(rumor_fams) else "",
+            current_realm_id=eff_realm,
         )
         if rm:
             spawned.append(rm)
@@ -280,6 +373,7 @@ def seed_opening_world_events(
                 include_nsfw=eff_nsfw,
                 lang=eff_lang,
                 preferred_family=minor_fams[_m_idx] if _m_idx < len(minor_fams) else "",
+                current_realm_id=eff_realm,
             )
             if mnr:
                 spawned.append(mnr)
@@ -311,11 +405,22 @@ def advance_world_pulse(
 
     eff_scen = str(scen_key or scenario_key or sess.get("scenario") or "fantasy")
     eff_lang = str(language or sess.get("narration_language") or sess.get("language") or "en")
+    eff_realm = _resolve_session_realm_id(session_id, sess)
     eff_nsfw = scenario_data.has_tag(eff_scen, "nsfw") if include_nsfw is None else (bool(include_nsfw) and scenario_data.has_tag(eff_scen, "nsfw"))
     rng = random.Random(seed if seed is not None else (int(session_id) * 1009 + int(current_day) * 1440 + int(current_minute)))
 
     now_abs = _abs_minutes(int(current_day), int(current_minute))
-    with UnitOfWork():
+    from .spirit_realm_events import (
+        SPIRIT_REALM_ID,
+        VEILED_SPIRIT_EVENT_KEYS,
+        cleanup_expired_spirit_crisis_commissions,
+    )
+    is_spirit_stasis_turn = (
+        eff_realm == SPIRIT_REALM_ID
+        and int(delta_minutes or 0) <= 0
+        and int(turn_number or 0) > 0
+    )
+    with UnitOfWork() as uow_conn:
         all_active = db.get_world_events(session_id, include_hidden=True, statuses=("active", "resolved_aftermath"))
 
         active_macro_count = sum(1 for e in all_active if e["entity_type"] == "macro_event" and e["status"] in ("active", "resolved_aftermath"))
@@ -326,12 +431,23 @@ def advance_world_pulse(
 
         for ev in all_active:
             ev_key = ev["event_key"]
+            ev_tpl = str(ev.get("template_key") or "").strip()
             exp_day = ev.get("expires_day")
             exp_min = ev.get("expires_minute")
             if exp_day is None or exp_min is None:
                 continue
             exp_abs = _abs_minutes(int(exp_day), int(exp_min))
             remaining = exp_abs - now_abs
+            if is_spirit_stasis_turn and ev_tpl in VEILED_SPIRIT_EVENT_KEYS and remaining > 0:
+                started_turn = int(ev.get("turn_created") or ev.get("started_turn") or 0)
+                started_abs = _abs_minutes(
+                    int(ev.get("started_day") or current_day),
+                    int(ev.get("started_minute") or current_minute),
+                )
+                duration_mins = max(60, exp_abs - started_abs)
+                stasis_ttl_turns = max(4, min(24, int(round(duration_mins / 120.0))))
+                if started_turn > 0 and (int(turn_number) - started_turn) >= stasis_ttl_turns:
+                    remaining = 0
 
             # 1. 24h Pre-Expiry Whisper Auto-Reveal Failsafe for hidden rumors
             if ev["entity_type"] == "rumor" and not ev["is_discovered"] and ev["status"] == "active":
@@ -346,6 +462,8 @@ def advance_world_pulse(
             # 2. Timer reached: handle aftermath expiry, 4-day cold transition, or ~30% escalation
             if ev["status"] == "resolved_aftermath":
                 db.resolve_world_event(session_id, ev_key, "expired", int(current_day), int(current_minute), int(turn_number))
+                if ev_tpl in ("evt_spirit_neon_static_surge", "evt_spirit_cold_iron_raid"):
+                    cleanup_expired_spirit_crisis_commissions(session_id, ev_tpl, conn=uow_conn)
                 expired_keys.append(ev_key)
                 if ev["entity_type"] == "macro_event":
                     active_macro_count = max(0, active_macro_count - 1)
@@ -377,6 +495,7 @@ def advance_world_pulse(
                         include_nsfw=eff_nsfw,
                         lang=eff_lang,
                         preferred_subtype="crisis",
+                        current_realm_id=eff_realm,
                     )
                     db.resolve_world_event(session_id, ev_key, "escalated", int(current_day), int(current_minute), int(turn_number))
                     escalated_keys.append(ev_key)
@@ -386,6 +505,8 @@ def advance_world_pulse(
                     continue
 
             db.resolve_world_event(session_id, ev_key, "expired", int(current_day), int(current_minute), int(turn_number))
+            if ev_tpl in ("evt_spirit_neon_static_surge", "evt_spirit_cold_iron_raid"):
+                cleanup_expired_spirit_crisis_commissions(session_id, ev_tpl, conn=uow_conn)
             expired_keys.append(ev_key)
             if ev["entity_type"] == "macro_event":
                 active_macro_count = max(0, active_macro_count - 1)
@@ -397,7 +518,8 @@ def advance_world_pulse(
         minor_cnt = sum(1 for e in refreshed if e["entity_type"] == "minor_event")
 
         pity = db.get_session_world_pity_state(session_id)
-        ev_pity = float(pity["event_pity_counter"]) + max(0, int(delta_minutes))
+        eff_ev_pity_delta = 60 if is_spirit_stasis_turn else max(0, int(delta_minutes))
+        ev_pity = float(pity["event_pity_counter"]) + eff_ev_pity_delta
         rm_pity = float(pity["rumor_pity_counter"]) + max(0, int(delta_minutes))
         mnr_pity = float(pity.get("minor_event_pity_counter") or 0.0) + max(0, int(delta_minutes))
 
@@ -415,6 +537,7 @@ def advance_world_pulse(
                 rng=rng,
                 include_nsfw=eff_nsfw,
                 lang=eff_lang,
+                current_realm_id=eff_realm,
             )
             if new_ev:
                 spawned_events.append(new_ev)
@@ -435,6 +558,7 @@ def advance_world_pulse(
                 rng=rng,
                 include_nsfw=eff_nsfw,
                 lang=eff_lang,
+                current_realm_id=eff_realm,
             )
             if new_rm:
                 spawned_events.append(new_rm)
@@ -456,6 +580,7 @@ def advance_world_pulse(
                     rng=rng,
                     include_nsfw=eff_nsfw,
                     lang=eff_lang,
+                    current_realm_id=eff_realm,
                 )
                 if new_mnr:
                     spawned_events.append(new_mnr)
@@ -553,6 +678,7 @@ def on_quest_or_bounty_completed(
                     turn_number=int(turn_number),
                     rng=rng,
                     include_nsfw=scenario_data.has_tag(scen_key, "nsfw"),
+                    current_realm_id=_resolve_session_realm_id(session_id, sess),
                 )
 
     return {"resolved_keys": resolved_keys, "aftermath_spawned": aftermath_spawned}
@@ -633,6 +759,21 @@ def build_client_world_pulse_payload(
     ]
     raw_minors = extract_minor_events(snap)
     active_minor = [_clean_item(m) for m in raw_minors]
+
+    _pulse_realm_id = ""
+    try:
+        from mechanics.world.locations.realms import get_node_realm_id
+        _sess_pulse = db.get_session(session_id) or {}
+        _pulse_nid = str(_sess_pulse.get("current_node_id") or "").strip()
+        if _pulse_nid:
+            _pulse_realm_id = get_node_realm_id(session_id, _pulse_nid)
+    except Exception:
+        _pulse_realm_id = ""
+    if _pulse_realm_id:
+        from mechanics.world.world_events.formatting import event_visible_in_realm
+        macros = [e for e in macros if event_visible_in_realm(e, _pulse_realm_id)]
+        discovered_rumors = [r for r in discovered_rumors if event_visible_in_realm(r, _pulse_realm_id)]
+        active_minor = [m for m in active_minor if event_visible_in_realm(m, _pulse_realm_id)]
 
     all_active_quests = db.get_session_quests(session_id, status="Active") or []
     active_rmr_quests = [
@@ -751,16 +892,26 @@ def spawn_quest_world_scar(
     else:
         rem_qid = f"REM-{clean_qid}"
 
+    scar_realm_id = ""
+    try:
+        from mechanics.world.locations.realms import get_node_realm_id
+        _scar_nid = str(nid or sanctuary_nid or "").strip() or str((db.get_session(session_id) or {}).get("current_node_id") or "").strip()
+        if _scar_nid:
+            scar_realm_id = get_node_realm_id(session_id, _scar_nid)
+    except Exception:
+        scar_realm_id = ""
+
     ev = db.create_world_event(
         session_id=session_id,
         event_key=ev_key,
-        template_key=f"world_scar_{scar_type}",
+        template_key=str(spec.get("template_key") or f"world_scar_{scar_type}"),
         entity_type="macro_event",
-        event_subtype="crisis",
+        event_subtype=str(spec.get("event_subtype") or "crisis"),
         title=title,
         description=desc,
         sfw_fallback_description=desc,
         faction_id=faction_id,
+        implicated_contact_id=None,
         location_node_id=nid,
         location_name=venue,
         is_discovered=1,
@@ -778,6 +929,8 @@ def spawn_quest_world_scar(
             "source_quest_id": str(source_quest_id or ""),
             "remediation_quest_id": rem_qid,
             "safe_sanctuary_exempt_node": sanctuary_nid,
+            "realm_id": scar_realm_id,
+            "is_cross_realm": bool(spec.get("is_cross_realm", False)),
         },
         linked_quest_id=rem_qid or None,
     )

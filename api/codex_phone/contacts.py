@@ -72,6 +72,8 @@ def _preload_fog_of_war_context(
     preloaded_party_npcs: list[dict[str, Any]] | None = None,
     scen_key: str = "",
     preloaded_session: dict[str, Any] | None = None,
+    preloaded_player_char: dict[str, Any] | None = None,
+    request_user_id: int = 0,
 ) -> dict:
     """Batch-loads dossier, roster, node, property, tie, and exemption context in O(1) queries."""
     import mechanics.social.relationship_graph as rg
@@ -224,10 +226,25 @@ def _preload_fog_of_war_context(
         or ""
     ).strip()
 
+    eff_player_char: dict[str, Any] | None = dict(preloaded_player_char) if isinstance(preloaded_player_char, dict) else None
+    if eff_player_char is None and (cid > 0 or sid > 0 or request_user_id or (isinstance(eff_session, dict) and eff_session.get("host_user_id"))):
+        try:
+            _pc_row = mechanics.social.relationships.resolve_session_player_character(
+                session_id=sid,
+                character_id=cid,
+                user_id=int(request_user_id or 0),
+                session=eff_session,
+            )
+            if isinstance(_pc_row, dict):
+                eff_player_char = dict(_pc_row)
+        except (sqlite3.Error, AttributeError, TypeError, ValueError):
+            eff_player_char = None
+
     return {
         "character_id": cid,
         "lang": str(lang or "en"),
         "session": eff_session,
+        "player_char": eff_player_char,
         "disc_by_npc": disc_by_npc,
         "party_npc_keys": party_npc_keys,
         "kin_npc_keys": kin_npc_keys,
@@ -324,6 +341,7 @@ def _enrich_contact_record(
     preloaded_faction_state = None
     preloaded_agent_roster = None
     preloaded_session = None
+    preloaded_player_char = None
     if isinstance(fow_context, dict):
         is_fow_preloaded = bool(fow_context.get("preloaded"))
         if fow_context.get("character_id") and not c_in.get("character_id"):
@@ -346,6 +364,7 @@ def _enrich_contact_record(
         preloaded_faction_state = fow_context.get("faction_state")
         preloaded_agent_roster = fow_context.get("anomalous_agent_roster")
         preloaded_session = fow_context.get("session")
+        preloaded_player_char = fow_context.get("player_char")
 
     res = enrich_contact_dossier(
         c_in,
@@ -363,6 +382,7 @@ def _enrich_contact_record(
         preloaded_faction_state=preloaded_faction_state,
         preloaded_agent_roster=preloaded_agent_roster,
         preloaded_session=preloaded_session,
+        player_char=preloaded_player_char,
     )
     if not res.get("grade"):
         b_inf = res.get("basic_info") or {}
@@ -583,6 +603,7 @@ def _build_contacts_and_acquaintances_payload(
     contacts: list[dict[str, Any]],
     unlocked_raw: list[dict[str, Any]],
     preloaded_session: dict[str, Any] | None = None,
+    preloaded_player_char: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     from mechanics.social.relationships import can_player_dm_contact, get_relationship_tier
 
@@ -595,6 +616,7 @@ def _build_contacts_and_acquaintances_payload(
         preloaded_party_npcs=party_npcs,
         scen_key=scen_key,
         preloaded_session=preloaded_session,
+        preloaded_player_char=preloaded_player_char,
     )
     enriched_contacts = [
         {
@@ -704,7 +726,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
     debug_reveal_all = bool((settings or {}).get("debug_reveal_all_info", 0))
     from scenario_data import is_nsfw_scenario
 
-    char_row = await adb(db.get_character, lookup_uid) if lookup_uid else None
+    char_row = await adb(db.get_character, lookup_uid, session_id=session_id) if lookup_uid else None
     char_id = char_row.get("id", 0) if char_row else 0
     contacts = await _get_contacts_ro(session_id, char_id)
     if not contacts and lookup_uid and char_id != lookup_uid:
@@ -740,6 +762,7 @@ async def get_contacts(session_id: int, user_id: int | None = Query(None), reque
         contacts,
         unlocked_raw,
         preloaded_session=session,
+        preloaded_player_char=char_row,
     )
     return {
         "contacts": enriched_contacts,

@@ -475,15 +475,27 @@ def _resolve_and_register_quest_cast_npc(
         or _DEFAULT_QUEST_CAST_ROLES.get(slot_role, "Quest Contact")
     ).strip()
 
+    from mechanics.social.employment_policy import (
+        is_prohibited_teen_civilian_role,
+        is_prohibited_teen_civilian_workplace,
+        is_teen_student_civilian,
+    )
+
     is_hs_scen = bool(
         scenario_data.is_high_school_scenario(scen_key)
         or scenario_data.is_anomalous_high_school_scenario(scen_key)
     )
+    resolved_wp_nid = str(anchor_node_id or (ex_roster or {}).get("workplace_node_id") or "").strip()
+    is_adult_emp = is_prohibited_teen_civilian_role(resolved_role) or is_prohibited_teen_civilian_workplace(
+        resolved_wp_nid, ""
+    )
     resolved_age_group = str(
         ex_c_bi.get("age_group")
         or ex_r_bi.get("age_group")
-        or ("teen" if (is_hs_scen and slot_role in ("informant", "accomplice", "witness")) else "adult")
+        or ("teen" if (is_hs_scen and not is_adult_emp and slot_role in ("informant", "accomplice", "witness")) else "adult")
     ).strip()
+    if is_adult_emp and not (ex_c_bi.get("is_special_agent") or ex_r_bi.get("is_special_agent")):
+        resolved_age_group = "adult"
 
     ex_wr_gender = normalize_gender(
         (ex_roster.get("gender") if isinstance(ex_roster, dict) else "") or ex_r_bi.get("gender") or ""
@@ -505,6 +517,12 @@ def _resolve_and_register_quest_cast_npc(
         import db
         ex_origin = str((ex_roster or {}).get("origin") or "").strip()
         target_origin = ex_origin if (ex_origin and ex_origin != "legacy_adapter") else "quest_seed"
+        eff_wp_for_payload = resolved_wp_nid
+        if is_teen_student_civilian(
+            {"role": resolved_role, "basic_info": {"age_group": resolved_age_group, "grade": ex_r_bi.get("grade") or ex_c_bi.get("grade") or ""}},
+            scen_key=scen_key,
+        ) and is_prohibited_teen_civilian_workplace(eff_wp_for_payload, ""):
+            eff_wp_for_payload = ""
         payload: Dict[str, Any] = {
             "npc_id": slugify_npc_id(clean_name),
             "name": clean_name,
@@ -513,7 +531,7 @@ def _resolve_and_register_quest_cast_npc(
             "role": resolved_role,
             "origin": target_origin,
             "tier_status": str((ex_roster or {}).get("tier_status") or "seeded"),
-            "workplace_node_id": str(anchor_node_id or (ex_roster or {}).get("workplace_node_id") or "").strip(),
+            "workplace_node_id": eff_wp_for_payload,
             "basic_info": {
                 "role": resolved_role,
                 "occupation": resolved_role,

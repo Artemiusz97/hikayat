@@ -201,13 +201,17 @@ def build_known_wardrobe_payload(
 
     kit_entries: dict[str, dict[str, Any]] = {}
     for kkey in ACTIVITY_KITS:
+        if kkey not in kits_catalog:
+            continue
         fkey = f"preset:{kkey}"
         is_known = bool(reveal_debug or fkey in witnessed_keys)
         if is_known:
-            kit_entries[kkey] = {
-                "known": True,
-                "summary": witnessed_values.get(fkey) or format_wardrobe_summary(kits_catalog.get(kkey)),
-            }
+            summary_val = format_wardrobe_summary(kits_catalog.get(kkey)) or witnessed_values.get(fkey)
+            if summary_val:
+                kit_entries[kkey] = {
+                    "known": True,
+                    "summary": summary_val,
+                }
 
     gifted_items: list[str] = []
     for bucket_name, slot_dict in gifted_by_preset.items():

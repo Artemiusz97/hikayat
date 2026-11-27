@@ -2381,8 +2381,38 @@ def get_privacy_nudge_choice(
                     home_dc_mod = int(p_cat.get("cha_invite_dc_mod") or 0)
     except Exception:
         home_dc_mod = 0
+    openness_nudge_mod = 0
+    if isinstance(contact, dict):
+        c_app_pn = contact.get("appearance")
+        if isinstance(c_app_pn, str):
+            try:
+                c_app_pn = json.loads(c_app_pn)
+            except Exception:
+                c_app_pn = {}
+        if isinstance(c_app_pn, dict):
+            raw_op_pn = c_app_pn.get("erotic_openness") or c_app_pn.get("openness")
+            if raw_op_pn not in (None, ""):
+                from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+                op_t_pn = normalize_openness_tier(raw_op_pn)
+                sh_pn = len(contact.get("gameplay_intimate_events") or [])
+                host_pn = str(contact.get("disposition") or "").strip().lower() == "hostile"
+                comf_pn = compute_with_you_comfort(
+                    op_t_pn,
+                    relationship_score=score,
+                    relationship_track=track or "platonic",
+                    shared_intimate_count=sh_pn,
+                    is_hostile=host_pn,
+                )
+                if op_t_pn == "shameless":
+                    openness_nudge_mod = -2
+                elif op_t_pn == "bold":
+                    openness_nudge_mod = -1
+                elif op_t_pn == "prude":
+                    openness_nudge_mod = 2 if comf_pn["stage"] == "guarded" else (1 if comf_pn["stage"] == "warming_up" else 0)
+
     base_dc = max(5, min(14, 12 - score_discount - track_bonus))
-    req_dc = max(3, min(14, base_dc + home_dc_mod))
+    req_dc = max(3, min(14, base_dc + home_dc_mod + openness_nudge_mod))
 
     scen_key = str(sess_dict.get('scenario') or 'high_school_drama')
     from mechanics.world.locations.hierarchy import parse_tiered_location, format_tiered_location_string

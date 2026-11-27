@@ -340,7 +340,7 @@ def _compute_target_preset_and_kit(
     Determines off-screen target (base_preset, activity_kit, overlay_key).
     Returns e.g. ('duty', 'activity:sport', '') or ('sleepwear', '', '').
     """
-    if meta.get("is_myobu_fox"):
+    if meta.get("is_folklore_beast") or meta.get("is_myobu_fox"):
         return "natural", "", ""
 
     basic = safe_json_dict(npc.get("basic_info") or npc.get("basic_info_json"))

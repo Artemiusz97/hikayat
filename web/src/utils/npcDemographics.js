@@ -158,3 +158,116 @@ export const resolveNpcDemographics = (npc, t) => {
   const hasAny = Boolean(ageCategory || genderInfo || raceLabel);
   return { ageCategory, genderInfo, raceLabel, hasAny };
 };
+
+const STATURE_LABEL_CONFIG = {
+  miniature: { i18nKey: 'build.stature.miniature', fallback: 'Miniature' },
+  short: { i18nKey: 'build.stature.short', fallback: 'Short' },
+  below_average: { i18nKey: 'build.stature.below_average', fallback: 'Below Average' },
+  average: { i18nKey: 'build.stature.average', fallback: 'Average' },
+  tall: { i18nKey: 'build.stature.tall', fallback: 'Tall' },
+  towering: { i18nKey: 'build.stature.towering', fallback: 'Towering' },
+};
+
+const PHYSIQUE_LABEL_CONFIG = {
+  slim: { canonical: 'Slim', i18nKey: 'build.physique.slim', fallback: 'Slim' },
+  average: { canonical: 'Average', i18nKey: 'build.physique.average', fallback: 'Average' },
+  athletic: { canonical: 'Athletic', i18nKey: 'build.physique.athletic', fallback: 'Athletic' },
+  muscular: { canonical: 'Muscular', i18nKey: 'build.physique.muscular', fallback: 'Muscular' },
+  voluptuous: { canonical: 'Voluptuous', i18nKey: 'build.physique.voluptuous', fallback: 'Voluptuous' },
+  stocky: { canonical: 'Stocky', i18nKey: 'build.physique.stocky', fallback: 'Stocky' },
+  chubby: { canonical: 'Chubby', i18nKey: 'build.physique.chubby', fallback: 'Chubby' },
+};
+
+const LEGACY_PHYSIQUE_CLIENT_MAP = {
+  'petite': 'Slim',
+  'slender': 'Slim',
+  'petite & soft': 'Slim',
+  'hourglass & slender': 'Slim',
+  'slender & lanky': 'Slim',
+  'slender & lithe': 'Slim',
+  'average & proportionate': 'Average',
+  'toned & athletic': 'Athletic',
+  'fit & lean': 'Athletic',
+  'athletic & sculpted': 'Athletic',
+  'broad shoulders & lean': 'Athletic',
+  'muscular & powerful': 'Muscular',
+  'muscular & tall': 'Muscular',
+  'curvy': 'Voluptuous',
+  'soft & curved': 'Voluptuous',
+  'full-figured & voluptuous': 'Voluptuous',
+  'thick & curvy': 'Voluptuous',
+  'curvy & voluptuous': 'Voluptuous',
+  'stocky & thick': 'Stocky',
+  'soft & overweight': 'Chubby',
+  'heavy & overweight': 'Chubby',
+  'thick': 'Voluptuous',
+  'plump': 'Chubby',
+  'overweight': 'Chubby',
+  'heavy': 'Chubby',
+  'burly': 'Stocky',
+  'broad': 'Stocky',
+  'sturdy': 'Stocky',
+  'busty': 'Voluptuous',
+  'stacked': 'Voluptuous',
+  'full-figured': 'Voluptuous',
+  'full figured': 'Voluptuous',
+  'hourglass': 'Voluptuous',
+  'shapely': 'Voluptuous',
+  'lithe': 'Slim',
+  'slim': 'Slim',
+  'lean': 'Slim',
+  'lanky': 'Slim',
+  'thin': 'Slim',
+  'wiry': 'Athletic',
+  'toned': 'Athletic',
+  'fit': 'Athletic',
+  'sculpted': 'Athletic',
+  'buff': 'Muscular',
+  'ripped': 'Muscular',
+  'brawny': 'Muscular',
+};
+
+export const normalizeStatureClient = (raw) => {
+  const s = cleanDemoValue(raw).toLowerCase().replace(/[-\s]+/g, ' ').trim();
+  if (!s) return '';
+  const underscored = s.replace(/\s+/g, '_');
+  if (STATURE_LABEL_CONFIG[underscored]) return underscored;
+  if (['dwarf', 'halfling', 'gnome', 'diminutive', 'tiny_race'].includes(s) || s.includes('miniature')) return 'miniature';
+  if (s.includes('below') && s.includes('average')) return 'below_average';
+  if (['petite', 'small', 'tiny', 'short'].includes(s)) return 'short';
+  if (['average', 'medium', 'normal', 'standard'].includes(s)) return 'average';
+  if (['tall', 'statuesque', 'high'].includes(s)) return 'tall';
+  if (s.includes('towering') || s.includes('gigantic') || s === 'giant') return 'towering';
+  return '';
+};
+
+export const normalizePhysiqueClient = (raw) => {
+  const clean = cleanDemoValue(raw);
+  if (!clean) return '';
+  const low = clean.toLowerCase().replace(/\s+/g, ' ').trim();
+  if (PHYSIQUE_LABEL_CONFIG[low]) return PHYSIQUE_LABEL_CONFIG[low].canonical;
+  if (LEGACY_PHYSIQUE_CLIENT_MAP[low]) return LEGACY_PHYSIQUE_CLIENT_MAP[low];
+  return '';
+};
+
+export const formatStature = (rawStature, t) => {
+  const raw = cleanDemoValue(rawStature);
+  if (!raw) return '';
+  const norm = normalizeStatureClient(raw);
+  const cfg = STATURE_LABEL_CONFIG[norm];
+  if (cfg) {
+    return typeof t === 'function' ? t(cfg.i18nKey, cfg.fallback) : cfg.fallback;
+  }
+  return formatTitle(raw);
+};
+
+export const formatPhysique = (rawPhysique, t) => {
+  const raw = cleanDemoValue(rawPhysique);
+  if (!raw) return '';
+  const norm = normalizePhysiqueClient(raw);
+  const cfg = norm ? PHYSIQUE_LABEL_CONFIG[norm.toLowerCase()] : null;
+  if (cfg) {
+    return typeof t === 'function' ? t(cfg.i18nKey, cfg.fallback) : cfg.fallback;
+  }
+  return formatTitle(raw);
+};

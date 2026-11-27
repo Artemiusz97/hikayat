@@ -97,13 +97,88 @@ def tag_turn_on_items(turn_ons_str: str, race: str = "") -> str:
                 tagged.append(f"{c} (Action)")
     return ", ".join(tagged)
 
-def generate_dynamic_fetish(hash_val: int, race: str = "", dynamic: str = "", openness: str = "") -> str:
-    """Generates exactly 1 fetish with a 25% roll chance, or 'None (Vanilla)' for 75%."""
-    has_fetish = ((hash_val // 37) % 100) < 25
-    if not has_fetish:
+def _openness_tier(openness: str) -> str:
+    o = str(openness or "").strip().lower()
+    if any(k in o for k in ("prude", "modest", "chaste", "guarded")):
+        return "prude"
+    if any(k in o for k in ("shameless", "lewd", "pervert", "hedonist")):
+        return "shameless"
+    if any(k in o for k in ("bold", "uninhibited")):
+        return "bold"
+    return "moderate"
+
+
+def _is_female_gender(gender: str) -> bool:
+    return is_female_gender(gender)
+
+
+_TURN_OFF_GENERIC_WORDS = frozenset({
+    "during", "intimacy", "feeling", "careless", "handling", "overly",
+    "lack", "purely", "without", "their", "against", "play",
+})
+
+
+def _turn_off_matches_key(to_name: str, to_lower: str) -> bool:
+    if not to_name or not to_lower:
+        return False
+    tn_l = to_name.lower()
+    if tn_l in to_lower:
+        return True
+    dist_words = [
+        w for w in re.split(r'[\s/&,\-]+', tn_l)
+        if len(w) >= 4 and w not in _TURN_OFF_GENERIC_WORDS
+    ]
+    if not dist_words:
+        return False
+    return any(re.search(r'\b' + re.escape(w) + r'\b', to_lower) for w in dist_words)
+
+
+def _act_tokens_to_ids(raw_acts: Any) -> set[str]:
+    if not raw_acts:
+        return set()
+    if isinstance(raw_acts, (list, tuple, set)):
+        parts = [str(p or "").strip().lower() for p in raw_acts if str(p or "").strip()]
+    else:
+        parts = [p.strip().lower() for p in str(raw_acts).split(",") if p.strip()]
+    out: set[str] = set()
+    for p in parts:
+        for item in ACT_PREFERENCE_REGISTRY:
+            if p == item["id"] or p == item["name"].lower() or item["name"].lower() in p or item["id"] in p:
+                out.add(item["id"])
+    return out
+
+
+def generate_dynamic_fetish(
+    hash_val: int,
+    race: str = "",
+    dynamic: str = "",
+    openness: str = "",
+    turn_offs: str = "",
+) -> str:
+    """Generates at most 1 fetish scaled by openness tier, filtered for Turn-Off conflicts."""
+    tier = _openness_tier(openness)
+    chance_pct = int(round(OPENNESS_FETISH_CHANCE.get(tier, 0.22) * 100))
+    roll = (abs(int(hash_val or 0)) // 37) % 100
+    if roll >= chance_pct:
         return "None (Vanilla)"
 
-    pool = list(FETISH_ITEMS)
+    blocked_fets: set[str] = set()
+    to_l = str(turn_offs or "").lower()
+    if to_l:
+        for to_name, f_set in TURN_OFF_VS_FETISH_CONFLICTS.items():
+            if _turn_off_matches_key(to_name, to_l):
+                blocked_fets.update(f_set)
+
+    if tier == "prude":
+        pool = [f for f in SOFT_ROMANTIC_FETISH_ITEMS if f not in blocked_fets]
+    elif tier == "moderate":
+        pool = [f for f in FETISH_ITEMS if f not in MODERATE_EXCLUDED_FETISH_ITEMS and f not in blocked_fets]
+    else:
+        pool = [f for f in FETISH_ITEMS if f not in blocked_fets]
+
+    if not pool:
+        return "None (Vanilla)"
+
     race_l = str(race or "").lower()
     dyn_l = str(dynamic or "").lower()
 
@@ -121,30 +196,51 @@ def generate_dynamic_fetish(hash_val: int, race: str = "", dynamic: str = "", op
         synergistic_fets = ["Overstimulation & gentle edging", "Aftercare obsession", "Public thrill & risk of being caught", "Biting & marking"]
     elif any(kw in dyn_l for kw in ("switch", "brat")):
         synergistic_fets = ["Costume / uniform roleplay", "Temperature play (ice & warmth)", "Biting & marking", "Mirror observation & exhibition"]
-    elif any(kw in dyn_l for kw in ("service")):
+    elif "service" in dyn_l:
         synergistic_fets = ["Massage oils & tactile worship", "Aftercare obsession", "Praise kink & verbal validation"]
 
-    if synergistic_fets and (((hash_val // 27) % 100) < 75):
-        syn_idx = (hash_val // 43) % len(synergistic_fets)
-        return synergistic_fets[syn_idx]
+    eligible_syn = [f for f in synergistic_fets if f in pool]
+    if eligible_syn and (((abs(int(hash_val or 0)) // 27) % 100) < 75):
+        syn_idx = (abs(int(hash_val or 0)) // 43) % len(eligible_syn)
+        return eligible_syn[syn_idx]
 
-    idx = (hash_val // 43) % len(pool)
+    idx = (abs(int(hash_val or 0)) // 43) % len(pool)
     return pool[idx]
 
-def generate_dynamic_turn_offs(hash_val: int, dynamic: str = "", openness: str = "", traits: List[str] = None) -> str:
-    """Dynamically generates 1-2 character-appropriate Turn-Offs (mood-killers / aversions)."""
+
+def generate_dynamic_turn_offs(
+    hash_val: int,
+    dynamic: str = "",
+    openness: str = "",
+    traits: List[str] = None,
+    fetishes: str = "",
+    act_likes: str = "",
+) -> str:
+    """Dynamically generates 1-2 character-appropriate Turn-Offs (mood-killers / aversions), avoiding direct self-contradictions."""
     dyn_l = str(dynamic or "").lower()
     open_l = str(openness or "").lower()
     traits_l = [str(t).lower() for t in (traits or [])]
 
-    pool = list(TURN_OFF_ITEMS)
+    blocked_turn_offs: set[str] = set()
+    fet_l = str(fetishes or "").lower()
+    if fet_l and fet_l not in ("none", "none (vanilla)", "unknown"):
+        for to_name, f_set in TURN_OFF_VS_FETISH_CONFLICTS.items():
+            if any(f.lower() in fet_l for f in f_set):
+                blocked_turn_offs.add(to_name)
+    liked_ids = _act_tokens_to_ids(act_likes)
+    if liked_ids:
+        for to_name, a_set in TURN_OFF_VS_ACT_LIKE_CONFLICTS.items():
+            if liked_ids & a_set:
+                blocked_turn_offs.add(to_name)
+
+    pool = [item for item in TURN_OFF_ITEMS if item not in blocked_turn_offs] or list(TURN_OFF_ITEMS)
     favored = []
 
     if any(kw in dyn_l for kw in ("receptive", "surrender", "yielding", "submissive")):
         favored += ["Clumsy / careless rough handling", "Crude degradation & insults", "Overly aggressive biting or pinching"]
     elif any(kw in dyn_l for kw in ("dominant", "proactive")):
         favored += ["Unearned bossiness & arrogance", "Limp passivity & lack of effort"]
-    elif any(kw in dyn_l for kw in ("service")):
+    elif "service" in dyn_l:
         favored += ["Dead silence & emotional detachment", "Purely transactional feeling", "Mocking or laughing at vulnerability"]
     elif any(kw in dyn_l for kw in ("switch", "brat")):
         favored += ["Rushed impatience & entitlement", "Dead silence & emotional detachment", "Unearned bossiness & arrogance"]
@@ -159,28 +255,42 @@ def generate_dynamic_turn_offs(hash_val: int, dynamic: str = "", openness: str =
     if any("noble" in t or "proud" in t or "knight" in t or "royal" in t for t in traits_l):
         favored += ["Unearned bossiness & arrogance", "Crude degradation & insults"]
 
-    count = 1 + ((hash_val // 71) % 2)  # 1 to 2
+    count = 1 + ((abs(int(hash_val or 0)) // 71) % 2)  # 1 to 2
     chosen = []
     for f in favored:
         if f in pool and len(chosen) < count:
-            if ((hash_val // 79) % 100) < 70:
+            if ((abs(int(hash_val or 0)) // 79) % 100) < 70:
                 chosen.append(f)
                 pool.remove(f)
 
     while len(chosen) < count and pool:
-        idx = (hash_val // (83 + len(chosen) * 13)) % len(pool)
+        idx = (abs(int(hash_val or 0)) // (83 + len(chosen) * 13)) % len(pool)
         chosen.append(pool.pop(idx))
 
     return ", ".join(chosen)
 
-def generate_dynamic_desires_and_turn_offs(hash_val: int, race: str = "", dynamic: str = "", openness: str = "moderate", traits: List[str] = None) -> tuple[str, str, str]:
-    """Dynamically generates:
-    1. Sensitive Spots (pure physical erogenous zones, 1-2 items)
-    2. Desires & Kinks (sensory triggers + 25% kink roll, 1-3 items)
-    3. Turn-Offs (mood-killers & aversions, 1-2 items)
-    """
+
+def generate_dynamic_desires_and_turn_offs(
+    hash_val: int,
+    race: str = "",
+    dynamic: str = "",
+    openness: str = "moderate",
+    traits: List[str] = None,
+    fetish_override: Optional[str] = None,
+    turn_offs_override: Optional[str] = None,
+) -> tuple[str, str, str]:
+    """Dynamically generates Sensitive Spots, Desires & Kinks, and Turn-Offs cleanly without duplicate fetish rolls."""
     phys_str, act_str = generate_dynamic_turn_ons_and_spots(hash_val, race=race, dynamic=dynamic)
-    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness)
+    turn_offs_str = (
+        turn_offs_override
+        if turn_offs_override is not None
+        else generate_dynamic_turn_offs(hash_val, dynamic=dynamic, openness=openness, traits=traits)
+    )
+    fetish_str = (
+        fetish_override
+        if fetish_override is not None
+        else generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness, turn_offs=turn_offs_str)
+    )
 
     desires_items = [x.strip() for x in act_str.split(",") if x.strip()]
     if fetish_str and fetish_str.lower() not in ("none", "none (vanilla)", "unknown", ""):
@@ -188,22 +298,42 @@ def generate_dynamic_desires_and_turn_offs(hash_val: int, race: str = "", dynami
             desires_items.append(fetish_str)
 
     desires_str = ", ".join(desires_items)
-    turn_offs_str = generate_dynamic_turn_offs(hash_val, dynamic=dynamic, openness=openness, traits=traits)
-
     return phys_str, desires_str, turn_offs_str
 
-def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor: str = "", openness: str = "") -> Dict[str, str]:
-    """Dynamically generates 1-2 Likes and 1-2 Dislikes from strictly bedroom acts, positions, and pacing."""
+
+def generate_dynamic_act_preferences(
+    hash_val: int,
+    dynamic: str = "",
+    demeanor: str = "",
+    openness: str = "",
+    gender: str = "",
+    is_virgin: Optional[bool] = None,
+    turn_offs: str = "",
+) -> Dict[str, str]:
+    """Dynamically generates 1-2 Likes and 1-2 Dislikes enforcing biological gender, prude-virgin, Turn-Off, and mutual-exclusion guards."""
     dyn_l = str(dynamic or "").lower()
     open_l = str(openness or "").lower()
+    o_tier = _openness_tier(openness)
+    is_female = _is_female_gender(gender)
 
-    likes_count = 1 + ((hash_val // 47) % 2)  # 1 to 2
-    dislikes_count = 1 + ((hash_val // 53) % 2)  # 1 to 2
+    likes_count = 1 + ((abs(int(hash_val or 0)) // 47) % 2)  # 1 to 2
+    dislikes_count = 1 + ((abs(int(hash_val or 0)) // 53) % 2)  # 1 to 2
 
     all_ids = [item["id"] for item in ACT_PREFERENCE_REGISTRY]
+    if is_female:
+        all_ids = [aid for aid in all_ids if aid not in FEMALE_EXCLUDED_ACT_IDS]
     name_map = {item["id"]: item["name"] for item in ACT_PREFERENCE_REGISTRY}
 
-    # Dynamic/Openness Synergistic Liked suggestions
+    excluded_like_ids: set[str] = set()
+    if is_virgin and o_tier == "prude":
+        excluded_like_ids.update(PRUDE_VIRGIN_EXCLUDED_ACT_IDS)
+
+    to_l = str(turn_offs or "").lower()
+    if to_l:
+        for to_name, conflict_ids in TURN_OFF_VS_ACT_LIKE_CONFLICTS.items():
+            if _turn_off_matches_key(to_name, to_l):
+                excluded_like_ids.update(conflict_ids)
+
     favored_likes = []
     favored_dislikes = []
 
@@ -215,7 +345,7 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
         favored_dislikes += ["spooning"]
     elif any(kw in dyn_l for kw in ("insatiable", "high-drive", "voracious")):
         favored_likes += ["swallowing", "cowgirl_riding", "fast_urgent", "prolonged_teasing"]
-    elif any(kw in dyn_l for kw in ("service")):
+    elif "service" in dyn_l:
         favored_likes += ["giving_oral", "slow_sensual", "swallowing"]
 
     if "prude" in open_l or "modest" in open_l:
@@ -225,30 +355,39 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
         favored_likes += ["swallowing", "facial", "cowgirl_riding", "from_behind"]
 
     # Select Likes
-    chosen_likes_ids = []
-    pool_likes = list(all_ids)
+    chosen_likes_ids: List[str] = []
+    pool_likes = [aid for aid in all_ids if aid not in excluded_like_ids]
+
+    def _add_like(act_id: str) -> None:
+        chosen_likes_ids.append(act_id)
+        if act_id in pool_likes:
+            pool_likes.remove(act_id)
+        for a, b in MUTUALLY_EXCLUSIVE_ACT_LIKE_PAIRS:
+            partner = b if act_id == a else (a if act_id == b else None)
+            if partner and partner in pool_likes:
+                pool_likes.remove(partner)
+
     for fl in favored_likes:
         if fl in pool_likes and len(chosen_likes_ids) < likes_count:
-            if ((hash_val // 61) % 100) < 70:
-                chosen_likes_ids.append(fl)
-                pool_likes.remove(fl)
+            if ((abs(int(hash_val or 0)) // 61) % 100) < 70:
+                _add_like(fl)
 
     while len(chosen_likes_ids) < likes_count and pool_likes:
-        idx = ((hash_val // (67 + len(chosen_likes_ids) * 17)) + len(chosen_likes_ids) * 7) % len(pool_likes)
-        chosen_likes_ids.append(pool_likes.pop(idx))
+        idx = ((abs(int(hash_val or 0)) // (67 + len(chosen_likes_ids) * 17)) + len(chosen_likes_ids) * 7) % len(pool_likes)
+        _add_like(pool_likes[idx])
 
     # Select Dislikes (Must be disjoint from Likes)
     pool_dislikes = [item_id for item_id in all_ids if item_id not in chosen_likes_ids]
-    chosen_dislikes_ids = []
+    chosen_dislikes_ids: List[str] = []
 
     for fd in favored_dislikes:
         if fd in pool_dislikes and len(chosen_dislikes_ids) < dislikes_count:
-            if ((hash_val // 71) % 100) < 70:
+            if ((abs(int(hash_val or 0)) // 71) % 100) < 70:
                 chosen_dislikes_ids.append(fd)
                 pool_dislikes.remove(fd)
 
     while len(chosen_dislikes_ids) < dislikes_count and pool_dislikes:
-        idx = ((hash_val // (73 + len(chosen_dislikes_ids) * 19)) + len(chosen_dislikes_ids) * 5) % len(pool_dislikes)
+        idx = ((abs(int(hash_val or 0)) // (73 + len(chosen_dislikes_ids) * 19)) + len(chosen_dislikes_ids) * 5) % len(pool_dislikes)
         chosen_dislikes_ids.append(pool_dislikes.pop(idx))
 
     likes_str = ", ".join(name_map[i] for i in chosen_likes_ids)
@@ -258,16 +397,25 @@ def generate_dynamic_act_preferences(hash_val: int, dynamic: str = "", demeanor:
         "likes": likes_str,
         "dislikes": dislikes_str,
         "act_likes": likes_str,
-        "act_dislikes": dislikes_str
+        "act_dislikes": dislikes_str,
     }
 
-def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderate", gender: str = "") -> Dict[str, str]:
+
+def generate_dynamic_intimate_experience(
+    hash_val: int,
+    openness: str = "moderate",
+    gender: str = "",
+    *,
+    act_likes: Any = "",
+    act_dislikes: Any = "",
+    turn_offs: str = "",
+    dynamic: str = "",
+    intercourse_override: str = "",
+) -> Dict[str, str]:
     """
-    Computes decoupled 4-track experience (Intercourse, Oral, Manual, Anal).
-    Base experience chance is 15% across all 3, modified additively by openness tier.
-    Enforces biological gender invariants for anal intimacy:
-    - Females: can only receive anal or be inexperienced (never 'has_done_anal' or 'has_done_and_received_anal').
-    - Males: can give anal to females, and can give or receive anal with males.
+    Computes decoupled 4-track experience (Intercourse, Oral, Manual, Anal),
+    correlating track odds and give/receive directions with liked/disliked acts, turn-offs, and dynamic
+    while preserving biological invariants and openness scaling.
     """
     o_low = str(openness or "moderate").lower()
     if "prude" in o_low or "modest" in o_low or "chaste" in o_low:
@@ -283,15 +431,47 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
         exp_rate = 20  # 80% virgin
         anal_rate = 7
 
-    # 1. Intercourse Track
-    roll_intercourse = hash_val % 100
-    intercourse_val = "non_virgin" if roll_intercourse < exp_rate else "virgin"
+    # 1. Intercourse Track (preserves exact openness scaling roll)
+    if intercourse_override in ("virgin", "non_virgin"):
+        intercourse_val = intercourse_override
+    else:
+        roll_intercourse = hash_val % 100
+        intercourse_val = "non_virgin" if roll_intercourse < exp_rate else "virgin"
+
+    is_non_virgin = intercourse_val == "non_virgin"
+    liked_ids = _act_tokens_to_ids(act_likes)
+    disliked_ids = _act_tokens_to_ids(act_dislikes)
+    to_l = str(turn_offs or "").lower()
+    dyn_l = str(dynamic or "").lower()
+    is_service = "service" in dyn_l
+    is_female = _is_female_gender(gender)
 
     # 2. Oral Intimacy Track
+    likes_oral_give = bool(liked_ids & {"giving_oral", "swallowing"})
+    likes_oral_rec = bool(liked_ids & {"receiving_oral", "facial"})
+    dislikes_oral = bool(disliked_ids & {"giving_oral", "receiving_oral"}) and not (likes_oral_give or likes_oral_rec)
+
+    if is_non_virgin:
+        oral_rate = max(exp_rate + 25, 45)
+        if likes_oral_give or likes_oral_rec or is_service:
+            oral_rate = 82
+        elif dislikes_oral:
+            oral_rate = max(5, exp_rate // 3)
+    else:
+        oral_rate = exp_rate
+        if likes_oral_give or likes_oral_rec:
+            oral_rate = min(55, exp_rate + 18)
+        elif dislikes_oral:
+            oral_rate = max(2, exp_rate // 3)
+
     roll_oral = (hash_val // 7) % 100
-    if roll_oral < exp_rate:
+    if roll_oral < oral_rate:
         sub_oral = (hash_val // 11) % 100
-        if sub_oral < 40:
+        if (likes_oral_give or is_service) and not likes_oral_rec:
+            oral_val = "has_done_and_received_oral" if sub_oral >= 70 else "has_done_oral"
+        elif likes_oral_rec and not likes_oral_give:
+            oral_val = "has_done_and_received_oral" if sub_oral >= 70 else "has_received_oral"
+        elif sub_oral < 40:
             oral_val = "has_done_oral"
         elif sub_oral < 80:
             oral_val = "has_received_oral"
@@ -301,10 +481,21 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
         oral_val = "inexperienced"
 
     # 3. Manual Intimacy Track
+    if is_non_virgin:
+        manual_rate = max(exp_rate + 30, 52)
+        if is_service or "prolonged_teasing" in liked_ids:
+            manual_rate = 85
+    else:
+        manual_rate = exp_rate
+        if "prolonged_teasing" in liked_ids:
+            manual_rate = min(55, exp_rate + 15)
+
     roll_manual = (hash_val // 13) % 100
-    if roll_manual < exp_rate:
+    if roll_manual < manual_rate:
         sub_man = (hash_val // 17) % 100
-        if sub_man < 40:
+        if is_service:
+            manual_val = "has_done_and_received_manual" if sub_man >= 65 else "has_done_manual"
+        elif sub_man < 40:
             manual_val = "has_done_manual"
         elif sub_man < 80:
             manual_val = "has_received_manual"
@@ -314,16 +505,30 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
         manual_val = "inexperienced"
 
     # 4. Anal Intimacy Track
+    anal_aversion = ("anal" in to_l) or ("backdoor" in to_l)
+    likes_anal_give = ("giving_anal" in liked_ids) and not is_female
+    likes_anal_rec = "receiving_anal" in liked_ids
+    dislikes_anal = bool(disliked_ids & {"giving_anal", "receiving_anal"}) and not (likes_anal_give or likes_anal_rec)
+
+    if anal_aversion or dislikes_anal:
+        eff_anal_rate = 0
+    elif likes_anal_give or likes_anal_rec:
+        eff_anal_rate = 60 if is_non_virgin else (0 if _openness_tier(openness) == "prude" else max(anal_rate + 12, 18))
+    elif is_non_virgin:
+        eff_anal_rate = anal_rate + 8
+    else:
+        eff_anal_rate = anal_rate
+
     roll_anal = (hash_val // 19) % 100
-    if roll_anal < anal_rate:
-        raw_g = str(gender or "").lower()
-        is_female = any(kw in raw_g for kw in ("female", "woman", "girl", "lady", "she", "her"))
-        if not is_female and raw_g:
-            is_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
-            is_female = not is_male
+    if roll_anal < eff_anal_rate:
         if is_female:
-            # Biological invariant: Female characters can only receive anal intimacy, never give
             anal_val = "has_received_anal"
+        elif likes_anal_give and not likes_anal_rec:
+            sub_anal = (hash_val // 23) % 100
+            anal_val = "has_done_and_received_anal" if sub_anal >= 75 else "has_done_anal"
+        elif likes_anal_rec and not likes_anal_give:
+            sub_anal = (hash_val // 23) % 100
+            anal_val = "has_done_and_received_anal" if sub_anal >= 75 else "has_received_anal"
         else:
             sub_anal = (hash_val // 23) % 100
             if sub_anal < 40:
@@ -339,16 +544,260 @@ def generate_dynamic_intimate_experience(hash_val: int, openness: str = "moderat
         "intercourse": intercourse_val,
         "oral": oral_val,
         "manual": manual_val,
-        "anal": anal_val
+        "anal": anal_val,
     }
 
+
+def normalize_body_preferences(
+    raw_likes: Any = None,
+    raw_dislikes: Any = None,
+) -> tuple[List[str], List[str]]:
+    """Normalizes BB/Ass body preferences into canonical keys, enforcing at most 1 preference per axis across likes and dislikes."""
+    valid_keys = set(BODY_PREFERENCE_KEYS)
+    alias_map = {
+        "smaller_bb": "smaller_bb",
+        "small_bb": "smaller_bb",
+        "likes_smaller_bb": "smaller_bb",
+        "dislikes_smaller_bb": "smaller_bb",
+        "bigger_bb": "bigger_bb",
+        "big_bb": "bigger_bb",
+        "large_bb": "bigger_bb",
+        "likes_bigger_bb": "bigger_bb",
+        "dislikes_bigger_bb": "bigger_bb",
+        "smaller_ass": "smaller_ass",
+        "small_ass": "smaller_ass",
+        "smaller_rear": "smaller_ass",
+        "likes_smaller_ass": "smaller_ass",
+        "dislikes_smaller_ass": "smaller_ass",
+        "bigger_ass": "bigger_ass",
+        "big_ass": "bigger_ass",
+        "large_ass": "bigger_ass",
+        "bigger_rear": "bigger_ass",
+        "likes_bigger_ass": "bigger_ass",
+        "dislikes_bigger_ass": "bigger_ass",
+        "taller_partner": "taller_partner",
+        "taller": "taller_partner",
+        "tall_partner": "taller_partner",
+        "likes_taller": "taller_partner",
+        "likes_taller_partner": "taller_partner",
+        "dislikes_taller": "taller_partner",
+        "dislikes_taller_partner": "taller_partner",
+        "shorter_partner": "shorter_partner",
+        "shorter": "shorter_partner",
+        "short_partner": "shorter_partner",
+        "likes_shorter": "shorter_partner",
+        "likes_shorter_partner": "shorter_partner",
+        "dislikes_shorter": "shorter_partner",
+        "dislikes_shorter_partner": "shorter_partner",
+    }
+
+    def _coerce_items(raw: Any) -> List[str]:
+        if raw is None:
+            return []
+        if isinstance(raw, str):
+            parts = [p.strip().lower().replace(" ", "_") for p in raw.split(",") if p.strip()]
+        elif isinstance(raw, (list, tuple, set)):
+            parts = [str(p or "").strip().lower().replace(" ", "_") for p in raw if str(p or "").strip()]
+        else:
+            return []
+        out: List[str] = []
+        for p in parts:
+            canon = alias_map.get(p, p)
+            if canon in valid_keys and canon not in out:
+                out.append(canon)
+        return out
+
+    seen_bb = False
+    seen_ass = False
+    seen_height = False
+    clean_likes: List[str] = []
+    clean_dislikes: List[str] = []
+
+    for item in _coerce_items(raw_likes):
+        if item.endswith("_bb"):
+            if seen_bb:
+                continue
+            seen_bb = True
+        elif item.endswith("_ass"):
+            if seen_ass:
+                continue
+            seen_ass = True
+        elif item in ("taller_partner", "shorter_partner"):
+            if seen_height:
+                continue
+            seen_height = True
+        clean_likes.append(item)
+
+    for item in _coerce_items(raw_dislikes):
+        if item.endswith("_bb"):
+            if seen_bb:
+                continue
+            seen_bb = True
+        elif item.endswith("_ass"):
+            if seen_ass:
+                continue
+            seen_ass = True
+        elif item in ("taller_partner", "shorter_partner"):
+            if seen_height:
+                continue
+            seen_height = True
+        clean_dislikes.append(item)
+
+    return clean_likes, clean_dislikes
+
+
+def generate_dynamic_height_preference(
+    hash_val: int,
+    gender: str = "",
+    stature: str = "average",
+    race: str = "",
+) -> Dict[str, List[str]]:
+    """Deterministically rolls a gender-skewed relative height preference (~50% neutral) with extreme-tier suppression.
+
+    - Female: 32% likes taller_partner, 6% likes shorter_partner, 10% dislikes shorter_partner, 2% dislikes taller_partner.
+    - Male:   32% likes shorter_partner, 6% likes taller_partner, 10% dislikes taller_partner, 2% dislikes shorter_partner.
+    - Non-binary / Neutral: 19% likes taller_partner, 19% likes shorter_partner, 6% dislikes taller_partner, 6% dislikes shorter_partner.
+    - Towering NPCs never roll taller_partner prefs; Miniature NPCs never roll shorter_partner prefs.
+    - Feral kitsune:myobu_fox returns empty lists.
+    """
+    from .appearance import is_feral_rear_excluded, normalize_stature_tier
+
+    if is_feral_rear_excluded(race):
+        return {"body_likes": [], "body_dislikes": []}
+
+    g_low = str(gender or "").strip().lower()
+    is_male = is_male_gender(g_low)
+    is_fem = is_female_gender(g_low)
+
+    h_abs = abs(int(hash_val or 0))
+    roll = (((h_abs * 3266489917 + 47) & 0xFFFFFFFF) >> 8) % 100
+    likes: List[str] = []
+    dislikes: List[str] = []
+
+    if is_fem:
+        if roll < 32:
+            likes.append("taller_partner")
+        elif roll < 38:
+            likes.append("shorter_partner")
+        elif roll < 48:
+            dislikes.append("shorter_partner")
+        elif roll < 50:
+            dislikes.append("taller_partner")
+    elif is_male:
+        if roll < 32:
+            likes.append("shorter_partner")
+        elif roll < 38:
+            likes.append("taller_partner")
+        elif roll < 48:
+            dislikes.append("taller_partner")
+        elif roll < 50:
+            dislikes.append("shorter_partner")
+    else:
+        if roll < 19:
+            likes.append("taller_partner")
+        elif roll < 38:
+            likes.append("shorter_partner")
+        elif roll < 44:
+            dislikes.append("taller_partner")
+        elif roll < 50:
+            dislikes.append("shorter_partner")
+
+    norm_stat = normalize_stature_tier(str(stature or "average"))
+    if norm_stat == "towering":
+        likes = [k for k in likes if k != "taller_partner"]
+        dislikes = [k for k in dislikes if k != "taller_partner"]
+    elif norm_stat == "miniature":
+        likes = [k for k in likes if k != "shorter_partner"]
+        dislikes = [k for k in dislikes if k != "shorter_partner"]
+
+    return {"body_likes": likes, "body_dislikes": dislikes}
+
+
+def generate_dynamic_body_preferences(
+    hash_val: int,
+    *,
+    gender: str = "",
+    stature: str = "average",
+    race: str = "",
+    include_height: bool = False,
+) -> Dict[str, List[str]]:
+    """Deterministically rolls BB & Ass size preferences per NPC (~60% neutral, ~28% like, ~12% dislike per axis), optionally including relative height."""
+    h_abs = abs(int(hash_val or 0))
+    likes: List[str] = []
+    dislikes: List[str] = []
+
+    bb_roll = (((h_abs * 2654435761 + 17) & 0xFFFFFFFF) >> 8) % 100
+    if bb_roll < 14:
+        likes.append("smaller_bb")
+    elif bb_roll < 28:
+        likes.append("bigger_bb")
+    elif bb_roll < 34:
+        dislikes.append("smaller_bb")
+    elif bb_roll < 40:
+        dislikes.append("bigger_bb")
+
+    ass_roll = (((h_abs * 2246822519 + 31) & 0xFFFFFFFF) >> 8) % 100
+    if ass_roll < 14:
+        likes.append("smaller_ass")
+    elif ass_roll < 28:
+        likes.append("bigger_ass")
+    elif ass_roll < 34:
+        dislikes.append("smaller_ass")
+    elif ass_roll < 40:
+        dislikes.append("bigger_ass")
+
+    if include_height:
+        h_prefs = generate_dynamic_height_preference(hash_val, gender=gender, stature=stature, race=race)
+        likes.extend(h_prefs["body_likes"])
+        dislikes.extend(h_prefs["body_dislikes"])
+
+    return {"body_likes": likes, "body_dislikes": dislikes}
+
+
 def generate_dynamic_intimate_attributes(hash_val: int, race: str = "", gender: str = "", dynamic: str = "", openness: str = "moderate", traits: List[str] = None) -> Dict[str, Any]:
-    """Dynamically generates sensitive spots, desires & kinks, turn-offs, symmetrical act preferences, 4-track experience, and undergarments."""
-    phys_str, desires_str, turn_offs_str = generate_dynamic_desires_and_turn_offs(hash_val, race=race, dynamic=dynamic, openness=openness, traits=traits)
-    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness)
-    act_prefs = generate_dynamic_act_preferences(hash_val, dynamic=dynamic, openness=openness)
-    experience = generate_dynamic_intimate_experience(hash_val, openness=openness, gender=gender)
+    """Dynamically generates coherent sensitive spots, desires & kinks, turn-offs, symmetrical act preferences, 4-track experience, body preferences, and undergarments."""
+    o_low = str(openness or "moderate").lower()
+    if "prude" in o_low or "modest" in o_low or "chaste" in o_low:
+        exp_rate = 10
+    elif "shameless" in o_low or "lewd" in o_low:
+        exp_rate = 40
+    elif "bold" in o_low or "uninhibited" in o_low:
+        exp_rate = 30
+    else:
+        exp_rate = 20
+    intercourse_val = "non_virgin" if (abs(int(hash_val or 0)) % 100) < exp_rate else "virgin"
+
+    turn_offs_str = generate_dynamic_turn_offs(hash_val, dynamic=dynamic, openness=openness, traits=traits)
+    fetish_str = generate_dynamic_fetish(hash_val, race=race, dynamic=dynamic, openness=openness, turn_offs=turn_offs_str)
+    act_prefs = generate_dynamic_act_preferences(
+        hash_val,
+        dynamic=dynamic,
+        openness=openness,
+        gender=gender,
+        is_virgin=(intercourse_val == "virgin"),
+        turn_offs=turn_offs_str,
+    )
+    phys_str, desires_str, turn_offs_str = generate_dynamic_desires_and_turn_offs(
+        hash_val,
+        race=race,
+        dynamic=dynamic,
+        openness=openness,
+        traits=traits,
+        fetish_override=fetish_str,
+        turn_offs_override=turn_offs_str,
+    )
+    experience = generate_dynamic_intimate_experience(
+        hash_val,
+        openness=openness,
+        gender=gender,
+        act_likes=act_prefs["likes"],
+        act_dislikes=act_prefs["dislikes"],
+        turn_offs=turn_offs_str,
+        dynamic=dynamic,
+        intercourse_override=intercourse_val,
+    )
     undergarments = generate_procedural_undergarments(gender=gender, openness=openness, dynamic=dynamic, hash_val=hash_val)
+    body_prefs = generate_dynamic_body_preferences(hash_val)
 
     return {
         "sensitive_spots": phys_str,
@@ -363,7 +812,9 @@ def generate_dynamic_intimate_attributes(hash_val: int, race: str = "", gender: 
         "oral": experience["oral"],
         "manual": experience["manual"],
         "anal": experience["anal"],
-        "undergarments": undergarments
+        "undergarments": undergarments,
+        "body_likes": body_prefs["body_likes"],
+        "body_dislikes": body_prefs["body_dislikes"],
     }
 
 def generate_intimate_synergy_tip(name: str, discovered: Dict[str, Any], info_level: int = 1) -> Dict[str, str]:
@@ -425,6 +876,14 @@ def generate_past_partner_name(scenario: str = "fantasy", partner_gender: str = 
         is_female = ("female" in partner_gender.lower() or "woman" in partner_gender.lower() or "girl" in partner_gender.lower())
         return "Elena Vance" if is_female else "Julian Vance" 
 
+def compute_past_history_seed(name: str, race: str = "", session_seed: str = "") -> str:
+    """Computes canonical deterministic seed string for past intimate history & ex-partner generation."""
+    name_str = str(name or "npc").strip() or "npc"
+    race_str = str(race or "human").strip() or "human"
+    sess_str = str(session_seed if session_seed not in (None, "") else 0)
+    return f"{name_str}_{race_str}_{sess_str}"
+
+
 def generate_past_intimate_history(
     hash_val: int = 0,
     race: str = "",
@@ -435,7 +894,9 @@ def generate_past_intimate_history(
     oral: str = "",
     manual: str = "",
     anal: str = "",
-    has_existing_partner: bool = False
+    has_existing_partner: bool = False,
+    act_likes: Any = "",
+    preferred_ex_partners: Optional[List[Dict[str, Any]]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Generates a structured past intimate history record with 4-tier scaling across
@@ -452,8 +913,8 @@ def generate_past_intimate_history(
         return None
 
     raw_g = str(gender or "").strip().lower()
-    is_char_male = any(kw in raw_g for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in raw_g for kw in ("female", "woman"))
-    is_char_female = not is_char_male
+    is_char_male = is_male_gender(raw_g)
+    is_char_female = is_female_gender(raw_g)
 
     # Biological gender invariant for anal intimacy:
     # Female characters can only receive anal intimacy. They can never give / perform anal.
@@ -498,8 +959,13 @@ def generate_past_intimate_history(
             else:
                 partner_gender = "female"
 
-        partner_name = generate_past_partner_name(scenario=scenario, partner_gender=partner_gender, hash_val=p_hash)
-        role = generate_past_partner_role(scenario=scenario, hash_val=p_hash)
+        if preferred_ex_partners and p_idx < len(preferred_ex_partners) and isinstance(preferred_ex_partners[p_idx], dict):
+            pref_p = preferred_ex_partners[p_idx]
+            partner_name = str(pref_p.get("name") or "").strip() or generate_past_partner_name(scenario=scenario, partner_gender=partner_gender, hash_val=p_hash)
+            role = str(pref_p.get("role") or "").strip() or generate_past_partner_role(scenario=scenario, hash_val=p_hash)
+        else:
+            partner_name = generate_past_partner_name(scenario=scenario, partner_gender=partner_gender, hash_val=p_hash)
+            role = generate_past_partner_role(scenario=scenario, hash_val=p_hash)
 
         enc_range = max(1, base_enc_max - base_enc_min + 1)
         count = base_enc_min + (p_hash % enc_range)
@@ -508,12 +974,21 @@ def generate_past_intimate_history(
         is_this_affair = has_affair and p_idx >= 1
         role_label = f"{role}, Secret Affair" if is_this_affair else role
 
+        liked_ids_ph = _act_tokens_to_ids(act_likes)
         has_intercourse = (i_state == "non_virgin") and (
             p_idx == 0 or (is_shameless and (p_hash % 2 == 0)) or (o_state == "inexperienced" and m_state == "inexperienced" and a_state == "inexperienced") or (p_hash % 2 == 0)
         )
-        has_oral = (o_state != "inexperienced")
-        has_manual = (m_state != "inexperienced")
-        has_anal = (a_state != "inexperienced")
+        oral_favored_ph = bool(liked_ids_ph & {"giving_oral", "receiving_oral", "swallowing", "facial"})
+        anal_favored_ph = bool(liked_ids_ph & {"giving_anal", "receiving_anal"})
+        has_oral = (o_state != "inexperienced") and (
+            p_idx == 0 or partner_count <= 2 or oral_favored_ph or ((p_hash // 3) % 100) < 75
+        )
+        has_manual = (m_state != "inexperienced") and (
+            p_idx == 0 or partner_count <= 2 or ((p_hash // 5) % 100) < 75
+        )
+        has_anal = (a_state != "inexperienced") and (
+            p_idx == 0 or partner_count <= 2 or anal_favored_ph or ((p_hash // 7) % 100) < 60
+        )
 
         ic_count = count
         ic_str = "1 time" if ic_count == 1 else f"{ic_count} times"

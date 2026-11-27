@@ -88,16 +88,41 @@ def _extract_list(events_or_snapshot: Any, key: str, entity_type: str) -> list[d
     return []
 
 
+def event_visible_in_realm(ev: dict[str, Any], current_realm_id: str = "") -> bool:
+    """Returns True if an event belongs to current_realm_id, has no realm owner, or is explicitly is_cross_realm."""
+    curr_r = str(current_realm_id or "").strip()
+    if not curr_r or not isinstance(ev, dict):
+        return True
+    meta = ev.get("metadata")
+    if not isinstance(meta, dict):
+        raw_meta = ev.get("metadata_json")
+        if isinstance(raw_meta, str) and raw_meta.strip():
+            try:
+                import json as _json_we
+                parsed = _json_we.loads(raw_meta)
+                meta = parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                meta = {}
+        else:
+            meta = {}
+    if meta.get("is_cross_realm"):
+        return True
+    ev_realm = str(meta.get("realm_id") or "").strip()
+    return (not ev_realm) or ev_realm == curr_r
+
+
 def format_macro_events_for_z2(
     events_or_snapshot: Any,
     lang: str = "en",
     is_nsfw_enabled: bool | None = None,
+    current_realm_id: str = "",
 ) -> str:
     """Formats active Macro World Events for Prompt Zone 2 (Z2), preserving Z1b KV-cache bytes.
     Note: entity_type='minor_event' is strictly excluded from Z2 to prevent KV-cache churn."""
     macros = [
         e for e in _extract_list(events_or_snapshot, "active_macro_events", "macro_event")
         if e.get("entity_type", "macro_event") != "minor_event"
+        and event_visible_in_realm(e, current_realm_id)
     ]
     if not macros:
         return ""
@@ -120,13 +145,20 @@ def format_rumors_for_z3(
     lang: str = "en",
     is_nsfw_enabled: bool | None = None,
     current_location: str = "",
+    current_realm_id: str = "",
 ) -> str:
     """Formats player-discovered Rumors and venue-scoped/claimed Minor Incidents for Prompt Zone 3 (Z3 user prompt)."""
     if isinstance(events_or_snapshot, dict) and "discovered_rumors" in events_or_snapshot:
-        rumors = [r for r in (events_or_snapshot.get("discovered_rumors") or []) if isinstance(r, dict)]
+        rumors = [
+            r for r in (events_or_snapshot.get("discovered_rumors") or [])
+            if isinstance(r, dict) and event_visible_in_realm(r, current_realm_id)
+        ]
     else:
         raw_rumors = _extract_list(events_or_snapshot, "active_rumors", "rumor")
-        rumors = [r for r in raw_rumors if bool(r.get("is_discovered"))]
+        rumors = [
+            r for r in raw_rumors
+            if bool(r.get("is_discovered")) and event_visible_in_realm(r, current_realm_id)
+        ]
 
     allow_nsfw = bool(llm_client.is_nsfw_configured()) if is_nsfw_enabled is None else (bool(is_nsfw_enabled) and bool(llm_client.is_nsfw_configured()))
 
@@ -144,7 +176,7 @@ def format_rumors_for_z3(
         if len(lines) > 1:
             blocks.append("\n".join(lines))
 
-    minors = extract_minor_events(events_or_snapshot)
+    minors = [m for m in extract_minor_events(events_or_snapshot) if event_visible_in_realm(m, current_realm_id)]
 
     curr_loc_clean = str(current_location or "").strip().lower()
     curr_loc_leaf = curr_loc_clean.split("➔")[-1].strip()

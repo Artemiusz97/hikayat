@@ -473,11 +473,18 @@ export const usePhone = (sessionId, user) => {
   return {
     phoneData,
     imageGenEnabled: phoneData?.image_gen_enabled ?? 0,
+    playerProfile: phoneData?.player_profile || null,
     branding: phoneData?.branding || {
       device_name: '📱 Smartphone',
       gallery_app_name: 'Photos',
       dm_app_name: 'Messages',
       feed_app_name: 'Feed',
+      shop_app_name: 'Online Store',
+      shop_subtitle: 'Instant Delivery',
+      bounty_app_name: 'Bounty Board',
+      bounty_subtitle: 'Contracts & Guilds',
+      people_tab_label: 'Network',
+      show_general_bounties: true,
       emoji: '📱'
     },
     appointments: phoneData?.appointments || [],
@@ -488,6 +495,9 @@ export const usePhone = (sessionId, user) => {
     dispatchChannels: phoneData?.dispatch_channels || [],
     suggestedPeers: phoneData?.suggested_peers || [],
     socialState: phoneData?.social_state || { charges: 3, turn_count: 0 },
+    commsStatus: phoneData?.comms_status || { available: true, reason: '' },
+    spiritRelayStaticActive: Boolean(phoneData?.spirit_relay_static_active),
+    spiritRelayStaticNote: phoneData?.spirit_relay_static_note || '',
     loading,
     refreshPhone: fetchPhoneState,
     refreshPhoneData: fetchPhoneState,

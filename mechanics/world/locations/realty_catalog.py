@@ -482,6 +482,66 @@ _BEDROOM_DISPLAY_NAMES: dict[str, str] = {
     "sub_bungalow_bedroom": "Oceanfront Bedroom",
     "sub_villa_tatami_suite": "Hinoki Tatami Master Suite",
     "sub_mansion_penthouse_suite": "Sovereign Penthouse Suite",
+    "sub_kitsune_villa_sleeping_room": "Starlit Hinoki Sleeping Chamber",
+    "sub_bunian_house_chamber": "Moonlit Cempaka Chamber",
+    "sub_ghoul_suite_bedroom": "Black-Silk Canopy Resting Chamber",
+}
+
+SPIRIT_COURT_PROPERTIES: dict[str, dict[str, Any]] = {
+    "prop_kitsune_guest_villa": {
+        "property_id": "prop_kitsune_guest_villa",
+        "tier": 0,
+        "price": 0,
+        "zone_id": "zone_spirit_kitsune",
+        "zone_name": "Sato-no-Inari — The Kitsune Enclave",
+        "facility_node_id": "fac_kitsune_guest_villa",
+        "entrance_node_id": "sub_kitsune_villa_engawa",
+        "bedroom_node_id": "sub_kitsune_villa_sleeping_room",
+        "all_room_ids": ("sub_kitsune_villa_engawa", "sub_kitsune_villa_sleeping_room"),
+        "name": "Hinoki Shrine Guest-Villa",
+        "base_slots": 0,
+        "cha_invite_dc_mod": -2,
+        "rest_multiplier": 1.25,
+        "hangout_affinity_bonus": 2,
+        "is_spirit_court_grant": True,
+        "theme_blurb": "A serene cedar-and-tatami guest villa granted in honor by the Sato-no-Inari Spirit Court.",
+    },
+    "prop_bunian_guest_house": {
+        "property_id": "prop_bunian_guest_house",
+        "tier": 0,
+        "price": 0,
+        "zone_id": "zone_spirit_bunian",
+        "zone_name": "Kampung Kayangan Bunian — The Mist-Canopy Domain",
+        "facility_node_id": "fac_bunian_guest_house",
+        "entrance_node_id": "sub_bunian_house_veranda",
+        "bedroom_node_id": "sub_bunian_house_chamber",
+        "all_room_ids": ("sub_bunian_house_veranda", "sub_bunian_house_chamber"),
+        "name": "Kayangan Banyan Guest-House",
+        "base_slots": 0,
+        "cha_invite_dc_mod": -2,
+        "rest_multiplier": 1.25,
+        "hangout_affinity_bonus": 2,
+        "is_spirit_court_grant": True,
+        "theme_blurb": "An elevated cempaka-scented ironwood cottage bestowed in friendship by the Kampung Kayangan Royal Court.",
+    },
+    "prop_ghoul_guest_manor": {
+        "property_id": "prop_ghoul_guest_manor",
+        "tier": 0,
+        "price": 0,
+        "zone_id": "zone_spirit_ghoul",
+        "zone_name": "The Pale Ossuary — Hidden Ghoul Enclave",
+        "facility_node_id": "fac_ghoul_guest_manor",
+        "entrance_node_id": "sub_ghoul_suite_foyer",
+        "bedroom_node_id": "sub_ghoul_suite_bedroom",
+        "all_room_ids": ("sub_ghoul_suite_foyer", "sub_ghoul_suite_bedroom"),
+        "name": "The Cypress Mausoleum Guest-Suite",
+        "base_slots": 0,
+        "cha_invite_dc_mod": -2,
+        "rest_multiplier": 1.25,
+        "hangout_affinity_bonus": 2,
+        "is_spirit_court_grant": True,
+        "theme_blurb": "A quiet slate-and-black-silk mausoleum suite bestowed in standing by the Pale Ossuary Court.",
+    },
 }
 
 
@@ -490,7 +550,8 @@ def resolve_realty_entry(
     session_or_id: Mapping[str, Any] | int | None = None,
 ) -> dict[str, Any] | None:
     """Returns a session-resolved copy of a purchasable property entry (handling Adult vs Student Suburbs split)."""
-    raw = REALTY_CATALOG.get(str(property_id or "").strip())
+    pid_key = str(property_id or "").strip()
+    raw = REALTY_CATALOG.get(pid_key) or SPIRIT_COURT_PROPERTIES.get(pid_key)
     if not raw:
         return None
     entry = dict(raw)
@@ -524,13 +585,16 @@ def find_realty_by_node_id(
     node_id: str,
     session_or_id: Mapping[str, Any] | int | None = None,
 ) -> dict[str, Any] | None:
-    """Finds the purchasable property entry matching a facility or sub-room node_id for this session."""
+    """Finds the purchasable or Spirit-Court granted property entry matching a facility or sub-room node_id."""
     target = str(node_id or "").strip()
     if not target:
         return None
     for entry in iter_session_realty_catalog(session_or_id=session_or_id):
         if target == entry["facility_node_id"] or target in entry.get("all_room_ids", ()):
             return entry
+    for entry in SPIRIT_COURT_PROPERTIES.values():
+        if target == entry["facility_node_id"] or target in entry.get("all_room_ids", ()):
+            return dict(entry)
     return None
 
 

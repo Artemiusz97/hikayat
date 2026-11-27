@@ -4,6 +4,7 @@ from .constants import *
 from .helpers import get_combined_narrative, is_check_success
 from .reducers import _evaluate_npc_milestones, _resolve_current_turn_1based
 import re
+import sqlite3
 import logging
 import game_engine
 import scenario_data
@@ -502,7 +503,11 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
 
                 is_money_recruit = any(kw in a_label.lower() for kw in ("pay", "hire", "gold", "coin", "bribe", "contract", "salary", "wage", "money"))
                 user_id = party[0][0]["user_id"] if (party and party[0]) else 0
-                char_data = db.get_character(user_id) if user_id else None
+                lead_cid = party[0][0].get("id") if (party and party[0] and isinstance(party[0][0], dict)) else None
+                char_data = (
+                    (db.get_character_by_id(lead_cid) if lead_cid else None)
+                    or (db.get_character(user_id, session_id=session_id) if user_id else None)
+                )
                 char_gold = char_data.get("gold", 0) if char_data else 0
 
                 anom_extra_comp: dict = {}
@@ -1389,6 +1394,17 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                 ):
                     delta = 0
                     aff_reasons.append("Daily small-talk budget exhausted (0)")
+            if session_id and delta > 0 and is_target_npc:
+                try:
+                    from mechanics.world.world_events.spirit_realm_events import get_drifting_lanterns_affinity_bonus
+                    _lantern_b = get_drifting_lanterns_affinity_bonus(
+                        session_id, str((session or {}).get("current_node_id") or "")
+                    )
+                    if _lantern_b > 0:
+                        delta += _lantern_b
+                        aff_reasons.append(f"Tide of Drifting Lanterns (+{_lantern_b})")
+                except Exception:
+                    pass
             rel["delta_score"] = delta
             rel["reasons"] = aff_reasons
             log.info("Deterministic Social Affinity for %s: delta=%d, breakdown=%s, reasons=%s", npc_name, delta, aff_breakdown, aff_reasons)
@@ -1569,36 +1585,85 @@ def _reduce_social_and_milestones(session_id: int, session: dict, party: list, o
                         or (is_target_npc and not action_explicit_targets)
                     )
                     if npc_mentioned:
+                        _disc_recs: list[dict[str, str]] = []
+                        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+                        _inq_app = app_dict or (
+                            eval_contact.get("appearance")
+                            if isinstance(eval_contact.get("appearance"), dict)
+                            else {}
+                        )
+                        _inq_raw_op = _inq_app.get("erotic_openness") or _inq_app.get("openness") or "moderate"
+                        _inq_tier = normalize_openness_tier(_inq_raw_op)
+                        _inq_is_prude = (_inq_tier == "prude")
+                        _inq_comfort = compute_with_you_comfort(
+                            _inq_tier,
+                            relationship_score=int(eval_contact.get("relationship_score", 0) or 0),
+                            relationship_track=str(existing_track or "platonic"),
+                            shared_intimate_count=len(eval_contact.get("gameplay_intimate_events") or []),
+                            is_hostile=(
+                                str(
+                                    eval_contact.get("disposition")
+                                    or (target_scene_npc or {}).get("disposition")
+                                    or ""
+                                ).strip().lower()
+                                == "hostile"
+                            ),
+                            for_dm_or_inquiry=True,
+                        )
+                        _inq_can_explicit = (not _inq_is_prude) or (_inq_comfort["stage"] in ("warming_up", "trusting_private"))
                         if any(kw in a_label for kw in ("sensitive spot", "erogenous", "touch where", "tickle", "turn on", "turn-on", "turns her on", "turns him on", "arousal trigger")):
-                            app_dict["sensitive_spots_revealed"] = True
-                            app_dict["turn_ons_revealed"] = True
-                            rel["turn_ons_revealed"] = True
-                        if any(kw in a_label for kw in ("fetish", "kink", "fantasy", "roleplay in bed", "bondage")):
-                            app_dict["fetishes_revealed"] = True
-                            rel["fetishes_revealed"] = True
-                        if any(kw in a_label for kw in ("like in bed", "preferred position", "bedroom preference", "likes oral", "dislikes")):
-                            app_dict["act_preferences_revealed"] = True
-                            rel["act_preferences_revealed"] = True
-                        if any(kw in a_label for kw in ("virgin", "virginity", "first time", "experienced", "past partner", "done oral", "received oral", "manual")):
-                            app_dict["intercourse_revealed"] = True
-                            app_dict["oral_revealed"] = True
-                            app_dict["manual_revealed"] = True
-                            rel["intercourse_revealed"] = True
-                            rel["oral_revealed"] = True
-                        if any(kw in a_label for kw in ("bedroom demeanor", "intimate demeanor", "in private", "in bed")):
+                            for _sp_i in [x.strip() for x in str(app_dict.get("sensitive_spots") or "").split(",") if x.strip()][:1]:
+                                _sp_clean = re.sub(r'\([^)]*\)', '', _sp_i).strip()
+                                if _sp_clean and _sp_clean.lower() not in ("none", "unknown"):
+                                    _disc_recs.append({"fact_category": "sensitive_spot", "fact_key": f"sensitive_spot:{_sp_clean.lower()}", "fact_value": _sp_clean})
+                            for _ds_i in [x.strip() for x in str(app_dict.get("desires_and_kinks") or app_dict.get("turn_ons") or "").split(",") if x.strip()][:1]:
+                                _ds_clean = re.sub(r'\([^)]*\)', '', _ds_i).strip()
+                                if _ds_clean and _ds_clean.lower() not in ("none", "unknown", "none (vanilla)"):
+                                    _disc_recs.append({"fact_category": "desire", "fact_key": f"desire:{_ds_clean.lower()}", "fact_value": _ds_clean})
+                        if _inq_can_explicit and any(kw in a_label for kw in ("fetish", "kink", "fantasy", "roleplay in bed", "bondage")):
+                            _fet_v = str(app_dict.get("fetishes") or "").strip()
+                            if _fet_v and _fet_v.lower() not in ("none", "unknown", "none (vanilla)"):
+                                _disc_recs.append({"fact_category": "kink", "fact_key": f"kink:{_fet_v.lower()}", "fact_value": _fet_v})
+                        if _inq_can_explicit and any(kw in a_label for kw in ("like in bed", "preferred position", "bedroom preference", "likes oral", "dislikes", "turn off", "turn-off")):
+                            for _al_i in [x.strip() for x in str(app_dict.get("act_likes") or "").split(",") if x.strip()][:1]:
+                                if _al_i and _al_i.lower() not in ("none", "unknown"):
+                                    _disc_recs.append({"fact_category": "act_pref", "fact_key": f"act_pref:{_al_i.lower()}", "fact_value": _al_i})
+                            for _to_i in [x.strip() for x in str(app_dict.get("turn_offs") or "").split(",") if x.strip()][:1]:
+                                if _to_i and _to_i.lower() not in ("none", "unknown"):
+                                    _disc_recs.append({"fact_category": "turn_off", "fact_key": f"turn_off:{_to_i.lower()}", "fact_value": _to_i})
+                        if _inq_can_explicit and any(kw in a_label for kw in ("bedroom demeanor", "intimate demeanor", "in private", "in bed")):
                             app_dict["demeanor_revealed"] = True
                             rel["demeanor_revealed"] = True
-                        if any(kw in a_label for kw in ("personal detail", "intimate detail", "intimate secret", "bedroom preference", "intimate preference", "ask about preference", "inquire about preference", "confess preference", "admit preference", "whisper preference")):
-                            app_dict["intimate_revealed"] = True
-                            app_dict["sensitive_spots_revealed"] = True
-                            app_dict["turn_ons_revealed"] = True
-                            app_dict["fetishes_revealed"] = True
-                            app_dict["act_preferences_revealed"] = True
-                            app_dict["demeanor_revealed"] = True
-                            app_dict["intercourse_revealed"] = True
-                            app_dict["oral_revealed"] = True
-                            app_dict["manual_revealed"] = True
-                            rel["intimate_revealed"] = True
+                        if _inq_can_explicit and any(kw in a_label for kw in ("personal detail", "intimate detail", "intimate secret", "bedroom preference", "intimate preference", "ask about preference", "inquire about preference", "confess preference", "admit preference", "whisper preference")):
+                            # Progressive unlock: 1-2 items rather than dumping all flags before Info Level 3
+                            if not _disc_recs:
+                                for _sp_i in [x.strip() for x in str(app_dict.get("sensitive_spots") or "").split(",") if x.strip()][:1]:
+                                    _sp_clean = re.sub(r'\([^)]*\)', '', _sp_i).strip()
+                                    if _sp_clean and _sp_clean.lower() not in ("none", "unknown"):
+                                        _disc_recs.append({"fact_category": "sensitive_spot", "fact_key": f"sensitive_spot:{_sp_clean.lower()}", "fact_value": _sp_clean})
+                                for _ds_i in [x.strip() for x in str(app_dict.get("desires_and_kinks") or app_dict.get("turn_ons") or "").split(",") if x.strip()][:1]:
+                                    _ds_clean = re.sub(r'\([^)]*\)', '', _ds_i).strip()
+                                    if _ds_clean and _ds_clean.lower() not in ("none", "unknown", "none (vanilla)"):
+                                        _disc_recs.append({"fact_category": "desire", "fact_key": f"desire:{_ds_clean.lower()}", "fact_value": _ds_clean})
+                        if _disc_recs and session_id:
+                            try:
+                                _seen_d_k: set[str] = set()
+                                _dedup_d: list[dict[str, str]] = []
+                                for _dr in _disc_recs:
+                                    if _dr["fact_key"] not in _seen_d_k:
+                                        _seen_d_k.add(_dr["fact_key"])
+                                        _dedup_d.append(_dr)
+                                db.record_contact_dossier_discoveries(
+                                    int(session_id),
+                                    npc_name,
+                                    _dedup_d[:2],
+                                    discovered_turn=int((session or {}).get("_target_turn") or (int((session or {}).get("turn_count") or 0) + 1)),
+                                    primary_character_id=int(first_char_id or 0),
+                                    discovery_source="dialogue",
+                                )
+                            except (sqlite3.Error, ValueError, TypeError) as _disc_err:
+                                log.warning("Dialogue dossier discovery write failed: %s", _disc_err)
                         if any(kw in a_label for kw in ("observe", "watch closely", "study expression", "study her expression", "study his expression", "notice body language", "watch body language", "scrutinize", "gauge reaction")):
                             app_dict["mannerisms_revealed"] = True
                             rel["mannerisms_revealed"] = True

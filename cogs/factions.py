@@ -13,6 +13,7 @@ from mechanics.social.factions import (
     get_faction_tier,
     get_active_perks,
     ensure_session_factions_seeded,
+    is_spirit_court_faction,
 )
 
 
@@ -288,6 +289,29 @@ def build_faction_detail_embed(faction: dict, char: dict) -> discord.Embed:
     perks = get_active_perks(faction, player_rank, score)
     if perks:
         embed.add_field(name="Active Perks", value="\n".join(f"• {p}" for p in perks), inline=False)
+
+    if is_spirit_court_faction(faction):
+        from mechanics.combat.spells.spirit_court_perks import (
+            SPIRIT_COURT_SUMMON_SPELLS,
+            SPIRIT_COURT_SWORN_ALLY_SPECS,
+            SPIRIT_COURT_SWORN_ALLY_THRESHOLD,
+            resolve_village_key_for_spirit_faction,
+        )
+        sc_vk = resolve_village_key_for_spirit_faction(faction)
+        sworn_spec = SPIRIT_COURT_SWORN_ALLY_SPECS.get(sc_vk or "") or {}
+        if sworn_spec:
+            sp_info = SPIRIT_COURT_SUMMON_SPELLS.get(sworn_spec.get("spell_id") or "") or {}
+            bonuses = sworn_spec.get("stat_bonuses") or {}
+            bonus_txt = ", ".join(f"+{v} {k}" for k, v in bonuses.items())
+            if score >= SPIRIT_COURT_SWORN_ALLY_THRESHOLD:
+                sworn_val = (
+                    f"{sworn_spec.get('emoji', '⛩️')} **{sworn_spec.get('spell_name')}** "
+                    f"({sworn_spec.get('duration', 3)}T, {sp_info.get('mp_cost', 14)} MP)\n"
+                    f"**Passive Aura:** {bonus_txt}"
+                )
+            else:
+                sworn_val = f"Reach **+90 Standing** to unlock `{sworn_spec.get('spell_name')}` & {bonus_txt}."
+            embed.add_field(name="⛩️ Sworn Ally (90+)", value=sworn_val, inline=False)
         
     # Roster
     roster = faction.get("leadership_roster")

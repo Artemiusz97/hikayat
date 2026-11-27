@@ -703,16 +703,43 @@ def sync_scene_embed(session: dict, party: list, scene_title: str, narrative: st
 
 
 def build_world_map_embed(session_id: int, scen_key: str, current_loc: str = "", char_name: str = "", zones: list = None) -> discord.Embed:
-    """Builds the rich World Map Atlas embed summarizing all discovered Tier 1 Zones."""
+    """Builds the rich World Map Atlas embed summarizing all discovered Tier 1 Zones (scoped to current REALM)."""
+    from mechanics.world.locations import build_session_realm_summary, get_node_realm_id, get_zone_summary_tree
+    sess = db.get_session(session_id) or {}
+    curr_nid = str(sess.get("current_node_id") or "").strip()
+    r_sum = build_session_realm_summary(session_id, curr_nid or None) if session_id else {}
+    curr_realm = r_sum.get("current_realm") if isinstance(r_sum, dict) else None
+    show_badge = bool(isinstance(r_sum, dict) and r_sum.get("show_realm_badge") and isinstance(curr_realm, dict))
+    curr_realm_id = str((curr_realm or {}).get("realm_id") or "")
+
     if zones is None:
-        from mechanics.world.locations import get_zone_summary_tree
-        zones = get_zone_summary_tree(session_id, scen_key, current_loc=current_loc, char_name=char_name)
+        zones = get_zone_summary_tree(
+            session_id,
+            scen_key,
+            current_loc=current_loc,
+            char_name=char_name,
+            realm_id=curr_realm_id or None,
+        )
+
+    desc_prefix = ""
+    if show_badge and isinstance(curr_realm, dict):
+        icon = curr_realm.get("portal_icon") or "🌀"
+        r_flags = []
+        if curr_realm.get("is_mobile_vessel") and curr_realm.get("docked_realm_name"):
+            r_flags.append(f"Docked: {curr_realm['docked_realm_name']}")
+        if curr_realm.get("comms_isolated"):
+            r_flags.append("📵 No Signal")
+        if float(curr_realm.get("time_scale", 1.0)) <= 0.0:
+            r_flags.append("⏳ Stasis")
+        f_txt = f" ({' · '.join(r_flags)})" if r_flags else ""
+        desc_prefix = f"{icon} **Current Realm: {curr_realm.get('name', 'Realm')}**{f_txt}\n\n"
+
     embed = discord.Embed(
         title="🗺️ World Map — Discovered Regions",
-        description="Select a region from the dropdown below to explore its local places or travel across districts:",
+        description=f"{desc_prefix}Select a region from the dropdown below to explore its local places or travel across districts:",
         color=discord.Color.gold()
     )
-    for z in zones[:25]:
+    for z in zones[:22]:
         z_name = z["zone_name"]
         z_emoji = z.get("emoji", "📍")
         eta_tag = z.get("travel_tag") or ""
@@ -726,6 +753,35 @@ def build_world_map_embed(session_id: int, scen_key: str, current_loc: str = "",
         if z.get("active_tags"):
             lines.append(f"• **Highlights:** {' | '.join(z['active_tags'])}")
         _safe_add_field(embed, name=header, value="\n".join(lines) if lines else "—", inline=False)
+
+    gateways = (r_sum.get("realm_gateways") or []) if isinstance(r_sum, dict) else []
+    if gateways:
+        gw_lines = []
+        for gw in gateways[:5]:
+            stat_txt = "Ready to cross" if gw.get("can_cross_now") else f"Via {gw.get('access_point_name', 'Access Point')}"
+            gw_lines.append(f"• {gw.get('icon') or '🌀'} **{gw.get('target_realm_name')}** — {stat_txt}")
+        _safe_add_field(embed, name="🌀 Realm Gateways", value="\n".join(gw_lines), inline=False)
+
+    if curr_realm_id and session_id:
+        try:
+            all_wps = db.get_all_session_active_waypoints(session_id) or []
+            off_lines = []
+            seen_ap = set()
+            for wp in all_wps:
+                wp_nid = str(wp.get("target_node_id") or "").strip()
+                if not wp_nid and wp.get("target_location"):
+                    wp_nid = str(db.resolve_node_id_from_location(session_id, wp["target_location"], prefer_facility=False) or "")
+                wp_rid = get_node_realm_id(session_id, wp_nid) if wp_nid else ""
+                if wp_rid and wp_rid != curr_realm_id:
+                    ap_match = next((g for g in gateways if g.get("target_realm_id") == wp_rid), None)
+                    ap_nm = (ap_match or {}).get("access_point_name") or "nearest Access Point"
+                    if ap_nm not in seen_ap:
+                        seen_ap.add(ap_nm)
+                        off_lines.append(f"• In Another Realm — return via **{ap_nm}**")
+            if off_lines:
+                _safe_add_field(embed, name="🌌 Off-Realm Objectives", value="\n".join(off_lines[:4]), inline=False)
+        except Exception:
+            pass
     return embed
 
 

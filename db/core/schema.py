@@ -554,6 +554,8 @@ CREATE TABLE IF NOT EXISTS adventure_saves (
     narrative_snippet   TEXT,
     current_location    TEXT,
     saved_at            REAL NOT NULL,
+    realm_name          TEXT DEFAULT NULL,
+    show_realm_badge    INTEGER DEFAULT 0,
     snapshot_data       TEXT NOT NULL,
     UNIQUE(character_id, slot_name)
 );

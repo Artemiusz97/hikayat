@@ -14,7 +14,7 @@ import db
 from db import adb
 from mechanics.system.concurrency import distributed_adventure_lock, distributed_session_lock
 from mechanics.world.locations.residences import build_realty_payload
-from .deps import serializable_action, manager, require_active_session
+from .deps import ensure_realm_comms_available, manager, require_active_session, serializable_action
 from .security import verify_session_participant
 
 router = APIRouter()
@@ -77,8 +77,15 @@ async def get_realty_state(
 ) -> dict[str, Any]:
     """Fetches Starter Quarters, Owned Deeds, 9-Tier Market Listings, and Spare Key state."""
     uid = user_id if isinstance(user_id, int) and not isinstance(user_id, bool) else None
-    _, canonical_uid = await verify_session_participant(request, session_id, uid)
+    pre_sess, canonical_uid = await verify_session_participant(request, session_id, uid)
     payload = await adb(build_realty_payload, session_id, canonical_uid or uid)
+    if isinstance(payload, dict):
+        from mechanics.world.locations.realms import check_realm_comms_available
+        payload["comms_status"] = await adb(
+            check_realm_comms_available,
+            session_id,
+            (pre_sess or {}).get("current_node_id"),
+        )
     return serializable_action(payload)
 
 
@@ -96,6 +103,7 @@ async def purchase_realty_property(
     async with distributed_adventure_lock(eff_uid, session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
         require_active_session(session)
+        await ensure_realm_comms_available(session_id, session=session)
         if not eff_uid:
             eff_uid = int(session.get("host_user_id") or 0)
         res = await adb(
@@ -133,6 +141,7 @@ async def set_realty_primary_home(
     async with distributed_session_lock(session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
         require_active_session(session)
+        await ensure_realm_comms_available(session_id, session=session)
         res = await adb(db.set_primary_property, session_id, req.property_id)
         if not res.get("ok"):
             _raise_for_realty_failure(res)
@@ -161,6 +170,7 @@ async def manage_realty_spare_key(
     async with distributed_session_lock(session_id):
         session, _ = await verify_session_participant(request, session_id, eff_uid or req.user_id)
         require_active_session(session)
+        await ensure_realm_comms_available(session_id, session=session)
         if req.revoke:
             res = await adb(db.revoke_property_spare_key, session_id, req.property_id, req.npc_id)
         else:

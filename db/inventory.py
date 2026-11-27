@@ -5,13 +5,19 @@ import logging
 import math
 import time
 import character_data as cd
-from .core import UnitOfWork, get_conn
+from .core import UnitOfWork, get_conn, is_in_readonly_uow
 
 log = logging.getLogger(__name__)
 
-def get_learned_spells(user_id: int, char: dict | None = None) -> list[str]:
+def get_learned_spells(
+    user_id: int,
+    char: dict | None = None,
+    *,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> list[str]:
     if char is None:
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, character_id=character_id, session_id=session_id)
     if not char:
         return []
     raw = char.get("learned_spells", "[]")
@@ -22,9 +28,17 @@ def get_learned_spells(user_id: int, char: dict | None = None) -> list[str]:
     except Exception:
         return []
 
-def learn_spell(user_id: int, spell_id: str, spell_data: dict | None = None) -> bool:
+def learn_spell(
+    user_id: int,
+    spell_id: str,
+    spell_data: dict | None = None,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
     with UnitOfWork() as conn:
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
         if not char:
             return False
         if spell_data and isinstance(spell_data, dict):
@@ -71,16 +85,30 @@ def get_all_procedural_spells() -> list[dict]:
                 pass
         return spells
 
-def set_learned_spells(user_id: int, spells: list[str]) -> bool:
-    char = db.get_character(user_id)
+def set_learned_spells(
+    user_id: int,
+    spells: list[str],
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
+    char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
     if not char:
         return False
     with get_conn() as conn:
         conn.execute("UPDATE characters SET learned_spells=? WHERE id=?", (json.dumps(spells), char["id"]))
     return True
 
-def has_learned_spell(user_id: int, spell_id: str) -> bool:
-    spells = get_learned_spells(user_id)
+def has_learned_spell(
+    user_id: int,
+    spell_id: str,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
+    spells = get_learned_spells(user_id, char=char, character_id=character_id, session_id=session_id)
     return spell_id in spells
 
 def get_skill_progress(char: dict) -> dict:
@@ -89,8 +117,21 @@ def get_skill_progress(char: dict) -> dict:
     except json.JSONDecodeError:
         return {}
 
-def set_skill_progress(user_id: int, progress: dict):
-    db.update_character_fields(user_id, skill_progress=json.dumps(progress))
+def set_skill_progress(
+    user_id: int,
+    progress: dict,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+):
+    target_cid = character_id or (int(char["id"]) if isinstance(char, dict) and char.get("id") else None)
+    db.update_character_fields(
+        user_id,
+        session_id=session_id,
+        character_id=target_cid,
+        skill_progress=json.dumps(progress),
+    )
 
 STACKABLE_CONSUMABLE_TYPES = {"potion", "food", "drink", "consumable"}
 
@@ -129,13 +170,16 @@ def can_add_item(
     item_type: str = "",
     effect: str = "",
     char: dict | None = None,
+    *,
+    character_id: int | None = None,
+    session_id: int | None = None,
 ) -> bool:
     if char is None:
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, character_id=character_id, session_id=session_id)
     if not char:
         return True
     cap = db.get_character_inventory_capacity(user_id, char=char)
-    existing = get_inventory(user_id, char=char)
+    existing = get_inventory(user_id, char=char, session_id=session_id)
     raw_cost = int(slot_cost) if slot_cost is not None else 1
     if raw_cost <= 0:
         return True
@@ -163,12 +207,24 @@ def add_item(
     linked_quest_id: str = "",
     is_pact_locked: int = 0,
     linked_contract_key: str = "",
+    *,
+    character_id: int | None = None,
+    session_id: int | None = None,
 ) -> int | None:
     if char is None:
-        char = db.get_character(user_id)
-    char_id = char["id"] if char else None
+        char = _resolve_target_char(user_id, character_id=character_id, session_id=session_id)
+    char_id = character_id or _extract_char_id(char)
     if not force and char:
-        if not can_add_item(user_id, slot_cost=slot_cost, name=name, item_type=item_type, effect=effect, char=char):
+        if not can_add_item(
+            user_id,
+            slot_cost=slot_cost,
+            name=name,
+            item_type=item_type,
+            effect=effect,
+            char=char,
+            character_id=char_id,
+            session_id=session_id,
+        ):
             return None
     if not is_quest_locked:
         try:
@@ -196,9 +252,17 @@ def add_item(
         return cur.lastrowid
 
 
-def set_item_quest_lock(user_id: int, quest_id: str, locked: int = 0) -> int:
-    """Unlocks or locks inventory items bound to a specific quest_id for a user's active character."""
-    char = db.get_character(user_id)
+def set_item_quest_lock(
+    user_id: int,
+    quest_id: str,
+    locked: int = 0,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> int:
+    """Unlocks or locks inventory items bound to a specific quest_id for a target character."""
+    char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
     char_id = char["id"] if char else None
     if not quest_id:
         return 0
@@ -219,32 +283,85 @@ def _sync_post_equipment_mutation(
     user_id: int,
     changed_slot: str | None = None,
     *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
     raise_on_error: bool = True,
 ) -> None:
     """Runs physical-state garment/holding sync and equipped anomalous spell sync inside the caller's UnitOfWork."""
-    _sync_equipment_to_physical_state(user_id, changed_slot=changed_slot, raise_on_error=raise_on_error)
+    _sync_equipment_to_physical_state(
+        user_id,
+        changed_slot=changed_slot,
+        char=char,
+        character_id=character_id,
+        session_id=session_id,
+        raise_on_error=raise_on_error,
+    )
     from mechanics.combat.items.anomalous_gear import sync_equipped_anomalous_spells
     try:
         try:
-            sync_equipped_anomalous_spells(user_id, raise_on_error=raise_on_error)
+            sync_equipped_anomalous_spells(
+                user_id,
+                char=char,
+                character_id=character_id,
+                session_id=session_id,
+                raise_on_error=raise_on_error,
+            )
         except TypeError:
-            sync_equipped_anomalous_spells(user_id)
+            try:
+                sync_equipped_anomalous_spells(user_id, raise_on_error=raise_on_error)
+            except TypeError:
+                sync_equipped_anomalous_spells(user_id)
     except Exception as e:
         if raise_on_error:
             raise
         log.warning("Failed syncing anomalous spells for user %s: %s", user_id, e, exc_info=True)
 
 
-def remove_item_by_name(user_id: int, name: str, force: bool = False) -> bool:
+def _extract_char_id(char: dict | None) -> int | None:
+    if not char:
+        return None
+    if isinstance(char, dict):
+        return char.get("id")
+    return char["id"] if hasattr(char, "keys") and "id" in char.keys() else None
+
+
+def _resolve_target_char(
+    user_id: int,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> dict | None:
+    raw_cid = character_id or _extract_char_id(char)
+    target_cid = int(raw_cid) if raw_cid else None
+    if target_cid:
+        resolved = db.get_character_by_id(int(target_cid))
+        if resolved:
+            return resolved
+    if session_id is not None:
+        return db.get_character(user_id, session_id=session_id)
+    return db.get_character(user_id)
+
+
+def remove_item_by_name(
+    user_id: int,
+    name: str,
+    force: bool = False,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
     target_clean = (name or "").strip().lower()
     if not target_clean:
         return False
 
     with UnitOfWork():
-        char = db.get_character(user_id)
-        if not char:
+        target_char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
+        if not target_char:
             return False
-        char_id = char["id"]
+        char_id = target_char["id"]
 
         was_equipped = False
         removed_slot: str | None = None
@@ -293,14 +410,29 @@ def remove_item_by_name(user_id: int, name: str, force: bool = False) -> bool:
                 removed = cur.rowcount > 0
 
         if removed and was_equipped:
-            _sync_post_equipment_mutation(user_id, changed_slot=removed_slot, raise_on_error=True)
+            _sync_post_equipment_mutation(
+                user_id,
+                changed_slot=removed_slot,
+                char=target_char,
+                character_id=target_char["id"],
+                session_id=session_id,
+                raise_on_error=True,
+            )
         return removed
 
 
-def remove_item(user_id: int, item_id: int, force: bool = False) -> bool:
+def remove_item(
+    user_id: int,
+    item_id: int,
+    force: bool = False,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> bool:
     with UnitOfWork():
-        char = db.get_character(user_id)
-        if not char:
+        target_char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
+        if not target_char:
             return False
         was_equipped = False
         removed_slot: str | None = None
@@ -308,7 +440,7 @@ def remove_item(user_id: int, item_id: int, force: bool = False) -> bool:
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT id, equipped, slot, is_quest_locked, is_pact_locked FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-                (item_id, char["id"], user_id),
+                (item_id, target_char["id"], user_id),
             ).fetchone()
             if not row or bool(row["is_pact_locked"]) or (not force and bool(row["is_quest_locked"])):
                 return False
@@ -316,12 +448,19 @@ def remove_item(user_id: int, item_id: int, force: bool = False) -> bool:
             removed_slot = row["slot"]
             cur = conn.execute(
                 "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-                (item_id, char["id"], user_id),
+                (item_id, target_char["id"], user_id),
             )
             removed = cur.rowcount > 0
 
         if removed and was_equipped:
-            _sync_post_equipment_mutation(user_id, changed_slot=removed_slot, raise_on_error=True)
+            _sync_post_equipment_mutation(
+                user_id,
+                changed_slot=removed_slot,
+                char=target_char,
+                character_id=target_char["id"],
+                session_id=session_id,
+                raise_on_error=True,
+            )
         return removed
 
 
@@ -332,42 +471,54 @@ def atomic_merchant_purchase(
     effect: str,
     slot_cost: int,
     price: int,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
 ) -> int:
     """Atomically verifies gold & capacity, deducts gold, and inserts the purchased item inside a single UnitOfWork."""
     with UnitOfWork():
-        char = db.get_character(user_id)
-        if not char:
+        target_char = _resolve_target_char(user_id, char=char, character_id=character_id)
+        if not target_char:
             raise LookupError("Character not found")
+        target_cid = int(target_char["id"])
         eff_price = max(0, int(price or 0))
-        if eff_price > 0 and int(char.get("gold", 0) or 0) < eff_price:
-            raise ValueError(f"Not enough gold! Need {eff_price}g, have {char.get('gold', 0)}g.")
-        if not can_add_item(user_id, slot_cost, name, item_type, effect):
+        if eff_price > 0 and int(target_char.get("gold", 0) or 0) < eff_price:
+            raise ValueError(f"Not enough gold! Need {eff_price}g, have {target_char.get('gold', 0)}g.")
+        if not can_add_item(user_id, slot_cost, name, item_type, effect, char=target_char):
             raise ValueError("Inventory is full!")
         if eff_price > 0:
-            updated = db.apply_hp_mp_delta(user_id, gold_delta=-eff_price)
+            updated = db.apply_hp_mp_delta(user_id, gold_delta=-eff_price, character_id=target_cid)
             if updated is None:
                 raise RuntimeError(f"Failed to deduct purchase price for user {user_id}")
-        item_id = add_item(user_id, name, item_type=item_type, effect=effect, slot_cost=slot_cost)
+        item_id = add_item(user_id, name, item_type=item_type, effect=effect, slot_cost=slot_cost, char=target_char)
         if not item_id:
             raise ValueError("Inventory is full!")
         return int(item_id)
 
 
-def sell_inventory_item(user_id: int, item_id: int, price: int) -> bool:
+def sell_inventory_item(
+    user_id: int,
+    item_id: int,
+    price: int,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+) -> bool:
     """Atomically removes an eligible unequipped inventory item and credits `price` gold inside a single UnitOfWork."""
     from mechanics.combat.items import is_digital_item, is_key_item
 
     payout = max(0, int(price or 0))
     with UnitOfWork():
-        char = db.get_character(user_id)
-        if not char:
+        target_char = _resolve_target_char(user_id, char=char, character_id=character_id)
+        if not target_char:
             return False
+        target_cid = int(target_char["id"])
         with get_conn() as conn:
             row = conn.execute(
                 """SELECT id, name, item_type, effect, equipped, is_quest_locked, is_pact_locked
                    FROM inventory
                    WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))""",
-                (item_id, char["id"], user_id),
+                (item_id, target_cid, user_id),
             ).fetchone()
             if not row:
                 return False
@@ -382,22 +533,20 @@ def sell_inventory_item(user_id: int, item_id: int, price: int) -> bool:
                 return False
             cur = conn.execute(
                 "DELETE FROM inventory WHERE id=? AND (character_id=? OR (character_id IS NULL AND user_id=?))",
-                (item_id, char["id"], user_id),
+                (item_id, target_cid, user_id),
             )
             if cur.rowcount <= 0:
                 return False
         if payout != 0:
-            updated = db.apply_hp_mp_delta(user_id, gold_delta=payout)
+            updated = db.apply_hp_mp_delta(user_id, gold_delta=payout, character_id=target_cid)
             if updated is None:
                 raise RuntimeError(f"Failed to credit resale payout for user {user_id}")
         return True
 
-def get_inventory(user_id: int, char: dict | None = None) -> list[dict]:
+def get_inventory(user_id: int, char: dict | None = None, *, session_id: int | None = None) -> list[dict]:
     if char is None:
-        char = db.get_character(user_id)
-    if not char:
-        return []
-    char_id = char.get("id") if isinstance(char, dict) else (char["id"] if "id" in char.keys() else None)
+        char = db.get_character(user_id, session_id=session_id)
+    char_id = _extract_char_id(char)
     if char_id is None:
         return []
     with get_conn() as conn:
@@ -446,13 +595,21 @@ def get_inventories_for_characters(chars: list[dict]) -> dict[int, list[dict]]:
                 by_char_id[mapped].append(dict(r))
     return by_char_id
 
-def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
+def equip_item(
+    user_id: int,
+    item_id: int,
+    slot: str,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> dict | None:
     if slot not in cd.EQUIPMENT_SLOTS:
         raise ValueError(f"'{slot}' is not a valid equipment slot.")
     from mechanics.combat.equipment import is_two_handed
 
     with UnitOfWork():
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
         if not char:
             raise ValueError("No active character found.")
         char_id = char["id"]
@@ -466,7 +623,7 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
 
             # 0.0 Scenario Equip Compatibility Validation (Single Source of Truth)
             from mechanics.combat.items.clothing import can_equip_item_in_scenario
-            active_sid = char.get("active_session_id")
+            active_sid = session_id or char.get("active_session_id")
             current_scen = None
             if active_sid:
                 s_row = conn.execute("SELECT scenario FROM sessions WHERE id=?", (active_sid,)).fetchone()
@@ -539,7 +696,17 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
             # 0.5 Restraint Dual-Wield / Two-Handed Gate (Invariant 12)
             if slot in ("Weapon", "Shield"):
                 try:
-                    active_sid_check = db.get_active_session_id_for_user(user_id)
+                    cand_sid = session_id or char.get("active_session_id")
+                    active_sid_check = None
+                    if cand_sid:
+                        s_row = conn.execute(
+                            "SELECT id FROM sessions WHERE id=? AND status IN ('active', 'waiting')",
+                            (cand_sid,),
+                        ).fetchone()
+                        if s_row:
+                            active_sid_check = int(s_row["id"])
+                    if active_sid_check is None and not cand_sid:
+                        active_sid_check = db.get_active_session_id_for_user(user_id)
                     if active_sid_check:
                         import mechanics.social.physical_state as ps
                         p_state = ps.get_actor_physical_state(active_sid_check, char.get("name", "Hero"), conn=conn) or ps.get_actor_physical_state(active_sid_check, "player", conn=conn)
@@ -596,15 +763,29 @@ def equip_item(user_id: int, item_id: int, slot: str) -> dict | None:
                 conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (previous["id"],))
 
             conn.execute("UPDATE inventory SET equipped=1, slot=?, character_id=? WHERE id=?", (slot, char_id, item_id))
-        _sync_post_equipment_mutation(user_id, changed_slot=slot, raise_on_error=True)
+        _sync_post_equipment_mutation(
+            user_id,
+            changed_slot=slot,
+            char=char,
+            character_id=char_id,
+            session_id=session_id,
+            raise_on_error=True,
+        )
         return previous
 
 
-def unequip_slot(user_id: int, slot: str) -> dict | None:
+def unequip_slot(
+    user_id: int,
+    slot: str,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> dict | None:
     if slot not in cd.EQUIPMENT_SLOTS:
         raise ValueError(f"'{slot}' is not a valid equipment slot.")
     with UnitOfWork():
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
         if not char:
             return None
         char_id = char["id"]
@@ -618,7 +799,14 @@ def unequip_slot(user_id: int, slot: str) -> dict | None:
                     f"Pact-bound symbiotic gear '{row['name']}' cannot be unequipped while its contract is active."
                 )
             conn.execute("UPDATE inventory SET equipped=0, slot=NULL WHERE id=?", (row["id"],))
-        _sync_post_equipment_mutation(user_id, changed_slot=slot, raise_on_error=True)
+        _sync_post_equipment_mutation(
+            user_id,
+            changed_slot=slot,
+            char=char,
+            character_id=char_id,
+            session_id=session_id,
+            raise_on_error=True,
+        )
         return dict(row)
 
 
@@ -626,17 +814,29 @@ def _sync_equipment_to_physical_state(
     user_id: int,
     changed_slot: str | None = None,
     *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
     raise_on_error: bool = False,
 ) -> None:
     """Invariant 5: Synchronizes equipped weapon holding and garment layers to active session physical state without clobbering unrelated garment states or posture/restraints."""
     try:
-        active_sid = db.get_active_session_id_for_user(user_id)
-        if not active_sid:
-            return
-        char = db.get_character(user_id)
+        char = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
         if not char:
             return
-        equipment = get_equipment(user_id)
+        cand_sid = session_id or char.get("active_session_id")
+        if not cand_sid:
+            return
+        active_sid = None
+        with get_conn() as conn:
+            s_row = conn.execute("SELECT id, status FROM sessions WHERE id=?", (cand_sid,)).fetchone()
+            if s_row and s_row["status"] in ("active", "waiting"):
+                active_sid = int(s_row["id"])
+            elif not is_in_readonly_uow():
+                conn.execute("UPDATE characters SET active_session_id=NULL WHERE id=?", (char["id"],))
+        if not active_sid:
+            return
+        equipment = get_equipment(user_id, char=char)
         import mechanics.social.physical_state as ps
 
         player_name = char.get("name", "Hero")
@@ -701,11 +901,19 @@ def _sync_equipment_to_physical_state(
             raise
         log.warning(f"Error syncing equipment to physical state for user {user_id}: {e}")
 
-def get_equipment(user_id: int) -> dict:
-    char = db.get_character(user_id)
-    if not char:
+def get_equipment(
+    user_id: int,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> dict:
+    char_id = character_id or _extract_char_id(char)
+    if char_id is None:
+        resolved = _resolve_target_char(user_id, char=char, character_id=character_id, session_id=session_id)
+        char_id = _extract_char_id(resolved)
+    if char_id is None:
         return {slot: None for slot in cd.EQUIPMENT_SLOTS}
-    char_id = char["id"]
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT * FROM inventory WHERE (character_id=? OR (character_id IS NULL AND user_id=?)) AND equipped=1 AND slot IS NOT NULL",
@@ -713,8 +921,16 @@ def get_equipment(user_id: int) -> dict:
     by_slot = {r["slot"]: dict(r) for r in rows}
     return {slot: by_slot.get(slot) for slot in cd.EQUIPMENT_SLOTS}
 
-def used_slots(user_id: int, char: dict | None = None) -> int:
-    return compute_inventory_used_slots(get_inventory(user_id, char=char))
+def used_slots(
+    user_id: int,
+    char: dict | None = None,
+    *,
+    character_id: int | None = None,
+    session_id: int | None = None,
+) -> int:
+    if char is None and character_id:
+        char = _resolve_target_char(user_id, character_id=character_id, session_id=session_id)
+    return compute_inventory_used_slots(get_inventory(user_id, char=char, session_id=session_id))
 
 
 def drop_item_to_session_floor(user_id: int, item_dict: dict, session_id: int | None = None) -> bool:

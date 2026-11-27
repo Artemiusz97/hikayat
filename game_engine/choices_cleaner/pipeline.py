@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import List
+from typing import Any, List
 
 import db
 from db import STAT_COLUMN
@@ -712,6 +712,42 @@ def _normalize_and_inject_open_hub_choices(
                 cleaned = [cleaned[0]] + missing_npc_choices + cleaned[1:]
             else:
                 cleaned = missing_npc_choices + cleaned
+
+    if session_id:
+        try:
+            from mechanics.world.locations.realms import get_portal_choices_at_node
+            _sess_portal = db.get_session(session_id)
+            _cur_nid_p = (_sess_portal or {}).get("current_node_id") or (
+                db.resolve_node_id_from_location(session_id, location) if location else None
+            )
+            if _cur_nid_p:
+                portal_opts = get_portal_choices_at_node(session_id, str(_cur_nid_p)) or []
+                existing_p_keys = {
+                    (
+                        str(c.get("sub_intent") or "").lower(),
+                        str(c.get("target_node_id") or ""),
+                        str(c.get("target_realm_id") or ""),
+                    )
+                    for c in cleaned
+                    if isinstance(c, dict)
+                }
+                to_add_p: list[dict] = []
+                for po in portal_opts[:3]:
+                    pk = (
+                        str(po.get("sub_intent") or "").lower(),
+                        str(po.get("target_node_id") or ""),
+                        str(po.get("target_realm_id") or ""),
+                    )
+                    if pk not in existing_p_keys:
+                        to_add_p.append(dict(po))
+                        existing_p_keys.add(pk)
+                if to_add_p:
+                    if len(cleaned) >= 1 and cleaned[0].get("stat") in ("PER", "INT", "STR", "END", "AGI", "CHA", "LUK"):
+                        cleaned = [cleaned[0]] + to_add_p + cleaned[1:]
+                    else:
+                        cleaned = to_add_p + cleaned
+        except Exception:
+            pass
 
     return cleaned
 
@@ -1503,9 +1539,12 @@ def _finalize_post_enrichment_filters(
     return cleaned
 
 
+_UNSET = object()
+
+
 def clean_choices_impl(
     cls,
-    choices: list,
+    choices: Any = _UNSET,
     scenario: str = "fantasy",
     location: str = "",
     char: dict = None,
@@ -1514,6 +1553,9 @@ def clean_choices_impl(
     session_id: int = None,
     departed_npcs: list = None,
 ) -> list:
+    if choices is _UNSET:
+        choices = cls if isinstance(cls, list) else []
+        cls = None
     is_non_combat = (
         scenario_data.is_non_combat_scenario(scenario)
         or scenario_data.has_tag(scenario, "non_combat")

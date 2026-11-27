@@ -386,6 +386,98 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
     relocation_num = (daily_limits["meetup"].get("relocations_used", 0) + 1) if (intent_category == "meetup" and is_reschedule_request) else 0
     is_player_sending = intent in ("photo_send", "send_photo", "spicy_send", "send_spicy", "nsfw_send")
 
+    from mechanics.social.persona import (
+        compute_with_you_comfort,
+        format_openness_prompt_directive,
+        get_erotic_openness_label,
+        normalize_openness_tier,
+        resolve_openness_contrast,
+    )
+
+    op_tier = normalize_openness_tier(erotic_open or "moderate")
+    is_prude = op_tier == "prude"
+    is_shameless = op_tier == "shameless"
+    is_bold = op_tier == "bold"
+    dm_shared_cnt = len(contact.get("gameplay_intimate_events") or [])
+    dm_is_hostile = str(contact.get("disposition") or "").strip().lower() == "hostile"
+    dm_ic_exp = str(app_data.get("intercourse_experience") or app_data.get("predetermined_intercourse") or "").strip().lower()
+    _dm_pre_comfort = compute_with_you_comfort(
+        op_tier,
+        relationship_score=score,
+        relationship_track=track,
+        shared_intimate_count=dm_shared_cnt,
+        is_hostile=dm_is_hostile,
+        for_dm_or_inquiry=True,
+    )
+    dm_contrast = resolve_openness_contrast(
+        op_tier,
+        intimate_dem,
+        intimate_dyn,
+        intercourse_experience=dm_ic_exp,
+        shared_intimate_count=dm_shared_cnt,
+        comfort_stage=_dm_pre_comfort["stage"],
+    )
+    dm_comfort = compute_with_you_comfort(
+        op_tier,
+        relationship_score=score,
+        relationship_track=track,
+        shared_intimate_count=dm_shared_cnt,
+        is_hostile=dm_is_hostile,
+        for_dm_or_inquiry=True,
+        contrast_archetype=dm_contrast["archetype"],
+        bluff_crack_active=dm_contrast["bluff_crack_active"],
+    )
+
+    # NSFW DM Synergies: Praise kink, Dirty talk, Lingerie & Turn-Offs
+    dm_pref_dc_mod = 0
+    dm_pref_aff_mod = 0
+    dm_pref_prompt_hints: list[str] = []
+    dm_triggered_discoveries: list[dict[str, str]] = []
+    if scenario_has_smartphone(scen_key) and (app_data.get("fetishes") or app_data.get("desires_and_kinks") or app_data.get("turn_offs")):
+        from scenario_data import is_nsfw_scenario as _is_nsfw_dm
+        if _is_nsfw_dm(scen_key):
+            from mechanics.social.persona import is_turn_off_triggered, match_desires_and_kinks
+            dm_desires_raw = app_data.get("desires_and_kinks") or app_data.get("turn_ons") or ""
+            dm_fetish_raw = str(app_data.get("fetishes") or "")
+            dm_to_raw = str(app_data.get("turn_offs") or "")
+            dm_kink_l = dm_fetish_raw.lower()
+            _dm_d_hits, _dm_k_hits = match_desires_and_kinks(user_message, dm_desires_raw, dm_fetish_raw)
+
+            if "praise" in dm_kink_l and any(
+                w in msg_lower for w in ("proud", "amazing", "perfect", "good girl", "good boy", "so well", "gorgeous", "wonderful", "beautiful", "handsome")
+            ):
+                dm_pref_dc_mod -= 1
+                dm_pref_aff_mod += 1
+                dm_pref_prompt_hints.append("- PREFERENCE SYNERGY (Praise Kink): Your partner's heartfelt praise flushes your cheeks cleanly; react with heightened warmth and validation.")
+                dm_triggered_discoveries.append({"fact_category": "kink", "fact_key": f"kink:{dm_fetish_raw.lower()}", "fact_value": dm_fetish_raw})
+
+            if ("dirty talk" in dm_kink_l or "audio" in dm_kink_l) and intent in ("flirt", "nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy", "spicy_send"):
+                dm_pref_dc_mod -= 1
+                dm_pref_aff_mod += 1
+                dm_pref_prompt_hints.append("- PREFERENCE SYNERGY (Audio / Dirty Talk): Explicit, provocative phrasing excites you deeply; lean into verbal intensity.")
+                dm_triggered_discoveries.append({"fact_category": "kink", "fact_key": f"kink:{dm_fetish_raw.lower()}", "fact_value": dm_fetish_raw})
+
+            if ("lingerie" in dm_kink_l or "silk costume" in dm_kink_l) and (
+                intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy")
+                or any(w in msg_lower for w in ("lingerie", "silk", "lace", "bra", "panties", "underwear", "stockings"))
+            ):
+                dm_pref_dc_mod -= 1
+                dm_pref_aff_mod += 1
+                dm_pref_prompt_hints.append("- PREFERENCE SYNERGY (Lingerie & Silk): Mentioning lingerie or intimate attire excites your imagination noticeably.")
+                dm_triggered_discoveries.append({"fact_category": "kink", "fact_key": f"kink:{dm_fetish_raw.lower()}", "fact_value": dm_fetish_raw})
+
+            for _d_hit in _dm_d_hits[:1]:
+                dm_triggered_discoveries.append({"fact_category": "desire", "fact_key": f"desire:{_d_hit.lower()}", "fact_value": _d_hit})
+            for _k_hit in _dm_k_hits[:1]:
+                dm_triggered_discoveries.append({"fact_category": "kink", "fact_key": f"kink:{_k_hit.lower()}", "fact_value": _k_hit})
+
+            if dm_to_raw and dm_to_raw.lower() not in ("none", "unknown") and is_turn_off_triggered(user_message, dm_to_raw, str(app_data.get("act_likes") or "")):
+                dm_pref_dc_mod += 3
+                dm_pref_aff_mod -= 2
+                dm_pref_prompt_hints.append(f"- TURN-OFF TRIGGERED ({dm_to_raw}): The player's message struck one of your strong aversions; recoil visibly and push back.")
+                first_to = [x.strip() for x in dm_to_raw.split(",") if x.strip()][0]
+                dm_triggered_discoveries.append({"fact_category": "turn_off", "fact_key": f"turn_off:{first_to.lower()}", "fact_value": first_to})
+
     req = get_dm_requirement(
         score,
         intent,
@@ -395,8 +487,10 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         attempt_num=flirt_attempt_num,
         prev_succeeded=flirt_prev_succeeded,
         relocation_num=relocation_num,
-        is_player_sending=is_player_sending
-    )
+        is_player_sending=is_player_sending,
+        shared_intimate_count=dm_shared_cnt,
+        is_hostile=dm_is_hostile,
+    ) + dm_pref_dc_mod
     user_settings = await db.adb(db.get_settings, player_char.get("user_id", 0))
     check_mode = user_settings.get("debug_check_mode", "off") if user_settings else "off"
     check_result = resolve_check(stat_val, req, luck=player_char.get("luk", 3), check_mode=check_mode)
@@ -409,12 +503,10 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             succeeded=True,
         )
 
-    is_prude = any(k in str(erotic_open).lower() for k in ("prude", "modest"))
-    is_shameless = any(k in str(erotic_open).lower() for k in ("shameless", "lewd"))
-    is_bold = any(k in str(erotic_open).lower() for k in ("bold", "uninhibited"))
-
-    # Strict prude barrier on NSFW media requests: requires 70+ affinity AND romantic track
-    if is_prude and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy") and (score < 70 or not is_romantic):
+    # Strict prude barrier on NSFW media requests: requires Comfort warming_up+ AND 70+ affinity (auditor score>=60 safe)
+    if is_prude and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy") and (
+        dm_comfort["stage"] == "guarded" or score < 70
+    ):
         check_result = CheckResult(
             chance=0,
             roll=1.0,
@@ -765,6 +857,29 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 elif is_bold or is_shameless:
                     asset_photo_cue = f"  * BODY ASSET FLAVOR (Large Assets: {npc_b_size} & Boastful): Sultry, audacious angle proudly showcasing cleavage and curves (*'Drooling yet? Take a good look'*).\n"
 
+        npc_rear_size = str(app_data.get("rear_size") or "").strip()
+        npc_rear_tex = str(app_data.get("rear_texture") or "").strip()
+        from mechanics.social.persona.intimacy.appearance import (
+            classify_rear_size_tier,
+            extract_rear_texture,
+            heal_rear_texture_for_context,
+            is_feral_rear_excluded,
+        )
+        from mechanics.social.persona.intimacy.constants import REAR_TEXTURE_NARRATIVE_FLAIR
+        if npc_rear_size and not is_feral_rear_excluded(str(contact.get("race") or app_data.get("race") or "")):
+            r_tier_npc = classify_rear_size_tier(npc_rear_size)
+            eff_r_tex = heal_rear_texture_for_context(
+                npc_rear_tex or extract_rear_texture(npc_rear_size),
+                size_tier=r_tier_npc,
+            )
+            r_flair = REAR_TEXTURE_NARRATIVE_FLAIR.get(eff_r_tex, "") if eff_r_tex else ""
+            if r_tier_npc in ("large", "huge"):
+                asset_photo_cue += f"  * REAR SILHOUETTE FLAVOR ({npc_rear_size}): Consider an over-the-shoulder mirror or arched-back framing highlighting soft hips and fullness. {r_flair}\n"
+            elif r_tier_npc in ("flat", "small"):
+                asset_photo_cue += f"  * REAR SILHOUETTE FLAVOR ({npc_rear_size}): Consider a sleek, taut side-profile pose emphasizing delicate hip lines and youthful proportions. {r_flair}\n"
+            elif r_flair:
+                asset_photo_cue += f"  * REAR SILHOUETTE FLAVOR ({npc_rear_size}): {r_flair}\n"
+
         intent_guidelines = (
             "- Intent: NSFW intimate photo swap. Player asked you to send an intimate photo.\n"
             "- CRITICAL CREATIVITY & VARIETY MANDATE FOR INTIMATE PHOTOS:\n"
@@ -817,16 +932,41 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
                 f"You may reference seeing them there soon if relevant, but do NOT schedule a new or different rendezvous location.\n"
             )
 
-    if is_prude and intent in ("nsfw_photo", "nsfw_video"):
-        intent_guidelines += (
-            "- EROTIC OPENNESS (Prude / Modest): You are deeply modest and protective of your decency. "
-            "You firmly refuse to send any spicy or indecent photo/video and scold or blush with flustered indignation (e.g. 'A-Are you out of your mind?!', 'I'm not sending that!'). Do NOT attach media.\n"
-        )
-    elif is_shameless and intent in ("nsfw_photo", "nsfw_video"):
+    if is_prude and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
+        if check_result.succeeded:
+            intent_guidelines += (
+                "- EROTIC OPENNESS (Prude / Modest — Shy Trusting Exception): "
+                "You normally guard strict modesty, yet *'only because it's you'* you shyly grant this request! "
+                "Write a bashful, vulnerable, and deeply flustered reply faithful to your Demeanor, and attach the vivid custom description as requested.\n"
+            )
+        else:
+            intent_guidelines += (
+                "- EROTIC OPENNESS (Prude / Modest): You uphold strong modesty and personal decorum. "
+                "You decline the spicy photo/video request in a way matching your Demeanor and traits, without attaching media.\n"
+            )
+    elif is_shameless and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
         intent_guidelines += (
             "- EROTIC OPENNESS (Shameless / Lewd): You have zero modesty barrier and love teasing the player with bold, spicy remarks! "
             "If check succeeded, enthusiastically send the photo/video with playful, sultry confidence.\n"
         )
+    elif is_bold and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
+        intent_guidelines += (
+            "- EROTIC OPENNESS (Bold / Uninhibited): You are sex-positive and confident without shameless crudeness. "
+            "If check succeeded, respond with witty, flirtatious assurance and warmly share the photo/video.\n"
+        )
+
+    dm_openness_dir = format_openness_prompt_directive(
+        contact_name,
+        erotic_open,
+        demeanor_val=intimate_dem,
+        traits=traits_list,
+        dynamic_val=intimate_dyn,
+        comfort=dm_comfort,
+        contrast=dm_contrast,
+        is_nsfw=scenario_data.is_nsfw_scenario(scen_key),
+    )
+    if dm_openness_dir:
+        intent_guidelines += f"- OPENNESS VOICE & COMFORT: {dm_openness_dir.strip()}\n"
 
     # Ground intimate media descriptions in canonical undergarments and intimate demeanor
     if intent in ("nsfw_photo", "nsfw_video") or "nsfw" in intent or is_intimate:
@@ -841,8 +981,12 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
             under_lines.append(f"- INTIMATE DEMEANOR: Express your defined intimate demeanor ({intimate_dem}) in your camera gaze, body language, and text tone.")
         if intimate_dyn:
             under_lines.append(f"- INTIMATE DYNAMIC: Reflect your dynamic ({intimate_dyn}) in your pose confidence and proactivity.")
+        for _ph in dm_pref_prompt_hints:
+            under_lines.append(_ph)
         if under_lines:
             intent_guidelines += "\n" + "\n".join(under_lines) + "\n"
+    elif dm_pref_prompt_hints:
+        intent_guidelines += "\n" + "\n".join(dm_pref_prompt_hints) + "\n"
 
     if intent == "meetup":
         dm_schema = """{
@@ -1066,6 +1210,10 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         affinity_delta = int(dm_gate["max_affinity_delta"])
     if is_autonomy_ping_decline:
         affinity_delta = max(0, affinity_delta)
+    if dm_pref_aff_mod and check_result.succeeded and not is_autonomy_ping_decline:
+        affinity_delta += dm_pref_aff_mod
+    elif dm_pref_aff_mod < 0:
+        affinity_delta += dm_pref_aff_mod
 
     _pre_resolve_intent = intent
     resolved_rendezvous, intent = resolve_rendezvous_location(
@@ -1404,6 +1552,78 @@ async def generate_contact_dm_reply(session: dict, contact: dict, player_char: d
         digital_item_id = media_persist_res.get("digital_item_id")
         digital_item_ids = list(media_persist_res.get("digital_item_ids") or [])
         media_type_created = media_persist_res.get("media_type_created")
+
+    # Progressive NSFW DM Dossier Discoveries (spicy media undergarments + inquiry/kink unlocks)
+    from scenario_data import is_nsfw_scenario as _is_nsfw_dm_rec
+    if _is_nsfw_dm_rec(scen_key) and is_contact_eligible(name=contact_name, role=role, scenario=scen_key):
+        _dm_recs_to_save: list[dict[str, str]] = []
+        if check_result.succeeded and intent in ("nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy"):
+            if bra_str:
+                _dm_recs_to_save.append({"fact_category": "undergarment", "fact_key": "undergarment:bra", "fact_value": "bra"})
+            if und_str:
+                _dm_recs_to_save.append({"fact_category": "undergarment", "fact_key": "undergarment:underwear", "fact_value": "underwear"})
+        if app_data.get("erotic_openness") or app_data.get("openness"):
+            if intent in ("flirt", "nsfw_photo", "nsfw_video", "spicy_ask", "ask_spicy", "spicy_send", "send_spicy") or (is_prude and is_intimate):
+                _dm_recs_to_save.append({
+                    "fact_category": "openness",
+                    "fact_key": f"openness:{op_tier}",
+                    "fact_value": get_erotic_openness_label(op_tier).split("(")[0].strip(),
+                })
+        if check_result.succeeded and any(w in msg_lower for w in ("sensitive spot", "erogenous", "turn on", "turn-on", "kink", "fetish", "like in bed", "turn off", "turn-off")):
+            _can_dm_inq = (not is_prude) or (dm_comfort["stage"] in ("warming_up", "trusting_private") and score >= 70)
+            if _can_dm_inq:
+                if "sensitive" in msg_lower or "erogenous" in msg_lower or "turn on" in msg_lower:
+                    for _s_dm in [x.strip() for x in str(app_data.get("sensitive_spots") or "").split(",") if x.strip()][:1]:
+                        _sc = re.sub(r'\([^)]*\)', '', _s_dm).strip()
+                        if _sc and _sc.lower() not in ("none", "unknown"):
+                            _dm_recs_to_save.append({"fact_category": "sensitive_spot", "fact_key": f"sensitive_spot:{_sc.lower()}", "fact_value": _sc})
+                elif "kink" in msg_lower or "fetish" in msg_lower:
+                    _fk = str(app_data.get("fetishes") or "").strip()
+                    if _fk and _fk.lower() not in ("none", "unknown", "none (vanilla)"):
+                        _dm_recs_to_save.append({"fact_category": "kink", "fact_key": f"kink:{_fk.lower()}", "fact_value": _fk})
+                elif "turn off" in msg_lower or "turn-off" in msg_lower:
+                    for _to_dm in [x.strip() for x in str(app_data.get("turn_offs") or "").split(",") if x.strip()][:1]:
+                        if _to_dm and _to_dm.lower() not in ("none", "unknown"):
+                            _dm_recs_to_save.append({"fact_category": "turn_off", "fact_key": f"turn_off:{_to_dm.lower()}", "fact_value": _to_dm})
+        for _dt in dm_triggered_discoveries[:2]:
+            _dm_recs_to_save.append(_dt)
+        if _dm_recs_to_save:
+            try:
+                _dedup_dm: list[dict[str, str]] = []
+                _seen_dm_k: set[str] = set()
+                for _dr_dm in _dm_recs_to_save:
+                    if _dr_dm["fact_key"] not in _seen_dm_k:
+                        _seen_dm_k.add(_dr_dm["fact_key"])
+                        _dedup_dm.append(_dr_dm)
+                _prev_dm_rows = await db.adb(
+                    db.get_contact_dossier_discoveries,
+                    session_id,
+                    int((player_char or {}).get("id") or 0),
+                    contact_name,
+                ) or []
+                _prev_dm_keys = {str(r.get("fact_key") or "").lower() for r in _prev_dm_rows}
+                _fresh_dm = [r for r in _dedup_dm[:3] if r["fact_key"] not in _prev_dm_keys]
+                if _fresh_dm:
+                    from mechanics.social.consequences import build_intimate_discovery_pills
+
+                    await db.adb(
+                        db.record_contact_dossier_discoveries,
+                        session_id,
+                        contact_name,
+                        _fresh_dm,
+                        discovered_turn=dm_turn_idx,
+                        primary_character_id=int((player_char or {}).get("id") or 0),
+                        discovery_source="dm",
+                    )
+                    _dm_pills = build_intimate_discovery_pills(
+                        _fresh_dm,
+                        lang=str((session or {}).get("language") or "en"),
+                    )
+                    if _dm_pills and isinstance(dm_discovered_facts, list):
+                        for _fp_pill in _dm_pills:
+                            dm_discovered_facts.append({"fact_category": "pill", "fact_value": _fp_pill})
+            except Exception as _dm_disc_err:
+                log.warning(f"[phone] Failed to record DM intimate discoveries: {_dm_disc_err}")
 
     if intent_category and not (is_autonomy_ping_reply and intent_category == "meetup"):
         meta = {}

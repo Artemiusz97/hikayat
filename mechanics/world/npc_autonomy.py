@@ -201,6 +201,28 @@ def _pick_friend_outing_target(
     return node_id, friend_name
 
 
+def _contact_openness_comfort(npc_row: Mapping[str, Any], aff_score: int) -> tuple[str, str]:
+    """Derives (openness_tier, comfort_stage) cleanly for autonomy pacing."""
+    app = _parse_json_dict(npc_row.get("appearance") or npc_row.get("appearance_json"))
+    raw_op = app.get("erotic_openness") or app.get("openness")
+    if raw_op in (None, ""):
+        return "moderate", "guarded"
+    from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+    op_tier = normalize_openness_tier(raw_op)
+    track = str(npc_row.get("relationship_track") or npc_row.get("track") or "platonic")
+    shared_cnt = len(npc_row.get("gameplay_intimate_events") or [])
+    is_hostile = str(npc_row.get("disposition") or "").strip().lower() == "hostile"
+    comfort = compute_with_you_comfort(
+        op_tier,
+        relationship_score=aff_score,
+        relationship_track=track,
+        shared_intimate_count=shared_cnt,
+        is_hostile=is_hostile,
+    )
+    return op_tier, str(comfort.get("stage") or "guarded")
+
+
 def resolve_autonomy_node_override(
     npc: Mapping[str, Any],
     *,
@@ -318,13 +340,20 @@ def resolve_autonomy_node_override(
     if not is_free:
         return None
 
-    # 4. D14 High-affinity (Affinity >= 75) casual drop-by to player home node (~20% on free blocks)
+    # 4. D14 Free-block casual drop-by scaled gently by Openness + With-You Comfort
     aff = _contact_affinity(npc)
     if aff < 75:
         aff = max(aff, _contact_affinity(basic))
+    op_tier_db, comfort_stage_db = _contact_openness_comfort(npc, aff)
+    if op_tier_db in ("bold", "shameless"):
+        dropby_min_aff, dropby_odds = 65, 2400
+    elif op_tier_db == "prude" and comfort_stage_db == "guarded":
+        dropby_min_aff, dropby_odds = 90, 1400
+    else:
+        dropby_min_aff, dropby_odds = 75, 2000
     home_dest = str(player_home_node_id or "").strip()
-    if aff >= 75 and home_dest and home_dest != str(npc.get("home_node_id") or "").strip():
-        if _det_unit(f"{session_id}:{cur_day}:{cur_block}:{nkey}:dropby") < 2000:
+    if aff >= dropby_min_aff and home_dest and home_dest != str(npc.get("home_node_id") or "").strip():
+        if _det_unit(f"{session_id}:{cur_day}:{cur_block}:{nkey}:dropby") < dropby_odds:
             return {
                 "node_id": home_dest,
                 "reason": "player_dropby",
@@ -799,18 +828,29 @@ def compute_boundary_autonomy_deltas(
                     eligible_friends.append((ckey, c))
         eligible_friends.sort(key=lambda item: item[0])
         for ckey, c in eligible_friends:
-            if _det_unit(f"{sid}:{last_day}:{last_block}:{ckey}:hangout_ping") < 3500:
+            c_aff = _contact_affinity(c)
+            op_tier_ping, comf_stage_ping = _contact_openness_comfort(c, c_aff)
+            ping_odds = 4000 if op_tier_ping in ("bold", "shameless") else (2600 if (op_tier_ping == "prude" and comf_stage_ping == "guarded") else 3500)
+            if _det_unit(f"{sid}:{last_day}:{last_block}:{ckey}:hangout_ping") < ping_odds:
                 hangout_pings_emitted += 1
                 cname = str(c.get("name") or ckey)
                 c_basic = _parse_json_dict(c.get("basic_info") or c.get("basic_info_json"))
                 ping_node = str(c.get("hangout_node_id") or c_basic.get("hangout_node_id") or "").strip()
+                if op_tier_ping == "shameless":
+                    ping_summary = "Don't leave me waiting—come keep me company?"
+                elif op_tier_ping == "bold":
+                    ping_summary = "Free right now? Come swing by and distract me."
+                elif op_tier_ping == "prude":
+                    ping_summary = "If you aren't too busy today, would you like to meet up?"
+                else:
+                    ping_summary = "Hey, want to swing by and hang out?"
                 dm_pings.append({
                     "kind": "hangout_invite",
                     "sender_key": ckey,
                     "sender_name": cname,
                     "node_id": ping_node,
                     "day": last_day,
-                    "summary": f"Hey, want to swing by and hang out?",
+                    "summary": ping_summary,
                 })
                 roster_mutations.append({
                     "npc_id": str(c.get("npc_id") or ckey),

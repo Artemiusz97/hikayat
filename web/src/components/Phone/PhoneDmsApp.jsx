@@ -53,11 +53,19 @@ const PhoneDmsApp = ({
   imageGenEnabled = 0,
   onSelectPhoto,
   onGenerateMediaPhoto,
+  commsOffline = false,
+  supportsSpiritRelay = false,
+  spiritRelayStaticActive = false,
+  spiritRelayStaticNote = '',
   clockFormat = '12h',
   t,
 }) => {
   const msgTabRefs = useRef({});
   const isImgGenActive = isImageGenModeActive(imageGenEnabled);
+  const activeHasSpiritRelay = Boolean(
+    supportsSpiritRelay && !isDispatchThread && activeContactEntry?.spirit_relay_unlocked
+  );
+  const dmComposerDisabled = commsOffline && !activeHasSpiritRelay;
 
   return (
     <div className="flex-1 flex flex-col h-full min-h-0">
@@ -90,6 +98,16 @@ const PhoneDmsApp = ({
                 {isDispatchThread ? '📡' : <User size={12} />}
               </div>
               <span className="font-bold text-xs text-gray-100 truncate">{activeDisplayTitle}</span>
+              {activeHasSpiritRelay && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-600/50 font-bold uppercase shrink-0">
+                  ⛩️ {t('phone.dms.spirit_relay_badge', 'Spirit Relay')}
+                </span>
+              )}
+              {activeContactEntry?.folklore_village === 'ghoul' && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-600/50 font-bold uppercase shrink-0">
+                  🦴 {t('spirit_realm.spirit_relay_ghoul_badge', 'Ossuary Relay')}
+                </span>
+              )}
               {isBlockedContact && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
                   🚫 {t('contacts.blocked_badge', 'Blocked')}
@@ -100,6 +118,11 @@ const PhoneDmsApp = ({
           </div>
 
           {/* DM Reply Outcome Banner */}
+          {spiritRelayStaticActive && (commsOffline || supportsSpiritRelay) && (
+            <div className="bg-amber-950/40 border border-amber-600/50 rounded-xl px-2.5 py-1.5 text-[10px] text-amber-200 leading-snug shrink-0">
+              ⚡ {spiritRelayStaticNote || t('spirit_realm.spirit_relay_static_banner', 'Neon-Static Leyline Surge: Spirit Relay crackling.')}
+            </div>
+          )}
           {dmOutcomeBanner && (
             <div
               className={`bg-neutral-950/90 border rounded-xl p-2 text-[10px] space-y-1 shrink-0 ${
@@ -301,7 +324,7 @@ const PhoneDmsApp = ({
                                             : t('phone.dms.attached_photo', 'Photo Attachment')}
                                       </span>
                                       {attachment.isBonus && (
-                                        <span className="text-[8px] px-1 py-0.2 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70">
+                                        <span className="text-[8px] px-1 py-0.5 bg-amber-950/85 text-amber-200 rounded border border-amber-700/70">
                                           +Bonus
                                         </span>
                                       )}
@@ -389,7 +412,7 @@ const PhoneDmsApp = ({
                     icon: '💬',
                     badge: `${chatLeft}/${chatMax}`,
                     locked: chatLeft === 0,
-                    disabled: sendingChat,
+                    disabled: sendingChat || dmComposerDisabled,
                     color: 'hover:border-cyan-500/50 hover:bg-cyan-950/40 text-cyan-200',
                     title: t(
                       'phone.dms.action_chat_title',
@@ -407,7 +430,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.flirt?.used ?? 0))}/3`
                       : '3/3',
                     locked: flirtLocked,
-                    disabled: sendingChat || flirtLocked,
+                    disabled: sendingChat || dmComposerDisabled || flirtLocked,
                     color: 'hover:border-pink-500/50 hover:bg-pink-950/40 text-pink-200',
                     title: t('phone.dms.action_flirt_title', 'Flirt with contact (3 attempts/day)'),
                   },
@@ -427,7 +450,7 @@ const PhoneDmsApp = ({
                           : '1/1'
                       : '1/1',
                     locked: meetupLocked,
-                    disabled: sendingChat || meetupLocked,
+                    disabled: sendingChat || dmComposerDisabled || meetupLocked,
                     color: 'hover:border-amber-500/50 hover:bg-amber-950/40 text-amber-200',
                     title: isMeetupAccepted
                       ? t('phone.dms.action_move_title', 'Relocate meetup spot (up to 2 times)')
@@ -439,7 +462,7 @@ const PhoneDmsApp = ({
                     icon: '🕵️',
                     badge: dailyLimits ? (rumorLocked ? '🔒' : '1/1') : '1/1',
                     locked: rumorLocked,
-                    disabled: sendingChat || rumorLocked,
+                    disabled: sendingChat || dmComposerDisabled || rumorLocked,
                     color: 'hover:border-emerald-500/50 hover:bg-emerald-950/40 text-emerald-200',
                     title: t('phone.dms.action_rumor_title', 'Ask for rumors and gossip (1 attempt/day)'),
                   },
@@ -453,7 +476,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`
                       : '3/3',
                     locked: photoLocked,
-                    disabled: sendingChat || photoLocked,
+                    disabled: sendingChat || dmComposerDisabled || photoLocked,
                     color: 'hover:border-purple-500/50 hover:bg-purple-950/40 text-purple-200',
                     title: t('phone.dms.action_ask_pic_title', 'Ask contact for a casual photo (shared 3/day)'),
                   },
@@ -467,7 +490,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.photo?.used ?? 0))}/3`
                       : '3/3',
                     locked: photoLocked,
-                    disabled: sendingChat || photoLocked,
+                    disabled: sendingChat || dmComposerDisabled || photoLocked,
                     color: 'hover:border-teal-500/50 hover:bg-teal-950/40 text-teal-200',
                     title: t('phone.dms.action_send_pic_title', 'Send contact a casual photo (shared 3/day)'),
                   },
@@ -481,7 +504,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`
                       : '3/3',
                     locked: spicyLocked,
-                    disabled: sendingChat || spicyLocked,
+                    disabled: sendingChat || dmComposerDisabled || spicyLocked,
                     color: 'hover:border-rose-500/50 hover:bg-rose-950/40 text-rose-200',
                     title: t('phone.dms.action_ask_spicy_title', 'Ask contact for a spicy photo (shared 3/day)'),
                   },
@@ -495,7 +518,7 @@ const PhoneDmsApp = ({
                         : `${Math.max(0, 3 - (dailyLimits?.spicy?.used ?? 0))}/3`
                       : '3/3',
                     locked: spicyLocked,
-                    disabled: sendingChat || spicyLocked,
+                    disabled: sendingChat || dmComposerDisabled || spicyLocked,
                     color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-200',
                     title: t(
                       'phone.dms.action_send_spicy_title',
@@ -511,7 +534,10 @@ const PhoneDmsApp = ({
                         key={opt.id}
                         type="button"
                         disabled={opt.disabled}
-                        onClick={() => onInstantIntentSend(opt.id)}
+                        onClick={() => {
+                          if (dmComposerDisabled) return;
+                          onInstantIntentSend(opt.id);
+                        }}
                         className={`flex flex-col items-center justify-center py-1.5 px-1 rounded-xl transition-all cursor-pointer select-none active:scale-95 border shadow-xs ${
                           opt.disabled
                             ? 'opacity-40 cursor-not-allowed bg-neutral-900/40 border-neutral-800/40 text-neutral-500'
@@ -541,18 +567,18 @@ const PhoneDmsApp = ({
               })()}
 
               {/* Custom Message Composer */}
-              <form onSubmit={onSendDm} className="flex items-center gap-2 pt-1.5 shrink-0">
+              <form onSubmit={(e) => { if (dmComposerDisabled) { e.preventDefault(); return; } onSendDm(e); }} className="flex items-center gap-2 pt-1.5 shrink-0">
                 <input
                   type="text"
                   value={dmInput}
                   onChange={(e) => onChangeDmInput(e.target.value)}
-                  disabled={sendingChat}
-                  placeholder={`Custom message to ${activeDisplayTitle}...`}
+                  disabled={sendingChat || dmComposerDisabled}
+                  placeholder={dmComposerDisabled ? t('phone.no_signal_banner', 'No Signal — Isolated Realm') : `Custom message to ${activeDisplayTitle}...`}
                   className="flex-1 bg-neutral-900 border border-neutral-800 focus:border-cyan-500 rounded-xl px-3.5 py-2.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none disabled:opacity-50 transition-colors"
                 />
                 <button
                   type="submit"
-                  disabled={!dmInput.trim() || sendingChat}
+                  disabled={!dmInput.trim() || sendingChat || dmComposerDisabled}
                   className="p-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 transition-colors cursor-pointer shrink-0 shadow-sm"
                   title={t('phone.dms.send_custom', 'Send Custom Message')}
                 >
@@ -578,6 +604,11 @@ const PhoneDmsApp = ({
           </div>
 
           {/* Contacts vs Alerts / Dispatch Sub-View Switcher */}
+          {spiritRelayStaticActive && (commsOffline || supportsSpiritRelay) && (
+            <div className="bg-amber-950/40 border border-amber-600/50 rounded-xl px-2.5 py-1.5 text-[10px] text-amber-200 leading-snug shrink-0">
+              ⚡ {spiritRelayStaticNote || t('spirit_realm.spirit_relay_static_banner', 'Neon-Static Leyline Surge: Spirit Relay crackling.')}
+            </div>
+          )}
           {showDispatchTab && (
             <div
               role="tablist"
@@ -765,6 +796,16 @@ const PhoneDmsApp = ({
                             {c.is_blocked_contact && (
                               <span className="text-[8.5px] px-1 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-700/60 font-bold uppercase shrink-0">
                                 🚫 {t('contacts.blocked_badge', 'Blocked')}
+                              </span>
+                            )}
+                            {supportsSpiritRelay && c.spirit_relay_unlocked && (
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-amber-950/70 text-amber-300 border border-amber-600/50 font-bold uppercase shrink-0">
+                                ⛩️ {t('phone.dms.spirit_relay_badge', 'Spirit Relay')}
+                              </span>
+                            )}
+                            {c.folklore_village === 'ghoul' && (
+                              <span className="text-[8.5px] px-1 py-0.5 rounded bg-violet-950/70 text-violet-300 border border-violet-600/50 font-bold uppercase shrink-0">
+                                🦴 {t('spirit_realm.spirit_relay_ghoul_badge', 'Ossuary Relay')}
                               </span>
                             )}
                             {c.anomalous_npc_tag === 'special_agent' && (

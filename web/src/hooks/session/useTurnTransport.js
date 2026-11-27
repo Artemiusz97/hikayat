@@ -25,18 +25,33 @@ export const useTurnTransport = ({
   const turnAbortControllerRef = useRef(null);
   const syncTurnRequestRef = useRef(false);
   const processingTurnRef = useRef(false);
+  const cancellingTurnRef = useRef(false);
   const pendingAsyncPostRef = useRef(null);
   const activeTurnIdRef = useRef(null);
   const turnGenerationRef = useRef(0);
+  const cancelSeqRef = useRef(0);
   const completedTurnIdsRef = useRef(new Set());
 
   useEffect(() => {
     processingTurnRef.current = processingTurn;
   }, [processingTurn]);
 
+  useEffect(() => {
+    cancellingTurnRef.current = cancellingTurn;
+  }, [cancellingTurn]);
+
   const setProcessingState = useCallback((next) => {
     processingTurnRef.current = next;
     setProcessingTurn(next);
+  }, []);
+
+  const setCancellingState = useCallback((next) => {
+    const val = Boolean(next);
+    if (!val) {
+      cancelSeqRef.current += 1;
+    }
+    cancellingTurnRef.current = val;
+    setCancellingTurn(val);
   }, []);
 
   const recordCompletedTurnId = useCallback((turnId) => {
@@ -73,13 +88,13 @@ export const useTurnTransport = ({
       setProcessingState(false);
       setPendingAction(null);
       setIsThinking(false);
-      setCancellingTurn(false);
+      setCancellingState(false);
       setIsStreaming(false);
       setStreamingNarrative(null);
       setStreamingState(null);
       safetyTimerRef.current = null;
     }, ms);
-  }, [clearSafetyTimer, setProcessingState]);
+  }, [clearSafetyTimer, setProcessingState, setCancellingState]);
 
   useEffect(() => {
     if (!processingTurn || !session?.id || session.id === 'embarking' || !user?.user_id) {
@@ -94,12 +109,12 @@ export const useTurnTransport = ({
         const res = await apiCall(`/api/adventure/active-session/${user.user_id}`, {
           signal: pollAbort.signal,
         });
-        if (pollAbort.signal.aborted) return;
+        if (pollAbort.signal.aborted || cancellingTurnRef.current) return;
         if (res?.session) {
           if (res.session.in_flight_turn) {
             if (!processingTurnRef.current) return;
             setIsThinking(res.session.in_flight_turn.status === 'thinking');
-          } else if (processingTurnRef.current && !syncTurnRequestRef.current) {
+          } else if (processingTurnRef.current && !syncTurnRequestRef.current && !cancellingTurnRef.current) {
             clearSafetyTimer();
             setSession(prev => ({
               ...res.session,
@@ -108,7 +123,7 @@ export const useTurnTransport = ({
             setProcessingState(false);
             setPendingAction(null);
             setIsThinking(false);
-            setCancellingTurn(false);
+            setCancellingState(false);
             setIsStreaming(false);
             setStreamingNarrative(null);
             setStreamingState(null);
@@ -117,6 +132,7 @@ export const useTurnTransport = ({
             if (missedErr?.error && (!activeTurnIdRef.current || missedErr.turn_id === activeTurnIdRef.current)) {
               setActionError(missedErr.error);
             }
+            recordCompletedTurnId(activeTurnIdRef.current);
             activeTurnIdRef.current = null;
             if (isAutoSceneImageGen(res.session) && !res.session?.scene_image_url) {
               pollForSceneImage(res.session.id);
@@ -136,7 +152,9 @@ export const useTurnTransport = ({
     socketRef,
     clearSafetyTimer,
     pollForSceneImage,
+    recordCompletedTurnId,
     setProcessingState,
+    setCancellingState,
     setSession,
     setLastSyncTimestamp,
     setActionError,
@@ -151,7 +169,7 @@ export const useTurnTransport = ({
     onSyncSuccess,
     onHttpError,
   }) => {
-    turnGenerationRef.current += 1;
+    const reqGen = ++turnGenerationRef.current;
     setProcessingState(true);
     armSafetyTimer(245000);
     if (resetStreamBeforeRequest) {
@@ -181,6 +199,9 @@ export const useTurnTransport = ({
         pendingAsyncPostRef.current = postPromise;
       }
       const data = await postPromise;
+      if (turnGenerationRef.current !== reqGen) {
+        return null;
+      }
       if (data?.status === 'accepted') {
         if (acceptAsyncTurn(data, postPromise, canAsyncWs)) {
           asyncAccepted = true;
@@ -192,8 +213,8 @@ export const useTurnTransport = ({
       }
       return data;
     } catch (e) {
-      if (e?.name === 'AbortError' || e?.isUserAbort) {
-        if (!resetStreamBeforeRequest) {
+      if (e?.name === 'AbortError' || e?.isUserAbort || turnGenerationRef.current !== reqGen) {
+        if (!resetStreamBeforeRequest && turnGenerationRef.current === reqGen) {
           setIsStreaming(false);
           setStreamingNarrative(null);
           setStreamingState(null);
@@ -202,6 +223,7 @@ export const useTurnTransport = ({
       }
       if (onHttpError) {
         return await onHttpError(e, {
+          reqGen,
           markAsyncAccepted: () => {
             asyncAccepted = true;
           },
@@ -212,11 +234,13 @@ export const useTurnTransport = ({
       if (pendingAsyncPostRef.current === postPromise) {
         pendingAsyncPostRef.current = null;
       }
-      syncTurnRequestRef.current = false;
+      if (turnGenerationRef.current === reqGen) {
+        syncTurnRequestRef.current = false;
+      }
       if (turnAbortControllerRef.current === abortCtrl) {
         turnAbortControllerRef.current = null;
       }
-      if (!asyncAccepted) {
+      if (!asyncAccepted && turnGenerationRef.current === reqGen && !cancellingTurnRef.current) {
         clearSafetyTimer();
         setProcessingState(false);
         setPendingAction(null);
@@ -226,7 +250,7 @@ export const useTurnTransport = ({
   };
 
   const submitAction = async (actionData) => {
-    if (processingTurnRef.current) return;
+    if (processingTurnRef.current || cancellingTurnRef.current) return;
     const prevTurnCount = session?.turn_count ?? 0;
     const prevHistLen = Array.isArray(session?.history) ? session.history.length : 0;
     const canAsyncWs = Boolean(socketRef.current && socketRef.current.readyState === WebSocket.OPEN);
@@ -279,12 +303,14 @@ export const useTurnTransport = ({
           }
         }
       },
-      onHttpError: async (e, { markAsyncAccepted }) => {
+      onHttpError: async (e, { reqGen, markAsyncAccepted }) => {
+        if (turnGenerationRef.current !== reqGen) return undefined;
         console.warn('Action API error or timeout, checking active session recovery...', e);
         const errMsg = e?.message || 'The action could not be completed. Please try again.';
         setActionError(errMsg);
         try {
           const recoveryData = await apiCall(`/api/adventure/active-session/${user.user_id}`);
+          if (turnGenerationRef.current !== reqGen) return undefined;
           if (recoveryData && recoveryData.session) {
             const recTurnCount = recoveryData.session.turn_count ?? 0;
             const recHistLen = Array.isArray(recoveryData.session.history) ? recoveryData.session.history.length : 0;
@@ -314,6 +340,7 @@ export const useTurnTransport = ({
         } catch (recErr) {
           console.error('State recovery check failed:', recErr);
         }
+        if (turnGenerationRef.current !== reqGen) return undefined;
         setIsStreaming(false);
         setStreamingNarrative(null);
         setStreamingState(null);
@@ -323,7 +350,7 @@ export const useTurnTransport = ({
   };
 
   const retryGeneration = async () => {
-    if (!session?.id || !user?.user_id || processingTurnRef.current) return null;
+    if (!session?.id || !user?.user_id || processingTurnRef.current || cancellingTurnRef.current) return null;
     const hasHistory = Array.isArray(session?.history) && session.history.length > 0;
     const canAsyncWs = Boolean(
       hasHistory &&
@@ -352,7 +379,8 @@ export const useTurnTransport = ({
           }
         }
       },
-      onHttpError: async (e) => {
+      onHttpError: async (e, { reqGen }) => {
+        if (turnGenerationRef.current !== reqGen) return null;
         const errMsg = e?.message || 'Failed to regenerate narration. Please try again.';
         setActionError(errMsg);
         return null;
@@ -361,8 +389,9 @@ export const useTurnTransport = ({
   };
 
   const cancelTurn = useCallback(async () => {
-    if (!session?.id || session.id === 'embarking' || !user?.user_id || cancellingTurn) return;
-    setCancellingTurn(true);
+    if (!session?.id || session.id === 'embarking' || !user?.user_id || cancellingTurnRef.current) return;
+    setCancellingState(true);
+    const cancelSeq = ++cancelSeqRef.current;
     const cancelGen = turnGenerationRef.current;
     const targetTurnId = activeTurnIdRef.current;
     if (pendingAsyncPostRef.current) {
@@ -410,19 +439,25 @@ export const useTurnTransport = ({
       console.error('Failed to cancel in-flight turn:', e);
       if (turnGenerationRef.current === cancelGen) {
         setActionError(e?.message || 'Failed to cancel turn.');
+        if (!activeTurnIdRef.current) {
+          clearSafetyTimer();
+          setProcessingState(false);
+          setPendingAction(null);
+          setIsThinking(false);
+        }
       }
     } finally {
-      if (turnGenerationRef.current === cancelGen) {
-        setCancellingTurn(false);
+      if (cancelSeqRef.current === cancelSeq) {
+        setCancellingState(false);
       }
     }
   }, [
     session?.id,
     user?.user_id,
-    cancellingTurn,
     clearSafetyTimer,
     recordCompletedTurnId,
     setProcessingState,
+    setCancellingState,
     setWaitingForParty,
     setActionError,
     setSession,
@@ -438,7 +473,8 @@ export const useTurnTransport = ({
     isThinking,
     setIsThinking,
     cancellingTurn,
-    setCancellingTurn,
+    setCancellingTurn: setCancellingState,
+    cancellingTurnRef,
     streamingNarrative,
     setStreamingNarrative,
     streamingState,

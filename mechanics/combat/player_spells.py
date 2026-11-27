@@ -92,6 +92,18 @@ def resolve_player_spell_action(
     else:
         spell = get_spell(spell_id) if spell_id else None
 
+    sp_id_pre = str((spell.get("id") if isinstance(spell, dict) else None) or spell_id or "").strip()
+    if sp_id_pre.startswith("spirit_summon_"):
+        eff_sid_sp = (session.get("id") if isinstance(session, dict) else None) or ctx.get("sess_id_cbt")
+        from mechanics.combat.spells.spirit_court_perks import is_spirit_court_summon_spell_active
+        if not eff_sid_sp or not is_spirit_court_summon_spell_active(int(eff_sid_sp), sp_id_pre):
+            sp_disp = (spell.get("name") if isinstance(spell, dict) else None) or sp_id_pre
+            combat_log.append(
+                f"⚠️ **{acting_char_name}** tried to invoke **{sp_disp}**, "
+                "but the Sovereign's Sworn Ally pact is dormant (Spirit Court standing below 90)."
+            )
+            return
+
     mp_cost = spell.get("mp_cost", action.get("mp_cost", 0)) if spell else action.get("mp_cost", 0)
     if mp_cost > 0:
         acting_char_data["mp"] = max(0, acting_char_data.get("mp", 0) - mp_cost)
@@ -447,22 +459,39 @@ def resolve_player_spell_action(
         s_arch = spell.get("summon_archetype", template.get("archetype", "Skirmisher"))
         c_lvl = acting_char_data.get("level", 1)
         s_hp = template.get("base_hp", 20) + (c_lvl * template.get("hp_per_level", 5))
+        s_mp = int(template.get("max_mp", 25) or 25)
         s_name = template.get("name", "Summoned Minion")
+        stat_weights = template.get("stat_weights")
+        base_stats = (
+            dict(stat_weights)
+            if isinstance(stat_weights, dict)
+            else {
+                "STR": 4 + c_lvl, "AGI": 4 + c_lvl, "INT": 4 + c_lvl,
+                "PER": 4 + c_lvl, "END": 4 + c_lvl, "CHA": 1, "LUK": 1,
+            }
+        )
+        tmpl_loadout = template.get("combat_loadout")
         for idx in range(s_count):
             minion_name = f"{s_name} #{idx+1}" if s_count > 1 else s_name
-            summon_npc = {
+            summon_npc: Dict[str, Any] = {
                 "name": minion_name,
                 "archetype": s_arch,
+                "combat_role": template.get("combat_role") or s_arch,
                 "level": c_lvl,
                 "hp": s_hp,
                 "max_hp": s_hp,
+                "mp": s_mp,
+                "max_mp": s_mp,
                 "summon_duration": s_dur,
                 "is_summon": True,
-                "stats": {
-                    "STR": 4 + c_lvl, "AGI": 4 + c_lvl, "INT": 4 + c_lvl,
-                    "PER": 4 + c_lvl, "END": 4 + c_lvl, "CHA": 1, "LUK": 1,
-                },
+                "stats": dict(base_stats),
             }
+            if template.get("element"):
+                summon_npc["element"] = str(template["element"])
+            if template.get("spirit_court"):
+                summon_npc["spirit_court"] = str(template["spirit_court"])
+            if isinstance(tmpl_loadout, list) and tmpl_loadout:
+                summon_npc["combat_loadout"] = [dict(sk) for sk in tmpl_loadout]
             current_npcs.append(summon_npc)
             living_allies.append(summon_npc)
         combat_log.append(f"🔮 **{acting_char_name}** cast **{spell['name']}**: Summoned **{s_count}x {s_name}** for {s_dur} turns!")

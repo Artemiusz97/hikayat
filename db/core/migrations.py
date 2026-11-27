@@ -13,6 +13,8 @@ from .migrations_backfills import (
     _migrate_zone_split_and_hidden_villages_v49,
     _migrate_anomalous_locations_integrity_v57,
     _migrate_outlaw_factions_v60,
+    _migrate_folklore_spirit_realm_v52,
+    _migrate_folklore_spirit_realm_v64,
     _migrate_dynamic_social_overhaul_v50,
     _migrate_main_quest_bounty_overhaul_v51,
     _migrate_combat_evolution_v53,
@@ -962,6 +964,34 @@ SCHEMA_MIGRATIONS.append(
     )
 )
 
+SCHEMA_MIGRATIONS.append(
+    (
+        62,
+        # Kept as *_v52 identifier for backwards compatibility with already-applied DBs
+        "folklore_spirit_realm_v52",
+        [],
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        63,
+        "adventure_saves_realm_meta_v63",
+        [
+            "ALTER TABLE adventure_saves ADD COLUMN realm_name TEXT DEFAULT NULL",
+            "ALTER TABLE adventure_saves ADD COLUMN show_realm_badge INTEGER DEFAULT 0",
+        ],
+    )
+)
+
+SCHEMA_MIGRATIONS.append(
+    (
+        64,
+        "folklore_spirit_realm_expansion_v64",
+        [],
+    )
+)
+
 CURRENT_SCHEMA_VERSION: int = SCHEMA_MIGRATIONS[-1][0]
 
 
@@ -989,6 +1019,36 @@ def run_schema_migrations(conn: sqlite3.Connection) -> list[int]:
                     pass
                 else:
                     raise
+        if version == 62:
+            _migrate_folklore_spirit_realm_v52(conn)
+        if version == 63:
+            from ..saves import _compute_save_realm_meta_from_snapshot
+            import json as _m63_json
+
+            legacy_rows = conn.execute(
+                "SELECT id, snapshot_data FROM adventure_saves WHERE realm_name IS NULL"
+            ).fetchall()
+            for lr in legacy_rows:
+                lr_id = lr["id"] if isinstance(lr, sqlite3.Row) else lr[0]
+                raw_s = lr["snapshot_data"] if isinstance(lr, sqlite3.Row) else lr[1]
+                r_name, show_b = "", False
+                if raw_s:
+                    try:
+                        snap_obj = _m63_json.loads(raw_s) if isinstance(raw_s, str) else raw_s
+                        r_name, show_b = _compute_save_realm_meta_from_snapshot(snap_obj)
+                    except (ValueError, TypeError) as _m63_row_err:
+                        log.warning(
+                            "[migration 63] Skipping corrupt snapshot_data for save id=%s: %s",
+                            lr_id,
+                            _m63_row_err,
+                        )
+                        r_name, show_b = "", False
+                conn.execute(
+                    "UPDATE adventure_saves SET realm_name = ?, show_realm_badge = ? WHERE id = ?",
+                    (r_name, 1 if show_b else 0, lr_id),
+                )
+        if version == 64:
+            _migrate_folklore_spirit_realm_v64(conn)
         conn.execute(
             "INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)",
             (version, name, time.time()),

@@ -7,6 +7,8 @@ import time
 import re
 import heapq
 from collections import defaultdict
+from contextlib import nullcontext
+from typing import Any
 from .core import *
 from .core import _to_str, _find_anomalous_agent_entry
 
@@ -297,7 +299,8 @@ def save_session_location(
     primary_name: str,
     sub_name: str,
     atmosphere: str = "",
-    is_dynamic: int = 0
+    is_dynamic: int = 0,
+    preferred_realm_id: str = "",
 ):
     """Upserts a discovered or seed location into the session map."""
     with UnitOfWork() as conn:
@@ -317,7 +320,8 @@ def save_session_location(
             with savepoint(conn, "sp_sync_spatial"):
                 _sync_location_to_spatial_graph(
                     session_id, location_id, zone_name, primary_name, sub_name,
-                    atmosphere=atmosphere, is_dynamic=is_dynamic
+                    atmosphere=atmosphere, is_dynamic=is_dynamic,
+                    preferred_realm_id=preferred_realm_id,
                 )
         except Exception as exc:
             log.warning(
@@ -328,11 +332,16 @@ def save_session_location(
             )
     return True
 
-def format_node_tiered_location(session_id: int, node_id: str, fallback_zone: str = "World Region") -> str:
-    """Formats a world_nodes node_id into its canonical 'Zone ➔ Facility ➔ Room' string in <1ms."""
+def format_node_tiered_location(
+    session_id: int,
+    node_id: str,
+    fallback_zone: str = "World Region",
+    conn: Any = None,
+) -> str:
+    """Formats a world_nodes node_id into its canonical 'Zone ➔ Facility ➔ Room' string in <1ms (role-based for variable depth)."""
     if not session_id or not node_id:
         return ""
-    nodes = get_session_world_nodes(session_id)
+    nodes = get_session_world_nodes(session_id, conn=conn)
     if not nodes:
         return ""
     node_map = {n["node_id"]: n for n in nodes}
@@ -340,7 +349,27 @@ def format_node_tiered_location(session_id: int, node_id: str, fallback_zone: st
     if not target:
         return ""
     from mechanics.world.locations.hierarchy import resolve_default_sublocation
-    n_type = target.get("node_type", "ROOM")
+    from mechanics.world.locations.realms import get_node_hierarchy_roles_in_memory
+
+    roles = get_node_hierarchy_roles_in_memory(node_id, node_map)
+    realm_node = roles.get("realm")
+    zone_node = roles.get("zone")
+    fac_node = roles.get("facility")
+    n_type = str(target.get("node_type") or "ROOM").upper()
+
+    if n_type == "REALM":
+        first_zone = next((n for n in nodes if n.get("node_type") == "ZONE" and n.get("parent_id") == node_id), None)
+        if first_zone:
+            return format_node_tiered_location(session_id, first_zone["node_id"], fallback_zone=fallback_zone, conn=conn)
+        first_fac = next((n for n in nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
+        if first_fac:
+            return format_node_tiered_location(session_id, first_fac["node_id"], fallback_zone=fallback_zone, conn=conn)
+        first_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == node_id), None)
+        if first_room:
+            return format_node_tiered_location(session_id, first_room["node_id"], fallback_zone=fallback_zone, conn=conn)
+        r_name = target.get("name") or fallback_zone
+        return f"{r_name} ➔ {r_name} ➔ Central Area"
+
     if n_type == "ZONE":
         z_name = target["name"]
         fac = next((n for n in nodes if n.get("node_type") == "FACILITY" and n.get("parent_id") == node_id), None)
@@ -348,18 +377,17 @@ def format_node_tiered_location(session_id: int, node_id: str, fallback_zone: st
         child_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == (fac["node_id"] if fac else node_id) and (n.get("name") or "").strip().lower() != "main area"), None)
         s_name = child_room["name"] if child_room else resolve_default_sublocation(p_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {p_name} ➔ {s_name}"
+
     if n_type == "FACILITY":
-        parent = node_map.get(target.get("parent_id")) if target.get("parent_id") else None
-        z_name = parent["name"] if parent else fallback_zone
+        z_name = zone_node["name"] if zone_node else (realm_node["name"] if realm_node else fallback_zone)
         p_name = target["name"]
         child_room = next((n for n in nodes if n.get("node_type") == "ROOM" and n.get("parent_id") == node_id and (n.get("name") or "").strip().lower() != "main area"), None)
         s_name = child_room["name"] if child_room else resolve_default_sublocation(p_name, z_name, session_id=session_id)
         return f"{z_name} ➔ {p_name} ➔ {s_name}"
+
     # ROOM node
-    fac = node_map.get(target.get("parent_id")) if target.get("parent_id") else None
-    zone = node_map.get(fac.get("parent_id")) if (fac and fac.get("parent_id")) else fac
-    z_name = zone["name"] if zone else fallback_zone
-    p_name = fac["name"] if fac else target["name"]
+    z_name = zone_node["name"] if zone_node else (realm_node["name"] if realm_node else (fac_node["name"] if fac_node else fallback_zone))
+    p_name = fac_node["name"] if fac_node else (realm_node["name"] if realm_node else target["name"])
     s_name = target["name"]
     if not s_name or s_name.strip().lower() == "main area":
         s_name = resolve_default_sublocation(p_name, z_name, session_id=session_id)
@@ -380,14 +408,17 @@ def get_session_locations(session_id: int) -> list[dict]:
     nodes = get_session_world_nodes(session_id)
     if not nodes:
         return []
+    from mechanics.world.locations.realms import get_node_hierarchy_roles_in_memory
     node_map = {n["node_id"]: n for n in nodes}
     synthesized: list[dict] = []
     for n in nodes:
         if n.get("node_type") == "ROOM":
-            fac = node_map.get(n.get("parent_id")) if n.get("parent_id") else None
-            zone = node_map.get(fac.get("parent_id")) if (fac and fac.get("parent_id")) else fac
-            z_name = zone["name"] if zone else "World Region"
-            p_name = fac["name"] if fac else n["name"]
+            roles = get_node_hierarchy_roles_in_memory(n["node_id"], node_map)
+            zone = roles.get("zone")
+            fac = roles.get("facility")
+            realm = roles.get("realm")
+            z_name = zone["name"] if zone else (realm["name"] if realm else "World Region")
+            p_name = fac["name"] if fac else (realm["name"] if realm else n["name"])
             synthesized.append({
                 "location_id": n["node_id"],
                 "zone_name": z_name,
@@ -478,22 +509,23 @@ def _resolve_school_fallback_row(conn, session_id: int, node_id: str, select_col
     return None, ""
 
 
-def get_world_node(session_id: int, node_id: str) -> dict | None:
+def get_world_node(session_id: int, node_id: str, conn: Any = None) -> dict | None:
     """Retrieves a single world_node row by node_id."""
     if not node_id:
         return None
-    with get_conn() as conn:
-        row = conn.execute(
+    ctx = nullcontext(conn) if conn is not None else get_conn()
+    with ctx as c:
+        row = c.execute(
             "SELECT * FROM world_nodes WHERE session_id = ? AND node_id = ?",
             (session_id, node_id)
         ).fetchone()
         if not row and node_id in _LEGACY_NODE_ID_ALIASES:
-            row = conn.execute(
+            row = c.execute(
                 "SELECT * FROM world_nodes WHERE session_id = ? AND node_id = ?",
                 (session_id, _LEGACY_NODE_ID_ALIASES[node_id])
             ).fetchone()
         if not row:
-            row, _ = _resolve_school_fallback_row(conn, session_id, node_id, select_cols="*")
+            row, _ = _resolve_school_fallback_row(c, session_id, node_id, select_cols="*")
         return dict(row) if row else None
 
 
@@ -606,10 +638,11 @@ def set_session_schema_epoch(session_id: int, epoch: int = 2) -> None:
         conn.execute("UPDATE sessions SET schema_epoch = ? WHERE id = ?", (epoch, session_id))
 
 
-def get_session_world_nodes(session_id: int) -> list[dict]:
+def get_session_world_nodes(session_id: int, conn: Any = None) -> list[dict]:
     """Retrieves all spatial graph nodes for a session ordered by hierarchy."""
-    with get_conn() as conn:
-        rows = conn.execute(
+    ctx = nullcontext(conn) if conn is not None else get_conn()
+    with ctx as c:
+        rows = c.execute(
             "SELECT * FROM world_nodes WHERE session_id = ? ORDER BY id ASC",
             (session_id,)
         ).fetchall()
@@ -678,9 +711,10 @@ def _sync_location_to_spatial_graph(
     primary_name: str,
     sub_name: str,
     atmosphere: str = "",
-    is_dynamic: int = 0
+    is_dynamic: int = 0,
+    preferred_realm_id: str = "",
 ):
-    """Ensures a location saved to session_locations also exists in world_nodes and world_edges."""
+    """Ensures a location saved to session_locations also exists in world_nodes and world_edges (scoped to realm)."""
     if not session_id or not zone_name or not primary_name:
         return
     existing_nodes = get_session_world_nodes(session_id)
@@ -694,24 +728,61 @@ def _sync_location_to_spatial_graph(
         infer_is_enclosed, infer_is_transit_hub, infer_access_tier,
         infer_curfew_window
     )
+    from mechanics.world.locations.realms import (
+        get_node_realm_id_in_memory,
+        get_primary_realm_in_memory,
+    )
 
-    z_id = next((n["node_id"] for n in existing_nodes if n["node_type"] == "ZONE" and n["name"].lower() == zone_name.lower()), None)
+    nodes_by_id = {n["node_id"]: n for n in existing_nodes if n.get("node_id")}
+    if location_id and str(location_id) in nodes_by_id:
+        return
+    eff_realm_id = str(preferred_realm_id or "").strip()
+    has_realm_nodes = any(str(n.get("node_type") or "").upper() == "REALM" for n in existing_nodes)
+    if not is_dynamic and eff_realm_id and has_realm_nodes and eff_realm_id not in nodes_by_id:
+        return
+    if not eff_realm_id:
+        sess_row = db.get_session(session_id)
+        curr_nid = str((sess_row or {}).get("current_node_id") or "").strip()
+        if curr_nid and curr_nid in nodes_by_id:
+            eff_realm_id = get_node_realm_id_in_memory(curr_nid, nodes_by_id)
+    if not eff_realm_id:
+        prim_r = get_primary_realm_in_memory(nodes_by_id)
+        eff_realm_id = str(prim_r["node_id"]) if prim_r else ""
+
+    def _in_eff_realm(n: dict) -> bool:
+        if not eff_realm_id:
+            return True
+        return get_node_realm_id_in_memory(n["node_id"], nodes_by_id) == eff_realm_id
+
+    realm_nodes = [n for n in existing_nodes if _in_eff_realm(n)]
+
+    z_id = next((n["node_id"] for n in realm_nodes if n["node_type"] == "ZONE" and n["name"].lower() == zone_name.lower()), None)
+    if not z_id:
+        # Check if zone_name actually names a compact REALM itself
+        matching_realm = next((n for n in existing_nodes if n["node_type"] == "REALM" and n["name"].lower() == zone_name.lower()), None)
+        if matching_realm and (not eff_realm_id or matching_realm["node_id"] == eff_realm_id):
+            z_id = matching_realm["node_id"]
     if not z_id:
         z_id = f"zone_dyn_{_slugify(zone_name)}"
+        if z_id in nodes_by_id and not _in_eff_realm(nodes_by_id[z_id]) and eff_realm_id:
+            z_id = f"zone_dyn_{_slugify(eff_realm_id)}_{_slugify(zone_name)}"
         z_cat = infer_node_category(z_id, "", zone_name)
         z_acc = infer_access_tier("ZONE", z_id, z_id, zone_name, z_cat)
         z_cs, z_ce = infer_curfew_window("ZONE", z_id, z_id, zone_name, z_cat)
         save_world_node(
-            session_id=session_id, node_id=z_id, parent_id=None, name=zone_name,
+            session_id=session_id, node_id=z_id, parent_id=eff_realm_id or None, name=zone_name,
             node_type="ZONE", category=z_cat,
             privacy_level="public", is_enclosed=0, is_transit_hub=1,
             access_tier=z_acc, curfew_start_min=z_cs, curfew_end_min=z_ce,
             atmosphere=atmosphere, is_dynamic=is_dynamic
         )
+        nodes_by_id[z_id] = {"node_id": z_id, "parent_id": eff_realm_id or None, "node_type": "ZONE", "name": zone_name}
 
-    p_id = next((n["node_id"] for n in existing_nodes if n["node_type"] == "FACILITY" and n["name"].lower() == primary_name.lower()), None)
+    p_id = next((n["node_id"] for n in realm_nodes if n["node_type"] == "FACILITY" and n["name"].lower() == primary_name.lower()), None)
     if not p_id:
         p_id = f"loc_dyn_{_slugify(zone_name)}_{_slugify(primary_name)}"
+        if p_id in nodes_by_id and not _in_eff_realm(nodes_by_id[p_id]) and eff_realm_id:
+            p_id = f"loc_dyn_{_slugify(eff_realm_id)}_{_slugify(zone_name)}_{_slugify(primary_name)}"
         cat = infer_node_category(z_id, p_id, primary_name)
         p_acc = infer_access_tier("FACILITY", z_id, p_id, primary_name, cat)
         p_cs, p_ce = infer_curfew_window("FACILITY", z_id, p_id, primary_name, cat)
@@ -724,12 +795,12 @@ def _sync_location_to_spatial_graph(
             access_tier=p_acc, curfew_start_min=p_cs, curfew_end_min=p_ce,
             atmosphere=atmosphere, is_dynamic=is_dynamic
         )
-        # Link to sibling facilities in the same zone (5 mins) or any existing hub (15 mins across zones)
-        same_zone_facs = [n["node_id"] for n in existing_nodes if n["node_type"] == "FACILITY" and n.get("parent_id") == z_id and n["node_id"] != p_id]
+        # Link to sibling facilities in the same zone (5 mins) or same-realm hub (15 mins across zones)
+        same_zone_facs = [n["node_id"] for n in realm_nodes if n["node_type"] == "FACILITY" and n.get("parent_id") == z_id and n["node_id"] != p_id]
         for sf_id in same_zone_facs[:3]:
             save_world_edge(session_id, p_id, sf_id, travel_minutes=5, edge_type="pathway", is_bidirectional=1)
         if not same_zone_facs:
-            any_hub = next((n["node_id"] for n in existing_nodes if n["node_type"] == "FACILITY" and n.get("is_transit_hub")), None)
+            any_hub = next((n["node_id"] for n in realm_nodes if n["node_type"] == "FACILITY" and n.get("is_transit_hub")), None)
             if any_hub and any_hub != p_id:
                 save_world_edge(session_id, p_id, any_hub, travel_minutes=15, edge_type="Cross-Zone", is_bidirectional=1)
 
@@ -737,9 +808,11 @@ def _sync_location_to_spatial_graph(
     s_clean = (sub_name or "").strip()
     if not s_clean or s_clean.lower() == "main area":
         s_clean = resolve_default_sublocation(primary_name, zone_name, session_id=session_id)
-    r_id = next((n["node_id"] for n in existing_nodes if n["node_type"] == "ROOM" and n.get("parent_id") == p_id and n["name"].lower() == s_clean.lower()), None)
+    r_id = next((n["node_id"] for n in realm_nodes if n["node_type"] == "ROOM" and n.get("parent_id") == p_id and n["name"].lower() == s_clean.lower()), None)
     if not r_id:
         r_id = location_id if str(location_id).startswith("sub_") else f"sub_dyn_{_slugify(primary_name)}_{_slugify(s_clean)}"
+        if r_id in nodes_by_id and not _in_eff_realm(nodes_by_id[r_id]) and eff_realm_id:
+            r_id = f"sub_dyn_{_slugify(eff_realm_id)}_{_slugify(primary_name)}_{_slugify(s_clean)}"
         cat = infer_node_category(z_id, p_id, primary_name)
         r_acc = infer_access_tier("ROOM", z_id, r_id, s_clean, cat)
         r_cs, r_ce = infer_curfew_window("ROOM", z_id, r_id, s_clean, cat)
@@ -752,7 +825,7 @@ def _sync_location_to_spatial_graph(
             atmosphere=atmosphere, is_dynamic=is_dynamic
         )
         save_world_edge(session_id, p_id, r_id, travel_minutes=1, edge_type="internal", is_bidirectional=1)
-        sibling_rooms = [n["node_id"] for n in existing_nodes if n["node_type"] == "ROOM" and n.get("parent_id") == p_id and n["node_id"] != r_id]
+        sibling_rooms = [n["node_id"] for n in realm_nodes if n["node_type"] == "ROOM" and n.get("parent_id") == p_id and n["node_id"] != r_id]
         for sr_id in sibling_rooms:
             save_world_edge(session_id, r_id, sr_id, travel_minutes=1, edge_type="internal", is_bidirectional=1)
 
@@ -868,28 +941,35 @@ def is_descendant_of(session_id: int, node_id: str, ancestor_id: str) -> bool:
 
 
 def is_node_or_parent_transit_hub(session_id: int, node_id: str) -> bool:
-    """Checks if the node itself or any of its non-zone parent facilities is a transit hub."""
+    """Checks if the node itself or any of its non-zone/non-realm parent facilities is a transit hub."""
     if not session_id or not node_id:
         return False
     curr = get_world_node(session_id, node_id)
     if curr and curr.get("is_transit_hub"):
         return True
     ancestors = get_node_ancestors(session_id, node_id)
-    return any(bool(a.get("is_transit_hub")) for a in ancestors if a.get("node_type") != "ZONE")
+    return any(bool(a.get("is_transit_hub")) for a in ancestors if a.get("node_type") not in ("ZONE", "REALM"))
 
 
 from .world_constants import _LEGACY_NODE_ID_ALIASES
 
 
-def resolve_node_id_from_location(session_id: int, location_str: str, prefer_facility: bool = False) -> str | None:
+def resolve_node_id_from_location(
+    session_id: int,
+    location_str: str,
+    prefer_facility: bool = False,
+    preferred_realm_id: str | None = None,
+) -> str | None:
     """
     Deterministically resolves a location string (e.g. 3-tier string, primary name,
     leaf name, or raw node_id) to its corresponding node_id in the session's spatial graph.
     If prefer_facility is True, prefers matching FACILITY nodes over child ROOM nodes.
+    If preferred_realm_id is given, matches inside that realm first to prevent cross-realm name collisions.
     """
     if not session_id or not location_str:
         return None
-    loc_clean = str(location_str).strip()
+    loc_clean = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u2793\u2795-\u27BF\uFE0F\u200D]+", "", str(location_str or ""))
+    loc_clean = re.sub(r"\s{2,}", " ", loc_clean).strip()
     if not loc_clean:
         return None
 
@@ -923,84 +1003,123 @@ def resolve_node_id_from_location(session_id: int, location_str: str, prefer_fac
     parts = [p.strip() for p in re.split(r"\s*(?:➔|->|>|/)\s*", loc_clean) if p.strip()]
     leaf_name = parts[-1].lower() if parts else ""
     prim_name = parts[1].lower() if len(parts) >= 2 else (parts[0].lower() if parts else "")
+    tier0_name = parts[0].lower() if parts else ""
 
-    # 2. If prim_name exists, resolve within the primary facility/zone first
-    prim_node = None
-    if prim_name:
-        for n in nodes:
-            if n.get("node_type") in ("FACILITY", "ZONE") and n["name"].lower() == prim_name:
-                prim_node = n
-                break
-        if not prim_node:
-            for n in nodes:
-                if n.get("node_type") in ("FACILITY", "ZONE") and (prim_name in n["name"].lower() or n["name"].lower() in prim_name):
+    from mechanics.world.locations.realms import get_node_realm_id_in_memory
+    nodes_by_id = {n["node_id"]: n for n in nodes if n.get("node_id")}
+
+    _legacy_display_aliases = {
+        "torii-crowned spirit courtyard": "sub_kitsune_inner_plaza",
+        "laman beringin diraja": "sub_bunian_inner_plaza",
+        "sato-no-inari — hidden kitsune village": "loc_hidden_kitsune_village",
+        "kampung kayangan — hidden bunian village": "loc_hidden_bunian_village",
+    }
+    if not prefer_facility and leaf_name in _legacy_display_aliases and _legacy_display_aliases[leaf_name] in nodes_by_id:
+        return _legacy_display_aliases[leaf_name]
+    if prim_name in _legacy_display_aliases and _legacy_display_aliases[prim_name] in nodes_by_id:
+        return _legacy_display_aliases[prim_name]
+
+    # If tier0 explicitly names a REALM (e.g. "The Abyssal Underworld ➔ ..."), prefer that realm if preferred_realm_id wasn't forced
+    eff_pref_realm = str(preferred_realm_id or "").strip()
+    if len(parts) >= 2 and tier0_name:
+        explicit_realm = next((n for n in nodes if n.get("node_type") == "REALM" and n["name"].lower() == tier0_name), None)
+        if explicit_realm:
+            eff_pref_realm = explicit_realm["node_id"]
+
+    def _resolve_against_pool(pool: list[dict]) -> str | None:
+        if not pool:
+            return None
+        prim_node = None
+        if prim_name:
+            for n in pool:
+                if n.get("node_type") in ("FACILITY", "ZONE") and n["name"].lower() == prim_name:
                     prim_node = n
                     break
+            if not prim_node:
+                for n in pool:
+                    if n.get("node_type") in ("FACILITY", "ZONE") and (prim_name in n["name"].lower() or n["name"].lower() in prim_name):
+                        prim_node = n
+                        break
 
-    if prim_node:
-        if prefer_facility:
-            return prim_node["node_id"]
-        if leaf_name and leaf_name != prim_name:
-            # Check exact child under prim_node
-            child = next((rn for rn in nodes if rn.get("parent_id") == prim_node["node_id"] and rn["name"].lower() == leaf_name), None)
-            if child:
-                return child["node_id"]
-            if leaf_name not in ("main area", "area", "main"):
-                child = next((rn for rn in nodes if rn.get("parent_id") == prim_node["node_id"] and (leaf_name in rn["name"].lower() or rn["name"].lower() in leaf_name)), None)
+        if prim_node:
+            if prefer_facility:
+                return prim_node["node_id"]
+            if leaf_name and leaf_name != prim_name:
+                child = next((rn for rn in pool if rn.get("parent_id") == prim_node["node_id"] and rn["name"].lower() == leaf_name), None)
                 if child:
                     return child["node_id"]
-                if ("gate path" in leaf_name or "entrance path" in leaf_name or "front gate" in leaf_name) and prim_node["node_id"] == "loc_school_gate":
-                    child = next((rn for rn in nodes if rn.get("parent_id") == prim_node["node_id"] and rn["node_id"] == "sub_entrance_path"), None)
+                if leaf_name not in ("main area", "area", "main"):
+                    child = next((rn for rn in pool if rn.get("parent_id") == prim_node["node_id"] and (leaf_name in rn["name"].lower() or rn["name"].lower() in leaf_name)), None)
                     if child:
                         return child["node_id"]
-                if "homeroom" in leaf_name:
-                    child = next((rn for rn in nodes if rn.get("parent_id") == prim_node["node_id"] and rn["node_id"] == "loc_homeroom"), None)
-                    if child:
-                        return child["node_id"]
-        return prim_node["node_id"]
+                    if ("gate path" in leaf_name or "entrance path" in leaf_name or "front gate" in leaf_name) and prim_node["node_id"] == "loc_school_gate":
+                        child = next((rn for rn in pool if rn.get("parent_id") == prim_node["node_id"] and rn["node_id"] == "sub_entrance_path"), None)
+                        if child:
+                            return child["node_id"]
+                    if "homeroom" in leaf_name:
+                        child = next((rn for rn in pool if rn.get("parent_id") == prim_node["node_id"] and rn["node_id"] == "loc_homeroom"), None)
+                        if child:
+                            return child["node_id"]
+            return prim_node["node_id"]
 
-    # 2b. Check if prim_name (middle tier of legacy 3-part string e.g. 'Zone ➔ Room ➔ Prop') matches a ROOM node directly
-    if prim_name and len(parts) >= 2:
-        for n in nodes:
-            if n.get("node_type") == "ROOM" and n["name"].lower() == prim_name:
-                return n["node_id"]
-        if "homeroom" in prim_name:
-            hr = next((n for n in nodes if n["node_id"] == "loc_homeroom"), None)
-            if hr:
-                return hr["node_id"]
-        for n in nodes:
-            if n.get("node_type") == "ROOM" and len(prim_name) >= 4 and (prim_name in n["name"].lower() or n["name"].lower() in prim_name):
-                return n["node_id"]
-
-    # 3. Match on leaf name (only non-generic)
-    if leaf_name and leaf_name not in ("main area", "area", "main"):
-        type_order = ("FACILITY", "ZONE", "ROOM") if prefer_facility else ("ROOM", "FACILITY", "ZONE")
-        for n_type in type_order:
-            for n in nodes:
-                if n.get("node_type") == n_type and n["name"].lower() == leaf_name:
+        if prim_name and len(parts) >= 2:
+            for n in pool:
+                if n.get("node_type") == "ROOM" and n["name"].lower() == prim_name:
+                    return n["node_id"]
+            if "homeroom" in prim_name:
+                hr = next((n for n in pool if n["node_id"] == "loc_homeroom"), None)
+                if hr:
+                    return hr["node_id"]
+            for n in pool:
+                if n.get("node_type") == "ROOM" and len(prim_name) >= 4 and (prim_name in n["name"].lower() or n["name"].lower() in prim_name):
                     return n["node_id"]
 
-    # 4. Containment / Substring match on leaf name (only non-generic)
-    if leaf_name and len(leaf_name) >= 4 and leaf_name not in ("main area", "area", "main"):
-        for n in nodes:
-            n_low = n["name"].lower()
-            if leaf_name in n_low or n_low in leaf_name:
-                return n["node_id"]
+        if leaf_name and leaf_name not in ("main area", "area", "main"):
+            type_order = ("FACILITY", "ZONE", "ROOM") if prefer_facility else ("ROOM", "FACILITY", "ZONE")
+            for n_type in type_order:
+                for n in pool:
+                    if n.get("node_type") == n_type and n["name"].lower() == leaf_name:
+                        return n["node_id"]
 
-    # 5. Containment / Substring match on primary name
-    if prim_name and len(prim_name) >= 4:
-        for n in nodes:
-            n_low = n["name"].lower()
-            if prim_name in n_low or n_low in prim_name:
-                return n["node_id"]
+        if leaf_name and len(leaf_name) >= 4 and leaf_name not in ("main area", "area", "main"):
+            for n in pool:
+                if n.get("node_type") == "REALM":
+                    continue
+                n_low = n["name"].lower()
+                if leaf_name in n_low or n_low in leaf_name:
+                    return n["node_id"]
 
-    return None
+        if prim_name and len(prim_name) >= 4:
+            for n in pool:
+                if n.get("node_type") == "REALM":
+                    continue
+                n_low = n["name"].lower()
+                if prim_name in n_low or n_low in prim_name:
+                    return n["node_id"]
+        return None
+
+    if eff_pref_realm:
+        in_realm = [n for n in nodes if get_node_realm_id_in_memory(n["node_id"], nodes_by_id) == eff_pref_realm]
+        hit = _resolve_against_pool(in_realm)
+        if hit:
+            return hit
+        other_nodes = [n for n in nodes if get_node_realm_id_in_memory(n["node_id"], nodes_by_id) != eff_pref_realm]
+        return _resolve_against_pool(other_nodes)
+
+    return _resolve_against_pool(nodes)
 
 
-def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node_id: str) -> int | None:
+def find_shortest_graph_path_minutes(
+    session_id: int,
+    from_node_id: str,
+    to_node_id: str,
+    allow_cross_realm: bool = False,
+) -> int | None:
     """
     Computes shortest-path travel time in minutes between two nodes using Dijkstra's algorithm
-    over world_edges plus implicit 1-minute parent-child transitions.
+    over world_edges plus implicit 1-minute parent-child transitions (never through REALM roots).
+    Cross-realm travel is blocked by default (`allow_cross_realm=False`) and otherwise restricted
+    strictly to `PORTAL_EDGE_TYPES`.
     Returns travel minutes (>= 2 for distinct nodes) or None if unreachable.
     """
     if not session_id or not from_node_id or not to_node_id:
@@ -1021,17 +1140,43 @@ def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node
     if from_node_id == to_node_id:
         return 2
 
+    from mechanics.world.locations.realms import PORTAL_EDGE_TYPES, get_node_realm_id_in_memory
+    nodes_by_id = {n["node_id"]: n for n in nodes if n.get("node_id")}
+    from_realm = get_node_realm_id_in_memory(from_node_id, nodes_by_id)
+    to_realm = get_node_realm_id_in_memory(to_node_id, nodes_by_id)
+    if not allow_cross_realm and from_realm and to_realm and from_realm != to_realm:
+        return None
+
+    explicit_directed_edges = {
+        (e.get("from_node_id"), e.get("to_node_id"))
+        for e in edges
+        if e.get("from_node_id") and e.get("to_node_id")
+    }
     adj = defaultdict(list)
     for e in edges:
         u = e.get("from_node_id")
         v = e.get("to_node_id")
         w = max(1, int(e.get("travel_minutes") or 2))
-        if str(e.get("edge_type") or "") == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1:
+        etype = str(e.get("edge_type") or "")
+        if etype == "leyline_spirit_passage" and int(e.get("is_locked") or 0) == 1:
             continue
-        if u and v:
-            adj[u].append((v, w))
-            if e.get("is_bidirectional", 1):
-                adj[v].append((u, w))
+        if (
+            etype in PORTAL_EDGE_TYPES
+            and int(e.get("is_locked") or 0) == 1
+            and not e.get("lock_key_item")
+            and not e.get("skill_check_type")
+        ):
+            continue
+        if not u or not v:
+            continue
+        u_realm = get_node_realm_id_in_memory(u, nodes_by_id)
+        v_realm = get_node_realm_id_in_memory(v, nodes_by_id)
+        if u_realm and v_realm and u_realm != v_realm:
+            if not allow_cross_realm or etype not in PORTAL_EDGE_TYPES:
+                continue
+        adj[u].append((v, w))
+        if e.get("is_bidirectional", 1) and (v, u) not in explicit_directed_edges:
+            adj[v].append((u, w))
 
     _mega_complex_ids = {
         "loc_agency_hq", "loc_private_hq_1", "loc_private_hq_2",
@@ -1039,14 +1184,18 @@ def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node
         "loc_botanical_zoo", "loc_cult_sanctum_hq", "loc_clandestine_syndicate_hq",
         "loc_hidden_kitsune_village", "loc_hidden_bunian_village",
     }
-    # Add implicit parent-child transitions (1 minute between facility and room; or zone if directly queried)
+    # Add implicit parent-child transitions (1 minute between facility and room; NEVER through REALM root)
     for n in nodes:
         pid = n.get("parent_id")
         nid = n.get("node_id")
-        if pid and nid:
-            if (n.get("node_type") == "ROOM" and pid not in _mega_complex_ids) or pid in (from_node_id, to_node_id):
-                adj[pid].append((nid, 1))
-                adj[nid].append((pid, 1))
+        if not pid or not nid:
+            continue
+        p_node = nodes_by_id.get(pid)
+        if (p_node and str(p_node.get("node_type") or "").upper() == "REALM") or str(n.get("node_type") or "").upper() == "REALM":
+            continue
+        if (n.get("node_type") == "ROOM" and pid not in _mega_complex_ids) or pid in (from_node_id, to_node_id):
+            adj[pid].append((nid, 1))
+            adj[nid].append((pid, 1))
 
     dist = {from_node_id: 0}
     pq = [(0, from_node_id)]
@@ -1063,6 +1212,422 @@ def find_shortest_graph_path_minutes(session_id: int, from_node_id: str, to_node
                 heapq.heappush(pq, (d + w, v))
 
     return max(2, dist[to_node_id]) if to_node_id in dist else None
+
+
+def get_session_world_nodes_tx(session_id: int, conn: Any = None) -> list[dict]:
+    """Transaction-aware world_nodes fetch reusing `conn` if provided."""
+    if not session_id:
+        return []
+    if conn is not None:
+        rows = conn.execute(
+            "SELECT * FROM world_nodes WHERE session_id = ? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    return get_session_world_nodes(session_id)
+
+
+def get_world_node_tx(session_id: int, node_id: str, conn: Any = None) -> dict | None:
+    """Transaction-aware single world_node fetch reusing `conn` if provided."""
+    if not session_id or not node_id:
+        return None
+    if conn is not None:
+        row = conn.execute(
+            "SELECT * FROM world_nodes WHERE session_id = ? AND node_id = ?",
+            (session_id, node_id),
+        ).fetchone()
+        return dict(row) if row else None
+    return get_world_node(session_id, node_id)
+
+
+def get_session_scenario_tx(session_id: int, conn: Any = None) -> str:
+    """Fetches a session's scenario string within `conn` or a pooled connection."""
+    if not session_id:
+        return "fantasy"
+    if conn is not None:
+        s_row = conn.execute("SELECT scenario FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        return str((s_row["scenario"] if s_row else "") or "fantasy")
+    with get_conn() as c:
+        s_row = c.execute("SELECT scenario FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        return str((s_row["scenario"] if s_row else "") or "fantasy")
+
+
+def update_world_node_state_json(
+    session_id: int,
+    node_id: str,
+    state: dict | str,
+    conn: Any = None,
+) -> None:
+    """Overwrites world_nodes.state_json for a node inside an optional connection/UoW."""
+    if not session_id or not node_id:
+        return
+    payload = state if isinstance(state, str) else json.dumps(state)
+    if conn is not None:
+        conn.execute(
+            "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+            (payload, session_id, node_id),
+        )
+        return
+    with UnitOfWork() as c:
+        c.execute(
+            "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+            (payload, session_id, node_id),
+        )
+
+
+def upsert_world_node_tx(
+    session_id: int,
+    node_id: str,
+    parent_id: str | None,
+    name: str,
+    node_type: str,
+    category: str = "academic",
+    privacy_level: str = "public",
+    is_enclosed: int = 1,
+    is_transit_hub: int = 0,
+    access_tier: str = "open",
+    curfew_start_min: int | None = None,
+    curfew_end_min: int | None = None,
+    atmosphere: str = "",
+    is_dynamic: int = 0,
+    state_json: str | dict | None = None,
+    overwrite_on_conflict: bool = False,
+    conn: Any = None,
+) -> None:
+    """Transaction-aware world_nodes insert/upsert reusing an active connection when provided."""
+    if not session_id or not node_id:
+        return
+    s_json_val = json.dumps(state_json) if isinstance(state_json, dict) else (state_json or "{}")
+    now = time.time()
+    sql = (
+        """INSERT INTO world_nodes
+           (session_id, node_id, parent_id, name, node_type, category, privacy_level,
+            is_enclosed, is_transit_hub, access_tier, curfew_start_min, curfew_end_min,
+            atmosphere, is_dynamic, state_json, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_id, node_id) DO UPDATE SET
+           parent_id=excluded.parent_id, name=excluded.name, node_type=excluded.node_type,
+           atmosphere=excluded.atmosphere, is_dynamic=excluded.is_dynamic, state_json=excluded.state_json"""
+        if overwrite_on_conflict
+        else """INSERT INTO world_nodes
+                (session_id, node_id, parent_id, name, node_type, category, privacy_level,
+                 is_enclosed, is_transit_hub, access_tier, curfew_start_min, curfew_end_min,
+                 atmosphere, is_dynamic, state_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, node_id) DO NOTHING"""
+    )
+    params = (
+        session_id,
+        node_id,
+        parent_id,
+        name,
+        node_type,
+        category,
+        privacy_level,
+        is_enclosed,
+        is_transit_hub,
+        access_tier,
+        curfew_start_min,
+        curfew_end_min,
+        atmosphere,
+        is_dynamic,
+        s_json_val,
+        now,
+    )
+    if conn is not None:
+        conn.execute(sql, params)
+        return
+    with UnitOfWork() as c:
+        c.execute(sql, params)
+
+
+def reparent_orphan_zones_to_realm(session_id: int, realm_id: str, conn: Any = None) -> int:
+    """Attaches orphan ZONE nodes (parent_id IS NULL or '') under `realm_id`."""
+    if not session_id or not realm_id:
+        return 0
+    sql = "UPDATE world_nodes SET parent_id = ? WHERE session_id = ? AND node_type = 'ZONE' AND (parent_id IS NULL OR parent_id = '')"
+    if conn is not None:
+        return int(conn.execute(sql, (realm_id, session_id)).rowcount or 0)
+    with UnitOfWork() as c:
+        return int(c.execute(sql, (realm_id, session_id)).rowcount or 0)
+
+
+def upsert_world_edge_tx(
+    session_id: int,
+    from_node_id: str,
+    to_node_id: str,
+    travel_minutes: int = 2,
+    edge_type: str = "hallway",
+    is_bidirectional: int = 1,
+    is_locked: int = 0,
+    lock_key_item: str = "",
+    skill_check_type: str = "",
+    skill_check_dc: int = 0,
+    update_on_conflict: bool = False,
+    conn: Any = None,
+) -> None:
+    """Transaction-aware world_edges insert/upsert reusing `conn` if provided."""
+    if not session_id or not from_node_id or not to_node_id:
+        return
+    now = time.time()
+    sql = (
+        """INSERT INTO world_edges
+           (session_id, from_node_id, to_node_id, travel_minutes, edge_type, is_bidirectional, is_locked, lock_key_item, skill_check_type, skill_check_dc, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(session_id, from_node_id, to_node_id) DO UPDATE SET
+           travel_minutes=excluded.travel_minutes, edge_type=excluded.edge_type,
+           is_bidirectional=excluded.is_bidirectional, is_locked=excluded.is_locked,
+           lock_key_item=excluded.lock_key_item, skill_check_type=excluded.skill_check_type,
+           skill_check_dc=excluded.skill_check_dc"""
+        if update_on_conflict
+        else """INSERT INTO world_edges
+                (session_id, from_node_id, to_node_id, travel_minutes, edge_type, is_bidirectional, is_locked, lock_key_item, skill_check_type, skill_check_dc, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, from_node_id, to_node_id) DO NOTHING"""
+    )
+    params = (
+        session_id,
+        from_node_id,
+        to_node_id,
+        travel_minutes,
+        edge_type,
+        is_bidirectional,
+        is_locked,
+        lock_key_item,
+        skill_check_type,
+        skill_check_dc,
+        now,
+    )
+    if conn is not None:
+        conn.execute(sql, params)
+        return
+    with UnitOfWork() as c:
+        c.execute(sql, params)
+
+
+def delete_world_edges_by_node_type(
+    session_id: int,
+    edge_type: str,
+    node_id: str,
+    conn: Any = None,
+) -> int:
+    """Deletes edges of `edge_type` incident to `node_id`."""
+    if not session_id or not edge_type or not node_id:
+        return 0
+    sql = "DELETE FROM world_edges WHERE session_id = ? AND edge_type = ? AND (from_node_id = ? OR to_node_id = ?)"
+    if conn is not None:
+        return int(conn.execute(sql, (session_id, edge_type, node_id, node_id)).rowcount or 0)
+    with UnitOfWork() as c:
+        return int(c.execute(sql, (session_id, edge_type, node_id, node_id)).rowcount or 0)
+
+
+def unlock_realm_edges_by_types(
+    session_id: int,
+    member_node_ids: list[str],
+    edge_types: tuple[str, ...],
+    *,
+    lock_return_only: bool = False,
+    conn: Any = None,
+) -> None:
+    """Unlocks portal edges for realm members or re-locks outgoing return edges on rollback."""
+    if not session_id or not member_node_ids or not edge_types:
+        return
+    ph_m = ",".join("?" for _ in member_node_ids)
+    ph_e = ",".join("?" for _ in edge_types)
+
+    def _run(c: Any) -> None:
+        if lock_return_only:
+            c.execute(
+                f"UPDATE world_edges SET is_locked = 1, is_bidirectional = 0 WHERE session_id = ? AND from_node_id IN ({ph_m}) AND edge_type IN ({ph_e})",
+                (session_id, *member_node_ids, *edge_types),
+            )
+            c.execute(
+                f"UPDATE world_edges SET is_bidirectional = 0 WHERE session_id = ? AND to_node_id IN ({ph_m}) AND edge_type IN ({ph_e})",
+                (session_id, *member_node_ids, *edge_types),
+            )
+        else:
+            c.execute(
+                f"UPDATE world_edges SET is_locked = 0, is_bidirectional = 1 WHERE session_id = ? AND (from_node_id IN ({ph_m}) OR to_node_id IN ({ph_m})) AND edge_type IN ({ph_e})",
+                (session_id, *member_node_ids, *member_node_ids, *edge_types),
+            )
+
+    if conn is not None:
+        _run(conn)
+        return
+    with UnitOfWork() as c:
+        _run(c)
+
+
+def delete_realm_nodes_and_edges(
+    session_id: int,
+    node_ids: list[str],
+    realm_id: str,
+    conn: Any = None,
+) -> dict[str, int]:
+    """Deletes `node_ids`, incident edges, session_locations, and dangling portal metadata."""
+    if not session_id or not node_ids:
+        return {"deleted_nodes": 0, "deleted_edges": 0}
+    to_del_set = set(node_ids)
+    ph = ",".join("?" for _ in node_ids)
+
+    def _run(c: Any) -> dict[str, int]:
+        del_edges = c.execute(
+            f"DELETE FROM world_edges WHERE session_id = ? AND (from_node_id IN ({ph}) OR to_node_id IN ({ph}))",
+            (session_id, *node_ids, *node_ids),
+        ).rowcount or 0
+        c.execute(
+            f"DELETE FROM session_locations WHERE session_id = ? AND location_id IN ({ph})",
+            (session_id, *node_ids),
+        )
+        del_nodes = c.execute(
+            f"DELETE FROM world_nodes WHERE session_id = ? AND node_id IN ({ph})",
+            (session_id, *node_ids),
+        ).rowcount or 0
+        rem_rows = c.execute(
+            "SELECT node_id, state_json FROM world_nodes WHERE session_id = ? AND state_json LIKE '%portals%'",
+            (session_id,),
+        ).fetchall()
+        for r in rem_rows:
+            nid = str(r["node_id"])
+            if nid in to_del_set or not r["state_json"]:
+                continue
+            try:
+                st = json.loads(r["state_json"]) if isinstance(r["state_json"], str) else dict(r["state_json"])
+            except Exception:
+                continue
+            if not isinstance(st, dict):
+                continue
+            portals = st.get("portals")
+            if isinstance(portals, dict):
+                pruned = {
+                    k: v
+                    for k, v in portals.items()
+                    if k not in to_del_set and not (isinstance(v, dict) and v.get("target_realm_id") == realm_id)
+                }
+                if len(pruned) != len(portals):
+                    st["portals"] = pruned
+                    c.execute(
+                        "UPDATE world_nodes SET state_json = ? WHERE session_id = ? AND node_id = ?",
+                        (json.dumps(st), session_id, nid),
+                    )
+        return {"deleted_nodes": int(del_nodes), "deleted_edges": int(del_edges)}
+
+    if conn is not None:
+        return _run(conn)
+    with UnitOfWork() as c:
+        return _run(c)
+
+
+def restore_session_location_node_tx(
+    session_id: int,
+    node_id: str,
+    location_str: str,
+    conn: Any = None,
+) -> None:
+    """Restores sessions.current_node_id and sessions.current_location inside an optional connection."""
+    if not session_id:
+        return
+    sql = "UPDATE sessions SET current_node_id = ?, current_location = ?, updated_at = ? WHERE id = ?"
+    params = (node_id, location_str, time.time(), session_id)
+    if conn is not None:
+        conn.execute(sql, params)
+        return
+    with UnitOfWork() as c:
+        c.execute(sql, params)
+
+
+def fix_dangling_session_node_after_collapse(
+    session_id: int,
+    fallback_node_ids: list[str] | tuple[str, ...] = (),
+    conn: Any = None,
+) -> bool:
+    """Relocates sessions.current_node_id if it references a node deleted during dynamic realm collapse."""
+    if not session_id:
+        return False
+
+    def _run(c: Any) -> bool:
+        s_row = c.execute(
+            "SELECT current_node_id, extra_json FROM sessions WHERE id = ?",
+            (session_id,),
+        ).fetchone()
+        if not s_row:
+            return False
+        curr_nid = str(s_row["current_node_id"] or "").strip()
+        if not curr_nid:
+            return False
+        exists = c.execute(
+            "SELECT 1 FROM world_nodes WHERE session_id = ? AND node_id = ?",
+            (session_id, curr_nid),
+        ).fetchone()
+        if exists:
+            return False
+
+        rows = c.execute("SELECT * FROM world_nodes WHERE session_id = ? ORDER BY id ASC", (session_id,)).fetchall()
+        nodes = [dict(r) for r in rows]
+        nodes_by_id = {str(n["node_id"]): n for n in nodes if n.get("node_id")}
+        chosen_nid = ""
+        for cand in (fallback_node_ids or ()):
+            c_str = str(cand or "").strip()
+            if c_str and c_str in nodes_by_id:
+                chosen_nid = c_str
+                break
+        from mechanics.world.locations.realms import (
+            format_tiered_location_in_memory,
+            get_node_realm_id_in_memory,
+            get_node_realm_in_memory,
+            get_primary_realm_in_memory,
+            get_realm_rules,
+            is_node_or_realm_hidden_in_memory,
+        )
+        if not chosen_nid and nodes:
+            prim = get_primary_realm_in_memory(nodes_by_id)
+            prim_id = str((prim or {}).get("node_id") or "")
+            room_cands = [
+                n for n in nodes
+                if str(n.get("node_type") or "").upper() == "ROOM"
+                and (not prim_id or get_node_realm_id_in_memory(str(n["node_id"]), nodes_by_id) == prim_id)
+                and not is_node_or_realm_hidden_in_memory(str(n["node_id"]), nodes_by_id)
+            ]
+            hub_pick = next(
+                (
+                    n for n in room_cands
+                    if int(n.get("is_transit_hub") or 0) == 1
+                    or int((nodes_by_id.get(str(n.get("parent_id") or "")) or {}).get("is_transit_hub") or 0) == 1
+                ),
+                room_cands[0] if room_cands else None,
+            )
+            if hub_pick:
+                chosen_nid = str(hub_pick["node_id"])
+            loc_str = format_tiered_location_in_memory(chosen_nid, nodes_by_id) if chosen_nid else ""
+        else:
+            loc_str = format_tiered_location_in_memory(chosen_nid, nodes_by_id) if chosen_nid else ""
+
+        dest_realm = get_node_realm_in_memory(chosen_nid, nodes_by_id) if chosen_nid else None
+        dest_rules = get_realm_rules(dest_realm) if dest_realm else {}
+        extra_sql = ""
+        params: list[Any] = [chosen_nid, loc_str, time.time()]
+        if not dest_rules.get("restrict_companions"):
+            try:
+                ex_obj = json.loads(s_row["extra_json"] or "{}") if s_row["extra_json"] else {}
+            except Exception:
+                ex_obj = {}
+            if isinstance(ex_obj, dict) and ex_obj.get("waiting_outside_companions"):
+                ex_obj["waiting_outside_companions"] = []
+                extra_sql = ", extra_json = ?"
+                params.append(json.dumps(ex_obj, default=str))
+        params.append(session_id)
+
+        c.execute(
+            f"UPDATE sessions SET current_node_id = ?, current_location = ?, focal_point = '', updated_at = ?{extra_sql} WHERE id = ?",
+            tuple(params),
+        )
+        return True
+
+    if conn is not None:
+        return _run(conn)
+    with UnitOfWork() as c:
+        return _run(c)
+
 
 
 

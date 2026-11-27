@@ -123,6 +123,8 @@ __all__ = [
     "WAL_MAINTENANCE_TURN_INTERVAL",
     "acquire_distributed_lock",
     "adb",
+    "call_with_supported_kwargs",
+    "callable_accepts_kwarg",
     "cleanup_simulation_db",
     "close_all_connections",
     "create_database_snapshot",
@@ -154,7 +156,11 @@ from . import (
     migrations_backfills as _mod_migrations_backfills,
     schema as _mod_schema,
 )
-from .module_proxy import install_submodule_proxy as _install_submodule_proxy
+from .module_proxy import (
+    call_with_supported_kwargs,
+    callable_accepts_kwarg,
+    install_submodule_proxy as _install_submodule_proxy,
+)
 
 _SUBMODULES = (
     _mod_schema,

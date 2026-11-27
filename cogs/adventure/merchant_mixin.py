@@ -18,8 +18,34 @@ from .embeds import scene_embed, sync_scene_embed
 from .views import ChoiceView, SyncChoiceView
 
 
+async def _get_session_character(user_id: int, session_id: int) -> dict | None:
+    char = await adb(db.get_character, user_id, session_id=session_id)
+    if not char:
+        char = await adb(db.get_character, user_id)
+    return char
+
+
 class MerchantMixin:
     """Merchant shop entry, detour voting, buy/sell menus, haggling, and rumor handlers for AdventureCog."""
+
+    async def _check_phone_shop_comms_gate(
+        self,
+        interaction: discord.Interaction,
+        session_id: int,
+        session: dict | None = None,
+    ) -> bool:
+        from mechanics.world.locations.realms import check_realm_comms_available
+
+        sess = session if isinstance(session, dict) else (await adb(db.get_session, session_id) or {})
+        comms = await adb(check_realm_comms_available, session_id, (sess or {}).get("current_node_id"))
+        if comms.get("available"):
+            return True
+        msg = f"📵 {comms.get('reason') or 'No signal — isolated realm.'}"
+        if interaction.response.is_done():
+            await interaction.followup.send(msg, ephemeral=True)
+        else:
+            await interaction.response.send_message(msg, ephemeral=True)
+        return False
 
     async def enter_merchant_shop(self, interaction: discord.Interaction, session_id: int,
                                    initiator_id: int, detour_note: str = None, is_phone_shop: bool = False,
@@ -38,22 +64,50 @@ class MerchantMixin:
             return
         merchant = dict(session.get("merchant") or {})
         party = list(await asyncio.gather(
-            *[(asyncio.gather(adb(db.get_character, uid), adb(db.get_inventory, uid)))
+            *[(asyncio.gather(adb(db.get_character, uid, session_id=session_id), adb(db.get_inventory, uid, session_id=session_id)))
               for uid in session["turn_order"]]
         ))
 
         from mechanics.combat.merchant import (
+            MERCHANT_ARCHETYPES,
+            compute_charisma_discount,
             get_anomalous_shop_faction_context,
             get_store_key,
             get_or_create_merchant_catalogue,
             update_merchant_catalogue,
             validate_or_clear_faction_quartermaster,
         )
+        from mechanics.combat.online_store import (
+            SCHOOL_MART_STUDENT_DISCOUNT_PCT,
+            STORE_MODE_ONLINE_GENERAL,
+            STORE_MODE_SCHOOL_MART,
+            is_legacy_flat_phone_stock,
+            is_school_mart_requested,
+            normalize_phone_store_mode,
+        )
+        from mechanics.social.origin_mode import resolve_player_age_profile
 
         current_day, current_minute, _ = await adb(db.get_session_time, session_id)
+        initiator_char = await _get_session_character(initiator_id, session_id)
         loc = session.get("current_location", "")
         is_qm_enter = False
-        if not is_phone_shop:
+        is_student = bool(
+            resolve_player_age_profile(
+                session,
+                initiator_char or (party[0][0] if party else None),
+            ).get("is_student")
+        )
+        if is_phone_shop:
+            if not await self._check_phone_shop_comms_gate(interaction, session_id, session):
+                return
+            if is_school_mart_requested(merchant_type) and not is_student:
+                await interaction.followup.send(
+                    "🎒 SchoolMart student store is only available to student characters.",
+                    ephemeral=True,
+                )
+                return
+            merchant_type = normalize_phone_store_mode(merchant_type, is_student=is_student)
+        else:
             is_qm_enter, updated_m = await adb(validate_or_clear_faction_quartermaster, session_id, loc, merchant)
             merchant.clear()
             merchant.update(updated_m)
@@ -91,28 +145,60 @@ class MerchantMixin:
             if shop_avail.get("staff_npc"):
                 merchant["flavor_name"] = str(shop_avail["staff_npc"].get("name") or merchant.get("flavor_name") or "")
 
-        store_key = get_store_key(merchant, is_phone_shop=is_phone_shop, merchant_type=merchant_type, location=loc)
+        store_key = get_store_key(
+            merchant,
+            is_phone_shop=is_phone_shop,
+            merchant_type=merchant_type,
+            location=loc,
+            store_mode=(merchant_type if is_phone_shop else None),
+        )
         cat_entry, needs_restock = get_or_create_merchant_catalogue(merchant, store_key, current_day, current_minute)
+        if (
+            is_phone_shop
+            and merchant_type == STORE_MODE_ONLINE_GENERAL
+            and is_legacy_flat_phone_stock((cat_entry or {}).get("stock"))
+        ):
+            needs_restock = True
 
         if needs_restock:
             shop = await game_engine.generate_merchant_shop(
-                party, merchant.get("flavor_name", ""), merchant.get("flavor_description", ""), session,
-                is_phone_shop=is_phone_shop, merchant_type=merchant_type)
+                party,
+                merchant.get("flavor_name", ""),
+                merchant.get("flavor_description", ""),
+                session,
+                is_phone_shop=is_phone_shop,
+                merchant_type=merchant_type,
+                store_mode=(merchant_type if is_phone_shop else None),
+            )
             cat_entry = update_merchant_catalogue(merchant, store_key, shop, current_day, current_minute)
+
+        phone_discount = 0
+        if is_phone_shop and merchant_type == STORE_MODE_SCHOOL_MART:
+            cha_disc = compute_charisma_discount(initiator_char or {}, {"discount_pct": 0})
+            phone_discount = min(40, SCHOOL_MART_STUDENT_DISCOUNT_PCT + cha_disc)
 
         merchant.update({
             "active": True,
             "active_store_key": store_key,
             "merchant_type": merchant_type,
             "is_phone_shop": is_phone_shop,
+            "in_person_only": (
+                False
+                if is_phone_shop
+                else bool((MERCHANT_ARCHETYPES.get(merchant_type, {}) or {}).get("in_person_only"))
+            ),
             "intro_narrative": cat_entry["intro_narrative"],
-            "stock": cat_entry["stock"],
             "rumors": cat_entry["rumors"],
             "haggle_attempts": cat_entry.get("haggle_attempts", 0),
-            "discount_pct": cat_entry.get("discount_pct", 0),
+            "discount_pct": phone_discount if is_phone_shop else cat_entry.get("discount_pct", 0),
             "restock_day": cat_entry.get("restock_day", current_day),
             "restock_minute": cat_entry.get("restock_minute", current_minute),
         })
+        if is_phone_shop:
+            stock_field = "school_mart_stock" if merchant_type == STORE_MODE_SCHOOL_MART else "phone_stock"
+            merchant[stock_field] = cat_entry["stock"]
+        else:
+            merchant["stock"] = cat_entry["stock"]
         await adb(db.save_merchant_state, session_id, merchant)
 
         embeds = [await adb(_merchant_embed, session_id, detour_note)]
@@ -124,7 +210,7 @@ class MerchantMixin:
         one party-wide CHA check (using the initiating player's character)
         to see if the group still gets talked into stopping anyway."""
         initiator, _settings = await asyncio.gather(
-            adb(db.get_character, initiator_id),
+            adb(db.get_character, initiator_id, session_id=session_id),
             adb(db.get_settings, initiator_id),
         )
         check_mode = _settings.get("debug_check_mode", "off")
@@ -142,7 +228,7 @@ class MerchantMixin:
             await adb(db.save_merchant_state, session_id, merchant)
 
             party = list(await asyncio.gather(
-                *[(asyncio.gather(adb(db.get_character, uid), adb(db.get_inventory, uid)))
+                *[(asyncio.gather(adb(db.get_character, uid, session_id=session_id), adb(db.get_inventory, uid, session_id=session_id)))
                   for uid in session["turn_order"]]
             ))
             if session["mode"] == "sync":
@@ -162,7 +248,7 @@ class MerchantMixin:
                 if turn_uid in party_by_uid:
                     actor_char, actor_inv = party_by_uid[turn_uid]
                 else:
-                    actor_char = await adb(db.get_character, turn_uid)
+                    actor_char = await adb(db.get_character, turn_uid, session_id=session_id)
                     actor_inv = None
                 embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
                                      session["choices"])
@@ -198,6 +284,7 @@ class MerchantMixin:
             compute_effective_shop_item_price,
             get_anomalous_shop_faction_context,
         )
+        from mechanics.combat.online_store import STORE_MODE_SCHOOL_MART
 
         session = await adb(db.get_session, session_id)
         merchant = session["merchant"]
@@ -222,7 +309,12 @@ class MerchantMixin:
             )
             return
 
-        stock = [item for item in merchant.get("stock", []) if item.get("quantity", 0) > 0]
+        buy_stock_field = (
+            ("school_mart_stock" if str(merchant.get("merchant_type") or "") == STORE_MODE_SCHOOL_MART else "phone_stock")
+            if is_phone_shop
+            else "stock"
+        )
+        stock = [item for item in (merchant.get(buy_stock_field) or []) if item.get("quantity", 0) > 0]
         if not stock:
             current_day, _, _ = await adb(db.get_session_time, session_id)
             await interaction.response.send_message(
@@ -254,16 +346,22 @@ class MerchantMixin:
         personal gold/inventory and not something Task 3.2 asks to be
         per-player."""
         from mechanics.combat.merchant import (
+            compute_charisma_discount,
             compute_effective_shop_item_price,
             get_anomalous_shop_faction_context,
             mark_vault_requisition_claimed,
             stamp_discounted_purchase_metadata,
             validate_or_clear_faction_quartermaster,
         )
-        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+        from mechanics.combat.online_store import (
+            SCHOOL_MART_STUDENT_DISCOUNT_PCT,
+            STORE_MODE_SCHOOL_MART,
+        )
+        from mechanics.social.origin_mode import resolve_player_age_profile
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_adventure_lock
 
         try:
-            async with distributed_session_lock(session_id, raise_http_error=False):
+            async with distributed_adventure_lock(user_id, session_id, raise_http_error=False):
                 session = await adb(db.get_session, session_id)
                 if not session:
                     await interaction.response.send_message("Session not found.", ephemeral=True)
@@ -275,8 +373,27 @@ class MerchantMixin:
                 if int(user_id) not in sess_members:
                     await interaction.response.send_message("You're not in this session.", ephemeral=True)
                     return
+                char = await _get_session_character(user_id, session_id)
                 merchant = dict(session.get("merchant") or {})
                 is_phone_shop = bool(merchant.get("is_phone_shop", False))
+                buy_store_mode = str(merchant.get("merchant_type") or "") if is_phone_shop else ""
+                if is_phone_shop:
+                    if not await self._check_phone_shop_comms_gate(interaction, session_id, session):
+                        return
+                    from mechanics.combat import is_in_combat
+
+                    if bool(session.get("in_combat") or is_in_combat(session)):
+                        await interaction.response.send_message(
+                            "⚔️ Courier deliveries are suspended during active combat!",
+                            ephemeral=True,
+                        )
+                        return
+                    if buy_store_mode == STORE_MODE_SCHOOL_MART and not resolve_player_age_profile(session, char).get("is_student"):
+                        await interaction.response.send_message(
+                            "🎒 SchoolMart student store is only available to student characters.",
+                            ephemeral=True,
+                        )
+                        return
                 is_qm_buy = False
                 if not is_phone_shop:
                     is_qm_buy, updated_m = await adb(
@@ -325,7 +442,12 @@ class MerchantMixin:
                     )
                     return
 
-                stock = merchant.get("stock", [])
+                buy_stock_field = (
+                    ("school_mart_stock" if buy_store_mode == STORE_MODE_SCHOOL_MART else "phone_stock")
+                    if is_phone_shop
+                    else "stock"
+                )
+                stock = list(merchant.get(buy_stock_field) or [])
                 entry = next((i for i in stock if i["name"] == item_name and i.get("quantity", 0) > 0), None)
                 if not entry and " #" in item_name:
                     base_name = item_name.rsplit(" #", 1)[0]
@@ -335,9 +457,17 @@ class MerchantMixin:
                     return
 
                 discount_pct = merchant.get("discount_pct", 0)
+                if is_phone_shop:
+                    if buy_store_mode == STORE_MODE_SCHOOL_MART:
+                        discount_pct = min(
+                            40,
+                            SCHOOL_MART_STUDENT_DISCOUNT_PCT
+                            + compute_charisma_discount(char or {}, {"discount_pct": 0}),
+                        )
+                    else:
+                        discount_pct = 0
                 price = compute_effective_shop_item_price(entry, shop_ctx=shop_ctx, discount_pct=discount_pct)
 
-                char = await adb(db.get_character, user_id)
                 if not char or (char.get("gold", 0) or 0) < price:
                     await interaction.response.send_message(
                         f"You don't have enough gold ({price}g needed).",
@@ -349,6 +479,7 @@ class MerchantMixin:
                 is_anom_purchase = scenario_data.is_anomalous_incursions_scenario(session.get("scenario", ""))
                 if (
                     is_anom_purchase
+                    or (is_phone_shop and buy_store_mode == "school_mart")
                     or shop_ctx.get("is_monastic_free_shop")
                     or shop_ctx.get("is_public_discounted_shop")
                     or shop_ctx.get("is_event_discounted_shop")
@@ -406,6 +537,9 @@ class MerchantMixin:
                 active_key = merchant.get("active_store_key")
                 if active_key and "catalogues" in merchant and active_key in merchant["catalogues"]:
                     merchant["catalogues"][active_key]["stock"] = stock
+                if is_phone_shop:
+                    stock_field = "school_mart_stock" if buy_store_mode == STORE_MODE_SCHOOL_MART else "phone_stock"
+                    merchant[stock_field] = stock
 
                 if entry.get("is_vault_requisition"):
                     claimed_reqs = mark_vault_requisition_claimed(session, entry.get("name", ""))
@@ -438,8 +572,18 @@ class MerchantMixin:
         inventory, session, char = await asyncio.gather(
             adb(db.get_inventory, user_id),
             adb(db.get_session, session_id),
-            adb(db.get_character, user_id),
+            _get_session_character(user_id, session_id),
         )
+        merchant = dict((session or {}).get("merchant") or {})
+        if bool(merchant.get("is_phone_shop")):
+            if not await self._check_phone_shop_comms_gate(interaction, session_id, session):
+                return
+            msg = "Selling items is only available in person at physical merchant stalls."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
         priced_items = []
         for item in (inventory or []):
             payout, reject_reason = compute_item_resale_payout(dict(item), session, char)
@@ -462,7 +606,7 @@ class MerchantMixin:
         inv, session, char = await asyncio.gather(
             adb(db.get_inventory, user_id),
             adb(db.get_session, session_id),
-            adb(db.get_character, user_id),
+            _get_session_character(user_id, session_id),
         )
         if not session:
             await interaction.response.send_message("Session not found.", ephemeral=True)
@@ -470,6 +614,15 @@ class MerchantMixin:
         from mechanics.combat.merchant import validate_or_clear_faction_quartermaster
         merchant = dict(session.get("merchant") or {})
         is_qm_sell = False
+        if bool(merchant.get("is_phone_shop")):
+            if not await self._check_phone_shop_comms_gate(interaction, session_id, session):
+                return
+            msg = "Selling items is only available in person at physical merchant stalls."
+            if interaction.response.is_done():
+                await interaction.followup.send(msg, ephemeral=True)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
+            return
         if not bool(merchant.get("is_phone_shop")):
             is_qm_sell, updated_m = await adb(
                 validate_or_clear_faction_quartermaster,
@@ -517,15 +670,24 @@ class MerchantMixin:
         the whole party, not per-player), difficulty scaling with each
         attempt. Success applies a cumulative discount to Buy (lower
         price) and Sell (higher payout) for the rest of the encounter."""
-        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_adventure_lock
 
         try:
-            async with distributed_session_lock(session_id, raise_http_error=False):
+            async with distributed_adventure_lock(user_id, session_id, raise_http_error=False):
                 session = await adb(db.get_session, session_id)
                 if not session:
                     await interaction.response.send_message("Session not found.", ephemeral=True)
                     return
                 merchant = session["merchant"]
+                if bool(merchant.get("is_phone_shop")):
+                    if not await self._check_phone_shop_comms_gate(interaction, session_id, session):
+                        return
+                    msg = "Haggling is only available in person at physical merchant stalls."
+                    if interaction.response.is_done():
+                        await interaction.followup.send(msg, ephemeral=True)
+                    else:
+                        await interaction.response.send_message(msg, ephemeral=True)
+                    return
                 if not bool(merchant.get("is_phone_shop")) and not bool(merchant.get("is_faction_quartermaster")):
                     shop_avail = await adb(
                         evaluate_shop_staff_availability,
@@ -545,7 +707,7 @@ class MerchantMixin:
                         )
                         return
                 attempts = merchant.get("haggle_attempts", 0)
-                char = await adb(db.get_character, user_id)
+                char = await _get_session_character(user_id, session_id)
 
                 if attempts >= 3:
                     note = "The merchant has grown tired of haggling — no more attempts this visit."
@@ -603,12 +765,12 @@ class MerchantMixin:
         marks it revealed EITHER WAY so it can't be re-attempted/farmed
         (Task 2's Ask spec). On success, logs the rumor text into the
         session history so future narration can stay consistent with it."""
-        from mechanics.system.concurrency import LockAcquisitionError, distributed_session_lock
+        from mechanics.system.concurrency import LockAcquisitionError, distributed_adventure_lock
 
         stale_click = False
         result_text = ""
         try:
-            async with distributed_session_lock(session_id, raise_http_error=False):
+            async with distributed_adventure_lock(user_id, session_id, raise_http_error=False):
                 session = await adb(db.get_session, session_id)
                 merchant = session["merchant"]
                 rumors = merchant.get("rumors", [])
@@ -617,7 +779,7 @@ class MerchantMixin:
                 else:
                     stale_click = False
                     char, _settings = await asyncio.gather(
-                        adb(db.get_character, user_id),
+                        _get_session_character(user_id, session_id),
                         adb(db.get_settings, user_id),
                     )
                     check_mode = _settings.get("debug_check_mode", "off")
@@ -733,7 +895,7 @@ class MerchantMixin:
             if turn_uid in party_by_uid:
                 actor_char, actor_inv = party_by_uid[turn_uid]
             else:
-                actor_char = await adb(db.get_character, turn_uid)
+                actor_char = await _get_session_character(turn_uid, session_id)
                 actor_inv = None
             embeds = scene_embed(session, actor_char, session["scene_title"], session["narrative"],
                                  session["choices"])

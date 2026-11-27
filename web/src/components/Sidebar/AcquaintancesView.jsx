@@ -5,13 +5,13 @@ import {
   ChevronRight,
   Lock,
   MessageCircle,
-  Sparkles,
   User,
   Users,
 } from 'lucide-react';
 import { getRelationshipTier } from './CodexPanel';
 import KnownRoutineCard from './KnownRoutineCard';
 import KnownWardrobeCard from './KnownWardrobeCard';
+import OperativeCombatDossierCard from './OperativeCombatDossierCard';
 import { resolveNpcDemographics } from '../../utils/npcDemographics';
 
 const formatItemText = (item) => {
@@ -253,122 +253,122 @@ const AcquaintancesView = ({
               </div>
             </div>
 
-            {isExpanded && (
-              <div className="space-y-3 pt-2.5 border-t border-fantasy-border/40 text-xs text-gray-300">
-                <div className="p-2 rounded bg-fantasy-accent/10 border border-fantasy-accent/30 text-[11px] text-amber-100/90 leading-snug flex items-start gap-1.5">
-                  <Sparkles size={12} className="text-fantasy-accent shrink-0 mt-0.5" />
-                  <span>
-                    {t(
-                      'contacts.promotion_hint',
-                      'Promote to Saved Contacts by reaching +15 Affinity, -10 Rivalry, exchanging numbers in person, forming a quest link, or recruiting them into your party.'
-                    )}
-                  </span>
+            {isExpanded && (() => {
+              const anomTag = acq.anomalous_npc_tag || basic.anomalous_npc_tag || null;
+              const isSpecialAgent = anomTag === 'special_agent';
+              const isCivilianTag = anomTag === 'civilian';
+              const isDeceased = Boolean(
+                acq.deceased ||
+                  basic.deceased ||
+                  String(acq.disposition || '').toLowerCase() === 'dead'
+              );
+              const isDebugRevealed = Boolean(acq.debug_revealed);
+
+              return (
+                <div className="space-y-3 pt-2.5 border-t border-fantasy-border/40 text-xs text-gray-300">
+                  {desc && (
+                    <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                        {t('contacts.background_notes', '📖 Background & Notes')}
+                      </span>
+                      {desc}
+                    </div>
+                  )}
+
+                  {traits.length > 0 && (
+                    <div>
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                        {t('contacts.known_traits', 'Known Traits')}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {traits.map((tr, idx) => {
+                          const text = formatItemText(tr);
+                          const isMasked = !text || text === maskedSlot || text.includes('???');
+                          return (
+                            <span
+                              key={idx}
+                              className={`text-xs px-2 py-0.5 rounded border ${
+                                isMasked
+                                  ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
+                                  : 'bg-black/60 text-gray-300 border-fantasy-border'
+                              }`}
+                            >
+                              {text || maskedSlot}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {likes.length > 0 && (
+                    <div>
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                        {t('contacts.preferred_likes', 'Preferred / Likes')}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {likes.map((lk, idx) => {
+                          const text = formatItemText(lk);
+                          const isMasked = !text || text === maskedSlot || text.includes('???');
+                          return (
+                            <span
+                              key={idx}
+                              className={`text-xs px-2 py-0.5 rounded border ${
+                                isMasked
+                                  ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
+                                  : 'bg-emerald-950/35 text-emerald-200 border-emerald-800/50'
+                              }`}
+                            >
+                              {text || maskedSlot}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {dislikes.length > 0 && (
+                    <div>
+                      <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                        {t('contacts.aversions_dislikes', 'Aversions / Dislikes')}
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {dislikes.map((dl, idx) => {
+                          const text = formatItemText(dl);
+                          const isMasked = !text || text === maskedSlot || text.includes('???');
+                          return (
+                            <span
+                              key={idx}
+                              className={`text-xs px-2 py-0.5 rounded border ${
+                                isMasked
+                                  ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
+                                  : 'bg-rose-950/35 text-rose-200 border-rose-800/50'
+                              }`}
+                            >
+                              {text || maskedSlot}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <OperativeCombatDossierCard
+                    npc={acq}
+                    isSpecialAgent={isSpecialAgent}
+                    isCivilianTag={isCivilianTag}
+                    isInParty={false}
+                    isDeceased={isDeceased}
+                    isDebugRevealed={isDebugRevealed}
+                    t={t}
+                  />
+
+                  <KnownWardrobeCard npc={acq} showDebug={isDebugRevealed} t={t} />
+
+                  <KnownRoutineCard npc={acq} t={t} />
                 </div>
-
-                {isDmLocked && (
-                  <div className="p-2 rounded bg-neutral-900/70 border border-neutral-700/60 text-[11px] text-gray-400 leading-snug flex items-start gap-1.5">
-                    <Lock size={12} className="text-gray-400 shrink-0 mt-0.5" />
-                    <span>
-                      {t(
-                        'contacts.dm_locked_tooltip',
-                        'Direct Messaging is locked. Ask for their number in person or connect via PeerPulse first; Affinity alone does not unlock DMs.'
-                      )}
-                    </span>
-                  </div>
-                )}
-
-                {desc && (
-                  <div className="bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40 text-xs text-gray-300 leading-relaxed">
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      {t('contacts.background_notes', '📖 Background & Notes')}
-                    </span>
-                    {desc}
-                  </div>
-                )}
-
-                <KnownWardrobeCard npc={acq} t={t} />
-
-                <KnownRoutineCard npc={acq} t={t} />
-
-                {traits.length > 0 && (
-                  <div>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      {t('contacts.known_traits', 'Known Traits')}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {traits.map((tr, idx) => {
-                        const text = formatItemText(tr);
-                        const isMasked = !text || text === maskedSlot || text.includes('???');
-                        return (
-                          <span
-                            key={idx}
-                            className={`text-xs px-2 py-0.5 rounded border ${
-                              isMasked
-                                ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
-                                : 'bg-black/60 text-gray-300 border-fantasy-border'
-                            }`}
-                          >
-                            {text || maskedSlot}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {likes.length > 0 && (
-                  <div>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      {t('contacts.preferred_likes', 'Preferred / Likes')}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {likes.map((lk, idx) => {
-                        const text = formatItemText(lk);
-                        const isMasked = !text || text === maskedSlot || text.includes('???');
-                        return (
-                          <span
-                            key={idx}
-                            className={`text-xs px-2 py-0.5 rounded border ${
-                              isMasked
-                                ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
-                                : 'bg-emerald-950/35 text-emerald-200 border-emerald-800/50'
-                            }`}
-                          >
-                            {text || maskedSlot}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {dislikes.length > 0 && (
-                  <div>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider block mb-1">
-                      {t('contacts.aversions_dislikes', 'Aversions / Dislikes')}
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {dislikes.map((dl, idx) => {
-                        const text = formatItemText(dl);
-                        const isMasked = !text || text === maskedSlot || text.includes('???');
-                        return (
-                          <span
-                            key={idx}
-                            className={`text-xs px-2 py-0.5 rounded border ${
-                              isMasked
-                                ? 'bg-black/40 text-gray-500 border-dashed border-neutral-700 font-mono'
-                                : 'bg-rose-950/35 text-rose-200 border-rose-800/50'
-                            }`}
-                          >
-                            {text || maskedSlot}
-                          </span>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+              );
+            })()}
           </div>
         );
       })}

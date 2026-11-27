@@ -4,7 +4,23 @@ import { X, Sparkles, Shield, Compass, RefreshCw, Check, Link, Play, Building2, 
 import { useTranslation } from 'react-i18next';
 import { apiCall } from '../../api/client';
 import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
-import { FEMALE_TEXTURE_OPTIONS, MALE_TEXTURE_OPTIONS } from '../../utils/anatomyOptions';
+import {
+  REAR_SIZE_OPTIONS,
+  classifyAssetSizeTierClient,
+  classifyRearSizeTierClient,
+  formatAssetTexture,
+  formatRearSizeLabel,
+  formatRearTexture,
+  getAllowedRearTextureOptions,
+  getAllowedTextureOptions,
+  getSpeciesSurfaceClient,
+  healRearTextureForSelection,
+  healTextureForSelection,
+  isFeralRearExcluded,
+  isMaleGender,
+  rollClientAssetTexture,
+  rollClientRearTexture,
+} from '../../utils/anatomyOptions';
 
 const STAT_KEYS = [
   { key: 'str', code: 'STR', label: 'Strength' },
@@ -71,6 +87,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
   const [breastSize, setBreastSize] = useState('average');
   const [penisSize, setPenisSize] = useState('average');
   const [assetTexture, setAssetTexture] = useState('');
+  const [rearSize, setRearSize] = useState('average');
+  const [rearTexture, setRearTexture] = useState('');
   // Collapsed to a summary when the character already has saved anatomy (set on a previous NSFW embark).
   const [anatomyExpanded, setAnatomyExpanded] = useState(false);
 
@@ -114,11 +132,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
     [activeFamily, scenarios]
   );
 
-  const charGen = String(character?.gender || '').toLowerCase();
-  const isMale = useMemo(() => {
-    return ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => charGen.includes(kw)) &&
-      !['female', 'woman', 'girl', 'lady', 'she', 'her'].some(kw => charGen.includes(kw));
-  }, [charGen]);
+  const isMale = useMemo(() => isMaleGender(character?.gender), [character?.gender]);
+  const feralRearExcluded = useMemo(() => isFeralRearExcluded(character?.race), [character?.race]);
 
   useEffect(() => {
     let cancelled = false;
@@ -134,16 +149,22 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         luk: character.luk ?? 1
       });
       const appObj = character.appearance || {};
-      setBreastSize(appObj.breast_size || character.breast_size || 'average');
-      setPenisSize(appObj.penis_size || character.penis_size || 'average');
-      let curTex = appObj.asset_texture || character.asset_texture || '';
-      if (isMale && FEMALE_TEXTURE_OPTIONS.some(o => o.value === curTex)) {
-        curTex = '';
-      } else if (!isMale && MALE_TEXTURE_OPTIONS.some(o => o.value === curTex)) {
-        curTex = '';
-      }
+      const rawBSize = appObj.breast_size || character.breast_size || 'average';
+      const rawPSize = appObj.penis_size || character.penis_size || 'average';
+      const bTier = classifyAssetSizeTierClient(rawBSize, false);
+      const pTier = classifyAssetSizeTierClient(rawPSize, true);
+      setBreastSize(bTier);
+      setPenisSize(pTier);
+      const rawTex = appObj.asset_texture || character.asset_texture || '';
+      const activeTier = isMale ? pTier : bTier;
+      const curTex = healTextureForSelection(rawTex, isMale, activeTier);
       setAssetTexture(curTex);
-      setAnatomyExpanded(!(appObj.breast_size || appObj.penis_size || character.breast_size || character.penis_size));
+      const rawRSize = appObj.rear_size || character.rear_size || 'average';
+      const rTier = classifyRearSizeTierClient(rawRSize);
+      setRearSize(rTier);
+      const rawRTex = appObj.rear_texture || character.rear_texture || '';
+      setRearTexture(healRearTextureForSelection(rawRTex, rTier));
+      setAnatomyExpanded(!(appObj.breast_size || appObj.penis_size || appObj.rear_size || character.breast_size || character.penis_size || character.rear_size));
       setAttribute(character.attribute || 'fire');
       setCombatArchetype(character.combat_archetype || 'vanguard');
       setAbilityMedium(character.ability_medium || 'direct_manifestation');
@@ -506,6 +527,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
       const finalBSize = isNsfw && !isMale ? breastSize : undefined;
       const finalPSize = isNsfw && isMale ? penisSize : undefined;
       const finalTexture = isNsfw ? assetTexture : undefined;
+      const finalRSize = isNsfw && !feralRearExcluded ? rearSize : undefined;
+      const finalRTexture = isNsfw && !feralRearExcluded ? rearTexture : undefined;
 
       if (isNsfw && character?.user_id) {
         try {
@@ -517,10 +540,14 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
               breast_size: finalBSize,
               penis_size: finalPSize,
               asset_texture: finalTexture,
+              rear_size: finalRSize,
+              rear_texture: finalRTexture,
             }),
           });
         } catch (syncErr) {
           console.warn('Character appearance background sync failed:', syncErr);
+          setError(syncErr?.message || t('embark.anatomy_sync_warn', 'Failed to sync anatomy customization.'));
+          return;
         }
       }
 
@@ -558,6 +585,8 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
         breast_size: finalBSize,
         penis_size: finalPSize,
         asset_texture: finalTexture,
+        rear_size: finalRSize,
+        rear_texture: finalRTexture,
       });
       if (isMountedRef.current) onClose();
     } catch (err) {
@@ -1060,7 +1089,15 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                     Assets influence psychological vulnerability or confidence, tactile sensations, lingerie fit, and partner reactions across romantic encounters.
                   </p>
 
-                  {!anatomyExpanded ? (
+                  {(() => {
+                    const embarkSizeTier = isMale
+                      ? classifyAssetSizeTierClient(penisSize, true)
+                      : classifyAssetSizeTierClient(breastSize, false);
+                    const allowedEmbarkTextures = getAllowedTextureOptions(isMale, embarkSizeTier);
+                    const embarkRearTier = classifyRearSizeTierClient(rearSize);
+                    const allowedEmbarkRearTextures = getAllowedRearTextureOptions(embarkRearTier);
+                    const embarkSpeciesSurface = getSpeciesSurfaceClient(character?.race, character?.appearance?.skin_type);
+                    return !anatomyExpanded ? (
                     <div className="flex items-center justify-between gap-3 p-3 rounded-lg bg-black/40 border border-pink-900/50">
                       <div className="text-xs text-gray-200 min-w-0">
                         <div className="text-[10px] uppercase tracking-wider font-bold text-pink-300 mb-0.5">
@@ -1071,8 +1108,21 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                             ? t(PENIS_SIZE_LABELS[penisSize]?.[0] || 'character.penis_average', PENIS_SIZE_LABELS[penisSize]?.[1] || penisSize)
                             : t(BREAST_SIZE_LABELS[breastSize]?.[0] || 'character.breast_proportional', BREAST_SIZE_LABELS[breastSize]?.[1] || breastSize)}
                           {' • '}
-                          {assetTexture || t('embark.anatomy_texture_auto', 'Texture auto-assigned')}
+                          {assetTexture ? formatAssetTexture(assetTexture, isMale, t) : t('embark.anatomy_texture_auto', 'Texture auto-assigned')}
                         </div>
+                        {!feralRearExcluded && (
+                          <div className="truncate text-amber-200/90 mt-0.5">
+                            {t('anatomy.rear_size', 'Rear')}:{' '}
+                            {formatRearSizeLabel(rearSize, t) || rearSize}
+                            {' • '}
+                            {rearTexture ? formatRearTexture(rearTexture, t) : t('embark.anatomy_texture_auto', 'Texture auto-assigned')}
+                          </div>
+                        )}
+                        {embarkSpeciesSurface && (
+                          <div className="mt-1 text-[10px] text-amber-300/90 truncate">
+                            ✨ {t('anatomy.species_surface.label', 'Auto species surface')}: {t(embarkSpeciesSurface.i18nKey, embarkSpeciesSurface.fallback)}
+                          </div>
+                        )}
                       </div>
                       <button
                         type="button"
@@ -1092,7 +1142,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                         </label>
                         <select
                           value={penisSize}
-                          onChange={(e) => setPenisSize(e.target.value)}
+                          onChange={(e) => {
+                            const nextSz = e.target.value;
+                            setPenisSize(nextSz);
+                            if (assetTexture) {
+                              setAssetTexture(healTextureForSelection(assetTexture, true, classifyAssetSizeTierClient(nextSz, true)));
+                            }
+                          }}
                           className="w-full bg-fantasy-dark border border-purple-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-purple-500"
                         >
                           <option value="small">{t('character.penis_compact', 'Petite / Modest (Compact)')}</option>
@@ -1108,7 +1164,13 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                         </label>
                         <select
                           value={breastSize}
-                          onChange={(e) => setBreastSize(e.target.value)}
+                          onChange={(e) => {
+                            const nextSz = e.target.value;
+                            setBreastSize(nextSz);
+                            if (assetTexture) {
+                              setAssetTexture(healTextureForSelection(assetTexture, false, classifyAssetSizeTierClient(nextSz, false)));
+                            }
+                          }}
                           className="w-full bg-fantasy-dark border border-pink-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-pink-500"
                         >
                           <option value="flat">{t('character.breast_flat', 'Flat (AA-Cup / Barely There)')}</option>
@@ -1130,8 +1192,7 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                       <button
                         type="button"
                         onClick={() => {
-                          const pool = isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS;
-                          setAssetTexture(pool[Math.floor(Math.random() * pool.length)].value);
+                          setAssetTexture(rollClientAssetTexture(isMale, embarkSizeTier, character?.race, character?.appearance?.physique));
                         }}
                         className="text-[10px] text-pink-400 hover:text-pink-300 flex items-center gap-1 font-semibold"
                       >
@@ -1144,13 +1205,80 @@ const EmbarkationModal = ({ isOpen, onClose, character, onEmbark, scenarios = []
                       className="w-full bg-fantasy-dark border border-fantasy-border/80 p-2 rounded text-xs text-gray-100"
                     >
                       <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
-                      {(isMale ? MALE_TEXTURE_OPTIONS : FEMALE_TEXTURE_OPTIONS).map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      {allowedEmbarkTextures.map(opt => (
+                        <option key={opt.value} value={opt.value}>{t(opt.i18nKey, opt.fallback)}</option>
                       ))}
                     </select>
                   </div>
-                  </>
+
+                  {/* Rear / Ass Anatomy (All Genders, NSFW only, non-feral) */}
+                  {!feralRearExcluded && (
+                    <div className="pt-2.5 border-t border-pink-900/35 space-y-3">
+                      <div>
+                        <label className="block text-[11px] uppercase tracking-wider font-bold text-rose-300 mb-1">
+                          {t('character.rear_size_tier', 'Rear / Ass Size Tier')}
+                        </label>
+                        <select
+                          value={rearSize}
+                          onChange={(e) => {
+                            const nextSz = e.target.value;
+                            setRearSize(nextSz);
+                            if (rearTexture) {
+                              setRearTexture(healRearTextureForSelection(rearTexture, classifyRearSizeTierClient(nextSz)));
+                            }
+                          }}
+                          className="w-full bg-fantasy-dark border border-rose-900/60 p-2 rounded text-xs text-gray-100 focus:outline-none focus:border-rose-500"
+                        >
+                          {REAR_SIZE_OPTIONS.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{t(opt.selectKey, opt.selectFallback)}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] uppercase tracking-wider font-bold text-gray-300">
+                            {t('character.rear_texture', 'Rear Tactile Texture')}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRearTexture(rollClientRearTexture(embarkRearTier, character?.race, character?.appearance?.physique));
+                            }}
+                            className="text-[10px] text-rose-300 hover:text-rose-200 flex items-center gap-1 font-semibold"
+                          >
+                            <Sparkles size={11} /> {t('character.roll_rear_feature', 'Roll Rear Feature')}
+                          </button>
+                        </div>
+                        <select
+                          value={rearTexture}
+                          onChange={(e) => setRearTexture(e.target.value)}
+                          className="w-full bg-fantasy-dark border border-fantasy-border/80 p-2 rounded text-xs text-gray-100"
+                        >
+                          <option value="">{t('character.auto_assign_anatomy', 'Auto-Assign from Race & Build (Dynamic Roll)')}</option>
+                          {allowedEmbarkRearTextures.map((opt) => (
+                            <option key={opt.value} value={opt.value}>{t(opt.i18nKey, opt.label)}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {embarkSpeciesSurface && (
+                        <p className="mt-1.5 text-[10px] text-amber-300/90 flex items-center gap-1">
+                          ✨ {t('anatomy.species_surface.label', 'Auto species surface')}:{' '}
+                          <strong className="font-semibold">{t(embarkSpeciesSurface.i18nKey, embarkSpeciesSurface.fallback)}</strong>
+                        </p>
+                      )}
+                    </div>
                   )}
+                  {feralRearExcluded && embarkSpeciesSurface && (
+                    <p className="mt-1.5 text-[10px] text-amber-300/90 flex items-center gap-1">
+                      ✨ {t('anatomy.species_surface.label', 'Auto species surface')}:{' '}
+                      <strong className="font-semibold">{t(embarkSpeciesSurface.i18nKey, embarkSpeciesSurface.fallback)}</strong>
+                    </p>
+                  )}
+                  </>
+                  );
+                  })()}
                 </section>
               )}
             </div>

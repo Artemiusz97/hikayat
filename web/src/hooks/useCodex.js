@@ -21,6 +21,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
   const [campaignEndGoals, setCampaignEndGoals] = useState([]);
   const [chapterDigest, setChapterDigest] = useState([]);
   const [noticeBoardLabel, setNoticeBoardLabel] = useState('Bounty Board');
+  const [playerProfile, setPlayerProfile] = useState(null);
   const [encyclopedia, setEncyclopedia] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -31,13 +32,40 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
 
   const fetchSeqRef = useRef(0);
   const abortRef = useRef(null);
+  const activeSessionIdRef = useRef(sessionId);
+  activeSessionIdRef.current = sessionId;
+  const loadedSessionIdRef = useRef(null);
+
+  const resetCodexState = useCallback(() => {
+    setContacts([]);
+    setAcquaintances([]);
+    setFactions([]);
+    setAgentDossier(null);
+    setLorebook({ categories: {}, entities: [] });
+    setWorldPulse(null);
+    setCommitments([]);
+    setQuests([]);
+    setAvailableBounties([]);
+    setActiveStoryQuest(null);
+    setClues([]);
+    setCurrentChapter(1);
+    setMaxChapters(11);
+    setCampaignSpine(null);
+    setCampaignEndGoals([]);
+    setChapterDigest([]);
+    setNoticeBoardLabel('Bounty Board');
+    setPlayerProfile(null);
+    setEncyclopedia(null);
+    setError(null);
+  }, []);
 
   const fetchCodexData = useCallback(async () => {
-    if (!isValidSessionId(sessionId) || !user) {
-      if (!isValidSessionId(sessionId)) {
-        setContacts([]);
-        setAcquaintances([]);
-      }
+    const curSidKey = isValidSessionId(sessionId) ? String(sessionId) : null;
+    if (loadedSessionIdRef.current !== curSidKey) {
+      loadedSessionIdRef.current = curSidKey;
+      resetCodexState();
+    }
+    if (!curSidKey || !user) {
       setLoading(false);
       return;
     }
@@ -67,6 +95,13 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
       const [contactsRes, factionsRes, lorebookRes, questsRes, encyclopediaRes] = await Promise.allSettled(requests);
       if (fetchSeqRef.current !== seq || controller.signal.aborted) {
         return;
+      }
+
+      const coreRejections = [contactsRes, factionsRes, lorebookRes, questsRes]
+        .filter((r) => r.status === 'rejected' && r.reason?.name !== 'AbortError' && !r.reason?.isUserAbort)
+        .map((r) => r.reason);
+      if (coreRejections.length > 0 && (coreRejections.length === 4 || contactsRes.status === 'rejected' || questsRes.status === 'rejected')) {
+        setError(coreRejections[0]?.message || 'Failed to load codex data');
       }
 
       if (contactsRes.status === 'fulfilled') {
@@ -105,6 +140,9 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         if (qData.notice_board_label) {
           setNoticeBoardLabel(qData.notice_board_label);
         }
+        if (qData.player_profile) {
+          setPlayerProfile(qData.player_profile);
+        }
       }
       if (encyclopediaRes && encyclopediaRes.status === 'fulfilled') {
         setEncyclopedia(encyclopediaRes.value || null);
@@ -120,7 +158,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         setLoading(false);
       }
     }
-  }, [sessionId, user, isAnomalousScenario, activeUiLang]);
+  }, [sessionId, user, isAnomalousScenario, activeUiLang, resetCodexState]);
 
   useEffect(() => {
     fetchCodexData();
@@ -134,13 +172,14 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
   }, [fetchCodexData]);
 
   useEffect(() => {
-    if (session?.world_pulse) {
+    if (session?.world_pulse && String(activeSessionIdRef.current ?? '') === String(session?.id ?? '')) {
       setWorldPulse(session.world_pulse);
     }
-  }, [session?.world_pulse]);
+  }, [session?.id, session?.world_pulse]);
 
   const factionHqAction = async (factionId, action, extraPayload = {}) => {
     if (!isValidSessionId(sessionId) || !user?.user_id) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/factions/${sessionId}/hq-action`, {
       method: 'POST',
       body: JSON.stringify({
@@ -150,21 +189,25 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         ...extraPayload,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     if (data?.factions) setFactions(data.factions);
     if (data?.agent_dossier) setAgentDossier(data.agent_dossier);
     return data;
   };
 
-  const generateBounties = async (forceRefresh = false, factionId = null) => {
+  const generateBounties = async (forceRefresh = false, factionId = null, boardScope = null) => {
     if (!isValidSessionId(sessionId)) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/quests/${sessionId}/bounties/generate`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user?.user_id,
         force_refresh: forceRefresh,
         faction_id: factionId || undefined,
+        board_scope: boardScope || undefined,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     return data;
   };
@@ -181,10 +224,12 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     if (data.chapter_digest) setChapterDigest(data.chapter_digest);
     if (data.campaign_end_goals) setCampaignEndGoals(data.campaign_end_goals);
     if (data.notice_board_label) setNoticeBoardLabel(data.notice_board_label);
+    if (data.player_profile) setPlayerProfile(data.player_profile);
   };
 
   const bountyAction = async (questId, action = 'accept', haggleAdvance = false) => {
     if (!isValidSessionId(sessionId) || !questId) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/quests/${sessionId}/bounties/action`, {
       method: 'POST',
       body: JSON.stringify({
@@ -194,15 +239,17 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         haggle_advance: Boolean(haggleAdvance),
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     return data;
   };
 
   const refreshEncyclopediaIfActive = useCallback(async () => {
     if (!isAnomalousScenario || !isValidSessionId(sessionId) || !user?.user_id) return;
+    const reqSid = String(sessionId);
     try {
       const encData = await apiCall(`/api/codex/encyclopedia?session_id=${sessionId}&user_id=${user.user_id}&lang=${encodeURIComponent(activeUiLang)}`);
-      if (encData) setEncyclopedia(encData);
+      if (String(activeSessionIdRef.current ?? '') === reqSid && encData) setEncyclopedia(encData);
     } catch {
       // Non-fatal background refresh
     }
@@ -210,6 +257,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
 
   const deduceClues = async (clueAId, clueBId = null) => {
     if (!isValidSessionId(sessionId) || !clueAId) return null;
+    const reqSid = String(sessionId);
     const body = {
       user_id: user?.user_id,
       clue_a_id: Number(clueAId),
@@ -221,14 +269,18 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
       method: 'POST',
       body: JSON.stringify(body),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     await refreshEncyclopediaIfActive();
-    await onSessionRefresh?.();
+    if (String(activeSessionIdRef.current ?? '') === reqSid) {
+      await onSessionRefresh?.();
+    }
     return data;
   };
 
   const accuseSuspect = async (questId, suspectName, mode = 'private') => {
     if (!isValidSessionId(sessionId) || !questId || !suspectName) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/quests/${sessionId}/caseboard/accuse`, {
       method: 'POST',
       body: JSON.stringify({
@@ -238,6 +290,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         mode,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     await onSessionRefresh?.();
     return data;
@@ -245,6 +298,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
 
   const turnInQuest = async (questId, disposition = 'deliver') => {
     if (!isValidSessionId(sessionId) || !questId || !user?.user_id) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/quests/${sessionId}/turn-in`, {
       method: 'POST',
       body: JSON.stringify({
@@ -253,14 +307,18 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         disposition,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     await refreshEncyclopediaIfActive();
-    await onSessionRefresh?.();
+    if (String(activeSessionIdRef.current ?? '') === reqSid) {
+      await onSessionRefresh?.();
+    }
     return data;
   };
 
   const chooseEpilogue = async (choiceId = 'endless') => {
     if (!isValidSessionId(sessionId)) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/quests/${sessionId}/epilogue`, {
       method: 'POST',
       body: JSON.stringify({
@@ -268,6 +326,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         choice_id: choiceId,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     syncQuestPayload(data);
     await onSessionRefresh?.();
     return data;
@@ -275,6 +334,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
 
   const cancelCommitment = async (commitmentId, reason = 'player_cancelled') => {
     if (!isValidSessionId(sessionId) || !commitmentId) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/commitments/${sessionId}/${commitmentId}/cancel`, {
       method: 'POST',
       body: JSON.stringify({
@@ -282,6 +342,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
         reason,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     if (data?.commitments) {
       setCommitments(data.commitments);
     } else {
@@ -292,12 +353,14 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
 
   const trackRumor = async (eventKey) => {
     if (!isValidSessionId(sessionId) || !eventKey) return null;
+    const reqSid = String(sessionId);
     const data = await apiCall(`/api/adventure/${sessionId}/rumors/${encodeURIComponent(eventKey)}/track`, {
       method: 'POST',
       body: JSON.stringify({
         user_id: user?.user_id,
       }),
     });
+    if (String(activeSessionIdRef.current ?? '') !== reqSid) return null;
     if (data?.world_pulse) {
       setWorldPulse(data.world_pulse);
     }
@@ -325,6 +388,7 @@ export const useCodex = (sessionId, user, session = null, onSessionRefresh = nul
     campaignEndGoals,
     chapterDigest,
     noticeBoardLabel,
+    playerProfile,
     encyclopedia,
     loading,
     error,

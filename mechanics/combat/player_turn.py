@@ -73,7 +73,16 @@ def resolve_player_combat_phase(ctx: Dict[str, Any]) -> None:
     if acting_uid_int and isinstance(preloaded_eq, dict) and acting_uid_int in preloaded_eq:
         player_equip = preloaded_eq[acting_uid_int] or {}
     else:
-        player_equip = db.get_equipment(acting_user_id) if acting_user_id else {}
+        player_equip = (
+            db.call_with_supported_kwargs(
+                db.get_equipment,
+                acting_user_id,
+                char=acting_char_data,
+                session_id=sess_id_cbt,
+            )
+            if acting_user_id
+            else {}
+        )
     equipped_list = [item for item in player_equip.values() if item] if player_equip else []
 
     weapon_item = player_equip.get("Weapon") if player_equip else None
@@ -81,7 +90,13 @@ def resolve_player_combat_phase(ctx: Dict[str, Any]) -> None:
 
     player_weapon = parse_equipment_metadata(weapon_item) if weapon_item else {}
     player_armor = parse_equipment_metadata(armor_item) if armor_item else {}
-    player_attrs = calculate_combat_attributes(acting_char_data, equipped_list, scenario=session.get("scenario", "fantasy"), allow_non_combat=True)
+    player_attrs = calculate_combat_attributes(
+        acting_char_data,
+        equipped_list,
+        scenario=session.get("scenario", "fantasy"),
+        allow_non_combat=True,
+        session_id=sess_id_cbt,
+    )
     player_attrs["combat_turn"] = session.get("combat_turn", 1)
     if any(t in player_attrs.get("tags", []) for t in ("precision", "optics", "hud", "smart_link")):
         player_attrs["acc"] += 5
@@ -405,7 +420,15 @@ def resolve_player_combat_phase(ctx: Dict[str, Any]) -> None:
                                     found_in_inv = True
                                     break
                     elif acting_user_id:
-                        found_in_inv = any(i.get("name", "").strip().lower() == consume_item_name.lower() for i in db.get_inventory(acting_user_id))
+                        inv_rows = db.call_with_supported_kwargs(
+                            db.get_inventory,
+                            acting_user_id,
+                            session_id=sess_id_cbt,
+                        )
+                        found_in_inv = any(
+                            i.get("name", "").strip().lower() == consume_item_name.lower()
+                            for i in inv_rows
+                        )
                     else:
                         found_in_inv = True
 

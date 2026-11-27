@@ -640,11 +640,17 @@ def _collect_db_imports(
             and node.module
             and (node.module == "db" or node.module.startswith("db."))
         ):
+            mod_dir = ROOT.joinpath(*node.module.split("."))
             for al in node.names:
                 if al.name == "*":
                     continue
                 bound = al.asname or al.name
-                if node.module == "db" and al.name in subs:
+                is_submod_name = (
+                    (node.module == "db" and al.name in subs)
+                    or (mod_dir / f"{al.name}.py").is_file()
+                    or (mod_dir / al.name / "__init__.py").is_file()
+                )
+                if is_submod_name:
                     aliases.add(bound)
                 else:
                     symbols[bound] = al.name
@@ -1126,6 +1132,15 @@ def _extract_ddl_strings_from_module(tree: ast.Module, only_named_ddl: bool = Fa
         ):
             _collect_str_nodes(stmt.value, "SCHEMA_MIGRATIONS")
             continue
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for sub in ast.walk(stmt):
+                if (
+                    isinstance(sub, ast.Constant)
+                    and isinstance(sub.value, str)
+                    and re.search(r"CREATE\s+(?:VIRTUAL\s+)?TABLE", sub.value, re.IGNORECASE)
+                ):
+                    out.append((sub.value, getattr(sub, "lineno", stmt.lineno) or 1, stmt.name))
+            continue
 
         if target_name and val_node is not None:
             if only_named_ddl:
@@ -1213,7 +1228,7 @@ def analyze_unregistered_session_tables(
         for sql_str, start_line, ctx_label in _extract_ddl_strings_from_module(src_tree, only_named_ddl=only_ddl):
             for m in create_re.finditer(sql_str):
                 tname = m.group(1).strip().lower()
-                if tname in dropped_tables:
+                if tname in dropped_tables or tname.endswith("__new"):
                     continue
                 open_idx = m.end() - 1
                 depth = 0
@@ -1681,9 +1696,14 @@ def run_pylint(targets: List[str]) -> List[Finding]:
         "--score=n", "--persistent=n", *targets,
     ]
     proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode & 32:  # pylint usage error
-        print(proc.stdout[-2000:], proc.stderr[-2000:], sep="\n")
-        raise SystemExit("pylint failed to run (usage error)")
+    stderr_txt = proc.stderr or ""
+    if (
+        (proc.returncode & 32)
+        or "No module named pylint" in stderr_txt
+        or (proc.returncode != 0 and not proc.stdout.strip() and stderr_txt.strip())
+    ):
+        print(proc.stdout[-2000:], stderr_txt[-2000:], sep="\n")
+        raise SystemExit("pylint failed to run (missing in interpreter or usage error)")
     out: List[Finding] = []
     for raw in proc.stdout.splitlines():
         m = _PYLINT_LINE.match(raw.strip())
@@ -1856,6 +1876,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             if rp not in seen_t:
                 targets.append(rp)
                 seen_t.add(rp)
+        if (ROOT / "scripts").is_dir():
+            for sp in sorted((ROOT / "scripts").glob("simulate_*.py")):
+                rp = sp.resolve()
+                if rp not in seen_t:
+                    targets.append(rp)
+                    seen_t.add(rp)
     if not targets:
         print("static_check: no Python files to check.")
         return 0
@@ -1869,6 +1895,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         if norm_r.startswith("tests/"):
             findings.extend(analyze_test_db_isolation(p, rel))
             continue
+        if norm_r.startswith("scripts/simulate_"):
+            findings.extend(analyze_test_db_isolation(p, rel))
         prod_rels.append(rel)
         findings.extend(analyze_possibly_unbound(p, rel))
         findings.extend(analyze_sync_db_in_async(p, rel, pure_helpers=pure_helpers))

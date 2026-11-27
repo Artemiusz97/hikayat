@@ -5,8 +5,55 @@ import discord
 import db
 import scenario_data
 log = logging.getLogger("hikayat.phone")
+
+
+def _get_session_char_sync(user_id: int, session_id: int | None) -> dict | None:
+    if session_id:
+        ch = db.get_character(user_id, session_id=session_id)
+        if ch:
+            return ch
+    return db.get_character(user_id)
+
+
+def _contact_has_spirit_relay(contact: dict | None) -> bool:
+    from mechanics.social.folklore_roster import has_spirit_relay_contact
+    return has_spirit_relay_contact(contact)
+
+
+async def _check_discord_comms_gate(
+    interaction: discord.Interaction,
+    session_id: int,
+    session: dict | None = None,
+    *,
+    contact: dict | None = None,
+    allow_spirit_relay: bool = False,
+) -> bool:
+    from mechanics.world.locations.realms import check_realm_comms_available
+
+    sess = session if isinstance(session, dict) else (await db.adb(db.get_session, session_id) or {})
+    comms = await db.adb(check_realm_comms_available, session_id, (sess or {}).get("current_node_id"))
+    if comms.get("available"):
+        return True
+    if allow_spirit_relay and comms.get("supports_spirit_relay"):
+        if _contact_has_spirit_relay(contact):
+            return True
+        realm_lbl = str(comms.get("realm_name") or "this realm")
+        msg = f"📵 No mortal signal — only befriended Spirit Relay contacts can receive messages from {realm_lbl}."
+    else:
+        msg = f"📵 {comms.get('reason') or 'No signal — isolated realm.'}"
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True)
+    return False
 from mechanics.combat.items import update_digital_media_image
-from mechanics.social.relationships import can_player_dm_contact, safe_get_contacts
+from mechanics.social.relationships import (
+    can_player_dm_contact,
+    is_contact_blocked,
+    is_contact_eligible,
+    is_promoted_family_or_cohabitant,
+    safe_get_contacts,
+)
 
 from .embeds import (
     build_media_gallery_embed,
@@ -52,7 +99,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
         session_obj = session if isinstance(session, dict) else db.get_session(session_id)
         scen_key = session_obj.get("scenario", "fantasy") if session_obj else "fantasy"
-        branding = get_phone_branding(scen_key)
+        branding = get_phone_branding(scen_key, session_obj)
 
         contacts_app = branding.get("contacts_app_name", "Contacts")
         gallery_app = branding.get("gallery_app_name", "Photo Vault")
@@ -65,9 +112,33 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
         from mechanics.world.locations import is_anomalous_realty_scenario
 
-        bounty_btn = discord.ui.Button(label=branding["bounty_app_name"], emoji="📋", style=discord.ButtonStyle.secondary, row=1)
-        shop_btn = discord.ui.Button(label=branding["shop_app_name"], emoji="🛍️", style=discord.ButtonStyle.secondary, row=1)
-        encyclopedia_btn = discord.ui.Button(label="Encyclopedia", emoji="📖", style=discord.ButtonStyle.secondary, row=1)
+        shop_btn = discord.ui.Button(label=branding["shop_app_name"][:80], emoji="🛍️", style=discord.ButtonStyle.secondary, row=1)
+        school_shop_btn = None
+        if branding.get("show_school_shop"):
+            school_shop_btn = discord.ui.Button(
+                label=str(branding.get("school_shop_app_name") or "SchoolMart")[:80],
+                emoji="🎒",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            school_shop_btn.callback = self._open_school_shop
+
+        bounty_btn = None
+        if branding.get("show_general_bounties", True):
+            bounty_btn = discord.ui.Button(label=branding["bounty_app_name"][:80], emoji="📋", style=discord.ButtonStyle.secondary, row=1)
+            bounty_btn.callback = self._open_bounties
+
+        school_bounty_btn = None
+        if branding.get("show_school_bounties"):
+            school_bounty_btn = discord.ui.Button(
+                label=str(branding.get("school_bounty_app_name") or "Campus Requests")[:80],
+                emoji="🏫",
+                style=discord.ButtonStyle.secondary,
+                row=1,
+            )
+            school_bounty_btn.callback = self._open_school_bounties
+
+        encyclopedia_btn = discord.ui.Button(label="Encyclopedia", emoji="📖", style=discord.ButtonStyle.secondary, row=2)
         realty_btn = None
         if is_anomalous_realty_scenario(scen_key):
             from localization import get_realty_label
@@ -76,16 +147,15 @@ class PhoneMainView(PhoneOwnerRestrictedView):
                 label=get_realty_label("app_name", _u_lang)[:80],
                 emoji="🏠",
                 style=discord.ButtonStyle.success,
-                row=1,
+                row=2,
             )
             realty_btn.callback = self._open_realty
-        close_btn = discord.ui.Button(label="Lock Screen", emoji="🔒", style=discord.ButtonStyle.secondary, row=1)
+        close_btn = discord.ui.Button(label="Lock Screen", emoji="🔒", style=discord.ButtonStyle.secondary, row=2)
 
         contacts_btn.callback = self._open_contacts
         dm_btn.callback = self._open_dms
         feed_btn.callback = self._open_feed
         gallery_btn.callback = self._open_gallery
-        bounty_btn.callback = self._open_bounties
         shop_btn.callback = self._open_shop
         encyclopedia_btn.callback = self._open_encyclopedia
         close_btn.callback = self._close_phone
@@ -94,8 +164,13 @@ class PhoneMainView(PhoneOwnerRestrictedView):
         self.add_item(dm_btn)
         self.add_item(feed_btn)
         self.add_item(gallery_btn)
-        self.add_item(bounty_btn)
         self.add_item(shop_btn)
+        if school_shop_btn is not None:
+            self.add_item(school_shop_btn)
+        if bounty_btn is not None:
+            self.add_item(bounty_btn)
+        if school_bounty_btn is not None:
+            self.add_item(school_bounty_btn)
         self.add_item(encyclopedia_btn)
         if realty_btn is not None:
             self.add_item(realty_btn)
@@ -155,7 +230,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_contacts(self, interaction: discord.Interaction):
-        char = await db.adb(db.get_character, self.user_id)
+        char = await db.adb(_get_session_char_sync, self.user_id, self.session_id)
         session = await db.adb(db.get_session, self.session_id)
         party_npcs = await db.adb(db.get_session_party_npcs, self.session_id) if self.session_id else []
         party_names = {
@@ -164,7 +239,7 @@ class PhoneMainView(PhoneOwnerRestrictedView):
             if isinstance(p, dict) and p.get("name")
         }
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+        branding = get_phone_branding(scen_key, session)
         char_id = int(char.get("id", 0)) if char else 0
         char_name = char.get("name", "Hero") if char else "Player"
 
@@ -216,17 +291,54 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
     async def _open_dms(self, interaction: discord.Interaction):
         def _load_dms():
-            ch = db.get_character(self.user_id)
+            from mechanics.world.locations.realms import check_realm_comms_available
+            from mechanics.world.world_events.spirit_realm_events import (
+                get_spirit_relay_static_note,
+                is_spirit_relay_static_active,
+            )
+
+            ch = _get_session_char_sync(self.user_id, self.session_id)
             cts = safe_get_contacts(self.session_id, ch.get("id", 0), ensure_scene=False) if ch else []
             sess = db.get_session(self.session_id)
             p_npcs = db.get_session_party_npcs(self.session_id)
-            return ch, cts, sess, p_npcs
+            comms = check_realm_comms_available(self.session_id, (sess or {}).get("current_node_id"))
+            u_sett = db.get_settings(self.user_id) or {}
+            dm_lang = str(
+                (sess or {}).get("narration_language")
+                or (sess or {}).get("language")
+                or u_sett.get("language")
+                or "en"
+            )
+            static_note = (
+                get_spirit_relay_static_note(self.session_id, dm_lang)
+                if is_spirit_relay_static_active(self.session_id)
+                else ""
+            )
+            return ch, cts, sess, p_npcs, comms, static_note
 
-        char, contacts, session, party_npcs = await db.adb(_load_dms)
+        char, contacts, session, party_npcs, comms, static_note = await db.adb(_load_dms)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+        branding = get_phone_branding(scen_key, session)
         party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
         dm_contacts = [c for c in (contacts or []) if can_player_dm_contact(c, party_names=party_names, scenario=scen_key)]
+
+        comms_avail = bool((comms or {}).get("available", True))
+        supports_relay = bool((comms or {}).get("supports_spirit_relay"))
+        if not comms_avail:
+            if not supports_relay:
+                await interaction.response.send_message(
+                    f"📵 {(comms or {}).get('reason') or 'No signal — isolated realm.'}",
+                    ephemeral=True,
+                )
+                return
+            dm_contacts = [c for c in dm_contacts if _contact_has_spirit_relay(c)]
+            if not dm_contacts:
+                realm_lbl = str((comms or {}).get("realm_name") or "this realm")
+                await interaction.response.send_message(
+                    f"📵 No mortal signal — only befriended Spirit Relay contacts (or met Ghoul Ossuary contacts) can receive messages from {realm_lbl}.",
+                    ephemeral=True,
+                )
+                return
 
         if not dm_contacts:
             msg = (
@@ -237,21 +349,38 @@ class PhoneMainView(PhoneOwnerRestrictedView):
             await interaction.response.send_message(msg, ephemeral=True)
             return
 
+        desc_parts = ["Pick a contact below to text, flirt, or ask for investigation clues:"]
+        if not comms_avail and supports_relay:
+            desc_parts.append("🦊 *Spirit Relay active — mortal contacts offline while veiled.*")
+        if static_note:
+            desc_parts.append(f"⚡ *{static_note}*")
         embed = discord.Embed(
             title=f"{branding['emoji']} {branding['dm_app_name']} — Select a Contact",
-            description=f"Pick a contact below to text, flirt, or ask for investigation clues:",
+            description="\n".join(desc_parts),
             color=branding["color"]
         )
         view = DMContactSelectView(self.cog, self.session_id, self.user_id, dm_contacts)
         await interaction.response.edit_message(embed=embed, view=view)
 
     async def _open_feed(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        session = await db.adb(db.get_session, self.session_id)
-        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+        from mechanics.social.origin_mode import resolve_player_age_profile
+        from .gossip_feed import cleanup_stale_campus_gossip_for_adult, is_stale_campus_gossip_post
 
+        await interaction.response.defer()
+        session, char = await db.adb(
+            lambda: (db.get_session(self.session_id), _get_session_char_sync(self.user_id, self.session_id))
+        )
+        if not await _check_discord_comms_gate(interaction, self.session_id, session):
+            return
+        scen_key = session.get("scenario", "fantasy") if session else "fantasy"
+        branding = get_phone_branding(scen_key, session)
+
+        is_student = bool(resolve_player_age_profile(session or {}, char).get("is_student"))
+        if session and not is_student:
+            await db.adb(cleanup_stale_campus_gossip_for_adult, self.session_id, dict(session))
         posts = await generate_gossip_feed_posts(session)
+        if session and not is_student and posts:
+            posts = [p for p in posts if not is_stale_campus_gossip_post(p)]
         state_summary = await db.adb(get_social_state_summary, self.session_id, session)
         embed = _build_gossip_feed_embed(session, posts, branding, charges=state_summary["charges"])
         view = SocialFeedView(
@@ -266,20 +395,58 @@ class PhoneMainView(PhoneOwnerRestrictedView):
 
     async def _open_bounties(self, interaction: discord.Interaction):
         from game_engine import generate_bounty_board
+        from mechanics.world.locations import location_has_bounty_board
         from cogs.adventure import _build_bounty_board_embed, BountyBoardView
         await interaction.response.defer()
         session = await db.adb(db.get_session, self.session_id)
-        bounties = await generate_bounty_board(session)
+        scen_key = str((session or {}).get("scenario") or "fantasy")
+        cur_loc = str((session or {}).get("current_location") or "")
+        if not location_has_bounty_board(cur_loc, scen_key=scen_key):
+            if not await _check_discord_comms_gate(interaction, self.session_id, session):
+                return
+        bounties = await generate_bounty_board(session, board_scope="general")
+        embed = _build_bounty_board_embed(session, bounties)
+        view = BountyBoardView(session, bounties)
+        await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
+
+    async def _open_school_bounties(self, interaction: discord.Interaction):
+        from game_engine import generate_bounty_board
+        from cogs.adventure import _build_bounty_board_embed, BountyBoardView
+        from mechanics.social.origin_mode import resolve_player_age_profile
+        await interaction.response.defer()
+        session, char = await db.adb(
+            lambda: (db.get_session(self.session_id), _get_session_char_sync(self.user_id, self.session_id))
+        )
+        if not await _check_discord_comms_gate(interaction, self.session_id, session):
+            return
+        if not resolve_player_age_profile(session or {}, char).get("is_student"):
+            await interaction.followup.send("🏫 Campus Requests are only available to student characters.", ephemeral=True)
+            return
+        bounties = await generate_bounty_board(session, board_scope="school")
         embed = _build_bounty_board_embed(session, bounties)
         view = BountyBoardView(session, bounties)
         await interaction.followup.edit_message(message_id=interaction.message.id, embed=embed, view=view)
 
     async def _open_shop(self, interaction: discord.Interaction):
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         await self.cog.enter_merchant_shop(
             interaction,
             self.session_id,
             self.user_id,
-            is_phone_shop=True
+            is_phone_shop=True,
+            merchant_type="online_general",
+        )
+
+    async def _open_school_shop(self, interaction: discord.Interaction):
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
+        await self.cog.enter_merchant_shop(
+            interaction,
+            self.session_id,
+            self.user_id,
+            is_phone_shop=True,
+            merchant_type="school_mart",
         )
 
     async def _close_phone(self, interaction: discord.Interaction):
@@ -329,7 +496,7 @@ class DMContactSelectView(PhoneOwnerRestrictedView):
             scen_k = str((sess or {}).get("scenario") or "fantasy")
             if not can_player_dm_contact(contact, party_names=p_names, scenario=scen_k):
                 return None, sess
-            emb = _build_dm_chat_embed(self.session_id, contact)
+            emb = _build_dm_chat_embed(self.session_id, contact, session=sess)
             return emb, sess
 
         embed, session = await db.adb(_prep_dm_chat)
@@ -415,7 +582,7 @@ class DMChatView(PhoneOwnerRestrictedView):
 
     async def _quick_photo(self, interaction: discord.Interaction):
         def _load_photo_ctx():
-            return db.get_character(self.user_id), db.get_session(self.session_id)
+            return _get_session_char_sync(self.user_id, self.session_id), db.get_session(self.session_id)
 
         char, session = await db.adb(_load_photo_ctx)
         loc = session.get("current_location", "around here") if session else "around here"
@@ -424,7 +591,7 @@ class DMChatView(PhoneOwnerRestrictedView):
         await self._send_dm_action(interaction, msg, intent="photo")
 
     async def _quick_nsfw_photo(self, interaction: discord.Interaction):
-        char = await db.adb(db.get_character, self.user_id)
+        char = await db.adb(_get_session_char_sync, self.user_id, self.session_id)
         caption = generate_player_photo_caption(char, intent="nsfw_photo")
         msg = f"Sending an intimate selfie just for your eyes... 🔞\n[Attached Intimate Photo: {caption}]\nHope you like what you see 😉"
         await self._send_dm_action(interaction, msg, intent="nsfw_photo")
@@ -446,25 +613,74 @@ class DMChatView(PhoneOwnerRestrictedView):
         await interaction.response.defer()
 
         def _load_dm_ctx():
-            ch = db.get_character(self.user_id)
+            ch = _get_session_char_sync(self.user_id, self.session_id)
             sess = db.get_session(self.session_id)
             p_npcs = db.get_session_party_npcs(self.session_id)
-            return ch, sess, p_npcs
+            npc_id = str((self.contact or {}).get("npc_id") or "").strip()
+            fresh_contact = None
+            if npc_id and ch and ch.get("id"):
+                fresh_contact = db.get_contact(self.session_id, npc_id, character_id=int(ch["id"]))
+            if not fresh_contact and npc_id:
+                fresh_contact = db.get_contact(self.session_id, npc_id)
+            return ch, sess, p_npcs, (fresh_contact or self.contact)
 
-        char, session, party_npcs = await db.adb(_load_dm_ctx)
+        char, session, party_npcs, active_contact = await db.adb(_load_dm_ctx)
+        if not await _check_discord_comms_gate(
+            interaction,
+            self.session_id,
+            session,
+            contact=active_contact,
+            allow_spirit_relay=True,
+        ):
+            return
         party_names = {str(p.get("name", "")).strip().lower() for p in (party_npcs or []) if isinstance(p, dict)}
         scen_key = str((session or {}).get("scenario") or "fantasy")
-        if not can_player_dm_contact(self.contact, party_names=party_names, scenario=scen_key):
+        c_name_dm = str((active_contact or {}).get("name") or "").strip().lower()
+        in_party_dm = bool(c_name_dm and c_name_dm in party_names)
+        is_family_dm = is_promoted_family_or_cohabitant(active_contact)
+        if not is_family_dm and not in_party_dm:
+            if not is_contact_eligible(active_contact, scenario=scen_key, session_id=self.session_id):
+                await interaction.followup.send(
+                    f"{(active_contact or {}).get('name', 'This entity')} is not eligible as a personal phone contact in this scenario.",
+                    ephemeral=True,
+                )
+                return
+        if isinstance(active_contact, dict) and (
+            active_contact.get("is_dispatch_channel")
+            or (isinstance(active_contact.get("basic_info"), dict) and active_contact["basic_info"].get("is_dispatch_channel"))
+        ):
+            await interaction.followup.send(
+                "Automated dispatch channels are read-only broadcast feeds and do not accept replies.",
+                ephemeral=True,
+            )
+            return
+        if is_contact_blocked(active_contact):
+            await interaction.followup.send(
+                f"{(active_contact or {}).get('name', 'This contact')} has blocked your number due to hostility. Reconcile with them in person first.",
+                ephemeral=True,
+            )
+            return
+        if isinstance(active_contact, dict) and (
+            active_contact.get("deceased")
+            or (isinstance(active_contact.get("basic_info"), dict) and active_contact["basic_info"].get("deceased"))
+        ):
+            await interaction.followup.send(
+                f"{(active_contact or {}).get('name', 'This contact')}'s line is disconnected — they perished during an anomaly breach.",
+                ephemeral=True,
+            )
+            return
+        if not can_player_dm_contact(active_contact, party_names=party_names, scenario=scen_key):
             await interaction.followup.send(
                 "You don't have their contact info yet. Exchange phone numbers or connect on PeerPulse first.",
                 ephemeral=True,
             )
             return
 
+        self.contact = active_contact
         if not message_text:
-            message_text = await generate_player_chat_message(session, self.contact, char, intent=intent)
+            message_text = await generate_player_chat_message(session, active_contact, char, intent=intent)
 
-        reply_data = await generate_contact_dm_reply(session, self.contact, char, message_text, intent=intent)
+        reply_data = await generate_contact_dm_reply(session, active_contact, char, message_text, intent=intent)
 
         raw_ids = (reply_data.get("digital_item_ids") if isinstance(reply_data, dict) else None) or (
             [reply_data["digital_item_id"]]
@@ -526,7 +742,7 @@ class DMChatView(PhoneOwnerRestrictedView):
     async def _back_to_contacts(self, interaction: discord.Interaction):
         session = await db.adb(db.get_session, self.session_id)
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+        branding = get_phone_branding(scen_key, session)
         embed = discord.Embed(
             title=f"{branding['emoji']} {branding['dm_app_name']} — Select a Contact",
             description=f"Pick a contact below to text, flirt, or ask for investigation clues:",
@@ -624,6 +840,8 @@ class SocialFeedView(PhoneOwnerRestrictedView):
     async def _dig_rumors(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         session = await db.adb(db.get_session, self.session_id)
+        if not await _check_discord_comms_gate(interaction, self.session_id, session):
+            return
         res = await scour_feed_for_rumor(session, self.user_id)
 
         if res.get("error") == "exhausted":
@@ -666,18 +884,25 @@ class SocialFeedView(PhoneOwnerRestrictedView):
 
     async def _find_friends(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
 
         def _prep_find():
             sess = db.get_session(self.session_id)
             scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
-            br = get_phone_branding(scen_k)
+            br = get_phone_branding(scen_k, sess)
             prof = discover_suggested_peer(self.session_id, self.user_id)
             emb = _build_social_profile_embed(self.session_id, prof, br) if prof else None
-            return prof, emb
+            return prof, emb, br
 
-        profile, embed = await db.adb(_prep_find)
+        profile, embed, br = await db.adb(_prep_find)
         if not profile:
-            await interaction.followup.send("⚠️ No student profiles available right now.", ephemeral=True)
+            empty_msg = (
+                "⚠️ No student profiles available right now."
+                if br.get("show_school_bounties")
+                else "⚠️ No local contacts available right now."
+            )
+            await interaction.followup.send(empty_msg, ephemeral=True)
             return
 
         view = SocialProfileView(self.cog, self.session_id, self.user_id, profile, self.posts)
@@ -699,8 +924,10 @@ class SocialFeedView(PhoneOwnerRestrictedView):
     async def _refresh_feed(self, interaction: discord.Interaction):
         await interaction.response.defer()
         session = await db.adb(db.get_session, self.session_id)
+        if not await _check_discord_comms_gate(interaction, self.session_id, session):
+            return
         scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-        branding = get_phone_branding(scen_key)
+        branding = get_phone_branding(scen_key, session)
 
         new_posts = await generate_gossip_feed_posts(session, force_refresh=True)
         state_summary = await db.adb(get_social_state_summary, self.session_id, session)
@@ -745,13 +972,15 @@ class SocialSearchModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer()
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         query = str(self.query_input.value).strip()
 
         def _prep_search():
             prof = lookup_social_profile(self.session_id, self.user_id, query)
             sess = db.get_session(self.session_id)
             scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
-            br = get_phone_branding(scen_k)
+            br = get_phone_branding(scen_k, sess)
             emb = _build_social_profile_embed(self.session_id, prof, br) if prof else None
             return prof, emb
 
@@ -815,13 +1044,15 @@ class SocialProfileView(PhoneOwnerRestrictedView):
         self.add_item(back_btn)
 
     async def _send_request(self, interaction: discord.Interaction):
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         def _resolve_req():
             sess = db.get_session(self.session_id)
             r = resolve_social_friend_request(sess, self.user_id, self.profile)
             if r.get("on_cooldown"):
                 return sess, r, None, None
             scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
-            br = get_phone_branding(scen_k)
+            br = get_phone_branding(scen_k, sess)
             upd_prof = lookup_social_profile(self.session_id, self.user_id, self.profile["name"]) or self.profile
             emb = _build_social_profile_embed(self.session_id, upd_prof, br)
             return sess, r, upd_prof, emb
@@ -899,7 +1130,7 @@ class SocialProfileView(PhoneOwnerRestrictedView):
         def _prep_feed():
             sess = db.get_session(self.session_id)
             scen_k = sess.get("scenario", "fantasy") if sess else "fantasy"
-            br = get_phone_branding(scen_k)
+            br = get_phone_branding(scen_k, sess)
             st = get_social_state_summary(self.session_id, sess)
             emb = _build_gossip_feed_embed(sess, self.posts, br, charges=st["charges"])
             return sess, st, emb
@@ -1522,6 +1753,8 @@ class PhoneRealtyView(PhoneOwnerRestrictedView):
         if not self.selected_prop_id:
             return
         await interaction.response.defer()
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         try:
             async with distributed_adventure_lock(self.user_id, self.session_id, raise_http_error=False):
                 sess = await db.adb(db.get_session, self.session_id)
@@ -1554,6 +1787,8 @@ class PhoneRealtyView(PhoneOwnerRestrictedView):
         if not self.selected_prop_id:
             return
         await interaction.response.defer()
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         try:
             async with distributed_session_lock(self.session_id, raise_http_error=False):
                 sess = await db.adb(db.get_session, self.session_id)
@@ -1683,6 +1918,8 @@ class PhoneSpareKeySelectView(PhoneOwnerRestrictedView):
         raw_val = interaction.data["values"][0]
         mode, npc_id = raw_val.split(":", 1)
         await interaction.response.defer()
+        if not await _check_discord_comms_gate(interaction, self.session_id):
+            return
         try:
             async with distributed_session_lock(self.session_id, raise_http_error=False):
                 sess = await db.adb(db.get_session, self.session_id)

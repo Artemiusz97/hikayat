@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { apiCall } from '../../api/client';
 
 export const isAutoSceneImageGen = (s) =>
@@ -9,7 +9,29 @@ export const isAutoSceneImageGen = (s) =>
 export const useSceneImagePoll = ({ session, user, setSession }) => {
   const imagePollIntervalRef = useRef(null);
   const imagePollAbortRef = useRef(null);
+  const rerollAbortRef = useRef(null);
+  const rerollSeqRef = useRef(0);
   const [rerollingImage, setRerollingImage] = useState(false);
+
+  useEffect(() => {
+    rerollSeqRef.current += 1;
+    if (rerollAbortRef.current) {
+      try {
+        rerollAbortRef.current.abort();
+      } catch {}
+      rerollAbortRef.current = null;
+    }
+    setRerollingImage(false);
+    return () => {
+      rerollSeqRef.current += 1;
+      if (rerollAbortRef.current) {
+        try {
+          rerollAbortRef.current.abort();
+        } catch {}
+        rerollAbortRef.current = null;
+      }
+    };
+  }, [session?.id]);
 
   const clearImagePoll = useCallback(() => {
     if (imagePollIntervalRef.current) {
@@ -96,18 +118,31 @@ export const useSceneImagePoll = ({ session, user, setSession }) => {
 
   const rerollImage = async () => {
     if (!session?.id || !user?.user_id || rerollingImage) return null;
+    const reqSid = session.id;
+    const seq = ++rerollSeqRef.current;
+    if (rerollAbortRef.current) {
+      try {
+        rerollAbortRef.current.abort();
+      } catch {}
+    }
+    const controller = new AbortController();
+    rerollAbortRef.current = controller;
     setRerollingImage(true);
     try {
       const data = await apiCall('/api/adventure/reroll_image', {
         method: 'POST',
+        signal: controller.signal,
         body: JSON.stringify({
-          session_id: session.id,
+          session_id: reqSid,
           user_id: user.user_id,
         }),
       });
+      if (controller.signal.aborted || rerollSeqRef.current !== seq) {
+        return null;
+      }
       if (data?.image_url) {
         setSession(prev => {
-          if (!prev) return prev;
+          if (!prev || String(prev.id) !== String(reqSid)) return prev;
           const hist = Array.isArray(prev.history) ? [...prev.history] : [];
           if (hist.length > 0 && typeof hist[hist.length - 1] === 'object') {
             hist[hist.length - 1] = {
@@ -124,10 +159,18 @@ export const useSceneImagePoll = ({ session, user, setSession }) => {
       }
       return data;
     } catch (err) {
+      if (err?.isUserAbort || err?.name === 'AbortError' || controller.signal.aborted || rerollSeqRef.current !== seq) {
+        return null;
+      }
       console.error('Reroll image failed:', err);
       throw err;
     } finally {
-      setRerollingImage(false);
+      if (rerollAbortRef.current === controller) {
+        rerollAbortRef.current = null;
+      }
+      if (rerollSeqRef.current === seq) {
+        setRerollingImage(false);
+      }
     }
   };
 

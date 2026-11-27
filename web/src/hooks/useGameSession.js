@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { apiCall } from '../api/client';
+import { isValidSessionId } from '../utils/session';
 import { useSceneImagePoll } from './session/useSceneImagePoll';
 import { useTurnTransport } from './session/useTurnTransport';
 import { useSessionSocket } from './session/useSessionSocket';
@@ -38,6 +39,7 @@ export const useGameSession = (user, character) => {
     setIsThinking,
     cancellingTurn,
     setCancellingTurn,
+    cancellingTurnRef,
     streamingNarrative,
     setStreamingNarrative,
     streamingState,
@@ -89,6 +91,7 @@ export const useGameSession = (user, character) => {
     completedTurnIdsRef,
     activeTurnIdRef,
     processingTurnRef,
+    cancellingTurnRef,
     syncTurnRequestRef,
     setProcessingState,
     setPendingAction,
@@ -104,9 +107,40 @@ export const useGameSession = (user, character) => {
     setLastSyncTimestamp,
   });
 
+  const resetTransientTurnState = useCallback(() => {
+    clearSafetyTimer();
+    activeTurnIdRef.current = null;
+    setProcessingState(false);
+    setPendingAction(null);
+    setIsStreaming(false);
+    setIsThinking(false);
+    setStreamingNarrative(null);
+    setStreamingState(null);
+    setCancellingTurn(false);
+    setWaitingForParty(false);
+    setPartyStatus(null);
+    setActionError(null);
+    setPartyChatMessages([]);
+  }, [
+    clearSafetyTimer,
+    activeTurnIdRef,
+    setProcessingState,
+    setPendingAction,
+    setIsStreaming,
+    setIsThinking,
+    setStreamingNarrative,
+    setStreamingState,
+    setCancellingTurn,
+    setWaitingForParty,
+    setPartyStatus,
+    setActionError,
+    setPartyChatMessages,
+  ]);
+
   const fetchActiveSession = useCallback(async (options = {}) => {
     const isInitial = isInitialLoadRef.current;
     const silent = options?.silent ?? !isInitial;
+    const fetchGen = turnGenerationRef.current;
     if (!userId) {
       if (fetchSessionAbortRef.current) {
         try {
@@ -114,6 +148,7 @@ export const useGameSession = (user, character) => {
         } catch {}
         fetchSessionAbortRef.current = null;
       }
+      resetTransientTurnState();
       setSession(null);
       setLoading(false);
       isInitialLoadRef.current = false;
@@ -134,8 +169,14 @@ export const useGameSession = (user, character) => {
       const data = await apiCall(`/api/adventure/active-session/${userId}`, {
         signal: controller.signal,
       });
-      if (fetchSessionAbortRef.current !== controller) return;
+      if (fetchSessionAbortRef.current !== controller || turnGenerationRef.current !== fetchGen) {
+        return;
+      }
       if (data && data.session) {
+        if (activeSessionIdRef.current && String(activeSessionIdRef.current) !== String(data.session.id)) {
+          clearImagePoll();
+          resetTransientTurnState();
+        }
         setSession(data.session);
         if (data.session.in_flight_turn) {
           setProcessingState(true);
@@ -154,6 +195,7 @@ export const useGameSession = (user, character) => {
         }
         connectWebSocket(data.session.id);
       } else {
+        resetTransientTurnState();
         setSession(null);
       }
     } catch (e) {
@@ -161,6 +203,14 @@ export const useGameSession = (user, character) => {
         aborted = true;
         return;
       }
+      if (fetchSessionAbortRef.current !== controller || turnGenerationRef.current !== fetchGen) {
+        return;
+      }
+      if (silent && activeSessionIdRef.current && e?.status !== 404) {
+        console.warn('Transient active-session refresh failed; retaining current session:', e);
+        return;
+      }
+      resetTransientTurnState();
       setSession(null);
     } finally {
       if (fetchSessionAbortRef.current === controller) {
@@ -175,6 +225,9 @@ export const useGameSession = (user, character) => {
     }
   }, [
     userId,
+    turnGenerationRef,
+    clearImagePoll,
+    resetTransientTurnState,
     connectWebSocket,
     armSafetyTimer,
     clearSafetyTimer,
@@ -192,6 +245,15 @@ export const useGameSession = (user, character) => {
     void activeCharacterId;
     fetchActiveSession();
     return () => {
+      turnGenerationRef.current += 1;
+      if (turnAbortControllerRef.current) {
+        try {
+          turnAbortControllerRef.current.abort();
+        } catch {}
+        turnAbortControllerRef.current = null;
+      }
+      syncTurnRequestRef.current = false;
+      resetTransientTurnState();
       if (fetchSessionAbortRef.current) {
         try {
           fetchSessionAbortRef.current.abort();
@@ -199,10 +261,18 @@ export const useGameSession = (user, character) => {
         fetchSessionAbortRef.current = null;
       }
       clearImagePoll();
-      clearSafetyTimer();
       closeSocket();
     };
-  }, [fetchActiveSession, activeCharacterId, clearImagePoll, clearSafetyTimer, closeSocket]);
+  }, [
+    fetchActiveSession,
+    activeCharacterId,
+    clearImagePoll,
+    closeSocket,
+    turnGenerationRef,
+    turnAbortControllerRef,
+    syncTurnRequestRef,
+    resetTransientTurnState,
+  ]);
 
   useEffect(() => {
     if (session?.id && session.id !== 'embarking') {
@@ -217,13 +287,17 @@ export const useGameSession = (user, character) => {
 
   const startSession = async (scenarioKey, mode = 'solo', options = {}) => {
     const startGen = ++turnGenerationRef.current;
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {}
+      fetchSessionAbortRef.current = null;
+    }
     if (turnAbortControllerRef.current) {
       turnAbortControllerRef.current.abort();
       turnAbortControllerRef.current = null;
     }
     syncTurnRequestRef.current = false;
-    activeTurnIdRef.current = null;
-    clearSafetyTimer();
     clearImagePoll();
     const abortCtrl = new AbortController();
     turnAbortControllerRef.current = abortCtrl;
@@ -231,8 +305,7 @@ export const useGameSession = (user, character) => {
       ? 'fantasy'
       : scenarioKey;
 
-    setActionError(null);
-    setCancellingTurn(false);
+    resetTransientTurnState();
     setPausedOnDashboard(false);
     setProcessingState(true);
     setPendingAction({ label: 'Embarking on new journey...' });
@@ -293,15 +366,19 @@ export const useGameSession = (user, character) => {
 
   const joinSession = async (joinCode) => {
     const joinGen = ++turnGenerationRef.current;
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {}
+      fetchSessionAbortRef.current = null;
+    }
     if (turnAbortControllerRef.current) {
       turnAbortControllerRef.current.abort();
       turnAbortControllerRef.current = null;
     }
     syncTurnRequestRef.current = false;
-    activeTurnIdRef.current = null;
-    clearSafetyTimer();
     clearImagePoll();
-    setCancellingTurn(false);
+    resetTransientTurnState();
     const abortCtrl = new AbortController();
     turnAbortControllerRef.current = abortCtrl;
     try {
@@ -343,28 +420,77 @@ export const useGameSession = (user, character) => {
   }, []);
 
   const resumeSessionSlot = useCallback(async (sessionObj) => {
-    if (!sessionObj?.id || !user?.user_id) return;
+    if (!sessionObj?.id || !user?.user_id) return null;
+    const resumeGen = ++turnGenerationRef.current;
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {}
+      fetchSessionAbortRef.current = null;
+    }
+    if (turnAbortControllerRef.current) {
+      turnAbortControllerRef.current.abort();
+      turnAbortControllerRef.current = null;
+    }
+    syncTurnRequestRef.current = false;
+    clearImagePoll();
+    resetTransientTurnState();
+    const abortCtrl = new AbortController();
+    turnAbortControllerRef.current = abortCtrl;
     try {
       const res = await apiCall('/api/adventure/resume', {
         method: 'POST',
+        signal: abortCtrl.signal,
         body: JSON.stringify({
           user_id: user.user_id,
           session_id: sessionObj.id,
           character_id: character?.id,
         }),
       });
+      if (turnGenerationRef.current !== resumeGen) {
+        return null;
+      }
       const activeSess = res?.session || sessionObj;
       setSession(activeSess);
+      if (activeSess?.in_flight_turn) {
+        activeTurnIdRef.current = activeSess.in_flight_turn.turn_id || null;
+        setProcessingState(true);
+        setPendingAction(activeSess.in_flight_turn.action || { label: 'Resolving Action...' });
+        setIsThinking(activeSess.in_flight_turn.status === 'thinking');
+        armSafetyTimer(245000);
+      }
       setPausedOnDashboard(false);
       connectWebSocket(activeSess.id);
       setLastSyncTimestamp(Date.now());
+      return activeSess;
     } catch (e) {
+      if (e?.isUserAbort || e?.name === 'AbortError' || turnGenerationRef.current !== resumeGen) {
+        return null;
+      }
       console.error('Failed to resume session slot', e);
-      setSession(sessionObj);
-      setPausedOnDashboard(false);
-      connectWebSocket(sessionObj.id);
+      setActionError(e?.message || 'Failed to resume session slot.');
+      return null;
+    } finally {
+      if (turnAbortControllerRef.current === abortCtrl) {
+        turnAbortControllerRef.current = null;
+      }
     }
-  }, [user?.user_id, character?.id, connectWebSocket]);
+  }, [
+    user?.user_id,
+    character?.id,
+    connectWebSocket,
+    turnGenerationRef,
+    turnAbortControllerRef,
+    syncTurnRequestRef,
+    activeTurnIdRef,
+    clearImagePoll,
+    resetTransientTurnState,
+    setProcessingState,
+    setPendingAction,
+    setIsThinking,
+    setActionError,
+    armSafetyTimer,
+  ]);
 
   const endSessionById = useCallback(async (sessionId) => {
     if (!sessionId || !user?.user_id) return;
@@ -376,22 +502,56 @@ export const useGameSession = (user, character) => {
           user_id: user.user_id,
         }),
       });
-      setSession(prev => (prev?.id === sessionId ? null : prev));
+      const isEndingActive =
+        activeSessionIdRef.current != null &&
+        String(activeSessionIdRef.current) === String(sessionId);
+      if (isEndingActive) {
+        turnGenerationRef.current += 1;
+        if (turnAbortControllerRef.current) {
+          try {
+            turnAbortControllerRef.current.abort();
+          } catch {}
+          turnAbortControllerRef.current = null;
+        }
+        syncTurnRequestRef.current = false;
+        activeSessionIdRef.current = null;
+        clearImagePoll();
+        closeSocket();
+        resetTransientTurnState();
+      }
+      setSession(prev => (prev && String(prev.id) === String(sessionId) ? null : prev));
       fetchActiveSession({ silent: true });
     } catch (e) {
       console.error('Failed to end session slot', e);
     }
-  }, [user?.user_id, fetchActiveSession]);
+  }, [
+    user?.user_id,
+    fetchActiveSession,
+    turnGenerationRef,
+    turnAbortControllerRef,
+    syncTurnRequestRef,
+    clearImagePoll,
+    closeSocket,
+    resetTransientTurnState,
+  ]);
 
   const endSession = async () => {
     turnGenerationRef.current += 1;
+    const endGen = turnGenerationRef.current;
+    if (fetchSessionAbortRef.current) {
+      try {
+        fetchSessionAbortRef.current.abort();
+      } catch {
+        // ignore abort error
+      }
+      fetchSessionAbortRef.current = null;
+    }
     if (turnAbortControllerRef.current) {
       turnAbortControllerRef.current.abort();
       turnAbortControllerRef.current = null;
     }
     syncTurnRequestRef.current = false;
-    clearSafetyTimer();
-    if (session?.id && user?.user_id) {
+    if (isValidSessionId(session?.id) && user?.user_id) {
       try {
         await apiCall('/api/adventure/end', {
           method: 'POST',
@@ -404,16 +564,15 @@ export const useGameSession = (user, character) => {
         console.warn('Failed to end session:', e);
       }
     }
+    if (turnGenerationRef.current !== endGen) {
+      return;
+    }
     activeSessionIdRef.current = null;
     clearImagePoll();
     closeSocket();
     setSession(null);
     setPausedOnDashboard(false);
-    setWaitingForParty(false);
-    setProcessingState(false);
-    setPendingAction(null);
-    setIsThinking(false);
-    setCancellingTurn(false);
+    resetTransientTurnState();
   };
 
   const clearActionError = useCallback(() => setActionError(null), []);

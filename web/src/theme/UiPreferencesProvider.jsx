@@ -13,6 +13,8 @@ export const ACRYLIC_MODES = ['full', 'focused', 'solid'];
 export const READING_MODES = ['scene', 'continuous'];
 export const CLOCK_FORMATS = ['12h', '24h'];
 export const DEFAULT_CLOCK_FORMAT = '24h';
+export const TIME_SKIP_CONTROLS = ['slider', 'dial'];
+export const DEFAULT_TIME_SKIP_CONTROL = 'dial';
 export const PHONE_UI_STYLES = ['classic', 'glass'];
 export const PHONE_CAROUSEL_POOLS = ['all_builtin', 'scenario_and_photos', 'photos_only', 'custom'];
 export const PHONE_WALLPAPER_FOCALS = ['top', 'center', 'bottom'];
@@ -94,6 +96,7 @@ const DEFAULT_PREFS = {
   illustratedBackdrops: true,
   readingMode: 'continuous',
   clockFormat: DEFAULT_CLOCK_FORMAT,
+  timeSkipControl: DEFAULT_TIME_SKIP_CONTROL,
   uiFont: THEME_DEFAULT_FONT_ID,
   narrationFont: THEME_DEFAULT_FONT_ID,
   ambientSceneBackdrop: false,
@@ -134,6 +137,9 @@ export const readStoredPrefs = () => {
     const clockFormat = CLOCK_FORMATS.includes(parsed.clockFormat)
       ? parsed.clockFormat
       : DEFAULT_PREFS.clockFormat;
+    const timeSkipControl = TIME_SKIP_CONTROLS.includes(parsed.timeSkipControl)
+      ? parsed.timeSkipControl
+      : DEFAULT_PREFS.timeSkipControl;
     const uiFont =
       typeof parsed.uiFont === 'string' && parsed.uiFont.trim()
         ? parsed.uiFont.trim()
@@ -195,6 +201,7 @@ export const readStoredPrefs = () => {
       illustratedBackdrops,
       readingMode,
       clockFormat,
+      timeSkipControl,
       uiFont,
       narrationFont,
       ambientSceneBackdrop,
@@ -324,6 +331,13 @@ export const UiPreferencesProvider = ({ children }) => {
     if (!CLOCK_FORMATS.includes(format)) return;
     setPrefs((prev) =>
       prev.clockFormat === format ? prev : { ...prev, clockFormat: format }
+    );
+  }, []);
+
+  const setTimeSkipControl = useCallback((control) => {
+    if (!TIME_SKIP_CONTROLS.includes(control)) return;
+    setPrefs((prev) =>
+      prev.timeSkipControl === control ? prev : { ...prev, timeSkipControl: control }
     );
   }, []);
 
@@ -464,6 +478,8 @@ export const UiPreferencesProvider = ({ children }) => {
       setReadingMode,
       clockFormat: prefs.clockFormat,
       setClockFormat,
+      timeSkipControl: prefs.timeSkipControl,
+      setTimeSkipControl,
       ambientSceneBackdrop: prefs.ambientSceneBackdrop,
       setAmbientSceneBackdrop,
       hud: prefs.hud,
@@ -488,6 +504,7 @@ export const UiPreferencesProvider = ({ children }) => {
       setIllustratedBackdrops,
       setReadingMode,
       setClockFormat,
+      setTimeSkipControl,
       setAmbientSceneBackdrop,
       setHudField,
       toggleHudField,

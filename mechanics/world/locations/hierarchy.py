@@ -551,8 +551,23 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
     
 
     scen_data = get_scenario_seed_data(scenario_key)
+    seed_zones_list = list(scen_data.get("zones", []))
+    for _r in scen_data.get("realms") or []:
+        if _r.get("primary_locations"):
+            seed_zones_list.append({
+                "id": _r.get("id", ""),
+                "name": resolve_session_location_tokens(session_id, str(_r.get("name") or ""), scenario_key, ""),
+                "primary_locations": _r.get("primary_locations") or [],
+            })
+        if _r.get("sub_locations"):
+            _r_nm = resolve_session_location_tokens(session_id, str(_r.get("name") or ""), scenario_key, "")
+            seed_zones_list.append({
+                "id": _r.get("id", ""),
+                "name": _r_nm,
+                "primary_locations": [{"id": _r.get("id", ""), "name": _r_nm, "sub_locations": _r.get("sub_locations") or []}],
+            })
 
-    for z in scen_data.get("zones", []):
+    for z in seed_zones_list:
 
         z_name = z.get("name", "")
         orig_z_name = z_name
@@ -628,6 +643,14 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
     # Also incorporate registered zones from SQLite session_locations
     if session_id:
         try:
+            wnodes_z = db.get_session_world_nodes(session_id) or []
+            non_zone_w_names = {
+                str(wn.get("name") or "").strip().lower()
+                for wn in wnodes_z
+                if isinstance(wn, dict)
+                and str(wn.get("node_type") or "").upper() in ("FACILITY", "ROOM")
+                and wn.get("name")
+            }
             existing = db.get_session_locations(session_id)
             for r in existing:
                 z = r.get("zone_name", "").strip()
@@ -635,6 +658,8 @@ def _build_session_zone_index(session_id: int = 0, scenario_key: str = "fantasy"
                 s = r.get("sub_name", "").strip()
                 if z:
                     z_low = z.lower()
+                    if z_low in non_zone_w_names:
+                        continue
                     if any(k in z_low for k in ("board", "desk", "table", "chair", "bed", "closet", "shelf", "counter")):
                         continue
                     if z_low not in zones:
@@ -676,8 +701,23 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
     # 1. From Seed Data
 
     scen_data = get_scenario_seed_data(scenario_key)
+    seed_zones_list = list(scen_data.get("zones", []))
+    for _r in scen_data.get("realms") or []:
+        if _r.get("primary_locations"):
+            seed_zones_list.append({
+                "id": _r.get("id", ""),
+                "name": resolve_session_location_tokens(session_id, str(_r.get("name") or ""), scenario_key, ""),
+                "primary_locations": _r.get("primary_locations") or [],
+            })
+        if _r.get("sub_locations"):
+            _r_nm = resolve_session_location_tokens(session_id, str(_r.get("name") or ""), scenario_key, "")
+            seed_zones_list.append({
+                "id": _r.get("id", ""),
+                "name": _r_nm,
+                "primary_locations": [{"id": _r.get("id", ""), "name": _r_nm, "sub_locations": _r.get("sub_locations") or []}],
+            })
 
-    for z in scen_data.get("zones", []):
+    for z in seed_zones_list:
 
         z_name = z.get("name", "")
 
@@ -797,7 +837,30 @@ def _build_session_spatial_index(session_id: int = 0, scenario_key: str = "fanta
 
             pass
 
-
+    # 3. Incorporate authoritative world_nodes (e.g., procedural transit hubs, annexes, dynamic realms)
+    if session_id:
+        try:
+            wnodes = db.get_session_world_nodes(session_id) or []
+            if wnodes:
+                from .realms import get_node_hierarchy_roles_in_memory
+                wmap = {str(n["node_id"]): n for n in wnodes if isinstance(n, dict) and n.get("node_id")}
+                for wn in wnodes:
+                    if not isinstance(wn, dict) or not wn.get("node_id"):
+                        continue
+                    ntype = str(wn.get("node_type") or "").upper()
+                    wname = str(wn.get("name") or "").strip()
+                    wlow = wname.lower()
+                    if not wname or wlow == "main area":
+                        continue
+                    roles = get_node_hierarchy_roles_in_memory(str(wn["node_id"]), wmap)
+                    z_node = roles.get("zone") or roles.get("realm")
+                    f_node = roles.get("facility") or roles.get("realm")
+                    if ntype == "FACILITY" and z_node and z_node.get("name"):
+                        primaries.setdefault(wlow, (str(z_node["name"]).strip(), wname))
+                    elif ntype == "ROOM" and z_node and z_node.get("name") and f_node and f_node.get("name"):
+                        subs.setdefault(wlow, (str(z_node["name"]).strip(), str(f_node["name"]).strip(), wname))
+        except Exception:
+            pass
 
     return primaries, subs
 
@@ -1159,7 +1222,7 @@ def _resolve_reverse_hierarchy(parts: list[str], scenario_key: str = "fantasy", 
                         break
                     pk_tokens = set(pk.replace("&", " ").replace("'", "").split())
                     overlap = tokens2 & pk_tokens
-                    if overlap - {"main", "area", "desk", "room", "hall", "spot", "office", "lab", "the", "and", "center", "entrance", "foyer", "residential", "street", (char_name.lower() if char_name else "")}:
+                    if overlap - {"main", "area", "desk", "room", "hall", "spot", "office", "lab", "the", "and", "center", "entrance", "foyer", "residential", "street", "platform", "station", "hub", "annex", (char_name.lower() if char_name else "")}:
                         matched_primary = (pz, pp)
                         break
 

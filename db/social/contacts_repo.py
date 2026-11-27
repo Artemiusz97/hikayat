@@ -3,12 +3,16 @@ from __future__ import annotations
 import db
 import hashlib
 import json
+import logging
+import sqlite3
 import threading
 import time
 from typing import Any
 from ..core import (UnitOfWork, get_conn, is_in_readonly_uow)
 from .contacts_enrichment import _enrich_contact_basic_info, _is_empty_info_val, _merge_basic_info_safely
 from .households_factions import _parse_household_row, get_household_by_id
+
+log = logging.getLogger(__name__)
 
 def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 0,
                    basic_info: dict = None, delta_score: int = 0, track: str = None,
@@ -279,7 +283,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 cur_track = str(track).strip().lower()
             else:
                 cur_track = existing_track
-            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and cur_track == "romantic":
+            if str(cur_race or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") and cur_track == "romantic":
                 cur_track = "platonic"
 
             existing_gender = existing_dict.get("gender")
@@ -380,6 +384,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and cur_app.get(k):
                     cur_prof[k] = cur_app[k]
                 cur_app.pop(k, None)
+            if cur_app.get("openness") not in (None, "") and not cur_prof.get("erotic_openness"):
+                cur_prof["erotic_openness"] = cur_app["openness"]
+            cur_app.pop("openness", None)
 
             if "tracks" not in cur_prof or not isinstance(cur_prof["tracks"], dict):
                 cur_prof["tracks"] = {}
@@ -431,7 +438,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                     race=cur_race or "human",
                     gender=cur_gender or "female",
                     scenario=scen,
-                    openness=str(cur_prof.get("erotic_openness") or "moderate"),
+                    openness=str(cur_prof.get("erotic_openness") or cur_prof.get("openness") or "moderate"),
                     intercourse=cur_prof["tracks"].get("intercourse", "virgin"),
                     oral=cur_prof["tracks"].get("oral", "inexperienced"),
                     manual=cur_prof["tracks"].get("manual", "inexperienced"),
@@ -562,7 +569,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 seed_str=f"{name}_{info.get('description', '')}"
             )
             cur_track = track if (track and str(track).strip()) else "platonic"
-            if str(cur_race or "").strip().lower() == "kitsune:myobu_fox" and str(cur_track).strip().lower() == "romantic":
+            if str(cur_race or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") and str(cur_track).strip().lower() == "romantic":
                 cur_track = "platonic"
             cur_gender = canonical_gender or info.get("gender") or gender or ""
             if cur_gender:
@@ -642,6 +649,9 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                 elif k == "had_first_time_with_player" and app_dict.get(k):
                     prof_dict[k] = app_dict[k]
                 app_dict.pop(k, None)
+            if app_dict.get("openness") not in (None, "") and not prof_dict.get("erotic_openness"):
+                prof_dict["erotic_openness"] = app_dict["openness"]
+            app_dict.pop("openness", None)
 
             if "tracks" not in prof_dict or not isinstance(prof_dict["tracks"], dict):
                 prof_dict["tracks"] = {}
@@ -737,7 +747,7 @@ def upsert_contact(session_id: int, npc_id: str, name: str, character_id: int = 
                     race=cur_race or "human",
                     gender=cur_gender or "female",
                     scenario=scen,
-                    openness=str(prof_dict.get("erotic_openness") or "moderate"),
+                    openness=str(prof_dict.get("erotic_openness") or prof_dict.get("openness") or "moderate"),
                     intercourse=prof_dict["tracks"].get("intercourse", "virgin"),
                     oral=prof_dict["tracks"].get("oral", "inexperienced"),
                     manual=prof_dict["tracks"].get("manual", "inexperienced"),
@@ -1340,8 +1350,8 @@ def get_contacts(session_id: int, character_id: int = 0, resolve_relations: bool
                         try:
                             with get_conn() as conn:
                                 conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))
-                        except Exception:
-                            pass
+                        except sqlite3.Error as exc:
+                            log.debug("Relations cache write skipped in get_contacts: %s", exc)
                 finally:
                     resolving_set.discard(session_id)
 
@@ -1470,7 +1480,7 @@ def update_contact_track(session_id: int, npc_id: str, new_track: str, character
                    AND (npc_id=? OR lower(npc_id)=? OR lower(name)=? OR lower(name)=?)""",
                 (session_id, character_id, character_id, clean_id, clean_name, clean_name, clean_id),
             ).fetchall()
-            if any(str(r["race"] or "").strip().lower() == "kitsune:myobu_fox" for r in _fox_chk):
+            if any(str(r["race"] or "").strip().lower() in ("kitsune:myobu_fox", "ghoul:canid") for r in _fox_chk):
                 return False
     now = time.time()
     with get_conn() as conn:
@@ -1870,8 +1880,8 @@ def get_contact(session_id: int, npc_id: str, character_id: int = 0) -> dict | N
             try:
                 with get_conn() as conn:
                     conn.execute("UPDATE contacts SET relations_json = ? WHERE id = ?", (json.dumps(d["relations"]), d["id"]))
-            except Exception:
-                pass
+            except sqlite3.Error as exc:
+                log.debug("Relations cache write skipped in get_contact: %s", exc)
 
     d["status_effects"] = (d.get("basic_info") or {}).get("status_effects") or []
     return d

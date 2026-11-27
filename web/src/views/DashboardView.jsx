@@ -26,6 +26,7 @@ import {
   MultiplayerSubModal,
 } from '../components/Menu/MainMenuSubModals';
 import { useSettings } from '../hooks/useSettings';
+import { isValidSessionId } from '../utils/session';
 
 const SettingsModal = lazy(() => import('../components/Settings/SettingsModal'));
 const CharacterCreatorModal = lazy(() => import('../components/Character/CharacterCreatorModal'));
@@ -249,7 +250,6 @@ const DashboardView = ({
       if (refreshCharacter) {
         await refreshCharacter();
       }
-      fetchCharacterSessions();
     } catch (err) {
       console.error('Failed to embark from dashboard:', err);
     }
@@ -338,8 +338,13 @@ const DashboardView = ({
     if (
       !found &&
       activeSession &&
+      isValidSessionId(activeSession.id) &&
+      (!activeSession.character_id ||
+        !character?.id ||
+        String(activeSession.character_id) === String(character.id)) &&
       (Number(activeSession.slot) === slotNum ||
         (slotNum === 1 &&
+          !(Number(activeSession.slot) >= 1 && Number(activeSession.slot) <= 6) &&
           !characterSessions.some((s) => s.id === activeSession.id)))
     ) {
       found = activeSession;

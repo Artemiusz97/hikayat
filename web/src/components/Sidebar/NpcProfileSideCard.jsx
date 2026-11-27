@@ -6,7 +6,6 @@ import {
   BookUser,
   Briefcase,
   Heart,
-  MapPin,
   ShieldAlert,
   User,
   X,
@@ -15,6 +14,7 @@ import { StatusEffectBadge } from './CharacterSheet';
 import { getRelationshipTier } from './CodexPanel';
 import NpcDossierBody, {
   defaultBulletRenderer as renderBulletPoints,
+  isRedundantAgentTierGrade,
   resolveAffiliations,
   resolveAgeGroupLabel,
 } from './NpcDossierBody';
@@ -23,7 +23,6 @@ import {
   formatRace,
   formatTitle,
 } from '../../utils/npcDemographics';
-import { formatCleanLocation } from '../../utils/locationFormat';
 import { isAnomalousNpc, normalizeActorName } from '../../utils/sceneTargets';
 import { findLinkedPersonInRoster, matchesNpcIdentity } from '../../utils/npcProfile';
 import { MotionButton } from '../Common/MotionPrimitives';
@@ -326,60 +325,67 @@ const NpcProfileSideCard = ({
         </div>
 
         {/* Summary Identity Chips */}
-        <div className="flex flex-wrap items-center gap-1 text-[11px]">
-          {roleSubtitle && (
-            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
-              Role: <strong className="text-gray-100">{roleSubtitle}</strong>
-            </span>
-          )}
-          {(basic.grade || npc.grade) && (
-            <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40 text-[10.5px]">
-              {formatTitle(basic.grade || npc.grade)}
-            </span>
-          )}
-          {ageLabel && (
-            <span className="px-1.5 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40 text-[10.5px]">
-              {ageLabel}
-            </span>
-          )}
-          {club && (
-            <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
-              Club: {formatTitle(club)}
-            </span>
-          )}
-          {faction && (
-            <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
-              Faction: {formatTitle(faction)}
-            </span>
-          )}
-          {raceLabel && (
-            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-              {raceLabel}
-            </span>
-          )}
-          {genderInfo && (
-            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-              {genderInfo.symbol ? `${genderInfo.symbol} ` : ''}
-              {genderInfo.label}
-            </span>
-          )}
-          {(basic.age || npc.age) && (
-            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
-              Age {basic.age || npc.age}
-            </span>
-          )}
-          {(basic.location || npc.location) && (
-            <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-400 border border-fantasy-border/30 text-[10.5px] flex items-center gap-1">
-              <MapPin size={9} className="text-fantasy-accent" />
-              <span>{formatCleanLocation(basic.location || npc.location)}</span>
-            </span>
-          )}
-          {isDebugRevealed && (
-            <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 font-mono">
-              {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
-            </span>
-          )}
-        </div>
+        {(() => {
+          const rawGrade = basic.grade || npc.grade;
+          const showGradeChip = Boolean(rawGrade) && !isRedundantAgentTierGrade(rawGrade, isSpecialAgent);
+          const hasAnyChip = Boolean(
+            showGradeChip ||
+              ageLabel ||
+              club ||
+              faction ||
+              raceLabel ||
+              genderInfo ||
+              basic.age ||
+              npc.age ||
+              isDebugRevealed
+          );
+          if (!hasAnyChip) return null;
+          return (
+            <div className="flex flex-wrap items-center gap-1 text-[11px]">
+              {showGradeChip && (
+                <span className="px-1.5 py-0.5 rounded bg-purple-950/40 text-purple-300 border border-purple-800/40 text-[10.5px]">
+                  {formatTitle(rawGrade)}
+                </span>
+              )}
+              {ageLabel && (
+                <span className="px-1.5 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40 text-[10.5px]">
+                  {ageLabel}
+                </span>
+              )}
+              {club && (
+                <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
+                  Club: {formatTitle(club)}
+                </span>
+              )}
+              {faction && (
+                <span className="px-1.5 py-0.5 rounded bg-slate-900/60 text-slate-300 border border-slate-700/50 text-[10.5px]">
+                  Faction: {formatTitle(faction)}
+                </span>
+              )}
+              {raceLabel && (
+                <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                  {raceLabel}
+                </span>
+              )}
+              {genderInfo && (
+                <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                  {genderInfo.symbol ? `${genderInfo.symbol} ` : ''}
+                  {genderInfo.label}
+                </span>
+              )}
+              {(basic.age || npc.age) && (
+                <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-300 border border-fantasy-border/40 text-[10.5px]">
+                  Age {basic.age || npc.age}
+                </span>
+              )}
+              {isDebugRevealed && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 font-mono">
+                  {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
+                </span>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Full Read-Only 4-Tab Dossier */}
         <NpcDossierBody

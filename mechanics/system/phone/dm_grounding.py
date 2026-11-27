@@ -15,7 +15,9 @@ def get_dm_requirement(
     attempt_num: int = 1,
     prev_succeeded: bool = False,
     relocation_num: int = 0,
-    is_player_sending: bool = False
+    is_player_sending: bool = False,
+    shared_intimate_count: int = 0,
+    is_hostile: bool = False,
 ) -> int:
     """Calculates skill check DC requirement based on affinity bracket, intent, track, traits, and progression."""
     is_romantic = str(track or "platonic").lower() == "romantic"
@@ -151,12 +153,22 @@ def get_dm_requirement(
         else:
             req = 2 if is_romantic else 4
 
-        op_clean = str(openness or "").lower()
-        if "prude" in op_clean or "modest" in op_clean:
-            req += 4
-        elif "shameless" in op_clean or "lewd" in op_clean:
+        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+        op_tier_dm = normalize_openness_tier(openness or "moderate")
+        comf_dm = compute_with_you_comfort(
+            op_tier_dm,
+            relationship_score=score,
+            relationship_track=track,
+            shared_intimate_count=shared_intimate_count,
+            is_hostile=is_hostile,
+            for_dm_or_inquiry=True,
+        )
+        if op_tier_dm == "prude":
+            req += 4 if comf_dm["stage"] == "guarded" else (2 if comf_dm["stage"] == "warming_up" else 0)
+        elif op_tier_dm == "shameless":
             req = max(1, req - 3)
-        elif "bold" in op_clean or "uninhibited" in op_clean:
+        elif op_tier_dm == "bold":
             req = max(1, req - 2)
         return req
 
@@ -169,12 +181,22 @@ def get_dm_requirement(
         else:
             req = 3 if is_romantic else 5
 
-        op_clean = str(openness or "").lower()
-        if "prude" in op_clean or "modest" in op_clean:
-            req += 5
-        elif "shameless" in op_clean or "lewd" in op_clean:
+        from mechanics.social.persona import compute_with_you_comfort, normalize_openness_tier
+
+        op_tier_dm = normalize_openness_tier(openness or "moderate")
+        comf_dm = compute_with_you_comfort(
+            op_tier_dm,
+            relationship_score=score,
+            relationship_track=track,
+            shared_intimate_count=shared_intimate_count,
+            is_hostile=is_hostile,
+            for_dm_or_inquiry=True,
+        )
+        if op_tier_dm == "prude":
+            req += 5 if comf_dm["stage"] == "guarded" else (2 if comf_dm["stage"] == "warming_up" else 0)
+        elif op_tier_dm == "shameless":
             req = max(1, req - 4)
-        elif "bold" in op_clean or "uninhibited" in op_clean:
+        elif op_tier_dm == "bold":
             req = max(1, req - 2)
         return max(1, req)
 
@@ -352,7 +374,12 @@ def is_bold_meetup_contact(contact: dict | None, openness: str = "", traits: lis
     c = contact or {}
     app = c.get("appearance") if isinstance(c.get("appearance"), dict) else {}
     basic = c.get("basic_info") if isinstance(c.get("basic_info"), dict) else {}
-    op = str(openness or app.get("erotic_openness") or app.get("openness") or c.get("openness") or "").lower()
+    raw_op = str(openness or app.get("erotic_openness") or app.get("openness") or c.get("openness") or "").strip()
+    if raw_op:
+        from mechanics.social.persona import normalize_openness_tier
+
+        return normalize_openness_tier(raw_op) in ("bold", "shameless")
+    op = raw_op.lower()
     tr_list = traits if traits is not None else (c.get("unlocked_traits") or c.get("traits") or [])
     blob = " ".join([
         op,

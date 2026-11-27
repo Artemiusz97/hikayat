@@ -256,3 +256,94 @@ CROWD_DENSITY_LABELS = {
     "crowd_label": "Tłum",
     "nearby_bystanders": "Pobliscy przechodnie"
 }
+
+STATURE_LABELS = {
+    "miniature": "Miniaturowy",
+    "short": "Niski",
+    "below_average": "Poniżej średniej",
+    "average": "Średni",
+    "tall": "Wysoki",
+    "towering": "Górujący",
+}
+
+PHYSIQUE_LABELS = {
+    "slim": "Szczupła",
+    "average": "Przeciętna",
+    "athletic": "Atletyczna",
+    "muscular": "Umięśniona",
+    "voluptuous": "Zmysłowa",
+    "stocky": "Krępa",
+    "chubby": "Puszysta",
+}
+
+ASSET_TEXTURE_LABELS = {
+    "perky": "Kształtny",
+    "firm": "Jędrny",
+    "supple": "Elastyczny",
+    "teardrop": "Łezkowaty",
+    "plush": "Pełny",
+    "pillowy": "Miękki",
+    "bouncy": "Sprężysty",
+    "delicate": "Delikatny",
+    "sensitive": "Wrażliwy",
+    "veined": "Żylasty",
+    "smooth": "Gładki",
+    "thick": "Gruby",
+    "heavy": "Ciężki",
+    "curved": "Zakrzywiony",
+    "tapered": "Zwężany",
+}
+
+SPECIES_SURFACE_LABELS = {
+    "furred": "Miękkie futro",
+    "scaled": "Mikrołuski",
+    "feathered": "Puszyste upierzenie",
+    "aquatic": "Lśniąca skóra",
+    "fever_warm": "Gorąca skóra",
+    "porcelain_silky": "Porcelanowo-jedwabista skóra",
+    "bio_synthetic": "Skóra biosyntetyczna",
+}
+
+REAR_SIZE_LABELS = {
+    "flat": "Płaskie",
+    "small": "Zgrabne",
+    "average": "Kształtne",
+    "large": "Pełne",
+    "huge": "Obfite",
+}
+
+REAR_TEXTURE_LABELS = {
+    "firm": "Jędrne",
+    "taut": "Napięte",
+    "supple": "Sprężyste",
+    "rounded": "Zaokrąglone",
+    "plush": "Miękkie",
+    "jiggly": "Falujące",
+}
+
+BODY_PREFERENCE_LABELS = {
+    "smaller_bb": "Mniejszy biust",
+    "bigger_bb": "Większy biust",
+    "smaller_ass": "Mniejsze pośladki",
+    "bigger_ass": "Większe pośladki",
+    "taller_partner": "Wyżsi partnerzy",
+    "shorter_partner": "Niżsi partnerzy",
+}
+
+SPIRIT_COURT_LABELS = {
+    "badge_human_world": "🏙️ Świat Ludzi",
+    "badge_veiled_realm": "⛩️ Zawoalowana Kraina",
+    "sworn_ally_active_header": "Zaprzysiężony Sojusznik — Pakt Dworu 90+",
+    "sworn_ally_summon_ready": "Aktywne 3-turowe Przyzwanie Bojowe",
+    "sworn_ally_stat_bonus": "Pasywna Aura Statystyk",
+    "autonomous_spirit_court_badge": "Autonomiczny Dwór Duchów",
+    "spirit_court_non_joinable_note": "Niezależny Dwór Duchów — zdobywaj uznanie poprzez czyny, sparingi i zlecenia.",
+    "ghoul_track_dark_crime": "Mroczne Zlecenie (Szybka Reputacja)",
+    "ghoul_track_grey_neutral": "Szaro-Neutralne (Bez Rozgłosu)",
+    "night_market_wing_selector": "Wybierz stragan ze skrzydeł Nocnego Targu...",
+    "spirit_relay_neon_static_note": "⚡ Przypływ Statyczny Linii Mocy: sygnały Duchowego Przekaźnika trzeszczą od zakłóceń.",
+    "spirit_relay_ghoul_channel": "🦴 Kościany Przekaźnik Nekropolii",
+    "pale_wake_toll_waived": "🕯️ Noc Bladego Czuwania — myto wejściowe do Nekropolii zniesione",
+    "lantern_tide_ferry_waived": "🏮 Przypływ Płynących Lampionów — opłata Przewoźnika zniesiona",
+    "event_crisis_commission_badge": "Pilny Kryzys Krainy",
+}

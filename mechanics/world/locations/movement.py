@@ -188,7 +188,16 @@ def sanitize_location_target(raw_target: str, session_id: int = 0, scen_key: str
 
     return format_tiered_location_string(z, p, s)
 
-def process_llm_location_update(session_id: int, raw_location: str, scenario_key: str = "high_school_drama", char_name: str = "") -> str:
+_EMOJI_NOISE_RE = re.compile(r"[\U0001F300-\U0001FAFF\u2600-\u2793\u2795-\u27BF\uFE0F\u200D]+")
+
+
+def strip_location_emojis(text: str) -> str:
+    """Strips decorative emoji pictographs from location strings while preserving arrows and multilingual text."""
+    cleaned = _EMOJI_NOISE_RE.sub("", str(text or ""))
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+def process_llm_location_update(session_id: int, raw_location: str, scenario_key: str = "high_school_drama", char_name: str = "", preferred_realm_id: str = "") -> str:
 
     """
 
@@ -206,21 +215,46 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
 
     ensure_session_locations_seeded(session_id, scenario_key, char_name=char_name)
 
-    # Clean markdown and delimiters from raw_location
+    # Clean markdown, decorative emojis, and delimiters from raw_location
     if raw_location:
         raw_location = re.sub(r"[*_`]", "", str(raw_location)).strip()
+        raw_location = strip_location_emojis(raw_location)
         raw_location = re.sub(r"\s*->\s*|\s*-->\s*", " ➔ ", raw_location)
 
     # Sanitize invalid objective/sentence strings before parsing
     if is_invalid_location_string(raw_location):
         raw_location = sanitize_location_target(raw_location, session_id=session_id, scen_key=scenario_key, char_name=char_name)
 
+    eff_pref_realm = str(preferred_realm_id or "").strip()
+    if not eff_pref_realm and session_id:
+        try:
+            from .realms import get_node_realm_id as _get_node_realm_id_cur
+            sess_cur = db.get_session(session_id)
+            cur_nid = str((sess_cur or {}).get("current_node_id") or "").strip()
+            if cur_nid:
+                eff_pref_realm = _get_node_realm_id_cur(session_id, cur_nid)
+        except Exception:
+            eff_pref_realm = ""
+
+    if session_id and raw_location and eff_pref_realm:
+        try:
+            from .realms import get_node_realm_id as _get_node_realm_id_match
+            matched_nid = db.resolve_node_id_from_location(
+                session_id, raw_location, preferred_realm_id=eff_pref_realm
+            )
+            if matched_nid and _get_node_realm_id_match(session_id, matched_nid) == eff_pref_realm:
+                canonical_fmt = db.format_node_tiered_location(session_id, matched_nid)
+                if canonical_fmt:
+                    return canonical_fmt
+        except Exception:
+            pass
+
     zone, primary, sub = parse_tiered_location(raw_location, scenario_key, session_id=session_id, char_name=char_name)
 
-    # Clean any surviving markdown from components
-    zone = re.sub(r"[*_`]", "", str(zone)).strip()
-    primary = re.sub(r"[*_`]", "", str(primary)).strip()
-    sub = re.sub(r"[*_`]", "", str(sub)).strip()
+    # Clean any surviving markdown or emoji pictographs from components
+    zone = strip_location_emojis(re.sub(r"[*_`]", "", str(zone)))
+    primary = strip_location_emojis(re.sub(r"[*_`]", "", str(primary)))
+    sub = strip_location_emojis(re.sub(r"[*_`]", "", str(sub)))
 
     from .hierarchy import resolve_default_sublocation
     zones_index = _build_session_zone_index(session_id, scenario_key)
@@ -427,23 +461,25 @@ def process_llm_location_update(session_id: int, raw_location: str, scenario_key
                 is_valid_save = False
 
     if is_valid_save:
-
+        eff_pref_realm = str(preferred_realm_id or "").strip()
+        if not eff_pref_realm and session_id:
+            try:
+                from .realms import get_node_realm_id
+                sess_cur = db.get_session(session_id)
+                cur_nid = str((sess_cur or {}).get("current_node_id") or "").strip()
+                if cur_nid:
+                    eff_pref_realm = get_node_realm_id(session_id, cur_nid)
+            except Exception:
+                eff_pref_realm = ""
         db.save_session_location(
-
             session_id=session_id,
-
             location_id=loc_id,
-
             zone_name=zone,
-
             primary_name=primary,
-
             sub_name=sub,
-
             atmosphere=atmosphere,
-
-            is_dynamic=1
-
+            is_dynamic=1,
+            preferred_realm_id=eff_pref_realm,
         )
 
 

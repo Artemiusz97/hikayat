@@ -21,7 +21,55 @@ PHONE_BRANDING = {
         "gallery_emoji": "📸",
         "bounty_app_name": "Campus Requests",
         "bounty_subtitle": "Student Bulletin",
-        "shop_app_name": "SchoolMart Delivery",
+        "shop_app_name": "QuickMart",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "PeerPulse Graph",
+        "show_school_shop": True,
+        "show_school_bounties": True,
+        "show_general_bounties": False,
+        "emoji": "📱",
+        "color": discord.Color.teal()
+    },
+    "anomalous_student": {
+        "device_name": "📱 Smartphone",
+        "os_name": "SmartOS v4.2",
+        "feed_app_name": "PeerPulse",
+        "feed_emoji": "📶",
+        "dm_app_name": "Messages",
+        "contacts_app_name": "Contacts",
+        "gallery_app_name": "Photo Vault",
+        "gallery_emoji": "📸",
+        "bounty_app_name": "Bounty Board",
+        "bounty_subtitle": "Freelance & Agency",
+        "shop_app_name": "MetroMart",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "PeerPulse Graph",
+        "show_school_shop": True,
+        "show_school_bounties": True,
+        "show_general_bounties": True,
+        "emoji": "📱",
+        "color": discord.Color.teal()
+    },
+    "anomalous_adult": {
+        "device_name": "📱 Tactical Comms",
+        "os_name": "BureauOS v5.1",
+        "feed_app_name": "MetroPulse",
+        "feed_emoji": "📡",
+        "dm_app_name": "Messages",
+        "contacts_app_name": "Field Directory",
+        "gallery_app_name": "Photo Vault",
+        "gallery_emoji": "📸",
+        "bounty_app_name": "Bounty Board",
+        "bounty_subtitle": "Field Contracts",
+        "shop_app_name": "MetroMart",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "📱",
         "color": discord.Color.teal()
     },
@@ -37,6 +85,12 @@ PHONE_BRANDING = {
         "bounty_app_name": "FixerNet Gigs",
         "bounty_subtitle": "Client Gigs",
         "shop_app_name": "DarkNet Market",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "📟",
         "color": discord.Color.purple()
     },
@@ -52,6 +106,12 @@ PHONE_BRANDING = {
         "bounty_app_name": "Dispatch Net",
         "bounty_subtitle": "Contract Missions",
         "shop_app_name": "Orbital Supplies",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "📡",
         "color": discord.Color.blue()
     },
@@ -67,6 +127,12 @@ PHONE_BRANDING = {
         "bounty_app_name": "Dispatch Ledger",
         "bounty_subtitle": "Errands & Gigs",
         "shop_app_name": "Mail-Order Ledger",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "⚙️",
         "color": discord.Color.dark_gold()
     },
@@ -82,6 +148,12 @@ PHONE_BRANDING = {
         "bounty_app_name": "GigBoard",
         "bounty_subtitle": "Local Tasks",
         "shop_app_name": "QuickDelivery Store",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "📱",
         "color": discord.Color.teal()
     },
@@ -97,6 +169,12 @@ PHONE_BRANDING = {
         "bounty_app_name": "Notice Board",
         "bounty_subtitle": "Guild Postings",
         "shop_app_name": "Courier Merchant",
+        "school_shop_app_name": "SchoolMart",
+        "school_bounty_app_name": "Campus Requests",
+        "people_tab_label": "Network",
+        "show_school_shop": False,
+        "show_school_bounties": False,
+        "show_general_bounties": True,
         "emoji": "🔮",
         "color": discord.Color.teal()
     }
@@ -109,29 +187,55 @@ def scenario_has_smartphone(scen_key: str) -> bool:
     from scenario_data import is_mechanic_enabled
     return is_mechanic_enabled(scen_key, "smartphone_hub")
 
-def get_phone_branding(scen_key: str) -> dict:
-    """Returns scenario-specific UI titles, app names, and emojis for the phone."""
+def get_phone_branding(
+    scen_key: str,
+    session: dict | None = None,
+    *,
+    is_student: bool | None = None,
+) -> dict:
+    """Returns scenario- and origin-specific UI titles, app names, visibility flags, and emojis for the phone."""
+    from scenario_data import (
+        has_tag,
+        is_anomalous_high_school_scenario,
+        is_anomalous_incursions_scenario,
+        is_school_scenario,
+    )
+
+    if is_student is None:
+        if isinstance(session, dict):
+            from mechanics.social.origin_mode import resolve_player_age_profile
+            eff_sess = dict(session)
+            if scen_key and not eff_sess.get("scenario"):
+                eff_sess["scenario"] = scen_key
+            is_student = bool(resolve_player_age_profile(eff_sess).get("is_student"))
+        else:
+            is_student = bool(is_school_scenario(scen_key))
+
+    if is_anomalous_high_school_scenario(scen_key):
+        return dict(PHONE_BRANDING["anomalous_student" if is_student else "anomalous_adult"])
+    if is_anomalous_incursions_scenario(scen_key):
+        return dict(PHONE_BRANDING["anomalous_adult"])
+    if is_school_scenario(scen_key):
+        return dict(PHONE_BRANDING["high_school_drama"])
+
     scen = str(scen_key or "").lower()
     if scen in PHONE_BRANDING:
-        return PHONE_BRANDING[scen]
-    from scenario_data import has_tag
-    if has_tag(scen_key, "high_school") or has_tag(scen_key, "high_school_drama") or "school" in scen:
-        return PHONE_BRANDING["high_school_drama"]
+        return dict(PHONE_BRANDING[scen])
     if has_tag(scen_key, "cyberpunk") or "cyber" in scen:
-        return PHONE_BRANDING["cyberpunk"]
+        return dict(PHONE_BRANDING["cyberpunk"])
     if has_tag(scen_key, "space") or has_tag(scen_key, "sci_fi") or "space" in scen:
-        return PHONE_BRANDING["sci_fi"]
+        return dict(PHONE_BRANDING["sci_fi"])
     if has_tag(scen_key, "steampunk") or "steam" in scen:
-        return PHONE_BRANDING["steampunk"]
+        return dict(PHONE_BRANDING["steampunk"])
     if has_tag(scen_key, "fantasy") or "fantasy" in scen:
-        return PHONE_BRANDING["fantasy"]
-    return PHONE_BRANDING["general_modern"]
+        return dict(PHONE_BRANDING["fantasy"])
+    return dict(PHONE_BRANDING["general_modern"])
 
 def build_media_gallery_embed(session_id: int, user_id: int, filter_contact: str = None, filter_type: str = None, page: int = 0) -> discord.Embed:
     """Builds a paginated visual embed listing all saved digital media items in the player's phone."""
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-    branding = get_phone_branding(scen_key)
+    branding = get_phone_branding(scen_key, session=session)
     app_name = branding.get("gallery_app_name", "Photo Vault")
     app_emoji = branding.get("gallery_emoji", "📸")
 
@@ -295,7 +399,7 @@ def _build_media_item_detail_embed(item: dict) -> discord.Embed:
 def build_phone_home_embed(session_id: int, user_id: int) -> discord.Embed:
     session = db.get_session(session_id)
     scen_key = session.get("scenario", "fantasy") if session else "fantasy"
-    branding = get_phone_branding(scen_key)
+    branding = get_phone_branding(scen_key, session=session)
     char = db.get_character(user_id)
     contacts = db.get_contacts(session_id, character_id=char.get("id", 0)) if char else []
 
@@ -342,21 +446,51 @@ def build_phone_home_embed(session_id: int, user_id: int) -> discord.Embed:
         value=gallery_summary,
         inline=True
     )
-    embed.add_field(
-        name=f"📋 {branding['bounty_app_name']}",
-        value=f"Accept dynamic commissions & side gigs directly on your device.",
-        inline=True
-    )
+    if branding.get("show_general_bounties", True):
+        embed.add_field(
+            name=f"📋 {branding['bounty_app_name']}",
+            value="Accept dynamic commissions & side gigs directly on your device.",
+            inline=True
+        )
+    if branding.get("show_school_bounties"):
+        embed.add_field(
+            name=f"🏫 {branding.get('school_bounty_app_name', 'Campus Requests')}",
+            value="Campus errands, study commissions, and student club requests.",
+            inline=True
+        )
     embed.add_field(
         name=f"🛍️ {branding['shop_app_name']}",
-        value=f"Order snacks, healing items, gear, and supplies delivered to your bag.",
+        value="Order food, drinks, meds, gifts, apparel, and tactical supplies delivered to your bag.",
         inline=True
     )
+    if branding.get("show_school_shop"):
+        embed.add_field(
+            name=f"🎒 {branding.get('school_shop_app_name', 'SchoolMart')}",
+            value="Student co-op essentials with automatic -20% student discount.",
+            inline=True
+        )
+
+    try:
+        from mechanics.world.world_events.spirit_realm_events import get_spirit_relay_static_note, is_spirit_relay_static_active
+        if is_spirit_relay_static_active(session_id):
+            lang = str((session or {}).get("narration_language") or (session or {}).get("language") or "en")
+            note = get_spirit_relay_static_note(session_id, lang)
+            if note:
+                embed.add_field(name="⚡ Spirit Relay", value=note[:200], inline=False)
+    except Exception:
+        pass
 
     embed.set_footer(text="Tap an App button below to open:")
     return embed
 
-def _build_dm_chat_embed(session_id: int, contact: dict, last_reply: dict = None) -> discord.Embed:
+def _build_dm_chat_embed(
+    session_id: int,
+    contact: dict,
+    last_reply: dict = None,
+    *,
+    session: dict | None = None,
+    language: str | None = None,
+) -> discord.Embed:
     name = contact.get("name", "Contact")
     score = contact.get("relationship_score", 0)
     track = contact.get("track", "platonic").capitalize()
@@ -367,9 +501,31 @@ def _build_dm_chat_embed(session_id: int, contact: dict, last_reply: dict = None
     messages = db.get_phone_messages(session_id, npc_id, limit=8)
 
     score_sign = f"+{score}" if score > 0 else str(score)
+    relay_badge = ""
+    if str(basic.get("folklore_village") or "").strip().lower() == "ghoul":
+        relay_badge = " • 🦴 Ossuary Relay"
+    static_line = ""
+    try:
+        from mechanics.world.world_events.spirit_realm_events import get_spirit_relay_static_note, is_spirit_relay_static_active
+        if is_spirit_relay_static_active(session_id):
+            sess_loc = session if isinstance(session, dict) else (db.get_session(session_id) or {})
+            host_uid = int((sess_loc or {}).get("host_user_id") or 0)
+            sett_lang = (db.get_settings(host_uid) or {}).get("language") if host_uid else None
+            dm_lang = str(
+                language
+                or (sess_loc or {}).get("narration_language")
+                or (sess_loc or {}).get("language")
+                or sett_lang
+                or "en"
+            )
+            s_note = get_spirit_relay_static_note(session_id, dm_lang)
+            if s_note:
+                static_line = f"\n⚡ *{s_note}*"
+    except Exception:
+        pass
     embed = discord.Embed(
         title=f"💬 Direct Messages: {name}",
-        description=f"**Role:** {role} • **Affinity:** `{score_sign}` ({track})\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        description=f"**Role:** {role} • **Affinity:** `{score_sign}` ({track}){relay_badge}{static_line}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         color=discord.Color.teal() if score >= 0 else discord.Color.red()
     )
 

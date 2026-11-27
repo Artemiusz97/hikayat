@@ -177,7 +177,7 @@ VENUE_ROLE_TEMPLATES: dict[str, tuple[dict[str, Any], ...]] = {
         _staff_spec("Evening Stylist", "Stylist", "evening", ("clothes_merchant", "accessories_merchant", "gift_merchant")),
     ),
     "school_campus": (
-        _staff_spec("Campus Store Clerk", "Clerk", "student", ("school_merchant", "student_merchant", "food_merchant")),
+        _staff_spec("Campus Store Clerk", "Clerk", "day", ("school_merchant", "student_merchant", "food_merchant")),
         _staff_spec("After-School Clerk", "Clerk", "evening", ("school_merchant", "cafe_merchant")),
     ),
     "ranger_outpost": (
@@ -587,7 +587,6 @@ def select_venue_template(
         if sk in SCHOOL_SCENARIOS and template_key == "clinic_hospital" and entry["shift_profile"] == "day":
             entry["role"] = "School Nurse"
             entry["occupation"] = "Nurse"
-            entry["shift_profile"] = "student"
             entry["merchant_archetypes"] = ("school_merchant",) if sk == "high_school_drama" else ("potion_merchant",)
         if force_24h:
             entry["is_24h_station"] = True
@@ -663,8 +662,6 @@ def resolve_slot_fill_role_spec(
 
     is_24h = bool(matched_spec.get("allow_24h_station")) and is_24h_venue_for_slot_fill(location_name, node=node)
     shift_profile = str(matched_spec.get("default_shift") or "day")
-    if sk in SCHOOL_SCENARIOS and shift_profile == "day" and any(k in loc_low for k in ("school", "academy", "campus", "infirmary", "library", "cafeteria")):
-        shift_profile = "student"
 
     return {
         "role_key": matched_key,

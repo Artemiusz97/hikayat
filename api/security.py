@@ -152,19 +152,25 @@ def is_trusted_tailscale_request(request_or_ws: Request | WebSocket | None) -> b
     if request_or_ws is None or not _is_tailscale_mode_enabled():
         return False
     headers = getattr(request_or_ws, "headers", None) or {}
-    if _header_value(headers, "cf-connecting-ip"):
+    if _header_value(headers, "cf-connecting-ip") or _header_value(headers, "tailscale-funnel-request"):
         return False
     client = getattr(request_or_ws, "client", None)
     host = str(getattr(client, "host", "") or "").strip().lower()
     is_ts_ip = _is_tailscale_ip(host)
-    # Path A: Tailscale Serve (tailnet only).
-    # Uvicorn's ProxyHeadersMiddleware rewrites client.host from 127.0.0.1 to the
-    # forwarded tailnet peer IP (100.64.0.0/10 or fd7a:115c:a1e0::/48) when X-Forwarded-For
-    # is set by local tailscaled, while direct ASGI / TestClient leaves host in _TRUSTED_LOCAL_HOSTS.
-    if (host in _TRUSTED_LOCAL_HOSTS or is_ts_ip) and _header_value(headers, "tailscale-user-login"):
-        return True
+    xff = _header_value(headers, "x-forwarded-for")
+    xri = _header_value(headers, "x-real-ip")
+    # Path A: Tailscale Serve reverse-proxied from loopback or Uvicorn ProxyHeadersMiddleware.
+    # Require every forwarded hop to belong to Tailscale CGNAT/ULA space when proxy headers are present.
+    if xff or xri:
+        hops = [h.strip() for h in xff.split(",") if h.strip()] + ([xri] if xri else [])
+        if not hops or not all(_is_tailscale_ip(h) for h in hops):
+            return False
+        return bool(
+            (host in _TRUSTED_LOCAL_HOSTS or is_ts_ip)
+            and _header_value(headers, "tailscale-user-login")
+        )
     # Path B: Direct connection over the tailnet without a reverse proxy.
-    if is_ts_ip and not _header_value(headers, "x-forwarded-for") and not _header_value(headers, "x-real-ip"):
+    if is_ts_ip:
         return True
     return False
 

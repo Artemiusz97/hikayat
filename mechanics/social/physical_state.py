@@ -16,6 +16,7 @@ from contextlib import contextmanager
 from typing import Dict, Any, List, Optional, Tuple, Union
 
 import db
+from mechanics.social.persona.core import is_male_gender
 
 log = logging.getLogger(__name__)
 
@@ -256,7 +257,7 @@ def _infer_initial_undergarments_state(char_or_npc: dict, scen_key: str = "fanta
     gifted_lingerie = str(gifted.get("Lingerie") or "").strip()
 
     gender = str(char_or_npc.get("gender") or app.get("gender") or "female").lower()
-    is_male = any(kw in gender for kw in ("male", "man", "boy", "lord", "he", "him", "his")) and not any(kw in gender for kw in ("female", "woman"))
+    is_male = is_male_gender(gender)
 
     bra_val = gifted_lingerie or str(under.get("bra") or app.get("bra") or "").strip()
     und_val = gifted_lingerie or str(under.get("underwear") or app.get("underwear") or "").strip()
@@ -578,12 +579,17 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 party_names.add(pn.lower())
                 matched_comp = _match_actor_key(pn, actors)
                 if matched_comp not in actors:
-                    _is_myobu_comp = str(p_npc.get("race") or "").strip().lower() == "kitsune:myobu_fox"
-                    u_top, u_bot = ("none", "none") if _is_myobu_comp else _infer_initial_undergarments_state(p_npc, session.get("scenario", "fantasy"), session_id=session.get("id"))
+                    _comp_race_low = str(p_npc.get("race") or "").strip().lower()
+                    _is_myobu_comp = _comp_race_low == "kitsune:myobu_fox"
+                    _is_ghoul_canid_comp = _comp_race_low == "ghoul:canid"
+                    _is_folklore_beast_comp = _is_myobu_comp or _is_ghoul_canid_comp
+                    u_top, u_bot = ("none", "none") if _is_folklore_beast_comp else _infer_initial_undergarments_state(p_npc, session.get("scenario", "fantasy"), session_id=session.get("id"))
+                    _beast_posture = "Poised on four silent canid paws" if _is_ghoul_canid_comp else "Poised on four spirit-fox paws"
+                    _beast_holding = "Pale ash mist" if _is_ghoul_canid_comp else "Foxfire wisps"
                     actors[pn] = {
-                        "posture": "Poised on four spirit-fox paws" if _is_myobu_comp else "Standing alert with party",
-                        "holding": "Foxfire wisps" if _is_myobu_comp else (p_npc.get("weapon") or "Equipped weapon"),
-                        "clothing": {slot: STATE_NONE for slot in ALL_GARMENT_SLOTS} if _is_myobu_comp else {
+                        "posture": _beast_posture if _is_folklore_beast_comp else "Standing alert with party",
+                        "holding": _beast_holding if _is_folklore_beast_comp else (p_npc.get("weapon") or "Equipped weapon"),
+                        "clothing": {slot: STATE_NONE for slot in ALL_GARMENT_SLOTS} if _is_folklore_beast_comp else {
                             "outerwear": "none",
                             "top": "Clothed",
                             "bottom": "Clothed",
@@ -850,6 +856,7 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                     contacts = []
 
             spots_val = None
+            discovered_intimate_bp: Dict[str, Any] = {}
             if partner_target and contacts:
                 pt_low = partner_target.lower()
                 pt_first = (pt_low.split() or [""])[0]
@@ -858,8 +865,51 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                     c_first = (c_name_low.split() or [""])[0]
                     if c_name_low == pt_low or (pt_first and len(pt_first) >= 3 and c_first == pt_first):
                         c_appr = c_rec.get("appearance") or {}
-                        if isinstance(c_appr, dict) and (c_appr.get("sensitive_spots_revealed") or c_appr.get("turn_ons_revealed")):
-                            spots_val = c_appr.get("sensitive_spots")
+                        if isinstance(c_appr, dict):
+                            if c_appr.get("sensitive_spots_revealed") or c_appr.get("turn_ons_revealed"):
+                                spots_val = c_appr.get("sensitive_spots")
+                            if c_appr.get("turn_ons_revealed"):
+                                discovered_intimate_bp["desires"] = c_appr.get("desires") or c_appr.get("turn_ons")
+                            if c_appr.get("fetishes_revealed"):
+                                discovered_intimate_bp["kinks"] = c_appr.get("fetishes") or c_appr.get("kinks")
+                            if c_appr.get("act_preferences_revealed"):
+                                discovered_intimate_bp["act_likes"] = c_appr.get("act_likes") or c_appr.get("favorite_acts")
+                                discovered_intimate_bp["act_dislikes"] = c_appr.get("act_dislikes") or c_appr.get("disliked_acts")
+                        if isinstance(session, dict) and session.get("id"):
+                            try:
+                                _cid_bp = int(session.get("character_id") or 0)
+                                _nid_bp = c_rec.get("npc_id") or c_rec.get("name") or partner_target
+                                _disc_rows_bp = db.get_contact_dossier_discoveries(session["id"], _cid_bp, _nid_bp) or []
+                                _cat_map = {
+                                    "sensitive_spot": "sensitive_spots",
+                                    "desire": "desires",
+                                    "kink": "kinks",
+                                    "act_pref": "act_likes",
+                                }
+                                for _dr in _disc_rows_bp:
+                                    if not isinstance(_dr, dict):
+                                        continue
+                                    _cat = str(_dr.get("fact_category") or _dr.get("category") or "").strip().lower()
+                                    _lbl = str(_dr.get("fact_value") or _dr.get("item_label") or _dr.get("fact_key") or _dr.get("item_key") or "").strip()
+                                    if not _lbl:
+                                        continue
+                                    if _cat == "act_pref":
+                                        _raw_likes = str((c_appr.get("act_likes") if isinstance(c_appr, dict) else "") or "").lower()
+                                        _raw_dislikes = str((c_appr.get("act_dislikes") if isinstance(c_appr, dict) else "") or "").lower()
+                                        _lbl_low = _lbl.lower()
+                                        _tgt = "act_dislikes" if (_lbl_low in _raw_dislikes and _lbl_low not in _raw_likes) else "act_likes"
+                                        discovered_intimate_bp.setdefault(_tgt, [])
+                                        if isinstance(discovered_intimate_bp[_tgt], list):
+                                            discovered_intimate_bp[_tgt].append(_lbl)
+                                    elif _cat in _cat_map:
+                                        _tk = _cat_map[_cat]
+                                        discovered_intimate_bp.setdefault(_tk, [])
+                                        if isinstance(discovered_intimate_bp[_tk], list):
+                                            discovered_intimate_bp[_tk].append(_lbl)
+                                if not spots_val and discovered_intimate_bp.get("sensitive_spots"):
+                                    spots_val = discovered_intimate_bp["sensitive_spots"]
+                            except Exception:
+                                pass
                         break
 
             # Multi-partner assembly
@@ -926,7 +976,13 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 for a in (actions or [])
             )
             primary_gender = "Female"
+            openness_profile_bp = None
             if contacts and partner_target:
+                from mechanics.social.persona import (
+                    compute_with_you_comfort,
+                    normalize_openness_tier,
+                    resolve_openness_contrast,
+                )
                 p_low = partner_target.lower()
                 p_first = (p_low.split() or [""])[0]
                 for c_rec in contacts:
@@ -934,6 +990,42 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                     c_first = (c_name_low.split() or [""])[0]
                     if c_name_low == p_low or (p_first and len(p_first) >= 3 and c_first == p_first):
                         primary_gender = c_rec.get("gender") or (c_rec.get("appearance") or {}).get("gender") or "Female"
+                        _c_app_bp = c_rec.get("appearance") or {}
+                        _raw_op_bp = _c_app_bp.get("erotic_openness") or _c_app_bp.get("openness") or ""
+                        if _raw_op_bp:
+                            _op_t_bp = normalize_openness_tier(_raw_op_bp)
+                            _sh_bp = int(len(c_rec.get("gameplay_intimate_events") or []))
+                            _pre_cm_bp = compute_with_you_comfort(
+                                _op_t_bp,
+                                relationship_score=int(c_rec.get("relationship_score", c_rec.get("score", 0)) or 0),
+                                relationship_track=str(c_rec.get("relationship_track") or c_rec.get("track") or "platonic"),
+                                shared_intimate_count=_sh_bp,
+                                is_hostile=(str(c_rec.get("disposition") or "").strip().lower() == "hostile"),
+                            )
+                            _cont_bp = resolve_openness_contrast(
+                                _op_t_bp,
+                                _c_app_bp.get("intimate_demeanor") or "",
+                                _c_app_bp.get("intimate_dynamic") or _c_app_bp.get("dynamic") or "",
+                                intercourse_experience=str(_c_app_bp.get("intercourse_experience") or ""),
+                                shared_intimate_count=_sh_bp,
+                                comfort_stage=_pre_cm_bp["stage"],
+                            )
+                            _cm_bp = compute_with_you_comfort(
+                                _op_t_bp,
+                                relationship_score=int(c_rec.get("relationship_score", c_rec.get("score", 0)) or 0),
+                                relationship_track=str(c_rec.get("relationship_track") or c_rec.get("track") or "platonic"),
+                                shared_intimate_count=_sh_bp,
+                                is_hostile=(str(c_rec.get("disposition") or "").strip().lower() == "hostile"),
+                                contrast_archetype=_cont_bp["archetype"],
+                                bluff_crack_active=_cont_bp["bluff_crack_active"],
+                            )
+                            openness_profile_bp = {
+                                "tier": _op_t_bp,
+                                "comfort_stage": _cm_bp["stage"],
+                                "contrast_archetype": _cont_bp["archetype"],
+                                "bluff_crack_active": bool(_cont_bp["bluff_crack_active"]),
+                                "hidden_fire_active": bool(_cont_bp["archetype"] == "hidden_fire" and _cont_bp["mechanical_active"]),
+                            }
                         break
 
             bp = build_intimate_choice_blueprints(
@@ -950,6 +1042,8 @@ def build_physical_prompt_block(session: dict, party: list, is_combat: bool = Fa
                 sensitive_spots=spots_val,
                 partner_actors=partner_actors_list if len(partner_actors_list) >= 2 else None,
                 partner_gender=primary_gender,
+                discovered_intimate=discovered_intimate_bp or None,
+                openness_profile=openness_profile_bp,
             )
             lines.extend(bp.get("guide_lines", []))
         except Exception:
@@ -1282,7 +1376,7 @@ def compute_clothing_summary_badge(clothing_dict: Optional[Dict[str, Any]], gend
         return "Fully Clothed 👕"
 
     gen = str(gender or "Female").lower()
-    is_male = any(kw in gen for kw in ("male", "man", "boy", "he", "him", "his")) and not any(kw in gen for kw in ("female", "woman"))
+    is_male = is_male_gender(gen)
 
     top = str(clothing_dict.get("top", "clothed") or "clothed").strip().lower()
     bot = str(clothing_dict.get("bottom", "clothed") or "clothed").strip().lower()
@@ -1969,7 +2063,7 @@ def check_venue_indecency_exposure(
     u_top_st = normalize_garment_state(str(cloth.get("under_top", "")))
     u_bot_st = normalize_garment_state(str(cloth.get("under_bottom", "")))
 
-    is_male = any(kw in str(gender).lower() for kw in ("male", "man", "boy", "he", "him")) and not any(kw in str(gender).lower() for kw in ("female", "woman"))
+    is_male = is_male_gender(gender)
 
     top_exposed = top_st in (STATE_REMOVED, STATE_NONE, STATE_DISPLACED) and (is_male or u_top_st in (STATE_REMOVED, STATE_NONE, STATE_DISPLACED))
     bottom_exposed = bot_st in (STATE_REMOVED, STATE_NONE, STATE_DISPLACED) and u_bot_st in (STATE_REMOVED, STATE_NONE, STATE_DISPLACED)
@@ -2049,8 +2143,8 @@ def resolve_canonical_wardrobe(
         except Exception:
             app = {}
 
-    _raw_race_chk = str(char_or_npc.get("race") or (char_or_npc.get("basic_info") or {}).get("race") or app.get("kitsune_form") or "").strip().lower()
-    if _raw_race_chk == "kitsune:myobu_fox":
+    _raw_race_chk = str(char_or_npc.get("race") or (char_or_npc.get("basic_info") or {}).get("race") or app.get("kitsune_form") or app.get("ghoul_form") or "").strip().lower()
+    if _raw_race_chk in ("kitsune:myobu_fox", "ghoul:canid"):
         return {
             slot: {
                 "slot": slot,

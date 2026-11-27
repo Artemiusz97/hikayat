@@ -58,14 +58,14 @@ def handle_npc_status_changed(event: NPCStatusChangedEvent):
 
 def handle_item_gifted(event: ItemGiftedEvent):
     # Lookup item metadata before removing from user inventory so wearable gifts equip cleanly
-    inv = db.get_inventory(event.user_id) or []
+    char = db.get_character(event.user_id, session_id=event.session_id)
+    char_id = char["id"] if char else 0
+    inv = db.get_inventory(event.user_id, char=char, session_id=event.session_id) or []
     gifted_obj = next(
         (it for it in inv if isinstance(it, dict) and str(it.get("name", "")).lower() == str(event.item_name or "").lower()),
         None,
     )
-    db.remove_item_by_name(event.user_id, event.item_name)
-    char = db.get_character(event.user_id)
-    char_id = char["id"] if char else 0
+    db.remove_item_by_name(event.user_id, event.item_name, char=char)
     npc_clean = (event.npc_name or "NPC").strip()
     db.upsert_contact(
         session_id=event.session_id,

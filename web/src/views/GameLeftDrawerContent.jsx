@@ -152,6 +152,7 @@ const GameLeftDrawerContent = ({
             onRefreshCharacter={refreshCharacter}
             character={character}
             session={session}
+            playerProfile={session?.player_profile || null}
             scenario={session?.scenario || character?.scenario}
             onOpenWorldMap={(targetLoc) => openWorldMap(targetLoc)}
           />
@@ -191,6 +192,7 @@ const GameLeftDrawerContent = ({
                 : character
             }
             scenario={session?.scenario || character?.scenario}
+            playerProfile={session?.player_profile || null}
             onAllocateStat={allocateStatPoint}
             onCastSpell={handleCastSpell}
             onRefreshCharacter={refreshCharacter}

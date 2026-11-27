@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request
 
 import db
@@ -20,6 +22,7 @@ from mechanics.social.factions import (
     get_rank_title,
     infer_anomalous_faction_archetype,
     is_nsfw_salon_faction,
+    is_spirit_court_faction,
     join_or_transfer_anomalous_faction,
     promote_player_in_roster,
     remove_player_from_roster,
@@ -35,95 +38,196 @@ from ..security import verify_session_participant
 from .common import _verify_missing_session_codex_auth
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 
 
-def _enrich_factions_list(session_id: int, user_id: int | None = None) -> dict:
+def _factions_need_seed_or_sync(session_id: int) -> bool:
+    import scenario_data
+
+    with db.ReadUnitOfWork():
+        session = db.get_session(session_id) or {}
+        if not session:
+            return False
+        raw_factions = db.get_factions(session_id) or []
+        if not raw_factions:
+            return True
+        scen_key = session.get("scenario", "fantasy")
+        if scenario_data.is_anomalous_incursions_scenario(scen_key):
+            expected_cnt = 68 if scenario_data.is_anomalous_high_school_scenario(scen_key) else 48
+            existing_roster = session.get("anomalous_agent_roster") or (
+                session.get("extra", {}).get("anomalous_agent_roster")
+                if isinstance(session.get("extra"), dict)
+                else None
+            )
+            if not (isinstance(existing_roster, list) and len(existing_roster) == expected_cnt):
+                return True
+        for f in raw_factions:
+            roster = f.get("leadership_roster") or []
+            if is_spirit_court_faction(f):
+                from mechanics.combat.spells.spirit_court_perks import resolve_village_key_for_spirit_faction
+
+                sc_vk = resolve_village_key_for_spirit_faction(f)
+                if sc_vk and (
+                    not roster
+                    or not (f.get("allied_faction_ids") or [])
+                    or not (f.get("rival_faction_ids") or [])
+                ):
+                    return True
+            elif not roster:
+                return True
+        return False
+
+
+def _enrich_factions_list(session_id: int, user_id: int | None = None, *, allow_seed: bool = True) -> dict:
     import scenario_data
 
     session = db.get_session(session_id) or {}
+    if not session:
+        return {
+            "factions": [],
+            "membership": {"joined_faction_id": "", "faction_rank": 0, "faction_title": ""},
+            "agent_dossier": {"is_anomalous_incursions": False},
+        }
     scen_key = session.get("scenario", "fantasy")
     is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     lookup_uid = user_id or session.get("host_user_id")
 
-    try:
-        ensure_starter_factions(session_id, scen_key)
-        if is_anom:
-            from mechanics.social.agent_roster import ensure_anomalous_agent_roster
+    with (db.UnitOfWork() if allow_seed else db.ReadUnitOfWork()):
+        if allow_seed:
+            try:
+                ensure_starter_factions(session_id, scen_key)
+                if is_anom:
+                    from mechanics.social.agent_roster import ensure_anomalous_agent_roster
 
-            ensure_anomalous_agent_roster(session_id, scen_key)
-        sync_faction_rosters_with_contacts(session_id)
-    except Exception:
-        pass
+                    ensure_anomalous_agent_roster(session_id, scen_key)
+                sync_faction_rosters_with_contacts(session_id)
+            except Exception as exc:
+                log.warning("Faction lazy-seed/sync failed for session %s: %s", session_id, exc)
 
-    agent_dossier = (
-        get_agent_dossier_summary(session_id, lookup_uid) if is_anom else {"is_anomalous_incursions": False}
-    )
-    if is_anom and isinstance(agent_dossier, dict):
-        arc_key = str(session.get("current_arc") or session.get("chapter_number") or session.get("act_number") or 1)
-        cal_map = dict(session.get("telemetry_calibrations_used") or {})
-        used_in_arc = int(cal_map.get(arc_key, 0) or 0)
-        p_tier = int(agent_dossier.get("promotion_tier") or 0)
-        agent_dossier["telemetry_calibrations_used"] = cal_map
-        agent_dossier["current_arc_key"] = arc_key
-        agent_dossier["can_calibrate_telemetry"] = bool(p_tier >= 4 and used_in_arc < 1)
-        if lookup_uid:
-            agent_dossier["character_3axis"] = db.get_character_3axis(lookup_uid)
-    char = db.get_character(lookup_uid) if lookup_uid else None
-    membership = {
-        "joined_faction_id": (char or {}).get("joined_faction_id") or "",
-        "faction_rank": int((char or {}).get("faction_rank") or 0),
-        "faction_title": (char or {}).get("faction_title") or "",
-    }
-
-    raw_factions = db.get_factions(session_id)
-    enriched = []
-    for f in raw_factions:
-        f_dict = dict(f)
-        f_dict.setdefault("hq_display_name", f_dict.get("hq_location_id", ""))
-        rep = int(f_dict.get("reputation_score") or 0)
-        template = f_dict.get("hierarchy_template") or f_dict.get("category") or "default"
-        roster = f_dict.get("leadership_roster") or []
-        if not roster:
-            roster = generate_leadership_roster(template, scen_key, f_dict.get("name", ""))
-            db.update_faction_leadership_roster(session_id, f_dict["faction_id"], roster)
-            f_dict["leadership_roster"] = roster
-
-        f_dict["tier"] = get_faction_tier(rep)
-        f_dict["hierarchy"] = get_hierarchy(template)
-        f_dict["eligible_rank"] = get_eligible_rank(template, rep)
-        f_dict["is_member"] = bool(
-            membership["joined_faction_id"]
-            and membership["joined_faction_id"].lower() == (f_dict.get("faction_id") or "").lower()
+        agent_dossier = (
+            get_agent_dossier_summary(session_id, lookup_uid) if is_anom else {"is_anomalous_incursions": False}
         )
-        f_dict["player_rank"] = membership["faction_rank"] if f_dict["is_member"] else 0
-        f_dict["player_title"] = membership["faction_title"] if f_dict["is_member"] else ""
-        eff_rank = f_dict["player_rank"] or (1 if rep > 0 else 0)
-        sal_susp = bool(f_dict["is_member"] and (agent_dossier or {}).get("salary_ration_suspended"))
-        perks = get_active_perks(f_dict, eff_rank, rep, salary_suspended=sal_susp)
-        f_dict["active_perks"] = perks or []
-        f_dict["rival_faction_ids"] = f_dict.get("rival_faction_ids") or []
-        from mechanics.social.factions import get_faction_category_tag, is_school_club_faction
+        if is_anom and isinstance(agent_dossier, dict):
+            arc_key = str(session.get("current_arc") or session.get("chapter_number") or session.get("act_number") or 1)
+            cal_map = dict(session.get("telemetry_calibrations_used") or {})
+            used_in_arc = int(cal_map.get(arc_key, 0) or 0)
+            p_tier = int(agent_dossier.get("promotion_tier") or 0)
+            agent_dossier["telemetry_calibrations_used"] = cal_map
+            agent_dossier["current_arc_key"] = arc_key
+            agent_dossier["can_calibrate_telemetry"] = bool(p_tier >= 4 and used_in_arc < 1)
+            if lookup_uid:
+                agent_dossier["character_3axis"] = db.get_character_3axis(lookup_uid, session_id=session_id)
+        char = db.get_character(lookup_uid, session_id=session_id) if lookup_uid else None
+        membership = {
+            "joined_faction_id": (char or {}).get("joined_faction_id") or "",
+            "faction_rank": int((char or {}).get("faction_rank") or 0),
+            "faction_title": (char or {}).get("faction_title") or "",
+        }
 
-        f_dict["is_school_club"] = is_school_club_faction(f_dict)
-        f_dict["category_tag"] = get_faction_category_tag(f_dict, scen_key)
-        if is_anom:
-            arch = infer_anomalous_faction_archetype(f_dict)
-            is_outlaw = arch in ANOMALOUS_OUTLAW_ARCHETYPES
-            f_dict["archetype_key"] = arch
-            f_dict["joinable"] = True
-            f_dict["is_outlaw"] = is_outlaw
-            f_dict["diplomatic_stance"] = "outlaw" if is_outlaw else "friendly"
-            f_dict["promotion_tiers"] = get_anomalous_promotion_tiers_for_archetype(arch)
-            if not f_dict["is_school_club"]:
-                player_arch = str((agent_dossier or {}).get("faction_archetype_key") or "freelancer").strip().lower()
-                player_outlaw = player_arch in ANOMALOUS_OUTLAW_ARCHETYPES
-                f_dict["quartermaster_eligible"] = (
-                    (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+        raw_factions = db.get_factions(session_id)
+        enriched = []
+        for f in raw_factions:
+            f_dict = dict(f)
+            f_dict.setdefault("hq_display_name", f_dict.get("hq_location_id", ""))
+            rep = int(f_dict.get("reputation_score") or 0)
+            template = f_dict.get("hierarchy_template") or f_dict.get("category") or "default"
+            is_spirit_court = is_spirit_court_faction(f_dict)
+            roster = f_dict.get("leadership_roster") or []
+            if is_spirit_court:
+                from mechanics.combat.spells.spirit_court_perks import resolve_village_key_for_spirit_faction
+                from mechanics.world.locations.folklore_spirit_courts import sync_spirit_court_leadership_and_diplomacy
+
+                sc_vk = resolve_village_key_for_spirit_faction(f_dict)
+                if allow_seed and sc_vk and (
+                    not roster
+                    or not (f_dict.get("allied_faction_ids") or [])
+                    or not (f_dict.get("rival_faction_ids") or [])
+                ):
+                    synced_row = sync_spirit_court_leadership_and_diplomacy(session_id, sc_vk)
+                    if synced_row:
+                        f_dict.update(synced_row)
+                        roster = f_dict.get("leadership_roster") or []
+            elif allow_seed and not roster:
+                roster = generate_leadership_roster(template, scen_key, f_dict.get("name", ""))
+                db.update_faction_leadership_roster(session_id, f_dict["faction_id"], roster)
+                f_dict["leadership_roster"] = roster
+
+            f_dict["tier"] = get_faction_tier(rep)
+            f_dict["hierarchy"] = get_hierarchy(template)
+            f_dict["eligible_rank"] = get_eligible_rank(template, rep)
+            f_dict["is_member"] = bool(
+                membership["joined_faction_id"]
+                and membership["joined_faction_id"].lower() == (f_dict.get("faction_id") or "").lower()
+            )
+            f_dict["player_rank"] = membership["faction_rank"] if f_dict["is_member"] else 0
+            f_dict["player_title"] = membership["faction_title"] if f_dict["is_member"] else ""
+            eff_rank = f_dict["player_rank"] or (1 if rep > 0 else 0)
+            sal_susp = bool(f_dict["is_member"] and (agent_dossier or {}).get("salary_ration_suspended"))
+            perks = get_active_perks(f_dict, eff_rank, rep, salary_suspended=sal_susp)
+            f_dict["active_perks"] = perks or []
+            f_dict["rival_faction_ids"] = f_dict.get("rival_faction_ids") or []
+            f_dict["allied_faction_ids"] = f_dict.get("allied_faction_ids") or []
+            from mechanics.social.factions import get_faction_category_tag, is_school_club_faction
+
+            f_dict["is_school_club"] = is_school_club_faction(f_dict)
+            f_dict["category_tag"] = get_faction_category_tag(f_dict, scen_key)
+            if is_spirit_court:
+                from mechanics.combat.spells.spirit_court_perks import (
+                    SPIRIT_COURT_SUMMON_SPELLS,
+                    SPIRIT_COURT_SWORN_ALLY_SPECS,
+                    SPIRIT_COURT_SWORN_ALLY_THRESHOLD,
+                    resolve_village_key_for_spirit_faction,
                 )
-                f_dict["bounty_board_eligible"] = (
-                    (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+                from mechanics.narrative.spirit_court_bounties import is_spirit_court_bounty_board_eligible
+
+                sc_vk = resolve_village_key_for_spirit_faction(f_dict)
+                f_dict["joinable"] = False
+                f_dict["is_joinable"] = 0
+                f_dict["archetype_key"] = ""
+                f_dict["is_outlaw"] = False
+                f_dict["diplomatic_stance"] = "spirit_court"
+                f_dict["quartermaster_eligible"] = False
+                f_dict["bounty_board_eligible"] = bool(
+                    sc_vk and is_spirit_court_bounty_board_eligible(session_id, sc_vk, rep)
                 )
-        enriched.append(f_dict)
+                f_dict["spirit_court_village"] = sc_vk or ""
+                sworn_spec = SPIRIT_COURT_SWORN_ALLY_SPECS.get(sc_vk or "") or {}
+                sworn_active = bool(rep >= SPIRIT_COURT_SWORN_ALLY_THRESHOLD and sworn_spec)
+                f_dict["sworn_ally_active"] = sworn_active
+                f_dict["sworn_ally_stat_bonuses"] = dict(sworn_spec.get("stat_bonuses") or {})
+                spell_id_sworn = str(sworn_spec.get("spell_id") or "")
+                spell_info = SPIRIT_COURT_SUMMON_SPELLS.get(spell_id_sworn) or {}
+                f_dict["sworn_ally_summon"] = (
+                    {
+                        "spell_id": spell_id_sworn,
+                        "name": str(sworn_spec.get("spell_name") or spell_info.get("name") or ""),
+                        "role_label": str(sworn_spec.get("role_label") or ""),
+                        "duration_turns": int(sworn_spec.get("duration") or 3),
+                        "mp_cost": int(spell_info.get("mp_cost") or 14),
+                        "emoji": str(sworn_spec.get("emoji") or "⛩️"),
+                    }
+                    if sworn_spec
+                    else None
+                )
+            elif is_anom:
+                arch = infer_anomalous_faction_archetype(f_dict)
+                is_outlaw = arch in ANOMALOUS_OUTLAW_ARCHETYPES
+                f_dict["archetype_key"] = arch
+                f_dict["joinable"] = True
+                f_dict["is_joinable"] = 1
+                f_dict["is_outlaw"] = is_outlaw
+                f_dict["diplomatic_stance"] = "outlaw" if is_outlaw else "friendly"
+                f_dict["promotion_tiers"] = get_anomalous_promotion_tiers_for_archetype(arch)
+                if not f_dict["is_school_club"]:
+                    player_arch = str((agent_dossier or {}).get("faction_archetype_key") or "freelancer").strip().lower()
+                    player_outlaw = player_arch in ANOMALOUS_OUTLAW_ARCHETYPES
+                    f_dict["quartermaster_eligible"] = (
+                        (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+                    )
+                    f_dict["bounty_board_eligible"] = (
+                        (not player_outlaw) if arch == "public_agency" else (player_arch == arch)
+                    )
+            enriched.append(f_dict)
 
     return {"factions": enriched, "membership": membership, "agent_dossier": agent_dossier}
 
@@ -133,18 +237,26 @@ async def get_factions(session_id: int, user_id: int | None = None, request: Req
     """Fetches faction standings, Rank 1-4 leadership rosters, hierarchy templates, and player membership."""
     user_id = user_id if isinstance(user_id, (int, str)) and not isinstance(user_id, bool) else None
     raw_sess = await adb(db.get_session, session_id)
-    if raw_sess:
-        await verify_session_participant(request, session_id, user_id, session=raw_sess)
-    else:
+    if not raw_sess:
         await _verify_missing_session_codex_auth(request, user_id)
-    return await adb(_enrich_factions_list, session_id, user_id)
+        return {
+            "factions": [],
+            "membership": {"joined_faction_id": "", "faction_rank": 0, "faction_title": ""},
+            "agent_dossier": {"is_anomalous_incursions": False},
+        }
+    await verify_session_participant(request, session_id, user_id, session=raw_sess)
+    needs_seed = await adb(_factions_need_seed_or_sync, session_id)
+    if needs_seed:
+        async with distributed_session_lock(session_id):
+            return await adb(_enrich_factions_list, session_id, user_id, allow_seed=True)
+    return await adb(_enrich_factions_list, session_id, user_id, allow_seed=False)
 
 
 @router.post("/api/factions/{session_id}/hq-action")
 async def faction_hq_action(session_id: int, req: FactionHQActionRequest, request: Request = None):
     """Executes a Faction HQ operation: join, leave, rest, quartermaster, bounty, or promote."""
-    await verify_session_participant(request, session_id, req.user_id)
-    async with distributed_user_lock(req.user_id):
+    _, eff_uid = await verify_session_participant(request, session_id, req.user_id)
+    async with distributed_user_lock(eff_uid):
         async with distributed_session_lock(session_id):
             return await _execute_faction_hq_action(session_id, req)
 
@@ -154,7 +266,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    char = await adb(db.get_character, req.user_id)
+    char = await adb(db.get_character, req.user_id, session_id=session_id)
     if not char:
         raise HTTPException(status_code=404, detail="Character not found")
 
@@ -177,6 +289,12 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
     subroom_err = await adb(validate_major_club_subroom_action, session_id, faction, action, current_loc_str, scen_key)
     if subroom_err:
         raise HTTPException(status_code=400, detail=subroom_err)
+
+    if action in ("join", "transfer", "leave") and is_spirit_court_faction(faction):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{faction.get('name', 'Spirit Court')} is an autonomous Spirit Court; formal enlistment is not required.",
+        )
 
     if action in ("join", "transfer"):
         if is_anom:
@@ -259,7 +377,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
         )
         if not hq_ok:
             raise HTTPException(status_code=hq_code, detail=hq_err)
-        await adb(db.apply_hp_mp_delta, req.user_id, char["max_hp"], char["max_mp"], 0)
+        await adb(db.apply_hp_mp_delta, req.user_id, char["max_hp"], char["max_mp"], 0, character_id=char_id)
         party_npcs_rest = await adb(db.get_session_party_npcs, session_id)
         if party_npcs_rest:
             rested_companions = []
@@ -352,7 +470,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
             {
                 "success": True,
                 "action": "bounty",
-                "bounties": [dict(b) for b in (payload.get("available_bounties") or []) if b],
+                "bounties": [dict(b) for b in (bounties or []) if isinstance(b, dict)],
                 "message": f"Generated {len(bounties or [])} faction contracts for {faction.get('name', 'Faction')}!",
                 **payload,
             }
@@ -489,7 +607,7 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 detail=f"Telemetry Calibration requires {cost_fmt} (you currently have {cur_fmt}).",
             )
 
-        inv_items = await adb(db.get_inventory, req.user_id)
+        inv_items = await adb(db.get_inventory, req.user_id, char=char, session_id=session_id)
         core_item = next(
             (
                 it
@@ -510,42 +628,26 @@ async def _execute_faction_hq_action(session_id: int, req: FactionHQActionReques
                 detail="Telemetry Calibration requires 1x Hume Core in your unequipped inventory.",
             )
 
-        removed = await adb(db.remove_item, req.user_id, int(core_item["id"]))
-        if not removed:
+        def _commit_calibration():
+            with db.UnitOfWork():
+                if not db.remove_item(req.user_id, int(core_item["id"]), char=char, session_id=session_id):
+                    return None
+                db.apply_hp_mp_delta(req.user_id, 0, 0, -500, session_id=session_id, character_id=char_id)
+                db.set_character_3axis(req.user_id, new_attr, new_arch, new_med, session_id=session_id, character_id=char_id)
+                sync_equipped_anomalous_spells(req.user_id, character_id=char_id, session_id=session_id)
+                next_cal_map = dict(cal_map)
+                next_cal_map[arc_key] = int(next_cal_map.get(arc_key, 0) or 0) + 1
+                db.update_session(session_id, extra={"telemetry_calibrations_used": next_cal_map})
+                fresh_spells = db.get_learned_spells(req.user_id, character_id=char_id, session_id=session_id)
+                return fresh_spells, next_cal_map
+
+        cal_result = await adb(_commit_calibration)
+        if cal_result is None:
             raise HTTPException(
                 status_code=400,
                 detail="Could not consume Hume Core (item locked or no longer available).",
             )
-
-        gold_deducted = False
-        try:
-            await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, -500)
-            gold_deducted = True
-            await adb(db.set_character_3axis, req.user_id, new_attr, new_arch, new_med)
-            await adb(sync_equipped_anomalous_spells, req.user_id)
-        except Exception:
-            if gold_deducted:
-                try:
-                    await adb(db.apply_hp_mp_delta, req.user_id, 0, 0, 500)
-                except Exception:
-                    pass
-            try:
-                await adb(
-                    db.add_item,
-                    req.user_id,
-                    core_item["name"],
-                    core_item.get("item_type") or "Material",
-                    core_item.get("effect") or "",
-                    int(core_item.get("slot_cost", 1) or 1),
-                    True,
-                )
-            except Exception:
-                pass
-            raise
-
-        cal_map[arc_key] = int(cal_map.get(arc_key, 0) or 0) + 1
-        await adb(db.update_session, session_id, extra={"telemetry_calibrations_used": cal_map})
-        learned_after = await adb(db.get_learned_spells, req.user_id)
+        learned_after, cal_map = cal_result
         payload = await adb(_enrich_factions_list, session_id, req.user_id)
         return serializable_action(
             {

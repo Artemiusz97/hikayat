@@ -17,12 +17,23 @@ const BountiesTab = ({
   onToggleBounty,
   onGenerateBoard,
   onBountyContract,
+  bountyScopeFilter = 'all',
+  onChangeBountyScopeFilter = null,
+  isStudentOrigin = false,
   busyAction,
   scenario = 'fantasy',
   t,
 }) => {
   const currencyMeta = getScenarioCurrency(scenario);
   const currencyLabel = t(`currency.${currencyMeta.key}`, currencyMeta.name);
+  const scopePills = [
+    { id: 'all', label: t('phone.bounties.tab_all', 'All') },
+    { id: 'generic', label: t('phone.bounties.tab_generic', 'Generic') },
+    { id: 'faction', label: t('phone.bounties.tab_faction', 'Faction') },
+    ...(isStudentOrigin
+      ? [{ id: 'school', label: t('phone.bounties.tab_campus', 'Campus') }]
+      : []),
+  ];
   return (
     <div className="space-y-3">
       {/* Flat Top Header */}
@@ -50,6 +61,25 @@ const BountiesTab = ({
           </span>
         </button>
       </div>
+
+      {onChangeBountyScopeFilter && (
+        <div className="flex flex-wrap items-center gap-1">
+          {scopePills.map((pill) => (
+            <button
+              key={pill.id}
+              type="button"
+              onClick={() => onChangeBountyScopeFilter(pill.id)}
+              className={`px-2.5 py-1 rounded-full text-[10.5px] font-bold border transition-colors cursor-pointer ${
+                bountyScopeFilter === pill.id
+                  ? 'bg-fantasy-accent/20 text-fantasy-accent border-fantasy-accent/50'
+                  : 'bg-gray-500/10 text-gray-400 border-white/[0.08] hover:text-gray-200'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {availableBounties.length === 0 ? (
         <div className="text-center py-8 px-4 text-gray-400 border border-dashed border-fantasy-border/50 rounded-xl space-y-2">
@@ -102,6 +132,31 @@ const BountiesTab = ({
                         title={b.anomalous_lock_reason || t('phone.bounties.locked_faction_btn', '🔒 Board Restricted')}
                       >
                         🔒
+                      </span>
+                    )}
+                    {b.target_realm_id === 'realm_city_metro' && (
+                      <span className="text-[9.5px] px-1.5 py-0.5 bg-sky-950/70 text-sky-300 rounded font-bold uppercase border border-sky-700/60">
+                        🏙️ {t('spirit_realm.target_human_world', 'Human World')}
+                      </span>
+                    )}
+                    {b.target_realm_id === 'realm_veiled_spirit_world' && (
+                      <span className="text-[9.5px] px-1.5 py-0.5 bg-indigo-950/70 text-indigo-300 rounded font-bold uppercase border border-indigo-700/60">
+                        ⛩️ {t('spirit_realm.target_veiled_realm', 'Veiled Realm')}
+                      </span>
+                    )}
+                    {b.ghoul_track === 'dark_crime' && (
+                      <span className="text-[9.5px] px-1.5 py-0.5 bg-rose-950/70 text-rose-300 rounded font-bold uppercase border border-rose-700/60">
+                        {t('spirit_realm.ghoul_track_dark', 'Dark Track')}
+                      </span>
+                    )}
+                    {b.ghoul_track === 'grey_neutral' && (
+                      <span className="text-[9.5px] px-1.5 py-0.5 bg-slate-900/80 text-slate-300 rounded font-bold uppercase border border-slate-600/60">
+                        {t('spirit_realm.ghoul_track_grey', 'Grey Track')}
+                      </span>
+                    )}
+                    {b.is_crisis_commission && (
+                      <span className="text-[9.5px] px-1.5 py-0.5 bg-red-950/80 text-red-200 rounded font-bold uppercase border border-red-600/70">
+                        ⚡ {t('spirit_realm.urgent_crisis_badge', 'Urgent Surge')}
                       </span>
                     )}
                     <span className="text-[9.5px] px-1.5 py-0.5 bg-amber-950/60 text-amber-300 rounded font-bold uppercase border border-amber-800/50">

@@ -34,9 +34,19 @@ const PhoneFeedApp = ({
   onSendFriendRequest,
   suggestedPeers = [],
   contacts = [],
+  isStudentOrigin = false,
   onOpenChatWithContact,
+  commsOffline = false,
   t,
 }) => {
+  const showSchoolCopy = Boolean(
+    isStudentOrigin || branding?.show_school_bounties || branding?.show_school_shop
+  );
+  const peopleTabLabel =
+    branding?.people_tab_label ||
+    (showSchoolCopy
+      ? t('phone.feed.peerpulse_graph', 'PeerPulse Graph')
+      : t('phone.feed.network_graph', 'Network'));
   return (
     <div className="space-y-2.5">
       {/* Header + Rumor Charges */}
@@ -74,7 +84,7 @@ const PhoneFeedApp = ({
           }`}
         >
           <Users size={12} />
-          <span>{t('phone.feed.peerpulse_graph', 'PeerPulse Graph')}</span>
+          <span>{peopleTabLabel}</span>
         </button>
       </div>
 
@@ -85,10 +95,10 @@ const PhoneFeedApp = ({
           <div className="flex items-center gap-1.5">
             <button
               type="button"
-              disabled={feedBusy || (socialState?.charges ?? 3) <= 0}
+              disabled={feedBusy || commsOffline || (socialState?.charges ?? 3) <= 0}
               onClick={onScourRumor}
               className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-xl text-[11px] font-bold border transition-all ${
-                (socialState?.charges ?? 3) > 0
+                (socialState?.charges ?? 3) > 0 && !commsOffline
                   ? 'bg-purple-950/60 hover:bg-purple-900/70 text-purple-200 border-purple-600/50'
                   : 'bg-neutral-900 text-gray-600 border-neutral-800 cursor-not-allowed'
               }`}
@@ -99,7 +109,7 @@ const PhoneFeedApp = ({
 
             <button
               type="button"
-              disabled={feedBusy}
+              disabled={feedBusy || commsOffline}
               onClick={onRefreshFeed}
               className="p-1.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-gray-300 border border-neutral-800 transition-colors"
               title={t('phone.feed.refresh_timeline', 'Refresh Timeline')}
@@ -247,9 +257,9 @@ const PhoneFeedApp = ({
             </div>
             <button
               type="button"
-              disabled={peerBusy}
+              disabled={peerBusy || commsOffline}
               onClick={() => onDiscoverPeer(peerQuery)}
-              className="px-2.5 py-1.5 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/50 text-[11px] font-bold transition-colors shrink-0"
+              className="px-2.5 py-1.5 rounded-xl bg-cyan-600/30 hover:bg-cyan-600/40 text-cyan-200 border border-cyan-500/50 text-[11px] font-bold transition-colors shrink-0 disabled:opacity-45"
             >
               Lookup
             </button>
@@ -257,12 +267,18 @@ const PhoneFeedApp = ({
 
           <button
             type="button"
-            disabled={peerBusy}
+            disabled={peerBusy || commsOffline}
             onClick={() => onDiscoverPeer('')}
             className="w-full py-1.5 px-3 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-cyan-300 flex items-center justify-center gap-1.5 transition-colors"
           >
             <Sparkles size={12} />
-            <span>{peerBusy ? 'Scanning Directory...' : 'Discover Suggested Peer'}</span>
+            <span>
+              {peerBusy
+                ? t('phone.peers.scanning', 'Scanning Directory...')
+                : showSchoolCopy
+                  ? t('phone.peers.discover_peer', 'Discover Suggested Peer')
+                  : t('phone.peers.discover_contact', 'Discover Local Contact')}
+            </span>
           </button>
 
           {peerFeedback && (
@@ -383,7 +399,7 @@ const PhoneFeedApp = ({
                   ) : (
                     <button
                       type="button"
-                      disabled={peerBusy || (peerProfile.cooldown_turns_left || 0) > 0}
+                      disabled={peerBusy || commsOffline || (peerProfile.cooldown_turns_left || 0) > 0}
                       onClick={() => onSendFriendRequest(peerProfile)}
                       className={`w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 border transition-all ${
                         (peerProfile.cooldown_turns_left || 0) > 0
@@ -408,10 +424,16 @@ const PhoneFeedApp = ({
                 <div>
                   <h5 className="font-bold text-xs text-gray-200 flex items-center gap-1.5">
                     <Users size={14} className="text-cyan-400" />
-                    <span>{t('phone.peers.suggested_peers', 'Suggested Peers & Classmates')}</span>
+                    <span>
+                      {showSchoolCopy
+                        ? t('phone.peers.suggested_peers', 'Suggested Peers & Classmates')
+                        : t('phone.peers.suggested_contacts', 'Suggested Contacts & Allies')}
+                    </span>
                   </h5>
                   <p className="text-[10px] text-gray-500">
-                    Classmates and mutual peers eligible for friend requests.
+                    {showSchoolCopy
+                      ? 'Classmates and mutual peers eligible for friend requests.'
+                      : t('phone.peers.suggested_contacts_sub', 'Local contacts and operatives available to connect with.')}
                   </p>
                 </div>
                 {suggestedPeers.length > 0 && (
@@ -425,10 +447,14 @@ const PhoneFeedApp = ({
                 <div className="text-center py-10 px-4 text-gray-500 border border-dashed border-neutral-800 rounded-2xl space-y-1">
                   <Users size={26} className="mx-auto opacity-30 text-cyan-400" />
                   <p className="text-xs text-gray-400">
-                    {t('phone.peers.discover_peers', 'Discover Peers & Mutual Connections')}
+                    {showSchoolCopy
+                      ? t('phone.peers.discover_peers', 'Discover Peers & Mutual Connections')
+                      : t('phone.peers.discover_contacts', 'Discover Local Contacts & Operatives')}
                   </p>
                   <p className="text-[10px] text-gray-500">
-                    Search by name or click "Discover Suggested Peer" to view social profiles and send Friend Requests.
+                    {showSchoolCopy
+                      ? 'Search by name or click "Discover Suggested Peer" to view social profiles and send Friend Requests.'
+                      : t('phone.peers.discover_contacts_hint', 'Search by name or click "Discover Local Contact" to view profiles and connect.')}
                   </p>
                 </div>
               ) : (

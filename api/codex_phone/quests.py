@@ -7,10 +7,13 @@ from fastapi import APIRouter, HTTPException, Query, Request
 import db
 from db import adb
 import game_engine
+from mechanics.narrative.bounty import classify_bounty_scope
 from mechanics.social.factions import (
+    is_school_club_faction,
     resolve_board_club_faction_for_location,
     validate_faction_hq_action_access,
 )
+from mechanics.social.origin_mode import resolve_player_age_profile
 from mechanics.system.concurrency import distributed_session_lock
 from mechanics.world.locations import get_notice_board_label, location_has_bounty_board
 from ..deps import (
@@ -20,6 +23,7 @@ from ..deps import (
     EpilogueChoiceRequest,
     QuestTurnInRequest,
     SuspectAccusationRequest,
+    ensure_realm_comms_available,
     serializable_action,
 )
 from ..security import verify_session_participant
@@ -44,6 +48,16 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
 
     quests = [dict(q) for q in db.get_session_quests(session_id) if q]
     import scenario_data as _sd_qp
+
+    char_row_qp = db.get_character(eff_uid, session_id=session_id) if eff_uid else None
+    player_profile_qp = resolve_player_age_profile(session, char_row_qp)
+    is_student_qp = bool(player_profile_qp.get("is_student"))
+    factions_qp = db.get_factions(session_id) or []
+    faction_map_qp = {
+        str(f.get("faction_id") or ""): f
+        for f in factions_qp
+        if isinstance(f, dict) and f.get("faction_id")
+    }
 
     is_anom_qp = _sd_qp.is_anomalous_incursions_scenario(scen_key)
     target_uid_qp = eff_uid
@@ -228,6 +242,28 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                         resolve_session_location_tokens(session_id, opt_o["target_location"], scen_key)
                     )
         q_notes_raw = str(_saved_notes or q.get("quest_notes") or "")
+        scope_probe = dict(q)
+        scope_probe["quest_notes"] = q_notes_raw
+        b_scope = classify_bounty_scope(scope_probe, faction_map=faction_map_qp)
+        q["bounty_scope"] = b_scope
+        q["is_school_bounty"] = (b_scope == "school")
+        from mechanics.narrative.spirit_court_bounties import (
+            _parse_notes_kv,
+            get_spirit_court_village_key_for_quest,
+            is_spirit_court_quest,
+        )
+        _sc_kv = _parse_notes_kv(q_notes_raw)
+        _is_sc_q = is_spirit_court_quest(scope_probe)
+        q["is_spirit_court_commission"] = bool(_is_sc_q)
+        q["spirit_court_village"] = get_spirit_court_village_key_for_quest(scope_probe) if _is_sc_q else ""
+        q["target_realm_id"] = str(q.get("target_realm_id") or _sc_kv.get("target_realm_id") or "")
+        q["target_node_id"] = str(q.get("target_node_id") or _sc_kv.get("target_node_id") or "")
+        _gh_tr = str(q.get("ghoul_track") or _sc_kv.get("ghoul_track") or "")
+        q["ghoul_track"] = _gh_tr if _gh_tr in ("dark_crime", "grey_neutral") else ""
+        q["is_crisis_commission"] = bool(
+            str(q.get("quest_id") or "").upper().startswith("EVT-SPC-")
+            or bool(_sc_kv.get("event_crisis") or _sc_kv.get("crisis_event"))
+        )
         if is_anom_qp and q.get("status") == "Available":
             try:
                 elig_probe = dict(q)
@@ -387,8 +423,13 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
                     c["corroboration_group"] = _meta["corroboration_group"]
             elif c.get("clue_tier") == "red_herring":
                 c["clue_tier"] = "corroborating"
-    available_bounties = [q for q in quests if q.get("status") == "Available"]
+    available_bounties = [
+        q for q in quests
+        if q.get("status") == "Available" and (is_student_qp or not q.get("is_school_bounty"))
+    ]
     nb_label, nb_emoji = get_notice_board_label(scen_key)
+    if not is_student_qp and any(tok in str(nb_label or "").lower() for tok in ("campus", "school")):
+        nb_label = "Field Contract Board"
     current_chapter = db.get_session_chapter(session_id) or 1
     campaign_end_goals = session.get("campaign_end_goals") or db.get_session_campaign_goals(session_id) or []
     chapter_digest = db.get_chapter_digest(session_id) or []
@@ -460,6 +501,7 @@ def _build_quests_payload(session_id: int, user_id: Optional[int] = None) -> dic
         "has_bounty_board": location_has_bounty_board(current_loc, scen_key=scen_key),
         "notice_board_label": nb_label,
         "notice_board_emoji": nb_emoji,
+        "player_profile": player_profile_qp,
         "current_chapter": current_chapter,
         "max_chapters": 11,
         "campaign_end_goals": campaign_end_goals,
@@ -487,40 +529,69 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
     """Generates or refreshes the Bounty Board contracts for the session."""
     session, _ = await verify_session_participant(request, session_id, req.user_id)
 
+    char_row = await adb(db.get_character, req.user_id, session_id=session_id) if req.user_id else None
+    is_student = bool(resolve_player_age_profile(session, char_row).get("is_student"))
+    req_scope = str(req.board_scope or "").strip().lower()
+    if req_scope == "school" and not is_student:
+        raise HTTPException(status_code=403, detail="Campus requests are only available to student characters.")
+
     scoped_club_faction = None
     async with distributed_session_lock(session_id):
+        fresh_sess = await adb(db.get_session, session_id) or session
+        scen_gen = str(fresh_sess.get("scenario") or "fantasy")
+        cur_loc_gen = str(fresh_sess.get("current_location") or "")
+        has_physical_board = bool(location_has_bounty_board(cur_loc_gen, scen_key=scen_gen))
         if req.faction_id:
             factions = await adb(db.get_factions, session_id)
             target_f = next((f for f in (factions or []) if f.get("faction_id") == req.faction_id), None)
+            if target_f and is_school_club_faction(target_f) and not is_student:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Adult characters cannot generate school club commissions.",
+                )
             if target_f:
                 hq_ok, hq_err, hq_code = await adb(
-                    validate_faction_hq_action_access, session_id, req.user_id, target_f, "bounty", session
+                    validate_faction_hq_action_access, session_id, req.user_id, target_f, "bounty", fresh_sess
                 )
                 if not hq_ok:
                     raise HTTPException(status_code=hq_code, detail=hq_err)
                 bounties = await game_engine.generate_faction_bounty_board(
-                    session, target_f, force_refresh=req.force_refresh
+                    fresh_sess, target_f, force_refresh=req.force_refresh
                 )
             else:
-                bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+                if not has_physical_board:
+                    await ensure_realm_comms_available(session_id, session=fresh_sess)
+                bounties = await game_engine.generate_bounty_board(
+                    fresh_sess, force_refresh=req.force_refresh, board_scope=(req_scope or None)
+                )
         else:
-            scoped_club_faction = await adb(
-                resolve_board_club_faction_for_location,
-                session_id,
-                str(session.get("current_location") or ""),
-                str(session.get("scenario") or ""),
-            )
+            if is_student and req_scope != "generic":
+                scoped_club_faction = await adb(
+                    resolve_board_club_faction_for_location,
+                    session_id,
+                    cur_loc_gen,
+                    scen_gen,
+                )
             if scoped_club_faction:
                 bounties = await game_engine.generate_faction_bounty_board(
-                    session, scoped_club_faction, force_refresh=req.force_refresh
+                    fresh_sess, scoped_club_faction, force_refresh=req.force_refresh
                 )
             else:
-                bounties = await game_engine.generate_bounty_board(session, force_refresh=req.force_refresh)
+                if not has_physical_board:
+                    await ensure_realm_comms_available(session_id, session=fresh_sess)
+                bounties = await game_engine.generate_bounty_board(
+                    fresh_sess, force_refresh=req.force_refresh, board_scope=(req_scope or None)
+                )
 
     payload = await adb(_build_quests_payload, session_id, req.user_id)
-    resp_bounties = (
-        bounties if (req.faction_id or scoped_club_faction) and bounties else (payload.get("available_bounties") or [])
-    )
+    if req.faction_id or scoped_club_faction:
+        resp_bounties = bounties or []
+    elif req_scope == "school":
+        resp_bounties = [b for b in (payload.get("available_bounties") or []) if b.get("bounty_scope") == "school"]
+    elif req_scope == "generic":
+        resp_bounties = [b for b in (payload.get("available_bounties") or []) if b.get("bounty_scope") == "generic"]
+    else:
+        resp_bounties = payload.get("available_bounties") or []
     return serializable_action(
         {
             "success": True,
@@ -534,10 +605,12 @@ async def generate_session_bounties(session_id: int, req: BountyGenerateRequest,
 async def bounty_contract_action(session_id: int, req: BountyActionRequest, request: Request = None):
     """Accepts an available bounty (compiling Stage-2 QuestDossier + optional CHA advance) or abandons/forfeits an active bounty."""
     session, _ = await verify_session_participant(request, session_id, req.user_id)
+    scen_key = str(session.get("scenario") or "fantasy")
+    if not location_has_bounty_board(str(session.get("current_location") or ""), scen_key=scen_key):
+        await ensure_realm_comms_available(session_id, session=session)
     quest = await adb(db.get_quest_by_id, session_id, req.quest_id)
     if not quest:
         raise HTTPException(status_code=404, detail="Bounty contract not found")
-    scen_key = str(session.get("scenario") or "fantasy")
     action = (req.action or "accept").strip().lower()
 
     import scenario_data
@@ -635,7 +708,7 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
             raise HTTPException(status_code=404, detail="Session not found")
 
         clue_a = await adb(db.get_session_clue_by_id, req.clue_a_id)
-        if not clue_a:
+        if not clue_a or int(clue_a.get("session_id") or 0) != int(session_id):
             raise HTTPException(status_code=404, detail="Selected evidence record could not be found.")
         if clue_a.get("is_consumed"):
             raise HTTPException(status_code=400, detail="The selected lead has already been consumed.")
@@ -645,7 +718,7 @@ async def deduce_caseboard_clues(session_id: int, req: ClueDeductionRequest, req
             eff_clue_b_id = None
         else:
             clue_b = await adb(db.get_session_clue_by_id, req.clue_b_id)
-            if not clue_b:
+            if not clue_b or int(clue_b.get("session_id") or 0) != int(session_id):
                 raise HTTPException(status_code=404, detail="Secondary evidence record could not be found.")
             if clue_b.get("is_consumed"):
                 raise HTTPException(status_code=400, detail="Secondary lead has already been consumed.")

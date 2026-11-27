@@ -113,7 +113,7 @@ def resolve_caseboard_deduction(
                         synth_r = db.synthesize_deduction_clue(session_id, [int(clue_a_id)], title_r, detail_r, chapter=cur_ch_r)
                         for uid_r in uids_rec:
                             try:
-                                db.add_xp(int(uid_r), 50)
+                                db.add_xp(int(uid_r), 50, session_id=session_id)
                             except Exception:
                                 pass
                         return {
@@ -339,7 +339,7 @@ def resolve_caseboard_deduction(
                 )
                 for uid in (db.get_session_members(session_id) or ([int(user_id)] if user_id else [])):
                     try:
-                        db.add_xp(int(uid), 50)
+                        db.add_xp(int(uid), 50, session_id=session_id)
                     except Exception:
                         pass
                 clk_final = climax.get("threat_clock") or {}
@@ -374,7 +374,7 @@ def resolve_caseboard_deduction(
     )
     for uid in (db.get_session_members(session_id) or ([int(user_id)] if user_id else [])):
         try:
-            db.add_xp(int(uid), 50)
+            db.add_xp(int(uid), 50, session_id=session_id)
         except Exception:
             pass
     return {
@@ -652,8 +652,8 @@ def resolve_quest_turn_in_or_betrayal(
                 "reason": "You must recover the quest item before delivering this contract.",
             }
         if t_item.get("has_item") and t_item.get("name"):
-            db.set_item_quest_lock(int(user_id), quest_id, locked=0)
-            db.remove_item_by_name(int(user_id), str(t_item["name"]))
+            db.set_item_quest_lock(int(user_id), quest_id, locked=0, session_id=session_id)
+            db.remove_item_by_name(int(user_id), str(t_item["name"]), session_id=session_id)
             t_item["disposition"] = "delivered"
 
         net_gold = max(0, base_gold - adv_paid)
@@ -677,8 +677,8 @@ def resolve_quest_turn_in_or_betrayal(
         with db.get_conn() as conn:
             conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
         for uid in uids:
-            db.apply_hp_mp_delta(int(uid), gold_delta=net_gold)
-            db.add_xp(int(uid), base_xp)
+            db.apply_hp_mp_delta(int(uid), gold_delta=net_gold, session_id=session_id)
+            db.add_xp(int(uid), base_xp, session_id=session_id)
         if t_item != prev_item:
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "tangible_item", prev_item, t_item)
         if climax != prev_climax:
@@ -707,8 +707,8 @@ def resolve_quest_turn_in_or_betrayal(
         if not (twist.get("has_twist") and twist.get("is_discovered") and twist.get("side_switch_available")):
             return {"success": False, "status_code": 400, "reason": "No uncovered side-switch twist is available on this contract."}
         if t_item.get("has_item") and t_item.get("name"):
-            db.set_item_quest_lock(int(user_id), quest_id, locked=0)
-            db.remove_item_by_name(int(user_id), str(t_item["name"]))
+            db.set_item_quest_lock(int(user_id), quest_id, locked=0, session_id=session_id)
+            db.remove_item_by_name(int(user_id), str(t_item["name"]), session_id=session_id)
             t_item["disposition"] = "delivered_to_twist_ally"
         twist["sided_with_twist"] = True
         payout = max(0, int(round(base_gold * 1.25)) - adv_paid)
@@ -725,8 +725,8 @@ def resolve_quest_turn_in_or_betrayal(
         with db.get_conn() as conn:
             conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
         for uid in uids:
-            db.apply_hp_mp_delta(int(uid), gold_delta=payout)
-            db.add_xp(int(uid), xp_out)
+            db.apply_hp_mp_delta(int(uid), gold_delta=payout, session_id=session_id)
+            db.add_xp(int(uid), xp_out, session_id=session_id)
         if client_npc:
             try:
                 db.update_relationship_score(session_id, client_npc, delta_score=-15)
@@ -769,7 +769,7 @@ def resolve_quest_turn_in_or_betrayal(
     if disp == "blackmail_client":
         if not (twist.get("has_twist") and twist.get("is_discovered") and twist.get("blackmail_available")):
             return {"success": False, "status_code": 400, "reason": "Uncover incriminating client twist evidence before attempting blackmail."}
-        char = db.get_character(int(user_id)) or {}
+        char = db.get_character(int(user_id), session_id=session_id) or {}
         cha_val = int(char.get("cha", 5) or 5)
         chk = skill_check.resolve_check(stat_name="CHA", stat_value=cha_val, requirement=6)
         if chk.succeeded:
@@ -785,8 +785,8 @@ def resolve_quest_turn_in_or_betrayal(
                 climax["completed"] = True
             with db.get_conn() as conn:
                 conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
-            db.apply_hp_mp_delta(int(user_id), gold_delta=hush_gold)
-            db.add_xp(int(user_id), base_xp)
+            db.apply_hp_mp_delta(int(user_id), gold_delta=hush_gold, session_id=session_id)
+            db.add_xp(int(user_id), base_xp, session_id=session_id)
             if climax != prev_climax_bm:
                 db.append_dossier_state_event(session_id, quest_id, eff_turn, "climax_spec", prev_climax_bm, climax)
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "twist_spec", prev_twist, twist)
@@ -840,17 +840,17 @@ def resolve_quest_turn_in_or_betrayal(
         if str(t_item.get("disposition") or "unclaimed").strip().lower() != "acquired":
             return {"success": False, "status_code": 400, "reason": "Acquire the quest item before deciding how to dispose of it."}
         item_name = str(t_item["name"])
-        db.set_item_quest_lock(int(user_id), quest_id, locked=0)
+        db.set_item_quest_lock(int(user_id), quest_id, locked=0, session_id=session_id)
 
         fenced_gold = 0
         if disp == "fence":
-            db.remove_item_by_name(int(user_id), item_name)
+            db.remove_item_by_name(int(user_id), item_name, session_id=session_id)
             fenced_gold = int(t_item.get("fencing_gold") or round(base_gold * 1.5))
-            db.apply_hp_mp_delta(int(user_id), gold_delta=fenced_gold)
+            db.apply_hp_mp_delta(int(user_id), gold_delta=fenced_gold, session_id=session_id)
             t_item["disposition"] = "fenced"
             t_item["pending_retaliation"] = True
         elif disp == "destroy":
-            db.remove_item_by_name(int(user_id), item_name)
+            db.remove_item_by_name(int(user_id), item_name, session_id=session_id)
             t_item["disposition"] = "destroyed"
         else:
             t_item["disposition"] = "kept"
@@ -860,7 +860,7 @@ def resolve_quest_turn_in_or_betrayal(
         if disp == "destroy" and twist.get("twist_type") == "cursed_payload":
             with db.get_conn() as conn:
                 conn.execute("UPDATE quests SET status='Completed', reward_claimed=1, updated_at=? WHERE session_id=? AND quest_id=?", (time.time(), session_id, quest_id))
-            db.add_xp(int(user_id), base_xp)
+            db.add_xp(int(user_id), base_xp, session_id=session_id)
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "tangible_item", prev_item, t_item)
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "quest_status", prev_status, "Completed")
             db.append_dossier_state_event(session_id, quest_id, eff_turn, "outcome_tier", prev_tier, "twist_resolution")

@@ -32,11 +32,7 @@ export {
   getReputationTier,
 };
 
-const renderBulletPoints = (lines, t = null) => {
-  const unknownFallback = typeof t === 'function' ? t('common.unknown', 'Unknown') : 'Unknown';
-  void unknownFallback;
-  return defaultBulletRenderer(lines, t);
-};
+const renderBulletPoints = (lines, t = null) => defaultBulletRenderer(lines, t);
 
 const CodexPanel = ({
   codexHook,

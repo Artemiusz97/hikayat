@@ -1053,15 +1053,24 @@ def _resolve_discord_masked_dossier(
     c_in = dict(contact or {})
     reveal_debug = bool((fow_context or {}).get("reveal_debug"))
     ui_lang = str((fow_context or {}).get("ui_lang") or "en")
-    if user_id and fow_context is None:
-        user_settings = db.get_settings(user_id) or {}
-        reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
-        ui_lang = str(user_settings.get("ui_language") or "en")
-        if not c_in.get("character_id"):
-            char_row = db.get_character(user_id)
-            if char_row and char_row.get("id"):
-                c_in["character_id"] = int(char_row["id"])
     sess_id = int(c_in.get("session_id") or (fow_context or {}).get("session_id") or 0)
+    player_char: dict | None = dict((fow_context or {}).get("player_char") or {}) or None
+    if fow_context is None and (user_id or sess_id or c_in.get("character_id")):
+        if user_id:
+            user_settings = db.get_settings(user_id) or {}
+            reveal_debug = bool(user_settings.get("debug_reveal_all_info"))
+            ui_lang = str(user_settings.get("ui_language") or "en")
+        from mechanics.social.relationships import resolve_session_player_character
+
+        char_row = resolve_session_player_character(
+            session_id=sess_id,
+            character_id=int(c_in.get("character_id") or 0),
+            user_id=user_id,
+        )
+        if isinstance(char_row, dict):
+            player_char = dict(char_row)
+            if not c_in.get("character_id") and char_row.get("id"):
+                c_in["character_id"] = int(char_row["id"])
 
     if fow_context is not None:
         enriched = enrich_discord_npc_with_routine(
@@ -1077,6 +1086,7 @@ def _resolve_discord_masked_dossier(
         scenario_key or "fantasy",
         debug_reveal_all=reveal_debug,
         lang=ui_lang,
+        player_char=player_char,
     )
     if sess_id <= 0 and isinstance(c_in.get("known_routine"), dict):
         routine = dict(c_in["known_routine"])
@@ -1147,6 +1157,9 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     score = int(enriched_c.get("relationship_score", contact.get("relationship_score", 0)) or 0)
     info_level = int(enriched_c.get("info_level") or get_unlocked_info_level(score))
     sections = dict(enriched_c.get("intimate_sections") or {})
+    structured = dict(enriched_c.get("intimate_structured") or {})
+    chemistry = dict(enriched_c.get("intimate_chemistry") or {})
+    shared_stats = dict(enriched_c.get("shared_intimacy_stats") or {})
 
     embed = discord.Embed(
         title=f"🔞 Intimate Profile: {name}",
@@ -1154,9 +1167,29 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
         color=discord.Color.magenta()
     )
 
+    if chemistry.get("has_any"):
+        chem_lines: list[str] = []
+        if chemistry.get("best_approach"):
+            chem_lines.append(str(chemistry["best_approach"]))
+        if chemistry.get("body_match"):
+            chem_lines.append(f"• **Physique**: {', '.join(chemistry['body_match'])}")
+        if chemistry.get("act_alignment"):
+            chem_lines.append(f"• **Synergy**: {', '.join(chemistry['act_alignment'])}")
+        if chemistry.get("watch_out"):
+            chem_lines.append(f"• **Avoid**: {', '.join(chemistry['watch_out'])}")
+        if chem_lines:
+            embed.add_field(
+                name="✨ Chemistry & Synergy",
+                value="\n".join(chem_lines),
+                inline=False,
+            )
+
+    from mechanics.social import locales
+    slot_mask = locales.get_masked_placeholder("slot", lang="en")
+
     # 1. Anatomy & Experience (inline=True)
     clean_anatomy = sections.get("anatomy", [])
-    anatomy_val = "\n".join(clean_anatomy) if clean_anatomy else "*Unknown*"
+    anatomy_val = "\n".join(clean_anatomy) if clean_anatomy else slot_mask
     embed.add_field(
         name="🔞 Anatomy & Experience",
         value=anatomy_val,
@@ -1164,7 +1197,21 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     )
 
     # 2. Demeanor & Dynamic (inline=True)
-    dyn_val = "\n".join(sections["dynamic"]) if sections.get("dynamic") else "*Unknown*"
+    dyn_lines_embed = [str(x) for x in (sections.get("dynamic") or [])]
+    if structured and isinstance(structured.get("openness"), dict):
+        dyn_lines_embed = [l for l in dyn_lines_embed if "**Openness**" not in l]
+        _open_st = structured["openness"]
+        _open_masked = bool(_open_st.get("masked"))
+        _open_lbl = slot_mask if _open_masked else (_open_st.get("label") or slot_mask)
+        _open_row = f"• **Openness**: {_open_lbl}"
+        _comf_st = structured.get("with_you_comfort")
+        if not _open_masked and isinstance(_comf_st, dict) and _comf_st.get("badge_label"):
+            _open_row += f" • `{_comf_st['badge_label']}`"
+        _cont_st = structured.get("openness_contrast")
+        if not _open_masked and isinstance(_cont_st, dict) and _cont_st.get("label"):
+            _open_row += f" • `{_cont_st['label']}`"
+        dyn_lines_embed.append(_open_row)
+    dyn_val = "\n".join(dyn_lines_embed) if dyn_lines_embed else slot_mask
     embed.add_field(
         name="🎭 Demeanor & Dynamic",
         value=dyn_val,
@@ -1172,7 +1219,7 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     )
 
     # 3. Undergarments (inline=False)
-    under_val = "\n".join(sections.get("undergarments", [])) if sections.get("undergarments") else "*Unknown*"
+    under_val = "\n".join(sections.get("undergarments", [])) if sections.get("undergarments") else slot_mask
     embed.add_field(
         name="👙 Undergarments",
         value=under_val,
@@ -1180,17 +1227,54 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     )
 
     # 4. Sensitive Spots (inline=False)
-    clean_spots = sections.get("sensitive_spots", [])
-    spots_val = "\n".join(clean_spots) if clean_spots else "*Unknown*"
+    if structured.get("sensitive_spots"):
+        _spot_tokens = [x["label"] if not x.get("masked") else slot_mask for x in structured["sensitive_spots"]]
+        spots_val = f"• **Sensitive Spots**: {', '.join(_spot_tokens)}"
+    else:
+        clean_spots = sections.get("sensitive_spots", [])
+        spots_val = "\n".join(clean_spots) if clean_spots else slot_mask
     embed.add_field(
         name="🌸 Sensitive Spots",
         value=spots_val,
         inline=False
     )
 
-    # 5. Desires & Turn-Offs (inline=False)
-    clean_desires = sections.get("desires_and_turn_offs", [])
-    desires_val = "\n".join(clean_desires) if clean_desires else "*Unknown*"
+    # 5. Desires, Active Kink & Turn-Offs (inline=False)
+    if structured:
+        desire_lines_embed: list[str] = []
+        if structured.get("desires"):
+            _des_tokens = [x["label"] if not x.get("masked") else "???" for x in structured["desires"]]
+            desire_lines_embed.append(f"• **Desires**: {', '.join(_des_tokens)}")
+        if structured.get("active_kink"):
+            _ak = structured["active_kink"]
+            _ak_str = _ak["label"] if not _ak.get("masked") else "???"
+            desire_lines_embed.append(f"• **Active Kink**: {_ak_str}")
+        if structured.get("turn_offs"):
+            _to_tokens = [x["label"] if not x.get("masked") else "???" for x in structured["turn_offs"]]
+            desire_lines_embed.append(f"• **Turn-Offs**: {', '.join(_to_tokens)}")
+        _bp_lbl_map = {
+            "smaller_bb": "Smaller Breasts",
+            "bigger_bb": "Bigger Breasts",
+            "smaller_ass": "Smaller Rear",
+            "bigger_ass": "Bigger Rear",
+            "taller_partner": "Taller Partners",
+            "shorter_partner": "Shorter Partners",
+        }
+        _bp_likes_st = [_bp_lbl_map[k] for k in (structured.get("body_likes") or []) if k in _bp_lbl_map]
+        _bp_dislikes_st = [_bp_lbl_map[k] for k in (structured.get("body_dislikes") or []) if k in _bp_lbl_map]
+        _bp_seg_st: list[str] = []
+        if _bp_likes_st:
+            _bp_seg_st.append("Likes " + ", ".join(_bp_likes_st))
+        if _bp_dislikes_st:
+            _bp_seg_st.append("Dislikes " + ", ".join(_bp_dislikes_st))
+        if _bp_seg_st:
+            desire_lines_embed.append(f"• **Body Preferences**: {'; '.join(_bp_seg_st)}")
+        if not desire_lines_embed and (info_level >= 3 or reveal_debug):
+            desire_lines_embed = ["• **Desires**: None", "• **Turn-Offs**: None"]
+        desires_val = "\n".join(desire_lines_embed) if desire_lines_embed else slot_mask
+    else:
+        clean_desires = sections.get("desires_and_turn_offs", [])
+        desires_val = "\n".join(clean_desires) if clean_desires else slot_mask
     embed.add_field(
         name="🔥 Desires & Turn-Offs",
         value=desires_val,
@@ -1198,12 +1282,41 @@ def build_intimate_profile_embed(contact: dict, scenario_key: str = "fantasy", u
     )
 
     # 6. Act & Position Preferences (inline=False)
-    act_val = "\n".join(sections["act_preferences"]) if sections.get("act_preferences") else "*Unknown*"
+    if structured and (structured.get("act_likes") or structured.get("act_dislikes")):
+        act_lines_embed: list[str] = []
+        if structured.get("act_likes"):
+            _al_tokens = [
+                ("???" if x.get("masked") else (f"{x['label']} (Curious)" if x.get("curious") else x["label"]))
+                for x in structured["act_likes"]
+            ]
+            act_lines_embed.append(f"• **Preferred / Likes**: {', '.join(_al_tokens)}")
+        if structured.get("act_dislikes"):
+            _ad_tokens = [x["label"] if not x.get("masked") else "???" for x in structured["act_dislikes"]]
+            act_lines_embed.append(f"• **Aversions / Dislikes**: {', '.join(_ad_tokens)}")
+        act_val = "\n".join(act_lines_embed)
+    elif structured and (info_level >= 3 or reveal_debug):
+        act_val = "• **Preferred / Likes**: None\n• **Aversions / Dislikes**: None"
+    else:
+        act_val = "\n".join(sections["act_preferences"]) if sections.get("act_preferences") else slot_mask
     embed.add_field(
         name="❤️ Act & Position Preferences",
         value=act_val,
         inline=False
     )
+
+    if int(shared_stats.get("shared_encounters") or 0) > 0 or shared_stats.get("firsts_badges"):
+        _sw_parts = [
+            f"Shared Encounters: **{int(shared_stats.get('shared_encounters') or 0)}**",
+            f"Partner Climaxes: **{int(shared_stats.get('partner_climaxes') or 0)}**",
+        ]
+        if shared_stats.get("firsts_badges"):
+            _ft_str = ", ".join(f"First {t.title()} Together" for t in shared_stats["firsts_badges"])
+            _sw_parts.append(f"Milestones: {_ft_str}")
+        embed.add_field(
+            name="💞 Shared With You",
+            value="\n".join(f"• {p}" for p in _sw_parts),
+            inline=False,
+        )
 
     footer_suffix = " • [🛠️ DEBUG: Revealed]" if reveal_debug else ""
     embed.set_footer(text=f"Information Disclosure Level: {info_level}/3 • Intimate Dossier{footer_suffix}")
@@ -1301,7 +1414,12 @@ def build_contact_list_embed(
         status_line = f"Standing: **{tier['name']}** [{bar}] | Check Mod: `{mod_str}` | Info Lvl: `{info_level}/3`"
         if "schedule_revealed" not in c and not c.get("debug_revealed"):
             from mechanics.social.consequences import apply_fog_of_war_to_enriched_contact
-            c = apply_fog_of_war_to_enriched_contact(c, session_id=int(c.get("session_id") or 0), character_id=int(c.get("character_id") or 0))
+            c = apply_fog_of_war_to_enriched_contact(
+                c,
+                session_id=int(c.get("session_id") or 0),
+                character_id=int(c.get("character_id") or 0),
+                is_nsfw=scenario_data.is_nsfw_scenario(scenario_key),
+            )
         traits = c.get("unlocked_traits", [])
         if traits:
             status_line += f"\nTraits: *{', '.join(traits[:2])}*"

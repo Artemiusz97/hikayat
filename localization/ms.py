@@ -256,3 +256,94 @@ CROWD_DENSITY_LABELS = {
     "crowd_label": "Orang Ramai",
     "nearby_bystanders": "Orang Awam Berdekatan"
 }
+
+STATURE_LABELS = {
+    "miniature": "Kerdil",
+    "short": "Rendah",
+    "below_average": "Agak Rendah",
+    "average": "Sederhana",
+    "tall": "Tinggi",
+    "towering": "Sangat Tinggi",
+}
+
+PHYSIQUE_LABELS = {
+    "slim": "Langsing",
+    "average": "Sederhana",
+    "athletic": "Atletik",
+    "muscular": "Berotot",
+    "voluptuous": "Montok",
+    "stocky": "Tegap",
+    "chubby": "Tembam",
+}
+
+ASSET_TEXTURE_LABELS = {
+    "perky": "Mekar",
+    "firm": "Pejal",
+    "supple": "Anjal",
+    "teardrop": "Titisan",
+    "plush": "Gebus",
+    "pillowy": "Empuk",
+    "bouncy": "Lantun",
+    "delicate": "Halus",
+    "sensitive": "Peka",
+    "veined": "Berurat",
+    "smooth": "Licin",
+    "thick": "Tebal",
+    "heavy": "Padat",
+    "curved": "Melengkung",
+    "tapered": "Tirus",
+}
+
+SPECIES_SURFACE_LABELS = {
+    "furred": "Bulu Halus",
+    "scaled": "Sisik Halus",
+    "feathered": "Bulu Pelepah Lembut",
+    "aquatic": "Kulit Berkilau",
+    "fever_warm": "Kulit Hangat Membara",
+    "porcelain_silky": "Kulit Halus Bak Sutera",
+    "bio_synthetic": "Kulit Bio-Sintetik",
+}
+
+REAR_SIZE_LABELS = {
+    "flat": "Rata",
+    "small": "Kemas",
+    "average": "Membulat",
+    "large": "Montok",
+    "huge": "Sarat",
+}
+
+REAR_TEXTURE_LABELS = {
+    "firm": "Pejal",
+    "taut": "Tegang",
+    "supple": "Anjal",
+    "rounded": "Bundar",
+    "plush": "Gebus",
+    "jiggly": "Bergoyang",
+}
+
+BODY_PREFERENCE_LABELS = {
+    "smaller_bb": "Dada Lebih Kecil",
+    "bigger_bb": "Dada Lebih Besar",
+    "smaller_ass": "Punggung Lebih Kecil",
+    "bigger_ass": "Punggung Lebih Besar",
+    "taller_partner": "Pasangan Lebih Tinggi",
+    "shorter_partner": "Pasangan Lebih Rendah",
+}
+
+SPIRIT_COURT_LABELS = {
+    "badge_human_world": "🏙️ Dunia Manusia",
+    "badge_veiled_realm": "⛩️ Alam Berhijab",
+    "sworn_ally_active_header": "Sekutu Bersumpah — Pakatan Istana 90+",
+    "sworn_ally_summon_ready": "Seruan Tempur 3 Giliran Aktif",
+    "sworn_ally_stat_bonus": "Aura Stat Pasif",
+    "autonomous_spirit_court_badge": "Istana Roh Berautonomi",
+    "spirit_court_non_joinable_note": "Istana Roh Bebas — raih reputasi melalui jasa, latihan tempur & komisen.",
+    "ghoul_track_dark_crime": "Jenayah Gelap (Reputasi Pantas)",
+    "ghoul_track_grey_neutral": "Kelabu-Neutral (Tanpa Percikan)",
+    "night_market_wing_selector": "Pilih gerai Sayap Pasar Malam...",
+    "spirit_relay_neon_static_note": "⚡ Lonjakan Statik Neon: isyarat Geganti Roh berdesir dengan gangguan astral.",
+    "spirit_relay_ghoul_channel": "🦴 Geganti Tulang Rumah Mayat Aktif",
+    "pale_wake_toll_waived": "🕯️ Malam Jaga Pucat — tol masuk Rumah Tulang dikecualikan",
+    "lantern_tide_ferry_waived": "🏮 Pasang Surut Tanglung Hanyut — tol Pendayung dikecualikan",
+    "event_crisis_commission_badge": "Krisis Alam Segera",
+}

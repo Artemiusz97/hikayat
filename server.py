@@ -154,14 +154,16 @@ def _launch_tunnel_sync(port: int, provider: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() not in ("1", "true", "yes"):
+    is_test_mode = os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() in ("1", "true", "yes")
+    if not is_test_mode:
         config.validate_runtime_config(require_discord=False)
     await db.adb(db.init_db)
-    try:
-        snapshot_path = await db.adb(db.create_database_snapshot, tag="server_startup")
-        print(f"[Database Snapshot] Automatic backup created at: {snapshot_path}")
-    except Exception as e:
-        print(f"[Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")
+    if not is_test_mode:
+        try:
+            snapshot_path = await db.adb(db.create_database_snapshot, tag="server_startup")
+            print(f"[Database Snapshot] Automatic backup created at: {snapshot_path}")
+        except Exception as e:
+            print(f"[Database Snapshot] Failed to create startup snapshot (non-fatal): {e}")
     if _is_share_requested():
         port = _get_port()
         provider = _get_share_provider()
@@ -169,13 +171,14 @@ async def lifespan(app: FastAPI):
         loop.run_in_executor(None, _launch_tunnel_sync, port, provider)
 
     # Pre-warm LLM model capability cache in background so turns have zero parameter mismatches
-    if os.getenv("HIKAYAT_TEST_MODE", "").strip().lower() not in ("1", "true", "yes"):
+    if not is_test_mode:
         asyncio.create_task(llm_client.probe_all_configured_models())
 
     yield
 
     tunnel.stop_tunnel()
-    await llm_client.close_llm_clients()
+    if not is_test_mode:
+        await llm_client.close_llm_clients()
 
 
 app = FastAPI(title="Hikayat Web API", version=config.APP_VERSION, lifespan=lifespan)

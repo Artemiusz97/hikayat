@@ -767,6 +767,68 @@ def _should_wiretap_reveal_dossier(session_id: int | None, board_src: str) -> bo
     return str((f_state or {}).get("faction_archetype_key") or "").strip().lower() == "clandestine_faction"
 
 
+def _get_session_curr_realm_id(session_id: int) -> str:
+    if not session_id:
+        return ""
+    try:
+        from mechanics.world.locations.realms import get_node_realm_id
+        sess = db.get_session(session_id) or {}
+        cur_nid = str(sess.get("current_node_id") or "").strip()
+        if not cur_nid and sess.get("current_location"):
+            cur_nid = db.resolve_node_id_from_location(session_id, sess["current_location"]) or ""
+        return get_node_realm_id(session_id, cur_nid) if cur_nid else ""
+    except Exception:
+        return ""
+
+
+def _filter_locs_by_realm(session_id: int, locs: list[str], curr_realm_id: str) -> list[str]:
+    """Keeps only location strings belonging to curr_realm_id when realm boundaries exist."""
+    if not session_id or not curr_realm_id or not locs:
+        return list(locs)
+    try:
+        from mechanics.world.locations.realms import get_node_realm_id_in_memory
+        nodes = db.get_session_world_nodes(session_id) or []
+        if not any(str(n.get("node_type") or "").upper() == "REALM" for n in nodes):
+            return list(locs)
+        n_map = {n["node_id"]: n for n in nodes if n.get("node_id")}
+        kept: list[str] = []
+        for loc_str in locs:
+            nid = db.resolve_node_id_from_location(session_id, loc_str, preferred_realm_id=curr_realm_id)
+            if not nid or get_node_realm_id_in_memory(nid, n_map) == curr_realm_id:
+                kept.append(loc_str)
+        return kept
+    except Exception:
+        return list(locs)
+
+
+def _build_cross_realm_expedition_hints(session_id: int, curr_realm_id: str) -> str:
+    """Builds expedition hook hints pointing to discovered realms or locked Access Point hooks."""
+    if not session_id or not curr_realm_id:
+        return ""
+    try:
+        from mechanics.world.locations.realms import build_session_realm_summary
+        r_sum = build_session_realm_summary(session_id)
+        if not r_sum.get("show_realm_badge"):
+            return ""
+        gateways = list(r_sum.get("realm_gateways") or [])
+        lines: list[str] = []
+        for gw in gateways[:3]:
+            ap_loc = gw.get("access_point_location") or gw.get("access_point_name") or ""
+            tr_name = gw.get("target_realm_name") or ""
+            if ap_loc and tr_name:
+                status = "Locked Access Point Hook" if gw.get("is_locked") else "Open Gateway"
+                lines.append(f"- Expedition Hook ({tr_name}, {status}): route Stage 1 via '{ap_loc}'")
+        if not lines:
+            return ""
+        return (
+            "\nOPTIONAL CROSS-REALM EXPEDITION ARCHETYPES (Rift Sealing, Off-World Hunt, Abyssal Purge):\n"
+            + "\n".join(lines)
+            + "\n- NEVER target rooms inside undiscovered hidden realms; point locked hooks to their Access Point.\n"
+        )
+    except Exception:
+        return ""
+
+
 def _collect_anomalous_bounty_candidate_locations(
     session_id: int,
     scen_key: str,
@@ -782,6 +844,8 @@ def _collect_anomalous_bounty_candidate_locations(
     candidates: list[str] = []
     if session_id:
         try:
+            from mechanics.world.locations.realms import get_node_realm_id_in_memory
+            curr_realm_id = _get_session_curr_realm_id(session_id)
             nodes = db.get_session_world_nodes(session_id) or []
             if nodes:
                 node_map = {n["node_id"]: n for n in nodes}
@@ -793,6 +857,15 @@ def _collect_anomalous_bounty_candidate_locations(
                     if n.get("node_type") != "FACILITY":
                         continue
                     nid = str(n.get("node_id") or "")
+                    if curr_realm_id and get_node_realm_id_in_memory(nid, node_map) != curr_realm_id:
+                        continue
+                    if curr_realm_id == "realm_veiled_spirit_world" and str(n.get("parent_id") or "") not in (
+                        "zone_spirit_wilds",
+                        "zone_spirit_peaks",
+                        "zone_spirit_mire",
+                        "zone_spirit_boneyard",
+                    ):
+                        continue
                     if ex_arch == "cult_faction" and nid == "loc_cult_sanctum_hq":
                         continue
                     if ex_arch == "clandestine_faction" and nid == "loc_clandestine_syndicate_hq":
@@ -801,7 +874,7 @@ def _collect_anomalous_bounty_candidate_locations(
                     if nid in _ANOMALOUS_SAFE_HQ_FACILITY_IDS or nid.startswith("loc_hq_") or is_excluded_from_random_incursions(session_id, node_id=nid, parent_id=str(n.get("parent_id") or "")):
                         continue
                     parent = node_map.get(n.get("parent_id"))
-                    z_name = parent["name"] if parent else "Metropolitan Grid"
+                    z_name = (parent["name"] if parent and str(parent.get("node_type") or "").upper() != "REALM" else "Metropolitan Grid")
                     if nid in _ANOMALOUS_CONSOLIDATED_COMPLEX_IDS:
                         for w in rooms_by_parent.get(nid, []):
                             if w.get("name"):
@@ -847,6 +920,97 @@ def _build_anomalous_fallback_bounties(
     sess = db.get_session(session_id) or {}
     scen_key = str(sess.get("scenario") or "anomalous_incursions")
     cur_min = int(sess.get("current_minute", 480) or 480)
+    if session_id and _get_session_curr_realm_id(session_id) == "realm_veiled_spirit_world":
+        frontier_rotations = (
+            (
+                "Cloud-Fang Crags Storm-Torii Clearance",
+                "Discharge Storm-Split Torii Crackle",
+                "Climb the gale-carved shale switchback of Storm-Split Torii Ridge and ground the surging fulgurite cairn.",
+                "Cloud-Fang Crags — Storm-Riven Spirit Peaks ➔ Storm-Split Torii Ridge",
+                "faction_spirit_kitsune",
+                15,
+                "Fulgurite Storm-Glass Shard",
+            ),
+            (
+                "Sunken Lotus Mire Sanctuary Sweep",
+                "Silence the Drowned Bronze Belfry Resonance",
+                "Wade the ironwood boardwalk in Drowned Bell-Shrine Bog and quiet the wailing spirit-bell beneath the lotus.",
+                "The Sunken Lotus Mire — Mist-Drowned Spirit Fen ➔ Drowned Bell-Shrine Bog",
+                "faction_spirit_bunian",
+                15,
+                "Lotus-Verdigris Chime Bell",
+            ),
+            (
+                "Ashen Barrowlands Pack Containment",
+                "Cull the Feral Hollow Chalk-Wraiths",
+                "Patrol Jackal-Watch Gallows Ridge in The Ashen Barrowlands and clear rogue anomalies stalking the moor.",
+                "The Ashen Barrowlands — Morbid Graveyard Moor ➔ Jackal-Watch Gallows Ridge",
+                "faction_spirit_ghoul",
+                15,
+                "Silver-Etched Myrrh Censer",
+            ),
+        )
+        alt_frontier = frontier_rotations[abs(int(seed_offset or 0)) % len(frontier_rotations)]
+        wilds_specs = (
+            (
+                "Corrupted Leyline Purge",
+                "Purge Static-Choked Leyline Fracture",
+                "Trace flickering city neon-static inside The Static-Choked Leyline Hollow and seal the bleeding fracture.",
+                "The Weeping Bleedwood — Untamed Spirit Wilds ➔ The Static-Choked Leyline Hollow",
+                "faction_spirit_bunian",
+                15,
+                "Cracked Leyline Amber Curio",
+            ),
+            (
+                "Syndicate Spirit-Poacher Interception",
+                "Dismantle Poacher Iron-Ward Snare",
+                "Sweep the iron-warded ravine in The Weeping Bleedwood and shatter Syndicate poacher traps.",
+                "The Weeping Bleedwood — Untamed Spirit Wilds ➔ Poacher's Iron-Ward Ravine",
+                "faction_spirit_kitsune",
+                15,
+                "Dual-Realm Lantern Oil",
+            ),
+            alt_frontier,
+        )
+        spirit_results: list[dict] = []
+        for idx_s, (q_tp, ttl, obj_t, tgt_l, fac_id_s, rep_r, reward_item_s) in enumerate(wilds_specs):
+            bp_s = generate_anomaly_blueprint(
+                session_id=session_id,
+                seed_key=f"spirit_wilds_{seed_offset}_{idx_s}",
+                scenario=scen_key,
+                location=tgt_l,
+                current_minute=cur_min,
+                force_type="phenomenon" if idx_s == 0 else "entity",
+                force_disposition="hostile",
+                tier=2 + (idx_s % 2),
+            )
+            spirit_results.append({
+                "quest_type": q_tp,
+                "title": ttl,
+                "objective": obj_t,
+                "faction_id": fac_id_s,
+                "reward_xp": 140 + (idx_s * 30),
+                "reward_gold": 85 + (idx_s * 20),
+                "reward_item": reward_item_s,
+                "faction_rep_reward": rep_r,
+                "anomaly_blueprint": bp_s,
+                "entity_name": bp_s.get("name", "Bleedwood Apparition"),
+                "waypoints": [
+                    {
+                        "stage_index": 1,
+                        "stage_label": f"Enter {tgt_l.split('➔')[-1].strip()} and secure the perimeter",
+                        "target_location": tgt_l,
+                        "completion_trigger": "arrival",
+                    },
+                    {
+                        "stage_index": 2,
+                        "stage_label": f"Clear the threat at {tgt_l.split('➔')[-1].strip()}",
+                        "target_location": tgt_l,
+                        "completion_trigger": "skill_check",
+                    },
+                ],
+            })
+        return spirit_results
 
     cand_locs = _filter_locations_anti_self_target(
         [c.replace(" -> ", " ➔ ") for c in (candidate_locations or []) if c and not is_safe_sanctuary_location(c)],
@@ -886,7 +1050,7 @@ def _build_anomalous_fallback_bounties(
         try:
             uids = db.get_session_participant_user_ids(session_id)
             if uids:
-                c_row = db.get_character(uids[0])
+                c_row = db.get_character(uids[0], session_id=session_id)
                 p_lvl = int((c_row or {}).get("level", 1) or 1)
         except Exception:
             p_lvl = 1
@@ -968,6 +1132,129 @@ def _filter_general_bounties(rows: list[dict]) -> list[dict]:
     ]
 
 
+_SCHOOL_BOARD_SOURCES = frozenset({
+    "campus_general",
+    "school_club",
+    "club",
+    "council",
+    "delinquents",
+    "sports",
+    "nsfw_club",
+    "discipline",
+})
+
+_FACTION_BOARD_SOURCES = frozenset({
+    "public_agency",
+    "private_agency_1",
+    "private_agency_2",
+    "monastic_order",
+    "cult_faction",
+    "clandestine_faction",
+})
+
+_SCHOOL_QUEST_TYPE_TOKENS = (
+    "academic rescue",
+    "campus errand",
+    "gossip control",
+    "election campaigning",
+    "matchmaking",
+    "secret admirer",
+    "club showdown",
+    "campus infiltration",
+    "exam heist",
+    "arcade rivalry",
+    "urban legend dare",
+)
+
+_SCHOOL_TEXT_TOKENS = (
+    "student council",
+    "homeroom",
+    "fifth period",
+    "first period",
+    "cram-session",
+    "classmate",
+    "cafeteria",
+    "clubroom",
+    "campus request",
+)
+
+
+def classify_bounty_scope(quest: dict | None, faction_map: dict[str, dict] | None = None) -> str:
+    """Classify a quest/bounty into `'school'`, `'faction'`, or `'generic'`."""
+    if not isinstance(quest, dict):
+        return "generic"
+    notes = str(quest.get("quest_notes") or "")
+    qid = str(quest.get("quest_id") or "").upper()
+    faction_id = ""
+    board_src = ""
+    for part in notes.replace("\n", "|").split("|"):
+        p = part.strip()
+        p_low = p.lower()
+        if p_low.startswith("board_source:"):
+            board_src = p_low.split(":", 1)[1].strip()
+        elif p_low.startswith("faction:"):
+            faction_id = p.split(":", 1)[1].strip()
+
+    if board_src in _SCHOOL_BOARD_SOURCES:
+        return "school"
+    if faction_id:
+        fac = (faction_map or {}).get(faction_id)
+        if fac:
+            from mechanics.social.factions import is_school_club_faction
+            if is_school_club_faction(fac):
+                return "school"
+        elif faction_id.lower() in _SCHOOL_BOARD_SOURCES or "club" in faction_id.lower() or "council" in faction_id.lower():
+            return "school"
+        return "faction"
+    if board_src in _FACTION_BOARD_SOURCES or qid.startswith(("FBNT-", "MAND-")):
+        return "faction"
+    if board_src == "freelance_app":
+        return "generic"
+
+    q_type_low = str(quest.get("quest_type") or "").strip().lower()
+    if any(tok in q_type_low for tok in _SCHOOL_QUEST_TYPE_TOKENS):
+        return "school"
+    blob = f"{quest.get('title', '')} {quest.get('objective', '')}".lower()
+    if any(tok in blob for tok in _SCHOOL_TEXT_TOKENS):
+        return "school"
+    return "generic"
+
+
+def is_school_bounty_quest(quest: dict | None, faction_map: dict[str, dict] | None = None) -> bool:
+    """Return True when a quest belongs to school/campus errands or school club commissions."""
+    return classify_bounty_scope(quest, faction_map=faction_map) == "school"
+
+
+def cleanup_stale_adult_school_bounties(session_id: int, session: dict | None = None) -> int:
+    """Remove unaccepted (`status='Available'`) school/club bounties for adult PCs without touching Active/Completed."""
+    if not session_id:
+        return 0
+    sess = session if isinstance(session, dict) else (db.get_session(int(session_id)) or {})
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
+    if resolve_player_age_profile(sess).get("is_student"):
+        return 0
+
+    avail = db.get_session_quests(int(session_id), status="Available") or []
+    if not avail:
+        return 0
+    factions = db.get_factions(int(session_id)) or []
+    faction_map = {str(f.get("faction_id") or ""): f for f in factions if isinstance(f, dict) and f.get("faction_id")}
+    stale_qids = [
+        str(q.get("quest_id"))
+        for q in avail
+        if q.get("quest_id") and is_school_bounty_quest(q, faction_map=faction_map)
+    ]
+    if not stale_qids:
+        return 0
+    with db.get_conn() as conn:
+        q_ph = ",".join("?" for _ in stale_qids)
+        conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [int(session_id)] + stale_qids)
+        conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [int(session_id)] + stale_qids)
+        conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph}) AND status='Available'", [int(session_id)] + stale_qids)
+    return len(stale_qids)
+
+
 def _extract_bounties_list(result: Any) -> list:
     if isinstance(result, list):
         return [b for b in result if isinstance(b, dict)]
@@ -979,44 +1266,70 @@ def _extract_bounties_list(result: Any) -> list:
     return []
 
 
-async def generate_bounty_board(session: dict | int, force_refresh: bool = False) -> list[dict]:
+async def generate_bounty_board(
+    session: dict | int,
+    force_refresh: bool = False,
+    board_scope: str | None = None,
+) -> list[dict]:
     """Generates 3 dynamic bounty board postings for a session using LLM JSON completion."""
     from game_engine import _scenario_block
+    from mechanics.social.origin_mode import resolve_player_age_profile
+
     if isinstance(session, (int, str)):
         session_id = int(session)
         session = await db.adb(db.get_session, session_id) or {"id": session_id}
     else:
         session_id = session["id"]
 
+    scen_key = session.get("scenario")
+    is_student = bool(resolve_player_age_profile(session).get("is_student"))
+    req_scope = str(board_scope or "").strip().lower()
+    if req_scope == "school" and is_student:
+        effective_scope = "school"
+    elif req_scope == "generic":
+        effective_scope = "generic"
+    else:
+        effective_scope = "school" if scenario_data.is_school_scenario(scen_key) else "generic"
+
     if not force_refresh:
         avail_q = await db.adb(db.get_session_quests, session_id, status="Available")
-        existing = _filter_general_bounties(avail_q)
+        general_q = _filter_general_bounties(avail_q)
+        if effective_scope == "school":
+            existing = [q for q in general_q if is_school_bounty_quest(q)]
+        else:
+            existing = [q for q in general_q if not is_school_bounty_quest(q)]
         if len(existing) >= 3:
             return existing
     else:
-        # Clear stale unaccepted general bounties upon refresh so new ones replace them cleanly
-        def _clear_stale_general_bounties():
+        # Clear stale unaccepted bounties matching ONLY the active board_scope so scopes stay isolated
+        def _clear_stale_scoped_bounties():
+            if not is_student:
+                cleanup_stale_adult_school_bounties(session_id, session=session)
             with db.get_conn() as conn:
                 stale_rows = conn.execute(
-                    "SELECT quest_id FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
+                    "SELECT quest_id, quest_type, title, objective, quest_notes FROM quests WHERE session_id=? AND status='Available' AND (quest_id LIKE 'BNT-%' AND quest_id NOT LIKE 'BNT-FLW-%') AND quest_id NOT LIKE 'COMM-%' AND (quest_notes IS NULL OR (quest_notes NOT LIKE 'faction:%' AND quest_notes NOT LIKE '%commission:%' AND quest_notes NOT LIKE '%followup_to:%'))",
                     (session_id,)
                 ).fetchall()
-                stale_qids = [r["quest_id"] for r in stale_rows if r and r["quest_id"]]
+                stale_qids = [
+                    r["quest_id"]
+                    for r in stale_rows
+                    if r and r["quest_id"] and (is_school_bounty_quest(dict(r)) == (effective_scope == "school"))
+                ]
                 if stale_qids:
                     q_ph = ",".join("?" for _ in stale_qids)
                     conn.execute(f"DELETE FROM quest_waypoints WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quest_dossiers WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
                     conn.execute(f"DELETE FROM quests WHERE session_id=? AND quest_id IN ({q_ph})", [session_id] + stale_qids)
-            try:
-                build_consequence_followup_bounty(session_id, session=session)
-            except Exception:
-                pass
-        await db.adb(_clear_stale_general_bounties)
+            if effective_scope != "school":
+                try:
+                    build_consequence_followup_bounty(session_id, session=session)
+                except Exception:
+                    pass
+        await db.adb(_clear_stale_scoped_bounties)
 
 
     scen_block = _scenario_block(session)
     loc = session.get("current_location", "the local hub")
-    scen_key = session.get("scenario")
 
     from game_engine.prompt_layout import build_side_channel_language_directive
     bounty_lang_dir = build_side_channel_language_directive(
@@ -1030,8 +1343,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         system_prompt = f"{system_prompt}\n\n{bounty_lang_dir}"
 
     school_hints = ""
-    from mechanics.world.locations import is_school_scenario
-    if is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key):
+    if effective_scope == "school" and is_student:
         from mechanics.social.school_roster import ensure_school_directory_exists
         roster = ensure_school_directory_exists(session)
         if roster:
@@ -1061,16 +1373,21 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
 
     loc_hints = ""
     candidate_locations = []
+    _curr_bnt_realm = _get_session_curr_realm_id(session_id)
     from mechanics.world.locations import get_discovered_primary_locations, get_session_school_name
     zones_dict = get_discovered_primary_locations(session_id, scen_key)
-    if scenario_data.is_anomalous_incursions_scenario(scen_key):
+    if scenario_data.is_anomalous_incursions_scenario(scen_key) and effective_scope != "school":
         candidate_locations = _collect_anomalous_bounty_candidate_locations(session_id, scen_key)
     if not candidate_locations:
         for z, prims in zones_dict.items():
             for p in prims:
                 candidate_locations.append(f"{z} -> {p}")
+    if _curr_bnt_realm:
+        _scoped_cands = _filter_locs_by_realm(session_id, candidate_locations, _curr_bnt_realm)
+        if _scoped_cands:
+            candidate_locations = _scoped_cands
 
-    if is_school_scenario(scen_key) or scenario_data.has_school_campus_mechanics(scen_key):
+    if effective_scope == "school" and is_student:
         school_zone = get_session_school_name(session_id, scen_key) or "Main Academy Campus"
         athletics_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["athletics", "grounds", "sports"])), "School Grounds & Athletics")
         commons_zone = next((z for z in zones_dict if any(w in z.lower() for w in ["commons", "plaza", "dining"])), "Student Commons & Central Plaza")
@@ -1153,11 +1470,12 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
             f"- STRICTLY FORBIDDEN: NEVER invent intermediate wings like 'Administration Wing'! Always use '{school_zone} ➔ Student Council Office', NOT '{school_zone} ➔ Administration Wing ➔ Student Council Office'.\n"
         )
     elif candidate_locations:
-        loc_hints = "\nAvailable Regional Locations for Waypoints:\n" + "\n".join(f"- {l}" for l in candidate_locations[:8]) + "\n"
+        loc_hints = "\nAvailable Regional Locations for Waypoints (current realm):\n" + "\n".join(f"- {l}" for l in candidate_locations[:8]) + "\n"
+        loc_hints += _build_cross_realm_expedition_hints(session_id, _curr_bnt_realm)
 
     is_anom = scenario_data.is_anomalous_incursions_scenario(scen_key)
     anom_hints = ""
-    if is_anom:
+    if is_anom and effective_scope != "school":
         pref_archs = ", ".join(ANOMALOUS_FACTION_BOARD_ARCHETYPE_WEIGHTS["freelance_app"])
         anom_hints = (
             f"\nFREELANCE ANOMALY DISPATCH APP RULES:\n"
@@ -1185,14 +1503,7 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
         bounties_raw = []
 
     if not bounties_raw:
-        if is_anom:
-            bounties_raw = _build_anomalous_fallback_bounties(
-                session_id=session_id,
-                board_key="freelance_app",
-                default_loc=loc,
-                candidate_locations=candidate_locations,
-            )
-        elif is_school_scenario(scen_key):
+        if effective_scope == "school" and is_student:
             bounties_raw = [
                 {
                     "quest_type": "Academic Rescue",
@@ -1228,6 +1539,13 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                     ]
                 }
             ]
+        elif is_anom:
+            bounties_raw = _build_anomalous_fallback_bounties(
+                session_id=session_id,
+                board_key="freelance_app",
+                default_loc=loc,
+                candidate_locations=candidate_locations,
+            )
         else:
             bounties_raw = [
                 {
@@ -1308,8 +1626,15 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                 seed_str=b_id,
             )
 
-            q_notes_gen = "board_source:freelance_app" if is_anom else ""
-            if is_anom:
+            if effective_scope == "school":
+                q_notes_gen = "board_source:campus_general"
+            else:
+                q_notes_gen = "board_source:freelance_app"
+            _spirit_fid = str(b.get("faction_id") or "").strip()
+            if _spirit_fid in ("faction_spirit_kitsune", "faction_spirit_bunian"):
+                _spirit_rep = _safe_bounty_int(b.get("faction_rep_reward"), 12)
+                q_notes_gen = f"{q_notes_gen}|faction:{_spirit_fid}|rep_reward:{_spirit_rep}"
+            if is_anom and effective_scope != "school":
                 from mechanics.world.anomaly_engine import generate_anomaly_blueprint, serialize_blueprint_note
                 wiretap_gen = _should_wiretap_reveal_dossier(session_id, "freelance_app")
                 is_nh_b = ("non-hostile" in str(q_type or "").lower() or bool(b.get("non_hostile_temperament")))
@@ -1408,7 +1733,10 @@ async def generate_bounty_board(session: dict | int, force_refresh: bool = False
                             wp["target_location"] = f"{z_norm} ➔ {p_norm}"
                 db.save_quest_waypoints(session_id=session_id, quest_id=b_id, waypoints=validated_wps, sub_obj_id=None)
 
-        return _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+        all_avail = _filter_general_bounties(db.get_session_quests(session_id, status="Available"))
+        if effective_scope == "school":
+            return [q for q in all_avail if is_school_bounty_quest(q)]
+        return [q for q in all_avail if not is_school_bounty_quest(q)]
 
     return await db.adb(_save_bounties_sync, bounties_raw)
 
@@ -1717,6 +2045,29 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
     faction_id = faction.get("faction_id", "")
     faction_name = faction.get("name", "Faction")
 
+    is_spirit_court = (
+        str(faction.get("category") or "").strip().lower() == "spirit_court"
+        or str(faction.get("hierarchy_template") or "").strip().lower() == "spirit_court"
+        or str(faction_id or "").strip().lower()
+        in ("faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul")
+    )
+    if is_spirit_court:
+        from mechanics.combat.spells.spirit_court_perks import resolve_village_key_for_spirit_faction
+        from mechanics.narrative.spirit_court_bounties import generate_spirit_court_commission_board
+
+        sc_vk = resolve_village_key_for_spirit_faction(faction)
+        if sc_vk:
+            return await db.adb(
+                generate_spirit_court_commission_board,
+                int(session_id),
+                sc_vk,
+                current_day=session.get("current_day"),
+                scenario=str(session.get("scenario") or ""),
+                force_refresh=bool(force_refresh),
+                persist_db=True,
+            )
+        return []
+
     if not force_refresh:
         # Check for cached faction bounties (stored with quest_notes matching faction_id)
         avail_q = await db.adb(db.get_session_quests, session_id, status="Available")
@@ -1847,6 +2198,11 @@ async def generate_faction_bounty_board(session: dict, faction: dict,
             from mechanics.world.locations import get_discovered_primary_locations
             zones_dict = get_discovered_primary_locations(session_id, scen_key) or {}
             all_disc = [f"{z} ➔ {p}" for z, prims in zones_dict.items() for p in prims] if isinstance(zones_dict, dict) else list(zones_dict)
+            _fac_curr_realm = _get_session_curr_realm_id(session_id)
+            if _fac_curr_realm:
+                _fac_scoped = _filter_locs_by_realm(session_id, all_disc, _fac_curr_realm)
+                if _fac_scoped:
+                    all_disc = _fac_scoped
             field_cands = [d for d in all_disc if d.strip().lower() != loc.strip().lower() and not is_safe_sanctuary_location(d)]
             target_field_loc = field_cands[0] if field_cands else ("Wilds Outer Perimeter ➔ Outpost" if not is_safe_sanctuary_location(loc) else "Wilds Outer Perimeter ➔ Outpost")
             field_short = format_clean_location_prose(target_field_loc, include_zone=False)
@@ -2652,13 +3008,25 @@ def parse_anomalous_quest_board_source(quest: dict, session_id: int | None = Non
         return "story_quest"
 
     notes = str(quest.get("quest_notes") or "")
+    if str(quest.get("board_source") or "").strip().lower() == "spirit_court":
+        return "spirit_court"
+    if str(quest.get("faction_id") or "").strip().lower() in (
+        "faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul"
+    ):
+        return "spirit_court"
     faction_id = ""
     for part in notes.replace("\n", "|").split("|"):
         p = part.strip()
         if p.startswith("board_source:"):
             return p.split(":", 1)[1].strip().lower()
+        if p.startswith("spirit_court:"):
+            return "spirit_court"
         if p.startswith("faction:"):
             faction_id = p.split(":", 1)[1].strip()
+    if faction_id.lower() in (
+        "faction_spirit_kitsune", "faction_spirit_bunian", "faction_spirit_ghoul"
+    ):
+        return "spirit_court"
 
     if faction_id and session_id:
         try:
@@ -2759,7 +3127,7 @@ def dispatch_anomalous_mandatory_daily_bounty(
     try:
         p_uids = db.get_session_participant_user_ids(session_id)
         if p_uids:
-            c_rec = db.get_character(p_uids[0])
+            c_rec = db.get_character(p_uids[0], session_id=session_id)
             mand_p_lvl = int((c_rec or {}).get("level", 1) or 1)
     except Exception:
         mand_p_lvl = 1
@@ -2913,7 +3281,18 @@ def evaluate_anomalous_bounty_eligibility(
     player_arch = str(fac_state.get("faction_archetype_key") or "public_agency")
     board_src = parse_anomalous_quest_board_source(quest, session_id=session_id)
 
-    if board_src in ("school_club", "club", "council", "delinquents", "sports", "nsfw_club", "discipline"):
+    if board_src == "spirit_court":
+        from mechanics.narrative.spirit_court_bounties import can_accept_spirit_court_commission
+        sc_ok, sc_reason = can_accept_spirit_court_commission(session_id, quest)
+        return {
+            "allowed": sc_ok,
+            "player_faction": player_arch,
+            "board_source": board_src,
+            "is_contract_work": False,
+            "reason": sc_reason,
+        }
+
+    if board_src in ("campus_general", "school_club", "club", "council", "delinquents", "sports", "nsfw_club", "discipline"):
         from mechanics.social.origin_mode import is_student_operative
         sess_b = session if session is not None else (db.get_session(session_id) if session_id else {})
         if is_student_operative(sess_b):

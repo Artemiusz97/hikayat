@@ -31,7 +31,6 @@ from config import (
     NSFW_LLM_MODEL,
     NSFW_LLM_TEMPERATURE,
 )
-from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 from . import (
     capabilities as _mod_capabilities,
     parsing as _mod_parsing,
@@ -165,6 +164,8 @@ _SUBMODULE_NAMES = frozenset(
         "transport_stream",
     }
 )
+
+from db.core.module_proxy import install_submodule_proxy as _install_submodule_proxy
 
 _install_submodule_proxy(
     __name__, _SUBMODULES, _SUBMODULE_NAMES, cls_name="_LLMClientPackageModule"

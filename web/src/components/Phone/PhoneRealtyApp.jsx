@@ -15,6 +15,7 @@ const PhoneRealtyApp = ({
   onSetPrimaryProperty,
   onManageSpareKey,
   onBuyProperty,
+  commsOffline = false,
   scenario = 'fantasy',
   t,
 }) => {
@@ -200,9 +201,9 @@ const PhoneRealtyApp = ({
                       {!prop.is_primary && (
                         <button
                           type="button"
-                          disabled={realtyBusy}
+                          disabled={realtyBusy || commsOffline}
                           onClick={() => onSetPrimaryProperty(prop.property_id)}
-                          className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 hover:bg-neutral-700 text-emerald-300 border border-emerald-700/40 shrink-0 cursor-pointer disabled:opacity-50"
+                          className="px-2 py-1 rounded-lg text-[10px] font-semibold bg-neutral-800 hover:bg-neutral-700 text-emerald-300 border border-emerald-700/40 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           {t('realty.set_primary', 'Set Primary')}
                         </button>
@@ -253,9 +254,9 @@ const PhoneRealtyApp = ({
                               <span>🔑 {h.name}</span>
                               <button
                                 type="button"
-                                disabled={realtyBusy}
+                                disabled={realtyBusy || commsOffline}
                                 onClick={() => onManageSpareKey(prop.property_id, h.npc_id, true)}
-                                className="text-rose-300 hover:text-rose-200 ml-0.5 cursor-pointer"
+                                className="text-rose-300 hover:text-rose-200 ml-0.5 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
                                 title={t('realty.revoke_key', 'Revoke Key')}
                               >
                                 <X size={10} />
@@ -268,8 +269,9 @@ const PhoneRealtyApp = ({
                         <div className="flex items-center gap-1.5">
                           <select
                             value={chosenNpc}
+                            disabled={commsOffline}
                             onChange={(e) => onSelectSpareKeyNpc(prop.property_id, e.target.value)}
-                            className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-2 py-1 text-[11px] text-gray-200"
+                            className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-2 py-1 text-[11px] text-gray-200 disabled:opacity-50"
                           >
                             {availableContacts.map((c) => (
                               <option key={c.npc_id} value={c.npc_id}>
@@ -279,9 +281,9 @@ const PhoneRealtyApp = ({
                           </select>
                           <button
                             type="button"
-                            disabled={realtyBusy || !chosenNpc}
+                            disabled={realtyBusy || commsOffline || !chosenNpc}
                             onClick={() => onManageSpareKey(prop.property_id, chosenNpc, false)}
-                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 shrink-0 cursor-pointer disabled:opacity-50"
+                            className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 shrink-0 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             {t('realty.give_spare_key', 'Give Key')}
                           </button>
@@ -328,7 +330,7 @@ const PhoneRealtyApp = ({
                   </div>
                   <button
                     type="button"
-                    disabled={isOwned || !canAfford || realtyBusy}
+                    disabled={isOwned || !canAfford || realtyBusy || commsOffline}
                     onClick={() => onBuyProperty(item.property_id)}
                     className={`px-2.5 py-1 rounded-lg text-[10px] font-bold tabular-nums transition-all shrink-0 ${
                       isOwned

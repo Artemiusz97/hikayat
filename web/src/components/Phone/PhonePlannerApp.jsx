@@ -10,6 +10,7 @@ const PhonePlannerApp = ({
   onCancelPlannerItem,
   onOpenMessages,
   onOpenChatWithContact,
+  commsOffline = false,
   clockFormat = '12h',
   t,
 }) => {
@@ -191,9 +192,9 @@ const PhonePlannerApp = ({
                     {canCancel && (
                       <button
                         type="button"
-                        disabled={cancellingCommitmentId === cId}
+                        disabled={commsOffline || cancellingCommitmentId === cId}
                         onClick={() => onCancelPlannerItem(cId)}
-                        className="px-2 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
+                        className="px-2 py-1 rounded-lg bg-rose-950/50 hover:bg-rose-900/60 text-rose-300 border border-rose-800/50 text-[10px] font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-400"
                       >
                         {cancellingCommitmentId === cId ? '...' : 'Cancel'}
                         <span className="sr-only"> {appt.title || npcName}</span>

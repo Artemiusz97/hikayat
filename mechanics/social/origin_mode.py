@@ -107,6 +107,87 @@ def is_adult_ahs_operative_fail_closed(
     return normalize_origin_mode(raw_mode) == ORIGIN_ADULT
 
 
+def resolve_player_age_profile(
+    session: Mapping[str, Any] | int | None,
+    char: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Derive the canonical player age bracket, origin mode, and UI badge from session + character.
+
+    Rules:
+    - Anomalous High: respects `session["origin_mode"]` (`"student"` vs `"adult"`), with legacy
+      save fallback to `char["appearance"]["origin_mode"]` and `joined_faction_id == "student_freelancer"`
+      before defaulting to `"adult"`.
+    - Pure high school scenarios (`is_school_scenario`): always `"teen"` / `"student"`.
+    - All other scenarios: always `"adult"` (never student).
+    """
+    sess = _as_session(session)
+    char_dict = dict(char) if isinstance(char, Mapping) else {}
+    scen_key = str(sess.get("scenario") or "")
+
+    if scenario_data.is_anomalous_high_school_scenario(scen_key):
+        raw_mode = str(sess.get("origin_mode") or "").strip().lower()
+        app = char_dict.get("appearance")
+        app_dict = app if isinstance(app, Mapping) else {}
+        if not raw_mode:
+            app_mode = str(app_dict.get("origin_mode") or "").strip().lower()
+            if app_mode:
+                raw_mode = app_mode
+            elif (
+                str(char_dict.get("joined_faction_id") or "").strip().lower() == STUDENT_FACTION_KEY
+                or str(sess.get("joined_faction") or "").strip().lower() == STUDENT_FACTION_KEY
+            ):
+                raw_mode = ORIGIN_STUDENT
+            else:
+                raw_mode = ORIGIN_ADULT
+        mode = normalize_origin_mode(raw_mode)
+        if mode == ORIGIN_STUDENT:
+            raw_grade = sess.get("student_grade") or app_dict.get("student_grade")
+            grade = normalize_student_grade(raw_grade)
+            return {
+                "age_bracket": "teen",
+                "age_tag": "Teen",
+                "origin_mode": ORIGIN_STUDENT,
+                "is_student": True,
+                "is_adult_field_agent": False,
+                "student_grade": grade,
+                "badge_label": "Teen • Student",
+            }
+        return {
+            "age_bracket": "adult",
+            "age_tag": "Adult",
+            "origin_mode": ORIGIN_ADULT,
+            "is_student": False,
+            "is_adult_field_agent": True,
+            "student_grade": None,
+            "badge_label": "Adult • Field Agent",
+        }
+
+    if scenario_data.is_school_scenario(scen_key):
+        app = char_dict.get("appearance")
+        app_dict = app if isinstance(app, Mapping) else {}
+        raw_grade = str(sess.get("student_grade") or app_dict.get("student_grade") or "").strip()
+        grade = normalize_student_grade(raw_grade) if raw_grade else None
+        return {
+            "age_bracket": "teen",
+            "age_tag": "Teen",
+            "origin_mode": ORIGIN_STUDENT,
+            "is_student": True,
+            "is_adult_field_agent": False,
+            "student_grade": grade,
+            "badge_label": "Teen • Student",
+        }
+
+    return {
+        "age_bracket": "adult",
+        "age_tag": "Adult",
+        "origin_mode": ORIGIN_ADULT,
+        "is_student": False,
+        "is_adult_field_agent": False,
+        "student_grade": None,
+        "badge_label": "Adult",
+    }
+
+
 def get_session_student_grade(session_or_id: Mapping[str, Any] | int | None) -> str:
     """Returns the student PC's grade, or '' when the PC is not a student operative."""
     sess = _as_session(session_or_id)

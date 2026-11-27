@@ -10,6 +10,7 @@ export function usePhoneCommerceControllers({
   onRefreshInventory,
   onRefreshCharacter,
   onRefreshCodex,
+  commsOffline = false,
   t,
 }) {
   // Online Shop state
@@ -20,10 +21,15 @@ export function usePhoneCommerceControllers({
 
   // Requests / Bounties state
   const [bountySubTab, setBountySubTab] = useState('available'); // 'available' | 'active'
+  const [bountySourceTab, setBountySourceTab] = useState('all'); // 'all' | 'generic' | 'faction'
   const [selectedFactionFilter, setSelectedFactionFilter] = useState('all');
   const [generatingBounties, setGeneratingBounties] = useState(false);
   const [busyBountyId, setBusyBountyId] = useState(null);
   const [bountyActionBanner, setBountyActionBanner] = useState(null);
+
+  const isShopApp = activeApp === 'shop' || activeApp === 'school_shop';
+  const storeMode = activeApp === 'school_shop' ? 'school_mart' : 'online_general';
+  const boardMode = activeApp === 'school_bounties' ? 'school' : 'general';
 
   // Realty & Safehouses state
   const [realtyData, setRealtyData] = useState(null);
@@ -36,10 +42,13 @@ export function usePhoneCommerceControllers({
   const prevSessionIdRef = useRef(session?.id ?? null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
+  const tRef = useRef(t);
+  tRef.current = t;
   const shopSeqRef = useRef(0);
   const shopAbortRef = useRef(null);
   const realtySeqRef = useRef(0);
   const realtyAbortRef = useRef(null);
+  const autoBountiesAttemptedRef = useRef({ general: false, school: false });
 
   useEffect(() => {
     const nextSid = session?.id ?? null;
@@ -47,21 +56,34 @@ export function usePhoneCommerceControllers({
     prevSessionIdRef.current = nextSid;
     setShopData(null);
     setShopFeedback(null);
+    setBuyingItem(null);
+    setGeneratingBounties(false);
+    setBusyBountyId(null);
     setBountyActionBanner(null);
+    setBountySourceTab('all');
     setSelectedFactionFilter('all');
     setRealtyData(sessionRef.current?.realty?.enabled ? sessionRef.current.realty : null);
+    setRealtyBusy(false);
     setRealtyBanner(null);
     setSelectedSpareKeyNpc({});
+    autoBountiesAttemptedRef.current = { general: false, school: false };
   }, [session?.id]);
 
   useEffect(() => {
-    if (!isOpen || activeApp !== 'shop' || !session?.id || !user?.user_id) {
+    setBountySourceTab('all');
+    setSelectedFactionFilter('all');
+    setBountyActionBanner(null);
+  }, [boardMode]);
+
+  useEffect(() => {
+    if (!isOpen || !isShopApp || commsOffline || !session?.id || !user?.user_id) {
       if (shopAbortRef.current) {
         try {
           shopAbortRef.current.abort();
         } catch {}
         shopAbortRef.current = null;
       }
+      setLoadingShop(false);
       return;
     }
     if (shopAbortRef.current) {
@@ -73,10 +95,12 @@ export function usePhoneCommerceControllers({
     const controller = new AbortController();
     shopAbortRef.current = controller;
     setLoadingShop(true);
+    setShopData(null);
     setShopFeedback(null);
-    apiCall(`/api/merchant/${session.id}?user_id=${user.user_id}&is_phone_shop=true`, {
-      signal: controller.signal,
-    })
+    apiCall(
+      `/api/merchant/${session.id}?user_id=${user.user_id}&is_phone_shop=true&store_mode=${encodeURIComponent(storeMode)}`,
+      { signal: controller.signal }
+    )
       .then((data) => {
         if (seq === shopSeqRef.current) {
           setShopData(data);
@@ -86,7 +110,7 @@ export function usePhoneCommerceControllers({
         if (err?.isUserAbort || err?.name === 'AbortError' || seq !== shopSeqRef.current) return;
         setShopFeedback({
           type: 'error',
-          text: err?.message || t('phone.shop_load_failed', 'Failed to load shop catalogue.'),
+          text: err?.message || tRef.current?.('phone.shop_load_failed', 'Failed to load shop catalogue.') || 'Failed to load shop catalogue.',
         });
       })
       .finally(() => {
@@ -102,10 +126,11 @@ export function usePhoneCommerceControllers({
         controller.abort();
       } catch {}
     };
-  }, [isOpen, activeApp, session?.id, user?.user_id, t]);
+  }, [isOpen, isShopApp, commsOffline, storeMode, session?.id, user?.user_id]);
 
   const handleBuyDeliveryItem = async (item) => {
-    if (!session?.id || !user?.user_id || buyingItem) return;
+    const reqSid = session?.id;
+    if (!reqSid || !user?.user_id || buyingItem) return;
     setBuyingItem(item.name);
     setShopFeedback(null);
     try {
@@ -113,11 +138,13 @@ export function usePhoneCommerceControllers({
         method: 'POST',
         body: JSON.stringify({
           user_id: user.user_id,
-          session_id: session.id,
+          session_id: reqSid,
           item_name: item.name,
           is_phone_shop: true,
+          store_mode: storeMode,
         }),
       });
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setShopFeedback({ type: 'ok', text: data.message || `Ordered ${item.name}!` });
       setShopData((prev) =>
         prev
@@ -132,35 +159,63 @@ export function usePhoneCommerceControllers({
       if (onRefreshInventory) onRefreshInventory();
       if (onRefreshCharacter) onRefreshCharacter();
     } catch (err) {
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setShopFeedback({ type: 'error', text: err.message || 'Order failed.' });
     } finally {
-      setBuyingItem(null);
+      if ((sessionRef.current?.id ?? null) === reqSid) {
+        setBuyingItem(null);
+      }
     }
   };
 
-  const handleRefreshBounties = async (factionId = null) => {
-    if (generatingBounties || !codexHook?.generateBounties) return;
+  const handleRefreshBounties = async (factionId = undefined) => {
+    const reqSid = session?.id;
+    if (!reqSid || generatingBounties || !codexHook?.generateBounties) return;
     setGeneratingBounties(true);
     setBountyActionBanner(null);
     try {
       const targetFaction =
-        factionId !== undefined ? factionId : selectedFactionFilter !== 'all' ? selectedFactionFilter : null;
-      await codexHook.generateBounties(true, targetFaction);
-      setBountyActionBanner({ type: 'ok', text: 'Requests updated from bulletin board!' });
+        factionId !== undefined
+          ? factionId
+          : bountySourceTab !== 'generic' && selectedFactionFilter !== 'all'
+            ? selectedFactionFilter
+            : null;
+      let boardScope = 'general';
+      if (boardMode === 'school') {
+        boardScope = targetFaction || bountySourceTab === 'faction' ? 'faction' : 'school';
+      } else if (targetFaction || bountySourceTab === 'faction') {
+        boardScope = 'faction';
+      } else if (bountySourceTab === 'generic') {
+        boardScope = 'generic';
+      }
+      await codexHook.generateBounties(true, targetFaction, boardScope);
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
+      setBountyActionBanner({
+        type: 'ok',
+        text: t('phone.bounties.updated_ok', 'Requests updated from bulletin board!'),
+      });
       if (onRefreshCodex) onRefreshCodex();
     } catch (err) {
-      setBountyActionBanner({ type: 'error', text: err.message || 'Failed to refresh requests.' });
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
+      setBountyActionBanner({
+        type: 'error',
+        text: err.message || t('phone.bounties.refresh_failed', 'Failed to refresh requests.'),
+      });
     } finally {
-      setGeneratingBounties(false);
+      if ((sessionRef.current?.id ?? null) === reqSid) {
+        setGeneratingBounties(false);
+      }
     }
   };
 
   const handleAcceptBounty = async (questId, questTitle) => {
-    if (!codexHook?.bountyAction || busyBountyId) return;
+    const reqSid = session?.id;
+    if (!reqSid || !codexHook?.bountyAction || busyBountyId) return;
     setBusyBountyId(questId);
     setBountyActionBanner(null);
     try {
       await codexHook.bountyAction(questId, 'accept');
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setBountyActionBanner({
         type: 'ok',
         text: `✅ Accepted "${questTitle}" — Moved to Active Tasks!`,
@@ -168,18 +223,23 @@ export function usePhoneCommerceControllers({
       if (onRefreshCodex) onRefreshCodex();
       if (onRefreshCharacter) onRefreshCharacter();
     } catch (err) {
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setBountyActionBanner({ type: 'error', text: err.message || 'Could not accept request.' });
     } finally {
-      setBusyBountyId(null);
+      if ((sessionRef.current?.id ?? null) === reqSid) {
+        setBusyBountyId(null);
+      }
     }
   };
 
   const handleAbandonBounty = async (questId, questTitle) => {
-    if (!codexHook?.bountyAction || busyBountyId) return;
+    const reqSid = session?.id;
+    if (!reqSid || !codexHook?.bountyAction || busyBountyId) return;
     setBusyBountyId(questId);
     setBountyActionBanner(null);
     try {
       await codexHook.bountyAction(questId, 'abandon');
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setBountyActionBanner({
         type: 'warn',
         text: `Dropped task "${questTitle}".`,
@@ -187,17 +247,41 @@ export function usePhoneCommerceControllers({
       if (onRefreshCodex) onRefreshCodex();
       if (onRefreshCharacter) onRefreshCharacter();
     } catch (err) {
+      if ((sessionRef.current?.id ?? null) !== reqSid) return;
       setBountyActionBanner({ type: 'error', text: err.message || 'Could not abandon request.' });
     } finally {
-      setBusyBountyId(null);
+      if ((sessionRef.current?.id ?? null) === reqSid) {
+        setBusyBountyId(null);
+      }
     }
   };
 
-  const allAvailableBounties = codexHook?.availableBounties || [];
-  const factionsList = codexHook?.factions || [];
+  const isSchoolBountyItem = (b) =>
+    Boolean(b?.bounty_scope === 'school' || b?.is_school_bounty);
+  const isFactionBountyItem = (b) =>
+    Boolean(
+      b?.bounty_scope === 'faction' ||
+        b?.faction_id ||
+        b?.faction_name ||
+        (b?.board_source && String(b.board_source).toLowerCase() !== 'general') ||
+        String(b?.quest_id || '').startsWith('FBNT-')
+    );
+
+  const rawAvailableBounties = codexHook?.availableBounties || [];
+  const generalAvailableBounties = rawAvailableBounties.filter((b) => !isSchoolBountyItem(b));
+  const schoolAvailableBounties = rawAvailableBounties.filter((b) => isSchoolBountyItem(b));
+  const allAvailableBounties =
+    boardMode === 'school' ? schoolAvailableBounties : generalAvailableBounties;
+
+  const rawFactions = codexHook?.factions || [];
+  const factionsList = rawFactions.filter((f) =>
+    boardMode === 'school' ? Boolean(f?.is_school_club) : !f?.is_school_club
+  );
 
   const availableBounties = allAvailableBounties.filter((b) => {
-    if (selectedFactionFilter === 'all') return true;
+    if (bountySourceTab === 'generic' && isFactionBountyItem(b)) return false;
+    if (bountySourceTab === 'faction' && !isFactionBountyItem(b)) return false;
+    if (selectedFactionFilter === 'all' || bountySourceTab === 'generic') return true;
     const bFaction = String(b.faction_id || b.faction_name || b.faction || '').toLowerCase();
     const bSource = String(b.board_source || '').toLowerCase();
     const targetF = factionsList.find(
@@ -223,31 +307,38 @@ export function usePhoneCommerceControllers({
           (q.quest_type.includes('Bounty') ||
             q.quest_type.includes('Request') ||
             q.quest_type.includes('Commission') ||
-            q.quest_type.includes('Gig'))))
+            q.quest_type.includes('Gig')))) &&
+      (boardMode === 'school' ? isSchoolBountyItem(q) : !isSchoolBountyItem(q))
   );
 
-  const autoBountiesAttemptedRef = useRef(false);
   const codexGenerateBountiesRef = useRef(codexHook?.generateBounties);
   codexGenerateBountiesRef.current = codexHook?.generateBounties;
+  const isBountyApp = activeApp === 'bounties' || activeApp === 'school_bounties';
 
   useEffect(() => {
-    if (!isOpen || activeApp !== 'bounties') {
-      autoBountiesAttemptedRef.current = false;
+    if (!isOpen || !isBountyApp || commsOffline) {
+      autoBountiesAttemptedRef.current = { general: false, school: false };
       return;
     }
     if (
       allAvailableBounties.length === 0 &&
       !generatingBounties &&
-      !autoBountiesAttemptedRef.current &&
+      !autoBountiesAttemptedRef.current[boardMode] &&
       codexGenerateBountiesRef.current
     ) {
-      autoBountiesAttemptedRef.current = true;
+      autoBountiesAttemptedRef.current[boardMode] = true;
+      const reqSid = sessionRef.current?.id ?? null;
       setGeneratingBounties(true);
-      Promise.resolve(codexGenerateBountiesRef.current())
+      const initialScope = boardMode === 'school' ? 'school' : 'general';
+      Promise.resolve(codexGenerateBountiesRef.current(false, null, initialScope))
         .catch(() => {})
-        .finally(() => setGeneratingBounties(false));
+        .finally(() => {
+          if ((sessionRef.current?.id ?? null) === reqSid) {
+            setGeneratingBounties(false);
+          }
+        });
     }
-  }, [isOpen, activeApp, allAvailableBounties.length, generatingBounties]);
+  }, [isOpen, isBountyApp, commsOffline, boardMode, allAvailableBounties.length, generatingBounties]);
 
   const fetchRealty = useCallback(async () => {
     if (!session?.id) return;
@@ -372,6 +463,7 @@ export function usePhoneCommerceControllers({
   };
 
   return {
+    storeMode,
     shopData,
     loadingShop,
     buyingItem,
@@ -379,8 +471,11 @@ export function usePhoneCommerceControllers({
     setShopFeedback,
     handleBuyDeliveryItem,
 
+    boardMode,
     bountySubTab,
     setBountySubTab,
+    bountySourceTab,
+    setBountySourceTab,
     selectedFactionFilter,
     setSelectedFactionFilter,
     generatingBounties,
@@ -388,6 +483,8 @@ export function usePhoneCommerceControllers({
     bountyActionBanner,
     setBountyActionBanner,
     allAvailableBounties,
+    generalAvailableBounties,
+    schoolAvailableBounties,
     factionsList,
     availableBounties,
     activeBounties,

@@ -19,11 +19,25 @@ from typing import Any, Dict
 CMD_START = r"(?:^|[;&|\r\n]\s*)"
 
 GIT_FORCE_ADD_RE = re.compile(
-    CMD_START + r"git\b[^\r\n;&|]*\badd\b[^\r\n;&|]*(?:\s-[A-Za-z]*f[A-Za-z]*\b|\s--force\b)[^\r\n;&|]*",
+    r"(?:^|[\s\"'`;&|\r\n])git(?:\s+(?:-[Cc]\s+\S+|-[A-Za-z]+))*\s+add\b(?P<args>[^\r\n;&|\"]*(?:\s-[A-Za-z]*f[A-Za-z]*\b|\s--force\b)[^\r\n;&|\"]*)",
     re.IGNORECASE,
 )
 LOCAL_ONLY_TARGET_RE = re.compile(
-    r"(?:^|[\s\"'\\/\.,])(?:tests(?:[/\\]|$|\b)|pytest\.ini\b|scripts[/\\]run_tests\.py\b|scripts[/\\]simulate_|\.desloppify(?:[/\\]|$|\b))",
+    r"(?:^|[\s\"'\\/\.,])(?:"
+    r"tests(?:[/\\]|$|\b)|"
+    r"pytest\.ini\b|"
+    r"run_tests\.bat\b|"
+    r"launchers[/\\]run_tests\.bat\b|"
+    r"requirements-dev\.txt\b|"
+    r"scripts[/\\]run_tests\.py\b|"
+    r"scripts[/\\]simulate_|"
+    r"scripts[/\\]playthrough_bot\.py\b|"
+    r"\.desloppify(?:[/\\]|$|\b)"
+    r")",
+    re.IGNORECASE,
+)
+GIT_FORCE_ADD_WILDCARD_RE = re.compile(
+    r"(?:^|\s)(?:\.\*?|\*|-A|--all)(?=$|\s|[\"'`;&|])",
     re.IGNORECASE,
 )
 SIM_LIVE_DB_RE = re.compile(
@@ -31,15 +45,25 @@ SIM_LIVE_DB_RE = re.compile(
     re.IGNORECASE,
 )
 GIT_PUSH_RE = re.compile(
-    CMD_START + r"git(?:\s+(?:-[Cc]\s+\S+|-[A-Za-z]+))*\s+push\b",
+    r"(?:^|[\s\"'`;&|\r\n])git(?:\s+(?:-[Cc]\s+\S+|-[A-Za-z]+))*\s+push\b",
     re.IGNORECASE,
 )
 GIT_DESTRUCTIVE_RE = re.compile(
-    CMD_START + r"git(?:\s+(?:-[Cc]\s+\S+|-[A-Za-z]+))*\s+(?:reset\s+--hard\b|clean\s+-[A-Za-z]*f[A-Za-z]*d|clean\s+-[A-Za-z]*d[A-Za-z]*f)",
+    r"(?:^|[\s\"'`;&|\r\n])git(?:\s+(?:-[Cc]\s+\S+|-[A-Za-z]+))*\s+(?:"
+    r"reset\s+--hard\b|"
+    r"clean\s+-[A-Za-z]*(?:fd|df)[A-Za-z]*\b|"
+    r"clean\b[^\r\n;&|]*\s--force\b[^\r\n;&|]*\s-[A-Za-z]*d[A-Za-z]*\b|"
+    r"clean\b[^\r\n;&|]*\s-[A-Za-z]*d[A-Za-z]*\b[^\r\n;&|]*\s--force\b|"
+    r"checkout\s+--\s+\.(?=$|\s|[\"'`;&|\r\n])|"
+    r"restore\s+(?:--worktree\s+|--staged\s+)*\.(?=$|\s|[\"'`;&|\r\n])"
+    r")",
     re.IGNORECASE,
 )
 LIVE_DB_DESTRUCTIVE_RE = re.compile(
-    CMD_START + r"(?:rm|del|erase|Remove-Item|Clear-Content|Set-Content)\b[^\r\n;&|]*\bhikayat\.db\b",
+    r"(?:^|[\s\"'`;&|\r\n])(?:"
+    r"(?:rm|ri|mv|del|erase|Remove-Item|Move-Item|Rename-Item|Clear-Content|Set-Content|Out-File|sqlite3)\b[^\r\n;&|]*|"
+    r"(?:>|>>)\s*[^\r\n;&|]*"
+    r")\bhikayat\.db\b",
     re.IGNORECASE,
 )
 
@@ -50,12 +74,12 @@ def evaluate_command(cmd: str) -> Dict[str, Any]:
         return {"decision": "allow"}
 
     for match in GIT_FORCE_ADD_RE.finditer(text):
-        segment = match.group(0)
-        if LOCAL_ONLY_TARGET_RE.search(segment):
+        segment = match.group("args") or match.group(0)
+        if LOCAL_ONLY_TARGET_RE.search(segment) or GIT_FORCE_ADD_WILDCARD_RE.search(segment):
             return {
                 "decision": "deny",
                 "reason": (
-                    "Blocked by hikayat-safety-guard: never `git add -f` local-only gitignored files "
+                    "Blocked by hikayat-safety-guard: never `git add -f` local-only gitignored files or wildcards "
                     "(tests/, pytest.ini, scripts/run_tests.py, scripts/simulate_*.py, .desloppify/)."
                 ),
             }

@@ -237,8 +237,8 @@ def compute_domain_skill_check_modifiers(
     jam_comms = False
     rule = spec.get("domain_rule") if isinstance(spec.get("domain_rule"), Mapping) else {}
     if not pacified and hq_mode != "allied_hub":
-        equipped = db.get_equipment(int(user_id)) if (session_id and user_id) else {}
-        inv = list(inventory_items) if inventory_items is not None else (db.get_inventory(int(user_id)) if (session_id and user_id) else [])
+        equipped = db.get_equipment(int(user_id), char=char_data, session_id=session_id) if (session_id and user_id) else {}
+        inv = list(inventory_items) if inventory_items is not None else (db.get_inventory(int(user_id), char=char_data, session_id=session_id) if (session_id and user_id) else [])
         mit = compute_domain_mitigation(int(session_id or 0), int(user_id or 0), char_data, equipped, inv, spec)
         if float(mit.get("mitigation_ratio") or 0.0) < 1.0:
             raw_pen = int(rule.get("dc_penalty") or 0)
@@ -315,7 +315,7 @@ def evaluate_turn_domain_effects(
 
     char_data, inv_items = _extract_primary_char(party)
     user_id = int((char_data or {}).get("user_id") or 0)
-    equipped = db.get_equipment(user_id) if (session_id and user_id) else {}
+    equipped = db.get_equipment(user_id, char=char_data, session_id=session_id) if (session_id and user_id) else {}
     mit = compute_domain_mitigation(session_id, user_id, char_data, equipped, inv_items, spec)
     mit_ratio = float(mit.get("mitigation_ratio") or 0.0)
 
@@ -362,7 +362,13 @@ def evaluate_turn_domain_effects(
             wet_flag = bool(rule.get("wet_flag"))
 
         if persist_db and user_id and (hp_delta != 0 or mp_delta != 0):
-            db.update_character_fields(user_id, hp=int(char_data["hp"]), mp=int(char_data["mp"]))
+            db.update_character_fields(
+                user_id,
+                hp=int(char_data["hp"]),
+                mp=int(char_data["mp"]),
+                session_id=session_id,
+                character_id=char_data.get("id"),
+            )
 
         if hp_delta < 0 or mp_delta < 0 or composure_shift or wet_flag or time_slip_min > 0:
             stage_directives.append(
@@ -390,7 +396,13 @@ def evaluate_turn_domain_effects(
             char_data["mp"] = cur_mp + gain_mp
             mp_delta = gain_mp
         if persist_db and user_id and (hp_delta > 0 or mp_delta > 0):
-            db.update_character_fields(user_id, hp=int(char_data["hp"]), mp=int(char_data["mp"]))
+            db.update_character_fields(
+                user_id,
+                hp=int(char_data["hp"]),
+                mp=int(char_data["mp"]),
+                session_id=session_id,
+                character_id=char_data.get("id"),
+            )
 
     result = {
         "active": True,
@@ -521,7 +533,7 @@ def evaluate_spatial_loop_travel(
 
     char_data, inv_items = _extract_primary_char(party)
     user_id = int((char_data or {}).get("user_id") or 0)
-    equipped = db.get_equipment(user_id) if (session_id and user_id) else {}
+    equipped = db.get_equipment(user_id, char=char_data, session_id=session_id) if (session_id and user_id) else {}
     mit = compute_domain_mitigation(session_id, user_id, char_data, equipped, inv_items, spec)
     if mit.get("has_spatial_anchor"):
         if consume_flare and persist_db and user_id:
@@ -529,7 +541,10 @@ def evaluate_spatial_loop_travel(
                 nm = str((item or {}).get("name") or "")
                 if any(kw in nm.lower() for kw in SPATIAL_ANCHOR_KEYWORDS):
                     try:
-                        db.remove_item(user_id, nm, 1)
+                        if isinstance(item, dict) and item.get("id"):
+                            db.remove_item(user_id, int(item["id"]), char=char_data, session_id=session_id)
+                        else:
+                            db.remove_item_by_name(user_id, nm, char=char_data, session_id=session_id)
                     except Exception:
                         pass
                     break
@@ -568,7 +583,12 @@ def evaluate_spatial_loop_travel(
         mp_drain = min(5, max(0, cur_mp))
         char_data["mp"] = cur_mp - mp_drain
         if persist_db and user_id and mp_drain > 0:
-            db.update_character_fields(user_id, mp=int(char_data["mp"]))
+            db.update_character_fields(
+                user_id,
+                mp=int(char_data["mp"]),
+                session_id=session_id,
+                character_id=char_data.get("id"),
+            )
 
     reroute_loc = ""
     if session_id:

@@ -1,4 +1,4 @@
-import { Fragment } from 'react';
+import { Fragment, useId } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -11,12 +11,26 @@ import {
   Users,
 } from 'lucide-react';
 import { StatusEffectBadge } from './CharacterSheet';
-import { defaultBulletRenderer } from './NpcDossierBody';
+import KnownRoutineCard from './KnownRoutineCard';
+import KnownWardrobeCard from './KnownWardrobeCard';
+import OperativeCombatDossierCard from './OperativeCombatDossierCard';
+import { defaultBulletRenderer, isRedundantAgentTierGrade } from './NpcDossierBody';
+import IntimateDossierPanel from './IntimateDossierPanel';
 import { formatCleanLocation } from '../../utils/locationFormat';
+import {
+  HEIGHT_PREFERENCE_KEYS,
+  formatFusedRear,
+  formatBodyPreferenceLabel,
+  isFeralRearExcluded,
+  isMaleGender,
+  stripRearTextureFromSizeClient,
+} from '../../utils/anatomyOptions';
 import {
   formatAgeCategory,
   formatGender,
+  formatPhysique,
   formatRace,
+  formatStature,
   formatTitle,
 } from '../../utils/npcDemographics';
 
@@ -143,7 +157,7 @@ export const getRelationshipTier = (score, track = 'platonic', t = null) => {
 
 const DEBUG_DOSSIER_TABS = [
   { id: 'persona', icon: '👤', shortLabel: 'Persona', fullLabel: 'Persona & Appearance' },
-  { id: 'history', icon: '📜', shortLabel: 'History', fullLabel: 'History & Schedule' },
+  { id: 'history', icon: '📜', shortLabel: 'History', fullLabel: 'Shared History' },
   { id: 'relations', icon: '🌳', shortLabel: 'Relations', fullLabel: 'Relations & Family' },
   { id: 'intimate', icon: '🔥', shortLabel: 'Intimacy', fullLabel: 'Intimate Dossier' },
 ];
@@ -171,6 +185,8 @@ const CodexCharactersTab = ({
   renderBulletPoints = defaultBulletRenderer,
   t,
 }) => {
+  const codexTabIdPrefix = useId();
+
   if (filteredContacts.length === 0) {
     return (
       <div className="text-center py-8 text-gray-500 border border-dashed border-fantasy-border/50 rounded-md">
@@ -181,7 +197,7 @@ const CodexCharactersTab = ({
     );
   }
 
-  return filteredContacts.map(rawNpc => {
+  return filteredContacts.map((rawNpc, npcIdx) => {
     const npcToggleKey = rawNpc.id || rawNpc.name;
     const isDebugRevealed = Boolean(rawNpc.debug_revealed);
     const npc = (isDebugRevealed && rawNpc.debug_profile)
@@ -206,13 +222,6 @@ const CodexCharactersTab = ({
       basic.deceased ||
       String(npc.disposition || '').toLowerCase() === 'dead'
     );
-    const isCombatDossierUnlocked = Boolean(
-      (npc.dossier_stage ?? 1) >= 2 ||
-      score >= 15 ||
-      isInParty ||
-      isDebugRevealed ||
-      npc.same_faction_colleague
-    );
     const traits = npc.unlocked_traits || [];
     const rawDislikes = npc.dislikes || basic.dislikes || [];
     const dislikes = rawDislikes.map(d => typeof d === 'string' ? d : (d.dislike || d.name || ''));
@@ -232,8 +241,9 @@ const CodexCharactersTab = ({
     const familyTree = npc.family_tree || {};
     const relations = npc.relations || {};
     const infoLevel = npc.info_level ?? 0;
-    const rawGender = String(basic.gender || npc.gender || appearance.gender || 'female').toLowerCase();
-    const isMale = ['male', 'man', 'boy', 'lord', 'he', 'him', 'his'].some(kw => rawGender.includes(kw)) && !['female', 'woman'].some(kw => rawGender.includes(kw));
+    const rawGender = String(basic.gender || npc.gender || appearance.gender || 'female').trim();
+    const isMale = isMaleGender(rawGender);
+    const feralRearExcluded = isFeralRearExcluded(basic.race || npc.race || appearance.race);
     const isNsfwScenario = Boolean(
       session?.is_nsfw ||
       npc?.is_nsfw ||
@@ -242,7 +252,10 @@ const CodexCharactersTab = ({
     );
 
     const isSavedContact = Boolean(npc.is_contact);
-    const hasOperationalDetails = Boolean(isInParty || isSpecialAgent || isCivilianTag || isDebugRevealed);
+    const hasRoutine = Boolean(npc.known_routine || npc.known_schedule || npc.schedule_summary);
+    const hasWardrobe = Boolean(npc.known_wardrobe || (isDebugRevealed && npc.debug_profile?.known_wardrobe));
+    const hasOperational = Boolean(isInParty || isSpecialAgent || isCivilianTag);
+    const hasExpandableDetails = Boolean(hasOperational || isDebugRevealed || hasWardrobe || hasRoutine);
 
     return (
       <div
@@ -357,16 +370,15 @@ const CodexCharactersTab = ({
 
         <div className="pt-1.5 space-y-1.5 text-[11px]">
           <div className="flex flex-wrap items-center gap-1">
-            {(npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role) && (
-              <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50 text-[10.5px]">
-                Role: <strong className="text-gray-100">{npc.public_role || basic.public_role || basic.role || basic.occupation || npc.role}</strong>
-              </span>
-            )}
-            {(npc.standing || basic.standing || basic.grade || npc.grade) && (
-              <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${getStandingBadgeClass(npc.standing || basic.standing || basic.grade || npc.grade)}`}>
-                {formatTitle(npc.standing || basic.standing || basic.grade || npc.grade)}
-              </span>
-            )}
+            {(() => {
+              const standingVal = npc.standing || basic.standing || basic.grade || npc.grade;
+              if (!standingVal || isRedundantAgentTierGrade(standingVal, isSpecialAgent)) return null;
+              return (
+                <span className={`px-1.5 py-0.5 rounded text-[10.5px] border ${getStandingBadgeClass(standingVal)}`}>
+                  {formatTitle(standingVal)}
+                </span>
+              );
+            })()}
             {(basic.club || npc.club) && (
               <span className="px-1.5 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 text-[10.5px]">
                 Club: {formatTitle(basic.club || npc.club)}
@@ -407,7 +419,7 @@ const CodexCharactersTab = ({
                 Age {basic.age || npc.age}
               </span>
             )}
-            {(basic.mannerisms || npc.mannerisms) && (
+            {!isDebugRevealed && (basic.mannerisms || npc.mannerisms) && (
               <span className="px-1.5 py-0.5 rounded bg-amber-950/30 text-amber-300/90 border border-amber-800/30 text-[10.5px] truncate max-w-full">
                 🎭 {basic.mannerisms || npc.mannerisms}
               </span>
@@ -427,18 +439,26 @@ const CodexCharactersTab = ({
             const physique = appearance.physique;
             const coatColor = appearance.coat_color || appearance.fur_color || appearance.scale_color || appearance.skin_color;
             const outfitStyle = appearance.outfit_style || appearance.clothing;
-            const hasAnyApp = Boolean(eyeColor || hairColor || stature || physique || coatColor || outfitStyle);
+            const hasAnyApp = Boolean(eyeColor || hairColor || stature || physique || coatColor || (!hasWardrobe && outfitStyle));
             if (!hasAnyApp) return null;
             return (
               <div className="text-[10.5px] text-gray-400 bg-black/30 p-1.5 rounded border border-fantasy-border/30 flex flex-wrap gap-x-2 gap-y-0.5">
-                {(stature || physique) && <span>📐 <strong>{t('codex.build', 'Build:')}</strong> {[stature, physique].filter(Boolean).map(formatTitle).join(' • ')}</span>}
+                {(stature || physique) && <span>📐 <strong>{t('codex.build', 'Build:')}</strong> {[formatStature(stature, t), formatPhysique(physique, t)].filter(Boolean).join(' • ')}</span>}
                 {eyeColor && <span>👁️ <strong>{t('codex.eyes', 'Eyes:')}</strong> {formatTitle(eyeColor)}</span>}
                 {hairColor && <span>💇 <strong>{t('codex.hair', 'Hair:')}</strong> {formatTitle(hairColor)}</span>}
                 {coatColor && <span>✨ <strong>{t('codex.skin_coat', 'Skin/Coat:')}</strong> {formatTitle(coatColor)}</span>}
-                {outfitStyle && <span>👔 <strong>{t('codex.outfit', 'Outfit:')}</strong> {formatTitle(outfitStyle)}</span>}
+                {!hasWardrobe && outfitStyle && <span>👔 <strong>{t('codex.outfit', 'Outfit:')}</strong> {formatTitle(outfitStyle)}</span>}
                 {isNsfwScenario && (isMale ? ((infoLevel >= 3 || isDebugRevealed) && appearance.penis_size && appearance.penis_size.toLowerCase() !== 'unknown') : appearance.breast_size) && (
                   <span className="text-pink-400/90 font-medium">
                     🔞 {isMale ? `Size: ${appearance.penis_size}` : `Bust: ${appearance.breast_size}`}
+                  </span>
+                )}
+                {isNsfwScenario && !feralRearExcluded && appearance.rear_size && (
+                  <span className="text-pink-400/90 font-medium">
+                    🍑 {t('contacts.rear_size_plain', 'Rear')}:{' '}
+                    {(infoLevel >= 3 || isDebugRevealed)
+                      ? (formatFusedRear(appearance.rear_size, appearance.rear_texture, t).label || formatTitle(appearance.rear_size))
+                      : (formatFusedRear(stripRearTextureFromSizeClient(appearance.rear_size), '', t).sizeOnly || stripRearTextureFromSizeClient(appearance.rear_size))}
                   </span>
                 )}
               </div>
@@ -460,18 +480,9 @@ const CodexCharactersTab = ({
                 <ChevronRight size={12} />
               </button>
             ) : isDebugRevealed ? (
-              <button
-                type="button"
-                aria-expanded={isExpanded}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleNpc(isExpanded ? null : npcToggleKey);
-                }}
-                className="flex items-center gap-1.5 py-1 px-2.5 rounded text-[11px] font-bold border bg-purple-950/50 hover:bg-purple-900/60 border-purple-700/60 text-purple-200 transition-all cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-purple-400"
-              >
-                {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>{t('codex.full_debug_dossier', 'Full Debug Dossier')}</span>
-              </button>
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 font-mono">
+                {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
+              </span>
             ) : (
               <span className="text-[10px] text-gray-500 italic flex items-center gap-1">
                 <Lock size={10} className="text-amber-400/70 shrink-0" />
@@ -480,12 +491,12 @@ const CodexCharactersTab = ({
             )}
 
             <div className="flex items-center gap-1.5">
-              {isDebugRevealed && (
+              {isSavedContact && isDebugRevealed && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-950/80 text-purple-300 border border-purple-700/60 font-mono">
                   {t('codex.debug_revealed_badge', 'DEBUG: Full Profile Revealed')}
                 </span>
               )}
-              {hasOperationalDetails && (
+              {hasExpandableDetails && (
                 <button
                   type="button"
                   aria-expanded={isExpanded}
@@ -496,14 +507,18 @@ const CodexCharactersTab = ({
                   className="flex items-center gap-1 py-1 px-2 rounded text-[10.5px] font-semibold border bg-black/50 hover:bg-black/70 border-fantasy-border/60 text-gray-300 transition-all cursor-pointer select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-fantasy-accent"
                 >
                   {isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
-                  <span>{isDebugRevealed ? t('codex.full_debug_dossier', 'Full Debug Dossier') : t('codex.operational_info', 'Field Status')}</span>
+                  <span>
+                    {isDebugRevealed
+                      ? t('codex.full_debug_dossier', 'Full Debug Dossier')
+                      : t('codex.details', 'Details')}
+                  </span>
                 </button>
               )}
             </div>
           </div>
         </div>
 
-        {isExpanded && hasOperationalDetails && (
+        {isExpanded && hasExpandableDetails && (
           <div className="space-y-3 pt-2.5 border-t border-fantasy-border/40 text-xs text-gray-300">
             {isInParty && (
               <div className="flex items-center justify-between bg-black/40 p-2.5 rounded-lg border border-fantasy-border/40">
@@ -524,135 +539,8 @@ const CodexCharactersTab = ({
               </div>
             )}
 
-            {isSpecialAgent && (() => {
-              const agentTier = npc.agent_tier || basic.agent_tier || 1;
-              const rankTitle = npc.rank_title || basic.rank_title || `Tier ${agentTier} Operative`;
-              const agentClass = npc.agent_class || basic.agent_class || basic.role || 'Special Agent';
-              const cMaxHp = npc.combat_max_hp ?? 130;
-              const cHp = npc.combat_hp ?? cMaxHp;
-              const cMaxMp = npc.combat_max_mp ?? 60;
-              const cMp = npc.combat_mp ?? cMaxMp;
-              const wName = npc.weapon_profile?.name || '';
-              const abilities = (
-                isDebugRevealed
-                  ? (npc.debug_innate_ability_details || npc.innate_ability_details)
-                  : npc.innate_ability_details
-              ) || [];
-
-              return (
-                <div className="bg-cyan-950/20 border border-cyan-800/50 rounded-lg p-2.5 space-y-2">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-[11px] font-bold text-cyan-300 uppercase tracking-wider flex items-center gap-1">
-                      <span>⚡</span>
-                      <span>{t('codex.operative_dossier', 'Operative Combat Dossier')}</span>
-                    </span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/70 text-cyan-200 border border-cyan-700/50 font-semibold">
-                      Tier {agentTier} • {rankTitle}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 text-[10.5px]">
-                    <span className="px-1.5 py-0.5 rounded bg-black/60 text-gray-200 border border-fantasy-border/50">
-                      Class: <strong className="text-white">{agentClass}</strong>
-                    </span>
-                    {(npc.attribute || basic.attribute) && (
-                      <span className="px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-200 border border-cyan-700/50 font-semibold">
-                        🧬 {t(`awakened.attrs.${String(npc.attribute || basic.attribute).toLowerCase()}`, formatTitle(npc.attribute || basic.attribute))}
-                      </span>
-                    )}
-                    {(npc.combat_archetype || basic.combat_archetype) && (
-                      <span className="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-200 border border-indigo-700/50 font-semibold">
-                        🛡️ {formatTitle(npc.combat_archetype || basic.combat_archetype)}
-                      </span>
-                    )}
-                    {isCombatDossierUnlocked && (isDebugRevealed ? (npc.debug_ability_medium || npc.ability_medium) : npc.ability_medium) && (
-                      <span className="px-1.5 py-0.5 rounded bg-purple-950/60 text-purple-200 border border-purple-700/50 font-semibold">
-                        ⚙️ {formatTitle(isDebugRevealed ? (npc.debug_ability_medium || npc.ability_medium) : npc.ability_medium)}
-                      </span>
-                    )}
-                    <span className="px-1.5 py-0.5 rounded bg-red-950/40 text-red-300 border border-red-800/40 font-mono">
-                      ❤️ {cHp}/{cMaxHp} HP
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-blue-950/40 text-blue-300 border border-blue-800/40 font-mono">
-                      💧 {cMp}/{cMaxMp} MP
-                    </span>
-                    {wName && (
-                      <span className="px-1.5 py-0.5 rounded bg-amber-950/35 text-amber-200 border border-amber-800/40">
-                        ⚔️ {wName}
-                      </span>
-                    )}
-                  </div>
-
-                  {isCombatDossierUnlocked && abilities.length > 0 ? (
-                    <div className="space-y-1 pt-1 border-t border-cyan-900/40">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 block">
-                        {t('codex.innate_abilities', 'Innate Special Abilities')}
-                      </span>
-                      <div className="grid grid-cols-1 gap-1">
-                        {abilities.map((ab, abIdx) => (
-                          <div
-                            key={ab.id || abIdx}
-                            className={`p-1.5 rounded border text-[10.5px] leading-snug ${
-                              ab.is_ultimate
-                                ? 'bg-purple-950/35 border-purple-700/50 text-purple-100'
-                                : 'bg-black/50 border-fantasy-border/40 text-gray-300'
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1.5">
-                              <span className="font-semibold text-gray-100 flex items-center gap-1">
-                                <span>{ab.emoji || '✨'}</span>
-                                <span>{ab.name}</span>
-                                {ab.is_ultimate && (
-                                  <span className="text-[8.5px] px-1 py-0.5 rounded bg-purple-900/80 text-purple-200 border border-purple-600/50 font-mono uppercase">
-                                    Ultimate
-                                  </span>
-                                )}
-                              </span>
-                              <span className="text-[9.5px] font-mono text-cyan-300 shrink-0">
-                                {ab.is_ultimate ? '3 Pips • 0 MP' : `${ab.mp_cost ?? 10} MP`}
-                              </span>
-                            </div>
-                            {ab.desc && (
-                              <p className="text-[10px] text-gray-400 mt-0.5">{ab.desc}</p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-[10px] text-gray-400 italic pt-1 border-t border-cyan-900/40">
-                      🔒 {t('awakened.dossier_stage2_locked', 'Stage 2 Classified — Unlocks at Affinity 15+, Party Companion, or Same-Faction Colleague.')}
-                    </p>
-                  )}
-                </div>
-              );
-            })()}
-
-            {isCivilianTag && (
-              <div className={`p-2.5 rounded-lg border space-y-1 ${
-                isDeceased
-                  ? 'bg-rose-950/25 border-rose-800/50 text-rose-200'
-                  : 'bg-slate-950/60 border-slate-700/60 text-slate-300'
-              }`}>
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <span className="text-[11px] font-bold uppercase tracking-wider flex items-center gap-1">
-                    <span>{isDeceased ? '💀' : '👤'}</span>
-                    <span>{t('codex.civilian_classification', 'Civilian Classification')}</span>
-                  </span>
-                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/50 text-gray-300 border border-slate-700/50">
-                    100 HP • 0 MP (Unawakened)
-                  </span>
-                </div>
-                <p className="text-[10.5px] text-gray-400 leading-snug">
-                  {isDeceased
-                    ? t('codex.civilian_deceased_note', 'Perished permanently during an anomaly breach due to lacking innate mana protection.')
-                    : t('codex.civilian_party_note', 'Mundane citizen with no mana or special abilities. Eligible as a Contact, but cannot be recruited into your field party.')}
-                </p>
-              </div>
-            )}
-
             {isDebugRevealed && (
-              <div className="space-y-2.5 pt-1">
+              <div className="hk-dossier-tabs-wrap pt-1" style={{ '--hk-tab-accent': '#c084fc' }}>
                 <div
                   role="tablist"
                   aria-label={`${npc.name} debug dossier sections`}
@@ -663,25 +551,33 @@ const CodexCharactersTab = ({
                     return (
                       <button
                         key={tb.id}
+                        id={`${codexTabIdPrefix}-${npcIdx}-tab-${tb.id}`}
                         type="button"
                         role="tab"
                         aria-selected={isActive}
                         title={tb.fullLabel}
                         onClick={(e) => { e.stopPropagation(); onChangeDebugDossierTab(tb.id); }}
-                        className={`min-w-0 py-1.5 px-1 text-xs font-bold transition-all flex items-center justify-center gap-1 rounded-t-md relative cursor-pointer ${
+                        className={`hk-dossier-tab min-w-0 py-1.5 px-1 text-xs font-bold transition-all flex items-center justify-center gap-1 rounded-t-md relative cursor-pointer border-t border-x ${
                           isActive
-                            ? 'bg-black/60 text-purple-200 border-t-2 border-t-purple-400 border-x border-purple-700/60 border-b-black/60 -mb-px z-10'
-                            : 'bg-black/25 text-gray-400 hover:text-gray-200 hover:bg-black/40 border-t border-x border-transparent border-b border-b-purple-700/60'
+                            ? 'bg-black/60 text-purple-200 border-purple-700/60 border-b-black/60 -mb-px z-10'
+                            : 'bg-black/25 text-gray-400 hover:text-gray-200 hover:bg-black/40 border-transparent border-b border-b-purple-700/60'
                         }`}
                       >
                         <span className="text-xs shrink-0">{tb.icon}</span>
-                        <span className="truncate text-[10.5px] font-semibold">{tb.shortLabel}</span>
+                        <span className="truncate text-[10.5px] font-semibold">
+                          <span className="hk-dossier-tab-full">{tb.fullLabel}</span>
+                          <span className="hk-dossier-tab-short">{tb.shortLabel}</span>
+                        </span>
                       </button>
                     );
                   })}
                 </div>
 
-                <div role="tabpanel" className="bg-black/50 border-x border-b border-purple-700/60 rounded-b-lg p-3 text-xs -mt-2.5 space-y-3">
+                <div
+                  role="tabpanel"
+                  aria-labelledby={`${codexTabIdPrefix}-${npcIdx}-tab-${debugDossierTab}`}
+                  className="bg-black/50 border-x border-b border-purple-700/60 rounded-b-lg p-3 text-xs -mt-px space-y-3"
+                >
                   {debugDossierTab === 'persona' && (
                     <div className="space-y-2.5">
                       {(npc.archetype_trope || basic.archetype_trope) && (
@@ -747,6 +643,30 @@ const CodexCharactersTab = ({
                           </div>
                         </div>
                       )}
+                      {(Array.isArray(appearance.body_likes) || Array.isArray(appearance.body_dislikes)) && (() => {
+                        const heightLikes = (appearance.body_likes || []).filter((k) => HEIGHT_PREFERENCE_KEYS.includes(String(k || '').toLowerCase()));
+                        const heightDislikes = (appearance.body_dislikes || []).filter((k) => HEIGHT_PREFERENCE_KEYS.includes(String(k || '').toLowerCase()));
+                        if (heightLikes.length === 0 && heightDislikes.length === 0) return null;
+                        return (
+                          <div>
+                            <span className="text-[10.5px] font-bold text-gray-400 uppercase tracking-wider block mb-1">
+                              📏 {t('contacts.height_preference_label', 'Height Preference')}
+                            </span>
+                            <div className="flex flex-wrap gap-1">
+                              {heightLikes.map((k, idx) => (
+                                <span key={`hl-${idx}`} className="text-[11px] px-2 py-0.5 rounded bg-cyan-950/40 text-cyan-300 border border-cyan-800/40">
+                                  {t('contacts.body_likes_prefix', 'Likes')}: {formatBodyPreferenceLabel(k, t)}
+                                </span>
+                              ))}
+                              {heightDislikes.map((k, idx) => (
+                                <span key={`hd-${idx}`} className="text-[11px] px-2 py-0.5 rounded bg-red-950/40 text-red-300 border border-red-800/40">
+                                  {t('contacts.body_dislikes_prefix', 'Dislikes')}: {formatBodyPreferenceLabel(k, t)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
 
@@ -756,14 +676,13 @@ const CodexCharactersTab = ({
                       : (Array.isArray(npc.rel_history) ? npc.rel_history : []);
                     return (
                       <div className="space-y-2.5">
-                        {(basic.primary_facility || basic.secondary_facility || basic.location || npc.location) && (
+                        {(basic.primary_facility || basic.secondary_facility) && (
                           <div className="bg-black/40 p-2 rounded border border-fantasy-border/40 space-y-1 text-[11px]">
                             <span className="font-bold text-amber-400 uppercase tracking-wider block">
                               📍 Schedule & Haunts
                             </span>
                             {basic.primary_facility && <div>• <strong>{t('codex.primary_facility', 'Primary Facility:')}</strong> {basic.primary_facility}</div>}
                             {basic.secondary_facility && <div>• <strong>{t('codex.secondary_hangout', 'Secondary Hangout:')}</strong> {basic.secondary_facility}</div>}
-                            {(basic.location || npc.location) && <div>• <strong>{t('codex.current_last_seen', 'Current / Last Seen:')}</strong> {formatCleanLocation(basic.location || npc.location)}</div>}
                           </div>
                         )}
                         <div className="space-y-1.5">
@@ -861,76 +780,34 @@ const CodexCharactersTab = ({
                     );
                   })()}
 
-                  {debugDossierTab === 'intimate' && (() => {
-                    const intSec = npc.intimate_sections || {};
-                    const hasSections = Boolean(intSec.anatomy && intSec.dynamic);
-                    const bSize = appearance.breast_size || 'Modest B-Cup';
-                    const pSize = appearance.penis_size || 'Average';
-                    const sizeDisplay = isMale ? formatTitle(pSize) : formatTitle(bSize);
-                    return (
-                      <div className="space-y-2.5 text-[11px]">
-                        <div>
-                          <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">
-                            🔞 Anatomy & Experience
-                          </span>
-                          {hasSections && intSec.anatomy ? (
-                            renderBulletPoints(intSec.anatomy, t)
-                          ) : (
-                            <div className="space-y-1 text-gray-300">
-                              <div>• <strong>{isMale ? 'Penis Size' : 'Breast Size'}:</strong> {sizeDisplay}</div>
-                              <div>• <strong>{t('codex.act_intercourse', 'Intercourse:')}</strong> {appearance.experience || (appearance.intercourse_experience === 'virgin' ? 'Virgin' : 'Non-Virgin')}</div>
-                              <div>• <strong>{t('codex.act_oral', 'Oral:')}</strong> {appearance.oral_experience || 'Inexperienced'}</div>
-                              <div>• <strong>{t('codex.act_manual', 'Manual:')}</strong> {appearance.manual_experience || 'Inexperienced'}</div>
-                              <div>• <strong>{t('codex.act_anal', 'Anal:')}</strong> {appearance.anal_experience || 'Inexperienced'}</div>
-                            </div>
-                          )}
-                        </div>
-                        {hasSections && intSec.dynamic && (
-                          <div className="pt-2 border-t border-fantasy-border/30">
-                            <span className="font-bold text-purple-400 uppercase tracking-wider block mb-1">{t('codex.section_demeanor_dynamic', '🎭 Demeanor & Dynamic')}</span>
-                            {renderBulletPoints(intSec.dynamic, t)}
-                          </div>
-                        )}
-                        {hasSections && intSec.undergarments && (
-                          <div className="pt-2 border-t border-fantasy-border/30">
-                            <span className="font-bold text-indigo-400 uppercase tracking-wider block mb-1">{t('codex.section_undergarments', '🩲 Undergarments')}</span>
-                            {renderBulletPoints(intSec.undergarments, t)}
-                          </div>
-                        )}
-                        {hasSections && (intSec.sensitive_spots || intSec.sensitivities) && (
-                          <div className="pt-2 border-t border-fantasy-border/30">
-                            <span className="font-bold text-pink-400 uppercase tracking-wider block mb-1">{t('codex.section_sensitive_spots', '🌸 Sensitive Spots & Desires')}</span>
-                            {renderBulletPoints(intSec.sensitive_spots || intSec.sensitivities, t)}
-                          </div>
-                        )}
-                        {hasSections && intSec.desires_and_turn_offs && (
-                          <div className="pt-2 border-t border-fantasy-border/30">
-                            <span className="font-bold text-amber-400 uppercase tracking-wider block mb-1">{t('codex.section_desires_turnoffs', '🔥 Desires & Turn-Offs')}</span>
-                            {renderBulletPoints(intSec.desires_and_turn_offs, t)}
-                          </div>
-                        )}
-                        {hasSections && intSec.act_preferences && (
-                          <div className="pt-2 border-t border-fantasy-border/30">
-                            <span className="font-bold text-rose-400 uppercase tracking-wider block mb-1">{t('codex.section_act_preferences', '❤️ Act Preferences')}</span>
-                            {renderBulletPoints(intSec.act_preferences, t)}
-                          </div>
-                        )}
-                        <div className="pt-2 border-t border-fantasy-border/30">
-                          <span className="font-bold text-gray-300 uppercase tracking-wider block mb-1">{t('codex.section_past_intimate_history', 'Past Intimate History')}</span>
-                          {npc.past_intimate_entries && npc.past_intimate_entries.length > 0 ? (
-                            npc.past_intimate_entries.map((h, i) => <p key={i} className="text-gray-300 italic">• {h}</p>)
-                          ) : npc.past_intimate_history ? (
-                            <p className="text-gray-300 italic">• {npc.past_intimate_history}</p>
-                          ) : (
-                            <p className="text-gray-400 italic">{t('codex.virgin_history', '• Virgin (No prior intimate history before meeting you)')}</p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
+                  {debugDossierTab === 'intimate' && (
+                    <IntimateDossierPanel
+                      npc={npc}
+                      t={t}
+                      infoLevel={npc.info_level ?? 3}
+                      isDebugRevealed={true}
+                      renderBulletPoints={renderBulletPoints}
+                      isNsfw={true}
+                      compact={true}
+                    />
+                  )}
                 </div>
               </div>
             )}
+
+            <OperativeCombatDossierCard
+              npc={npc}
+              isSpecialAgent={isSpecialAgent}
+              isCivilianTag={isCivilianTag}
+              isInParty={isInParty}
+              isDeceased={isDeceased}
+              isDebugRevealed={isDebugRevealed}
+              t={t}
+            />
+
+            <KnownWardrobeCard npc={npc} showDebug={isDebugRevealed} t={t} />
+
+            <KnownRoutineCard npc={npc} t={t} />
           </div>
         )}
       </div>

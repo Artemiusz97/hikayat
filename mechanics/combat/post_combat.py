@@ -131,10 +131,14 @@ def finalize_post_combat_state(
     total_xp_gain: int,
     dead_enemies: List[Any],
     dead_enemy_dicts_rec: List[Dict[str, Any]],
+    *,
+    persist_db: bool = True,
 ) -> None:
     """Handles post-turn companion auto-revive, party defeat extraction/recovery, companion scaling, and threat decay."""
     session_id = session.get("id", 0) if session else 0
     party_npcs = db.get_session_party_npcs(session_id) if session_id else []
+    staged_pc_ops: Dict[str, Any] = {}
+    status_effects_by_uid: Dict[int, List[str]] = {}
 
     if not enemies and (party_npcs or (party and len(party) > 1)):
         for co in llm_outcome.get("character_outcomes", []):
@@ -166,75 +170,428 @@ def finalize_post_combat_state(
                     break
 
         is_anom_defeat = bool(isinstance(session, dict) and scenario_data.is_anomalous_incursions_scenario(session.get("scenario", "")))
-        if all_downed and is_anom_defeat:
+        _realm_ext_info: dict = {}
+        _collapse_realm_id = ""
+        _nmap_post: dict = {}
+        if all_downed and session_id and not is_anom_defeat:
+            try:
+                from mechanics.world.locations.realms import (
+                    _format_tiered_location_in_memory,
+                    collapse_dynamic_realm,
+                    get_node_realm_id_in_memory,
+                    get_primary_realm_in_memory,
+                    get_realm_rules,
+                    is_node_or_realm_hidden_in_memory,
+                    parse_node_state_json,
+                )
+                _nodes_pre = db.get_session_world_nodes(session_id) or []
+                _nmap_pre = {str(n["node_id"]): n for n in _nodes_pre if n.get("node_id")}
+                _ext_curr_nid = str(session.get("current_node_id") or "").strip()
+                if not _ext_curr_nid and session.get("current_location"):
+                    _ext_curr_nid = db.resolve_node_id_from_location(session_id, session["current_location"]) or ""
+                _ext_curr_rid = get_node_realm_id_in_memory(_ext_curr_nid, _nmap_pre) if _ext_curr_nid else ""
+                _ext_r_node = _nmap_pre.get(_ext_curr_rid) if _ext_curr_rid else None
+                _ext_r_rules = get_realm_rules(_ext_r_node) if _ext_r_node else {}
+                if (
+                    _ext_curr_rid
+                    and not _ext_r_rules.get("is_primary_realm")
+                    and (not _ext_r_rules.get("has_local_safe_hub", True) or _ext_r_rules.get("is_ephemeral"))
+                ):
+                    _dest_ext_nid = str(_ext_r_rules.get("ephemeral_origin_node_id") or "").strip()
+                    if _ext_r_rules.get("is_ephemeral") and not _ext_r_rules.get("pacified"):
+                        _collapse_realm_id = _ext_curr_rid
+                        if persist_db:
+                            collapse_dynamic_realm(session_id, _ext_curr_rid)
+                        else:
+                            staged_pc_ops["collapse_realm_id"] = _ext_curr_rid
+                    _nmap_post = {
+                        nid: nd for nid, nd in _nmap_pre.items()
+                        if not _collapse_realm_id or (nid != _collapse_realm_id and get_node_realm_id_in_memory(nid, _nmap_pre) != _collapse_realm_id)
+                    }
+                    if not _dest_ext_nid or _dest_ext_nid not in _nmap_post:
+                        _prim_r = get_primary_realm_in_memory(_nmap_post)
+                        _prim_rid = str((_prim_r or {}).get("node_id") or "")
+                        _desig_fac = next(
+                            (
+                                (nid, nd) for nid, nd in _nmap_post.items()
+                                if (not _prim_rid or get_node_realm_id_in_memory(nid, _nmap_post) == _prim_rid)
+                                and parse_node_state_json(nd).get("safe_sanctuary_exempt")
+                                and not is_node_or_realm_hidden_in_memory(nid, _nmap_post)
+                            ),
+                            None,
+                        )
+                        if _desig_fac:
+                            _desig_id, _desig_node = _desig_fac
+                            if str(_desig_node.get("node_type") or "").upper() == "FACILITY":
+                                _desig_room = next(
+                                    (
+                                        nid for nid, nd in _nmap_post.items()
+                                        if str(nd.get("parent_id") or "") == _desig_id
+                                        and str(nd.get("node_type") or "").upper() == "ROOM"
+                                        and not is_node_or_realm_hidden_in_memory(nid, _nmap_post)
+                                    ),
+                                    "",
+                                )
+                                _dest_ext_nid = _desig_room or _desig_id
+                            else:
+                                _dest_ext_nid = _desig_id
+                        else:
+                            _safe_cats = {"sanctuary", "residential", "medical", "hub", "inn", "tavern"}
+                            _prim_rooms = [
+                                (nid, nd)
+                                for nid, nd in _nmap_post.items()
+                                if str(nd.get("node_type") or "").upper() == "ROOM"
+                                and (not _prim_rid or get_node_realm_id_in_memory(nid, _nmap_post) == _prim_rid)
+                                and not is_node_or_realm_hidden_in_memory(nid, _nmap_post)
+                            ]
+                            _safe_pick = next(
+                                (
+                                    nid for nid, nd in _prim_rooms
+                                    if int(nd.get("is_transit_hub") or 0) == 1
+                                    or str(nd.get("category") or "").lower() in _safe_cats
+                                    or int((_nmap_post.get(str(nd.get("parent_id") or "")) or {}).get("is_transit_hub") or 0) == 1
+                                    or str((_nmap_post.get(str(nd.get("parent_id") or "")) or {}).get("category") or "").lower() in _safe_cats
+                                ),
+                                _prim_rooms[0][0] if _prim_rooms else "",
+                            )
+                            _dest_ext_nid = _safe_pick
+                    _dest_ext_loc = (
+                        _format_tiered_location_in_memory(_dest_ext_nid, _nmap_post)
+                        if _dest_ext_nid
+                        else (session.get("current_location") or "Primary Safe Haven")
+                    )
+                    _realm_ext_info = {
+                        "node_id": _dest_ext_nid,
+                        "location": _dest_ext_loc,
+                        "from_realm": (_ext_r_node or {}).get("name") or "the hostile realm",
+                    }
+            except (NameError, UnboundLocalError, ImportError, TypeError):
+                raise
+            except Exception:
+                _realm_ext_info = {}
+
+        if all_downed and _realm_ext_info:
             session["nearby_enemies"] = []
             llm_outcome["nearby_enemies"] = []
-            lead_char = party[0][0] if (party and party[0] and isinstance(party[0][0], dict)) else {}
-            lead_uid = lead_char.get("user_id") or (session.get("host_user_id") if isinstance(session, dict) else 0)
-            try:
-                from mechanics.world.anomalous_sites import collapse_anomalous_site_on_extraction
-                collapse_anomalous_site_on_extraction(
-                    int(session_id or 0),
-                    str(session.get("current_node_id") or ""),
-                    str(session.get("current_location") or ""),
-                    int(session.get("current_day", 1) or 1),
-                    len(session.get("history") or []) + 1,
-                )
-            except Exception:
-                pass
-            from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
-            ext = resolve_anomalous_emergency_extraction(int(session_id or 0), int(lead_uid or 0), apply_vitals_to_db=False)
-            session["current_location"] = ext["destination_location"]
-            session["current_node_id"] = ext["destination_node_id"]
-            session["current_day"] = ext.get("new_day", session.get("current_day", 1))
-            session["current_minute"] = ext.get("new_minute", session.get("current_minute", 480))
-            llm_outcome["location"] = ext["destination_location"]
-            llm_outcome["current_node_id"] = ext["destination_node_id"]
-            llm_outcome["_anomalous_extracted"] = True
-            llm_outcome["_authorized_gold_spend"] = int(ext.get("fee_paid", 0) or 0)
-
-            for idx_p, (char, _) in enumerate(party):
+            cleanup_anomalous_combat_session_state(session)
+            llm_outcome["combat_threat_ledger"] = {}
+            llm_outcome["combat_boss_telegraph"] = {}
+            if _realm_ext_info.get("location"):
+                session["current_location"] = _realm_ext_info["location"]
+                llm_outcome["location"] = _realm_ext_info["location"]
+            if _realm_ext_info.get("node_id"):
+                session["current_node_id"] = _realm_ext_info["node_id"]
+                llm_outcome["current_node_id"] = _realm_ext_info["node_id"]
+            session["focal_point"] = ""
+            llm_outcome["focal_point"] = ""
+            from mechanics.world.locations.realms import get_node_realm_in_memory, get_realm_rules
+            _dest_ext_r = (
+                get_node_realm_in_memory(str(_realm_ext_info["node_id"]), _nmap_post)
+                if _realm_ext_info.get("node_id") and _nmap_post
+                else None
+            )
+            _clear_waiting = not bool(get_realm_rules(_dest_ext_r).get("restrict_companions")) if _dest_ext_r else True
+            if _clear_waiting:
+                session["waiting_outside_companions"] = []
+            llm_outcome["_realm_extracted"] = True
+            for p_entry in party:
+                char = p_entry[0] if isinstance(p_entry, (tuple, list)) and len(p_entry) > 0 else (p_entry if isinstance(p_entry, dict) else {})
                 uid = char.get("user_id")
                 max_hp = int(char.get("max_hp") or 30)
-                max_mp = int(char.get("max_mp") or 15)
                 revive_hp = max(1, max_hp // 2)
-                revive_mp = max(1, max_mp // 2)
                 cur_hp = int(char.get("hp") or 0)
-                cur_mp = int(char.get("mp") or 0)
-                fee_delta = -int(ext.get("fee_paid", 0)) if idx_p == 0 else 0
                 matching_co = next((co for co in llm_outcome.get("character_outcomes", []) if isinstance(co, dict) and co.get("name", "").lower() == char.get("name", "").lower()), None)
                 if matching_co:
                     matching_co["hp_change"] = revive_hp - cur_hp
-                    matching_co["mp_change"] = max(0, revive_mp - cur_mp)
-                    matching_co["gold_change"] = matching_co.get("gold_change", 0) + fee_delta
-                    matching_co["status_effects"] = ["Stabilized / Triage Recovery"]
+                    matching_co["status_effects"] = ["Extracted / Recovering"]
                 else:
                     llm_outcome.setdefault("character_outcomes", []).append({
-                        "name": char.get("name", "Operative"),
+                        "name": char.get("name", "Traveler"),
                         "hp_change": revive_hp - cur_hp,
-                        "mp_change": max(0, revive_mp - cur_mp),
-                        "gold_change": fee_delta,
-                        "status_effects": ["Stabilized / Triage Recovery"],
+                        "mp_change": 0,
+                        "gold_change": 0,
+                        "status_effects": ["Extracted / Recovering"],
                     })
                 if uid:
-                    db.set_status_effects(uid, ["Stabilized / Triage Recovery"])
-
+                    status_effects_by_uid[int(uid)] = ["Extracted / Recovering"]
+            updated_npcs: list = []
             if party_npcs:
-                updated_npcs = []
                 for c in party_npcs:
                     c["hp"] = max(1, c.get("max_hp", 20) // 2)
-                    c["status_effects"] = ["Stabilized / Triage Recovery"]
+                    c["status_effects"] = ["Extracted / Recovering"]
                     updated_npcs.append(c)
-                db.set_session_party_npcs(session_id, updated_npcs)
                 session["current_npcs"] = updated_npcs
-
-            llm_outcome["_party_defeated_notice"] = ext["narrative"]
+            if persist_db:
+                with db.UnitOfWork():
+                    if _realm_ext_info.get("node_id") and _realm_ext_info.get("location"):
+                        upd_kw: dict[str, Any] = {
+                            "current_node_id": str(_realm_ext_info["node_id"]),
+                            "current_location": str(_realm_ext_info["location"]),
+                            "focal_point": "",
+                            "nearby_enemies": [],
+                        }
+                        if _clear_waiting:
+                            upd_kw["extra"] = {"waiting_outside_companions": []}
+                        db.update_session(session_id, **upd_kw)
+                    for _se_uid, _se_vals in status_effects_by_uid.items():
+                        db.set_status_effects(_se_uid, _se_vals)
+                    if party_npcs:
+                        db.set_session_party_npcs(session_id, updated_npcs)
+            else:
+                if _realm_ext_info.get("node_id") and _realm_ext_info.get("location"):
+                    staged_pc_ops["rescue_node_id"] = str(_realm_ext_info["node_id"])
+                    staged_pc_ops["rescue_location"] = str(_realm_ext_info["location"])
+                    staged_pc_ops["clear_focal_point"] = True
+                    if _clear_waiting:
+                        staged_pc_ops["clear_waiting_outside_companions"] = True
+                if status_effects_by_uid:
+                    staged_pc_ops["status_effects_by_uid"] = status_effects_by_uid
+                if party_npcs:
+                    staged_pc_ops["party_npcs"] = updated_npcs
+            llm_outcome["_party_defeated_notice"] = (
+                f"⚠️ **Emergency Extraction!** After collapsing inside {_realm_ext_info['from_realm']}, "
+                f"the threshold expelled your party back to **{_realm_ext_info['location']}**."
+            )
             llm_outcome["next_choices"] = [
-                {"label": "Check medical telemetry and stabilize your psychic resonance", "stat": "END", "requirement": 4, "mp_cost": 0},
-                {"label": "Review field logs and inspect your tactical loadout", "stat": "PER", "requirement": 4, "mp_cost": 0},
-                {"label": "Debrief with triage staff before redeploying to the breach", "stat": "CHA", "requirement": 4, "mp_cost": 0},
+                {"label": "Catch your breath and inspect your wounds", "stat": "END", "requirement": 4, "mp_cost": 0},
+                {"label": "Check your gear and take stock of the extraction point", "stat": "PER", "requirement": 4, "mp_cost": 0},
+                {"label": "Regroup with companions before planning your next move", "stat": "CHA", "requirement": 4, "mp_cost": 0},
             ]
             llm_outcome["choices"] = llm_outcome["next_choices"]
+        elif all_downed and is_anom_defeat:
+            session["nearby_enemies"] = []
+            llm_outcome["nearby_enemies"] = []
+            cleanup_anomalous_combat_session_state(session)
+            llm_outcome["combat_threat_ledger"] = {}
+            llm_outcome["combat_boss_telegraph"] = {}
+            lead_char = party[0][0] if (party and party[0] and isinstance(party[0][0], dict)) else {}
+            lead_uid = lead_char.get("user_id") or (session.get("host_user_id") if isinstance(session, dict) else 0)
+            _anom_nid = str(session.get("current_node_id") or "").strip()
+            _anom_rid = ""
+            _anom_rrules: dict[str, Any] = {}
+            _anom_tscale = 1.0
+            collapse_dynamic_realm = None
+            try:
+                from mechanics.world.locations.realms import (
+                    collapse_dynamic_realm as _collapse_dyn,
+                    get_node_realm_id,
+                    get_realm_rules,
+                )
+                collapse_dynamic_realm = _collapse_dyn
+                _anom_rid = get_node_realm_id(int(session_id or 0), _anom_nid) if (_anom_nid and session_id) else ""
+                if _anom_rid:
+                    _anom_rnode = db.get_world_node(int(session_id), _anom_rid)
+                    _anom_rrules = get_realm_rules(_anom_rnode)
+                    _anom_tscale = float(_anom_rrules.get("time_scale", 1.0))
+            except Exception:
+                _anom_rid = ""
+                _anom_rrules = {}
+
+            if (
+                (_anom_rid == "realm_veiled_spirit_world")
+                or (_anom_rid and _anom_rrules and not _anom_rrules.get("is_ephemeral") and not _anom_rrules.get("is_primary_realm") and _anom_rrules.get("has_local_safe_hub"))
+                or _anom_nid.startswith((
+                    "zone_spirit_", "sub_wilds_", "loc_wilds_",
+                    "sub_peaks_", "loc_peaks_", "sub_mire_", "loc_mire_",
+                    "sub_boneyard_", "loc_boneyard_",
+                ))
+            ):
+                # Spirit Warden Rescue inside any of the 4 Spirit Frontier biomes: extract to Joint Ward-Stone Perimeter Camp (0g fee)
+                rescue_nid = "sub_wilds_ward_camp"
+                if session_id and not db.get_world_node(int(session_id), rescue_nid):
+                    rescue_nid = "sub_crossroads_tea_hall"
+                rescue_loc = (
+                    db.format_node_tiered_location(int(session_id), rescue_nid)
+                    if session_id
+                    else ""
+                ) or "The Weeping Bleedwood — Untamed Spirit Wilds ➔ Joint Ward-Stone Perimeter Camp ➔ Joint Frontier Ward-Stone Triage Camp"
+                rescue_delta = (
+                    0
+                    if _anom_tscale <= 0.0
+                    else (max(1, int(round(30 * _anom_tscale))) if _anom_tscale != 1.0 else 30)
+                )
+                if session_id:
+                    c_day, c_min, c_awake = db.get_session_time(int(session_id))
+                    tot_min = int(c_min) + rescue_delta
+                    new_day = int(c_day) + (tot_min // 1440)
+                    new_min = tot_min % 1440
+                    session["current_day"] = new_day
+                    session["current_minute"] = new_min
+                session["current_location"] = rescue_loc
+                session["current_node_id"] = rescue_nid
+                llm_outcome["location"] = rescue_loc
+                llm_outcome["current_node_id"] = rescue_nid
+                llm_outcome["_spirit_warden_rescued"] = True
+                llm_outcome["_anomalous_extracted"] = False
+                llm_outcome["_authorized_gold_spend"] = 0
+
+                for (char, _) in party:
+                    uid = char.get("user_id")
+                    max_hp = int(char.get("max_hp") or 30)
+                    max_mp = int(char.get("max_mp") or 15)
+                    revive_hp = max(1, max_hp // 2)
+                    revive_mp = max(1, max_mp // 2)
+                    cur_hp = int(char.get("hp") or 0)
+                    cur_mp = int(char.get("mp") or 0)
+                    matching_co = next(
+                        (
+                            co for co in llm_outcome.get("character_outcomes", [])
+                            if isinstance(co, dict) and co.get("name", "").lower() == char.get("name", "").lower()
+                        ),
+                        None,
+                    )
+                    if matching_co:
+                        matching_co["hp_change"] = revive_hp - cur_hp
+                        matching_co["mp_change"] = max(0, revive_mp - cur_mp)
+                        matching_co["status_effects"] = ["Recovering / Warden-Tended"]
+                    else:
+                        llm_outcome.setdefault("character_outcomes", []).append({
+                            "name": char.get("name", "Operative"),
+                            "hp_change": revive_hp - cur_hp,
+                            "mp_change": max(0, revive_mp - cur_mp),
+                            "gold_change": 0,
+                            "status_effects": ["Recovering / Warden-Tended"],
+                        })
+                    if uid:
+                        status_effects_by_uid[int(uid)] = ["Recovering / Warden-Tended"]
+
+                updated_npcs = []
+                if party_npcs:
+                    for c in party_npcs:
+                        c["hp"] = max(1, c.get("max_hp", 20) // 2)
+                        c["status_effects"] = ["Recovering / Warden-Tended"]
+                        updated_npcs.append(c)
+                    session["current_npcs"] = updated_npcs
+
+                if session_id and persist_db:
+                    with db.UnitOfWork():
+                        c_day, c_min, c_awake = db.get_session_time(int(session_id))
+                        tot_min = int(c_min) + rescue_delta
+                        new_day = int(c_day) + (tot_min // 1440)
+                        new_min = tot_min % 1440
+                        db.update_session_time(int(session_id), new_day, new_min, c_awake)
+                        db.update_session(
+                            int(session_id),
+                            current_node_id=rescue_nid,
+                            current_location=rescue_loc,
+                            nearby_enemies=[],
+                        )
+                        for _se_uid, _se_vals in status_effects_by_uid.items():
+                            db.set_status_effects(_se_uid, _se_vals)
+                        if party_npcs:
+                            db.set_session_party_npcs(session_id, updated_npcs)
+                elif session_id:
+                    staged_pc_ops["rescue_time_delta"] = rescue_delta
+                    staged_pc_ops["rescue_node_id"] = rescue_nid
+                    staged_pc_ops["rescue_location"] = rescue_loc
+                    if status_effects_by_uid:
+                        staged_pc_ops["status_effects_by_uid"] = status_effects_by_uid
+                    if party_npcs:
+                        staged_pc_ops["party_npcs"] = updated_npcs
+
+                llm_outcome["_party_defeated_notice"] = (
+                    "Joint Frontier Spirit Wardens dragged your fallen party out of the Spirit Frontier depths behind blazing "
+                    "banishment flares to the Joint Ward-Stone Perimeter Camp, tending your wounds beside the brazier at no charge."
+                )
+                llm_outcome["next_choices"] = [
+                    {"label": "Rest beside the ward-stone brazier and recover your breath", "stat": "END", "requirement": 4, "mp_cost": 0},
+                    {"label": "Ask Frontier Ward-Captain about Bleedwood threat patterns", "stat": "PER", "requirement": 4, "mp_cost": 0},
+                    {"label": "Walk back toward the Dusk Confluence River Tea-Pavilion", "stat": "CHA", "requirement": 4, "mp_cost": 0},
+                ]
+                llm_outcome["choices"] = llm_outcome["next_choices"]
+            else:
+                if _anom_rid and _anom_rrules.get("is_ephemeral") and not _anom_rrules.get("pacified"):
+                    llm_outcome["_realm_extracted"] = True
+                    if persist_db and callable(collapse_dynamic_realm):
+                        try:
+                            collapse_dynamic_realm(int(session_id), _anom_rid)
+                        except Exception:
+                            pass
+                    else:
+                        staged_pc_ops["collapse_realm_id"] = _anom_rid
+                if persist_db:
+                    try:
+                        from mechanics.world.anomalous_sites import collapse_anomalous_site_on_extraction
+                        collapse_anomalous_site_on_extraction(
+                            int(session_id or 0),
+                            str(session.get("current_node_id") or ""),
+                            str(session.get("current_location") or ""),
+                            int(session.get("current_day", 1) or 1),
+                            len(session.get("history") or []) + 1,
+                        )
+                    except Exception:
+                        pass
+                else:
+                    staged_pc_ops["collapse_anomalous_site"] = {
+                        "node_id": str(session.get("current_node_id") or ""),
+                        "location": str(session.get("current_location") or ""),
+                        "day": int(session.get("current_day", 1) or 1),
+                        "turn": len(session.get("history") or []) + 1,
+                    }
+                from mechanics.world.anomalous_events import resolve_anomalous_emergency_extraction
+                ext = resolve_anomalous_emergency_extraction(int(session_id or 0), int(lead_uid or 0), apply_vitals_to_db=False)
+                session["current_location"] = ext["destination_location"]
+                session["current_node_id"] = ext["destination_node_id"]
+                session["current_day"] = ext.get("new_day", session.get("current_day", 1))
+                session["current_minute"] = ext.get("new_minute", session.get("current_minute", 480))
+                llm_outcome["location"] = ext["destination_location"]
+                llm_outcome["current_node_id"] = ext["destination_node_id"]
+                llm_outcome["_anomalous_extracted"] = True
+                llm_outcome["_authorized_gold_spend"] = int(ext.get("fee_paid", 0) or 0)
+
+                for idx_p, (char, _) in enumerate(party):
+                    uid = char.get("user_id")
+                    max_hp = int(char.get("max_hp") or 30)
+                    max_mp = int(char.get("max_mp") or 15)
+                    revive_hp = max(1, max_hp // 2)
+                    revive_mp = max(1, max_mp // 2)
+                    cur_hp = int(char.get("hp") or 0)
+                    cur_mp = int(char.get("mp") or 0)
+                    fee_delta = -int(ext.get("fee_paid", 0)) if idx_p == 0 else 0
+                    matching_co = next((co for co in llm_outcome.get("character_outcomes", []) if isinstance(co, dict) and co.get("name", "").lower() == char.get("name", "").lower()), None)
+                    if matching_co:
+                        matching_co["hp_change"] = revive_hp - cur_hp
+                        matching_co["mp_change"] = max(0, revive_mp - cur_mp)
+                        matching_co["gold_change"] = matching_co.get("gold_change", 0) + fee_delta
+                        matching_co["status_effects"] = ["Stabilized / Triage Recovery"]
+                    else:
+                        llm_outcome.setdefault("character_outcomes", []).append({
+                            "name": char.get("name", "Operative"),
+                            "hp_change": revive_hp - cur_hp,
+                            "mp_change": max(0, revive_mp - cur_mp),
+                            "gold_change": fee_delta,
+                            "status_effects": ["Stabilized / Triage Recovery"],
+                        })
+                    if uid:
+                        status_effects_by_uid[int(uid)] = ["Stabilized / Triage Recovery"]
+
+                updated_npcs = []
+                if party_npcs:
+                    for c in party_npcs:
+                        c["hp"] = max(1, c.get("max_hp", 20) // 2)
+                        c["status_effects"] = ["Stabilized / Triage Recovery"]
+                        updated_npcs.append(c)
+                    session["current_npcs"] = updated_npcs
+
+                if session_id and persist_db:
+                    with db.UnitOfWork():
+                        for _se_uid, _se_vals in status_effects_by_uid.items():
+                            db.set_status_effects(_se_uid, _se_vals)
+                        if party_npcs:
+                            db.set_session_party_npcs(session_id, updated_npcs)
+                elif session_id:
+                    if status_effects_by_uid:
+                        staged_pc_ops["status_effects_by_uid"] = status_effects_by_uid
+                    if party_npcs:
+                        staged_pc_ops["party_npcs"] = updated_npcs
+
+                llm_outcome["_party_defeated_notice"] = ext["narrative"]
+                llm_outcome["next_choices"] = [
+                    {"label": "Check medical telemetry and stabilize your psychic resonance", "stat": "END", "requirement": 4, "mp_cost": 0},
+                    {"label": "Review field logs and inspect your tactical loadout", "stat": "PER", "requirement": 4, "mp_cost": 0},
+                    {"label": "Debrief with triage staff before redeploying to the breach", "stat": "CHA", "requirement": 4, "mp_cost": 0},
+                ]
+                llm_outcome["choices"] = llm_outcome["next_choices"]
         elif all_downed:
             is_climax = any(
                 e.get("is_boss") or e.get("tier_rank", 1) >= 5 or (isinstance(session, dict) and session.get("is_climax_encounter"))
@@ -249,6 +606,9 @@ def finalize_post_combat_state(
             else:
                 session["nearby_enemies"] = []
                 llm_outcome["nearby_enemies"] = []
+                cleanup_anomalous_combat_session_state(session)
+                llm_outcome["combat_threat_ledger"] = {}
+                llm_outcome["combat_boss_telegraph"] = {}
 
                 for p_entry in party:
                     char = p_entry[0] if isinstance(p_entry, (tuple, list)) and len(p_entry) > 0 else (p_entry if isinstance(p_entry, dict) else {})
@@ -269,16 +629,27 @@ def finalize_post_combat_state(
                             "status_effects": ["Exhausted / Recovering"],
                         })
                     if uid:
-                        db.set_status_effects(uid, ["Exhausted / Recovering"])
+                        status_effects_by_uid[int(uid)] = ["Exhausted / Recovering"]
 
+                updated_npcs = []
                 if party_npcs:
-                    updated_npcs = []
                     for c in party_npcs:
                         c["hp"] = max(1, c.get("max_hp", 20) // 2)
                         c["status_effects"] = ["Exhausted / Recovering"]
                         updated_npcs.append(c)
-                    db.set_session_party_npcs(session_id, updated_npcs)
                     session["current_npcs"] = updated_npcs
+
+                if session_id and persist_db:
+                    with db.UnitOfWork():
+                        for _se_uid, _se_vals in status_effects_by_uid.items():
+                            db.set_status_effects(_se_uid, _se_vals)
+                        if party_npcs:
+                            db.set_session_party_npcs(session_id, updated_npcs)
+                elif session_id:
+                    if status_effects_by_uid:
+                        staged_pc_ops["status_effects_by_uid"] = status_effects_by_uid
+                    if party_npcs:
+                        staged_pc_ops["party_npcs"] = updated_npcs
 
                 llm_outcome["_party_defeated_notice"] = "💀 **Party Defeated!** You were overwhelmed and fell in battle, but were recovered to safety. You awaken stabilized, nursing your injuries."
                 llm_outcome["next_choices"] = [
@@ -287,6 +658,9 @@ def finalize_post_combat_state(
                     {"label": "Consult with companions about what happened", "stat": "CHA", "requirement": 4, "mp_cost": 0},
                 ]
                 llm_outcome["choices"] = llm_outcome["next_choices"]
+
+    if staged_pc_ops and isinstance(llm_outcome, dict):
+        llm_outcome["_staged_post_combat_ops"] = staged_pc_ops
 
     if not enemies and total_xp_gain > 0 and party_npcs and party and party[0]:
         scen_lvl = session.get("scenario", "fantasy") if isinstance(session, dict) else "fantasy"

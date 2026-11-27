@@ -126,6 +126,7 @@ const GameViewModals = ({
           codexHook={codex}
           session={session}
           user={user}
+          inCombat={inCombat}
           imageGenMode={settings.settings?.image_gen_enabled}
           initialChatNpc={phoneInitialNpc}
           onClearInitialChatNpc={() => setPhoneInitialNpc(null)}

@@ -363,73 +363,135 @@ const GameView = ({
     sidebarRefreshRef.current.refreshPhone();
   }, [lastSyncTimestamp]);
 
+  const turnBusy = Boolean(processingTurn || waitingForParty || isStreaming);
+  const stealthActiveRef = useRef(isStealthActive);
+  stealthActiveRef.current = isStealthActive;
+  const stealthPromiseRef = useRef(null);
+  const activeSessionIdRef = useRef(session?.id);
+  activeSessionIdRef.current = session?.id;
+
   useEffect(() => {
     const isHidden = session?.stealth_state?.is_hidden;
-    if (typeof isHidden === 'boolean') {
-      setIsStealthActive(isHidden);
-    }
-  }, [session?.stealth_state?.is_hidden]);
+    const nextHidden = typeof isHidden === 'boolean' ? isHidden : false;
+    stealthActiveRef.current = nextHidden;
+    setIsStealthActive(nextHidden);
+  }, [session?.id, session?.stealth_state?.is_hidden]);
 
   const handleToggleStealth = async () => {
-    if (stealthPendingRef.current) return;
-    const prevState = isStealthActive;
+    if (stealthPendingRef.current) return stealthPromiseRef.current;
+    const reqSid = session?.id;
+    const prevState = stealthActiveRef.current;
     const nextState = !prevState;
+    stealthActiveRef.current = nextState;
     setIsStealthActive(nextState);
     setStealthError(null);
-    if (isValidSessionId(session?.id) && user?.user_id) {
+    if (isValidSessionId(reqSid) && user?.user_id) {
       stealthPendingRef.current = true;
-      try {
-        const res = await apiCall('/api/adventure/toggle_stealth', {
-          method: 'POST',
-          body: JSON.stringify({
-            session_id: session.id,
-            user_id: user.user_id,
-            active: nextState,
-          }),
-        });
-        if (res?.session && setSession) {
-          setSession((prev) => ({
-            ...res.session,
-            scene_image_url:
-              res.session?.scene_image_url || prev?.scene_image_url || null,
-          }));
+      const syncPromise = (async () => {
+        try {
+          const res = await apiCall('/api/adventure/toggle_stealth', {
+            method: 'POST',
+            body: JSON.stringify({
+              session_id: reqSid,
+              user_id: user.user_id,
+              active: nextState,
+            }),
+          });
+          if (String(activeSessionIdRef.current) !== String(reqSid)) {
+            return;
+          }
+          if (res?.session) {
+            const serverHidden = res.session?.stealth_state?.is_hidden;
+            if (typeof serverHidden === 'boolean') {
+              stealthActiveRef.current = serverHidden;
+              setIsStealthActive(serverHidden);
+            }
+            if (setSession) {
+              setSession((prev) =>
+                prev && String(prev.id) === String(reqSid)
+                  ? {
+                      ...res.session,
+                      scene_image_url:
+                        res.session?.scene_image_url || prev?.scene_image_url || null,
+                    }
+                  : prev
+              );
+            }
+          }
+        } catch (err) {
+          console.warn('Failed to sync stealth stance to server:', err);
+          if (String(activeSessionIdRef.current) === String(reqSid)) {
+            stealthActiveRef.current = prevState;
+            setIsStealthActive(prevState);
+            setStealthError(err?.message || 'Failed to sync stealth stance.');
+          }
+        } finally {
+          stealthPendingRef.current = false;
+          if (stealthPromiseRef.current === syncPromise) {
+            stealthPromiseRef.current = null;
+          }
         }
-      } catch (err) {
-        console.warn('Failed to sync stealth stance to server:', err);
-        setIsStealthActive(prevState);
-        setStealthError(err?.message || 'Failed to sync stealth stance.');
-      } finally {
-        stealthPendingRef.current = false;
-      }
+      })();
+      stealthPromiseRef.current = syncPromise;
+      return syncPromise;
     }
+    return null;
   };
 
   const handleAction = async (actionData) => {
+    const reqSid = session?.id;
+    if (stealthPromiseRef.current) {
+      try {
+        await stealthPromiseRef.current;
+      } catch {}
+      if (reqSid != null && String(activeSessionIdRef.current) !== String(reqSid)) {
+        return;
+      }
+    }
     const finalAction = { ...actionData };
     const intent = finalAction.intent || '';
     const isVoluntaryDisengage =
       intent === 'rest_sleep' || intent === 'dialogue_init';
 
     if (isVoluntaryDisengage) {
-      setIsStealthActive(false);
       finalAction.is_stealth = false;
-    } else if (isStealthActive && finalAction.is_stealth !== false) {
+    } else if (stealthActiveRef.current && finalAction.is_stealth !== false) {
       finalAction.is_stealth = true;
       finalAction.stance = finalAction.stance || 'stealth';
     }
 
-    const outcome = await submitAction(finalAction);
+    let outcome;
+    try {
+      outcome = await submitAction(finalAction);
+    } catch {
+      return;
+    }
+    if (!outcome) {
+      return;
+    }
+    if (isVoluntaryDisengage) {
+      stealthActiveRef.current = false;
+      setIsStealthActive(false);
+    }
     if (outcome?.status === 'accepted') {
       return;
     }
     const updatedStealth = outcome?.session?.stealth_state || outcome?.stealth_state;
     if (updatedStealth && typeof updatedStealth.is_hidden === 'boolean') {
+      stealthActiveRef.current = updatedStealth.is_hidden;
       setIsStealthActive(updatedStealth.is_hidden);
     }
   };
 
   const handleFastTravel = async (destination) => {
-    if (!destination || processingTurn) return;
+    if (!destination || turnBusy) return;
+    if (typeof destination === 'object' && destination.direct_choice) {
+      await handleAction({
+        intent: 'movement',
+        direct_choice: destination.direct_choice,
+      });
+      return;
+    }
     const cleanDest =
       formatCleanLocation(destination, { includeZone: true, style: 'badge' }) ||
       destination;
@@ -445,7 +507,7 @@ const GameView = ({
   };
 
   const handleCastSpell = async (spell) => {
-    if (!spell?.name || processingTurn) return;
+    if (!spell?.name || turnBusy) return;
     await handleAction({
       custom_action_text: `Cast ${spell.name}`,
       stat: 'INT',
@@ -490,6 +552,11 @@ const GameView = ({
       .length || null;
 
   const isAnomalous = isAnomalousScenarioKey(session?.scenario);
+  useEffect(() => {
+    if (!isAnomalous && activeUtilityTab === 'contracts') {
+      setActiveUtilityTab('hero');
+    }
+  }, [isAnomalous, activeUtilityTab]);
   const contractsBadge = session?.contracts_hud?.has_breach
     ? '!'
     : session?.contracts_hud?.available_count > 0
@@ -689,7 +756,7 @@ const GameView = ({
     codex,
     inCombat,
     isStreaming,
-    processingTurn,
+    processingTurn: turnBusy,
     onlineUserIds,
     partyChatMessages,
     sendPartyChat,
@@ -713,13 +780,13 @@ const GameView = ({
     leftPanel: hud.leftPanel,
     clockFormat,
     wsStatus,
-    processingTurn,
+    processingTurn: turnBusy,
     inCombat,
     hasUtilityAlert,
     onToggleUtility: () => toggleLeftPanel('utility'),
     onToggleWorldMap: handleToggleWorldMapDrawer,
     onOpenTimeSkip: () => {
-      if (!processingTurn && !inCombat) setTimeSkipModalOpen(true);
+      if (!turnBusy && !inCombat) setTimeSkipModalOpen(true);
     },
   };
 
@@ -1249,7 +1316,7 @@ const GameView = ({
         settings={settings}
         inCombat={inCombat}
         isStealthActive={isStealthActive}
-        processingTurn={processingTurn}
+        processingTurn={turnBusy}
         rerollImage={rerollImage}
         rerollingImage={rerollingImage}
         handleFastTravel={handleFastTravel}

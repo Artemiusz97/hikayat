@@ -82,18 +82,18 @@ def _apply_faction_live_containment_bonus(
             user_id=lead_uid,
         )
         if lead_uid:
-            c_row = db.get_character(int(lead_uid)) or {}
+            c_row = db.get_character(int(lead_uid), session_id=int(session_id)) or {}
             max_mp = max(1, int(c_row.get("max_mp", 10) or 10))
             cur_mp = max(0, int(c_row.get("mp", 0) or 0))
             target_mp_gain = max(1, int(round(max_mp * 0.25)))
             mp_restored = min(target_mp_gain, max(0, max_mp - cur_mp))
             if mp_restored > 0:
-                db.apply_hp_mp_delta(int(lead_uid), mp_delta=mp_restored)
+                db.apply_hp_mp_delta(int(lead_uid), mp_delta=mp_restored, session_id=int(session_id))
         notice = " *(Cult Communion: +5 Rep & +25% Max MP Restored)*"
     elif faction_bonus_active("clandestine_faction", f_state):
         extra_gold = 50
         if lead_uid:
-            db.apply_hp_mp_delta(int(lead_uid), gold_delta=50)
+            db.apply_hp_mp_delta(int(lead_uid), gold_delta=50, session_id=int(session_id))
         notice = " *(+50G Syndicate Specimen Commission)*"
 
     return extra_rep, extra_gold, mp_restored, notice
@@ -207,7 +207,12 @@ def spawn_agitated_non_hostile_entity(
     return enemy_obj
 
 
-def _roll_optional_incursion_gear_drop(user_id: Optional[int], scen_key: str) -> str:
+def _roll_optional_incursion_gear_drop(
+    user_id: Optional[int],
+    scen_key: str,
+    *,
+    session_id: Optional[int] = None,
+) -> str:
     if not user_id or random.random() >= 0.35:
         return ""
     try:
@@ -224,6 +229,7 @@ def _roll_optional_incursion_gear_drop(user_id: Optional[int], scen_key: str) ->
                 item_type=eq.get("item_type", "Weapon"),
                 effect=eq.get("effect", ""),
                 slot_cost=int(eq.get("slot_cost", 1) or 1),
+                session_id=session_id,
             )
             return str(eq["name"])
     except Exception:
@@ -344,7 +350,7 @@ def _complete_or_advance_linked_quest_containment(
                     q_xp_only = int(quest.get("reward_xp", 0) or 0)
                     if q_xp_only > 0:
                         for _p_uid in party_user_ids:
-                            db.add_xp(_p_uid, q_xp_only)
+                            db.add_xp(_p_uid, q_xp_only, session_id=session_id)
                     claim_res = {"ok": True, "gold_awarded": 0, "xp_awarded": q_xp_only, "forfeited_bounty_gold": True}
                 else:
                     claim_res = db.claim_quest_reward(session_id, quest_id, party_user_ids)
@@ -748,8 +754,8 @@ def resolve_anomalous_combat_containment(
             except Exception:
                 pass
         if lead_uid:
-            db.apply_hp_mp_delta(lead_uid, gold_delta=gold_gain)
-            db.add_xp(lead_uid, xp_gain)
+            db.apply_hp_mp_delta(lead_uid, gold_delta=gold_gain, session_id=session_id)
+            db.add_xp(lead_uid, xp_gain, session_id=session_id)
 
         vault_entry = record_contained_anomaly_to_vault_log(
             session_id=session_id,
@@ -777,7 +783,7 @@ def resolve_anomalous_combat_containment(
             entity_name=target_inc["entity_name"],
             skip_codex_progress=True,
         )
-        dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(lead_uid, scen_key)
+        dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(lead_uid, scen_key, session_id=session_id)
         gear_suffix = f" {converted_res['notice']}" if converted_res else (f" Recovered salvage: **{dropped_gear}**!" if dropped_gear else "")
         refund_suffix = f" {refund_res['notice']}" if refund_res.get("notice") else ""
         live_bonus_suffix = " *(+20% Live-Capture XP & +5 Promotion Rep)*" if is_born_hostile else ""
@@ -836,7 +842,7 @@ def resolve_anomalous_combat_containment(
         bonus_xp_awarded = max(20, int(round(base_q_xp * 0.20)))
         rep_bonus = 5
         if lead_uid:
-            db.add_xp(lead_uid, bonus_xp_awarded)
+            db.add_xp(lead_uid, bonus_xp_awarded, session_id=session_id)
         try:
             from mechanics.social.factions import update_agent_promotion_reputation
             update_agent_promotion_reputation(
@@ -1051,7 +1057,7 @@ def handle_killed_non_hostile_entity(
 
     db.reset_quest_strikes(session_id, linked_qid)
     if lead_uid:
-        db.apply_hp_mp_delta(lead_uid, hp_delta=-5)
+        db.apply_hp_mp_delta(lead_uid, hp_delta=-5, session_id=session_id)
 
     msg = (
         f"⚠️ **Dire Cost — Specimen Shattered!** Lethal force destroyed **{ent_name}**, unleashing a violent "
@@ -1188,7 +1194,7 @@ def resolve_non_hostile_incursion_action(
         "pacify": "Pacified & Contained",
     }
 
-    char = db.get_character(user_id) or {}
+    char = db.get_character(user_id, session_id=session_id) or {}
     stat_key = str(stat_used or approach_default_stats.get(act) or target_inc.get("preferred_stat") or "CHA").upper()
 
     # Intentional attack on hostile_breach or non_hostile_entity immediately starts combat
@@ -1330,8 +1336,8 @@ def resolve_non_hostile_incursion_action(
         gold_gain = int(target_inc.get("reward_gold", 120) or 120)
         xp_gain = int(target_inc.get("reward_xp", 85) or 85)
         if user_id:
-            db.apply_hp_mp_delta(user_id, gold_delta=gold_gain)
-            db.add_xp(user_id, xp_gain)
+            db.apply_hp_mp_delta(user_id, gold_delta=gold_gain, session_id=session_id)
+            db.add_xp(user_id, xp_gain, session_id=session_id)
 
         method_desc = (
             "Sacred Seal / Ability Containment"
@@ -1365,7 +1371,7 @@ def resolve_non_hostile_incursion_action(
             entity_name=target_inc["entity_name"],
             skip_codex_progress=True,
         )
-        dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(user_id, scen_key)
+        dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(user_id, scen_key, session_id=session_id)
         gear_suffix = f" {converted_res['notice']}" if converted_res else (f" Recovered salvage: **{dropped_gear}**!" if dropped_gear else "")
         refund_suffix = f" {refund_res['notice']}" if refund_res.get("notice") else ""
         taboo_note = f" {taboo_eval['log_message']}" if taboo_eval.get("exploited") else ""
@@ -1401,7 +1407,7 @@ def resolve_non_hostile_incursion_action(
         if taboo_eval.get("violated") and int(taboo_eval.get("strike_delta", 0) or 0) > 0:
             strike_delta = max(strike_delta, strike_delta + 1)
             if temperament not in ("mischievous", "spook") and user_id and int(taboo_eval.get("player_backlash_dmg", 0) or 0) > 0:
-                db.apply_hp_mp_delta(user_id, hp_delta=-4)
+                db.apply_hp_mp_delta(user_id, hp_delta=-4, session_id=session_id)
         new_strikes = prev_strikes + strike_delta
 
         if new_strikes < max_strikes:
@@ -1614,8 +1620,8 @@ def mark_hostile_incursion_resolved_on_victory(
         gold_gain = int(round(gold_gain * 0.60))
         xp_gain = int(round(xp_gain * 0.60))
         if user_id:
-            db.apply_hp_mp_delta(user_id, gold_delta=gold_gain)
-            db.add_xp(user_id, xp_gain)
+            db.apply_hp_mp_delta(user_id, gold_delta=gold_gain, session_id=session_id)
+            db.add_xp(user_id, xp_gain, session_id=session_id)
         if isinstance(bp_inc, dict) and (bp_inc.get("blueprint_id") or bp_inc.get("codex_id")):
             try:
                 db.record_session_anomaly_field_log(session_id, bp_inc, stage="sighted", location=str(target_inc.get("location") or ""))
@@ -1649,10 +1655,10 @@ def mark_hostile_incursion_resolved_on_victory(
         entity_name=target_inc["entity_name"],
         skip_codex_progress=True,
     )
-    dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(user_id, scen_key)
+    dropped_gear = (converted_res["item"]["name"] if converted_res and converted_res.get("item") else "") or _roll_optional_incursion_gear_drop(user_id, scen_key, session_id=session_id)
     if user_id:
-        db.apply_hp_mp_delta(user_id, gold_delta=gold_gain)
-        db.add_xp(user_id, xp_gain)
+        db.apply_hp_mp_delta(user_id, gold_delta=gold_gain, session_id=session_id)
+        db.add_xp(user_id, xp_gain, session_id=session_id)
 
     vault_entry = record_contained_anomaly_to_vault_log(
         session_id=session_id,

@@ -622,6 +622,13 @@ def record_contact_dossier_discoveries(
                     continue
                 if not f_key:
                     f_key = f"{f_cat}:{f_val.lower()}"
+                if f_cat == "openness":
+                    c.execute(
+                        """DELETE FROM contact_dossier_discoveries
+                           WHERE session_id = ? AND character_id = ? AND npc_id = ?
+                             AND fact_category = 'openness' AND fact_key != ?""",
+                        (sid, cid, nid, f_key),
+                    )
                 cur = c.execute(
                     """INSERT OR IGNORE INTO contact_dossier_discoveries (
                            session_id, character_id, npc_id, fact_category, fact_key,

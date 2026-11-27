@@ -45,6 +45,29 @@
       "twilight_veil_dc": 12,
       "atonement_cost_gold": 100,
       "atonement_offering_label": "Bunga Rampai & Benzoin Kemeyan Offering"
+    },
+    "ghoul": {
+      "village_id": "loc_hidden_ghoul_village",
+      "zone_id": "zone_spirit_ghoul",
+      "zone_name": "The Pale Ossuary",
+      "mundane_name": "Undercity Ossuary Black Font",
+      "true_name": "The Ossuary Court & Inner Crypt",
+      "outer_threshold_id": "sub_uc_black_font",
+      "outer_threshold_name": "Black-Water Scrying Font",
+      "inner_plaza_id": "sub_ghoul_inner_plaza",
+      "inner_plaza_name": "Ashen Cypress Funeral Square",
+      "royal_pavilion_id": "sub_ghoul_sovereign_manor",
+      "royal_pavilion_name": "Heir's Obsidian Mourning Parlor",
+      "merchant_room_id": "sub_ghoul_curio_morgue",
+      "merchant_room_name": "The Formalin & Bone-Relic Apothecary",
+      "leyline_room_id": "sub_ghoul_leyline_crypt",
+      "leyline_room_name": "The Sunken Catacomb Arch",
+      "permission_token_name": "Bone-Etched Catacomb Signet",
+      "permission_token_slug": "bone-etched catacomb signet",
+      "veil_dc": 14,
+      "twilight_veil_dc": 12,
+      "atonement_cost_gold": 100,
+      "atonement_offering_label": "Black Myrrh & Cypress Incense Offering"
     }
   },
   "permission_tokens": {
@@ -73,19 +96,94 @@
       "undroppable": true,
       "vendor_location_id": "loc_ranger_station",
       "description": "A handcrafted Nusantara reed-and-brass flute carrying the timeless scent of white cempaka blossoms; opens the veiled paths of Kampung Kayangan Bunian."
+    },
+    "bone_etched_catacomb_signet": {
+      "name": "Bone-Etched Catacomb Signet",
+      "slug": "bone-etched catacomb signet",
+      "village_key": "ghoul",
+      "price": 180,
+      "item_type": "quest_item",
+      "rarity": "rare",
+      "quest_locked": true,
+      "unsellable": true,
+      "undroppable": true,
+      "vendor_location_id": "loc_uc_drifter_bazaar",
+      "vendor_sub_id": "sub_uc_salvage_stalls",
+      "description": "A blackened silver catacomb signet engraved with Ossuary funerary script and amber myrrh resin; its heavy seal unlocks the Undercity Black-Water Font toward The Pale Ossuary."
     }
   },
   "name_pools": {
     "kitsune": {
-      "female_given": ["Tamamo", "Kuzunoha", "Kohaku", "Suzuha", "Kagura", "Mikage", "Hotaru", "Shirayuki", "Akane", "Yuzuki", "Konoha", "Komachi"],
-      "male_given": ["Hakumen", "Kurama", "Izuna", "Byakko", "Yakumo", "Kenshin", "Subaru", "Kagetsu", "Shigure", "Haku", "Renji", "Ukon"],
-      "surnames": ["Inari", "Minamoto", "Shirakawa", "Tsukishiro", "Kitsunebi", "Takamagahara", "Fujinomiya", "Kasuga"],
+      "female_given": [
+        "Tamamo",
+        "Kuzunoha",
+        "Kohaku",
+        "Suzuha",
+        "Kagura",
+        "Mikage",
+        "Hotaru",
+        "Shirayuki",
+        "Akane",
+        "Yuzuki",
+        "Konoha",
+        "Komachi"
+      ],
+      "male_given": [
+        "Hakumen",
+        "Kurama",
+        "Izuna",
+        "Byakko",
+        "Yakumo",
+        "Kenshin",
+        "Subaru",
+        "Kagetsu",
+        "Shigure",
+        "Haku",
+        "Renji",
+        "Ukon"
+      ],
+      "surnames": [
+        "Inari",
+        "Minamoto",
+        "Shirakawa",
+        "Tsukishiro",
+        "Kitsunebi",
+        "Takamagahara",
+        "Fujinomiya",
+        "Kasuga"
+      ],
       "sovereign_female": "Lady Tamamo-no-Shirakawa",
       "sovereign_male": "Lord Hakumen-no-Shirakawa"
     },
     "bunian": {
-      "female_given": ["Cempaka", "Melur", "Kirana", "Kasturi", "Seroja", "Nilam", "Puspita", "Delima", "Mayang", "Anggerik", "Ratna", "Kesuma"],
-      "male_given": ["Indera", "Purnama", "Sakti", "Bayu", "Megat", "Naga", "Wira", "Kencana", "Nirwana", "Adi", "Jebat", "Tuah"],
+      "female_given": [
+        "Cempaka",
+        "Melur",
+        "Kirana",
+        "Kasturi",
+        "Seroja",
+        "Nilam",
+        "Puspita",
+        "Delima",
+        "Mayang",
+        "Anggerik",
+        "Ratna",
+        "Kesuma"
+      ],
+      "male_given": [
+        "Indera",
+        "Purnama",
+        "Sakti",
+        "Bayu",
+        "Megat",
+        "Naga",
+        "Wira",
+        "Kencana",
+        "Nirwana",
+        "Adi",
+        "Jebat",
+        "Tuah"
+      ],
       "royal_female": "Puteri Seri Cempaka",
       "royal_male": "Putera Indera Purnama",
       "honorifics": {
@@ -100,6 +198,50 @@
         "scout_male": "Awang",
         "scout_female": "Dayang"
       }
+    },
+    "ghoul": {
+      "female_given": [
+        "Nadia",
+        "Layla",
+        "Yasmin",
+        "Selene",
+        "Samira",
+        "Mina",
+        "Soraya",
+        "Camila",
+        "Dalia",
+        "Nour",
+        "Rania",
+        "Zara"
+      ],
+      "male_given": [
+        "Tariq",
+        "Zayd",
+        "Rami",
+        "Kareem",
+        "Nabil",
+        "Farris",
+        "Jude",
+        "Darius",
+        "Malik",
+        "Salim",
+        "Rafiq",
+        "Sami"
+      ],
+      "surnames": [
+        "Haddad",
+        "Khoury",
+        "Mansour",
+        "Farah",
+        "Nassar",
+        "Darwish",
+        "Sabbagh",
+        "Qasim",
+        "Boulos",
+        "Zidan"
+      ],
+      "heir_female": "Nadia Haddad",
+      "heir_male": "Tariq Haddad"
     }
   },
   "appearance_palettes": {
@@ -152,6 +294,32 @@
       "Deep emerald silk baju melayu cekak musang with gold-threaded songket samping and royal pending buckle",
       "Crimson-and-gold pendekar baju sikap jacket over fine linen, bound with a sacred songket waist-sash",
       "Midnight-indigo Nusantara court tunic embroidered in gold lotus filigree with a ceremonial folded destar"
+    ],
+    "ghoul_skin_tones": [
+      "Pale Cool Alabaster Porcelain",
+      "Moonlit Ivory-Ash Complexion",
+      "Pale Olive-Porcelain Undertone"
+    ],
+    "ghoul_eyes": [
+      "Pale Slate-Amber",
+      "Silver-Grey Nocturnal",
+      "Cool Dark Obsidian-Amber",
+      "Ash-Gold Catacomb Iris"
+    ],
+    "ghoul_female_builds": [
+      "Tall Slender Poised Sculpted",
+      "Willowy Aristocratic Lithe",
+      "Graceful Angular Athletic"
+    ],
+    "ghoul_male_builds": [
+      "Tall Lean Angular Poised",
+      "Broad-Shouldered Tailored Athletic",
+      "Wiry Graceful Predator Build"
+    ],
+    "ghoul_attire": [
+      "Long tailored obsidian wool trench over a black silk turtleneck and leather ankle boots",
+      "Dark charcoal structured double-breasted coat over slate tailored trousers and silver signet",
+      "Midnight-black pleated funeral blazer over ivory-ash silk blouse and polished boots"
     ]
   },
   "kitsune_roster_slots": [
@@ -188,9 +356,9 @@
       "home_node": "sub_kitsune_leyline_shrine",
       "schedule": {
         "morning": "sub_kitsune_leyline_shrine",
-        "afternoon": "sub_kitsune_leyline_shrine",
+        "afternoon": "sub_kitsune_scroll_gallery",
         "evening": "sub_kitsune_inner_plaza",
-        "night": "sub_kitsune_leyline_shrine"
+        "night": "sub_kitsune_star_divination_deck"
       },
       "personality": "Serene keeper of the Leyline Spirit Arch who reads starlight ripples and tests mortal sincerity."
     },
@@ -210,7 +378,7 @@
         "morning": "sub_kitsune_spirit_apothecary",
         "afternoon": "sub_kitsune_spirit_apothecary",
         "evening": "sub_kitsune_spirit_apothecary",
-        "night": "sub_kitsune_inner_plaza"
+        "night": "sub_kitsune_tea_veranda"
       },
       "personality": "Shrewd, silver-tongued apothecary brewing starlight elixirs and bartering warded Myōbu relics to trusted mortals."
     },
@@ -226,7 +394,7 @@
       "home_node": "sub_kitsune_inner_plaza",
       "schedule": {
         "morning": "loc_et_fox_torii_tunnel",
-        "afternoon": "sub_kitsune_inner_plaza",
+        "afternoon": "sub_kitsune_sparring_yard",
         "evening": "loc_et_fox_torii_tunnel",
         "night": "sub_kitsune_inner_plaza"
       },
@@ -243,10 +411,10 @@
       "combat_kit": "kitsune_mystic",
       "home_node": "sub_kitsune_inner_plaza",
       "schedule": {
-        "morning": "sub_kitsune_inner_plaza",
-        "afternoon": "sub_kitsune_sovereign_pavilion",
-        "evening": "sub_kitsune_inner_plaza",
-        "night": "sub_kitsune_leyline_shrine"
+        "morning": "sub_kitsune_mask_workshop",
+        "afternoon": "sub_crossroads_tea_hall",
+        "evening": "sub_kitsune_kagura_stage",
+        "night": "sub_kitsune_scroll_gallery"
       },
       "personality": "Inquisitive folklore chronicler fascinated by modern human smartphones, tea sweets, and urban legends."
     },
@@ -265,8 +433,8 @@
       "schedule": {
         "morning": "loc_es_lantern_tea_street",
         "afternoon": "loc_es_bamboo_footbath_bridge",
-        "evening": "sub_kitsune_inner_plaza",
-        "night": "sub_kitsune_inner_plaza"
+        "evening": "sub_crossroads_bazaar_walk",
+        "night": "sub_kitsune_tea_veranda"
       },
       "personality": "Playful young kitsune who slips into human glamour during the day to sample street-stall sweets along the Sanctuary tea steps."
     },
@@ -287,6 +455,82 @@
         "night": "sub_kitsune_leyline_shrine"
       },
       "personality": "Earnest, spirited young fox spirit tending the blue kitsunebi lanterns and eager to accompany friendly mortals on city delves."
+    },
+    {
+      "slot_key": "kitsune_onsen_host",
+      "role": "Fox-Fire Onsen Attendant",
+      "rank_title": "Rotenburo Host",
+      "agent_tier": 3,
+      "tails": 3,
+      "forced_initial_form": "kitsune:humanoid",
+      "coat": "Warm Chestnut Amber Fur",
+      "eyes": "Warm Honey-Amber",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_tea_veranda",
+      "schedule": {
+        "morning": "sub_kitsune_tea_veranda",
+        "afternoon": "sub_kitsune_autumn_rotenburo",
+        "evening": "sub_kitsune_bamboo_bath",
+        "night": "sub_kitsune_tea_veranda"
+      },
+      "personality": "Gracious kitsune bathhouse host who brews roasted chestnut tea beside steaming maple-leaf cedar springs."
+    },
+    {
+      "slot_key": "kitsune_mask_artisan",
+      "role": "Noh & Kitsune-Men Carver",
+      "rank_title": "Master Maskwright",
+      "agent_tier": 3,
+      "tails": 4,
+      "forced_initial_form": "kitsune:humanoid",
+      "coat": "Silver-Dusted Sable Fox Fur",
+      "eyes": "Bright Vermilion-Gold",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_mask_workshop",
+      "schedule": {
+        "morning": "sub_kitsune_mask_workshop",
+        "afternoon": "sub_crossroads_kitsune_alley",
+        "evening": "sub_kitsune_kagura_stage",
+        "night": "sub_kitsune_mask_workshop"
+      },
+      "personality": "Deft lacquer mask carver whose workshop smells of hinoki shavings and mineral vermilion paint."
+    },
+    {
+      "slot_key": "kitsune_blade_instructor",
+      "role": "Blade-Yard Duel Instructor",
+      "rank_title": "Ofuda Swordmaster",
+      "agent_tier": 4,
+      "tails": 5,
+      "forced_initial_form": "kitsune:myobu_fox",
+      "coat": "Snow-Cream Kitsune Fur",
+      "eyes": "Emerald Spirit-Flame",
+      "combat_kit": "kitsune_guardian",
+      "home_node": "sub_kitsune_sparring_yard",
+      "schedule": {
+        "morning": "sub_kitsune_sparring_yard",
+        "afternoon": "sub_peaks_wind_switchback",
+        "evening": "sub_kitsune_talisman_rack",
+        "night": "sub_kitsune_sparring_yard"
+      },
+      "personality": "Disciplined foxfire duelist who patrols Cloud-Fang Crags by afternoon and drills initiates under cedar rafters."
+    },
+    {
+      "slot_key": "kitsune_astrologer",
+      "role": "Star-Deck Veil Astronomer",
+      "rank_title": "Kitsunebi Diviner",
+      "agent_tier": 4,
+      "tails": 6,
+      "forced_initial_form": "kitsune:myobu_fox",
+      "coat": "Twilight Indigo-Silver Fox Fur",
+      "eyes": "Violet-Gold Horizon",
+      "combat_kit": "kitsune_mystic",
+      "home_node": "sub_kitsune_star_divination_deck",
+      "schedule": {
+        "morning": "sub_kitsune_scroll_gallery",
+        "afternoon": "sub_peaks_ice_mouth",
+        "evening": "sub_kitsune_star_divination_deck",
+        "night": "sub_kitsune_star_divination_deck"
+      },
+      "personality": "Measured sky-watcher charting leyline storms across the jagged crags with brass astrolabes and foxfire beads."
     }
   ],
   "bunian_roster_slots": [
@@ -307,7 +551,7 @@
       "schedule": {
         "morning": "sub_bunian_orchid_spring",
         "afternoon": "sub_bunian_royal_istana",
-        "evening": "sub_bunian_inner_plaza",
+        "evening": "sub_bunian_orchid_walk",
         "night": "sub_bunian_royal_istana"
       },
       "personality": "Ethereal, pure-hearted royal heir of the Orang Bunian who feels a quiet, destined longing toward the protagonist from first sight, hiding shy warmth behind courtly Nusantara grace."
@@ -321,8 +565,8 @@
       "home_node": "sub_bunian_inner_plaza",
       "schedule": {
         "morning": "sub_bunian_inner_plaza",
-        "afternoon": "sub_bunian_royal_istana",
-        "evening": "sub_bunian_inner_plaza",
+        "afternoon": "sub_bunian_astrolabe_deck",
+        "evening": "sub_bunian_banquet_hall",
         "night": "sub_bunian_inner_plaza"
       },
       "personality": "Wise, soft-spoken custodian of ancient forest adat and treaties who honors courteous mortals and banishes Oath-breakers into the mist."
@@ -339,7 +583,7 @@
         "morning": "sub_bunian_pusaka_hall",
         "afternoon": "sub_bunian_pusaka_hall",
         "evening": "sub_bunian_pusaka_hall",
-        "night": "sub_bunian_inner_plaza"
+        "night": "sub_bunian_banquet_hall"
       },
       "personality": "Master Nusantara metalsmith and songket weaver forging meteoric-iron keris charms and mist-warded regalia."
     },
@@ -352,7 +596,7 @@
       "home_node": "sub_bunian_inner_plaza",
       "schedule": {
         "morning": "loc_bunian_threshold_glade",
-        "afternoon": "sub_bunian_inner_plaza",
+        "afternoon": "sub_bunian_silat_courtyard",
         "evening": "loc_bunian_threshold_glade",
         "night": "sub_bunian_inner_plaza"
       },
@@ -367,8 +611,8 @@
       "home_node": "sub_bunian_orchid_spring",
       "schedule": {
         "morning": "sub_bunian_orchid_spring",
-        "afternoon": "sub_bunian_orchid_spring",
-        "evening": "sub_bunian_inner_plaza",
+        "afternoon": "sub_bunian_waterfall_grotto",
+        "evening": "sub_bunian_orchid_walk",
         "night": "sub_bunian_orchid_spring"
       },
       "personality": "Gentle spring keeper who distills moon-dew tonics and tends the glowing leyline orchids linking the two spirit enclaves."
@@ -385,7 +629,7 @@
       "schedule": {
         "morning": "sub_trail_gateway",
         "afternoon": "sub_cedar_bridge",
-        "evening": "sub_bunian_inner_plaza",
+        "evening": "sub_crossroads_bazaar_walk",
         "night": "sub_bunian_orchid_spring"
       },
       "personality": "Observant Bunian envoy who walks the outer cedar trails in human guise by day, quietly guiding lost hikers away from dangerous rifts."
@@ -398,96 +642,1435 @@
       "combat_kit": "bunian_pawang",
       "home_node": "sub_bunian_orchid_spring",
       "schedule": {
-        "morning": "sub_bunian_inner_plaza",
-        "afternoon": "sub_bunian_orchid_spring",
-        "evening": "sub_bunian_royal_istana",
-        "night": "sub_bunian_orchid_spring"
+        "morning": "sub_bunian_songket_loom",
+        "afternoon": "sub_crossroads_tea_hall",
+        "evening": "sub_bunian_banquet_hall",
+        "night": "sub_bunian_astrolabe_deck"
       },
       "personality": "Melodic courtier whose bamboo flute echoes across the reserve at twilight, curious about mortal music and stories."
+    },
+    {
+      "slot_key": "bunian_songket_weaver",
+      "role": "Royal Songket Master Weaver",
+      "rank_title": "Tok Tenun Seri",
+      "agent_tier": 3,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_songket_loom",
+      "schedule": {
+        "morning": "sub_bunian_songket_loom",
+        "afternoon": "sub_crossroads_bunian_arcade",
+        "evening": "sub_bunian_banquet_hall",
+        "night": "sub_bunian_songket_loom"
+      },
+      "personality": "Serene artisan who threads gold-spun Nusantara songket gleaming with dawn mist along the Dusk Confluence arcade."
+    },
+    {
+      "slot_key": "bunian_silat_master",
+      "role": "Gelanggang Silat Preceptor",
+      "rank_title": "Pendekar Gelanggang",
+      "agent_tier": 4,
+      "combat_kit": "bunian_hulubalang",
+      "home_node": "sub_bunian_silat_courtyard",
+      "schedule": {
+        "morning": "sub_bunian_silat_courtyard",
+        "afternoon": "sub_mire_boardwalk_head",
+        "evening": "sub_bunian_pusaka_pavilion",
+        "night": "sub_bunian_silat_courtyard"
+      },
+      "personality": "Fluid martial preceptor teaching breathless step-work over flooded bamboo planks and lantern-lit courtyards."
+    },
+    {
+      "slot_key": "bunian_canopy_navigator",
+      "role": "Canopy Astrolabe Navigator",
+      "rank_title": "Juragan Langit",
+      "agent_tier": 4,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_astrolabe_deck",
+      "schedule": {
+        "morning": "sub_bunian_root_landing",
+        "afternoon": "sub_mire_root_crossing",
+        "evening": "sub_bunian_astrolabe_deck",
+        "night": "sub_bunian_astrolabe_deck"
+      },
+      "personality": "Sharp-eyed Wayfinder who maps shifting lotus-mire tideways by copper wind-vanes and constellation bells."
+    },
+    {
+      "slot_key": "bunian_orchid_botanist",
+      "role": "Grotto Dew-Orchid Herbalist",
+      "rank_title": "Bidan Taman",
+      "agent_tier": 3,
+      "combat_kit": "bunian_pawang",
+      "home_node": "sub_bunian_orchid_walk",
+      "schedule": {
+        "morning": "sub_bunian_orchid_walk",
+        "afternoon": "sub_bunian_waterfall_grotto",
+        "evening": "sub_mire_gas_fen",
+        "night": "sub_bunian_orchid_walk"
+      },
+      "personality": "Gentle botanist harvesting moonlit dew-orchids and swamp-amber resin before will-o'-the-wisp gases thicken."
+    }
+  ],
+  "crossroads_roster_slots": [
+    {
+      "slot_key": "crossroads_lantern_broker",
+      "name": "Tok Dalang Pelita",
+      "gender": "male",
+      "race": "spirit_broker",
+      "role": "Dusk Confluence Lantern Broker",
+      "rank_title": "Bazaar Broker",
+      "agent_tier": 3,
+      "merchant_type": "crossroads_bazaar_merchant",
+      "home_node": "sub_crossroads_bazaar_walk",
+      "outfit": "Woven indigo-and-saffron pelita-merchant coat hung with brass charm scales",
+      "schedule": {
+        "morning": "sub_crossroads_bazaar_walk",
+        "afternoon": "sub_crossroads_curio_arcade",
+        "evening": "sub_crossroads_bazaar_walk",
+        "night": "sub_crossroads_bazaar_walk"
+      },
+      "personality": "Affable twilight curio merchant trading across Japanese kitsunebi stalls and Nusantara oil-lantern arcades under neutral truce."
+    },
+    {
+      "slot_key": "crossroads_tea_innkeeper",
+      "name": "Oharu Binti Bendang",
+      "gender": "female",
+      "race": "spirit_keeper",
+      "role": "Two-Moons River Tea-Pavilion Innkeeper",
+      "rank_title": "Confluence Host",
+      "agent_tier": 3,
+      "home_node": "sub_crossroads_tea_hall",
+      "outfit": "Cream kimono-kebayamix apron scented with roasted hojicha tea and cardamom",
+      "schedule": {
+        "morning": "sub_crossroads_tea_hall",
+        "afternoon": "sub_crossroads_tea_hall",
+        "evening": "sub_crossroads_tea_hall",
+        "night": "sub_crossroads_tea_hall"
+      },
+      "personality": "Warm, unflappable tea-house proprietor keeping hot ginger tea and clean tatami mats ready for tired realm-walkers."
+    },
+    {
+      "slot_key": "wilds_frontier_warden",
+      "name": "Warden Harun Kagemori",
+      "gender": "male",
+      "race": "spirit_warden",
+      "role": "Joint Frontier Ward-Captain",
+      "rank_title": "Perimeter Captain",
+      "agent_tier": 4,
+      "home_node": "sub_wilds_ward_camp",
+      "outfit": "Ash-grey iron-weave border coat slung with twin paper ofuda and silver ward-stakes",
+      "schedule": {
+        "morning": "sub_wilds_ward_camp",
+        "afternoon": "sub_wilds_ward_camp",
+        "evening": "sub_wilds_watch_brazier",
+        "night": "sub_wilds_ward_camp"
+      },
+      "personality": "Stoic joint-enclave frontier ranger patrolling the Bleedwood border and hauling downed explorers back to safety."
+    },
+    {
+      "slot_key": "crossroads_spirit_ferryman",
+      "name": "Nakhoda Sabri",
+      "gender": "male",
+      "race": "spirit_ferryman",
+      "role": "The Spirit Ferryman",
+      "rank_title": "Confluence Ferryman",
+      "agent_tier": 4,
+      "home_node": "sub_crossroads_mist_wharf",
+      "outfit": "Salt-darkened indigo oilskin coat with two hanging spirit-compass lanterns",
+      "schedule": {
+        "morning": "sub_crossroads_mist_wharf",
+        "afternoon": "sub_crossroads_ferry_lantern_pier",
+        "evening": "sub_crossroads_mist_wharf",
+        "night": "sub_crossroads_ferry_lantern_pier"
+      },
+      "personality": "Laconic river ferryman poling a lantern-lit skiff across the Dusk Confluence fog between all three courts and the four outer wilds."
+    },
+    {
+      "slot_key": "crossroads_kitsune_stallholder",
+      "name": "Hanae-no-Mori",
+      "gender": "female",
+      "race": "spirit_broker",
+      "role": "Kitsunebi Mask & Lacquer Stallholder",
+      "rank_title": "Alley Artisan",
+      "agent_tier": 3,
+      "home_node": "sub_crossroads_kitsune_alley",
+      "outfit": "Indigo-and-vermilion festival happi apron jingling with tiny shrine bells",
+      "schedule": {
+        "morning": "sub_crossroads_kitsune_alley",
+        "afternoon": "sub_crossroads_kitsune_alley",
+        "evening": "sub_crossroads_bazaar_walk",
+        "night": "sub_crossroads_kitsune_alley"
+      },
+      "personality": "Brisk festival stallkeeper peddling painted paper masks, charm cords, and honeyed sesame skewers."
+    },
+    {
+      "slot_key": "crossroads_bunian_stallholder",
+      "name": "Bidan Melati",
+      "gender": "female",
+      "race": "spirit_broker",
+      "role": "Seri Nusantara Songket & Pusaka Stallholder",
+      "rank_title": "Arcade Merchant",
+      "agent_tier": 3,
+      "home_node": "sub_crossroads_bunian_arcade",
+      "outfit": "Soft emerald silk kebaya draped with gold-thread songket bolts",
+      "schedule": {
+        "morning": "sub_crossroads_bunian_arcade",
+        "afternoon": "sub_crossroads_curio_arcade",
+        "evening": "sub_crossroads_bunian_arcade",
+        "night": "sub_crossroads_bunian_arcade"
+      },
+      "personality": "Velvet-voiced curio dealer inspecting heirloom keris scabbards and fragrant pandan sachets."
+    },
+    {
+      "slot_key": "frontier_peaks_warden",
+      "name": "Warden Renjiro",
+      "gender": "male",
+      "race": "spirit_warden",
+      "role": "Cloud-Fang Crags Storm-Warden",
+      "rank_title": "Crag Warden",
+      "agent_tier": 4,
+      "home_node": "sub_peaks_wind_switchback",
+      "outfit": "Storm-slate fur-lined mountain coat strapped with insulated copper lightning rods",
+      "schedule": {
+        "morning": "sub_peaks_wind_switchback",
+        "afternoon": "sub_peaks_ice_mouth",
+        "evening": "sub_peaks_scree_ledge",
+        "night": "sub_wilds_ward_camp"
+      },
+      "personality": "Weather-beaten alpine ranger anchoring guy-lines across storm-split torii ridges and frost caverns."
+    },
+    {
+      "slot_key": "frontier_mire_boneyard_warden",
+      "name": "Warden Safiya",
+      "gender": "female",
+      "race": "spirit_warden",
+      "role": "Mire & Barrow Boundary Ranger",
+      "rank_title": "Frontier Ranger",
+      "agent_tier": 4,
+      "home_node": "sub_mire_boardwalk_head",
+      "outfit": "Waterproof oil-green swamp cloak and silver bell-charm bandolier",
+      "schedule": {
+        "morning": "sub_mire_boardwalk_head",
+        "afternoon": "sub_mire_root_crossing",
+        "evening": "sub_boneyard_headstone_rim",
+        "night": "sub_boneyard_lantern_overlook"
+      },
+      "personality": "Unflappable joint-court ranger charting sunken belfries by day and walking the Ashen Barrowlands lantern perimeter by dusk."
     }
   ],
   "combat_kits": {
     "kitsune_sovereign": [
-      {"name": "Kitsunebi Ninefold Barrage", "type": "offensive", "power": 34, "mp_cost": 14, "stat": "INT", "description": "Unleashes nine orbiting azure fox-fire spheres that sear anomalous corruption."},
-      {"name": "Torii Mirage Veil", "type": "buff", "power": 22, "mp_cost": 10, "stat": "AGI", "description": "Wraps allies in refracting shrine mist, sharply boosting evasion and ward resistance."},
-      {"name": "Bewitching Suzu Resonance", "type": "debuff", "power": 24, "mp_cost": 12, "stat": "CHA", "description": "Rings a sacred chime that disorients hostile entities and disrupts their focus."},
-      {"name": "Inari Sunlit Mending", "type": "heal", "power": 30, "mp_cost": 14, "stat": "INT", "description": "Restores vitality and purges psychic static with warm golden shrine light."},
-      {"name": "Ultimate: Celestial Myōbu Nine-Tail Eclipse", "type": "ultimate", "power": 58, "mp_cost": 28, "stat": "INT", "is_ultimate": true, "description": "Manifests the full nine-tailed celestial corona, incinerating hostile rifts while shielding the party."}
+      {
+        "name": "Kitsunebi Ninefold Barrage",
+        "type": "offensive",
+        "power": 34,
+        "mp_cost": 14,
+        "stat": "INT",
+        "description": "Unleashes nine orbiting azure fox-fire spheres that sear anomalous corruption."
+      },
+      {
+        "name": "Torii Mirage Veil",
+        "type": "buff",
+        "power": 22,
+        "mp_cost": 10,
+        "stat": "AGI",
+        "description": "Wraps allies in refracting shrine mist, sharply boosting evasion and ward resistance."
+      },
+      {
+        "name": "Bewitching Suzu Resonance",
+        "type": "debuff",
+        "power": 24,
+        "mp_cost": 12,
+        "stat": "CHA",
+        "description": "Rings a sacred chime that disorients hostile entities and disrupts their focus."
+      },
+      {
+        "name": "Inari Sunlit Mending",
+        "type": "heal",
+        "power": 30,
+        "mp_cost": 14,
+        "stat": "INT",
+        "description": "Restores vitality and purges psychic static with warm golden shrine light."
+      },
+      {
+        "name": "Ultimate: Celestial Myōbu Nine-Tail Eclipse",
+        "type": "ultimate",
+        "power": 58,
+        "mp_cost": 28,
+        "stat": "INT",
+        "is_ultimate": true,
+        "description": "Manifests the full nine-tailed celestial corona, incinerating hostile rifts while shielding the party."
+      }
     ],
     "kitsune_guardian": [
-      {"name": "Fox-Fire Iaijutsu Slash", "type": "offensive", "power": 28, "mp_cost": 10, "stat": "AGI", "description": "Draws a spirit-wreathed shrine blade in a blinding vermilion arc."},
-      {"name": "Flicker-Step Phantasms", "type": "buff", "power": 18, "mp_cost": 8, "stat": "AGI", "description": "Splits into twin foxfire afterimages to evade incoming strikes."},
-      {"name": "Shimenawa Spirit Bind", "type": "debuff", "power": 20, "mp_cost": 10, "stat": "PER", "description": "Pins an enemy's shadow with consecrated talisman cords."},
-      {"name": "Guardian's Shrine Ward", "type": "defensive", "power": 22, "mp_cost": 10, "stat": "END", "description": "Raises a vermilion torii barrier that absorbs incoming blows."},
-      {"name": "Ultimate: Thousand-Torii Crimson Tempest", "type": "ultimate", "power": 48, "mp_cost": 24, "stat": "AGI", "is_ultimate": true, "description": "Summons a corridor of spectral torii gates to blitz through every foe in foxfire."}
+      {
+        "name": "Fox-Fire Iaijutsu Slash",
+        "type": "offensive",
+        "power": 28,
+        "mp_cost": 10,
+        "stat": "AGI",
+        "description": "Draws a spirit-wreathed shrine blade in a blinding vermilion arc."
+      },
+      {
+        "name": "Flicker-Step Phantasms",
+        "type": "buff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "AGI",
+        "description": "Splits into twin foxfire afterimages to evade incoming strikes."
+      },
+      {
+        "name": "Shimenawa Spirit Bind",
+        "type": "debuff",
+        "power": 20,
+        "mp_cost": 10,
+        "stat": "PER",
+        "description": "Pins an enemy's shadow with consecrated talisman cords."
+      },
+      {
+        "name": "Guardian's Shrine Ward",
+        "type": "defensive",
+        "power": 22,
+        "mp_cost": 10,
+        "stat": "END",
+        "description": "Raises a vermilion torii barrier that absorbs incoming blows."
+      },
+      {
+        "name": "Ultimate: Thousand-Torii Crimson Tempest",
+        "type": "ultimate",
+        "power": 48,
+        "mp_cost": 24,
+        "stat": "AGI",
+        "is_ultimate": true,
+        "description": "Summons a corridor of spectral torii gates to blitz through every foe in foxfire."
+      }
     ],
     "kitsune_mystic": [
-      {"name": "Azure Kitsunebi Wisp", "type": "offensive", "power": 25, "mp_cost": 9, "stat": "INT", "description": "Launches homing spirit-lantern flames that bypass mundane armor."},
-      {"name": "Aburaage Vitality Brew", "type": "heal", "power": 26, "mp_cost": 11, "stat": "INT", "description": "Infuses an ally with warm shrine spirit-nectar to mend wounds."},
-      {"name": "Fox-Mist Confusion", "type": "debuff", "power": 19, "mp_cost": 9, "stat": "CHA", "description": "Blankets foes in illusory twilight fog, lowering accuracy."},
-      {"name": "Starlit Tail Blessing", "type": "buff", "power": 20, "mp_cost": 10, "stat": "LUK", "description": "Blesses the party with auspicious Inari fortune and critical focus."},
-      {"name": "Ultimate: Star-Lantern Grand Exorcism", "type": "ultimate", "power": 45, "mp_cost": 22, "stat": "INT", "is_ultimate": true, "description": "Ignites a constellation of shrine lanterns that purges anomalies and restores ally spirit."}
+      {
+        "name": "Azure Kitsunebi Wisp",
+        "type": "offensive",
+        "power": 25,
+        "mp_cost": 9,
+        "stat": "INT",
+        "description": "Launches homing spirit-lantern flames that bypass mundane armor."
+      },
+      {
+        "name": "Aburaage Vitality Brew",
+        "type": "heal",
+        "power": 26,
+        "mp_cost": 11,
+        "stat": "INT",
+        "description": "Infuses an ally with warm shrine spirit-nectar to mend wounds."
+      },
+      {
+        "name": "Fox-Mist Confusion",
+        "type": "debuff",
+        "power": 19,
+        "mp_cost": 9,
+        "stat": "CHA",
+        "description": "Blankets foes in illusory twilight fog, lowering accuracy."
+      },
+      {
+        "name": "Starlit Tail Blessing",
+        "type": "buff",
+        "power": 20,
+        "mp_cost": 10,
+        "stat": "LUK",
+        "description": "Blesses the party with auspicious Inari fortune and critical focus."
+      },
+      {
+        "name": "Ultimate: Star-Lantern Grand Exorcism",
+        "type": "ultimate",
+        "power": 45,
+        "mp_cost": 22,
+        "stat": "INT",
+        "is_ultimate": true,
+        "description": "Ignites a constellation of shrine lanterns that purges anomalies and restores ally spirit."
+      }
     ],
     "kitsune_myobu_beast": [
-      {"name": "Spirit-Fox Fang Lunge", "type": "offensive", "power": 24, "mp_cost": 6, "stat": "AGI", "description": "Darts across the battlefield as a silver-fast spirit fox, biting with foxfire fangs."},
-      {"name": "Multi-Tail Ember Sweep", "type": "offensive", "power": 26, "mp_cost": 9, "stat": "INT", "description": "Sweeps blazing spirit tails to scatter ghostly embers across clustered enemies."},
-      {"name": "Myōbu Howl of Warding", "type": "buff", "power": 18, "mp_cost": 8, "stat": "PER", "description": "Lets out a crystalline spirit yip that sharpens party perception and dodge."},
-      {"name": "Shadow-Brush Pounce", "type": "debuff", "power": 18, "mp_cost": 8, "stat": "AGI", "description": "Harries a target's flank, throwing them off balance."},
-      {"name": "Ultimate: Wild Myōbu Astral Stampede", "type": "ultimate", "power": 44, "mp_cost": 20, "stat": "AGI", "is_ultimate": true, "description": "Multiplies into a pack of blazing spirit foxes that overwhelm all hostile targets."}
+      {
+        "name": "Spirit-Fox Fang Lunge",
+        "type": "offensive",
+        "power": 24,
+        "mp_cost": 6,
+        "stat": "AGI",
+        "description": "Darts across the battlefield as a silver-fast spirit fox, biting with foxfire fangs."
+      },
+      {
+        "name": "Multi-Tail Ember Sweep",
+        "type": "offensive",
+        "power": 26,
+        "mp_cost": 9,
+        "stat": "INT",
+        "description": "Sweeps blazing spirit tails to scatter ghostly embers across clustered enemies."
+      },
+      {
+        "name": "Myōbu Howl of Warding",
+        "type": "buff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "PER",
+        "description": "Lets out a crystalline spirit yip that sharpens party perception and dodge."
+      },
+      {
+        "name": "Shadow-Brush Pounce",
+        "type": "debuff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "AGI",
+        "description": "Harries a target's flank, throwing them off balance."
+      },
+      {
+        "name": "Ultimate: Wild Myōbu Astral Stampede",
+        "type": "ultimate",
+        "power": 44,
+        "mp_cost": 20,
+        "stat": "AGI",
+        "is_ultimate": true,
+        "description": "Multiplies into a pack of blazing spirit foxes that overwhelm all hostile targets."
+      }
     ],
     "bunian_royal": [
-      {"name": "Sinar Seri Kayangan", "type": "offensive", "power": 33, "mp_cost": 14, "stat": "INT", "description": "Calls down a radiant beam of moonlit Kayangan grace that dissolves anomalous taint."},
-      {"name": "Cempaka Royal Restorative", "type": "heal", "power": 32, "mp_cost": 14, "stat": "CHA", "description": "Showers allies in fragrant golden cempaka petals, deeply restoring health and composure."},
-      {"name": "Selendang Mist Sanctuary", "type": "buff", "power": 24, "mp_cost": 11, "stat": "AGI", "description": "Weaves royal songket mist around the party, softening harm and hiding their presence."},
-      {"name": "Titah Diraja Command", "type": "debuff", "power": 23, "mp_cost": 11, "stat": "CHA", "description": "Utters a sovereign Nusantara cadence that stills violent malice in enemies."},
-      {"name": "Ultimate: Mahkota Kayangan Sovereign Bloom", "type": "ultimate", "power": 58, "mp_cost": 28, "stat": "CHA", "is_ultimate": true, "description": "Unfurls the full majesty of the veiled Kayangan realm, healing allies and banishing hostile horrors in golden mist."}
+      {
+        "name": "Sinar Seri Kayangan",
+        "type": "offensive",
+        "power": 33,
+        "mp_cost": 14,
+        "stat": "INT",
+        "description": "Calls down a radiant beam of moonlit Kayangan grace that dissolves anomalous taint."
+      },
+      {
+        "name": "Cempaka Royal Restorative",
+        "type": "heal",
+        "power": 32,
+        "mp_cost": 14,
+        "stat": "CHA",
+        "description": "Showers allies in fragrant golden cempaka petals, deeply restoring health and composure."
+      },
+      {
+        "name": "Selendang Mist Sanctuary",
+        "type": "buff",
+        "power": 24,
+        "mp_cost": 11,
+        "stat": "AGI",
+        "description": "Weaves royal songket mist around the party, softening harm and hiding their presence."
+      },
+      {
+        "name": "Titah Diraja Command",
+        "type": "debuff",
+        "power": 23,
+        "mp_cost": 11,
+        "stat": "CHA",
+        "description": "Utters a sovereign Nusantara cadence that stills violent malice in enemies."
+      },
+      {
+        "name": "Ultimate: Mahkota Kayangan Sovereign Bloom",
+        "type": "ultimate",
+        "power": 58,
+        "mp_cost": 28,
+        "stat": "CHA",
+        "is_ultimate": true,
+        "description": "Unfurls the full majesty of the veiled Kayangan realm, healing allies and banishing hostile horrors in golden mist."
+      }
     ],
     "bunian_hulubalang": [
-      {"name": "Keris Halilintar Thrust", "type": "offensive", "power": 29, "mp_cost": 10, "stat": "AGI", "description": "Lunges with a sinuous meteoric-iron keris wreathed in emerald wind."},
-      {"name": "Langkah Angin Silat", "type": "buff", "power": 20, "mp_cost": 8, "stat": "AGI", "description": "Adopts a weightless Kayangan silat footwork stance to counter incoming strikes."},
-      {"name": "Banyan Root Snare", "type": "debuff", "power": 20, "mp_cost": 10, "stat": "PER", "description": "Commands spectral banyan roots to entangle an enemy's stride."},
-      {"name": "Pendekar Songket Aegis", "type": "defensive", "power": 23, "mp_cost": 10, "stat": "END", "description": "Channels ancestral pusaka warding through gold-woven cloth."},
-      {"name": "Ultimate: Tujuh Lapis Pusaka Storm", "type": "ultimate", "power": 49, "mp_cost": 24, "stat": "AGI", "is_ultimate": true, "description": "Executes a seven-step Kayangan pendekar blitz that cleaves through every dimensional threat."}
+      {
+        "name": "Keris Halilintar Thrust",
+        "type": "offensive",
+        "power": 29,
+        "mp_cost": 10,
+        "stat": "AGI",
+        "description": "Lunges with a sinuous meteoric-iron keris wreathed in emerald wind."
+      },
+      {
+        "name": "Langkah Angin Silat",
+        "type": "buff",
+        "power": 20,
+        "mp_cost": 8,
+        "stat": "AGI",
+        "description": "Adopts a weightless Kayangan silat footwork stance to counter incoming strikes."
+      },
+      {
+        "name": "Banyan Root Snare",
+        "type": "debuff",
+        "power": 20,
+        "mp_cost": 10,
+        "stat": "PER",
+        "description": "Commands spectral banyan roots to entangle an enemy's stride."
+      },
+      {
+        "name": "Pendekar Songket Aegis",
+        "type": "defensive",
+        "power": 23,
+        "mp_cost": 10,
+        "stat": "END",
+        "description": "Channels ancestral pusaka warding through gold-woven cloth."
+      },
+      {
+        "name": "Ultimate: Tujuh Lapis Pusaka Storm",
+        "type": "ultimate",
+        "power": 49,
+        "mp_cost": 24,
+        "stat": "AGI",
+        "is_ultimate": true,
+        "description": "Executes a seven-step Kayangan pendekar blitz that cleaves through every dimensional threat."
+      }
     ],
     "bunian_pawang": [
-      {"name": "Serunai Resonance Bolt", "type": "offensive", "power": 24, "mp_cost": 9, "stat": "INT", "description": "Projects a piercing harmonic note that shatters unnatural distortions."},
-      {"name": "Air Embun Kayangan", "type": "heal", "power": 28, "mp_cost": 11, "stat": "INT", "description": "Applies blessed moonlit orchid dew to mend wounds and fatigue."},
-      {"name": "Kabut Rimba Veil", "type": "debuff", "power": 20, "mp_cost": 9, "stat": "PER", "description": "Shrouds adversaries in disorienting primeval forest mist."},
-      {"name": "Semangat Rimba Blessing", "type": "buff", "power": 20, "mp_cost": 10, "stat": "END", "description": "Harmonizes ally vital spirit with ancient forest leylines."},
-      {"name": "Ultimate: Malam Berinai Spirit Chorus", "type": "ultimate", "power": 46, "mp_cost": 22, "stat": "INT", "is_ultimate": true, "description": "Calls forth the unseen chorus of the elder woods to rejuvenate the party and purge corruption."}
+      {
+        "name": "Serunai Resonance Bolt",
+        "type": "offensive",
+        "power": 24,
+        "mp_cost": 9,
+        "stat": "INT",
+        "description": "Projects a piercing harmonic note that shatters unnatural distortions."
+      },
+      {
+        "name": "Air Embun Kayangan",
+        "type": "heal",
+        "power": 28,
+        "mp_cost": 11,
+        "stat": "INT",
+        "description": "Applies blessed moonlit orchid dew to mend wounds and fatigue."
+      },
+      {
+        "name": "Kabut Rimba Veil",
+        "type": "debuff",
+        "power": 20,
+        "mp_cost": 9,
+        "stat": "PER",
+        "description": "Shrouds adversaries in disorienting primeval forest mist."
+      },
+      {
+        "name": "Semangat Rimba Blessing",
+        "type": "buff",
+        "power": 20,
+        "mp_cost": 10,
+        "stat": "END",
+        "description": "Harmonizes ally vital spirit with ancient forest leylines."
+      },
+      {
+        "name": "Ultimate: Malam Berinai Spirit Chorus",
+        "type": "ultimate",
+        "power": 46,
+        "mp_cost": 22,
+        "stat": "INT",
+        "is_ultimate": true,
+        "description": "Calls forth the unseen chorus of the elder woods to rejuvenate the party and purge corruption."
+      }
+    ],
+    "ghoul_sovereign": [
+      {
+        "name": "Ossuary Shadow Step",
+        "type": "buff",
+        "power": 22,
+        "mp_cost": 10,
+        "stat": "AGI",
+        "description": "Melts into cypress shadow, sharpening evasion and precision."
+      },
+      {
+        "name": "Obsidian Signet Lash",
+        "type": "offensive",
+        "power": 32,
+        "mp_cost": 13,
+        "stat": "AGI",
+        "description": "Channels cold funerary force into a razor-fast strike."
+      },
+      {
+        "name": "Myrrh-Mist Mending",
+        "type": "heal",
+        "power": 28,
+        "mp_cost": 12,
+        "stat": "INT",
+        "description": "Stanches wounds with cool silver-grey spirit mist."
+      },
+      {
+        "name": "Velvet Court Glare",
+        "type": "debuff",
+        "power": 22,
+        "mp_cost": 10,
+        "stat": "CHA",
+        "description": "Pins an adversary's nerve with ancient predatory poise."
+      },
+      {
+        "name": "Ultimate: Nocturne of the Pale Court",
+        "type": "ultimate",
+        "power": 56,
+        "mp_cost": 26,
+        "stat": "AGI",
+        "is_ultimate": true,
+        "description": "Summons midnight cypress shadows and silver fangs to shatter hostile rifts."
+      }
+    ],
+    "ghoul_humanoid_duelist": [
+      {
+        "name": "Cane-Sabre Riposte",
+        "type": "offensive",
+        "power": 25,
+        "mp_cost": 8,
+        "stat": "AGI",
+        "description": "Executes a crisp silver-cane thrust trained beneath the Ossuary arches."
+      },
+      {
+        "name": "Cold-Slate Guard",
+        "type": "buff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "END",
+        "description": "Steadies breathing and posture against supernatural shock."
+      },
+      {
+        "name": "Myrrh Smoke Feint",
+        "type": "debuff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "PER",
+        "description": "Clouds enemy sightlines in spiced mourning incense."
+      },
+      {
+        "name": "Ultimate: Funeral Toll Flourish",
+        "type": "ultimate",
+        "power": 45,
+        "mp_cost": 20,
+        "stat": "AGI",
+        "is_ultimate": true,
+        "description": "Unleashes three merciless shadow-blade arcs under tolling bronze chimes."
+      }
+    ],
+    "ghoul_canid_beast": [
+      {
+        "name": "Ashen Fang Takedown",
+        "type": "offensive",
+        "power": 26,
+        "mp_cost": 7,
+        "stat": "STR",
+        "description": "Lunges on four powerful paws with tearing spirit-canid jaws."
+      },
+      {
+        "name": "Barrow-Pack Howl",
+        "type": "buff",
+        "power": 18,
+        "mp_cost": 8,
+        "stat": "PER",
+        "description": "Lets out a chilling nocturnal howl that sharpens allied pack instincts."
+      },
+      {
+        "name": "Shadow-Hock Rend",
+        "type": "debuff",
+        "power": 20,
+        "mp_cost": 8,
+        "stat": "AGI",
+        "description": "Circles an enemy's blindside to hamper movement."
+      },
+      {
+        "name": "Ultimate: Wild Ash-Pit Stampede",
+        "type": "ultimate",
+        "power": 46,
+        "mp_cost": 20,
+        "stat": "STR",
+        "is_ultimate": true,
+        "description": "Rushes through grey mist as a blur of silver teeth and flying grave-earth."
+      }
+    ],
+    "crossroads_warden": [
+      {
+        "name": "Truce-Lantern Ward",
+        "type": "buff",
+        "power": 20,
+        "mp_cost": 9,
+        "stat": "PER",
+        "description": "Raises a tri-court frontier lantern barrier against ambushes."
+      },
+      {
+        "name": "Ofuda & Silver Strike",
+        "type": "offensive",
+        "power": 24,
+        "mp_cost": 8,
+        "stat": "STR",
+        "description": "Delivers a disciplined warden strike combining ward-talisman and steel."
+      },
+      {
+        "name": "Boundary Triage Draught",
+        "type": "heal",
+        "power": 24,
+        "mp_cost": 10,
+        "stat": "INT",
+        "description": "Applies frontier herbal balm to recover battered allies."
+      },
+      {
+        "name": "Ultimate: Joint Enclave Barrier",
+        "type": "ultimate",
+        "power": 44,
+        "mp_cost": 20,
+        "stat": "END",
+        "is_ultimate": true,
+        "description": "Anchors an unbroken sanctuary ring through howling frontier storms."
+      }
     ]
   },
   "merchant_catalogs": {
     "kitsune_spirit_merchant": {
+      "home_court": "kitsune",
       "open_stock": [
-        {"name": "Fox-Fire Lantern Talisman", "item_type": "consumable", "tier": 3, "price": 95, "effect": "Restores 35 MP and illuminates hidden anomalies"},
-        {"name": "Inari Honeyed Aburaage Box", "item_type": "consumable", "tier": 3, "price": 65, "effect": "Restores 40 HP and grants warm shrine fortune"},
-        {"name": "Vermilion Kitsune Ward Haori", "item_type": "armor", "slot": "chest", "tier": 2, "price": 420, "defense": 12, "effect": "Silk shrine haori threaded with foxfire wards (+2 AGI, +2 INT)"},
-        {"name": "Myōbu Silver Suzu Blade", "item_type": "weapon", "slot": "main_hand", "tier": 2, "price": 460, "attack": 16, "effect": "Consecrated shrine wakizashi that rings with azure foxfire (+2 PER)"}
+        {
+          "name": "Fox-Fire Lantern Talisman",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 95,
+          "effect": "Restores spirit focus and illuminates hidden anomalies"
+        },
+        {
+          "name": "Inari Honeyed Aburaage Box",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 65,
+          "effect": "Restores vitality and grants warm shrine fortune"
+        },
+        {
+          "name": "Vermilion Kitsune Ward Haori",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 420,
+          "defense": 12,
+          "effect": "Silk shrine haori threaded with foxfire wards"
+        },
+        {
+          "name": "Myōbu Silver Suzu Blade",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 460,
+          "attack": 16,
+          "effect": "Consecrated shrine wakizashi that rings with azure foxfire"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Kagura Gilded Kitsune Charm-Belt",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 520,
+          "effect": "Silk-knotted bronze bell charm honing spiritual clarity and reflexes"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Twilight Fox-Ember Tea Infuser",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 580,
+          "effect": "Hand-burnished bronze infuser carried by commuting shrine artisans at Lantern-Tide"
+        }
       ],
       "trusted_tier1_stock": [
-        {"name": "Celestial Nine-Tail Regalia Robe", "item_type": "armor", "slot": "chest", "tier": 1, "price": 1250, "defense": 22, "min_trust": 60, "effect": "Sovereign-blessed hinoki-silk vestment woven from starlit foxfire (+4 INT, +3 AGI)"},
-        {"name": "Kitsunebi Sovereign Kagura Fan", "item_type": "weapon", "slot": "main_hand", "tier": 1, "price": 1350, "attack": 26, "min_trust": 60, "effect": "Relic iron-and-gold ritual fan commanding ninefold spirit flame (+4 INT, +3 CHA)"}
+        {
+          "name": "Celestial Nine-Tail Regalia Robe",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 1,
+          "price": 1250,
+          "defense": 22,
+          "min_trust": 60,
+          "effect": "Sovereign-blessed hinoki-silk vestment woven from starlit foxfire"
+        },
+        {
+          "name": "Kitsunebi Sovereign Kagura Fan",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 1350,
+          "attack": 26,
+          "min_trust": 60,
+          "effect": "Relic iron-and-gold ritual fan commanding ninefold spirit flame"
+        }
       ]
     },
     "bunian_pusaka_merchant": {
+      "home_court": "bunian",
       "open_stock": [
-        {"name": "Embun Cempaka Dew Vial", "item_type": "consumable", "tier": 3, "price": 95, "effect": "Restores 45 HP and clears psychic exhaustion"},
-        {"name": "Bunga Rampai Spirit Sachet", "item_type": "consumable", "tier": 3, "price": 80, "effect": "Restores 30 MP and calms hostile forest spirits"},
-        {"name": "Songket Kayangan Pendekar Vestment", "item_type": "armor", "slot": "chest", "tier": 2, "price": 440, "defense": 13, "effect": "Gold-brocaded Nusantara royal cloth light as mist (+2 AGI, +2 CHA)"},
-        {"name": "Keris Lok Tujuh Berpamur", "item_type": "weapon", "slot": "main_hand", "tier": 2, "price": 480, "attack": 17, "effect": "Seven-wave meteoric-iron pusaka keris humming with leyline wind (+2 AGI)"}
+        {
+          "name": "Embun Cempaka Dew Vial",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 95,
+          "effect": "Restores vitality and clears psychic exhaustion"
+        },
+        {
+          "name": "Bunga Rampai Spirit Sachet",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 80,
+          "effect": "Restores spirit focus and calms hostile forest spirits"
+        },
+        {
+          "name": "Songket Kayangan Pendekar Vestment",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 440,
+          "defense": 13,
+          "effect": "Gold-brocaded Nusantara royal cloth light as mist"
+        },
+        {
+          "name": "Keris Lok Tujuh Berpamur",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 480,
+          "attack": 17,
+          "effect": "Seven-wave meteoric-iron pusaka keris humming with leyline wind"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Selendang Kayangan Mist-Sash",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 510,
+          "effect": "Woven jasmine-gold shawl blessed by Kayangan loom-masters"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Empu Silver Tepak Warding Case",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 590,
+          "effect": "Engraved Nusantara brass curio box brought in by nocturnal master empu"
+        }
       ],
       "trusted_tier1_stock": [
-        {"name": "Busana Diraja Seri Kayangan", "item_type": "armor", "slot": "chest", "tier": 1, "price": 1300, "defense": 23, "min_trust": 60, "effect": "Heirloom royal Bunian songket regalia blessed against all mortal & anomalous harm (+4 CHA, +3 END)"},
-        {"name": "Keris Pusaka Taming Sari Kayangan", "item_type": "weapon", "slot": "main_hand", "tier": 1, "price": 1400, "attack": 27, "min_trust": 60, "effect": "Legendary veiled-realm pusaka keris that moves of its own accord to parry lethal blows (+4 AGI, +3 PER)"}
+        {
+          "name": "Busana Diraja Seri Kayangan",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 1,
+          "price": 1300,
+          "defense": 23,
+          "min_trust": 60,
+          "effect": "Heirloom royal Bunian songket regalia blessed against all mortal & anomalous harm"
+        },
+        {
+          "name": "Keris Pusaka Taming Sari Kayangan",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 1400,
+          "attack": 27,
+          "min_trust": 60,
+          "effect": "Legendary veiled-realm pusaka keris that moves of its own accord to parry lethal blows"
+        }
       ]
     },
     "ranger_station_outfitter": {
       "open_stock": [
-        {"name": "Cempaka Brass Serunai", "item_type": "quest_item", "tier": 2, "price": 180, "quest_locked": true, "unsellable": true, "undroppable": true, "effect": "Handcrafted brass-and-bamboo Nusantara reed flute scented with white cempaka; parts the mist veil of Kampung Kayangan Bunian"},
-        {"name": "Alpine Trail Trauma Medkit", "item_type": "consumable", "tier": 3, "price": 75, "effect": "Restores 45 HP during wilderness expeditions"},
-        {"name": "Cold-Iron Signal Flare Pack", "item_type": "consumable", "tier": 3, "price": 85, "effect": "Grounds ambient spatial distortion and reveals trail hazards"},
-        {"name": "Reinforced Ranger Field Parka", "item_type": "armor", "slot": "chest", "tier": 3, "price": 260, "defense": 9, "effect": "Weatherproof forestry canvas jacket lined with warding mesh (+1 END, +1 PER)"}
+        {
+          "name": "Cempaka Brass Serunai",
+          "item_type": "quest_item",
+          "tier": 2,
+          "price": 180,
+          "quest_locked": true,
+          "unsellable": true,
+          "undroppable": true,
+          "effect": "Handcrafted brass-and-bamboo Nusantara reed flute scented with white cempaka; parts the mist veil of Kampung Kayangan Bunian"
+        },
+        {
+          "name": "Alpine Trail Trauma Medkit",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 75,
+          "effect": "Restores vitality during wilderness expeditions"
+        },
+        {
+          "name": "Cold-Iron Signal Flare Pack",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 85,
+          "effect": "Grounds ambient spatial distortion and reveals trail hazards"
+        },
+        {
+          "name": "Reinforced Ranger Field Parka",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 3,
+          "price": 260,
+          "defense": 9,
+          "effect": "Weatherproof forestry canvas jacket lined with warding mesh"
+        }
+      ]
+    },
+    "crossroads_bazaar_merchant": {
+      "merchant_name": "Tok Dalang Pelita",
+      "wing_node_id": "sub_crossroads_curio_arcade",
+      "open_stock": [
+        {
+          "name": "Dual-Realm Lantern Oil",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 75,
+          "effect": "Restores spirit focus and wards off Bleedwood veil-static for one encounter"
+        },
+        {
+          "name": "Cempaka-Sesame Spirit Bento",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 60,
+          "effect": "Restores vitality with warm confluence spices"
+        },
+        {
+          "name": "Mist-Woven Wayfarer Cloak",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 390,
+          "defense": 11,
+          "effect": "Reversible lantern-silk coat blending Inari trim and songket piping"
+        },
+        {
+          "name": "Boundary Ward Charm",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 310,
+          "effect": "Carved cedar-and-brass talisman humming near Bleedwood anomalies"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Lantern-Tide Confluence Astrolabe",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 980,
+          "effect": "Rare dual-script brass wayfinder unveiled by Tok Dalang Pelita during Lantern-Tide hours"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Confluence Twin-Moon Compass",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 1150,
+          "min_trust": 60,
+          "effect": "Mythic astrolabe compass aligned to both Spirit Courts"
+        }
+      ]
+    },
+    "ghoul_ossuary_merchant": {
+      "home_court": "ghoul",
+      "open_stock": [
+        {
+          "name": "Ash-Myrrh Clotting Vial",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 75,
+          "effect": "Restores vitality cleanly with cold myrrh tonic"
+        },
+        {
+          "name": "Cypress Formalin Focus Draft",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 90,
+          "effect": "Restores spirit focus and steadies nerve against spirit-dread"
+        },
+        {
+          "name": "Charcoal Mourning Greatcoat",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 430,
+          "defense": 13,
+          "effect": "Double-breasted obsidian wool greatcoat lined with silver ward-thread"
+        },
+        {
+          "name": "Obsidian Fang Stiletto",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 470,
+          "attack": 17,
+          "effect": "Slender blackened-silver stiletto forged in the Ossuary Vault"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Silver-Ferruled Ossuary Signet Ring",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 540,
+          "effect": "Carved black-onyx mourning ring weighted for razor-fast pack reflexes"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Midnight Embalmer's Glass Blade",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 620,
+          "attack": 20,
+          "effect": "Volcanic-glass surgical dueling knife brought by Ossuary apothecaries at Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Sovereign Velvet Pall Coat",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 1,
+          "price": 1280,
+          "defense": 23,
+          "min_trust": 60,
+          "effect": "Tailored midnight-velvet overcoat blessed by the Ossuary Court"
+        },
+        {
+          "name": "Pale Ossuary Bone-Cane Sabre",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 1380,
+          "attack": 27,
+          "min_trust": 60,
+          "effect": "Silver-ferruled dueling cane concealing an ancient Al-Ghul sabre"
+        }
+      ]
+    },
+    "bazaar_foxfire_tea_stall": {
+      "home_court": "kitsune",
+      "merchant_name": "Kikyo the Tea Peddler",
+      "wing_node_id": "sub_crossroads_bazaar_walk",
+      "open_stock": [
+        {
+          "name": "Roasted Chestnut & Matcha Box",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 55,
+          "effect": "Restores stamina along the lantern canal promenade"
+        },
+        {
+          "name": "Sweet Inari Aburaage Platter",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 65,
+          "effect": "Restores spirit energy with honeyed tofu skewers"
+        },
+        {
+          "name": "Foxfire Amber Gyokuro Flask",
+          "item_type": "consumable",
+          "tier": 2,
+          "price": 135,
+          "effect": "Steeped spirit-leaf tea sharpening perception across twilight mist"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Suzu-Infused Sencha Elixir",
+          "item_type": "consumable",
+          "tier": 2,
+          "price": 195,
+          "effect": "Rare shrine-harvest tea restoring full clarity between frontier expeditions"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Lantern-Steeped Nine-Herbs Oolong",
+          "item_type": "consumable",
+          "tier": 1,
+          "price": 320,
+          "effect": "Nocturnal master blend poured strictly during Lantern-Tide confluence hours"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Imperial Myōbu Matcha Lacquer Bowl",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 1100,
+          "min_trust": 60,
+          "effect": "Gilded ceremonial tea vessel consecrated by Sato-no-Inari"
+        }
+      ]
+    },
+    "bazaar_cempaka_kuih_stall": {
+      "home_court": "bunian",
+      "merchant_name": "Mak Cik Seri Kuih",
+      "wing_node_id": "sub_crossroads_bazaar_walk",
+      "open_stock": [
+        {
+          "name": "Pandan Kuih Serimuka Parcel",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 55,
+          "effect": "Fragrant coconut-pandan delicacy restoring vigor"
+        },
+        {
+          "name": "Cempaka Spice Jamuan Flask",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 70,
+          "effect": "Warm spiced jamuan herbal draught clearing weariness"
+        },
+        {
+          "name": "Bunga Telang Sapphire Rice Bento",
+          "item_type": "consumable",
+          "tier": 2,
+          "price": 140,
+          "effect": "Royally spiced Nusantara feast parcel steadying nerve and breath"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Kayangan Royal Jamu Tonic",
+          "item_type": "consumable",
+          "tier": 2,
+          "price": 205,
+          "effect": "Golden rhizome-and-dew royal jamu fortifying resilience"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Moon-Mist Pulut Kuning Vessel",
+          "item_type": "consumable",
+          "tier": 1,
+          "price": 310,
+          "effect": "Nocturnal Bunian royal offering prepared at Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Cempaka Sovereign Spice Censer",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 1120,
+          "min_trust": 60,
+          "effect": "Filigree silver feast censer bestowed on Kampung Kayangan Honorees"
+        }
+      ]
+    },
+    "bazaar_kagura_mask_stall": {
+      "home_court": "kitsune",
+      "merchant_name": "Hana the Lacquer Carver",
+      "wing_node_id": "sub_crossroads_kitsune_alley",
+      "open_stock": [
+        {
+          "name": "Carved Cedar Fox Half-Mask",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 3,
+          "price": 145,
+          "effect": "Lacquer festival half-mask lending elusive poise"
+        },
+        {
+          "name": "Cinnabar Kagura Ribbon Cord",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 3,
+          "price": 120,
+          "effect": "Braided crimson shrine cord warding minor illusions"
+        },
+        {
+          "name": "Gilded Urushi Kitsune Mantle",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 430,
+          "defense": 12,
+          "effect": "Lacquer-threaded silk mantle crafted in Kitsunebi Mask Alley"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Starlight Lacquer Nine-Tail Visor",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 530,
+          "effect": "Iridescent ceremonial mask piercing spirit shrouds and smoke"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Master-Carver Azure Kagura Mask",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 860,
+          "effect": "Heirloom stage mask brought from Sato-no-Inari only during Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Crown Mask of the First Fox",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 1290,
+          "min_trust": 60,
+          "effect": "Sovereign lacquer relic mask carrying true shrine authority"
+        }
+      ]
+    },
+    "bazaar_inari_ofuda_stall": {
+      "home_court": "kitsune",
+      "merchant_name": "Riku the Ofuda Calligrapher",
+      "wing_node_id": "sub_crossroads_kitsune_alley",
+      "open_stock": [
+        {
+          "name": "Vermilion Flame-Ward Ofuda",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 85,
+          "effect": "Consecrated paper talisman snapping with sharp spirit sparks"
+        },
+        {
+          "name": "Cedar Purification Prayer Scroll",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 90,
+          "effect": "Clears lingering dread and steadies channeling"
+        },
+        {
+          "name": "Silver-Inked Foxfire Seal Ribbon",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 395,
+          "effect": "Weighted calligraphy scroll sleeve magnifying focused channeling"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Gold-Leaf Torii Binding Scroll",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 510,
+          "effect": "Archival Inari sealing strip dampening hostile anomalous hexes"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Moonlit Archive Twin-Brush Case",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 820,
+          "effect": "Rare lacquer brush-box supplied by Sato-no-Inari scribes at Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Original Inari Nine-Seal Compendium",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 1240,
+          "min_trust": 60,
+          "effect": "Sealed shrine scroll-case reserved for trusted Kitsune Honorees"
+        }
+      ]
+    },
+    "bazaar_songket_silk_stall": {
+      "home_court": "bunian",
+      "merchant_name": "Puan Zainab Tenun",
+      "wing_node_id": "sub_crossroads_bunian_arcade",
+      "open_stock": [
+        {
+          "name": "Silver-Hemmed Batik Pocket Square",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 3,
+          "price": 125,
+          "effect": "Refined indigo-and-gold cloth granting courtly composure"
+        },
+        {
+          "name": "Bunga Cempaka Kebaya Silk Coat",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 2,
+          "price": 410,
+          "defense": 12,
+          "effect": "Tailored songket-cuffed tunic woven to shed mire damp and ash"
+        },
+        {
+          "name": "Embossed Pendekar Tengkolok Wrap",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 340,
+          "effect": "Crisply pleated headdress symbol of agile Nusantara dueling grace"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Tenun Emas Royal Drape Sash",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 515,
+          "effect": "Shimmering gold-threaded silk sash prized in Seri Nusantara"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Mist-Spun Kayangan Evening Kebaya",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 1,
+          "price": 890,
+          "defense": 18,
+          "effect": "Loom-fresh royal garment brought to the Night Market at Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Mantle of the Mist-Queen's Loom",
+          "item_type": "armor",
+          "slot": "chest",
+          "tier": 1,
+          "price": 1310,
+          "defense": 22,
+          "min_trust": 60,
+          "effect": "Mythic cloth-of-gold songket reserved for Bunian Cottage Honorees"
+        }
+      ]
+    },
+    "bazaar_empu_pusaka_stall": {
+      "home_court": "bunian",
+      "merchant_name": "Empu Haris",
+      "wing_node_id": "sub_crossroads_bunian_arcade",
+      "open_stock": [
+        {
+          "name": "Engraved Brass Sirih Bowl",
+          "item_type": "item",
+          "tier": 3,
+          "price": 110,
+          "effect": "Polished ceremonial brasswork carrying a faint clove sheen"
+        },
+        {
+          "name": "Pamur Iron Tombak Spear-Tip",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 460,
+          "attack": 17,
+          "effect": "Pattern-welded short blade forged over Kayangan charcoal"
+        },
+        {
+          "name": "Kacip Brass Warding Calipers",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 325,
+          "effect": "Pocket smith-tool balanced to deflect erratic spirit static"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Badik Berpamur Frontier Knife",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 540,
+          "attack": 19,
+          "effect": "Meteoric-iron utility blade weighted for rapid close quarters"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Empu's Twilight Silver Keris",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 940,
+          "attack": 22,
+          "effect": "Nine-wave silvered pusaka blade brought down by Kampung smiths after dusk"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Sovereign Pusaka Keris Lok Sembilan",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 1390,
+          "attack": 27,
+          "min_trust": 60,
+          "effect": "Royal nine-wave heirloom keris forged for trusted Bunian allies"
+        }
+      ]
+    },
+    "bazaar_ghoul_curio_stall": {
+      "home_court": "ghoul",
+      "open_while_distrusted": true,
+      "merchant_name": "Nadia al-Kafan",
+      "wing_node_id": "sub_crossroads_curio_arcade",
+      "open_stock": [
+        {
+          "name": "Cold Myrrh & Cedar Respite Phial",
+          "item_type": "consumable",
+          "tier": 3,
+          "price": 80,
+          "effect": "Spiced funerary balm restoring vitality cleanly; sold openly even to outsiders"
+        },
+        {
+          "name": "Carved Onyx Canid Bone-Charm",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 3,
+          "price": 160,
+          "effect": "Cool bone-and-onyx amulet steadying pulse near hostile haunts"
+        },
+        {
+          "name": "Silver-Edged Embalming Knife",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 2,
+          "price": 450,
+          "attack": 17,
+          "effect": "Surgical steel-and-silver dueling knife honed to a whisper-thin edge"
+        }
+      ],
+      "high_tier_themed_stock": [
+        {
+          "name": "Weeping Cypress Silver Mourning Brooch",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 2,
+          "price": 525,
+          "effect": "Chilled filigree pin dampening sensory overload in deep catacombs"
+        }
+      ],
+      "lantern_tide_rare_stock": [
+        {
+          "name": "Ossuary Artisan's Velvet Cravat",
+          "item_type": "accessory",
+          "slot": "Accessory",
+          "tier": 1,
+          "price": 840,
+          "effect": "Midnight-silk collar pin lined with silver ward-wire, displayed during Lantern-Tide"
+        }
+      ],
+      "trusted_tier1_stock": [
+        {
+          "name": "Arch-Embalmer's Crimson-Hilt Lancet",
+          "item_type": "weapon",
+          "slot": "main_hand",
+          "tier": 1,
+          "price": 1360,
+          "attack": 27,
+          "min_trust": 60,
+          "effect": "Heirloom Ossuary blade awarded to revered Majlis al-Ghūl Honorees"
+        }
       ]
     }
   },
@@ -505,6 +2088,13 @@
       "target_node_id": "loc_hidden_bunian_village",
       "title": "Fragrance of Cempaka in the Banyan Mist",
       "text": "Forestry rangers at the Old Ranger Station speak of lost hikers guided home by graceful figures in gold-threaded songket near the Mist-Veiled Banyan & Bamboo Glade—and keep a curious Cempaka Brass Serunai traded by an unseen flute-player."
+    },
+    {
+      "id": "rumor_ghoul_catacomb_signet",
+      "village_key": "ghoul",
+      "target_node_id": "loc_hidden_ghoul_village",
+      "title": "Ink-Black Water Below the Ossuary",
+      "text": "Scavengers in Undercity Drifter Bazaar whisper of the motionless Black-Water Scrying Font hidden deep inside the Ossuary Catacombs—and say a Bone-Etched Catacomb Signet sold at the salvage stalls opens the passage to The Pale Ossuary."
     }
   ],
   "festivals": [
@@ -524,5 +2114,464 @@
       "description": "Luminous white cempaka blossoms bloom out of season across the Wilderness Forest Reserve while distant gamelan and serunai melodies drift from the Mist-Veiled Banyan Glade.",
       "veil_dc_reduction": 2
     }
-  ]
+  ],
+  "ghoul_roster_slots": [
+    {
+      "slot_key": "ghoul_heir",
+      "role": "Al-Ghul Ossuary Heir",
+      "rank_title": "Ossuary Heir",
+      "agent_tier": 5,
+      "is_royal_heir": true,
+      "opposite_gender_to_pc": true,
+      "virgin": true,
+      "initial_affinity": 10,
+      "predatory_fascination_on_pc": true,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "wolf",
+      "combat_kit": "ghoul_sovereign",
+      "home_node": "sub_ghoul_sovereign_manor",
+      "schedule": {
+        "morning": "sub_ghoul_sovereign_manor",
+        "afternoon": "sub_ghoul_inner_plaza",
+        "evening": "sub_ghoul_leyline_crypt",
+        "night": "sub_ghoul_sovereign_manor"
+      },
+      "personality": "Poised, sharply observant heir to The Pale Ossuary—dresses in immaculate black-tailored wool, flashes faint predatory amusement at bold outsiders, and regards the player with unnervingly warm curiosity despite the Council's distrust."
+    },
+    {
+      "slot_key": "ghoul_elder",
+      "role": "Ossuary Council Arbiter",
+      "rank_title": "First Mourning Arbiter",
+      "agent_tier": 4,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "striped_hyena",
+      "combat_kit": "ghoul_sovereign",
+      "home_node": "sub_ghoul_inner_plaza",
+      "schedule": {
+        "morning": "sub_ghoul_inner_plaza",
+        "afternoon": "sub_ghoul_ledger_hall",
+        "evening": "sub_ghoul_inner_plaza",
+        "night": "sub_ghoul_bell_columbarium"
+      },
+      "personality": "Stern silver-haired gatekeeper of Ossuary precedent who scrutinizes outsiders' nerve before bowing an inch."
+    },
+    {
+      "slot_key": "ghoul_merchant",
+      "role": "Formalin & Bone-Relic Apothecary",
+      "rank_title": "Ossuary Purveyor",
+      "agent_tier": 3,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "jackal",
+      "merchant_type": "ghoul_ossuary_merchant",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "sub_ghoul_curio_morgue",
+      "schedule": {
+        "morning": "sub_ghoul_curio_morgue",
+        "afternoon": "sub_ghoul_curio_morgue",
+        "evening": "sub_crossroads_curio_arcade",
+        "night": "sub_ghoul_curio_morgue"
+      },
+      "personality": "Immaculately polite apothecary who polishes silver reliquaries and keeps bespoke obsidian greatcoats in stock."
+    },
+    {
+      "slot_key": "ghoul_embalmer",
+      "role": "Cold-Slab Elixir Alchemist",
+      "rank_title": "Master Distiller",
+      "agent_tier": 3,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "coyote",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "sub_ghoul_prep_gallery",
+      "schedule": {
+        "morning": "sub_ghoul_prep_gallery",
+        "afternoon": "sub_ghoul_distillation_vault",
+        "evening": "sub_ghoul_prep_gallery",
+        "night": "sub_ghoul_distillation_vault"
+      },
+      "personality": "Quiet perfume-and-myrrh distiller pressing cool resin draughts in slate-walled vaults."
+    },
+    {
+      "slot_key": "ghoul_wake_host",
+      "role": "Black-Velvet Wake Parlor Proprietor",
+      "rank_title": "Parlor Host",
+      "agent_tier": 3,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "jackal",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "sub_ghoul_wake_lounge",
+      "schedule": {
+        "morning": "sub_ghoul_wake_lounge",
+        "afternoon": "sub_ghoul_private_booth",
+        "evening": "sub_ghoul_wake_lounge",
+        "night": "sub_ghoul_wake_lounge"
+      },
+      "personality": "Dry-witted midnight host pouring spiced cardamom coffee and plum wine in velvet booths lit by sodium lamps."
+    },
+    {
+      "slot_key": "ghoul_pit_champion",
+      "role": "Ash-Pit Pack Sparring Champion",
+      "rank_title": "Pack Sentinel",
+      "agent_tier": 4,
+      "default_humanoid_outside_hunt": false,
+      "forced_initial_form": "ghoul:canid",
+      "canid_species": "striped_hyena",
+      "combat_kit": "ghoul_canid_beast",
+      "home_node": "sub_ghoul_sparring_pit",
+      "schedule": {
+        "morning": "sub_ghoul_sparring_pit",
+        "afternoon": "sub_ghoul_trophy_rack",
+        "evening": "sub_ghoul_sparring_pit",
+        "night": "sub_boneyard_headstone_rim"
+      },
+      "personality": "Fierce pack-duelist equally comfortable sparring on two feet or bounding across grave-ash as a silver-eyed striped hyena."
+    },
+    {
+      "slot_key": "ghoul_archivist",
+      "role": "Silent Columbarium Bell-Archivist",
+      "rank_title": "Crypt Archivist",
+      "agent_tier": 3,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "wolf",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "sub_ghoul_ledger_hall",
+      "schedule": {
+        "morning": "sub_ghoul_ledger_hall",
+        "afternoon": "sub_ghoul_bell_columbarium",
+        "evening": "sub_ghoul_ledger_hall",
+        "night": "sub_ghoul_leyline_crypt"
+      },
+      "personality": "Methodical genealogist tracking century-old truces in brass-clasped vellum ledgers beneath copper bells."
+    },
+    {
+      "slot_key": "ghoul_barrow_scout",
+      "role": "Ashen Barrowlands Outrider",
+      "rank_title": "Moor Outrider",
+      "agent_tier": 4,
+      "default_humanoid_outside_hunt": false,
+      "forced_initial_form": "ghoul:canid",
+      "canid_species": "coyote",
+      "combat_kit": "ghoul_canid_beast",
+      "home_node": "sub_boneyard_headstone_rim",
+      "schedule": {
+        "morning": "sub_boneyard_headstone_rim",
+        "afternoon": "sub_boneyard_hearse_lot",
+        "evening": "sub_boneyard_lantern_overlook",
+        "night": "sub_ghoul_sparring_pit"
+      },
+      "personality": "Lean frontier outrider scouting the Ashen Barrowlands in quadruped coyote form and challenging trespassers with low growls before parlance."
+    },
+    {
+      "slot_key": "ghoul_city_wanderer_hosp",
+      "role": "Night-Shift Pale Observer",
+      "rank_title": "City Emissary",
+      "agent_tier": 3,
+      "is_daytime_wanderer": true,
+      "is_ghoul_city_wanderer": true,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "jackal",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "loc_hosp_morgue",
+      "glamour_tell": "unblinking pale slate eyes reflected clearly in hospital glass, cool myrrh scent, and subtly sharp canines under fluorescent lights",
+      "schedule": {
+        "morning": "loc_hosp_emergency_triage",
+        "afternoon": "loc_hosp_morgue",
+        "evening": "sub_crypt_ossuary",
+        "night": "sub_ghoul_wake_lounge"
+      },
+      "personality": "Collected Al-Ghul courier moving naturally through daylight hospital corridors and uptown vaults in sleek dark wool tailoring."
+    },
+    {
+      "slot_key": "ghoul_city_wanderer_undercity",
+      "role": "Subway Salvage Signet-Runner",
+      "rank_title": "Undercity Scout",
+      "agent_tier": 3,
+      "is_daytime_wanderer": true,
+      "is_ghoul_city_wanderer": true,
+      "default_humanoid_outside_hunt": true,
+      "forced_initial_form": "ghoul:humanoid",
+      "canid_species": "wolf",
+      "combat_kit": "ghoul_humanoid_duelist",
+      "home_node": "sub_uc_salvage_stalls",
+      "glamour_tell": "flawless alabaster pallor untouched by tunnel soot, silver-grey irises, and a crisp shadow that leans an inch toward the Undercity font",
+      "schedule": {
+        "morning": "sub_uc_salvage_stalls",
+        "afternoon": "sub_crypt_ossuary",
+        "evening": "sub_uc_tunnel_cantina",
+        "night": "sub_ghoul_inner_plaza"
+      },
+      "personality": "Dry-humored catacomb scout keeping tabs on surface relic stalls and tipping off sharp-eyed travelers about the Black Font."
+    }
+  ],
+  "spirit_court_commissions": {
+    "kitsune": [
+      {
+        "template_id": "kitsune_city_chinatown_relic",
+        "title": "Recover Stolen Inari Lacquer Seal in Chinatown",
+        "objective": "Track down an antique broker in Chinatown who fenced a stolen Sato-no-Inari fox-seal from a pilgrim shrine and reclaim it before cold-iron buyers crack its ward.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "zone_chinatown",
+        "location_label": "Chinatown District",
+        "gold_reward": 145,
+        "xp_reward": 75,
+        "rep_reward": 10,
+        "track": "standard",
+        "quest_type": "Relic Retrieval",
+        "required_item": "Inari Lacquer Fox-Seal"
+      },
+      {
+        "template_id": "kitsune_city_shipyard_poachers",
+        "title": "Intercept Cold-Iron Poacher Crates at the Drydocks",
+        "objective": "Infiltrate the Drydock Shipyard piers where cold-iron poachers are rigging spirit-snare cages for kitsune couriers and disable their manifest crates.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_drydock_shipyard",
+        "location_label": "Drydock Shipyard",
+        "gold_reward": 165,
+        "xp_reward": 85,
+        "rep_reward": 12,
+        "track": "standard",
+        "quest_type": "Sabotage & Rescue"
+      },
+      {
+        "template_id": "kitsune_city_industrial_cell",
+        "title": "Neutralize Cold-Iron Smelter Cell in the Industrial Zone",
+        "objective": "Locate the clandestine foundry workshop in the Industrial District forging iron shackles tuned against Nine-Tail shrine messengers and dismantle its furnace coils.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "zone_industrial",
+        "location_label": "Industrial District",
+        "gold_reward": 170,
+        "xp_reward": 90,
+        "rep_reward": 12,
+        "track": "standard",
+        "quest_type": "Cell Disruption"
+      },
+      {
+        "template_id": "kitsune_city_curio_offering",
+        "title": "Procure Mortal Shrine Offerings at the Occult Curio Shop",
+        "objective": "Collect rare aged cedarwood incense and hand-glazed aburaage vessels commissioned through the Occult Curio Shop for the Sato-no-Inari twilight lanterns.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_occult_curio_shop",
+        "location_label": "Occult Curio Shop",
+        "gold_reward": 120,
+        "xp_reward": 65,
+        "rep_reward": 8,
+        "track": "standard",
+        "quest_type": "Procurement",
+        "required_item": "Consecrated Cedar Offering"
+      },
+      {
+        "template_id": "kitsune_frontier_peaks_storm",
+        "title": "Re-Ground the Storm-Split Torii Ridge in Cloud-Fang Crags",
+        "objective": "Ascend Cloud-Fang Crags to the Storm-Split Torii Ridge, clear static-charged mountain wraiths, and seat a fresh fox-fire conductor pin.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_peaks",
+        "sub_target_node_id": "loc_peaks_split_torii",
+        "location_label": "Cloud-Fang Crags — Storm-Split Torii Ridge",
+        "gold_reward": 180,
+        "xp_reward": 95,
+        "rep_reward": 12,
+        "track": "standard",
+        "quest_type": "Frontier Sweep"
+      },
+      {
+        "template_id": "kitsune_frontier_wilds_bleedwood",
+        "title": "Prune Bleedwood Snare Vines Along the Boundary Trail",
+        "objective": "Patrol the Weeping Bleedwood perimeter and sever blood-sap snare roots choking the lantern markers guiding young foxes home.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_wilds",
+        "location_label": "The Weeping Bleedwood — Untamed Spirit Wilds",
+        "gold_reward": 150,
+        "xp_reward": 80,
+        "rep_reward": 10,
+        "track": "standard",
+        "quest_type": "Frontier Patrol"
+      }
+    ],
+    "bunian": [
+      {
+        "template_id": "bunian_city_hiker_escort",
+        "title": "Guide Mist-Bound Mortal Hikers Off the Forest Trails",
+        "objective": "Find two disoriented city hikers wandering off the Wilderness Forest Trails near the mist veil and guide them back to marked human trailheads without panic.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_forest_trails",
+        "location_label": "Wilderness Forest Trails",
+        "gold_reward": 140,
+        "xp_reward": 75,
+        "rep_reward": 10,
+        "track": "standard",
+        "quest_type": "Escort & Veil Protection"
+      },
+      {
+        "template_id": "bunian_city_staircase_rescue",
+        "title": "Unthread Illusion Loops Around the Woods Staircase",
+        "objective": "Dispel an anomalous recursion trapping late-night joggers on the isolated Woods Staircase before mortal emergency crews stumble past the Banyan threshold.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_woods_staircase",
+        "location_label": "Forest Reserve Woods Staircase",
+        "gold_reward": 155,
+        "xp_reward": 80,
+        "rep_reward": 11,
+        "track": "standard",
+        "quest_type": "Veil Stabilization"
+      },
+      {
+        "template_id": "bunian_city_suburbs_tether",
+        "title": "Sever Occult Ley-Tethers Under Quiet Suburbs",
+        "objective": "Locate an unauthorized cult siphon draining ley-mist from residential drainage culverts in the Quiet Suburbs and cut its chalk-circle anchor.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "zone_suburbs",
+        "location_label": "Quiet Residential Suburbs",
+        "gold_reward": 160,
+        "xp_reward": 85,
+        "rep_reward": 11,
+        "track": "standard",
+        "quest_type": "Tether Purge"
+      },
+      {
+        "template_id": "bunian_city_beach_catalysts",
+        "title": "Gather Pure Tide-Salt Catalysts at the Seaside Coast",
+        "objective": "Harvest unblemished night-tide sea salt crystals and washed white coral shards from the Seaside Beach for Royal Kayangan purification censers.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "zone_seaside_beach",
+        "location_label": "Seaside Coast",
+        "gold_reward": 125,
+        "xp_reward": 70,
+        "rep_reward": 9,
+        "track": "standard",
+        "quest_type": "Catalyst Gathering",
+        "required_item": "Pure Moon-Tide Salt"
+      },
+      {
+        "template_id": "bunian_city_university_tether",
+        "title": "Pacify Dormant Ley-Rift Near the University Grounds",
+        "objective": "Seal an accidental amateur summoning rift humming under the University research annex before it corrodes nearby Kayangan windlines.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "zone_university",
+        "location_label": "University Campus",
+        "gold_reward": 150,
+        "xp_reward": 80,
+        "rep_reward": 10,
+        "track": "standard",
+        "quest_type": "Tether Purge"
+      },
+      {
+        "template_id": "bunian_frontier_mire_bell",
+        "title": "Calm the Drowned Bell-Shrine in Sunken Lotus Mire",
+        "objective": "Traverse the Sunken Lotus Mire boardwalks, hush the mud-choked bronze shrine bell attracting bog phantoms, and restore calm water reflections.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_mire",
+        "sub_target_node_id": "loc_mire_bell_bog",
+        "location_label": "The Sunken Lotus Mire — Drowned Bell-Shrine",
+        "gold_reward": 180,
+        "xp_reward": 95,
+        "rep_reward": 12,
+        "track": "standard",
+        "quest_type": "Frontier Sanctuary"
+      },
+      {
+        "template_id": "bunian_frontier_wilds_wards",
+        "title": "Re-Kindle Kayangan Boundary Censers in the Bleedwood",
+        "objective": "Escort brass benzoin censers along the Weeping Bleedwood perimeter to drive blight mist away from Kampung Kayangan orchards.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_wilds",
+        "location_label": "The Weeping Bleedwood — Untamed Spirit Wilds",
+        "gold_reward": 145,
+        "xp_reward": 80,
+        "rep_reward": 10,
+        "track": "standard",
+        "quest_type": "Frontier Patrol"
+      }
+    ],
+    "ghoul": [
+      {
+        "template_id": "ghoul_dark_morgue_heist",
+        "title": "Nocturnal Marrow & Cold-Drawer Extraction at Municipal Morgue",
+        "objective": "Slip past night-shift orderlies into the Municipal Hospital Morgue, liberate three unclaimed cryo-sealed bone-marrow ampoules and velvet-wrapped donor satchels, and deliver them discreetly to The Pale Ossuary without raising an alarm.",
+        "gore_objective": "Bypass the Municipal Hospital Morgue freezer locks, prize open stainless cold-drawers slick with condensation and dried formaldehyde, harvest fresh crimson bone-marrow phials and cold arterial grafts before autopsy begins, and smuggle the wet velvet satchel back beneath the Black Font without alerting Human security.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_hosp_morgue",
+        "location_label": "Municipal Hospital Morgue",
+        "gold_reward": 240,
+        "xp_reward": 115,
+        "rep_reward": 16,
+        "track": "dark_crime",
+        "quest_type": "Dark Crime Extraction"
+      },
+      {
+        "template_id": "ghoul_dark_crypt_gravedig",
+        "title": "Midnight Ossuary Excavation Under Weeping Crypt",
+        "objective": "Break the modern concrete sub-seal inside Uptown's Weeping Crypt ossuary chamber, exhume two pre-treaty alabaster bone reliquaries sought by Majlis al-Ghul elders, and cover your spadework before dawn.",
+        "gore_objective": "Pry loose the cracked stone slab in Uptown's Weeping Crypt ossuary chamber, sift through wet grave earth, splintered ribcages, and blackened tallow to lift two pre-treaty marrow-stained reliquaries for Majlis al-Ghul elders without leaving tracks.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_weeping_crypt",
+        "sub_target_node_id": "sub_crypt_ossuary",
+        "location_label": "Weeping Crypt — Lower Ossuary",
+        "gold_reward": 260,
+        "xp_reward": 125,
+        "rep_reward": 18,
+        "track": "dark_crime",
+        "quest_type": "Dark Crime Excavation"
+      },
+      {
+        "template_id": "ghoul_dark_blackmarket_remains",
+        "title": "Black-Market Remains Hijack Behind Hospital Morgue Dock",
+        "objective": "Ambush an unlicensed syndicate hearse at the Municipal Hospital Morgue loading dock and seize its lead-lined embalmed remains crates before mortal brokers carve them up.",
+        "gore_objective": "Corner the syndicate meat-wagon behind Municipal Hospital Morgue, wrench open its ice-packed zinc coffins smelling of copper blood and cold formalin, and haul the stolen cadaver crates back into the Undercity dark.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_hosp_morgue",
+        "location_label": "Municipal Hospital Morgue Dock",
+        "gold_reward": 220,
+        "xp_reward": 105,
+        "rep_reward": 12,
+        "track": "dark_crime",
+        "quest_type": "Dark Crime Contraband"
+      },
+      {
+        "template_id": "ghoul_grey_boneyard_cull",
+        "title": "Cull Feral Rogue Al-Ghul Pack in the Ashen Barrowlands",
+        "objective": "Hunt down a rabid pack of truce-breaking feral Al-Ghul terrorizing mourners along the Ashen Barrowlands ridges so Ossuary roads remain disciplined and lawful.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_boneyard",
+        "sub_target_node_id": "loc_boneyard_barrow_moor",
+        "location_label": "The Ashen Barrowlands — Sunken Barrow-Moor",
+        "gold_reward": 135,
+        "xp_reward": 80,
+        "rep_reward": 6,
+        "track": "grey_neutral",
+        "quest_type": "Frontier Pack Cull"
+      },
+      {
+        "template_id": "ghoul_grey_syndicate_raiders",
+        "title": "Drive Syndicate Grave-Robbers Out of Weeping Crypt",
+        "objective": "Expel a crew of armed Clandestine Syndicate scavengers caught looting brass plaques near Uptown's Weeping Crypt while leaving the buried dead undisturbed.",
+        "target_realm_id": "realm_city_metro",
+        "target_node_id": "loc_weeping_crypt",
+        "location_label": "Weeping Crypt Grounds",
+        "gold_reward": 125,
+        "xp_reward": 70,
+        "rep_reward": 5,
+        "track": "grey_neutral",
+        "quest_type": "Civic Watch Duty"
+      },
+      {
+        "template_id": "ghoul_grey_wilds_scavengers",
+        "title": "Clear Rabid Carrion-Hounds From Bleedwood Ossuary Cairns",
+        "objective": "Sweep a pack of anomalous carrion-stalkers roosting beside the western Weeping Bleedwood boundary cairns without disturbing Kitsune or Bunian shrines.",
+        "target_realm_id": "realm_veiled_spirit_world",
+        "target_node_id": "zone_spirit_wilds",
+        "location_label": "The Weeping Bleedwood — Boundary Cairns",
+        "gold_reward": 130,
+        "xp_reward": 75,
+        "rep_reward": 5,
+        "track": "grey_neutral",
+        "quest_type": "Frontier Patrol"
+      }
+    ]
+  }
 }

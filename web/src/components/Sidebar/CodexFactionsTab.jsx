@@ -70,6 +70,12 @@ export const getFactionCategoryBadge = (faction, t) => {
         icon: '⛩️',
         style: 'bg-amber-950/70 text-amber-300 border-amber-700/50',
       };
+    case 'spirit_court':
+      return {
+        label: t('spirit_realm.spirit_court_badge', 'Spirit Court'),
+        icon: '⛩️',
+        style: 'bg-amber-950/70 text-amber-200 border-amber-600/60',
+      };
     case 'cult':
       return {
         label: t('codex.tag_cult', 'Occult Cult'),
@@ -214,11 +220,15 @@ const CodexFactionsTab = ({
         const playerRank = Number(faction.player_rank || 0);
         const eligibleRank = Number(faction.eligible_rank || 0);
         const isAnomScenario = String(session?.scenario || '').toLowerCase().includes('anomalous');
+        const isSpiritCourt = Boolean(
+          faction.category === 'spirit_court' ||
+          faction.diplomatic_stance === 'spirit_court'
+        );
         const isOutlaw = Boolean(faction.is_outlaw || faction.diplomatic_stance === 'outlaw');
-        const isAnomMainFaction = isAnomScenario && !faction.is_school_club;
+        const isAnomMainFaction = isAnomScenario && !faction.is_school_club && !isSpiritCourt;
         const promoTiers = Array.isArray(faction.promotion_tiers) ? faction.promotion_tiers : [];
-        const canPromote = isMember && eligibleRank > playerRank && playerRank < 4;
-        const canRest = isAnomMainFaction ? isMember : rep >= 1;
+        const canPromote = !isSpiritCourt && isMember && eligibleRank > playerRank && playerRank < 4;
+        const canRest = isSpiritCourt ? rep >= 1 : (isAnomMainFaction ? isMember : rep >= 1);
         const qmBlocked = faction.quartermaster_eligible === false;
         const bountyBlocked = faction.bounty_board_eligible === false;
         const roster = Array.isArray(faction.leadership_roster) ? faction.leadership_roster : [];
@@ -401,19 +411,73 @@ const CodexFactionsTab = ({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
                     {t('codex.faction_hq_ops', 'Faction Headquarters Operations')}
                   </span>
+                  {isSpiritCourt && (
+                    <div className="space-y-1.5 mb-2">
+                      <p className="text-[10.5px] text-amber-200/85 bg-amber-950/25 border border-amber-800/40 rounded px-2 py-1.5 leading-snug">
+                        ⛩️ {t('spirit_realm.spirit_court_autonomous_note', 'Autonomous Spirit Court — earn standing via deeds, commissions & tokens instead of enlistment.')}
+                      </p>
+                      {faction.sworn_ally_summon && (
+                        <div className={`p-2 rounded border text-[11px] space-y-1 ${
+                          faction.sworn_ally_active
+                            ? 'bg-emerald-950/35 border-emerald-600/60 text-emerald-100'
+                            : 'bg-black/45 border-fantasy-border/40 text-gray-300'
+                        }`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-bold text-[10.5px] uppercase tracking-wider flex items-center gap-1">
+                              <span>{faction.sworn_ally_summon.emoji || '⛩️'}</span>
+                              <span>{t('spirit_realm.sworn_ally_badge', 'Sworn Ally')} (90+)</span>
+                            </span>
+                            <span className={`text-[9.5px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              faction.sworn_ally_active
+                                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                                : 'bg-black/50 text-gray-400 border border-fantasy-border/40'
+                            }`}>
+                              {faction.sworn_ally_active ? 'Active' : `${Math.max(0, rep)}/90 Rep`}
+                            </span>
+                          </div>
+                          {faction.sworn_ally_active ? (
+                            <>
+                              <div className="text-[11px]">
+                                <strong className="text-amber-300">{t('spirit_realm.sworn_ally_summon_label', '90+ Native Summon')}:</strong>{' '}
+                                {faction.sworn_ally_summon.name} ({faction.sworn_ally_summon.duration_turns}T • {faction.sworn_ally_summon.mp_cost} MP)
+                              </div>
+                              {faction.sworn_ally_stat_bonuses && Object.keys(faction.sworn_ally_stat_bonuses).length > 0 && (
+                                <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                                  <span className="text-[10px] text-emerald-300 font-semibold mr-1">
+                                    {t('spirit_realm.sworn_ally_stat_label', '90+ Sovereign Blessing')}:
+                                  </span>
+                                  {Object.entries(faction.sworn_ally_stat_bonuses).map(([statK, statV]) => (
+                                    <span key={statK} className="text-[9.5px] font-mono px-1.5 py-0.5 rounded bg-black/50 text-emerald-200 border border-emerald-700/40">
+                                      +{statV} {statK}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <p className="text-[10px] text-gray-400 leading-snug">
+                              {t('spirit_realm.sworn_ally_tier_hint', "Reach +90 standing to unlock this court's stackable Sovereign Blessing & 3-turn combat summon.")}
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-1.5">
-                    <button
-                      disabled={Boolean(factionBusy)}
-                      onClick={() => onFactionOp(faction.faction_id, isMember ? 'leave' : 'join')}
-                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
-                        isMember
-                          ? 'bg-red-950/40 hover:bg-red-900/50 border-red-800/60 text-red-300'
-                          : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-700/60 text-emerald-300'
-                      }`}
-                    >
-                      <Flag size={12} />
-                      <span>{isMember ? t('codex.leave_faction', 'Leave Faction') : t('codex.join_faction', 'Pledge / Join')}</span>
-                    </button>
+                    {!isSpiritCourt && (
+                      <button
+                        disabled={Boolean(factionBusy)}
+                        onClick={() => onFactionOp(faction.faction_id, isMember ? 'leave' : 'join')}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                          isMember
+                            ? 'bg-red-950/40 hover:bg-red-900/50 border-red-800/60 text-red-300'
+                            : 'bg-emerald-950/40 hover:bg-emerald-900/50 border-emerald-700/60 text-emerald-300'
+                        }`}
+                      >
+                        <Flag size={12} />
+                        <span>{isMember ? t('codex.leave_faction', 'Leave Faction') : t('codex.join_faction', 'Pledge / Join')}</span>
+                      </button>
+                    )}
 
                     <button
                       disabled={Boolean(factionBusy) || !canRest}
@@ -435,45 +499,49 @@ const CodexFactionsTab = ({
                       <span>{t('codex.safehouse_rest', 'Safehouse Rest')}</span>
                     </button>
 
-                    <button
-                      disabled={Boolean(factionBusy) || qmBlocked}
-                      onClick={() => onFactionOp(faction.faction_id, 'quartermaster')}
-                      title={qmBlocked ? t('codex.qm_locked_tip', 'Locked: Outlaws are blacklisted at Bureau HQ; specialized faction armories are members-only.') : undefined}
-                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
-                        qmBlocked
-                          ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
-                          : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300'
-                      }`}
-                    >
-                      <ShoppingBag size={12} />
-                      <span>{qmBlocked ? `🔒 ${t('codex.quartermaster', 'Quartermaster')}` : t('codex.quartermaster', 'Quartermaster')}</span>
-                    </button>
+                    {!isSpiritCourt && (
+                      <button
+                        disabled={Boolean(factionBusy) || qmBlocked}
+                        onClick={() => onFactionOp(faction.faction_id, 'quartermaster')}
+                        title={qmBlocked ? t('codex.qm_locked_tip', 'Locked: Outlaws are blacklisted at Bureau HQ; specialized faction armories are members-only.') : undefined}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                          qmBlocked
+                            ? 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                            : 'bg-amber-950/40 hover:bg-amber-900/50 border-amber-700/60 text-amber-300'
+                        }`}
+                      >
+                        <ShoppingBag size={12} />
+                        <span>{qmBlocked ? `🔒 ${t('codex.quartermaster', 'Quartermaster')}` : t('codex.quartermaster', 'Quartermaster')}</span>
+                      </button>
+                    )}
 
-                    <button
-                      disabled={Boolean(factionBusy) || isAnomMainFaction || !canPromote}
-                      onClick={() => onFactionOp(faction.faction_id, 'promote')}
-                      title={
-                        isAnomMainFaction
-                          ? t('codex.auto_promote_tip', 'Advances automatically at 20 / 45 / 70 / 90 Rep via Bounties and Dispatches')
-                          : !isMember
-                            ? 'Join faction first'
-                            : canPromote
-                              ? `Challenge for Rank ${playerRank + 1}!`
-                              : 'Earn more Faction Reputation to unlock the next rank'
-                      }
-                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
-                        !isAnomMainFaction && canPromote
-                          ? 'bg-purple-950/50 hover:bg-purple-900/60 border-purple-600/60 text-purple-200 animate-pulse'
-                          : 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
-                      }`}
-                    >
-                      <Swords size={12} />
-                      <span>
-                        {isAnomMainFaction
-                          ? t('codex.auto_promote_btn', 'Auto-Promotes (Rep)')
-                          : canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}
-                      </span>
-                    </button>
+                    {!isSpiritCourt && (
+                      <button
+                        disabled={Boolean(factionBusy) || isAnomMainFaction || !canPromote}
+                        onClick={() => onFactionOp(faction.faction_id, 'promote')}
+                        title={
+                          isAnomMainFaction
+                            ? t('codex.auto_promote_tip', 'Advances automatically at 20 / 45 / 70 / 90 Rep via Bounties and Dispatches')
+                            : !isMember
+                              ? 'Join faction first'
+                              : canPromote
+                                ? `Challenge for Rank ${playerRank + 1}!`
+                                : 'Earn more Faction Reputation to unlock the next rank'
+                        }
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded text-[11px] font-bold border transition-all ${
+                          !isAnomMainFaction && canPromote
+                            ? 'bg-purple-950/50 hover:bg-purple-900/60 border-purple-600/60 text-purple-200 animate-pulse'
+                            : 'bg-black/40 border-neutral-800 text-gray-600 cursor-not-allowed'
+                        }`}
+                      >
+                        <Swords size={12} />
+                        <span>
+                          {isAnomMainFaction
+                            ? t('codex.auto_promote_btn', 'Auto-Promotes (Rep)')
+                            : canPromote ? `Promote (R${playerRank + 1})` : 'Promotion Locked'}
+                        </span>
+                      </button>
+                    )}
 
                     <button
                       disabled={Boolean(factionBusy) || bountyBlocked}

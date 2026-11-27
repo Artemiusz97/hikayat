@@ -53,13 +53,20 @@ _ADULT_SERVICE_KEYWORDS = (
     "supervisor", "duty officer", "outfitter", "steward", "server",
     "clothier", "dispatch operator", "dispatcher", "operative",
     "concierge", "curator", "bouncer",
+    "field specialist", "hazmat", "containment", "field associate",
+    "managing partner", "director", "investigator", "analyst",
+    "researcher", "scientist", "engineer", "paramedic", "surgeon",
+    "therapist", "attorney", "judge", "mayor", "executive", "warden",
+    "firefighter", "exorcist", "broker", "cleaner", "fixer",
+    "hierophant", "conduit", "police officer", "security officer",
+    "containment officer", "field officer", "operations officer", "patrol officer",
 )
 
 # False-positive student exceptions (words that contain adult tokens but are student roles)
 _STUDENT_ROLE_EXCEPTIONS = (
     "student council", "class rep", "class representative", "student teacher",
     "peer tutor", "club president", "club vice president", "club leader",
-    "team captain", "club captain", "prefect", "delinquent", "cheerleader", "valedictorian",
+    "club officer", "team captain", "club captain", "prefect", "delinquent", "cheerleader", "valedictorian",
     "transfer student", "exchange student", "cyclist", "student"
 )
 

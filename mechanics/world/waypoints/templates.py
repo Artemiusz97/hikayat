@@ -151,6 +151,21 @@ ARCHETYPE_WAYPOINT_TEMPLATES: dict[str, list[dict]] = {
         {"stage_index": 2, "stage_label": "Encounter and contain the non-hostile anomalous entity alive without provoking or losing it", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
         {"stage_index": 3, "stage_label": "Deliver the sealed containment unit to your client for vault intake", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
     ],
+    "rift sealing": [
+        {"stage_index": 1, "stage_label": "Reach the dimensional access threshold", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Cross the threshold and stabilize or clear the rift core", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Return through the access point and confirm containment", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "off-world hunt": [
+        {"stage_index": 1, "stage_label": "Plot a jump or transit via the starport toward the target sector", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Track and engage the quarry across the off-world sector", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Recover proof of completion and return via the orbital dock", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
+    "abyssal purge": [
+        {"stage_index": 1, "stage_label": "Descend through the planar gate toward the abyssal perimeter", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
+        {"stage_index": 2, "stage_label": "Purge the hostile vanguard and break the planar anchor", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+        {"stage_index": 3, "stage_label": "Escape back to the overworld gate before collapse", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},
+    ],
     "default": [
         {"stage_index": 1, "stage_label": "Travel to the quest objective threshold", "target_location": "", "target_npc": "", "completion_trigger": "arrival"},
         {"stage_index": 2, "stage_label": "Investigate the site and overcome the local obstacle", "target_location": "", "target_npc": "", "completion_trigger": "skill_check"},

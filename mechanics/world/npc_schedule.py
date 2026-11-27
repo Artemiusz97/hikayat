@@ -969,14 +969,17 @@ def get_npc_schedule_node_ids(
     from mechanics.social.roster_tags import npc_is_folklore_villager
     if npc_is_folklore_villager(hydrated_for_anchor):
         from mechanics.social.folklore_roster import get_folklore_villager_spec
-        from mechanics.social.races import is_myobu_fox_race
+        from mechanics.social.races import is_folklore_beast_race
         spec = get_folklore_villager_spec(int(session_id or 0), npc.get("npc_id") or name) if session_id else None
         raw_sched = dict((spec or {}).get("schedule") or basic.get("schedule") or {})
-        home_nid = str(
-            (spec or {}).get("home_node")
-            or basic.get("home_node")
-            or ("sub_kitsune_inner_plaza" if "kitsune" in str(npc.get("race") or "").lower() else "sub_bunian_inner_plaza")
+        _r_low_ns = str(npc.get("race") or "").lower()
+        _fv_ns = str((spec or {}).get("folklore_village") or basic.get("folklore_village") or "").lower()
+        _def_home_ns = (
+            "sub_kitsune_inner_plaza"
+            if ("kitsune" in _r_low_ns or _fv_ns == "kitsune")
+            else ("sub_ghoul_inner_plaza" if ("ghoul" in _r_low_ns or _fv_ns == "ghoul") else "sub_bunian_inner_plaza")
         )
+        home_nid = str((spec or {}).get("home_node") or basic.get("home_node") or _def_home_ns)
         villager_nodes = {
             "morning": str(raw_sched.get("morning") or home_nid),
             "lunch": str(raw_sched.get("afternoon") or raw_sched.get("morning") or home_nid),
@@ -988,7 +991,7 @@ def get_npc_schedule_node_ids(
             "extracurricular": str(raw_sched.get("evening") or home_nid),
         }
         cur_race = str((spec or {}).get("race") or npc.get("race") or "")
-        if is_myobu_fox_race(cur_race):
+        if is_folklore_beast_race(cur_race):
             return villager_nodes
         return _apply_spare_key_schedule_overrides(villager_nodes, session_id, npc, current_day, scen_key_low)
 

@@ -113,7 +113,7 @@ async def run_post_turn_phase(
         result = game_engine.sync_hostile_entities(result, session)
 
         if precomputed is not None:
-            result = await adb(reconcile_combat_results, session, result, precomputed, party=party)
+            result = await adb(reconcile_combat_results, session, result, precomputed, party=party, persist_db=False)
         if _pre_turn_incursion_notice:
             result["_combat_resolved_notice"] = (
                 f"{_pre_turn_incursion_notice}\n{result['_combat_resolved_notice']}".strip()
@@ -820,7 +820,7 @@ async def run_post_turn_phase(
 
     if isinstance(result, dict) and is_location_engine_enabled(scen_key):
         old_loc = session.get("current_location", "")
-        if result.get("_anomalous_extracted"):
+        if result.get("_anomalous_extracted") or result.get("_realm_extracted") or result.get("_spirit_warden_rescued"):
             new_loc = result.get("location") or old_loc
             new_node_id = result.get("current_node_id") or session.get("current_node_id")
             focal_point = None
@@ -828,8 +828,14 @@ async def run_post_turn_phase(
         else:
             def _resolve_post_llm_location() -> tuple[str, Any, Any, Optional[str]]:
                 with db.ReadUnitOfWork() if session.get("id") else nullcontext():
+                    from mechanics.world.locations.realms import get_node_realm_id
                     curr_nid = session.get("current_node_id") or (
                         db.resolve_node_id_from_location(session["id"], old_loc) if session.get("id") else None
+                    )
+                    curr_realm_id = (
+                        get_node_realm_id(session["id"], str(curr_nid))
+                        if session.get("id") and curr_nid
+                        else ""
                     )
                     has_graph = bool(curr_nid)
                     eff_nid_ov: Optional[str] = None
@@ -838,10 +844,19 @@ async def run_post_turn_phase(
                     elif has_graph:
                         r_loc = old_loc
                         cand_post_nid = result.get("destination_node_id") or (
-                            db.resolve_node_id_from_location(session["id"], result.get("location"))
+                            db.resolve_node_id_from_location(
+                                session["id"],
+                                result.get("location"),
+                                preferred_realm_id=curr_realm_id,
+                            )
                             if session.get("id") and result.get("location") and result.get("location") != old_loc
                             else None
                         )
+                        # Anti-hallucination teleport wall: never cross realms without a pre-staged portal traversal
+                        if cand_post_nid and curr_realm_id and not stage_info.get("crossed_realm"):
+                            cand_realm_id = get_node_realm_id(session["id"], str(cand_post_nid))
+                            if cand_realm_id and cand_realm_id != curr_realm_id:
+                                cand_post_nid = None
                         if cand_post_nid and cand_post_nid != curr_nid and session.get("id"):
                             try:
                                 from mechanics.world.locations.pathfinding import find_spatial_path
@@ -861,7 +876,7 @@ async def run_post_turn_phase(
                     r_nid = (
                         eff_nid_ov
                         or stage_info.get("effective_node_id")
-                        or (db.resolve_node_id_from_location(session["id"], r_loc) if session.get("id") and r_loc else None)
+                        or (db.resolve_node_id_from_location(session["id"], r_loc, preferred_realm_id=curr_realm_id) if session.get("id") and r_loc else None)
                         or session.get("current_node_id")
                     )
                     r_fp = stage_info.get("focal_point") if stage_info.get("focal_point") is not None else result.get("focal_point")
@@ -1256,6 +1271,13 @@ async def run_post_turn_phase(
                     session_id=session["id"],
                 )
                 time_delta += int(_anom_domain_res.get("time_slip_min") or 0)
+                from mechanics.world.locations.realms import get_realm_time_scale
+                _fb_nid = (res.get("current_node_id") if isinstance(res, dict) else None) or session.get("current_node_id")
+                _fb_scale = await adb(get_realm_time_scale, session["id"], _fb_nid)
+                if _fb_scale <= 0.0:
+                    time_delta = 0
+                elif _fb_scale != 1.0:
+                    time_delta = max(1, int(round(time_delta * _fb_scale))) if time_delta > 0 else 0
                 time_report = await adb(advance_time, session["id"], time_delta, party_uids=party_uids)
                 if isinstance(res, dict):
                     res["_time_info"] = time_report
@@ -1560,7 +1582,11 @@ async def run_post_turn_phase(
                                         include_converse=True,
                                     )
                                 if lead_uid_ch and act_inc.get("subtype") != "hostile_breach":
-                                    lrn_sp = db.get_learned_spells(lead_uid_ch) or []
+                                    lrn_sp = db.get_learned_spells(
+                                        lead_uid_ch,
+                                        char=lead_char_end if isinstance(lead_char_end, dict) else None,
+                                        session_id=int(session["id"]),
+                                    ) or []
                             return None, [], act_inc, inc_nh_c, lrn_sp
 
                     nh_q_wp, nh_q_choices, active_inc, inc_nh_choices, learned_sp = await adb(_load_incursion_choice_context)
@@ -1764,20 +1790,14 @@ async def run_post_turn_phase(
             res["focal_point"] = stage_info["focal_point"]
             session["focal_point"] = stage_info["focal_point"]
         if session.get("id"):
-            try:
-                db_updates = {}
-                if "focal_point" in stage_info:
-                    db_updates["focal_point"] = stage_info["focal_point"] or ""
-                if res.get("location"):
-                    db_updates["current_location"] = res["location"]
-                if res.get("current_node_id"):
-                    db_updates["current_node_id"] = res["current_node_id"]
-                if "previous_node_id" in session:
-                    db_updates["extra"] = {"previous_node_id": session["previous_node_id"]}
-                if db_updates:
-                    await adb(db.update_session, session["id"], **db_updates)
-            except Exception:
-                pass
+            if "previous_node_id" in session:
+                res["_staged_previous_node_id"] = session["previous_node_id"]
+            if stage_info.get("waiting_outside_companions_dirty"):
+                res["_staged_waiting_outside_companions"] = list(
+                    stage_info.get("waiting_outside_companions") or []
+                )
+            if isinstance(stage_info.get("pending_realm_ops"), dict) and stage_info["pending_realm_ops"]:
+                res["_staged_realm_ops"] = dict(stage_info["pending_realm_ops"])
         if stage_info.get("schedule_departed_npcs"):
             res["schedule_departed_npcs"] = stage_info["schedule_departed_npcs"]
 

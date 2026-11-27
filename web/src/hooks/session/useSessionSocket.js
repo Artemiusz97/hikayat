@@ -15,6 +15,7 @@ export const useSessionSocket = ({
   completedTurnIdsRef,
   activeTurnIdRef,
   processingTurnRef,
+  cancellingTurnRef,
   syncTurnRequestRef,
   setProcessingState,
   setPendingAction,
@@ -51,6 +52,9 @@ export const useSessionSocket = ({
         ws._pingInterval = null;
       }
       ws._intentionalClose = true;
+      ws.onopen = null;
+      ws.onmessage = null;
+      ws.onerror = null;
       ws.onclose = null;
       try {
         ws.close();
@@ -81,6 +85,9 @@ export const useSessionSocket = ({
         prevWs._pingInterval = null;
       }
       prevWs._intentionalClose = true;
+      prevWs.onopen = null;
+      prevWs.onmessage = null;
+      prevWs.onerror = null;
       prevWs.onclose = null;
       try {
         prevWs.close();
@@ -125,6 +132,7 @@ export const useSessionSocket = ({
     };
 
     ws.onopen = async () => {
+      if (socketRef.current !== ws) return;
       hasConnectedOnceRef.current = true;
       setWsStatus('connected');
       if (reconnectTimeoutRef.current) {
@@ -132,9 +140,10 @@ export const useSessionSocket = ({
         reconnectTimeoutRef.current = null;
       }
       const expectedSid = String(sessionId);
-      if (processingTurnRef.current && userId && String(activeSessionIdRef.current) === expectedSid) {
+      if (processingTurnRef.current && !cancellingTurnRef?.current && userId && String(activeSessionIdRef.current) === expectedSid) {
         try {
           const res = await apiCall(`/api/adventure/active-session/${userId}`);
+          if (socketRef.current !== ws || cancellingTurnRef?.current) return;
           if (
             res?.session &&
             String(activeSessionIdRef.current) === expectedSid &&
@@ -143,7 +152,7 @@ export const useSessionSocket = ({
             if (res.session.in_flight_turn) {
               setPendingAction(res.session.in_flight_turn.action || { label: 'Resolving Action...' });
               setIsThinking(res.session.in_flight_turn.status === 'thinking');
-            } else if (processingTurnRef.current && !syncTurnRequestRef.current) {
+            } else if (processingTurnRef.current && !syncTurnRequestRef.current && !cancellingTurnRef?.current) {
               clearSafetyTimer();
               setSession(prev => ({
                 ...res.session,
@@ -161,6 +170,7 @@ export const useSessionSocket = ({
               if (missedErr?.error && (!activeTurnIdRef.current || missedErr.turn_id === activeTurnIdRef.current)) {
                 setActionError(missedErr.error);
               }
+              recordCompletedTurnId(activeTurnIdRef.current);
               activeTurnIdRef.current = null;
               if (isAutoSceneImageGen(res.session) && !res.session?.scene_image_url) {
                 pollForSceneImage(res.session.id);
@@ -172,6 +182,7 @@ export const useSessionSocket = ({
     };
 
     ws.onmessage = (event) => {
+      if (socketRef.current !== ws) return;
       let data;
       try {
         data = JSON.parse(event.data);
@@ -181,14 +192,18 @@ export const useSessionSocket = ({
       }
       if (!data || typeof data !== 'object') return;
       if (data.type === 'STREAM_THINKING') {
-        if (isStaleTurnEvent(data?.turn_id)) return;
+        if (cancellingTurnRef?.current || isStaleTurnEvent(data?.turn_id)) return;
+        setProcessingState(true);
+        setWaitingForParty(false);
         setIsThinking(true);
         if (data.action) {
           setPendingAction(prev => prev || data.action);
         }
         armSafetyTimer(182000);
       } else if (data.type === 'STREAM_START') {
-        if (isStaleTurnEvent(data?.turn_id)) return;
+        if (cancellingTurnRef?.current || isStaleTurnEvent(data?.turn_id)) return;
+        setProcessingState(true);
+        setWaitingForParty(false);
         setIsThinking(false);
         setIsStreaming(true);
         setStreamingNarrative('');
@@ -198,7 +213,7 @@ export const useSessionSocket = ({
           nextText: '',
         });
       } else if (data.type === 'STREAM_CHUNK') {
-        if (isStaleTurnEvent(data?.turn_id)) return;
+        if (cancellingTurnRef?.current || isStaleTurnEvent(data?.turn_id)) return;
         const chunkText = data.text || '';
         const field = data.field || 'outcome_narrative';
         setIsThinking(false);
@@ -216,7 +231,7 @@ export const useSessionSocket = ({
         if (isStaleTurnEvent(data?.turn_id)) return;
         applyCompletedScenePayload(data);
       } else if (data.type === 'STREAM_RESET') {
-        if (isStaleTurnEvent(data?.turn_id)) return;
+        if (cancellingTurnRef?.current || isStaleTurnEvent(data?.turn_id)) return;
         setIsThinking(false);
         setStreamingNarrative('');
         setStreamingState(prev => (prev ? { ...prev, outcomeText: '', nextText: '' } : null));
@@ -289,6 +304,7 @@ export const useSessionSocket = ({
         });
         if (nextWaiting === 0 || (data.total && (data.locked_picks || 0) >= data.total)) {
           setWaitingForParty(false);
+          setProcessingState(true);
         } else if (data.user_id != null && String(data.user_id) === String(userId)) {
           setWaitingForParty(true);
           setProcessingState(false);
@@ -439,6 +455,7 @@ export const useSessionSocket = ({
     completedTurnIdsRef,
     activeTurnIdRef,
     processingTurnRef,
+    cancellingTurnRef,
     syncTurnRequestRef,
     setProcessingState,
     setPendingAction,

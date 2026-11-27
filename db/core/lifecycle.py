@@ -555,7 +555,7 @@ def _find_anomalous_agent_entry(
             return ar
     return None
 
-def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir: str = "backups") -> str:
+def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir: str = "data/backups") -> str:
     """Creates a non-blocking SQLite online backup using SQLite's backup API.
     Maintains a rolling window of the last `max_backups` snapshot files.
     """
@@ -563,7 +563,7 @@ def create_database_snapshot(tag: str = "auto", max_backups: int = 5, custom_dir
 
     if not os.path.isabs(custom_dir):
         project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        custom_dir = os.path.join(project_root, custom_dir)
+        custom_dir = os.path.normpath(os.path.join(project_root, custom_dir))
 
     os.makedirs(custom_dir, exist_ok=True)
     timestamp = time.strftime("%Y%m%d_%H%M%S")

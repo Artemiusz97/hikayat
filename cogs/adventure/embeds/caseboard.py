@@ -412,9 +412,23 @@ def _build_bounty_board_embed(session: dict, bounties: list[dict]) -> discord.Em
         rew_str = ", ".join(rew_parts)
         q_type = b.get("quest_type", "Side Bounty")
         icon = _quest_type_icon(q_type)
+        realm_tag = ""
+        t_realm = str(b.get("target_realm_id") or "")
+        if t_realm == "realm_city_metro":
+            realm_tag = "🏙️ "
+        elif t_realm == "realm_veiled_spirit_world":
+            realm_tag = "⛩️ "
+        extra_tags = []
+        if b.get("ghoul_track") == "dark_crime":
+            extra_tags.append("Dark Track")
+        elif b.get("ghoul_track") == "grey_neutral":
+            extra_tags.append("Grey Track")
+        if str(b.get("quest_id") or "").upper().startswith("EVT-SPC-"):
+            extra_tags.append("⚡ Urgent Surge")
+        tag_str = f" ({', '.join(extra_tags)})" if extra_tags else ""
 
         embed.add_field(
-            name=f"{idx}. {icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]",
+            name=f"{idx}. {realm_tag}{icon} {clean_narrative_location_arrows(b['title'])} [{q_type}]{tag_str}"[:255],
             value=f"**Objective:** {clean_narrative_location_arrows(b['objective'])}\n**Rewards:** {rew_str}",
             inline=False
         )

@@ -11,7 +11,7 @@ adaptation is delegated to `db.roster_adapters`.
 import json
 import sqlite3
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Mapping, Sequence
 
 import db
 from .core import UnitOfWork, _conn_ctx, _opt_int, ensure_table_group_once
@@ -466,6 +466,27 @@ def hydrate_world_roster_visuals(
 
     def _run(c: sqlite3.Connection) -> int:
         _ensure_world_roster_table(c)
+        all_rows = c.execute(
+            "SELECT * FROM world_roster WHERE session_id = ? ORDER BY id ASC",
+            (sid,),
+        ).fetchall()
+        if not all_rows:
+            return 0
+        by_nid: dict[str, sqlite3.Row] = {}
+        by_name: dict[str, sqlite3.Row] = {}
+        by_slug: dict[str, sqlite3.Row] = {}
+        for r in all_rows:
+            nid_low = str(r["npc_id"] or "").strip().lower()
+            nm_raw = str(r["name"] or "").strip()
+            nm_low = nm_raw.lower()
+            nm_slug = slugify_npc_id(nm_raw)
+            if nid_low and nid_low not in by_nid:
+                by_nid[nid_low] = r
+            if nm_low and nm_low not in by_name:
+                by_name[nm_low] = r
+            if nm_slug and nm_slug not in by_slug:
+                by_slug[nm_slug] = r
+
         updated = 0
         for item in updates:
             if not isinstance(item, dict):
@@ -473,7 +494,9 @@ def hydrate_world_roster_visuals(
             key = str(item.get("npc_id") or item.get("name") or "").strip()
             if not key:
                 continue
-            row = _find_roster_row(c, sid, key)
+            raw_needle = key.lower()
+            slug_needle = slugify_npc_id(key)
+            row = by_nid.get(raw_needle) or (by_nid.get(slug_needle) if slug_needle else None) or by_name.get(raw_needle) or (by_slug.get(slug_needle) if slug_needle else None)
             if row is None:
                 continue
             existing = _hydrate_roster_row(row)
@@ -742,6 +765,75 @@ def clear_roster_npc_merchant_archetypes(
             c,
             int(row["id"]),
             {"role": role_val, "basic_info_json": json.dumps(basic_info), "updated_at": now},
+        )
+        return True
+
+    with _conn_ctx(conn) as c:
+        return _run(c)
+
+
+_ALLOWED_HEAL_ROSTER_COLS: frozenset[str] = frozenset({
+    "role",
+    "workplace_node_id",
+    "home_node_id",
+    "hangout_node_id",
+    "shift_profile",
+    "staff_status",
+})
+
+
+def heal_world_roster_npc_employment(
+    session_id: int,
+    npc_id: str,
+    *,
+    updates: Mapping[str, Any] | None = None,
+    basic_info_updates: Mapping[str, Any] | None = None,
+    remove_basic_keys: Sequence[str] = (),
+    conn: sqlite3.Connection | None = None,
+) -> bool:
+    """Safely updates employment/demographic fields on a `world_roster` NPC row and linked contacts."""
+    raw_nid = str(npc_id or "").strip()
+    if not session_id or not raw_nid:
+        return False
+    sid, now = int(session_id), time.time()
+
+    def _run(c: sqlite3.Connection) -> bool:
+        _ensure_world_roster_table(c)
+        row = _find_roster_row(c, sid, raw_nid)
+        if row is None:
+            return False
+        basic_info = parse_json_dict(row["basic_info_json"])
+        for rk in (remove_basic_keys or ()):
+            basic_info.pop(str(rk), None)
+        if isinstance(basic_info_updates, Mapping):
+            for bk, bv in basic_info_updates.items():
+                basic_info[str(bk)] = bv
+
+        col_updates: dict[str, Any] = {
+            "basic_info_json": json.dumps(basic_info),
+            "updated_at": now,
+        }
+        if isinstance(updates, Mapping):
+            for ck, cv in updates.items():
+                if ck in _ALLOWED_HEAL_ROSTER_COLS:
+                    col_updates[ck] = str(cv or "").strip()
+
+        _update_roster_columns(c, int(row["id"]), col_updates)
+
+        def _sync_contact(c_info: dict[str, Any]) -> None:
+            for rk in (remove_basic_keys or ()):
+                c_info.pop(str(rk), None)
+            if isinstance(basic_info_updates, Mapping):
+                for bk, bv in basic_info_updates.items():
+                    c_info[str(bk)] = bv
+
+        _update_matching_contacts_basic_info(
+            c,
+            sid,
+            str(row["npc_id"] or raw_nid),
+            str(row["name"] or ""),
+            _sync_contact,
+            now,
         )
         return True
 

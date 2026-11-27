@@ -34,9 +34,13 @@ async def start_adventure(
     ability_medium: Optional[str] = None,
     stats_override: Optional[Dict[str, Optional[int]]] = None,
     appearance: Optional[Dict[str, Any]] = None,
+    stature: Optional[str] = None,
+    physique: Optional[str] = None,
     breast_size: Optional[str] = None,
     penis_size: Optional[str] = None,
     asset_texture: Optional[str] = None,
+    rear_size: Optional[str] = None,
+    rear_texture: Optional[str] = None,
     schedule_chapter_plan: bool = True,
 ) -> Dict[str, Any]:
     """Shared headless new-adventure embarkation pipeline used by HTTP API and playthrough sweeps."""
@@ -202,6 +206,10 @@ async def start_adventure(
                 await adb(db.update_character_stats, canonical_id, stats)
 
         app_update = dict(appearance or {})
+        if stature is not None and str(stature).strip().lower() not in ("auto", "__auto__"):
+            app_update["stature"] = str(stature).strip()
+        if physique is not None and str(physique).strip().lower() not in ("auto", "__auto__"):
+            app_update["physique"] = str(physique).strip()
         if scenario_data.is_nsfw_scenario(scenario_key):
             if breast_size is not None:
                 app_update["breast_size"] = breast_size
@@ -209,8 +217,12 @@ async def start_adventure(
                 app_update["penis_size"] = penis_size
             if asset_texture is not None:
                 app_update["asset_texture"] = asset_texture
+            if rear_size is not None:
+                app_update["rear_size"] = rear_size
+            if rear_texture is not None:
+                app_update["rear_texture"] = rear_texture
         else:
-            for anatomy_key in ("breast_size", "penis_size", "asset_texture"):
+            for anatomy_key in ("breast_size", "penis_size", "asset_texture", "rear_size", "rear_texture"):
                 app_update.pop(anatomy_key, None)
         if app_update:
             await adb(db.update_character_appearance, char["id"], app_update)
@@ -386,6 +398,16 @@ async def commit_opening_scene(
         init_node_id = await adb(db.resolve_node_id_from_location, session_id, location)
     if not init_node_id:
         init_node_id = sess_dict.get("current_node_id")
+    if init_node_id:
+        try:
+            from mechanics.world.locations.realms import discover_realm, get_node_realm_id
+            _init_realm_id = await adb(get_node_realm_id, session_id, str(init_node_id))
+            if _init_realm_id:
+                await adb(discover_realm, session_id, _init_realm_id, 1)
+        except (NameError, UnboundLocalError, ImportError):
+            raise
+        except Exception as exc:
+            logger.warning("Initial realm discovery failed for session %s node %s: %s", session_id, init_node_id, exc)
 
     await adb(
         db.save_session_scene,

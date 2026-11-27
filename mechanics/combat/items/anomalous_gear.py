@@ -889,7 +889,14 @@ def convert_object_anomaly_to_gear(
     return anom_eq
 
 
-def sync_equipped_anomalous_spells(user_id: int, *, raise_on_error: bool = False) -> Dict[str, Any]:
+def sync_equipped_anomalous_spells(
+    user_id: int,
+    *,
+    char: dict | None = None,
+    character_id: int | None = None,
+    session_id: int | None = None,
+    raise_on_error: bool = False,
+) -> Dict[str, Any]:
     """
     Synchronizes equipment-granted spells with the character's active learned_spells list.
     - Iterates strictly in priority slot order (Weapon > Shield > Armor/Top > Accessory 1..4).
@@ -905,11 +912,16 @@ def sync_equipped_anomalous_spells(user_id: int, *, raise_on_error: bool = False
         set_active_empowered_spells_context,
     )
 
-    char = db.get_character(user_id)
+    char = (
+        (db.get_character_by_id(character_id) if character_id else None)
+        or char
+        or db.get_character(user_id, session_id=session_id)
+    )
     if not char:
         return {"active_granted_spells": [], "empowered_spells": []}
 
-    equipment = db.get_equipment(user_id) or {}
+    target_cid = int(char["id"])
+    equipment = db.get_equipment(user_id, char=char, character_id=target_cid, session_id=session_id) or {}
     progress = db.get_skill_progress(char)
     prev_granted_only: List[str] = list(progress.get("equipped_granted_spells") or [])
     innate_spells: List[str] = list(progress.get("innate_spells") or [])
@@ -931,13 +943,13 @@ def sync_equipped_anomalous_spells(user_id: int, *, raise_on_error: bool = False
         or has_anom_relic
     )
     if not is_anom_char:
-        sess_id = char.get("active_session_id")
+        sess_id = session_id or char.get("active_session_id")
         sess_obj = db.get_session(sess_id) if sess_id else None
         if not sess_obj or not is_anomalous_incursions_scenario(str(sess_obj.get("scenario") or "")):
             set_active_empowered_spells_context([])
             return {"active_granted_spells": [], "empowered_spells": []}
 
-    current_spells = list(db.get_learned_spells(user_id) or [])
+    current_spells = list(db.get_learned_spells(user_id, char=char, character_id=target_cid, session_id=session_id) or [])
     if not innate_spells:
         innate_spells = [s for s in current_spells if s not in prev_granted_only]
         progress["innate_spells"] = innate_spells
@@ -1000,8 +1012,8 @@ def sync_equipped_anomalous_spells(user_id: int, *, raise_on_error: bool = False
 
     progress["equipped_granted_spells"] = active_relic_ids
     progress["empowered_granted_spells"] = empowered_ids
-    db.set_skill_progress(user_id, progress)
-    db.set_learned_spells(user_id, updated_spells)
+    db.set_skill_progress(user_id, progress, char=char, character_id=target_cid, session_id=session_id)
+    db.set_learned_spells(user_id, updated_spells, char=char, character_id=target_cid, session_id=session_id)
     set_active_empowered_spells_context(empowered_ids)
 
     return {

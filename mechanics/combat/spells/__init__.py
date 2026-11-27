@@ -39,3 +39,21 @@ from .awakened_kits import (
     get_actor_spell,
     ensure_awakened_kits_registered,
 )
+from .spirit_court_perks import (
+    SPIRIT_COURT_VILLAGE_KEYS,
+    SPIRIT_COURT_FACTION_ID_BY_VILLAGE,
+    SPIRIT_COURT_VILLAGE_BY_FACTION_ID,
+    SPIRIT_COURT_SWORN_ALLY_THRESHOLD,
+    SPIRIT_COURT_SWORN_ALLY_SPECS,
+    SPIRIT_COURT_SUMMON_SPELLS,
+    SPIRIT_COURT_SUMMON_TEMPLATES,
+    resolve_village_key_for_spirit_faction,
+    get_spirit_court_standing_tier_boost,
+    get_spirit_court_active_perks,
+    get_active_sworn_ally_courts,
+    get_spirit_court_stat_bonuses,
+    apply_spirit_court_stat_bonuses,
+    get_active_spirit_court_summon_spell_ids,
+    is_spirit_court_summon_spell_active,
+    register_spirit_court_summons,
+)

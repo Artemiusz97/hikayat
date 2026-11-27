@@ -235,6 +235,12 @@ def normalize_race(raw_race: str, scen_key: str = "fantasy", seed: str = "") -> 
         return "kitsune:humanoid"
     if clean in ("kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox"):
         return "kitsune:myobu_fox"
+    if clean in ("ghoul:humanoid", "ghoul_humanoid", "al_ghul:humanoid", "al_ghul"):
+        return "ghoul:humanoid"
+    if clean in ("ghoul:canid", "ghoul_canid", "al_ghul:canid", "ghoul:beast", "ghoul:hound"):
+        return "ghoul:canid"
+    if clean in ("ghul", "al_ghul") or (clean == "ghoul" and not has_tag(scen_key, "post_apocalypse")):
+        return "ghoul:humanoid"
 
     # 1. Furry scenarios (High School or Anomalous Incursions): Weighted Beastfolk / Half-Beast / Human
     if has_tag(scen_key, "furry"):
@@ -513,6 +519,10 @@ def format_race_display(race_str: str) -> str:
         return "Kitsune (Humanoid Guise)"
     if clean == "kitsune:myobu_fox":
         return "Kitsune (Myōbu Spirit Fox)"
+    if clean == "ghoul:humanoid":
+        return "Al-Ghūl (Humanoid Guise)"
+    if clean == "ghoul:canid":
+        return "Al-Ghūl (Canid Hound Form)"
     if clean == "irradiated_human":
         return "Irradiated Human"
     if clean in ("half_beast", "halfbeast"):
@@ -556,12 +566,37 @@ def get_scenario_race_hint(scen_key: str = "fantasy") -> str:
     return "human|elf|dwarf|dark_elf|goblin|beastfolk:<species>|half_beast:<species>|hybrid:<species>|string"
 
 def is_folklore_race(race_str: str | None) -> bool:
-    """Return True if the normalized race string belongs to a folklore race (Orang Bunian or Kitsune)."""
+    """Return True if the normalized race string belongs to a folklore race (Orang Bunian, Kitsune, or Al-Ghul)."""
     clean = str(race_str or "").strip().lower().replace("-", "_")
-    return clean in ("orang_bunian", "orang bunian", "bunian", "kitsune:humanoid", "kitsune_humanoid", "kitsune:guise", "kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox") or clean.startswith("kitsune:")
+    return (
+        clean in (
+            "orang_bunian", "orang bunian", "bunian",
+            "kitsune:humanoid", "kitsune_humanoid", "kitsune:guise",
+            "kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox",
+            "ghoul:humanoid", "ghoul_humanoid", "ghoul:canid", "ghoul_canid", "al_ghul",
+        )
+        or clean.startswith(("kitsune:", "ghoul:", "al_ghul:"))
+    )
 
 
 def is_myobu_fox_race(race_str: str | None) -> bool:
     """Return True if the race string denotes the beast/fox form Kitsune (kitsune:myobu_fox)."""
     clean = str(race_str or "").strip().lower().replace("-", "_")
     return clean in ("kitsune:myobu_fox", "kitsune_myobu_fox", "kitsune:fox", "myobu_fox")
+
+
+def is_ghoul_race(race_str: str | None) -> bool:
+    """Return True if the race string belongs to the dual-form Al-Ghul folklore race."""
+    clean = str(race_str or "").strip().lower().replace("-", "_")
+    return clean in ("ghoul:humanoid", "ghoul_humanoid", "ghoul:canid", "ghoul_canid", "al_ghul") or clean.startswith(("ghoul:", "al_ghul:"))
+
+
+def is_ghoul_canid_race(race_str: str | None) -> bool:
+    """Return True if the race string denotes the quadruped feral hound form of Al-Ghul (`ghoul:canid`)."""
+    clean = str(race_str or "").strip().lower().replace("-", "_")
+    return clean in ("ghoul:canid", "ghoul_canid", "al_ghul:canid", "ghoul:hound", "ghoul:beast")
+
+
+def is_folklore_beast_race(race_str: str | None) -> bool:
+    """Return True for any non-humanoid folklore beast form (`kitsune:myobu_fox` or `ghoul:canid`)."""
+    return is_myobu_fox_race(race_str) or is_ghoul_canid_race(race_str)

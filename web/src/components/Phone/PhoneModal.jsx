@@ -36,6 +36,7 @@ const PhoneModal = ({
   codexHook,
   session,
   user,
+  inCombat = false,
   imageGenMode = null,
   initialChatNpc = null,
   onClearInitialChatNpc = null,
@@ -52,10 +53,11 @@ const PhoneModal = ({
     setSessionPhoneWallpaper,
   } = useUiPreferences();
   const reduced = useReducedMotion();
-  const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'planner' | 'bounties' | 'realty' | 'settings'
+  const [activeApp, setActiveApp] = useState('home'); // 'home' | 'photos' | 'dms' | 'feed' | 'shop' | 'school_shop' | 'planner' | 'bounties' | 'school_bounties' | 'realty' | 'settings'
 
   const {
     branding,
+    playerProfile: phonePlayerProfile = null,
     appointments,
     gossipFeed,
     mediaGallery,
@@ -68,9 +70,32 @@ const PhoneModal = ({
     loadingChat,
     sendingChat,
     imageGenEnabled = 0,
+    commsStatus = { available: true },
+    spiritRelayStaticActive = false,
+    spiritRelayStaticNote = '',
+    refreshPhone,
     loadChatMessages,
     closeChat,
   } = phoneHook;
+  const hasLiveRealmHud =
+    session?.realm_hud && typeof session.realm_hud.comms_isolated === 'boolean';
+  const commsOffline = hasLiveRealmHud
+    ? Boolean(session.realm_hud.comms_isolated)
+    : Boolean(commsStatus?.available === false);
+  const supportsSpiritRelay = Boolean(
+    commsStatus?.supports_spirit_relay ||
+      commsStatus?.spirit_relay_active ||
+      session?.realm_hud?.supports_spirit_relay
+  );
+
+  const resolvedProfile = phonePlayerProfile || codexHook?.playerProfile || session?.player_profile || null;
+  const isStudentOrigin = Boolean(
+    resolvedProfile?.is_student ?? branding?.show_school_shop ?? branding?.show_school_bounties
+  );
+  const showSchoolShop = Boolean(branding?.show_school_shop ?? isStudentOrigin);
+  const showGeneralBounties = branding?.show_general_bounties !== false;
+  const showSchoolBounties = Boolean(branding?.show_school_bounties ?? isStudentOrigin);
+  const activeCombat = Boolean(inCombat || session?.is_in_combat || session?.in_combat);
 
   const effectiveImageGenMode =
     session?.image_gen_enabled ?? imageGenMode ?? imageGenEnabled ?? 0;
@@ -88,6 +113,7 @@ const PhoneModal = ({
     setSessionPhoneWallpaper,
     onRefreshInventory,
     onRefreshCodex,
+    commsOffline,
     t,
   });
 
@@ -100,16 +126,29 @@ const PhoneModal = ({
     onRefreshInventory,
     onRefreshCharacter,
     onRefreshCodex,
+    commsOffline,
     t,
   });
 
   const wasOpenRef = useRef(false);
   const prevSessionIdRef = useRef(session?.id ?? null);
+  const realmHudRefreshKey = `${session?.id ?? ''}:${session?.realm_hud?.realm_id ?? ''}:${String(session?.realm_hud?.comms_isolated ?? '')}`;
+  const prevRealmHudKeyRef = useRef(realmHudRefreshKey);
+  const refreshPhoneRef = useRef(refreshPhone);
+  refreshPhoneRef.current = refreshPhone;
   const phoneDialogRef = useRef(null);
   const previousFocusRef = useRef(null);
   const onCloseRef = useRef(onClose);
   const phonePrefsRef = useRef(phonePrefs);
   phonePrefsRef.current = phonePrefs;
+
+  useEffect(() => {
+    const prevKey = prevRealmHudKeyRef.current;
+    prevRealmHudKeyRef.current = realmHudRefreshKey;
+    if (isOpen && prevKey !== realmHudRefreshKey && session?.id) {
+      refreshPhoneRef.current?.();
+    }
+  }, [isOpen, realmHudRefreshKey, session?.id]);
 
   useEffect(() => {
     const nextSid = session?.id ?? null;
@@ -119,11 +158,22 @@ const PhoneModal = ({
   }, [session?.id]);
 
   useEffect(() => {
+    if (
+      (activeApp === 'school_shop' && !showSchoolShop) ||
+      (activeApp === 'bounties' && !showGeneralBounties) ||
+      (activeApp === 'school_bounties' && !showSchoolBounties)
+    ) {
+      setActiveApp('home');
+    }
+  }, [activeApp, showSchoolShop, showGeneralBounties, showSchoolBounties]);
+
+  useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
+    refreshPhoneRef.current?.();
 
     const token = Symbol('phone-modal');
     const unregister = registerEscapeLayer(token);
@@ -238,13 +288,52 @@ const PhoneModal = ({
     },
     {
       id: 'shop',
-      name: branding.shop_app_name || t('phone.apps.shop', 'SchoolMart Delivery'),
-      subtitle: branding.shop_subtitle || t('phone.apps.shop_sub', 'Online Courier'),
+      name: branding.shop_app_name || t('phone.apps.online_store', 'Online Store'),
+      subtitle: branding.shop_subtitle || t('phone.apps.online_store_sub', 'Instant Delivery'),
       icon: ShoppingBag,
       gradient: 'from-amber-500 via-orange-500 to-amber-600',
       badge: null,
       badgeColor: 'bg-amber-500',
     },
+    ...(showSchoolShop
+      ? [
+          {
+            id: 'school_shop',
+            name: branding.school_shop_app_name || t('phone.apps.school_mart', 'SchoolMart'),
+            subtitle: branding.school_shop_subtitle || t('phone.apps.school_mart_sub', 'Student Discount'),
+            icon: ShoppingBag,
+            gradient: 'from-sky-500 via-indigo-500 to-violet-600',
+            badge: null,
+            badgeColor: 'bg-sky-500',
+          },
+        ]
+      : []),
+    ...(showGeneralBounties
+      ? [
+          {
+            id: 'bounties',
+            name: branding.bounty_app_name || branding.bounties_app_name || t('phone.apps.bounty_board', 'Bounty Board'),
+            subtitle: branding.bounty_subtitle || t('phone.apps.bounty_board_sub', 'Contracts & Guilds'),
+            icon: ShieldAlert,
+            gradient: 'from-rose-500 via-red-600 to-rose-700',
+            badge: commerce.generalAvailableBounties.length > 0 ? commerce.generalAvailableBounties.length : null,
+            badgeColor: 'bg-rose-500',
+          },
+        ]
+      : []),
+    ...(showSchoolBounties
+      ? [
+          {
+            id: 'school_bounties',
+            name: branding.school_bounty_app_name || t('phone.apps.campus_requests', 'Campus Requests'),
+            subtitle: branding.school_bounty_subtitle || t('phone.apps.campus_requests_sub', 'Student Bulletin'),
+            icon: ShieldAlert,
+            gradient: 'from-fuchsia-500 via-pink-600 to-rose-600',
+            badge: commerce.schoolAvailableBounties.length > 0 ? commerce.schoolAvailableBounties.length : null,
+            badgeColor: 'bg-fuchsia-500',
+          },
+        ]
+      : []),
     {
       id: 'planner',
       name: branding.planner_app_name || t('phone.apps.planner', 'Planner & Agenda'),
@@ -253,15 +342,6 @@ const PhoneModal = ({
       gradient: 'from-blue-500 via-indigo-500 to-sky-600',
       badge: social.plannerItems.length > 0 ? social.plannerItems.length : null,
       badgeColor: 'bg-blue-500',
-    },
-    {
-      id: 'bounties',
-      name: branding.bounty_app_name || branding.bounties_app_name || t('phone.apps.bounties', 'Campus Requests'),
-      subtitle: branding.bounty_subtitle || t('phone.apps.bounties_sub', 'Student Bulletin'),
-      icon: ShieldAlert,
-      gradient: 'from-rose-500 via-red-600 to-rose-700',
-      badge: commerce.availableBounties.length > 0 ? commerce.availableBounties.length : null,
-      badgeColor: 'bg-rose-500',
     },
     {
       id: 'settings',
@@ -452,12 +532,33 @@ const PhoneModal = ({
                 !isGlass && activeApp !== 'home' ? 'bg-gradient-to-b from-neutral-900/40 to-black' : ''
               }`}
             >
+              {commsOffline && supportsSpiritRelay && activeApp === 'dms' ? (
+                <div className="mb-2.5 px-3 py-2 rounded-xl bg-amber-950/60 border border-amber-600/50 text-amber-200 text-[11px] font-semibold flex items-center gap-2 shrink-0">
+                  <span aria-hidden="true">⛩️</span>
+                  <span>
+                    {t(
+                      'phone.dms.spirit_relay_banner',
+                      'Spirit Relay Active — Only attuned Spirit Realm contacts can receive messages here'
+                    )}
+                  </span>
+                </div>
+              ) : commsOffline ? (
+                <div className="mb-2.5 px-3 py-2 rounded-xl bg-rose-950/75 border border-rose-700/60 text-rose-200 text-[11px] font-semibold flex items-center gap-2 shrink-0">
+                  <span aria-hidden="true">📵</span>
+                  <span>
+                    {t('phone.no_signal_banner', 'No Signal — Isolated Realm (cached logs remain readable)')}
+                  </span>
+                </div>
+              ) : null}
               {activeApp === 'home' && (
                 <PhoneHomeApp
                   displayTime={displayTime}
                   session={session}
                   appointments={appointments}
-                  availableBounties={commerce.availableBounties}
+                  availableBounties={[
+                    ...(showGeneralBounties ? commerce.generalAvailableBounties : []),
+                    ...(showSchoolBounties ? commerce.schoolAvailableBounties : []),
+                  ]}
                   mediaGallery={mediaGallery}
                   apps={apps}
                   onSelectApp={(appId) => {
@@ -503,6 +604,7 @@ const PhoneModal = ({
                   onSetPrimaryProperty={commerce.handleSetPrimaryProperty}
                   onManageSpareKey={commerce.handleManageSpareKey}
                   onBuyProperty={commerce.handleBuyProperty}
+                  commsOffline={commsOffline}
                   scenario={scenarioKey}
                   t={t}
                 />
@@ -517,6 +619,7 @@ const PhoneModal = ({
                   onCancelPlannerItem={social.handleCancelPlannerItem}
                   onOpenMessages={() => setActiveApp('dms')}
                   onOpenChatWithContact={social.handleOpenChatWithContact}
+                  commsOffline={commsOffline}
                   clockFormat={clockFormat}
                   t={t}
                 />
@@ -575,6 +678,10 @@ const PhoneModal = ({
                     social.setSelectedPhoto(photo);
                   }}
                   onGenerateMediaPhoto={(itemId) => social.handleGenerateMediaPhoto(itemId)}
+                  commsOffline={commsOffline}
+                  supportsSpiritRelay={supportsSpiritRelay}
+                  spiritRelayStaticActive={spiritRelayStaticActive}
+                  spiritRelayStaticNote={spiritRelayStaticNote}
                   clockFormat={clockFormat}
                   t={t}
                 />
@@ -603,32 +710,43 @@ const PhoneModal = ({
                   onSendFriendRequest={social.handleSendFriendReq}
                   suggestedPeers={suggestedPeers}
                   contacts={contacts}
+                  isStudentOrigin={isStudentOrigin}
                   onOpenChatWithContact={social.handleOpenChatWithContact}
+                  commsOffline={commsOffline}
                   t={t}
                 />
               )}
 
-              {activeApp === 'shop' && (
+              {(activeApp === 'shop' || activeApp === 'school_shop') && (
                 <PhoneShopApp
                   branding={branding}
+                  storeMode={activeApp === 'school_shop' ? 'school_mart' : 'online_general'}
                   shopData={commerce.shopData}
                   loadingShop={commerce.loadingShop}
                   buyingItem={commerce.buyingItem}
                   shopFeedback={commerce.shopFeedback}
                   onClearFeedback={() => commerce.setShopFeedback(null)}
                   onBuyDeliveryItem={commerce.handleBuyDeliveryItem}
+                  inCombat={activeCombat}
+                  commsOffline={commsOffline}
                   scenario={scenarioKey}
                   t={t}
                 />
               )}
 
-              {activeApp === 'bounties' && (
+              {(activeApp === 'bounties' || activeApp === 'school_bounties') && (
                 <PhoneBountiesApp
                   branding={branding}
+                  boardMode={activeApp === 'school_bounties' || !showGeneralBounties ? 'school' : 'general'}
                   generatingBounties={commerce.generatingBounties}
                   onRefreshBounties={commerce.handleRefreshBounties}
                   bountySubTab={commerce.bountySubTab}
                   onChangeBountySubTab={commerce.setBountySubTab}
+                  bountySourceTab={commerce.bountySourceTab}
+                  onChangeBountySourceTab={(tab) => {
+                    commerce.setBountySourceTab(tab);
+                    if (tab === 'generic') commerce.setSelectedFactionFilter('all');
+                  }}
                   allAvailableBounties={commerce.allAvailableBounties}
                   availableBounties={commerce.availableBounties}
                   activeBounties={commerce.activeBounties}
@@ -640,6 +758,7 @@ const PhoneModal = ({
                   onAcceptBounty={commerce.handleAcceptBounty}
                   onAbandonBounty={commerce.handleAbandonBounty}
                   busyBountyId={commerce.busyBountyId}
+                  commsOffline={commsOffline}
                   scenario={scenarioKey}
                   t={t}
                 />

@@ -25,18 +25,44 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 LOCAL_ONLY_TRACKED_PREFIXES: Tuple[str, ...] = (
     "tests/",
     "pytest.ini",
+    "run_tests.bat",
+    "launchers/run_tests.bat",
+    "requirements-dev.txt",
     "scripts/run_tests.py",
     "scripts/simulate_",
+    "scripts/playthrough_bot.py",
     ".desloppify/",
+)
+SECURITY_ROUTE_CHECKS: Tuple[str, ...] = (
+    "missing-session-auth",
+    "missing-user-auth",
+    "weak-debug-gate",
 )
 
 
-def _db_fingerprint() -> Tuple[int, int] | None:
-    db_file = REPO_ROOT / "hikayat.db"
-    if not db_file.is_file():
-        return None
-    st = db_file.stat()
-    return (st.st_size, st.st_mtime_ns)
+def _db_fingerprint() -> Dict[str, Tuple[int, int]]:
+    candidates: List[Path] = [
+        REPO_ROOT / "hikayat.db",
+        REPO_ROOT / "data" / "hikayat.db",
+    ]
+    env_db = (os.getenv("DB_PATH") or "").strip()
+    if env_db:
+        p = Path(env_db)
+        candidates.append(p if p.is_absolute() else (REPO_ROOT / p))
+
+    seen: set[Path] = set()
+    fingerprints: Dict[str, Tuple[int, int]] = {}
+    for base in candidates:
+        resolved = base.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        for suffix in ("", "-wal", "-shm"):
+            db_file = Path(f"{resolved}{suffix}") if suffix else resolved
+            if db_file.is_file():
+                st = db_file.stat()
+                fingerprints[str(db_file)] = (st.st_size, st.st_mtime_ns)
+    return fingerprints
 
 
 def _run_cmd(cmd: List[str], env_extra: Dict[str, str] | None = None, timeout: int = 180) -> Dict[str, Any]:
@@ -82,7 +108,27 @@ def _check_baseline_empty() -> Dict[str, Any]:
     return {"ok": count == 0, "summary": f"{count} baselined finding(s) in scripts/static_baseline.json."}
 
 
-def _check_git_and_dist_hygiene() -> Dict[str, Any]:
+def _latest_git_commit_ts(path_spec: str) -> int | None:
+    res = _run_cmd(["git", "log", "-1", "--format=%ct", "--", path_spec], timeout=15)
+    raw = (res.get("stdout") or "").strip()
+    if res.get("ok") and raw.isdigit():
+        return int(raw)
+    return None
+
+
+def _latest_dir_mtime_ns(dir_path: Path) -> int | None:
+    if not dir_path.is_dir():
+        return None
+    latest: int | None = None
+    for entry in dir_path.rglob("*"):
+        if entry.is_file():
+            mt = entry.stat().st_mtime_ns
+            if latest is None or mt > latest:
+                latest = mt
+    return latest
+
+
+def _check_git_and_dist_hygiene(require_clean: bool = False) -> Dict[str, Any]:
     tracked = _run_cmd(["git", "ls-files"], timeout=30)
     tracked_lines = [ln.strip() for ln in tracked.get("stdout", "").splitlines() if ln.strip()]
     forbidden_tracked = [
@@ -96,13 +142,29 @@ def _check_git_and_dist_hygiene() -> Dict[str, Any]:
     changed_web_src = any("web/src/" in ln for ln in dirty_lines)
     changed_web_dist = any("web/dist/" in ln for ln in dirty_lines)
     stale_dist = changed_web_src and not changed_web_dist
+    stale_reason = "web/src/ modified without web/dist/ rebuild" if stale_dist else ""
+    if not stale_dist and changed_web_src:
+        dist_index = REPO_ROOT / "web" / "dist" / "index.html"
+        max_src_mtime = _latest_dir_mtime_ns(REPO_ROOT / "web" / "src")
+        if not dist_index.is_file() or (max_src_mtime is not None and max_src_mtime > dist_index.stat().st_mtime_ns):
+            stale_dist = True
+            stale_reason = "web/src/ edited after last web/dist/ build (run npm run build)"
+    if not stale_dist and not changed_web_dist:
+        src_ts = _latest_git_commit_ts("web/src")
+        dist_ts = _latest_git_commit_ts("web/dist")
+        if src_ts is not None and dist_ts is not None and src_ts > dist_ts:
+            stale_dist = True
+            stale_reason = "committed web/src/ is newer than web/dist/ (rebuild web/dist)"
 
-    ok = not forbidden_tracked and not stale_dist
+    dirty_blocked = require_clean and bool(dirty_lines)
+    ok = not forbidden_tracked and not stale_dist and not dirty_blocked
     notes: List[str] = [f"dirty_entries={len(dirty_lines)}"]
     if forbidden_tracked:
         notes.append(f"tracked_local_only={forbidden_tracked[:5]}")
     if stale_dist:
-        notes.append("web/src/ modified without web/dist/ rebuild")
+        notes.append(stale_reason)
+    if dirty_blocked:
+        notes.append("--require-clean blocked on dirty working tree")
     return {
         "ok": ok,
         "dirty_count": len(dirty_lines),
@@ -116,7 +178,8 @@ def main(argv: List[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run Hikayat's read-only release and hygiene gate.")
     parser.add_argument("--json", action="store_true", help="Emit structured JSON scorecard.")
     parser.add_argument("--skip-tests", action="store_true", help="Skip pytest contract suite (fast static checks only).")
-    parser.add_argument("--strict-auth", action="store_true", help="Fail gate if audit_route_auth.py reports findings.")
+    parser.add_argument("--strict-auth", action="store_true", help="Fail gate if audit_route_auth.py reports any findings (including advisory docstrings).")
+    parser.add_argument("--require-clean", action="store_true", help="Fail gate if working tree has uncommitted entries.")
     args = parser.parse_args(argv)
 
     py = sys.executable
@@ -144,15 +207,30 @@ def main(argv: List[str] | None = None) -> int:
         auth_cmd.append("--strict")
     auth_res = _run_cmd(auth_cmd, timeout=60)
     auth_count = 0
+    security_count = 0
+    parsed_auth = False
     try:
         auth_data = json.loads(auth_res.get("stdout") or "{}")
-        auth_count = int(auth_data.get("finding_count", 0))
+        if isinstance(auth_data, dict) and "findings" in auth_data:
+            parsed_auth = True
+            findings = auth_data.get("findings") or []
+            auth_count = int(auth_data.get("finding_count", len(findings)))
+            security_count = sum(1 for item in findings if item.get("check") in SECURITY_ROUTE_CHECKS)
     except Exception:
-        pass
+        parsed_auth = False
+    advisory_count = max(0, auth_count - security_count)
+    auth_ok = parsed_auth and security_count == 0 and (not args.strict_auth or auth_count == 0)
     checks["route_auth_audit"] = {
-        "ok": auth_res["ok"] if args.strict_auth else True,
+        "ok": auth_ok,
         "finding_count": auth_count,
-        "summary": f"{auth_count} advisory finding(s)" + (" [strict]" if args.strict_auth else " [diagnostic]"),
+        "security_count": security_count,
+        "advisory_count": advisory_count,
+        "summary": (
+            f"{security_count} security, {advisory_count} advisory finding(s)"
+            + (" [strict]" if args.strict_auth else "")
+            if parsed_auth
+            else "Failed to parse audit_route_auth.py --json output"
+        ),
     }
 
     if not args.skip_tests:
@@ -169,13 +247,17 @@ def main(argv: List[str] | None = None) -> int:
             timeout=240,
         )
 
-    checks["git_and_dist_hygiene"] = _check_git_and_dist_hygiene()
+    checks["git_and_dist_hygiene"] = _check_git_and_dist_hygiene(require_clean=args.require_clean)
 
     db_after = _db_fingerprint()
     db_untouched = db_before == db_after
     checks["live_db_untouched"] = {
         "ok": db_untouched,
-        "summary": "hikayat.db untouched" if db_untouched else f"MODIFIED: before={db_before}, after={db_after}",
+        "summary": (
+            f"live DB files untouched ({len(db_after)} tracked)"
+            if db_untouched
+            else f"MODIFIED: before={db_before}, after={db_after}"
+        ),
     }
 
     # Strip bulky stdout before output.

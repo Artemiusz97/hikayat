@@ -15,6 +15,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { AcrylicModal, MotionButton } from '../Common/MotionPrimitives';
 import { formatSaveDate } from '../../utils/timeFormat';
+import { formatStature, formatPhysique } from '../../utils/npcDemographics';
 
 export const AdventuresSubModal = ({
   isOpen,
@@ -340,6 +341,13 @@ export const CharactersSubModal = ({
                 {character.gender && (
                   <span className="hk-chip">{character.gender}</span>
                 )}
+                {(() => {
+                  const activeBuild = [
+                    formatStature(character.appearance?.stature || character.stature, t),
+                    formatPhysique(character.appearance?.physique || character.physique, t),
+                  ].filter(Boolean).join(' • ');
+                  return activeBuild ? <span className="hk-chip">📐 {activeBuild}</span> : null;
+                })()}
               </div>
             </div>
 
