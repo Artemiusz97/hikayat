@@ -8,93 +8,91 @@ Hikayat is a text-based role-playing game (RPG) where an AI language model gener
 
 ---
 
-## 🛠️ 10 Technical Innovations
-*(How the engine actually works under the hood)*
+## 🛠️ What Makes Hikayat Different
 
-### 1. Deterministic Rule Engine vs. AI Narration (Phases 1–5 Pipeline & Typed Stage Contexts)
-* **What problem it solves**: In typical AI dungeon masters, the language model invents dice rolls, changes character health arbitrarily, and forgets inventory constraints, leading to hallucinations and broken rules.
-* **How Hikayat works**: The game separates logic from storytelling. Every player action is first processed deterministically through the modular `services/turn/` pipeline, `game_engine/turn/` stage runners (`PreTurnState`, `PromptAssemblyState` in `game_engine/turn/phase_state.py`), and modular state reducers (`game_engine/state/reducers.py`), coordinating typed stage dataclasses in `TurnExecutionContext` (`TurnClockStage`, `CombatStageState`, `EpistemicAndWorldStage`, `TurnNotices` in `game_engine/turn_context.py`). The engine resolves skill checks, applies Fallout-style Armor DT/DR, deducts item charges, awards post-combat auto-loot recovery, and advances quest state before locking the numbers and asking the LLM to narrate what happened.
+### 1. Deterministic Simulation Before AI Narration
+* **The problem with typical AI RPGs**: Language models fudge dice rolls, arbitrarily invent HP or inventory changes, and let persuasive prompts break game rules.
+* **How Hikayat solves it**: Every turn runs through a 5-phase deterministic Python engine first—resolving intent, SPECIAL skill checks, Fallout-style Armor DT/DR, cooldowns, stamina, item charges, and quest progression. Only after locking the exact outcome into an immutable turn snapshot does Hikayat ask the LLM to narrate what happened, scrubbing raw numbers and internal tags so stats never leak into prose.
 
-### 2. Closed-World NPC Engine, 3-Stage Population Seeder & 6-Tier Presence Resolver (`CastPlanner`, `population_seeder.py`, `presence_resolver.py`)
-* **What problem it solves**: AI story games often suffer from "phantom NPCs"—characters who speak when they are not in the room, invent random shopkeepers every visit, or disappear mid-conversation.
-* **How Hikayat works**: Every character belongs to a persistent closed-world database roster (`db/roster.py`) seeded with Stage 0 zero-LLM skeletons (~180–310 NPCs per world plus 68 special agent blueprints in `population_seeder.py` and 40 Spirit Realm slots in `folklore_villages_catalog.json`), lazily hydrated on first scene encounter (Stage 1), and automatically backfilled for active quests alongside teen/student civilian job validation (`employment_policy.py`). Before each turn, a 6-tier presence resolver (`mechanics/world/presence_resolver.py`) and stage manager (`game_engine/npcs/cast_planner.py`, `stage_manager.py`) determine physically present characters—checking party companions, scheduled commitments, quest pins, home doorbell rules, and shift schedules—so the AI only writes dialogue for people who are actually there.
+### 2. Closed-World Persistent NPC Roster & 6-Tier Presence Resolution
+* **The problem with typical AI RPGs**: "Phantom NPCs" speak when they are not in the room, disappear mid-conversation, or turn into throwaway characters regenerated on every visit.
+* **How Hikayat solves it**: Every character belongs to a persistent closed-world SQLite roster (seeded lazily on demand). Before each turn, a 6-tier presence resolver checks party companions, circadian work/sleep schedules, active commitments, quest pins, and private-residence access rules so the AI can only write dialogue for characters physically present in the scene.
 
-### 3. Multi-Realm World Graph, Ephemeral Anomaly Rifts & Dijkstra Pathfinding (`locations/realms/`, `locations/pathfinding.py`)
-* **What problem it solves**: Instead of letting the player teleport across worlds, ignore dimensional communication limits, or travel across impossible distances, multi-setting RPGs need explicit dimensional boundaries, realistic transit costs, and strict access rules.
-* **How Hikayat works**: World geography is stored in SQLite across a 4-tier hierarchy (*Realm ➔ Zone ➔ Facility ➔ Room*), encompassing multi-realm settings (Fantasy *Underworld*, 9 Sci-Fi orbital/starship/planetary realms with FTL vessel jumping and multi-jump dock rollback, and Anomalous dimensions including the 8-zone *Veiled Spirit Realm*), ephemeral dynamic rifts (`data/dynamic_realm_templates.json`), realm-scoped `time_scale` & communication isolation (`check_realm_comms_available`), procedural urban profiles (`namegen.py`), and 10-wing faction headquarters. When a player travels, Dijkstra’s shortest-path algorithm calculates transit time, stamina cost, travel fares, locked door requirements, curfew checks, and same-realm fast-travel guards before moving the player.
+### 3. Structured 4-Tier World Graph & Dijkstra Pathfinding
+* **The problem with typical AI RPGs**: Geography exists only as loose prose, allowing impossible teleportation or contradicting room layouts two turns later.
+* **How Hikayat solves it**: World topology is modeled in SQLite across a 4-tier relational graph (*Realm ➔ Zone ➔ Facility ➔ Room*) with explicit connections, access tiers, curfews, temporal scaling, and dimensional communication boundaries. Travel executes Dijkstra’s shortest-path algorithm to enforce transit time, stamina, fares, and locked barriers deterministically.
 
-### 4. Mathematical Alert State Machine & Live Stealth Projection (`mechanics/stealth/`)
-* **What problem it solves**: Stealth in text games usually relies on the AI guessing whether a guard notices you, or fails to keep action choices synchronized with your stealth posture.
-* **How Hikayat works**: Stealth uses a mathematical alert state machine per NPC (`UNAWARE`, `SUSPICIOUS`, `SEARCHING`, `DETECTED`). The engine calculates noise levels from armor weight, companion footsteps, lighting conditions, and player action loudness, projects per-user stealth states (`project_stealth_state_for_user`), and dynamically synchronizes stealth/distraction choices (`sync_stealth_choices_for_toggle`) when toggling stealth on or off.
+### 4. Epistemic Asymmetry & Server-Side Fog-of-War
+* **The problem with typical AI RPGs**: Either every NPC telepathically knows everything the player has done, or characters never hear rumors or react to past actions.
+* **How Hikayat solves it**: Hikayat explicitly tracks *who knows what* in normalized tables. Witnesses log observed events, rumors decay or spread one hop across social ties over time, NPC alibis are checked for contradictions, and server-side Fog-of-War withholds undiscovered schedules, secrets, and locations from both the UI and the narrator until genuinely learned.
 
-### 5. Multi-Engine Quest Architecture, Threat Clocks & Forensic Dossiers (`game_engine/quest_agency.py`, `mechanics/narrative/dossier_compiler.py`)
-* **What problem it solves**: Quests in AI games easily lose focus, forget objectives, or conclude abruptly without resolving clues or cast identities.
-* **How Hikayat works**: Quests run on specialized operational engines (Investigation, Bounty, Social Infiltration, Survival) backed by 6-segment Threat Clocks, Chapter Plans, cross-realm Spirit Court commissions (`spirit_court_bounties.py`), and relational database tables (`quests`, `quest_dossiers`, `session_clues`). As players uncover evidence and interview witnesses, the system compiles structured forensic dossiers with verifiable leads, registers quest cast NPCs deterministically, and prevents premature turn-ins until stage conditions are satisfied.
+### 5. Physical Continuity, Garment Layering & Posture State Machine
+* **The problem with typical AI RPGs**: Characters juggle impossible combinations of gear, change outfits randomly between paragraphs, or ignore physical constraints like restraints.
+* **How Hikayat solves it**: A dedicated physical-state engine tracks posture, held items, restraints/tethers, 12 equipment slots, layered garments, and contextual NPC wardrobes (*Duty, Casual, Sleepwear*, and activity presets)—enforcing physical constraints mechanically and grounding both prose and optional scene artwork.
 
-### 6. Living World Autonomy & Epistemic Asymmetry Matrix (`npc_autonomy.py`, `epistemic_engine.py`, `db/epistemic.py`)
-* **What problem it solves**: In most RPGs, NPCs never interact with each other off-screen, and every character magically knows secrets the moment something happens—or never hears rumors at all.
-* **How Hikayat works**: Across time-block boundaries, the engine runs deterministic off-screen NPC autonomy (`mechanics/world/npc_autonomy.py`) alongside World Pulse regional & Spirit Realm events (`mechanics/world/world_events/`) and an Epistemic Asymmetry Matrix (`mechanics/social/epistemic_engine.py`, `epistemic_propagation.py`). Witnesses track what they saw, rumors decay or spread 1-hop across social ties with server-side Fog-of-War isolation, alibis are checked for lies, and players can confront, hush, bribe, or leverage secrets deterministically.
+### 6. Mathematical Stealth & Per-NPC Alert State Machine
+* **The problem with typical AI RPGs**: Sneaking depends entirely on prompt luck rather than consistent rules for sound, visibility, or escalation.
+* **How Hikayat solves it**: Each NPC runs an explicit alert state machine (`UNAWARE` ➔ `SUSPICIOUS` ➔ `SEARCHING` ➔ `DETECTED`). Noise and detection math factor in armor weight, companion footsteps, lighting, and action loudness, automatically syncing stealth and distraction choices whenever stealth posture is toggled.
 
-### 7. Declarative 44-Table Session Lifecycle Registry, Pooled `ReadUnitOfWork` & Hybrid Memory (`db/registry.py`, `db/core/`, `mechanics/system/memory/`)
-* **What problem it solves**: Multi-table SQLite RPGs risk orphaned save-slot rows, broken turn rollbacks, redundant database round-trips, or upward architecture layer leaks as campaigns grow.
-* **How Hikayat works**: All 44 session-scoped child specs are governed by a declarative lifecycle contract (`SESSION_TABLE_REGISTRY` / `SessionTableSpec` in `db/registry.py`, validated alongside 53 schema tables and 11 global tables) driving FK-safe purge ordering, tiered save/load slot ID remapping (`db/saves.py` with realm badge metadata), deterministic turn rollback (`db/sessions.py`), and ring-buffer snapshot pruning across modular `db/core/`, `db/social/`, `db/quests/`, and `db/dossiers/` packages—while enforcing strict 4-layer dependency boundaries, raw-SQL isolation, unused/shadow import detection, and package facade integrity via `scripts/static_check.py`. Thread-safe read connection pooling (`ReadUnitOfWork`), `PRAGMA user_version` fast-path checks, and batched turn preloaders keep queries fast, while FTS5 and vector memory compaction condense older turns within token budgets.
+### 7. Hybrid Long-Term Memory (Normalized SQLite + FTS5 + Vector Compaction)
+* **The problem with typical AI RPGs**: Long campaigns collapse once chat transcripts overflow the model's context window—forgetting quests, inventory, or relationships while burning tokens on raw history.
+* **How Hikayat solves it**: Authoritative world state lives in normalized SQLite tables rather than chat logs alone. Older turns are deterministically compacted into searchable chapter digests indexed with multilingual FTS5 and semantic embeddings, keeping long-running campaigns coherent within tight KV-cache-friendly prompt budgets.
 
-### 8. Hybrid Reasoning Streaming, Dual-Model Cascade & Split Stall Guardrails (`llm_client/`)
-* **What problem it solves**: Streaming structured JSON from local or hybrid-reasoning models often stalls on long KV prefills, leaks `<think>` blocks, or wastes large-model latency on routine utility classification.
-* **How Hikayat works**: Live turns stream prose in real time through the modular `llm_client/` package via `DualModeStreamingExtractor` (`@@TITLE:`, `@@OUTCOME`, `@@NEXT`, `@@CHOICES`, `@@META`) with transparent JSON fallback, split Time-To-First-Token (`LLM_TTFT_TIMEOUT`) and inter-chunk idle timers (`LLM_CHUNK_IDLE_TIMEOUT`), hybrid reasoning token ceilings (`LLM_THINKING_MAX_TOKENS`), and Chain-of-Thought suppression (`LLM_SUPPRESS_NARRATION_COT`). Meanwhile, `LLM_UTILITY_MODEL` handles fast background extraction/classification, `NSFW_LLM_*` isolates mature scenarios, and fallback cascades handle rate limits seamlessly.
+### 8. Atomic Turn Transactions, Deterministic Rollback & Portable Save Slots
+* **The problem with typical AI RPGs**: A stalled generation or bad turn leaves story state half-mutated, and rewinding or branching campaigns risks orphaned data.
+* **How Hikayat solves it**: Multi-step turn mutations execute inside atomic SQLite Units of Work governed by a declarative 44-table session lifecycle registry. Failed turns roll back cleanly without corrupting state, players can rewind turns deterministically, and save/load slots remap every child record cleanly across branches.
 
-### 9. 5-Language Dictionary Canonicalization, Build/Anatomy Rules & Anti-Drift Pronoun Engine (`localization/`, `game_engine/pronoun_resolver.py`)
-* **What problem it solves**: Multi-language support often breaks formatting, and language models frequently mix up character pronouns or demographic traits during long scenes.
-* **How Hikayat works**: Game actions, combat choices, UI labels (`1,971` web i18n keys), character build/anatomy taxonomies (`stature`, `physique`, `rear_size`, `species_surface`), and inventory metadata synchronize across English, Polish, Malay, German, and Simplified Chinese in both Python dictionaries and React i18n JSON bundles. An automated pronoun resolver checks entity genders against database IDs to prevent models from drifting mid-scene.
+### 9. Dual-Mode Streaming, Multi-Model Routing & Anti-Drift Guardrails
+* **The problem with typical AI RPGs**: Local or reasoning models stall on structured JSON streaming, leak `<think>` blocks into prose, waste expensive tokens on utility tasks, or drift on character pronouns mid-scene.
+* **How Hikayat solves it**: Live narration streams through a dual-mode sentinel/JSON extractor with split Time-To-First-Token and idle stall timers, Chain-of-Thought suppression, fallback cascades, lightweight utility-model offloading, optional isolated mature-model routing, and database-backed pronoun grounding across 5 languages.
 
-### 10. Headless Omnichannel Game Loop, Zero-Turn Inspection & Remote Access Security (`services/turn/`, `services/examine_service.py`, `api/security.py`)
-* **What problem it solves**: Supporting both a Discord bot and a web application across local, tunneled, or private remote networks usually leads to duplicated game logic or inconsistent auth gates.
-* **How Hikayat works**: Both `TurnService` (`services/turn/` behind `services/turn_service.py` for turns Phases 1–5) and `get_examine_payload` (`services/examine_service.py` for zero-turn scene and tactical inspection with LRU/TTL prose caching and strict stat/secret scrubbing) run headlessly in Python services, driving Discord slash commands/buttons (`cogs/adventure/embeds/`, `cogs/character.py`) and the modular FastAPI `api/adventure/` & `api/codex_phone/` REST/WebSocket routes from a single source of truth—backed by optional Cloudflare Tunnel sharing and verified Tailscale remote-play headers (`bin/tunnel.py`, `launchers/`).
+### 10. Headless Single-Engine Architecture for Web, Discord & Co-Op
+* **The problem with typical AI RPGs**: Games are either trapped in a single chat box or split across separate web and bot implementations whose rules drift apart.
+* **How Hikayat solves it**: Turn execution, state reducers, and zero-turn scene inspection run headlessly behind one authoritative Python service layer with distributed session locking—powering a real-time WebSocket React SPA, full Discord bot views, and synchronized multiplayer parties from a single source of truth, with built-in Cloudflare Tunnel and private Tailscale remote play.
 
 ---
 
-## 🎮 10 Unique Gameplay Features
-*(What you actually experience as a player)*
+## 🎮 Gameplay Features
 
-### 1. Acrylic Glassmorphism Web UI, 12 Scenario Backdrops, Phone Wallpapers & Discord Parity
-* **What it looks like**: Play on Discord using slash commands and interactive decks, or launch the React 18 Web SPA featuring frosted Acrylic panels (`Full`, `Focused`, and `Solid` modes with 5%–95% opacity), drop-in custom fonts (`custom_fonts/`) or curated Google Font presets, adjustable text scaling (`70%–130%`), 12 illustrated `.webp` scenario backdrops, and 11 bundled `.webp` smartphone wallpapers.
-* **How it plays**: Backdrops smoothly crossfade per campaign with OKLCH time-of-day atmospheric color grading (*Dawn, Day, Dusk, Night*) and an optional blurred ambient scene-artwork mode. Explore your chronicle through the searchable **Turn History Modal**, spot dimensional context via **Save-Slot Realm Badges**, and navigate multi-realm gateways & active quest tabs in a native `<dialog>` **World Map Modal**.
+### 1. Hybrid Action Loop: Smart Choices, Free-Text Input & Zero-Turn Examine
+* **What it looks like**: Pick from context-aware choices (with optional skill-check odds), type any custom action in plain text, or open **Examine (`0 Turns`)** from the persistent action dock.
+* **How it plays**: Free-text inputs are classified into real mechanics and dice rolls rather than hand-waved prose. Examining a scene costs zero turns and reveals live structured intel—present NPCs (posture, visible attire, `PER`-gated mood tells, instant *Use Item* / *Gift* actions), dropped floor items for one-click pickup, active leads, stealth/witness status, and enemy weaknesses.
 
-### 2. Zero-Turn Scene Examine, Tactical Action Dock & 5-Mode Quick Belt (`ExamineModal.jsx`, `TacticalActionDock.jsx`, `QuickBeltPopover.jsx`)
-* **What it looks like**: A persistent sidebar action dock, quick-use consumable belt, and a dedicated **Examine** button (`0 Turns`) on both Web and Discord.
-* **How it plays**: Inspecting a scene costs zero turns and presents live structured snapshots—present NPCs (with posture, visible attire, `PER`-tier mood tells, and instant *Use Item* / *Gift* buttons), dropped items ready for one-click pickup, active leads, stealth/privacy/witness awareness, and enemy combat weaknesses/intents. Out of combat, the 5-mode consumable classifier automatically separates instant **Quick Use** healing/buffs from turn-consuming food, drinks, gifts, and covert items.
+### 2. Turn-Based Tactical Combat with Telegraphed Moves, Armor DT/DR & Auto-Loot
+* **What it looks like**: A structured 7-slot battle menu (*Attack, Defend, Magic/Skills, Item, Flee, Tactician, Switch Target*) with toggleable enemy HP bars and intent badges.
+* **How it plays**: Enemies telegraph upcoming attacks so you can time blocks, dodges, counters, or interrupts against Fallout-style flat Damage Threshold (DT) and percentage Damage Resistance (DR). Defeating foes deterministically deposits auto-loot directly into your inventory so rewards are never lost to narration gaps.
 
-### 3. Turn-Based Tactical Combat with Telegraphed Moves, Armor DT/DR, Summons & Auto-Loot
-* **What it looks like**: A structured 7-slot combat menu (*Attack, Defend, Magic, Item, Flee, Tactician, Switch Target*) with toggleable enemy HP bars and intent readouts.
-* **How it plays**: Enemies telegraph upcoming actions so you can time blocks, dodges, counters, or interrupts against Fallout-style flat Damage Threshold (DT) and percentage Damage Resistance (DR), invoke 3-turn **Sworn Ally Spirit Court Summons** (*Myōbu Fox-Spirit, Kayangan Mist-Guardian, Mirage Pack Canid*) once court standing hits `90+`, and receive deterministic post-combat auto-loot into your inventory without losing drops to narration gaps.
+### 3. Deep Character Creation, SPECIAL Progression & 12-Slot Loadouts
+* **What it looks like**: Full character sheets with 7 **SPECIAL** attributes, customizable demographics and build traits, 12 dedicated equipment slots (*Head, Armor, Top, Bottom, Weapon, Shield, Gloves, Shoes, 4 Accessories*), and a **Quick Belt**.
+* **How it plays**: Attributes mechanically shape carry weight, examine detail, XP scaling, evasion, crits, and haggling discounts. A 5-mode consumable system automatically separates instant out-of-combat quick-use healing/buffs from turn-consuming meals, gifts, and covert items.
 
-### 4. Modular 8-App In-Game Smartphone, Categorized Online Store & SchoolMart (`PhoneModal.jsx`, `online_store.py`)
-* **What it looks like**: A sleek in-game smartphone modal organized into 8 purpose-built apps (*Home, DMs, Feed, Photos, Planner, Shop, Bounties, Realty*) plus **Phone Settings** (`PhoneSettingsApp.jsx`) and an interactive **Photo Lightbox**.
-* **How it plays**: Text NPCs (bridged across dimensions via *Spirit Relay* or *Ossuary Bone-Relay* when signal permits), scroll local gossip feeds, customize glass UI & phone wallpapers, schedule calendar meetups, scout realty, and shop a daily-rotating **Categorized Online Store** or 20% discounted student **SchoolMart** storefront (locked safely during combat or realm blackout zones).
+### 4. Living World Clock, 24-Hour Analog Time Skip & Circadian NPC Routines
+* **What it looks like**: A toggleable `12h`/`24h` world clock, an interactive draggable **24-Hour Analog Clock Dial** (or slider) for skipping time, and progressive Contacts & Acquaintances cards.
+* **How it plays**: Time advances realistically as you travel, wait, or rest. Persistent NPCs follow weekly work shifts, hangout habits, and sleep schedules—shops close when staff are off duty, private homes stay gated until you are invited, and NPCs swap outfits naturally across contexts (including wearable gifts you give them).
 
-### 5. Interactive 24h Analog Clock Dial, Circadian Schedules & Dynamic NPC Wardrobes (`AnalogClockDial.jsx`, `KnownRoutineCard.jsx`, `KnownWardrobeCard.jsx`)
-* **What it looks like**: An interactive radial **24-Hour Analog Clock Dial** (`AnalogClockDial.jsx` or horizontal slider toggle) paired with `12h`/`24h` world clock formats, temporal stasis (`0x`) indicators, and progressive Contacts & Acquaintances cards showing 5-block weekly routines and tracked outfits.
-* **How it plays**: Persistent characters follow work shifts, rest days, hangout habits, and sleep schedules. Shops only open when assigned staff are on duty, private residences remain gated until invited, and NPCs dynamically shift outfits between *Duty, Casual, Sleepwear*, and contextual activity kits—including wearable gifts you give them.
+### 5. Multi-Track Relationships, Households & Living Rumor Networks
+* **What it looks like**: Rich NPC dossiers tracking relationship tiers, family trees, discovered preferences, shared memories, and faction standing.
+* **How it plays**: Bonds evolve independently across platonic, professional, rivalry, and romantic tracks with persistent gift ownership and milestone unlocks. Witnesses remember what they saw—rumors spread across local social circles, NPCs can be caught in lies, and you can confront, persuade, or hush witnesses instead of playing in a memoryless sandbox.
 
-### 6. Build/Anatomy Customization, Reaction Engine, Normalized Social Graph & Dossier Cards (`anatomyOptions.js`, `IntimateDossierPanel.jsx`, `OperativeCombatDossierCard.jsx`)
-* **What it looks like**: Hero and NPC dossiers display localized demographic pills (*Age Category, Gender, Scenario Race, Stature, Physique*), family trees, personal body preferences, relationship tiers, and unified **Operative Combat Dossiers** or **Civilian Classifications**—editable on both Web (`CharacterCreatorModal.jsx`, `CharacterSheet.jsx`) and Discord (`/character appearance`).
-* **How it plays**: Relationships evolve across platonic, rivalry, professional, and romantic tracks within normalized Household, Commitment, Relationship Graph, and Intimacy tables, while anatomy proportions and partner preferences scale excitement multipliers with zero-number narrative cues (`intimate_excitement.py`) and unlock persistent NPC gift ownership and Guest-Cottage hospitality.
+### 6. Interactive World Map, Real Travel & Multi-Realm Exploration
+* **What it looks like**: A native `<dialog>` **World Map** displaying connected regions, facilities, sub-rooms, access badges, active quest markers, and realm gateways.
+* **How it plays**: Moving between places calculates real transit time, stamina, and travel fares while enforcing locked doors, curfews, and Fog-of-War discovery—extending seamlessly from neighborhood rooms up to alternate planes, starships, and distant worlds depending on your campaign.
 
-### 7. Entity Contracts & Eldritch Pacts (`/contracts`, `EntityContractsModal.jsx`)
-* **What it looks like**: A formal covenant agreement modal displaying terms, tithes, taboos, and granted powers.
-* **How it plays**: Negotiate pacts with mysterious patrons and anomalous entities. Accepting a pact grants passive combat bonuses or special traits while binding your character to behavioral taboos and penalties if violated.
+### 7. True Stealth & Infiltration Mechanics
+* **What it looks like**: A one-click Stealth toggle with live per-NPC alert status and stealth-adapted action choices.
+* **How it plays**: Toggling stealth dynamically swaps scene options toward sneaking, distractions, pickpocketing, or ambushes. Armor noise, lighting, companions, and risky actions shift individual guard alert levels from *Unaware* to *Detected*, rewarding careful positioning and timing.
 
-### 8. Realty, Safehouse Ownership & Scenario Currencies (`/realty`, `CurrencyBadge.jsx`)
-* **What it looks like**: Real estate listings and merchant interfaces tailored with scenario-native currency symbols (*Gold `G`, Crowns, Credits `₵`, Yen `¥`, Cash `$`, Eurodollars `€$`, Sovereigns `£`, Caps*).
-* **How it plays**: Purchase or rent apartments, cabins, safehouses, or Spirit Court Guest-Cottages as private bases to rest safely, store valuable gear away from pickpockets, ward against anomalies, and host private meetings.
+### 8. Structured Quests, Forensic Caseboards & Ticking Threat Clocks
+* **What it looks like**: Dedicated Quest Log, Bounty Board, and Forensic Dossier views tracking active objectives, clues, suspects, and regional crises.
+* **How it plays**: Investigations, bounties, infiltration jobs, and survival arcs run on structured quest engines backed by 6-segment **Threat Clocks** and Chapter Plans—preventing quests from stalling out, advancing world consequences if threats go unchecked, and tying witnesses and clues together cleanly.
 
-### 9. Hidden Veiled Spirit Realm, 3 Spirit Courts, Folklore Codex & 39 Anomalous Sites (`folklore_spirit_realm.py`, `folklore_ghoul.py`, `EncyclopediaSubTab.jsx`)
-* **What it looks like**: A navigable multi-zone **Veiled Spirit Realm** alongside an in-game encyclopedia tab with Folklore, Anomalous Sites, and Field Log views tracking supernatural entities and stabilized zones.
-* **How it plays**: Cross thresholds from *Chinatown, Mount Ryujin, Woods Reserve*, or *Undercity Catacombs* into *Dusk Confluence Bazaar* and its 4-wing Night Market; explore 4 dangerous frontier biomes; gain standing through friendly sparring drills and cross-realm commissions across the **Kitsune Shrine Court**, **Royal Bunian Court**, and **Dual-Form Al-Ghul Ossuary Court** (`ghoul:humanoid` / `ghoul:canid`); or seal **39 pacifiable Anomalous Sites** (`anomalous_sites/`) by solving spatial puzzles and surviving domain hazards.
+### 9. Omnichannel Web & Discord Play, Co-Op, Save Slots, Rollback & Optional Scene Artwork
+* **What it looks like**: A customizable React 18 Web SPA (frosted Acrylic modes, opacity/text scaling, drop-in custom fonts, 12 time-of-day graded backdrops, searchable **Turn History**) with full Discord bot parity.
+* **How it plays**: Play solo or join synchronized multiplayer co-op sessions from browser or Discord (including remote play via Cloudflare Tunnel or private Tailscale). Branch stories with multiple **Save Slots**, rewind turns cleanly, and optionally generate live SDXL scene illustrations grounded in present characters, attire, and lighting.
 
-### 10. World Pulse Regional & Spirit Crises, Outlaw Syndicates & Custom Narrative Pacing (`/factions`, `/settings`)
-* **What it looks like**: Live faction & regional crisis dashboards paired with dedicated **Narrative Pacing** (*Concise, Balanced, Novelistic*) and **Prose Style** (*Normal, Vivid, Noir, Witty, Shakespearean, Brainrot*) controls.
-* **How it plays**: Compete or align with lawful agencies, monastic orders, outlaw syndicates (*Occult Cult*, *Clandestine Syndicate*) featuring 10-wing headquarters and 5-tier promotion ladders, and 3 autonomous Spirit Courts while witnessing dynamic festivals and crises across both human districts and the Veiled Spirit Realm.
+### 10. Genre-Adaptive Worlds, Narrative Pacing & 5-Language Play
+* **What it looks like**: 21 playable scenario presets paired with dedicated **Narrative Pacing** (*Concise, Balanced, Novelistic*), **Prose Style** (*Normal, Vivid, Noir, Witty, Shakespearean, Brainrot*), and instant language switching.
+* **How it plays**: Play across Fantasy, Dark Fantasy, Isekai, Sci-Fi, Cyberpunk, Steampunk, High School Drama, Slice of Life, Post-Apocalypse, and Urban Supernatural worlds—with native currencies, classes, and setting-appropriate systems adapting automatically—in **English, Polish, Malay, German, or Simplified Chinese**.
 
 ---
 
